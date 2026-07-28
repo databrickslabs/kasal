@@ -15,8 +15,6 @@ from src.api.tools_router import (
     get_all_tool_configurations,
     get_tool_configuration,
     update_tool_configuration,
-    get_tool_configuration_schema,
-    update_tool_configuration_in_memory,
 )
 from src.schemas.tool import ToolCreate, ToolUpdate
 
@@ -124,26 +122,9 @@ async def test_config_endpoints(monkeypatch):
     out3 = await update_tool_configuration("toolA", {"a": 1}, service=svc, group_context=Ctx(user_role="admin"))
     assert out3["a"] == 1
 
-    # schema endpoints use EngineFactory.get_engine
-    from src.engines.factory import EngineFactory
-    class FakeRegistry:
-        def get_tool_configuration_schema(self, name):
-            return {"type": "object"}
-        def update_tool_configuration_in_memory(self, name, config):
-            return True
-        def get_tool_configuration(self, name):
-            return {"z": 3}
-    class FakeEngine:
-        def __init__(self):
-            self.tool_registry = FakeRegistry()
-    async def fake_get_engine(**kwargs):
-        return FakeEngine()
-    # Use monkeypatch so the original get_engine is restored after this test.
-    monkeypatch.setattr(EngineFactory, "get_engine", staticmethod(fake_get_engine))
-
-    schema = await get_tool_configuration_schema("toolA", session=SimpleNamespace(), group_context=Ctx())
-    assert schema["type"] == "object"
-
-    updated = await update_tool_configuration_in_memory("toolA", {"z": 3}, session=SimpleNamespace(), group_context=Ctx(user_role="admin"))
-    assert updated["z"] == 3
+    # The /configurations/{tool}/schema and /in-memory endpoints are gone.
+    # They called `engine.tool_registry`, an attribute KasalEngineService has
+    # never had, through a factory signature that rejected the kwargs they
+    # passed — every call raised. This test kept them green by fabricating a
+    # FakeEngine WITH a tool_registry, which is why nobody noticed.
 

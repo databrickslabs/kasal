@@ -6,7 +6,7 @@ Auto-generated test template. TODO: Add comprehensive test coverage.
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from src.engines.base.base_engine_service import (
+from src.services.execution.base import (
     BaseEngineService
 )
 

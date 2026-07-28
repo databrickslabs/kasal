@@ -47,21 +47,23 @@ src/
 ├── schemas/         # Pydantic validation schemas
 ├── services/        # Business logic layer (see services/CLAUDE.md)
 ├── repositories/    # Data access layer (see repositories/CLAUDE.md)
-├── engines/kasal/   # Kasal native engine — POST-REFACTOR layout (see engines/kasal/CLAUDE.md)
 └── main.py          # Application entry point (uvicorn target: src.main:app)
 ```
 
-### Kasal engine (three execution paths)
-The engine has three answer paths selected by `execution_type`:
-- `"agent"` → **light** path = **ChatMode / chat answer mode**, a single agent run
-  in-process (`Agent.kickoff_async`) for sub-second latency.
-- `"crew"` → crew path, runs in a **subprocess** (`process_crew_executor.py`).
-- `"flow"` → flow path, also **subprocess**.
+### Three execution paths
+Selected by `execution_type`:
+- `"agent"` → **Chat** (`services/chat/`), a single agent run in-process
+  (`Agent.kickoff_async`) for sub-second latency.
+- `"crew"` → **Agent Builder** (`services/agent_builder/`), in a **subprocess**.
+- `"flow"` → **Flow Builder** (`services/flow_builder/`), also **subprocess**.
 
-The engine was restructured into `paths/{light_agent,crew,flow}/` over a shared
-`kernel/`, plus `infra/`, `memory/`, `guardrails/{core,demo}/`. The old
-`common/`, `helpers/`, `utils/`, `services/`, `mcp/` packages are gone. See
-`src/backend/src/engines/kasal/CLAUDE.md` for details.
+The wire values stay `agent`/`crew`/`flow` — they are persisted in
+`execution_history`. Only the code names follow the UI.
+
+**There is no `src/engines/` package any more.** The paths are
+`services/chat/`, `services/agent_builder/` and `services/flow_builder/`, over
+shared machinery in `services/execution/` (hub, kernel, config, logs). See
+`src/backend/src/services/execution/CLAUDE.md`.
 
 ## Database Patterns
 
@@ -229,15 +231,15 @@ Two rules, both learned the hard way:
 ## AI Engine Integration
 
 ### Kasal Engine Integration Points
-- **Engine Service** (`engines/kasal/kasal_engine_service.py`): the hub that dispatches to one of three paths.
-- **Three execution paths** (`engines/kasal/paths/`): `light_agent` (chat, in-process), `crew` (subprocess), `flow` (subprocess).
-- **Kernel** (`engines/kasal/kernel/`): path-agnostic single-source agent/task build logic shared by crew + flow.
+- **Engine Service** (`services/execution/engine_service.py`): the hub that dispatches to one of three paths.
+- **Three execution paths**: `services/chat/` (in-process), `services/agent_builder/` (subprocess), `services/flow_builder/` (subprocess).
+- **Kernel** (`services/execution/kernel/`): path-agnostic single-source agent/task build logic shared by all three.
 - **Configuration Adapter** (`config_adapter.py`): normalizes frontend configs to engine shape.
 - **Tool Factory** (`services/tools/`): extensible tool system. Tools live in
   services, not the engine — an agent calls them, but nothing about a tool
   requires a crew to be running.
 
-See `engines/kasal/CLAUDE.md` for the full path model and the subprocess-boundary rules.
+See `services/execution/CLAUDE.md` for the full path model and the subprocess-boundary rules.
 
 ## Environment
 

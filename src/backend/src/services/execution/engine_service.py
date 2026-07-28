@@ -38,7 +38,7 @@ import os
 from datetime import datetime, UTC
 from typing import Dict, List, Any, Optional
 
-from src.engines.base.base_engine_service import BaseEngineService
+from src.services.execution.base import BaseEngineService
 from src.models.execution_status import ExecutionStatus
 
 # Import helper modules

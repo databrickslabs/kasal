@@ -183,8 +183,10 @@ class TestCreateMemoryBackendsErrorHandling:
         with patch.object(
             service, '_emit_index_validation_trace', new_callable=AsyncMock
         ) as mock_emit:
+            # create_memory_backends is a legacy shim that delegates to
+            # create_unified_storage — patch what the code actually calls.
             with patch(
-                'src.services.memory.crew_memory.MemoryBackendFactory.create_memory_backends',
+                'src.services.memory.crew_memory.MemoryBackendFactory.create_unified_storage',
                 new_callable=AsyncMock
             ) as mock_factory:
                 mock_factory.side_effect = DatabricksIndexValidationError(
@@ -214,9 +216,9 @@ class TestCreateMemoryBackendsErrorHandling:
             service, '_emit_index_validation_trace', new_callable=AsyncMock
         ) as mock_emit:
             with patch(
-                'src.services.memory.crew_memory.MemoryBackendFactory.create_memory_backends',
+                'src.services.memory.crew_memory.MemoryBackendFactory.create_unified_storage',
                 new_callable=AsyncMock,
-                return_value={'short_term': MagicMock()}
+                return_value=MagicMock()
             ):
                 result = await service.create_memory_backends(
                     memory_backend_config={'backend_type': 'default'},
@@ -226,7 +228,8 @@ class TestCreateMemoryBackendsErrorHandling:
 
                 # Verify no error trace was emitted
                 mock_emit.assert_not_called()
-                assert 'short_term' in result
+                # The shim wraps the single unified storage.
+                assert 'unified' in result
 
 
 class TestEmitIndexValidationTrace:

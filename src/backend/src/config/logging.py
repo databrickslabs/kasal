@@ -184,7 +184,6 @@ class CentralizedLoggingConfig:
         'api': ['src.api'],
         'services': ['src.services'],
         'repositories': ['src.repositories'],
-        'engines': ['src.engines'],
         'seeds': ['src.seeds'],
         'utils': ['src.utils'],
         'core': ['src.core'],

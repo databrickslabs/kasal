@@ -18,8 +18,8 @@ from src.models.execution_status import ExecutionStatus
 from src.schemas.execution import CrewConfig
 from src.repositories.execution_repository import ExecutionRepository
 # Sync flow repository removed - use async FlowRepository instead
-from src.engines.factory import EngineFactory
-from src.engines.kasal.kasal_engine_service import KasalEngineService
+from src.services.execution.engine_factory import EngineFactory
+from src.services.execution.engine_service import KasalEngineService
 from src.services.execution_status_service import ExecutionStatusService
 from src.services.flow_builder.kasal_flow_service import KasalFlowService
 from src.utils.user_context import GroupContext

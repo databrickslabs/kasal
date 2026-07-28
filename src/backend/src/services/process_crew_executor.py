@@ -1155,7 +1155,8 @@ def run_crew_in_process(
                         logging.getLogger(
                             "src.services.execution.kernel.execution_callback"
                         ),
-                        logging.getLogger("src.engines.kasal"),
+                        logging.getLogger("src.services.agent_builder"),
+                        logging.getLogger("src.services.execution"),
                         logging.getLogger("mlflow"),
                         logging.getLogger("mlflow.tracing"),
                         logging.getLogger("__main__"),

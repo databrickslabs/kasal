@@ -15,11 +15,13 @@ from pathlib import Path
 
 
 def _flow_methods_source() -> str:
-    p = (
-        Path(__file__).resolve().parents[6]
-        / "src" / "services" / "flow_builder" / "modules" / "flow_methods.py"
-    )
-    return p.read_text()
+    # Walk up to src/backend rather than counting parents: a parent count breaks
+    # silently the moment this test file changes depth, and it did.
+    here = Path(__file__).resolve()
+    backend = next(a for a in here.parents if (a / "src" / "services").is_dir())
+    return (
+        backend / "src" / "services" / "flow_builder" / "modules" / "flow_methods.py"
+    ).read_text()
 
 
 def test_listener_runtime_task_carries_tools_and_structured_output():

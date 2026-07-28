@@ -95,7 +95,7 @@ class TestRunFlow:
         mock_engine = MagicMock()
         mock_engine.run_flow = AsyncMock(return_value='exec-123')
 
-        with patch('src.engines.engine_factory.EngineFactory') as mock_factory:
+        with patch('src.services.execution.engine_factory.EngineFactory') as mock_factory:
             mock_factory.get_engine = AsyncMock(return_value=mock_engine)
 
             result = await service.run_flow(
@@ -116,7 +116,7 @@ class TestRunFlow:
         mock_engine = MagicMock()
         mock_engine.run_flow = AsyncMock(return_value='exec-123')
 
-        with patch('src.engines.engine_factory.EngineFactory') as mock_factory:
+        with patch('src.services.execution.engine_factory.EngineFactory') as mock_factory:
             mock_factory.get_engine = AsyncMock(return_value=mock_engine)
 
             result = await service.run_flow(
@@ -141,7 +141,7 @@ class TestRunFlow:
         mock_engine = MagicMock()
         mock_engine.run_flow = AsyncMock(return_value='exec-123')
 
-        with patch('src.engines.engine_factory.EngineFactory') as mock_factory:
+        with patch('src.services.execution.engine_factory.EngineFactory') as mock_factory:
             mock_factory.get_engine = AsyncMock(return_value=mock_engine)
 
             result = await service.run_flow(
@@ -169,7 +169,7 @@ class TestRunFlow:
         mock_engine = MagicMock()
         mock_engine.run_flow = AsyncMock(return_value='exec-123')
 
-        with patch('src.engines.engine_factory.EngineFactory') as mock_factory:
+        with patch('src.services.execution.engine_factory.EngineFactory') as mock_factory:
             mock_factory.get_engine = AsyncMock(return_value=mock_engine)
 
             result = await service.run_flow(
@@ -194,7 +194,7 @@ class TestRunFlow:
         mock_engine = MagicMock()
         mock_engine.run_flow = AsyncMock(return_value='exec-123')
 
-        with patch('src.engines.engine_factory.EngineFactory') as mock_factory:
+        with patch('src.services.execution.engine_factory.EngineFactory') as mock_factory:
             mock_factory.get_engine = AsyncMock(return_value=mock_engine)
 
             result = await service.run_flow(
@@ -222,7 +222,7 @@ class TestRunFlow:
             return_value=MagicMock(name='Generated Test Flow')
         )
 
-        with patch('src.engines.engine_factory.EngineFactory') as mock_factory:
+        with patch('src.services.execution.engine_factory.EngineFactory') as mock_factory:
             mock_factory.get_engine = AsyncMock(return_value=mock_engine)
 
             with patch('src.services.execution_name_service.ExecutionNameService') as mock_name_class:
@@ -240,7 +240,7 @@ class TestRunFlow:
         """Test that error is raised when engine cannot be obtained."""
         flow_id = uuid.uuid4()
 
-        with patch('src.engines.engine_factory.EngineFactory') as mock_factory:
+        with patch('src.services.execution.engine_factory.EngineFactory') as mock_factory:
             mock_factory.get_engine = AsyncMock(return_value=None)
 
             with pytest.raises(HTTPException) as exc_info:
@@ -259,7 +259,7 @@ class TestRunFlow:
         mock_engine = MagicMock()
         mock_engine.run_flow = AsyncMock(side_effect=ValueError("Engine error"))
 
-        with patch('src.engines.engine_factory.EngineFactory') as mock_factory:
+        with patch('src.services.execution.engine_factory.EngineFactory') as mock_factory:
             mock_factory.get_engine = AsyncMock(return_value=mock_engine)
 
             with pytest.raises(HTTPException) as exc_info:
@@ -279,7 +279,7 @@ class TestRunFlow:
         mock_engine = MagicMock()
         mock_engine.run_flow = AsyncMock(return_value='exec-123')
 
-        with patch('src.engines.engine_factory.EngineFactory') as mock_factory:
+        with patch('src.services.execution.engine_factory.EngineFactory') as mock_factory:
             mock_factory.get_engine = AsyncMock(return_value=mock_engine)
 
             result = await service.run_flow(
@@ -418,7 +418,7 @@ class TestRunFlowIntegration:
         mock_engine = MagicMock()
         mock_engine.run_flow = AsyncMock(return_value='exec-123')
 
-        with patch('src.engines.engine_factory.EngineFactory') as mock_factory:
+        with patch('src.services.execution.engine_factory.EngineFactory') as mock_factory:
             mock_factory.get_engine = AsyncMock(return_value=mock_engine)
 
             result = await service.run_flow(
@@ -436,7 +436,7 @@ class TestRunFlowIntegration:
         mock_engine = MagicMock()
         mock_engine.run_flow = AsyncMock(return_value='exec-123')
 
-        with patch('src.engines.engine_factory.EngineFactory') as mock_factory:
+        with patch('src.services.execution.engine_factory.EngineFactory') as mock_factory:
             mock_factory.get_engine = AsyncMock(return_value=mock_engine)
 
             result = await service.run_flow(
@@ -459,7 +459,7 @@ class TestRunFlowIntegration:
         mock_engine = MagicMock()
         mock_engine.run_flow = AsyncMock(return_value='exec-123')
 
-        with patch('src.engines.engine_factory.EngineFactory') as mock_factory:
+        with patch('src.services.execution.engine_factory.EngineFactory') as mock_factory:
             mock_factory.get_engine = AsyncMock(return_value=mock_engine)
 
             with patch('src.services.flow_builder.kasal_flow_service.logger') as mock_logger:

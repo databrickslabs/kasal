@@ -10,8 +10,8 @@ from typing import Dict, Type, Optional, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 import asyncio
 
-from src.engines.base.base_engine_service import BaseEngineService
-from src.engines.kasal.kasal_engine_service import KasalEngineService
+from src.services.execution.base import BaseEngineService
+from src.services.execution.engine_service import KasalEngineService
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ class EngineFactory:
         try:
             # "crewai" is the legacy name for the kasal engine (old DB rows/payloads)
             if engine_type in ("kasal", "crewai"):
-                from src.engines.kasal.kasal_engine_service import KasalEngineService
+                from src.services.execution.engine_service import KasalEngineService
                 engine = KasalEngineService()
                 if initialize:
                     # Create initialization task but don't await it

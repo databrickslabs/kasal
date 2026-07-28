@@ -12,7 +12,6 @@ from src.core.exceptions import BadRequestError, ForbiddenError, KasalError, Not
 
 from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.permissions import check_role_in_context, require_admin
-from src.engines.factory import EngineFactory
 from src.schemas.tool import (
     ToggleResponse,
     ToolCreate,
@@ -295,76 +294,6 @@ async def update_tool_configuration(
         tool_name, config, group_context
     )
     return updated.config or {}
-
-
-@router.get("/configurations/{tool_name}/schema", response_model=Dict[str, Any])
-async def get_tool_configuration_schema(
-    tool_name: str,
-    session: SessionDep,
-    group_context: GroupContextDep = None,
-) -> Dict[str, Any]:
-    """
-    Get configuration schema for a specific tool with group isolation.
-
-    Args:
-        tool_name: Name of the tool
-        db: Database session
-        group_context: Group context from headers
-
-    Returns:
-        JSON schema dictionary describing the tool's configuration format
-    """
-    logger.info(f"Getting configuration schema for tool: {tool_name}")
-    # Get the CrewAI engine
-    engine = await EngineFactory.get_engine(
-        engine_type="kasal", db=session, initialize=True
-    )
-
-    # Get tool registry from engine
-    tool_registry = engine.tool_registry
-
-    # Get schema
-    schema = tool_registry.get_tool_configuration_schema(tool_name)
-    if not schema:
-        raise NotFoundError(f"Schema for tool {tool_name} not found")
-
-    logger.info(f"Retrieved configuration schema for tool: {tool_name}")
-    return schema
-
-
-@router.patch("/configurations/{tool_name}/in-memory", response_model=Dict[str, Any])
-async def update_tool_configuration_in_memory(
-    tool_name: str,
-    config: Dict[str, Any],
-    session: SessionDep,
-    group_context: GroupContextDep = None,
-) -> Dict[str, Any]:
-    """
-    Update a tool's configuration in memory without requiring a database entry.
-    Only Admins can use this ephemeral override.
-    """
-    # Enforce admin-only configuration changes
-    if not check_role_in_context(group_context, ["admin"]):
-        raise ForbiddenError("Only admins can configure tools")
-
-    logger.info(f"Updating in-memory configuration for tool: {tool_name}")
-    # Get the CrewAI engine
-    engine = await EngineFactory.get_engine(
-        engine_type="kasal", db=session, initialize=True
-    )
-
-    # Get tool registry from engine
-    tool_registry = engine.tool_registry
-
-    # Update configuration in memory
-    success = tool_registry.update_tool_configuration_in_memory(tool_name, config)
-    if not success:
-        raise KasalError(f"Failed to update in-memory configuration for tool {tool_name}")
-
-    # Get updated configuration
-    updated_config = tool_registry.get_tool_configuration(tool_name)
-    logger.info(f"Updated in-memory configuration for tool: {tool_name}")
-    return updated_config
 
 
 @router.patch("/{tool_id}/global-availability", response_model=ToolResponse)

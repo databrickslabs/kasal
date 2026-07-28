@@ -3,7 +3,7 @@ Coverage tests for engines/base/base_engine_service.py
 The abstract methods have 'pass' bodies that need to be covered.
 """
 import pytest
-from src.engines.base.base_engine_service import BaseEngineService
+from src.services.execution.base import BaseEngineService
 
 
 class ConcreteEngineService(BaseEngineService):

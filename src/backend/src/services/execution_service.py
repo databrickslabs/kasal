@@ -1802,7 +1802,7 @@ class ExecutionService:
             
             # Also try to cancel via KasalEngineService
             try:
-                from src.engines.kasal.kasal_engine_service import KasalEngineService
+                from src.services.execution.engine_service import KasalEngineService
                 crew_service = KasalEngineService()
                 cancelled = await crew_service.cancel_execution(execution_id)
                 if cancelled:

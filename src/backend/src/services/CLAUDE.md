@@ -15,17 +15,17 @@ Not everything in this directory is a `*_service.py` CRUD class, and that is
 deliberate. **Capability packages** — `tools/`, `memory/`, `guardrails/`,
 `security/`, `knowledge/`, `export/`, `a2ui/`, `trace/`, `task_output/` — are
 things an agent run needs that do not require a crew to be running. They were
-moved out of `engines/kasal/` so a chat turn, crew generation, or an exported
-app can use them without importing the orchestrator.
+moved out of the old `src/engines/` tree so a chat turn, crew generation, or an
+exported app can use them without importing an orchestrator.
 
-The rule that decides whether something belongs in a capability package or in
-the engine: does it import `kasal_engine` (the vendored LIBRARY — fine here,
-e.g. `BaseTool`, `crewai_event_bus`), or `src.engines.kasal.*` (the
-orchestration layer — then it is engine code, not a capability). **A capability
-package must not import `src.engines.kasal.*`.** The exception is the handful of
-modules whose whole job is to LAUNCH the engine — `process_crew_executor.py`,
-`process_flow_executor.py`, `kasal_execution_service.py`,
-`execution_service.py`. They sit above it and are supposed to import it.
+`src/engines/` is gone entirely: the three paths are `chat/`, `agent_builder/`
+and `flow_builder/`, over shared machinery in `execution/`. See
+`execution/CLAUDE.md`.
+
+The rule that keeps a capability a capability: it may import `kasal_engine` (the
+vendored LIBRARY — `BaseTool`, `crewai_event_bus`, `MemoryRecord`), but it must
+not import a PATH package. A guardrail that imports `flow_builder` has stopped
+being usable from a chat turn, which is the whole reason these moved.
 
 ## Conventions (match `agent_service.py`)
 

@@ -148,13 +148,13 @@ class KasalFlowService:
                 job_id = str(uuid.uuid4())
                 logger.info(f"Generated job_id: {job_id}")
 
-            # Get the CrewAI engine
-            from src.engines.engine_factory import EngineFactory
-            engine = await EngineFactory.get_engine(
-                engine_type="kasal",
-                db=None,  # No session needed for cached instance
-                init_params={}  # Will initialize if not cached
-            )
+            # Get the engine. This used to call a SECOND EngineFactory that
+            # cached instances; the two factories have been collapsed into one.
+            # Nothing depended on the cache: the engine object holds only a
+            # _running_jobs dict, and the cancel path in ExecutionService builds
+            # its own fresh KasalEngineService anyway.
+            from src.services.execution.engine_factory import EngineFactory
+            engine = await EngineFactory.get_engine(engine_type="kasal")
 
             if not engine:
                 raise ValueError("Failed to get CrewAI engine")

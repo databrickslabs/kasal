@@ -14,7 +14,8 @@ you are editing wins on specifics:
   - `src/backend/src/services/CLAUDE.md` — business logic
   - `src/backend/src/repositories/CLAUDE.md` — data access
   - `src/backend/src/models/CLAUDE.md` — SQLAlchemy models + migrations
-  - `src/backend/src/engines/kasal/CLAUDE.md` — the Kasal native engine (post-refactor)
+  - `src/backend/src/services/execution/CLAUDE.md` — the three execution paths
+    (Chat / Agent Builder / Flow Builder) and the machinery they share
   - `src/backend/src/services/` — capabilities usable without a crew run:
     `tools/`, `memory/`, `guardrails/`, `security/`, `knowledge/`, `export/`,
     `trace/`
@@ -83,7 +84,7 @@ Applies to `.py`, `.ts`, and `.tsx` under `src/backend/` and `src/frontend/src/`
   gesture.
 - **Do not mass-refactor files you were not asked to touch.** Splitting modules
   the crew/flow **subprocess** imports is high-risk (see
-  `src/backend/src/engines/kasal/CLAUDE.md`); a drive-by split that passes
+  `src/backend/src/services/execution/CLAUDE.md`); a drive-by split that passes
   in-process tests can still break the spawned interpreter. Shrink what the task
   puts you in, and flag the rest.
 

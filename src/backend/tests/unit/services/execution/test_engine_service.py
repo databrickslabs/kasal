@@ -11,7 +11,7 @@ import pytest
 from datetime import datetime, UTC
 from unittest.mock import MagicMock, patch, AsyncMock, Mock
 
-from src.engines.kasal.kasal_engine_service import KasalEngineService
+from src.services.execution.engine_service import KasalEngineService
 from src.models.execution_status import ExecutionStatus
 from src.utils.user_context import GroupContext
 
@@ -101,7 +101,7 @@ class TestInitialize:
     @pytest.mark.asyncio
     async def test_returns_true_on_success(self, service):
         with patch(
-            "src.engines.kasal.kasal_engine_service.LogWriterTask.ensure_writer_started",
+            "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
             new_callable=AsyncMock,
         ):
             result = await service.initialize(llm_provider="openai", model="gpt-4o")
@@ -110,7 +110,7 @@ class TestInitialize:
     @pytest.mark.asyncio
     async def test_uses_default_provider_and_model(self, service):
         with patch(
-            "src.engines.kasal.kasal_engine_service.LogWriterTask.ensure_writer_started",
+            "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
             new_callable=AsyncMock,
         ):
             result = await service.initialize()
@@ -119,7 +119,7 @@ class TestInitialize:
     @pytest.mark.asyncio
     async def test_returns_false_on_exception(self, service):
         with patch(
-            "src.engines.kasal.kasal_engine_service.LogWriterTask.ensure_writer_started",
+            "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
             new_callable=AsyncMock,
         ), patch(
             "src.services.execution.logs.capture.execution_log_capture",
@@ -133,7 +133,7 @@ class TestInitialize:
     @pytest.mark.asyncio
     async def test_flow_execution_type_uses_flow_logger(self, service):
         with patch(
-            "src.engines.kasal.kasal_engine_service.LogWriterTask.ensure_writer_started",
+            "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
             new_callable=AsyncMock,
         ):
             result = await service.initialize(execution_type="flow")
@@ -149,7 +149,7 @@ class TestUpdateExecutionStatus:
     @pytest.mark.asyncio
     async def test_delegates_to_retry_function(self, service):
         with patch(
-            "src.engines.kasal.kasal_engine_service.update_execution_status_with_retry",
+            "src.services.execution.engine_service.update_execution_status_with_retry",
             new_callable=AsyncMock,
         ) as mock_retry:
             await service._update_execution_status(
@@ -290,13 +290,13 @@ class TestRunExecution:
         mock_session = AsyncMock()
 
         with patch(
-            "src.engines.kasal.kasal_engine_service.normalize_config",
+            "src.services.execution.engine_service.normalize_config",
             return_value=sample_execution_config,
         ), patch(
-            "src.engines.kasal.kasal_engine_service.LogWriterTask.ensure_writer_started",
+            "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
             new_callable=AsyncMock,
         ), patch(
-            "src.engines.kasal.kasal_engine_service.run_crew_in_process",
+            "src.services.execution.engine_service.run_crew_in_process",
             new_callable=AsyncMock,
         ) as mock_run:
             result = await service.run_execution(
@@ -314,16 +314,16 @@ class TestRunExecution:
         mock_session = AsyncMock()
 
         with patch(
-            "src.engines.kasal.kasal_engine_service.normalize_config",
+            "src.services.execution.engine_service.normalize_config",
             return_value=sample_execution_config,
         ), patch(
-            "src.engines.kasal.kasal_engine_service.LogWriterTask.ensure_writer_started",
+            "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
             new_callable=AsyncMock,
         ), patch(
             "src.services.tools.tool_factory.ToolFactory.create",
             new_callable=AsyncMock,
         ) as mock_factory_create, patch(
-            "src.engines.kasal.kasal_engine_service.run_crew_in_process",
+            "src.services.execution.engine_service.run_crew_in_process",
             new_callable=AsyncMock,
         ):
             await service.run_execution(
@@ -341,13 +341,13 @@ class TestRunExecution:
             return cfg
 
         with patch(
-            "src.engines.kasal.kasal_engine_service.normalize_config",
+            "src.services.execution.engine_service.normalize_config",
             side_effect=capture_normalize,
         ), patch(
-            "src.engines.kasal.kasal_engine_service.LogWriterTask.ensure_writer_started",
+            "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
             new_callable=AsyncMock,
         ), patch(
-            "src.engines.kasal.kasal_engine_service.run_crew_in_process",
+            "src.services.execution.engine_service.run_crew_in_process",
             new_callable=AsyncMock,
         ):
             await service.run_execution(
@@ -367,13 +367,13 @@ class TestRunExecution:
                 raise Exception("prep fail")
 
         with patch(
-            "src.engines.kasal.kasal_engine_service.normalize_config",
+            "src.services.execution.engine_service.normalize_config",
             return_value=sample_execution_config,
         ), patch(
-            "src.engines.kasal.kasal_engine_service.LogWriterTask.ensure_writer_started",
+            "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
             new_callable=AsyncMock,
         ), patch(
-            "src.engines.kasal.kasal_engine_service.logger.info",
+            "src.services.execution.engine_service.logger.info",
             side_effect=raise_in_prep,
         ), patch.object(
             service, "_update_execution_status", new_callable=AsyncMock
@@ -387,7 +387,7 @@ class TestRunExecution:
     @pytest.mark.asyncio
     async def test_outer_exception_propagates(self, service, sample_execution_config):
         with patch(
-            "src.engines.kasal.kasal_engine_service.normalize_config",
+            "src.services.execution.engine_service.normalize_config",
             side_effect=Exception("boom"),
         ):
             with pytest.raises(Exception, match="boom"):
@@ -403,13 +403,13 @@ class TestRunFlow:
     @pytest.mark.asyncio
     async def test_successful_flow_returns_id(self, service, sample_flow_config, group_context):
         with patch(
-            "src.engines.kasal.kasal_engine_service.normalize_flow_config",
+            "src.services.execution.engine_service.normalize_flow_config",
             return_value=sample_flow_config,
         ), patch(
-            "src.engines.kasal.kasal_engine_service.LogWriterTask.ensure_writer_started",
+            "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
             new_callable=AsyncMock,
         ), patch(
-            "src.engines.kasal.kasal_engine_service.run_flow_in_process",
+            "src.services.execution.engine_service.run_flow_in_process",
             new_callable=AsyncMock,
         ):
             result = await service.run_flow(
@@ -422,13 +422,13 @@ class TestRunFlow:
     @pytest.mark.asyncio
     async def test_adds_group_id_to_flow_config(self, service, sample_flow_config, group_context):
         with patch(
-            "src.engines.kasal.kasal_engine_service.normalize_flow_config",
+            "src.services.execution.engine_service.normalize_flow_config",
             side_effect=lambda c: c,
         ), patch(
-            "src.engines.kasal.kasal_engine_service.LogWriterTask.ensure_writer_started",
+            "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
             new_callable=AsyncMock,
         ), patch(
-            "src.engines.kasal.kasal_engine_service.run_flow_in_process",
+            "src.services.execution.engine_service.run_flow_in_process",
             new_callable=AsyncMock,
         ):
             await service.run_flow("fg", sample_flow_config, group_context)
@@ -437,7 +437,7 @@ class TestRunFlow:
     @pytest.mark.asyncio
     async def test_flow_failure_updates_status(self, service, sample_flow_config):
         with patch(
-            "src.engines.kasal.kasal_engine_service.normalize_flow_config",
+            "src.services.execution.engine_service.normalize_flow_config",
             side_effect=Exception("norm fail"),
         ), patch.object(
             service, "_update_execution_status", new_callable=AsyncMock

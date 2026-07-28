@@ -234,6 +234,11 @@ _BROKEN_IMPORT_FILES = {
     "test_crew_config_builder.py",
     "test_company_name_not_null_guardrail.py",
     # "test_memory_backend_factory.py",  # Fixed by crewai.rag stubs in memory/conftest.py
+    # NOTE: this list matches by BASENAME. tests/unit/services/memory/
+    # test_crew_memory_service.py really is broken (it imports a
+    # `generate_crew_id` that no longer exists), but the same entry was also
+    # silently skipping the engine-side suite of the same name — 22 working
+    # tests. That one now runs as test_crew_memory_service_engine.py.
     "test_crew_memory_service.py",
     "test_config_adapter.py",
     # test_powerbi_analysis_tool.py — import errors resolved; re-enabled for
