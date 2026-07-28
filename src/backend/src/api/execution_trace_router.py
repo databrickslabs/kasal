@@ -20,7 +20,7 @@ from src.schemas.execution_trace import (
     ExecutionTraceResponseByJobId,
     ExecutionTraceResponseByRunId,
 )
-from src.services.execution_trace_service import ExecutionTraceService
+from src.services.trace import ExecutionTraceService
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().system
@@ -110,6 +110,7 @@ async def get_traces_by_job_id(
     limit: int = Query(100, ge=1, le=15000),
     offset: int = Query(0, ge=0),
     since_id: int = Query(0, ge=0),
+    preview_chars: int = Query(0, ge=0, le=100000),
 ):
     """
     Get traces for an execution by job_id.
@@ -123,13 +124,16 @@ async def get_traces_by_job_id(
         since_id: Incremental cursor — return only traces with id greater than
             this. Pollers pass their last seen trace id so each 2s poll ships
             only NEW rows instead of the run's entire trace history.
+        preview_chars: Trim each row's long text to this many characters,
+            recording their true sizes (see trace.row_view). 0 (the default)
+            returns them whole, so existing callers are unaffected.
 
     Returns:
         ExecutionTraceResponseByJobId with traces for the execution
     """
     result = await service.get_traces_by_job_id(
         group_context=group_context, job_id=job_id, limit=limit, offset=offset,
-        since_id=since_id
+        since_id=since_id, preview_chars=preview_chars,
     )
     if not result:
         raise NotFoundError(f"Execution with job_id {job_id} not found or access denied")

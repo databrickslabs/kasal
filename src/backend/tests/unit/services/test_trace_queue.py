@@ -8,7 +8,7 @@ import pytest
 import queue
 from unittest.mock import patch, MagicMock
 
-from src.services.trace_queue import TraceQueue, get_trace_queue
+from src.services.trace.queue import TraceQueue, get_trace_queue
 
 
 class TestTraceQueue:

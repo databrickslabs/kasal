@@ -90,13 +90,13 @@ def service(mock_session, mock_trace_repo, mock_history_repo):
     by patching the constructors so that __init__ uses our mocks.
     """
     with patch(
-        "src.services.execution_trace_service.ExecutionTraceRepository",
+        "src.services.trace.service.ExecutionTraceRepository",
         return_value=mock_trace_repo,
     ), patch(
-        "src.services.execution_trace_service.ExecutionHistoryRepository",
+        "src.services.trace.service.ExecutionHistoryRepository",
         return_value=mock_history_repo,
     ):
-        from src.services.execution_trace_service import ExecutionTraceService
+        from src.services.trace import ExecutionTraceService
         svc = ExecutionTraceService(mock_session)
     return svc
 
@@ -705,7 +705,7 @@ class TestCreateTrace:
         mock_trace_repo.create = AsyncMock(return_value=created)
 
         with patch(
-            "src.services.execution_trace_service.sse_manager"
+            "src.services.trace.service.sse_manager"
         ) as mock_sse, patch.dict(
             "os.environ", {}, clear=False
         ):
@@ -731,7 +731,7 @@ class TestCreateTrace:
         created = _make_trace_obj(id=8, job_id="j1", event_type="tool_usage")
         mock_trace_repo.create = AsyncMock(return_value=created)
 
-        with patch("src.services.execution_trace_service.sse_manager") as mock_sse:
+        with patch("src.services.trace.service.sse_manager") as mock_sse:
             mock_sse.broadcast_to_job = AsyncMock(return_value=0)
             await service.create_trace(
                 {"job_id": "j1", "event_type": "tool_usage"},
@@ -751,7 +751,7 @@ class TestCreateTrace:
         mock_trace_repo.create = AsyncMock(return_value=created)
 
         with patch(
-            "src.services.execution_trace_service.sse_manager"
+            "src.services.trace.service.sse_manager"
         ) as mock_sse, patch.dict(
             "os.environ", {"CREW_SUBPROCESS_MODE": "true"}, clear=False
         ):
@@ -770,7 +770,7 @@ class TestCreateTrace:
         mock_trace_repo.create = AsyncMock(return_value=created)
 
         with patch(
-            "src.services.execution_trace_service.sse_manager"
+            "src.services.trace.service.sse_manager"
         ) as mock_sse, patch.dict(
             "os.environ", {}, clear=False
         ):
@@ -793,7 +793,7 @@ class TestCreateTrace:
         mock_trace_repo.create = AsyncMock(return_value=created)
 
         with patch(
-            "src.services.execution_trace_service.sse_manager"
+            "src.services.trace.service.sse_manager"
         ) as mock_sse, patch.dict(
             "os.environ", {}, clear=False
         ):
@@ -1452,11 +1452,11 @@ class TestInit:
 
     def test_service_initializes_repositories(self, mock_session):
         with patch(
-            "src.services.execution_trace_service.ExecutionTraceRepository"
+            "src.services.trace.service.ExecutionTraceRepository"
         ) as mock_tr_cls, patch(
-            "src.services.execution_trace_service.ExecutionHistoryRepository"
+            "src.services.trace.service.ExecutionHistoryRepository"
         ) as mock_hr_cls:
-            from src.services.execution_trace_service import ExecutionTraceService
+            from src.services.trace import ExecutionTraceService
             svc = ExecutionTraceService(mock_session)
 
             mock_tr_cls.assert_called_once_with(mock_session)

@@ -390,7 +390,7 @@ CALCULATETABLE(...)
                 return
 
             # Get the trace queue
-            from src.services.trace_queue import get_trace_queue
+            from src.services.trace.queue import get_trace_queue
             queue = get_trace_queue()
 
             # Build trace data with prompt and response (limit size to avoid issues)

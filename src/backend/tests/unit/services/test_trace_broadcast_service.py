@@ -9,7 +9,7 @@ import asyncio
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.services.trace_broadcast_service import (
+from src.services.trace import (
     TraceBroadcastService,
     trace_broadcast_service,
 )
@@ -144,7 +144,7 @@ class TestGetActiveJobIds:
         """Test getting active job IDs from SSE manager."""
         service = TraceBroadcastService()
 
-        with patch('src.services.trace_broadcast_service.sse_manager') as mock_manager:
+        with patch('src.services.trace.broadcast.sse_manager') as mock_manager:
             mock_manager.get_statistics.return_value = {
                 "active_jobs": ["job-1", "job-2", "job-3"]
             }
@@ -157,7 +157,7 @@ class TestGetActiveJobIds:
         """Test that global stream IDs are excluded."""
         service = TraceBroadcastService()
 
-        with patch('src.services.trace_broadcast_service.sse_manager') as mock_manager:
+        with patch('src.services.trace.broadcast.sse_manager') as mock_manager:
             mock_manager.get_statistics.return_value = {
                 "active_jobs": ["job-1", "all_groups_group1-group2", "job-2"]
             }
@@ -171,7 +171,7 @@ class TestGetActiveJobIds:
         """Test getting active job IDs when none exist."""
         service = TraceBroadcastService()
 
-        with patch('src.services.trace_broadcast_service.sse_manager') as mock_manager:
+        with patch('src.services.trace.broadcast.sse_manager') as mock_manager:
             mock_manager.get_statistics.return_value = {"active_jobs": []}
 
             active_jobs = service._get_active_job_ids()
@@ -246,7 +246,7 @@ class TestPollForTraces:
 
         with patch.object(service, '_get_active_job_ids', return_value=set()):
             with patch.object(service, '_has_global_stream_listeners', return_value=False):
-                with patch('src.services.trace_broadcast_service.async_session_factory') as mock_factory:
+                with patch('src.services.trace.broadcast.async_session_factory') as mock_factory:
                     mock_session = AsyncMock()
                     mock_factory.return_value.__aenter__.return_value = mock_session
 
@@ -261,7 +261,7 @@ class TestPollForTraces:
         service = TraceBroadcastService()
 
         with patch.object(service, '_get_active_job_ids', return_value={"job-123"}):
-            with patch('src.services.trace_broadcast_service.async_session_factory') as mock_factory:
+            with patch('src.services.trace.broadcast.async_session_factory') as mock_factory:
                 mock_session = AsyncMock()
                 mock_factory.return_value.__aenter__.return_value = mock_session
 
@@ -282,7 +282,7 @@ class TestPollForTraces:
         service._last_trace_ids = {"job-1": 10, "job-2": 20}
 
         with patch.object(service, '_get_active_job_ids', return_value={"job-1"}):
-            with patch('src.services.trace_broadcast_service.async_session_factory') as mock_factory:
+            with patch('src.services.trace.broadcast.async_session_factory') as mock_factory:
                 mock_session = AsyncMock()
                 mock_factory.return_value.__aenter__.return_value = mock_session
 
@@ -311,7 +311,7 @@ class TestBroadcastNewTracesForJob:
         mock_result.scalars.return_value.all.return_value = []
         mock_session.execute.return_value = mock_result
 
-        with patch('src.services.trace_broadcast_service.sse_manager') as mock_manager:
+        with patch('src.services.trace.broadcast.sse_manager') as mock_manager:
             await service._broadcast_new_traces_for_job(mock_session, "job-123")
 
             mock_manager.broadcast_to_job.assert_not_called()
@@ -331,7 +331,7 @@ class TestBroadcastNewTracesForJob:
         mock_result.scalars.return_value.all.return_value = mock_traces
         mock_session.execute.return_value = mock_result
 
-        with patch('src.services.trace_broadcast_service.sse_manager') as mock_manager:
+        with patch('src.services.trace.broadcast.sse_manager') as mock_manager:
             mock_manager.broadcast_to_job = AsyncMock(return_value=1)
 
             await service._broadcast_new_traces_for_job(mock_session, "job-123")
@@ -362,7 +362,7 @@ class TestBroadcastNewTracesForJob:
         mock_result.scalars.return_value.all.return_value = [trace]
         mock_session.execute.return_value = mock_result
 
-        with patch('src.services.trace_broadcast_service.sse_manager') as mock_manager:
+        with patch('src.services.trace.broadcast.sse_manager') as mock_manager:
             mock_manager.broadcast_to_job = AsyncMock(return_value=1)
 
             await service._broadcast_new_traces_for_job(mock_session, "job-123")
@@ -395,7 +395,7 @@ class TestBroadcastNewTracesForJob:
         mock_result.scalars.return_value.all.return_value = mock_traces
         mock_session.execute.return_value = mock_result
 
-        with patch('src.services.trace_broadcast_service.sse_manager') as mock_manager:
+        with patch('src.services.trace.broadcast.sse_manager') as mock_manager:
             mock_manager.broadcast_to_job = AsyncMock(return_value=1)
 
             await service._broadcast_new_traces_for_job(mock_session, "job-123")
@@ -425,7 +425,7 @@ class TestBroadcastNewTracesForJob:
 
         pipe._mark_relay_started("job-123")
         try:
-            with patch('src.services.trace_broadcast_service.sse_manager') as mock_manager:
+            with patch('src.services.trace.broadcast.sse_manager') as mock_manager:
                 mock_manager.broadcast_to_job = AsyncMock(return_value=1)
 
                 await service._broadcast_new_traces_for_job(mock_session, "job-123")
@@ -460,7 +460,7 @@ class TestBroadcastNewTracesForJob:
         pipe._mark_relay_started("job-123")
         pipe._mark_relay_finished("job-123")
         try:
-            with patch('src.services.trace_broadcast_service.sse_manager') as mock_manager:
+            with patch('src.services.trace.broadcast.sse_manager') as mock_manager:
                 mock_manager.broadcast_to_job = AsyncMock(return_value=1)
 
                 # Within grace: suppressed
@@ -494,7 +494,7 @@ class TestBroadcastNewTracesForJob:
         ]
         mock_session.execute.return_value = mock_result
 
-        with patch('src.services.trace_broadcast_service.sse_manager') as mock_manager:
+        with patch('src.services.trace.broadcast.sse_manager') as mock_manager:
             mock_manager.broadcast_to_job = AsyncMock(return_value=1)
 
             await service._broadcast_new_traces_for_job(mock_session, "job-999")
@@ -510,7 +510,7 @@ class TestBroadcastNewTracesForJob:
 
         mock_session.execute.side_effect = Exception("Database error")
 
-        with patch('src.services.trace_broadcast_service.sse_manager') as mock_manager:
+        with patch('src.services.trace.broadcast.sse_manager') as mock_manager:
             # Should not raise
             await service._broadcast_new_traces_for_job(mock_session, "job-123")
 
@@ -612,7 +612,7 @@ class TestTraceDataFormatting:
         mock_result.scalars.return_value.all.return_value = [trace]
         mock_session.execute.return_value = mock_result
 
-        with patch('src.services.trace_broadcast_service.sse_manager') as mock_manager:
+        with patch('src.services.trace.broadcast.sse_manager') as mock_manager:
             mock_manager.broadcast_to_job = AsyncMock(return_value=1)
 
             await service._broadcast_new_traces_for_job(mock_session, "job-123")
@@ -634,7 +634,7 @@ class TestTraceDataFormatting:
         mock_result.scalars.return_value.all.return_value = [trace]
         mock_session.execute.return_value = mock_result
 
-        with patch('src.services.trace_broadcast_service.sse_manager') as mock_manager:
+        with patch('src.services.trace.broadcast.sse_manager') as mock_manager:
             mock_manager.broadcast_to_job = AsyncMock(return_value=1)
 
             await service._broadcast_new_traces_for_job(mock_session, "job-123")
@@ -655,7 +655,7 @@ class TestTraceDataFormatting:
         mock_result.scalars.return_value.all.return_value = [trace]
         mock_session.execute.return_value = mock_result
 
-        with patch('src.services.trace_broadcast_service.sse_manager') as mock_manager:
+        with patch('src.services.trace.broadcast.sse_manager') as mock_manager:
             mock_manager.broadcast_to_job = AsyncMock(return_value=1)
 
             await service._broadcast_new_traces_for_job(mock_session, "job-123")

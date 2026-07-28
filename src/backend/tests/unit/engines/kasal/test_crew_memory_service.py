@@ -254,7 +254,7 @@ class TestEmitIndexValidationTrace:
             mock_session_instance = AsyncMock()
             mock_session.return_value.__aenter__.return_value = mock_session_instance
 
-            with patch('src.services.execution_trace_service.ExecutionTraceService') as MockTraceService:
+            with patch('src.services.trace.ExecutionTraceService') as MockTraceService:
                 mock_trace_service = MagicMock()
                 mock_trace_service.create_trace = AsyncMock()
                 MockTraceService.return_value = mock_trace_service
@@ -294,7 +294,7 @@ class TestEmitIndexValidationTrace:
             mock_session_instance = AsyncMock()
             mock_session.return_value.__aenter__.return_value = mock_session_instance
 
-            with patch('src.services.execution_trace_service.ExecutionTraceService') as MockTraceService:
+            with patch('src.services.trace.ExecutionTraceService') as MockTraceService:
                 mock_trace_service = MagicMock()
                 mock_trace_service.create_trace = AsyncMock()
                 MockTraceService.return_value = mock_trace_service
@@ -324,7 +324,7 @@ class TestEmitIndexValidationTrace:
 
         # Patch at the source location since imports happen inside the method
         with patch('src.db.session.request_scoped_session') as mock_session:
-            with patch('src.services.execution_trace_service.ExecutionTraceService') as MockTraceService:
+            with patch('src.services.trace.ExecutionTraceService') as MockTraceService:
                 await service._emit_index_validation_trace(error)
 
                 # Session should not be called when no job_id
@@ -374,7 +374,7 @@ class TestEmitIndexValidationTrace:
             mock_session_instance = AsyncMock()
             mock_session.return_value.__aenter__.return_value = mock_session_instance
 
-            with patch('src.services.execution_trace_service.ExecutionTraceService') as MockTraceService:
+            with patch('src.services.trace.ExecutionTraceService') as MockTraceService:
                 mock_trace_service = MagicMock()
                 mock_trace_service.create_trace = AsyncMock()
                 MockTraceService.return_value = mock_trace_service

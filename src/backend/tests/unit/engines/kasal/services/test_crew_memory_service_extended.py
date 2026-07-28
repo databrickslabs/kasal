@@ -921,7 +921,7 @@ class TestEmitIndexValidationTraceOtherType:
             mock_session_instance = AsyncMock()
             mock_session.return_value.__aenter__.return_value = mock_session_instance
             with patch(
-                "src.services.execution_trace_service.ExecutionTraceService"
+                "src.services.trace.ExecutionTraceService"
             ) as MockTraceService:
                 mock_trace_service = MagicMock()
                 mock_trace_service.create_trace = AsyncMock()

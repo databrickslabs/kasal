@@ -409,7 +409,7 @@ class CrewMemoryService:
             from datetime import datetime, timezone
 
             from src.db.session import request_scoped_session
-            from src.services.execution_trace_service import ExecutionTraceService
+            from src.services.trace import ExecutionTraceService
 
             # Get job_id from config
             job_id = self.config.get("execution_id") or self.config.get("job_id")

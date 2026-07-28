@@ -379,7 +379,7 @@ async def lifespan(app: FastAPI):
     # Required because subprocess executions can't broadcast SSE directly
     trace_broadcast_started = False
     try:
-        from src.services.trace_broadcast_service import trace_broadcast_service
+        from src.services.trace import trace_broadcast_service
 
         trace_broadcast_service.start()
         trace_broadcast_started = True
@@ -425,7 +425,7 @@ async def lifespan(app: FastAPI):
         if "trace_broadcast_started" in locals() and trace_broadcast_started:
             system_logger.info("Stopping trace broadcast service...")
             try:
-                from src.services.trace_broadcast_service import trace_broadcast_service
+                from src.services.trace import trace_broadcast_service
 
                 trace_broadcast_service.stop()
                 system_logger.info("Trace broadcast service stopped successfully.")

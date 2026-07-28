@@ -253,7 +253,7 @@ class TestLifespanStartup:
             "src.services.hitl_timeout_service.start_hitl_timeout_service": AsyncMock(),
             "src.services.hitl_timeout_service.stop_hitl_timeout_service": AsyncMock(),
             # trace/execution broadcast services imported lazily
-            "src.services.trace_broadcast_service.trace_broadcast_service": MagicMock(),
+            "src.services.trace.trace_broadcast_service": MagicMock(),
             "src.services.execution_broadcast_service.execution_broadcast_service": MagicMock(),
             # embedding queue service imported lazily (SQLite path creates a task)
             "src.services.embedding_queue_service.embedding_queue": mock_embedding_queue,
@@ -340,7 +340,7 @@ class TestLifespanStartup:
 
             # Set start/stop on broadcast service mocks
             for svc_key in (
-                "src.services.trace_broadcast_service.trace_broadcast_service",
+                "src.services.trace.trace_broadcast_service",
                 "src.services.execution_broadcast_service.execution_broadcast_service",
             ):
                 svc = mocks[svc_key]
@@ -376,7 +376,7 @@ class TestLifespanStartup:
             self._setup_logger_mock(mocks["src.main.LoggerManager"])
 
             for svc_key in (
-                "src.services.trace_broadcast_service.trace_broadcast_service",
+                "src.services.trace.trace_broadcast_service",
                 "src.services.execution_broadcast_service.execution_broadcast_service",
             ):
                 svc = mocks[svc_key]
@@ -412,7 +412,7 @@ class TestLifespanStartup:
             self._setup_logger_mock(mocks["src.main.LoggerManager"])
 
             for svc_key in (
-                "src.services.trace_broadcast_service.trace_broadcast_service",
+                "src.services.trace.trace_broadcast_service",
                 "src.services.execution_broadcast_service.execution_broadcast_service",
             ):
                 svc = mocks[svc_key]
@@ -478,7 +478,7 @@ class TestLifespanStartup:
             mocks["src.repositories.engine_config_repository.EngineConfigRepository"].return_value = mock_repo
 
             for svc_key in (
-                "src.services.trace_broadcast_service.trace_broadcast_service",
+                "src.services.trace.trace_broadcast_service",
                 "src.services.execution_broadcast_service.execution_broadcast_service",
             ):
                 svc = mocks[svc_key]
@@ -515,7 +515,7 @@ class TestLifespanStartup:
             self._setup_logger_mock(mocks["src.main.LoggerManager"])
 
             for svc_key in (
-                "src.services.trace_broadcast_service.trace_broadcast_service",
+                "src.services.trace.trace_broadcast_service",
                 "src.services.execution_broadcast_service.execution_broadcast_service",
             ):
                 svc = mocks[svc_key]
@@ -570,7 +570,7 @@ class TestLifespanStartup:
             mocks["src.repositories.engine_config_repository.EngineConfigRepository"].return_value = mock_repo
 
             for svc_key in (
-                "src.services.trace_broadcast_service.trace_broadcast_service",
+                "src.services.trace.trace_broadcast_service",
                 "src.services.execution_broadcast_service.execution_broadcast_service",
             ):
                 svc = mocks[svc_key]

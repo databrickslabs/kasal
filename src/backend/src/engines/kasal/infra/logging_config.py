@@ -570,7 +570,7 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
         'src.engines.kasal.callbacks.logging_callbacks',
         'src.engines.kasal.callbacks.execution_callback',
         'src.engines.kasal.infra.trace_management',
-        'src.services.trace_queue',  # Add trace queue logger
+        'src.services.trace.queue',  # Add trace queue logger
         'src.engines.kasal.paths.crew.execution_runner',  # Add execution runner logger
         'src.services.databricks_knowledge_service',  # Add knowledge service logger for search debugging
         'src.engines.kasal.tools.tool_factory',  # Tool factory creation + config injection logs

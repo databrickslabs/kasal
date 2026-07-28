@@ -446,7 +446,7 @@ class TestDeleteAllExecutions:
             'error_trace_count': 2
         })
 
-        with patch('src.services.execution_trace_service.ExecutionTraceService') as mock_trace_service, \
+        with patch('src.services.trace.ExecutionTraceService') as mock_trace_service, \
              patch('src.services.execution_logs_service.ExecutionLogsService') as mock_logs_service, \
              patch('src.services.execution_service.ExecutionService') as mock_exec_service:
             mock_trace_instance = MagicMock()
@@ -481,7 +481,7 @@ class TestDeleteAllExecutions:
             'error_trace_count': 1
         })
 
-        with patch('src.services.execution_trace_service.ExecutionTraceService') as mock_trace_service, \
+        with patch('src.services.trace.ExecutionTraceService') as mock_trace_service, \
              patch('src.services.execution_logs_service.ExecutionLogsService') as mock_logs_service, \
              patch('src.services.execution_service.ExecutionService') as mock_exec_service:
             mock_trace_instance = MagicMock()
@@ -527,7 +527,7 @@ class TestDeleteAllExecutions:
             'run_count': 1, 'task_status_count': 0, 'error_trace_count': 0
         })
 
-        with patch('src.services.execution_trace_service.ExecutionTraceService') as mock_trace_service, \
+        with patch('src.services.trace.ExecutionTraceService') as mock_trace_service, \
              patch('src.services.execution_logs_service.ExecutionLogsService') as mock_logs_service, \
              patch('src.services.workflow_recipe_service.WorkflowRecipeService') as mock_recipes, \
              patch('src.services.execution_service.ExecutionService') as mock_exec_service:
@@ -615,7 +615,7 @@ class TestDeleteExecution:
             'error_trace_count': 1
         })
 
-        with patch('src.services.execution_trace_service.ExecutionTraceService') as mock_trace_service, \
+        with patch('src.services.trace.ExecutionTraceService') as mock_trace_service, \
              patch('src.services.execution_logs_service.ExecutionLogsService') as mock_logs_service, \
              patch('src.services.execution_service.ExecutionService') as mock_exec_service:
             mock_trace_instance = MagicMock()
@@ -681,7 +681,7 @@ class TestDeleteExecutionByJobId:
             'error_trace_count': 1
         })
 
-        with patch('src.services.execution_trace_service.ExecutionTraceService') as mock_trace_service, \
+        with patch('src.services.trace.ExecutionTraceService') as mock_trace_service, \
              patch('src.services.execution_logs_service.ExecutionLogsService') as mock_logs_service, \
              patch('src.services.execution_service.ExecutionService') as mock_exec_service:
             mock_trace_instance = MagicMock()

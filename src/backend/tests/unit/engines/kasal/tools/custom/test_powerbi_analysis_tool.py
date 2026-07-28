@@ -4362,8 +4362,8 @@ class TestEmitLlmTraceWithContext:
         mock_queue = MagicMock()
         mock_queue.put_nowait = MagicMock()
 
-        # The import is inside the method: "from src.services.trace_queue import get_trace_queue"
-        with patch("src.services.trace_queue.get_trace_queue", return_value=mock_queue, create=True):
+        # The import is inside the method: "from src.services.trace.queue import get_trace_queue"
+        with patch("src.services.trace.queue.get_trace_queue", return_value=mock_queue, create=True):
             self.tool._emit_llm_trace(
                 event_context="DAX Generation",
                 prompt="Generate DAX",

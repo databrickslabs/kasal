@@ -1704,7 +1704,7 @@ def run_crew_in_process(
         try:
             import time
 
-            from src.services.trace_queue import get_trace_queue
+            from src.services.trace.queue import get_trace_queue
 
             trace_queue = get_trace_queue()
             if trace_queue.qsize() > 0:

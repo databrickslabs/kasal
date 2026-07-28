@@ -130,7 +130,7 @@ async def flush_and_stop_writers(async_logger: Optional[logging.Logger] = None) 
 
     # Drain any custom trace queue and stop TraceManager if available (CrewAI-specific)
     try:
-        from src.services.trace_queue import get_trace_queue
+        from src.services.trace.queue import get_trace_queue
         trace_queue = get_trace_queue()
         max_wait = 10
         waited = 0.0

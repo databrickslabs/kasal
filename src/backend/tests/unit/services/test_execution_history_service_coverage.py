@@ -310,7 +310,7 @@ def patch_deletion_services(mock_trace_svc, mock_logs_svc):
     Patch ExecutionTraceService and ExecutionLogsService used inside
     the execution_history_service methods via local imports.
     """
-    import src.services.execution_trace_service as trace_mod
+    import src.services.trace.service as trace_mod
     import src.services.execution_logs_service as logs_mod
 
     original_trace = trace_mod.ExecutionTraceService

@@ -21,34 +21,13 @@ from src.schemas.execution_trace import (
     DeleteTraceResponse
 )
 from src.utils.user_context import GroupContext
-from src.utils.sensitive_data_utils import mask_sensitive_fields
+from src.services.trace.row_view import mask_sensitive_data, preview_trace
 from src.core.sse_manager import sse_manager, SSEEvent
 
 from src.core.logger import LoggerManager
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().system
-
-
-def _mask_trace_sensitive_data(trace: ExecutionTraceItem) -> ExecutionTraceItem:
-    """
-    Mask sensitive data in trace fields before returning to API.
-
-    Args:
-        trace: ExecutionTraceItem with potentially sensitive data
-
-    Returns:
-        ExecutionTraceItem with sensitive fields masked
-    """
-    # Mask sensitive data in trace_metadata
-    if trace.trace_metadata:
-        trace.trace_metadata = mask_sensitive_fields(trace.trace_metadata)
-
-    # Mask sensitive data in output if it's a dict
-    if trace.output and isinstance(trace.output, dict):
-        trace.output = mask_sensitive_fields(trace.output)
-
-    return trace
 
 
 class ExecutionTraceService:
@@ -126,7 +105,7 @@ class ExecutionTraceService:
                         trace.job_id = job_id
             
             # Convert to schema objects and mask sensitive data
-            trace_items = [_mask_trace_sensitive_data(ExecutionTraceItem.model_validate(trace)) for trace in traces]
+            trace_items = [mask_sensitive_data(ExecutionTraceItem.model_validate(trace)) for trace in traces]
 
             return ExecutionTraceResponseByRunId(
                 run_id=run_id,
@@ -146,7 +125,8 @@ class ExecutionTraceService:
         job_id: str = None,
         limit: int = 100,
         offset: int = 0,
-        since_id: int = 0
+        since_id: int = 0,
+        preview_chars: int = 0,
     ) -> ExecutionTraceResponseByJobId:
         """
         Get traces for an execution by job_id with pagination and authorization.
@@ -159,6 +139,10 @@ class ExecutionTraceService:
             since_id: Incremental cursor — only traces with id greater than this.
                 Pollers pass their last seen id so each poll returns only NEW
                 rows instead of re-reading (and re-masking) the whole trace set.
+            preview_chars: Trim each row's long text to this many characters
+                (see row_view.preview_trace). 0 returns them whole. The timeline
+                asks for previews because it renders one-line labels; a row's
+                full text is fetched only when someone opens it.
 
         Returns:
             ExecutionTraceResponseByJobId with traces for the execution if authorized
@@ -217,8 +201,14 @@ class ExecutionTraceService:
                     if not trace.job_id:
                         trace.job_id = job_id
 
-            # Convert to schema objects and mask sensitive data
-            trace_items = [_mask_trace_sensitive_data(ExecutionTraceItem.model_validate(trace)) for trace in traces]
+            # Convert to schema objects, mask sensitive data, and trim the
+            # long text when the caller only needs labels.
+            trace_items = [
+                mask_sensitive_data(ExecutionTraceItem.model_validate(trace))
+                for trace in traces
+            ]
+            if preview_chars:
+                trace_items = [preview_trace(item, preview_chars) for item in trace_items]
 
             return ExecutionTraceResponseByJobId(
                 job_id=job_id,
@@ -262,7 +252,7 @@ class ExecutionTraceService:
                 job_id, event_types or []
             )
             return [
-                _mask_trace_sensitive_data(ExecutionTraceItem.model_validate(trace))
+                mask_sensitive_data(ExecutionTraceItem.model_validate(trace))
                 for trace in traces
             ]
         except SQLAlchemyError as e:
@@ -294,7 +284,7 @@ class ExecutionTraceService:
             )
 
             # Convert to schema objects and mask sensitive data
-            trace_items = [_mask_trace_sensitive_data(ExecutionTraceItem.model_validate(trace)) for trace in traces]
+            trace_items = [mask_sensitive_data(ExecutionTraceItem.model_validate(trace)) for trace in traces]
 
             return ExecutionTraceList(
                 traces=trace_items,
@@ -341,7 +331,7 @@ class ExecutionTraceService:
             )
 
             # Convert to schema objects and mask sensitive data
-            trace_items = [_mask_trace_sensitive_data(ExecutionTraceItem.model_validate(trace)) for trace in traces]
+            trace_items = [mask_sensitive_data(ExecutionTraceItem.model_validate(trace)) for trace in traces]
 
             return ExecutionTraceList(
                 traces=trace_items,
@@ -374,7 +364,7 @@ class ExecutionTraceService:
                 return None
 
             trace_item = ExecutionTraceItem.model_validate(trace)
-            return _mask_trace_sensitive_data(trace_item)
+            return mask_sensitive_data(trace_item)
 
         except SQLAlchemyError as e:
             logger.error(f"Database error retrieving trace {trace_id}: {str(e)}")
@@ -413,7 +403,7 @@ class ExecutionTraceService:
                     return None  # Not authorized
 
             trace_item = ExecutionTraceItem.model_validate(trace)
-            return _mask_trace_sensitive_data(trace_item)
+            return mask_sensitive_data(trace_item)
             
         except SQLAlchemyError as e:
             logger.error(f"Database error retrieving trace {trace_id}: {str(e)}")

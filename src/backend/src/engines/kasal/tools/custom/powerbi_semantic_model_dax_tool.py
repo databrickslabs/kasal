@@ -2198,7 +2198,7 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
             if not trace_ctx or not trace_ctx.get('job_id'):
                 return
 
-            from src.services.trace_queue import get_trace_queue
+            from src.services.trace.queue import get_trace_queue
             queue = get_trace_queue()
             max_len = 3000
             trace_output: Dict[str, Any] = {

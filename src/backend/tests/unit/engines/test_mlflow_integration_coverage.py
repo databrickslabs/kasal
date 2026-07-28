@@ -187,7 +187,7 @@ async def test_flush_and_stop_writers_exception_path():
     # Patch the function-level import of flush_async_logging
     with patch.dict('sys.modules', {
         'src.services.mlflow_tracing_service': MagicMock(flush_async_logging=mock_flush),
-        'src.services.trace_queue': MagicMock(get_trace_queue=MagicMock(side_effect=Exception("no queue"))),
+        'src.services.trace.queue': MagicMock(get_trace_queue=MagicMock(side_effect=Exception("no queue"))),
     }):
         # Should not raise
         await flush_and_stop_writers()
@@ -205,7 +205,7 @@ async def test_flush_and_stop_writers_with_empty_queue():
 
     with patch.dict('sys.modules', {
         'src.services.mlflow_tracing_service': MagicMock(flush_async_logging=AsyncMock()),
-        'src.services.trace_queue': MagicMock(get_trace_queue=MagicMock(return_value=mock_queue)),
+        'src.services.trace.queue': MagicMock(get_trace_queue=MagicMock(return_value=mock_queue)),
         'src.engines.kasal.infra.trace_management': MagicMock(TraceManager=mock_tm),
     }):
         # Should not raise

@@ -355,7 +355,7 @@ class ExecutionHistoryService:
             logger.info(f"Attempting to delete all executions and their associated data{group_filter_msg}")
 
             # Import services here to avoid circular imports
-            from src.services.execution_trace_service import ExecutionTraceService
+            from src.services.trace import ExecutionTraceService
             from src.services.execution_logs_service import ExecutionLogsService
             from src.services.workflow_recipe_service import WorkflowRecipeService
 
@@ -480,7 +480,7 @@ class ExecutionHistoryService:
             job_id = run.job_id
             
             # Import services here to avoid circular imports
-            from src.services.execution_trace_service import ExecutionTraceService
+            from src.services.trace import ExecutionTraceService
             from src.services.execution_logs_service import ExecutionLogsService
 
             # Create service instances
@@ -552,7 +552,7 @@ class ExecutionHistoryService:
             execution_id = run.id
             
             # Import services here to avoid circular imports
-            from src.services.execution_trace_service import ExecutionTraceService
+            from src.services.trace import ExecutionTraceService
             from src.services.execution_logs_service import ExecutionLogsService
 
             # Create service instances
