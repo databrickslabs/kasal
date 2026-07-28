@@ -123,6 +123,10 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                     "type": "string",
                     "description": "What the crew should do, in plain language.",
                 },
+                "name": {
+                    "type": "string",
+                    "description": "Catalogue name. Derived from the prompt if omitted.",
+                },
                 "model": {"type": "string", "description": "Optional model override."},
                 "tools": {
                     "type": "array",
@@ -344,13 +348,19 @@ async def respond_to_run(
 async def create_crew(
     caller: ExternalCaller,
     prompt: str,
+    name: Optional[str] = None,
     model: Optional[str] = None,
     tools: Optional[List[str]] = None,
     session: Any = None,
 ) -> Dict[str, Any]:
     """Build a new crew. Admin and editor only — the check is in the EIL."""
     return await authoring.create_crew(
-        caller=caller, prompt=prompt, model=model, tools=tools, session=session
+        caller=caller,
+        prompt=prompt,
+        name=name,
+        model=model,
+        tools=tools,
+        session=session,
     )
 
 
