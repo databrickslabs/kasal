@@ -456,14 +456,12 @@ class TestAgentServiceFindByGroup:
         ]
         
         # Mock the session execute and scalars
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = agents
-        mock_session.execute.return_value = mock_result
+        agent_service.repository.find_by_group_ids = AsyncMock(return_value=agents)
         
         result = await agent_service.find_by_group(sample_group_context)
         
         assert len(result) == 3
-        mock_session.execute.assert_called_once()
+        agent_service.repository.find_by_group_ids.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_find_by_group_empty_group_context(self, agent_service, sample_group_context):
@@ -482,14 +480,12 @@ class TestAgentServiceFindByGroup:
     @pytest.mark.asyncio
     async def test_find_by_group_no_agents(self, agent_service, mock_session, sample_group_context):
         """Test find by group when no agents exist for the group."""
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = []
-        mock_session.execute.return_value = mock_result
+        agent_service.repository.find_by_group_ids = AsyncMock(return_value=[])
         
         result = await agent_service.find_by_group(sample_group_context)
         
         assert result == []
-        mock_session.execute.assert_called_once()
+        agent_service.repository.find_by_group_ids.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_find_by_group_ordering(self, agent_service, mock_session, sample_group_context):
@@ -502,9 +498,7 @@ class TestAgentServiceFindByGroup:
         
         agents = [newer_agent, older_agent]  # Should be returned in this order
         
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = agents
-        mock_session.execute.return_value = mock_result
+        agent_service.repository.find_by_group_ids = AsyncMock(return_value=agents)
         
         result = await agent_service.find_by_group(sample_group_context)
         

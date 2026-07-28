@@ -26,6 +26,11 @@ class GroupService:
         self.session = session
         self.group_repo = GroupRepository(session)
         self.group_user_repo = GroupUserRepository(session)
+        # User lookups belong to the user repository, not to a raw select here.
+        from src.models.user import User as _User
+        from src.repositories.user_repository import UserRepository
+
+        self.user_repo = UserRepository(_User, session)
     
     async def ensure_group_exists(self, group_context) -> Optional[Group]:
         """
@@ -162,10 +167,7 @@ class GroupService:
             List[Group]: List of groups the user belongs to
         """
         # First get the user
-        from sqlalchemy import select
-        user_stmt = select(User).where(User.email == email)
-        result = await self.session.execute(user_stmt)
-        user = result.scalar_one_or_none()
+        user = await self.user_repo.get_by_email(email)
         
         if not user:
             return []
@@ -272,14 +274,7 @@ class GroupService:
         Returns:
             int: Number of users in group
         """
-        from sqlalchemy import func, select
-        
-        stmt = select(func.count(GroupUser.id)).where(
-            GroupUser.group_id == group_id,
-            GroupUser.status == GroupUserStatus.ACTIVE
-        )
-        result = await self.session.execute(stmt)
-        return result.scalar() or 0
+        return await self.group_user_repo.count_active_users(group_id)
     
     async def list_group_users(
         self, 
@@ -344,10 +339,7 @@ class GroupService:
         user_id = user_email.split('@')[0]
         
         # Ensure User record exists
-        from sqlalchemy import select
-        user_stmt = select(User).where(User.email == user_email)
-        user_result = await self.session.execute(user_stmt)
-        user = user_result.scalar_one_or_none()
+        user = await self.user_repo.get_by_email(user_email)
         
         if not user:
             # Create a basic User record

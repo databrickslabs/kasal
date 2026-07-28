@@ -346,9 +346,7 @@ async def test_get_group_user_count():
     session = make_session()
     svc = make_service(session=session)
 
-    mock_result = MagicMock()
-    mock_result.scalar.return_value = 7
-    session.execute = AsyncMock(return_value=mock_result)
+    svc.group_user_repo.count_active_users = AsyncMock(return_value=7)
 
     count = await svc.get_group_user_count("g1")
     assert count == 7
@@ -359,9 +357,7 @@ async def test_get_group_user_count_none():
     session = make_session()
     svc = make_service(session=session)
 
-    mock_result = MagicMock()
-    mock_result.scalar.return_value = None
-    session.execute = AsyncMock(return_value=mock_result)
+    svc.group_user_repo.count_active_users = AsyncMock(return_value=0)
 
     count = await svc.get_group_user_count("g1")
     assert count == 0

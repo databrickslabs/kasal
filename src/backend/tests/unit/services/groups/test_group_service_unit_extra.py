@@ -5,6 +5,14 @@ from datetime import datetime
 from src.services.groups.groups import GroupService as Svc
 
 
+class _Scalars:
+    def __init__(self, user):
+        self._user = user
+
+    def first(self):
+        return self._user
+
+
 class FakeSession:
     def __init__(self, user=None):
         self._user = user
@@ -16,6 +24,9 @@ class FakeSession:
                 self._user = user
             def scalar_one_or_none(self):
                 return self._user
+            def scalars(self):
+                # UserRepository.get_by_email uses .scalars().first()
+                return _Scalars(self._user)
         return R(self._user)
     def add(self, obj):
         self.added.append(obj)

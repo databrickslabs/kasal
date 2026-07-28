@@ -100,6 +100,16 @@ class GroupUserRepository(BaseRepository[GroupUser]):
         result = await self.session.execute(query)
         return result.scalars().first()
     
+    async def count_active_users(self, group_id: str) -> int:
+        """How many ACTIVE members a group has."""
+        result = await self.session.execute(
+            select(func.count(GroupUser.id)).where(
+                GroupUser.group_id == group_id,
+                GroupUser.status == GroupUserStatus.ACTIVE,
+            )
+        )
+        return result.scalar() or 0
+
     async def get_users_by_group(self, group_id: str, skip: int = 0, limit: int = 100) -> List[GroupUser]:
         """Get all users in a group with user details"""
         query = select(self.model).options(

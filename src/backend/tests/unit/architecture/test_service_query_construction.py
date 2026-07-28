@@ -44,7 +44,6 @@ _EXEMPT = (
 
 #: Files that already build queries. Shrink this; never add to it.
 _BASELINE = {
-    "services/catalog/agents.py",
     "services/execution/broadcast.py",
     "services/execution/cleanup.py",
     "services/execution/logs/db_handler.py",
@@ -55,7 +54,6 @@ _BASELINE = {
     "services/flow_builder/modules/task_adapter.py",
     "services/flow_builder/process_executor.py",
     "services/flow_builder/runtime/persistence.py",
-    "services/groups/groups.py",
     "services/knowledge/embedding_queue.py",
     "services/knowledge/embedding_service.py",
     "services/knowledge/embedding_session.py",

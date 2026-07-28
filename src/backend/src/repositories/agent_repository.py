@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from src.core.base_repository import BaseRepository
 from src.models.agent import Agent
+from src.models.task import Task
 
 
 class AgentRepository(BaseRepository[Agent]):
@@ -119,6 +120,38 @@ class AgentRepository(BaseRepository[Agent]):
         stmt = delete(self.model)
         await self.session.execute(stmt)
         await self.session.flush()
+
+    async def delete_with_tasks(self, agent_ids: List[str]) -> None:
+        """Delete these agents and every task assigned to them.
+
+        Order matters: tasks.agent_id has a FOREIGN KEY to agents, so deleting
+        the agents first trips the constraint. No table references tasks, so
+        cascading this far and no further is safe.
+        """
+        if not agent_ids:
+            return
+        await self.session.execute(
+            delete(Task).where(Task.agent_id.in_(agent_ids))
+        )
+        await self.session.execute(
+            delete(self.model).where(self.model.id.in_(agent_ids))
+        )
+
+    async def delete_all_with_tasks(self) -> None:
+        """Delete every agent, and every task assigned to one. Same FK order."""
+        await self.session.execute(delete(Task).where(Task.agent_id.isnot(None)))
+        await self.session.execute(delete(self.model))
+
+    async def find_by_group_ids(self, group_ids: List[str]) -> List[Agent]:
+        """Agents visible to any of these groups, newest first."""
+        if not group_ids:
+            return []
+        result = await self.session.execute(
+            select(self.model)
+            .where(self.model.group_id.in_(group_ids))
+            .order_by(self.model.created_at.desc())
+        )
+        return list(result.scalars().all())
 
 
 class SyncAgentRepository:

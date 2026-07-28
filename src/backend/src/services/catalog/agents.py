@@ -298,15 +298,9 @@ class AgentService(BaseService[Agent, AgentCreate]):
         if not agent_ids:
             return
 
-        from sqlalchemy import delete as sql_delete
-        from src.models.task import Task
+        from src.repositories.agent_repository import AgentRepository
 
-        await session.execute(
-            sql_delete(Task).where(Task.agent_id.in_(agent_ids))
-        )
-        await session.execute(
-            sql_delete(Agent).where(Agent.id.in_(agent_ids))
-        )
+        await AgentRepository(session).delete_with_tasks(agent_ids)
 
     async def delete(self, id: str) -> bool:
         """
@@ -365,17 +359,14 @@ class AgentService(BaseService[Agent, AgentCreate]):
         Returns:
             None
         """
-        from sqlalchemy import delete as sql_delete
-        from src.models.task import Task
         from src.db.session import get_isolated_db_session
 
         # Delete + commit on a private connection (see delete() for why).
         async with get_isolated_db_session() as session:
-            # Delete all assigned tasks first so the agent deletes don't trip the FK constraint
-            await session.execute(
-                sql_delete(Task).where(Task.agent_id.isnot(None))
-            )
-            await session.execute(sql_delete(Agent))
+            # Tasks first, so the agent deletes don't trip the FK constraint.
+            from src.repositories.agent_repository import AgentRepository
+
+            await AgentRepository(session).delete_all_with_tasks()
             await session.commit()
 
     async def delete_all_for_group(self, group_context: GroupContext) -> None:
@@ -442,10 +433,7 @@ class AgentService(BaseService[Agent, AgentCreate]):
             # If no group context, return empty list for security
             return []
 
-        # Filter by group IDs and order by created_at descending (newest first)
-        stmt = select(Agent).where(Agent.group_id.in_(group_context.group_ids)).order_by(Agent.created_at.desc())
-        result = await self.session.execute(stmt)
-        agents = list(result.scalars().all())
+        agents = await self.repository.find_by_group_ids(group_context.group_ids)
         for agent in agents:
             self._decrypt_agent_tool_configs(agent)
         return agents 
