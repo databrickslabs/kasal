@@ -10,17 +10,17 @@ Run it directly (``python demo_excise_tax.py``); see README.md and demo.md.
 import os
 from pathlib import Path
 
-# Imported as src.converters.* like the rest of the codebase. This used to
+# Imported as src.services.converters.* like the rest of the codebase. This used to
 # sys.path-insert src/ and import a bare `converters` package, against an
 # outbound/{dax,uc_metrics,sql}/generator layout that no longer exists — the
 # generators live under services/ now. The stale imports went unnoticed because
 # the file is not a test (see the module docstring) yet was named test_*.py, so
 # pytest collected it and reported ModuleNotFoundError at collection time.
-from src.converters.common.transformers.yaml import YAMLKPIParser
-from src.converters.services.powerbi.yaml_to_dax import DAXGenerator
-from src.converters.services.uc_metrics.yaml_to_uc_metrics import UCMetricsGenerator
-from src.converters.services.sql.yaml_to_sql import SQLGenerator
-from src.converters.services.sql.models import SQLDialect
+from src.services.converters.common.transformers.yaml import YAMLKPIParser
+from src.services.converters.formats.powerbi.yaml_to_dax import DAXGenerator
+from src.services.converters.formats.uc_metrics.yaml_to_uc_metrics import UCMetricsGenerator
+from src.services.converters.formats.sql.yaml_to_sql import SQLGenerator
+from src.services.converters.formats.sql.models import SQLDialect
 
 
 def generate_demo():

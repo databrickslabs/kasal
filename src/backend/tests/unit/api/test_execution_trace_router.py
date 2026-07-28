@@ -106,7 +106,7 @@ class TestExecutionTraceRouter:
         assert len(data["traces"]) == 1
         assert data["total"] == 1
         
-    @patch('src.api.execution_trace_router.ExecutionTraceService.get_all_traces')
+    @patch('src.api.execution_trace_router.ExecutionTraceService.get_all_traces_for_group')
     def test_get_all_traces_exception(self, mock_get_all_traces, client, mock_group_context):
         """Test exception handling in get_all_traces."""
         mock_get_all_traces.side_effect = Exception("Database error")
@@ -498,7 +498,12 @@ class TestExecutionTraceRouter:
                 group_context=mock_group_context,
                 job_id="job-123",
                 limit=25,
-                offset=5
+                offset=5,
+                # Incremental-polling params: the router always forwards them, so
+                # they are part of the call even at their defaults. since_id=0 is
+                # "from the beginning"; preview_chars=0 is "do not trim".
+                since_id=0,
+                preview_chars=0,
             )
 
     # Test high limit acceptance (limit up to 15000)
@@ -516,7 +521,9 @@ class TestExecutionTraceRouter:
                 group_context=mock_group_context,
                 job_id="job-123",
                 limit=1500,
-                offset=0
+                offset=0,
+                since_id=0,
+                preview_chars=0,
             )
 
     def test_get_traces_rejects_limit_over_max(self, client, mock_group_context):
@@ -556,8 +563,8 @@ class TestExecutionTraceRouter:
         mock_result = MagicMock()
         mock_result.traces = [mock_trace_started, mock_trace_completed, mock_trace_crew_done]
 
-        with patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id') as mock_get_traces:
-            mock_get_traces.return_value = mock_result
+        with patch('src.api.execution_trace_router.ExecutionTraceService.get_state_events_by_job_id') as mock_get_traces:
+            mock_get_traces.return_value = mock_result.traces
 
             response = client.get("/traces/job/job-123/crew-node-states")
 
@@ -588,8 +595,8 @@ class TestExecutionTraceRouter:
         mock_result = MagicMock()
         mock_result.traces = traces
 
-        with patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id') as mock_get_traces:
-            mock_get_traces.return_value = mock_result
+        with patch('src.api.execution_trace_router.ExecutionTraceService.get_state_events_by_job_id') as mock_get_traces:
+            mock_get_traces.return_value = mock_result.traces
             data = client.get("/traces/job/job-123/crew-node-states").json()
 
         assert data["news_crew"]["status"] == "running"
@@ -599,8 +606,8 @@ class TestExecutionTraceRouter:
         # Now the crew emits CREW_COMPLETED → the node turns completed.
         traces.append(_trace("task_completed", 9))
         traces.append(_trace("crew_completed", 10))
-        with patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id') as mock_get_traces:
-            mock_get_traces.return_value = mock_result
+        with patch('src.api.execution_trace_router.ExecutionTraceService.get_state_events_by_job_id') as mock_get_traces:
+            mock_get_traces.return_value = mock_result.traces
             data = client.get("/traces/job/job-123/crew-node-states").json()
 
         assert data["news_crew"]["status"] == "completed"
@@ -630,8 +637,8 @@ class TestExecutionTraceRouter:
         mock_result = MagicMock()
         mock_result.traces = [mock_trace_started, mock_trace_failed]
 
-        with patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id') as mock_get_traces:
-            mock_get_traces.return_value = mock_result
+        with patch('src.api.execution_trace_router.ExecutionTraceService.get_state_events_by_job_id') as mock_get_traces:
+            mock_get_traces.return_value = mock_result.traces
 
             response = client.get("/traces/job/job-123/crew-node-states")
 
@@ -643,7 +650,7 @@ class TestExecutionTraceRouter:
 
     def test_get_crew_node_states_not_found(self, client, mock_group_context):
         """Test crew node states when job not found."""
-        with patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id') as mock_get_traces:
+        with patch('src.api.execution_trace_router.ExecutionTraceService.get_state_events_by_job_id') as mock_get_traces:
             mock_get_traces.return_value = None
 
             response = client.get("/traces/job/nonexistent/crew-node-states")
@@ -668,8 +675,8 @@ class TestExecutionTraceRouter:
         mock_result = MagicMock()
         mock_result.traces = [mock_trace_started, mock_trace_failed]
 
-        with patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id') as mock_get_traces:
-            mock_get_traces.return_value = mock_result
+        with patch('src.api.execution_trace_router.ExecutionTraceService.get_state_events_by_job_id') as mock_get_traces:
+            mock_get_traces.return_value = mock_result.traces
 
             response = client.get("/traces/job/job-123/crew-node-states")
 
@@ -696,8 +703,8 @@ class TestExecutionTraceRouter:
         mock_result = MagicMock()
         mock_result.traces = [mock_trace_started, mock_trace_completed]
 
-        with patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id') as mock_get_traces:
-            mock_get_traces.return_value = mock_result
+        with patch('src.api.execution_trace_router.ExecutionTraceService.get_state_events_by_job_id') as mock_get_traces:
+            mock_get_traces.return_value = mock_result.traces
 
             response = client.get("/traces/job/job-123/task-states")
 
@@ -724,8 +731,8 @@ class TestExecutionTraceRouter:
         mock_result = MagicMock()
         mock_result.traces = [mock_trace_started, mock_trace_failed]
 
-        with patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id') as mock_get_traces:
-            mock_get_traces.return_value = mock_result
+        with patch('src.api.execution_trace_router.ExecutionTraceService.get_state_events_by_job_id') as mock_get_traces:
+            mock_get_traces.return_value = mock_result.traces
 
             response = client.get("/traces/job/job-123/task-states")
 
@@ -736,7 +743,7 @@ class TestExecutionTraceRouter:
 
     def test_get_task_states_not_found(self, client, mock_group_context):
         """Test task states when job not found."""
-        with patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id') as mock_get_traces:
+        with patch('src.api.execution_trace_router.ExecutionTraceService.get_state_events_by_job_id') as mock_get_traces:
             mock_get_traces.return_value = None
 
             response = client.get("/traces/job/nonexistent/task-states")
@@ -754,8 +761,8 @@ class TestExecutionTraceRouter:
         mock_result = MagicMock()
         mock_result.traces = [mock_trace_started]
 
-        with patch('src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id') as mock_get_traces:
-            mock_get_traces.return_value = mock_result
+        with patch('src.api.execution_trace_router.ExecutionTraceService.get_state_events_by_job_id') as mock_get_traces:
+            mock_get_traces.return_value = mock_result.traces
 
             response = client.get("/traces/job/job-123/task-states")
 

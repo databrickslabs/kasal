@@ -227,7 +227,7 @@ def test_redirect_crewai_logs_related_logger_exception():
         # Make getLogger raise for specific names (related loggers)
         call_count = [0]
         def side_effect(name=None):
-            if name in ('langchain', 'httpx', 'openai', 'src.converters'):
+            if name in ('langchain', 'httpx', 'openai', 'src.services.converters'):
                 raise Exception(f"Cannot get logger {name}")
             return MagicMock(handlers=[], propagate=True)
         mock_get_logger.side_effect = side_effect

@@ -200,10 +200,36 @@ class TestSubprocessTracebackSurfacing:
             new_callable=AsyncMock,
             return_value=True,
         ):
+            # Captured with a handler attached DIRECTLY to the module's logger
+            # rather than through caplog. caplog installs its handler on the root
+            # logger and therefore depends on records propagating there, plus on
+            # the ambient root level and logging.disable() — all process-global
+            # state that other tests reconfigure (LoggerManager builds domain
+            # loggers with their own handlers). That made this test fail roughly
+            # one parallel run in three, capturing an unrelated record from
+            # src.services.execution.status and none of its own.
             import logging as _logging
-            with caplog.at_level(_logging.ERROR, logger="src.services.agent_builder.execution_runner"):
-                await run_crew_in_process("exec-tb", {"agents": {}}, {})
 
-        log_text = caplog.text
+            target = _logging.getLogger("src.services.agent_builder.execution_runner")
+            captured: list = []
+
+            class _Collect(_logging.Handler):
+                def emit(self, record):
+                    captured.append(record.getMessage())
+
+            handler = _Collect(level=_logging.ERROR)
+            prev_level = target.level
+            prev_disable = _logging.root.manager.disable
+            target.addHandler(handler)
+            target.setLevel(_logging.ERROR)
+            _logging.disable(_logging.NOTSET)
+            try:
+                await run_crew_in_process("exec-tb", {"agents": {}}, {})
+            finally:
+                target.removeHandler(handler)
+                target.setLevel(prev_level)
+                _logging.disable(prev_disable)
+
+        log_text = "\n".join(captured)
         assert "Subprocess traceback for exec-tb" in log_text
         assert "AttributeError: 'Agent' object has no attribute 'i18n'" in log_text

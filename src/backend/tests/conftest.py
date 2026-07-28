@@ -449,6 +449,126 @@ _POLLUTION_IGNORED = (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_logging_config():
+    """Restore global logging state around every test.
+
+    ``caplog`` works by installing a handler on the ROOT logger, so it only sees
+    a record if the emitting logger still propagates, its level still allows the
+    record, and ``logging.disable()`` is not swallowing it. All three are
+    process-global, and this codebase reconfigures them: LoggerManager builds
+    domain loggers with their own handlers and turns propagation off.
+
+    The result was caplog assertions that passed or failed on collection order —
+    a test in tests/unit/services/otel_tracing failing because something in a
+    file that ran before it, on the same xdist worker, had left a logger muted.
+
+    Snapshot-and-restore, so config installed by a module- or session-scoped
+    fixture survives, and only what a single test changes gets rolled back.
+    Loggers created DURING the test are returned to a fresh logger's defaults.
+    """
+    import logging
+
+    manager = logging.root.manager
+    root = logging.getLogger()
+    saved_disable = manager.disable
+    saved_root = (root.level, root.handlers[:])
+    saved = {
+        name: (logger.level, logger.propagate, logger.handlers[:])
+        for name, logger in list(manager.loggerDict.items())
+        if isinstance(logger, logging.Logger)
+    }
+    try:
+        yield
+    finally:
+        manager.disable = saved_disable
+        root.setLevel(saved_root[0])
+        root.handlers[:] = saved_root[1]
+        for name, logger in list(manager.loggerDict.items()):
+            if not isinstance(logger, logging.Logger):
+                continue
+            if name in saved:
+                level, propagate, handlers = saved[name]
+                logger.setLevel(level)
+                logger.propagate = propagate
+                logger.handlers[:] = handlers
+            else:
+                # Created during the test — back to what logging.getLogger()
+                # hands out for a name nobody has configured.
+                logger.setLevel(logging.NOTSET)
+                logger.propagate = True
+                logger.handlers[:] = []
+
+
+@pytest.fixture(autouse=True)
+def _isolate_user_context():
+    """Keep one test's group/user context out of every later test.
+
+    UserContext keeps its state in module-level ContextVars. A SYNC test that
+    reaches code calling ``UserContext.set_group_context`` sets them in the main
+    context, where they persist for the rest of the worker's run. (Async tests
+    are already safe — the event loop runs each coroutine in a copy of the
+    context — which is why this only ever bit on some orderings.)
+
+    The symptom was remote from the cause: a flow-builder test passes a local
+    stub ``class GC`` with only ``group_ids``; three files later, guardrail tests
+    failed because ``_apply_llm_guardrail`` did ``gc.primary_group_id`` on that
+    stub, raised AttributeError, and had it swallowed by a broad ``except`` —
+    so the guardrail was silently not applied and the assertion failed with no
+    hint as to why.
+    """
+    import sys
+
+    module = sys.modules.get("src.utils.user_context")
+    if module is None:
+        yield
+        return
+
+    saved = []
+    for name in ("_group_context", "_user_context", "_user_access_token"):
+        var = getattr(module, name, None)
+        if var is not None:
+            saved.append((var, var.get()))
+    try:
+        yield
+    finally:
+        for var, value in saved:
+            var.set(value)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_execution_registry():
+    """Stop one test's in-flight executions leaking into every later test.
+
+    ``ExecutionService.executions`` is a CLASS-level dict — process-global, and
+    shared by every test that runs in the same xdist worker. ``list_executions``
+    merges it with the DB rows, so a test that creates an execution makes later
+    tests see it: test_list_executions_minimal_db hands the router a fake session
+    returning zero rows, then failed with a pydantic ValidationError for
+    ``group_id=123`` — an int belonging to some other test's fixture, from a run
+    that had nothing to do with it.
+
+    Snapshot-and-restore rather than clear-after: a test still sees whatever a
+    module- or session-scoped fixture put there, but nothing it adds escapes.
+    Looked up through sys.modules so an unrelated test run never has to import
+    the execution service just to tear it down.
+    """
+    import sys
+
+    module = sys.modules.get("src.services.execution.service")
+    registry = getattr(getattr(module, "ExecutionService", None), "executions", None)
+    if registry is None:
+        yield
+        return
+
+    before = dict(registry)
+    try:
+        yield
+    finally:
+        registry.clear()
+        registry.update(before)
+
+
 def _tree_snapshot(root):
     """Every file under root, minus the directories tests are allowed to write."""
     import pathlib
@@ -473,9 +593,12 @@ def pytest_configure(config):
         return  # an xdist worker; the controller owns this check
     if os.environ.get("KASAL_ALLOW_TEST_ARTIFACTS") == "1":
         return
-    import pathlib
+    # Imported lazily, and NOT depth-counted from __file__: a conftest that
+    # computes the backend root as parent.parent breaks silently the day the
+    # file moves, which is the same bug class this guard exists to catch.
+    from src.core.paths import BACKEND_ROOT
 
-    _pollution_snapshot = _tree_snapshot(pathlib.Path(__file__).resolve().parent.parent)
+    _pollution_snapshot = _tree_snapshot(BACKEND_ROOT)
 
 
 def pytest_sessionfinish(session, exitstatus):
@@ -487,8 +610,6 @@ def pytest_sessionfinish(session, exitstatus):
     and attributed to whichever test happened to be last. A guard that cries
     wolf gets deleted, so it runs exactly once, where it can see the whole run.
     """
-    import pathlib
-
     if hasattr(session.config, "workerinput"):
         return
     if os.environ.get("KASAL_ALLOW_TEST_ARTIFACTS") == "1":
@@ -496,8 +617,10 @@ def pytest_sessionfinish(session, exitstatus):
     if not _pollution_snapshot:
         return
 
+    from src.core.paths import BACKEND_ROOT
+
     created = sorted(
-        _tree_snapshot(pathlib.Path(__file__).resolve().parent.parent) - _pollution_snapshot
+        _tree_snapshot(BACKEND_ROOT) - _pollution_snapshot
     )
     if created:
         raise pytest.UsageError(

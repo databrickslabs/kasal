@@ -93,11 +93,11 @@ class TestReachesTheTrace:
         """The mapping is not the wiring. The bridge only receives what
         register() subscribes to — ContextCompactionEvent was mapped but never
         subscribed, and produced zero trace rows for its entire existence."""
-        import inspect
 
-        from src.services.otel_tracing.event_bridge import OTelEventBridge
+        from src.services.otel_tracing.event_bridge import _EVENT_CLASSES
 
-        assert '"A2UISurfaceEvent"' in inspect.getsource(OTelEventBridge.register)
+        # Data, not source text — see the note in test_context_compaction_event.
+        assert "A2UISurfaceEvent" in {name for _module, name in _EVENT_CLASSES}
 
     def test_the_span_carries_the_fields_the_timeline_reads(self):
         from unittest.mock import MagicMock

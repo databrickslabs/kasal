@@ -233,13 +233,23 @@ class TestExecutionService:
             assert isinstance(result, dict)
             assert result["status"] == ExecutionStatus.RUNNING.value
             assert "execution_id" in result
-            assert result["run_name"] == "Test Execution Name"
+
+            # The run starts under a deterministic PLACEHOLDER name, not the LLM
+            # one: _derive_placeholder_run_name takes the first four words of the
+            # first task's description. The LLM name is applied later by
+            # _generate_run_name_async, precisely so create_execution does not
+            # wait on a model roundtrip (1-10s on reasoning models) before the
+            # run can start. asyncio.create_task is patched here, so that
+            # rename never runs and the placeholder is what we see.
+            assert result["run_name"] == "Research the latest trends"
 
             # Verify UUID format
             uuid.UUID(result["execution_id"])
 
             # Verify mocks were called
             mock_status_service.create_execution.assert_called_once()
+            # ...and that the rename really was scheduled off the critical path.
+            assert mock_create_task.called
 
     @pytest.mark.asyncio
     async def test_create_execution_with_flow_id(self, execution_service, sample_flow_config, mock_group_context):
@@ -384,6 +394,23 @@ class TestExecutionService:
         assert result["status"] == ExecutionStatus.RUNNING.value
         assert "execution started" in result["message"]
 
+        # run_crew_execution schedules the real work as a background task and
+        # returns immediately, so this test would otherwise end with that task
+        # still pending. It completed during whichever test happened to run
+        # next: in test_run_crew_execution_with_error_handling — which patches
+        # ExecutionStatusService.update_status — the stray task called the patched
+        # method with job_id='test-other-exec', and assert_called_once failed on a
+        # call that had nothing to do with it. Whether the task got its turn
+        # before this test ended came down to event-loop scheduling, so it only
+        # showed up under parallel load and read as flakiness.
+        pending = ExecutionService.executions.get(execution_id, {}).get("task")
+        if pending is not None:
+            pending.cancel()
+            try:
+                await pending
+            except (asyncio.CancelledError, Exception):
+                pass
+
     @pytest.mark.asyncio
     async def test_run_crew_execution_with_error_handling(self, sample_crew_config, mock_group_context):
         """Test crew execution with error handling."""
@@ -449,11 +476,20 @@ class TestExecutionService:
         mock_execution.mlflow_trace_id = None
         mock_execution.mlflow_experiment_name = None
         mock_execution.mlflow_evaluation_run_id = None
+        mock_execution.completed_at = datetime.now(UTC)
+        mock_execution.execution_type = "crew"
 
         mock_session = AsyncMock()
 
+        # get_execution_status reads a LIGHTWEIGHT SUMMARY row first, and only
+        # fetches the full row (which carries the result/inputs JSON blobs) once
+        # the status is terminal. Mocking only get_execution_by_job_id, as this
+        # test used to, left the summary call returning a bare MagicMock: awaiting
+        # it raised TypeError, the method's except caught it, and the assertion
+        # blew up on `None[...]` rather than reporting the real mismatch.
         with patch('src.repositories.execution_history_repository.ExecutionHistoryRepository') as mock_repo_class:
             mock_repo = MagicMock()
+            mock_repo.get_execution_summary_by_job_id = AsyncMock(return_value=mock_execution)
             mock_repo.get_execution_by_job_id = AsyncMock(return_value=mock_execution)
             mock_repo_class.return_value = mock_repo
 
@@ -467,6 +503,40 @@ class TestExecutionService:
             assert result["result"] == {"output": "success"}
             assert result["run_name"] == "Test Run"
             assert result["error"] is None
+            # Terminal status, so the full row WAS fetched for the result blob.
+            mock_repo.get_execution_by_job_id.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_get_execution_status_running_skips_full_row_fetch(self, mock_group_context):
+        """An in-flight run is answered from the summary row alone.
+
+        This is the point of the two-step read: polling a RUNNING execution must
+        not drag the result/inputs JSON blobs back on every request.
+        """
+        mock_execution = MagicMock()
+        mock_execution.status = ExecutionStatus.RUNNING.value
+        mock_execution.created_at = datetime.now(UTC)
+        mock_execution.completed_at = None
+        mock_execution.run_name = "Test Run"
+        mock_execution.error = None
+        mock_execution.execution_type = "crew"
+        mock_execution.mlflow_trace_id = None
+        mock_execution.mlflow_experiment_name = None
+        mock_execution.mlflow_evaluation_run_id = None
+
+        with patch('src.repositories.execution_history_repository.ExecutionHistoryRepository') as mock_repo_class:
+            mock_repo = MagicMock()
+            mock_repo.get_execution_summary_by_job_id = AsyncMock(return_value=mock_execution)
+            mock_repo.get_execution_by_job_id = AsyncMock()
+            mock_repo_class.return_value = mock_repo
+
+            service = ExecutionService(session=AsyncMock())
+            result = await service.get_execution_status(
+                "test-exec-running", mock_group_context.group_ids
+            )
+
+            assert result["status"] == ExecutionStatus.RUNNING.value
+            mock_repo.get_execution_by_job_id.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_get_execution_status_not_found(self):

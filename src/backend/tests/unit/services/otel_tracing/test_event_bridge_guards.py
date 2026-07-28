@@ -183,7 +183,13 @@ class TestEmitSpanNullGuards:
         event = SimpleNamespace()
         bridge._emit_span("test.span", "test_event", event)
 
-        mock_tracer.start_as_current_span.assert_called_once_with("test.span")
+        # context=None is the documented fallback: _dag_parent_context returns
+        # None when the causing event's span is unknown (root event, or a parent
+        # emitted before this bridge registered), and the tracer then uses the
+        # ambient context — the behaviour that predates DAG parenting.
+        mock_tracer.start_as_current_span.assert_called_once_with(
+            "test.span", context=None
+        )
         mock_span.set_attribute.assert_any_call("kasal.event_type", "test_event")
 
     def test_emit_span_captures_crew_name(self):

@@ -22,6 +22,7 @@ from src.services.otel_tracing.event_bridge import (
     _get_output,
     _EVENT_SPAN_MAP,
     _SKIP_EVENTS,
+    _EVENT_CLASSES,
     OTelEventBridge,
 )
 
@@ -420,45 +421,51 @@ class TestOTelEventBridgeRegister:
     """Tests for OTelEventBridge.register method."""
 
     def test_register_successful_imports(self):
-        """When all crewai event classes import successfully, all get registered."""
+        """Every declared event class gets registered when it imports cleanly."""
         tracer, _ = _make_tracer()
         bridge = OTelEventBridge(tracer, "job-reg")
         event_bus = MagicMock()
 
-        # All class names from the _EVENT_CLASSES list in register()
-        all_class_names = [
-            "CrewKickoffStartedEvent", "CrewKickoffCompletedEvent",
-            "AgentExecutionStartedEvent", "AgentExecutionCompletedEvent",
-            "TaskStartedEvent", "TaskCompletedEvent", "TaskFailedEvent",
-            "ToolUsageStartedEvent", "ToolUsageFinishedEvent", "ToolUsageErrorEvent",
-            "LLMCallStartedEvent", "LLMCallCompletedEvent", "LLMCallFailedEvent",
-            "LLMStreamChunkEvent",
-            "MemorySaveStartedEvent", "MemorySaveCompletedEvent",
-            "MemoryQueryStartedEvent", "MemoryQueryCompletedEvent",
-            "MemoryRetrievalCompletedEvent",
-            "KnowledgeRetrievalStartedEvent", "KnowledgeRetrievalCompletedEvent",
-            "AgentReasoningStartedEvent", "AgentReasoningCompletedEvent",
-            "AgentReasoningFailedEvent",
-            "LLMGuardrailStartedEvent", "LLMGuardrailCompletedEvent",
-            "LLMGuardrailFailedEvent",
-            "FlowStartedEvent", "FlowFinishedEvent", "FlowCreatedEvent",
-            "MCPConnectionStartedEvent", "MCPConnectionCompletedEvent",
-            "MCPToolExecutionStartedEvent", "MCPToolExecutionCompletedEvent",
-            "HumanFeedbackRequestedEvent", "HumanFeedbackReceivedEvent",
-        ]
-
-        # Build a fake module with dynamically created types for each class name.
-        # getattr(module, class_name) must return a type with __name__ == class_name
-        # so _register_handler can look it up in _EVENT_SPAN_MAP.
-        class_types = {name: type(name, (), {}) for name in all_class_names}
+        # Built FROM _EVENT_CLASSES, not from a hand-maintained copy of it. The
+        # copy that used to live here drifted: entries were added to the
+        # production list and never here, so the fake module lacked them,
+        # getattr raised AttributeError, and the count silently disagreed.
+        #
+        # getattr(module, class_name) must return a type whose __name__ is the
+        # class name, so _register_handler can find it in _EVENT_SPAN_MAP.
+        class_types = {name: type(name, (), {}) for _module, name in _EVENT_CLASSES}
         fake_module = SimpleNamespace(**class_types)
 
         with patch("importlib.import_module", return_value=fake_module):
             count = bridge.register(event_bus)
 
-        # 36 event classes total in the list (including LLMStreamChunkEvent)
-        assert count == 36
-        assert bridge._registered_count == 36
+        assert count == len(_EVENT_CLASSES)
+        assert bridge._registered_count == len(_EVENT_CLASSES)
+
+    def test_every_declared_event_class_actually_resolves(self):
+        """No entry in _EVENT_CLASSES names a class that does not exist.
+
+        register() catches ImportError/AttributeError per entry and logs the name
+        as "missing", so a dead entry costs nothing at runtime except a warning —
+        which is the problem. Twelve dead crewAI-era names (Knowledge*,
+        AgentReasoning*, MCP*, HumanFeedback*) meant that warning fired twelve
+        times every run, so the one case it exists to catch — a real event type
+        silently absent from every trace — was buried in the noise.
+        """
+        import importlib
+
+        unresolvable = []
+        for module_path, class_name in _EVENT_CLASSES:
+            try:
+                getattr(importlib.import_module(module_path), class_name)
+            except (ImportError, AttributeError):
+                unresolvable.append(f"{module_path}.{class_name}")
+
+        assert not unresolvable, (
+            "these event classes are subscribed to but do not exist:\n  "
+            + "\n  ".join(unresolvable)
+            + "\n\nEither implement/emit them, or drop them from _EVENT_CLASSES."
+        )
 
     def test_register_handles_import_error(self):
         """ImportError for a module is caught and that class is skipped."""
@@ -629,7 +636,10 @@ class TestOTelEventBridgeEmitSpan:
 
         bridge._emit_span("CrewAI.task.execute", "task_started", event)
 
-        tracer.start_as_current_span.assert_called_once_with("CrewAI.task.execute")
+        # context=None -> fall back to the ambient context; see _dag_parent_context.
+        tracer.start_as_current_span.assert_called_once_with(
+            "CrewAI.task.execute", context=None
+        )
         span.set_attribute.assert_any_call("kasal.event_type", "task_started")
         span.set_attribute.assert_any_call("kasal.agent_name", "Researcher")
         span.set_attribute.assert_any_call("kasal.task_name", "Gather data")
@@ -2593,7 +2603,10 @@ class TestIntegrationRegisterAndTrigger:
         handlers["TaskStartedEvent"]("source", event)
 
         # Verify span was created
-        tracer.start_as_current_span.assert_called_once_with("CrewAI.task.execute")
+        # context=None -> fall back to the ambient context; see _dag_parent_context.
+        tracer.start_as_current_span.assert_called_once_with(
+            "CrewAI.task.execute", context=None
+        )
         span.set_attribute.assert_any_call("kasal.event_type", "task_started")
         span.set_attribute.assert_any_call("kasal.agent_name", "Coder")
 

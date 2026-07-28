@@ -1,23 +1,32 @@
 """
-Real integration test for CrewAI input workflow.
+End-to-end check of the input/variable workflow against a LIVE backend.
 
-This test makes actual API calls to a running backend.
-Requires the backend to be running at http://localhost:8000
+Makes real HTTP calls, so every test here skips unless a backend is reachable
+at KASAL_E2E_BASE_URL (default http://localhost:8000).
+
+The driver used to be a class named ``TestCrewAIRealIntegration`` with an
+``__init__``, which pytest refuses to collect ("cannot collect test class ...
+because it has a __init__ constructor"). It was a warning, not an error, so the
+entire tests/e2e tier collected ZERO tests and looked like it was passing. The
+driver is now a plain client class and the checks are module-level test
+functions that pytest can actually see.
 """
 
 import json
-import time
+import os
 import sys
+import time
 from typing import Dict, Any, List, Optional
+import pytest
 import requests
 from datetime import datetime
 
 
-class TestCrewAIRealIntegration:
-    """Real integration test for the CrewAI input workflow."""
-    
+class KasalIntegrationClient:
+    """Thin HTTP client for driving a live backend from the e2e checks."""
+
     # Test configuration
-    BASE_URL = "http://localhost:8000"
+    BASE_URL = os.environ.get("KASAL_E2E_BASE_URL", "http://localhost:8000")
     TEST_USER = "alice@acme-corp.com"
     
     def __init__(self):
@@ -28,12 +37,21 @@ class TestCrewAIRealIntegration:
             "Content-Type": "application/json"
         })
     
+    # Seconds to wait on the health probe. Short and explicit: with no timeout
+    # at all, deciding "no backend, skip" took over two minutes and that cost
+    # landed on every full test run.
+    HEALTH_TIMEOUT = 2.0
+
     def check_backend_health(self) -> bool:
         """Check if backend is accessible."""
         try:
-            response = self.session.get(f"{self.BASE_URL}/health")
+            response = self.session.get(
+                f"{self.BASE_URL}/health", timeout=self.HEALTH_TIMEOUT
+            )
             return response.status_code == 200
-        except requests.exceptions.ConnectionError:
+        except requests.exceptions.RequestException:
+            # ConnectionError, Timeout, and anything else that means
+            # "not reachable" — all of which should skip, not error.
             return False
     
     def list_crews(self) -> List[Dict[str, Any]]:
@@ -200,7 +218,7 @@ class TestCrewAIRealIntegration:
         
         raise TimeoutError(f"Execution {execution_id} did not complete within {timeout} seconds")
     
-    def test_list_and_execute_existing_crew(self):
+    def run_list_and_execute_existing_crew(self):
         """Test listing crews and executing one with input variables."""
         print("\n=== Testing List and Execute Existing Crew ===")
         
@@ -283,7 +301,7 @@ class TestCrewAIRealIntegration:
         except Exception as e:
             print(f"   ✗ Execution failed: {e}")
     
-    def test_create_and_execute_new_crew(self):
+    def run_create_and_execute_new_crew(self):
         """Test creating a new crew with input variables and executing it."""
         print("\n=== Testing Create and Execute New Crew ===")
         
@@ -422,9 +440,45 @@ class TestCrewAIRealIntegration:
             print(f"   ✗ Execution failed: {e}")
 
 
+# ---------------------------------------------------------------------------
+# Collectable tests. Every one skips unless a backend is actually reachable, so
+# the tier is honest: it either exercises a live backend or reports "skipped",
+# never "0 tests collected" dressed up as green.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def live_client():
+    """A client for a live backend, or a skip explaining why there isn't one.
+
+    Opt-in via KASAL_E2E=1. These tests CREATE crews and RUN executions against
+    whatever backend answers KASAL_E2E_BASE_URL — on a developer machine that is
+    the dev database. Running them implicitly as part of `pytest tests` would
+    mean every unit-test run quietly wrote real rows to it.
+    """
+    if os.environ.get("KASAL_E2E") != "1":
+        pytest.skip("e2e disabled; set KASAL_E2E=1 to run against a live backend")
+    client = KasalIntegrationClient()
+    if not client.check_backend_health():
+        pytest.skip(f"no backend reachable at {client.BASE_URL}")
+    return client
+
+
+def test_backend_is_reachable(live_client):
+    assert live_client.check_backend_health()
+
+
+def test_list_and_execute_existing_crew(live_client):
+    live_client.run_list_and_execute_existing_crew()
+
+
+def test_create_and_execute_new_crew(live_client):
+    live_client.run_create_and_execute_new_crew()
+
+
 def main():
     """Run the real integration tests."""
-    test = TestCrewAIRealIntegration()
+    test = KasalIntegrationClient()
     
     print("=" * 60)
     print("CREWAI INPUT WORKFLOW - REAL INTEGRATION TEST")
@@ -433,7 +487,7 @@ def main():
     # Check backend
     print("\nChecking backend connectivity...")
     if not test.check_backend_health():
-        print("✗ Backend is not accessible at http://localhost:8000")
+        print(f"✗ Backend is not accessible at {test.BASE_URL}")
         print("Please ensure the backend is running: cd src/backend && ./run.sh")
         sys.exit(1)
     
@@ -441,10 +495,10 @@ def main():
     
     try:
         # Test 1: List and execute existing crew
-        test.test_list_and_execute_existing_crew()
+        test.run_list_and_execute_existing_crew()
         
         # Test 2: Create and execute new crew
-        test.test_create_and_execute_new_crew()
+        test.run_create_and_execute_new_crew()
         
     except Exception as e:
         print(f"\n✗ Test failed with error: {e}")

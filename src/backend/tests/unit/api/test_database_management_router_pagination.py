@@ -94,7 +94,11 @@ def test_enable_with_explicit_endpoint(client):
     )
     assert resp.status_code == 200
     mock_svc.get_instance.assert_not_called()
-    mock_svc.enable_lakebase.assert_called_once_with("my-inst", "my-dns.example.com")
+    # expand_schema defaults to False: the router reads it off the request body and
+    # always forwards it, so it is part of the call even when the caller omits it.
+    mock_svc.enable_lakebase.assert_called_once_with(
+        "my-inst", "my-dns.example.com", expand_schema=False
+    )
 
 
 def test_enable_auto_resolves_endpoint(client):
@@ -109,7 +113,32 @@ def test_enable_auto_resolves_endpoint(client):
     )
     assert resp.status_code == 200
     mock_svc.get_instance.assert_called_once_with("auto-inst")
-    mock_svc.enable_lakebase.assert_called_once_with("auto-inst", "resolved-dns.example.com")
+    mock_svc.enable_lakebase.assert_called_once_with(
+        "auto-inst", "resolved-dns.example.com", expand_schema=False
+    )
+
+
+def test_enable_forwards_expand_schema_true(client):
+    """POST /lakebase/enable forwards expand_schema=True from the request body.
+
+    This is the branch that does work — the service runs a non-destructive schema
+    reconcile only when it is set — and it had no coverage at all.
+    """
+    test_client, mock_svc = client
+    mock_svc.enable_lakebase = AsyncMock(return_value={"success": True})
+
+    resp = test_client.post(
+        "/database-management/lakebase/enable",
+        json={
+            "instance_name": "my-inst",
+            "endpoint": "my-dns.example.com",
+            "expand_schema": True,
+        },
+    )
+    assert resp.status_code == 200
+    mock_svc.enable_lakebase.assert_called_once_with(
+        "my-inst", "my-dns.example.com", expand_schema=True
+    )
 
 
 def test_enable_no_instance_name_returns_400(client):

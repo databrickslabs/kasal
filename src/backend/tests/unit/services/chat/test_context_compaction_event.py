@@ -152,18 +152,21 @@ def test_event_is_registered_all_the_way_to_a_trace_row():
     it subscribes to in register(), and ContextCompactionEvent was absent from
     that list — so compaction emitted faithfully onto the bus and produced not a
     single trace row. The database had zero of them."""
-    import inspect
 
     from src.services.otel_tracing.db_exporter import SPAN_NAME_MAP
     from src.services.otel_tracing.event_bridge import (
         _EVENT_SPAN_MAP,
-        OTelEventBridge,
+        _EVENT_CLASSES,
     )
 
     span_name, event_type = _EVENT_SPAN_MAP["ContextCompactionEvent"]
     assert event_type == "context_compaction"
     assert SPAN_NAME_MAP[span_name] == "context_compaction"
-    assert '"ContextCompactionEvent"' in inspect.getsource(OTelEventBridge.register), (
+    # Checked against the _EVENT_CLASSES data, not against the TEXT of
+    # register()'s source. The source-scan version broke the moment the list was
+    # hoisted out of the method into a module constant — it was asserting on
+    # where the code happened to live, not on what it does.
+    assert "ContextCompactionEvent" in {name for _module, name in _EVENT_CLASSES}, (
         "mapped but not subscribed: the bridge never receives it"
     )
 

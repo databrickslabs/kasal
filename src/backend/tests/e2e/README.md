@@ -1,10 +1,26 @@
 # End-to-End Tests
 
-This directory contains end-to-end (E2E) tests for Kasal workflows, particularly focusing on the CrewAI input variable functionality.
+End-to-end tests for Kasal workflows, focused on the input-variable functionality.
+
+## These are OPT-IN
+
+They talk to a real backend and CREATE crews and RUN executions against it, so
+they are skipped unless you ask for them:
+
+```bash
+KASAL_E2E=1 python -m pytest tests/e2e -v          # run them
+python -m pytest tests/e2e                          # 3 skipped, ~1s
+KASAL_E2E_BASE_URL=http://127.0.0.1:8001 KASAL_E2E=1 python -m pytest tests/e2e
+```
+
+Without `KASAL_E2E=1` they report as skipped with the reason. They used to report
+nothing at all: the driver was a class named `TestCrewAIRealIntegration` with an
+`__init__`, which pytest cannot collect, so the whole tier silently collected
+ZERO tests while looking green.
 
 ## Test Structure
 
-### `test_crewai_input_integration.py`
+### `test_kasal_input_integration.py`
 The main end-to-end integration test that makes actual API calls to test the complete CrewAI input workflow:
 
 **What it tests:**
@@ -40,15 +56,14 @@ The main end-to-end integration test that makes actual API calls to test the com
 ### Run the E2E Test
 ```bash
 # Run directly (recommended for seeing real-time output)
-cd src/backend/tests
-python e2e/test_crewai_input_integration.py
-
-# Or run with pytest
 cd src/backend
-python -m pytest tests/e2e/test_crewai_input_integration.py -v
+python tests/e2e/test_kasal_input_integration.py
 
-# Run with output displayed
-python -m pytest tests/e2e/test_crewai_input_integration.py -v -s
+# Or with pytest (note the opt-in flag)
+KASAL_E2E=1 python -m pytest tests/e2e/test_kasal_input_integration.py -v
+
+# With output displayed
+KASAL_E2E=1 python -m pytest tests/e2e/test_kasal_input_integration.py -v -s
 ```
 
 ### Run with Coverage

@@ -230,17 +230,42 @@ class TestSettingsEdgeCases:
     
     @patch.dict(os.environ, {}, clear=True)
     def test_settings_with_no_environment_variables(self):
-        """Test Settings initialization when no environment variables are set."""
-        # Clear environment and create fresh settings
-        from src.config.settings import Settings as FreshSettings
-        clean_settings = FreshSettings()
-        
-        # Should use all defaults
-        assert clean_settings.DATABASE_TYPE == "postgres"  # Default fallback
-        # SQLITE_DB_PATH is baked into the class body at IMPORT time, so
-        # clearing os.environ here cannot change it — conftest sets ":memory:"
-        # before collection. What this asserts is the property that matters: the
-        # value is never a CWD-relative path, because that is what scattered
-        # empty app.db files across the repo.
-        assert not clean_settings.SQLITE_DB_PATH.startswith("./")
-        assert clean_settings.DB_FILE_PATH == "sqlite.db"  # Default fallback
+        """Test Settings initialization when no environment variables are set.
+
+        The module is RELOADED under the cleared environment. Every default in
+        Settings is an ``os.getenv(...)`` evaluated in the class body, i.e. at
+        import — so instantiating the already-imported class cannot see a
+        cleared environment, and this test used to assert whatever env happened
+        to exist when the first test module imported settings. That made it fail
+        or pass depending on collection order: several memory test modules set
+        DATABASE_TYPE=sqlite at module scope, so running them first turned the
+        "postgres default" assertion red.
+        """
+        import importlib
+
+        import src.config.settings as settings_module
+
+        # The reload replaces module attributes, including the shared `settings`
+        # SINGLETON — but every module that did `from src.config.settings import
+        # settings` still holds the ORIGINAL object. Leaving the new one in place
+        # splits them in two, and a later test that flips a flag on the object it
+        # imports has no effect on the one the code under test reads. That is not
+        # hypothetical: it made test_database_management_router_smoke set
+        # DEBUG_MODE=True on one instance while the router checked the other, and
+        # debug_permissions answered 404.
+        original_settings = settings_module.settings
+        try:
+            reloaded = importlib.reload(settings_module)
+            clean_settings = reloaded.Settings()
+
+            # Should use all defaults
+            assert clean_settings.DATABASE_TYPE == "postgres"  # Default fallback
+            # Absolute, anchored on the backend root — never CWD-relative, which
+            # is what scattered empty app.db files across the repo.
+            assert not clean_settings.SQLITE_DB_PATH.startswith("./")
+            assert clean_settings.DB_FILE_PATH == "sqlite.db"  # Default fallback
+        finally:
+            # Rebuild the module under the real environment, then hand back the
+            # exact singleton object everyone else is holding.
+            importlib.reload(settings_module)
+            settings_module.settings = original_settings
