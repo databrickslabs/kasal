@@ -54,7 +54,7 @@ class TestToolFactoryConstruction:
 
     def test_core_tools_always_registered(self):
         f = _make_factory()
-        always_present = ["PerplexityTool", "Dall-E Tool", "SerperDevTool", "ScrapeWebsiteTool"]
+        always_present = ["PerplexityTool", "Image Generation Tool", "SerperDevTool", "ScrapeWebsiteTool"]
         for name in always_present:
             assert name in f._tool_implementations
 

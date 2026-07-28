@@ -66,7 +66,12 @@ _BUNDLEABLE_TOOLS: Dict[str, Dict[str, Any]] = {
         "config_keys": ["website_url"],
         "deps": ['"beautifulsoup4>=4.12.0"'],
     },
-    "Dall-E Tool": {
+    # NOTE: the exported app is still a CrewAI runtime (see pyproject.toml.template,
+    # which pins crewai[tools]), so image generation maps onto crewai_tools'
+    # DallETool rather than Kasal's own ImageGenerationTool — the latter subclasses
+    # OUR BaseTool, which the exported app does not ship. The config carries the
+    # model through, so a crew configured for gpt-image-1 exports as gpt-image-1.
+    "Image Generation Tool": {
         "import": "from crewai_tools import DallETool",
         "class": "DallETool",
         "config_keys": ["model", "size", "quality", "n"],
@@ -105,7 +110,11 @@ _BUNDLEABLE_TOOLS: Dict[str, Dict[str, Any]] = {
 }
 
 # Class-name aliases that may appear instead of the canonical Kasal title.
-_TOOL_ALIASES = {"DallETool": "Dall-E Tool", "GmailTool": "Gmail"}
+_TOOL_ALIASES = {
+    "DallETool": "Image Generation Tool",
+    "Dall-E Tool": "Image Generation Tool",  # crews saved before the rename
+    "GmailTool": "Gmail",
+}
 
 # Config keys that look like secrets are never baked into the export — the
 # deployed app reads them from env vars / OBO instead. ``_SECRET_KEY_HINTS`` is

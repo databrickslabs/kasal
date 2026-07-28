@@ -66,7 +66,7 @@ TOOL_CAPABILITIES: Dict[str, ToolCapability] = {
     "scrape_website":                                 _U | _E,  # runtime name
 
     # Image generation (external API, no sensitive read)
-    "Dall-E Tool":                                    _E,
+    "Image Generation Tool":                          _E,
 
     # MCP (may ingest untrusted content from MCP servers)
     "MCPTool":                                        _U | _E,

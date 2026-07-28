@@ -4,11 +4,12 @@ Seed the tools table with default tool data.
 import json
 import logging
 from datetime import datetime
-from sqlalchemy import select
+from sqlalchemy import delete as sa_delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.session import async_session_factory
 from src.models.tool import Tool
+from src.models.group_tool import GroupTool
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -16,12 +17,12 @@ logger = logging.getLogger(__name__)
 # Tool data as a list of tuples (id, title, description, icon)
 # Only keeping the safe and approved tools
 tools_data = [
-    (6, "Dall-E Tool", "A creative image generation tool that uses the DALL-E API to transform text descriptions into visual imagery. The tool allows agents to generate custom images based on detailed textual prompts, with configurable parameters including model selection (DALL-E 3), image size, quality settings, and quantity. Perfect for creating visualizations, concept art, illustrations, and other visual content based on textual descriptions.", "ai"),
+    (6, "Image Generation Tool", "Generates images from text descriptions through an OpenAI-compatible images endpoint. The model is configurable (default gpt-image-1) and so is the endpoint, so a self-hosted or gateway-fronted image model works without code changes. Returns the image as a base64 payload or a URL depending on the model, along with any revised prompt the model produced. Use for illustrations, concept art, diagrams and visual mockups.", "ai"),
     (16, "SerperDevTool", "A sophisticated search tool that integrates with the Serper.dev API to perform high-quality web searches and return structured results. It offers customizable search parameters including result count, geographic targeting (country and locale), and location specificity. This tool excels at retrieving current information from the web, making it essential for real-time research, market analysis, and gathering the latest data on any topic.", "development"),
     (26, "ScrapeWebsiteTool", "A comprehensive web scraping tool for extracting entire website content and converting it into structured, usable data. It handles various website complexities including JavaScript rendering, authentication, and cookie management to ensure complete content extraction. Ideal for content aggregation, data collection for analysis, competitive research, and building searchable archives of web content.", "web"),
     (31, "PerplexityTool", "A powerful search and question-answering tool that leverages the Perplexity AI platform to provide detailed, accurate answers to complex queries. It combines web search capabilities with advanced language processing to generate comprehensive responses with references and citations. Ideal for research tasks, fact-checking, gathering detailed information on specialized topics, and obtaining nuanced explanations of complex subjects.", "search"),
     (35, "GenieTool", "A sophisticated database querying tool that enables natural language access to database tables and content. It translates plain language questions into optimized database queries, allowing non-technical users to retrieve complex information from databases without SQL knowledge. Perfect for data analysis, business intelligence applications, and providing database access within conversational interfaces.", "database"),
-    (71, "AgentBricksTool", "A powerful tool for querying Databricks AgentBricks (Mosaic AI Agent Bricks) endpoints. AgentBricks is Databricks' no-code AI agent builder platform that enables users to create sophisticated AI agents without writing code. This tool provides seamless integration with AgentBricks serving endpoints, allowing CrewAI agents to leverage pre-built Databricks AI agents for specialized tasks. It supports full authentication (OBO, PAT, Service Principal), customizable inputs, and execution tracing. Ideal for integrating Databricks-native AI agents into multi-agent workflows, accessing domain-specific agents, and building hybrid AI systems that combine CrewAI orchestration with Databricks AgentBricks capabilities.", "databricks"),
+    (71, "AgentBricksTool", "A powerful tool for querying Databricks AgentBricks (Mosaic AI Agent Bricks) endpoints. AgentBricks is Databricks' no-code AI agent builder platform that enables users to create sophisticated AI agents without writing code. This tool provides seamless integration with AgentBricks serving endpoints, allowing Kasal agents to leverage pre-built Databricks AI agents for specialized tasks. It supports full authentication (OBO, PAT, Service Principal), customizable inputs, and execution tracing. Ideal for integrating Databricks-native AI agents into multi-agent workflows, accessing domain-specific agents, and building hybrid AI systems that combine Kasal orchestration with Databricks AgentBricks capabilities.", "databricks"),
     (36, "DatabricksKnowledgeSearchTool", "A powerful knowledge search tool that enables semantic search across documents uploaded to Databricks Vector Search. It provides RAG (Retrieval-Augmented Generation) capabilities by searching through indexed documents based on vector similarity. This tool allows agents to access and retrieve relevant information from uploaded knowledge files including PDFs, Word documents, text files, and other document formats. Essential for building context-aware AI applications with access to custom knowledge bases.", "search"),
     (96, "Gmail", "Read the user's Gmail inbox through the Databricks-managed Google connection. Supports listing the most recent emails (sender, subject, date, snippet) with optional day-range filtering, and reading a single email's full content by message id. Access is read-only, uses the per-user Google authorization stored on the workspace connection, and requires the running user to have completed the one-time Google login on that connection. Perfect for email summaries, daily briefings, and extracting action items from recent correspondence.", "communication"),
     (69, "MCPTool", "An advanced adapter for Model Context Protocol (MCP) servers that enables access to thousands of specialized tools from the MCP ecosystem. This tool establishes and manages connections with MCP servers through SSE (Server-Sent Events), providing seamless integration with community-built tool collections. Perfect for extending agent capabilities with domain-specific tools without requiring custom development or direct integration work.", "integration"),
@@ -54,12 +55,12 @@ def get_tool_configs():
     """Return the default configurations for each tool."""
     return {
         "6": {
-            "model": "dall-e-3",
+            "model": "gpt-image-1",
             "size": "1024x1024",
-            "quality": "standard",
+            "quality": "auto",
             "n": 1,
             "result_as_answer": False
-        },  # DallETool
+        },  # ImageGenerationTool
         "16": {
             "n_results": 10,
             "search_url": "https://google.serper.dev/search",
@@ -479,8 +480,6 @@ async def seed_async():
     tools_skipped = 0
     tools_error = 0
 
-    # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95]
 
     for tool_id, title, description, icon in tools_data:
         try:
@@ -526,7 +525,39 @@ async def seed_async():
             logger.error(f"Error processing tool {tool_id}: {str(e)}")
             tools_error += 1
 
-    logger.info(f"Tools seeding summary: Added {tools_added}, Updated {tools_updated}, Skipped {tools_skipped}, Errors {tools_error}")
+    # Remove rows this file no longer defines. Without this the seeder only ever
+    # ADDED, so every tool a previous version seeded stayed in the table forever
+    # — including the CrewAI tools this engine replaced, still listed and still
+    # assignable in the UI while the factory had no implementation to build.
+    # group_tools.tool_id is ON DELETE CASCADE, so per-group config for a tool
+    # that cannot be built goes with it.
+    seeded_ids = {row[0] for row in tools_data}
+    async with async_session_factory() as session:
+        result = await session.execute(select(Tool).filter(Tool.id.notin_(seeded_ids)))
+        stale = result.scalars().all()
+        stale_ids = [tool.id for tool in stale]
+        for tool in stale:
+            logger.warning(
+                f"Removing tool {tool.id} ({tool.title!r}): no longer defined in seeds/tools.py"
+            )
+        if stale_ids:
+            # Delete the dependent rows explicitly rather than leaning on the
+            # FK's ON DELETE CASCADE. Two reasons it does not fire on its own:
+            # SQLite ignores foreign keys unless PRAGMA foreign_keys=ON, and the
+            # ORM gets there first — session.delete() on a Tool tries to NULL
+            # group_tools.tool_id, which is NOT NULL, so the commit dies with an
+            # IntegrityError. A bulk delete skips the ORM's cascade entirely.
+            await session.execute(
+                sa_delete(GroupTool).where(GroupTool.tool_id.in_(stale_ids))
+            )
+            await session.execute(sa_delete(Tool).where(Tool.id.in_(stale_ids)))
+            await session.commit()
+    tools_removed = len(stale_ids)
+
+    logger.info(
+        f"Tools seeding summary: Added {tools_added}, Updated {tools_updated}, "
+        f"Removed {tools_removed}, Skipped {tools_skipped}, Errors {tools_error}"
+    )
 
 def seed_sync():
     """Seed tools into the database using sync session."""
@@ -542,8 +573,6 @@ def seed_sync():
     tools_skipped = 0
     tools_error = 0
 
-    # List of tool IDs that should be enabled
-    enabled_tool_ids = [6, 16, 26, 31, 35, 36, 67, 69, 70, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95]
 
     for tool_id, title, description, icon in tools_data:
         try:
@@ -588,7 +617,26 @@ def seed_sync():
             logger.error(f"Error processing tool {tool_id}: {str(e)}")
             tools_error += 1
 
-    logger.info(f"Tools seeding summary: Added {tools_added}, Updated {tools_updated}, Skipped {tools_skipped}, Errors {tools_error}")
+    # See the note in seed_async: rows this file no longer defines are removed,
+    # not left behind.
+    seeded_ids = {row[0] for row in tools_data}
+    with SessionLocal() as session:
+        stale = session.execute(select(Tool).filter(Tool.id.notin_(seeded_ids))).scalars().all()
+        stale_ids = [tool.id for tool in stale]
+        for tool in stale:
+            logger.warning(
+                f"Removing tool {tool.id} ({tool.title!r}): no longer defined in seeds/tools.py"
+            )
+        if stale_ids:
+            session.execute(sa_delete(GroupTool).where(GroupTool.tool_id.in_(stale_ids)))
+            session.execute(sa_delete(Tool).where(Tool.id.in_(stale_ids)))
+            session.commit()
+    tools_removed = len(stale_ids)
+
+    logger.info(
+        f"Tools seeding summary: Added {tools_added}, Updated {tools_updated}, "
+        f"Removed {tools_removed}, Skipped {tools_skipped}, Errors {tools_error}"
+    )
 
 # Main entry point for seeding - can be called directly or by seed_runner
 async def seed():

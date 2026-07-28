@@ -72,6 +72,5 @@ class ScrapeWebsiteTool(BaseTool):
         return re.sub("\\s+\n\\s+", "\n", text)
 
 
-# ----------------------------- DallETool -----------------------------
 
 

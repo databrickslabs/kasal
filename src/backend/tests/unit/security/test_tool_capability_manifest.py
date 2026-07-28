@@ -39,7 +39,7 @@ class TestAssessTrifecta:
 
     def test_no_trifecta_external_only(self):
         # Tool with only EXTERNAL (no sensitive, no untrusted)
-        result = assess_trifecta(["Dall-E Tool"])
+        result = assess_trifecta(["Image Generation Tool"])
         assert not result.has_trifecta
         assert not result.reads_sensitive
         assert not result.ingests_untrusted
@@ -155,7 +155,7 @@ class TestToolCapabilityRegistry:
         assert not (caps & ToolCapability.READS_SENSITIVE_DATA)
 
     def test_dalle_has_only_external(self):
-        caps = TOOL_CAPABILITIES["Dall-E Tool"]
+        caps = TOOL_CAPABILITIES["Image Generation Tool"]
         assert caps & ToolCapability.EXTERNAL_COMMUNICATION
         assert not (caps & ToolCapability.READS_SENSITIVE_DATA)
         assert not (caps & ToolCapability.INGESTS_UNTRUSTED_CONTENT)

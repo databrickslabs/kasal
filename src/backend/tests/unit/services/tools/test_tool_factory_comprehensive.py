@@ -70,7 +70,7 @@ class TestToolFactoryInit:
         assert isinstance(factory._tool_implementations, dict)
         assert len(factory._tool_implementations) > 0
         # Check for some expected tools
-        expected_tools = ["PerplexityTool", "Dall-E Tool", "SerperDevTool", "ScrapeWebsiteTool"]
+        expected_tools = ["PerplexityTool", "Image Generation Tool", "SerperDevTool", "ScrapeWebsiteTool"]
         for tool in expected_tools:
             assert tool in factory._tool_implementations
 

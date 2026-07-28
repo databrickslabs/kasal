@@ -579,28 +579,28 @@ class TestUpdateToolConfigAsync:
 
 # ─── DallETool ────────────────────────────────────────────────────────────────
 
-class TestDallEToolCreation:
+class TestImageGenerationToolCreation:
 
-    def test_creates_dalle_tool(self):
+    def test_creates_image_generation_tool(self):
         f = _make_factory()
-        info = _tool_info("Dall-E Tool", 3, {})
-        f._available_tools["Dall-E Tool"] = info
+        info = _tool_info("Image Generation Tool", 3, {})
+        f._available_tools["Image Generation Tool"] = info
         cls = _mock_tool_cls()
-        f._tool_implementations["Dall-E Tool"] = cls
+        f._tool_implementations["Image Generation Tool"] = cls
 
-        result = f.create_tool("Dall-E Tool")
+        result = f.create_tool("Image Generation Tool")
         assert result is cls.return_value
 
-    def test_dalle_tool_with_config(self):
+    def test_image_generation_tool_with_config(self):
         f = _make_factory()
-        info = _tool_info("Dall-E Tool", 3, {"model": "dall-e-3", "size": "1024x1024"})
-        f._available_tools["Dall-E Tool"] = info
+        info = _tool_info("Image Generation Tool", 3, {"model": "gpt-image-1", "size": "1024x1024"})
+        f._available_tools["Image Generation Tool"] = info
         cls = _mock_tool_cls()
-        f._tool_implementations["Dall-E Tool"] = cls
+        f._tool_implementations["Image Generation Tool"] = cls
 
-        f.create_tool("Dall-E Tool")
+        f.create_tool("Image Generation Tool")
         call_kwargs = cls.call_args[1]
-        assert call_kwargs.get("model") == "dall-e-3"
+        assert call_kwargs.get("model") == "gpt-image-1"
 
 
 # ─── _validate_databricks_auth additional branches ────────────────────────────

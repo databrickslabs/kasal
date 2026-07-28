@@ -42,7 +42,7 @@ const TOOL_CAPABILITIES: Record<string, number> = {
   'scrape_website':                                         _U | _E,
 
   // Image generation
-  'Dall-E Tool':                                                 _E,
+  'Image Generation Tool':                                                 _E,
 
   // MCP
   'MCPTool':                                                _U | _E,

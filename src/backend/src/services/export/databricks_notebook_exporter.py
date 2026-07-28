@@ -12,6 +12,21 @@ from .code_generator import CodeGenerator, _parse_task_guardrail
 
 logger = logging.getLogger(__name__)
 
+#: Tools the generated notebook gets from ``crewai_tools`` rather than from a
+#: bundled source file — everything else in a crew is a "custom" tool that has to
+#: be written into the notebook.
+#:
+#: These are Kasal TOOL TITLES, as stored on the agent/task row. The list used to
+#: carry "DallETool", a class name that was never a Kasal title and so never
+#: matched anything. "Dall-E Tool" is kept for crews saved before that tool was
+#: replaced by "Image Generation Tool".
+_CREWAI_PROVIDED_TOOLS = frozenset({
+    "SerperDevTool",
+    "ScrapeWebsiteTool",
+    "Image Generation Tool",
+    "Dall-E Tool",  # legacy title, pre-rename crews
+})
+
 
 class DatabricksNotebookExporter(BaseExporter):
     """Export crew as a Databricks notebook (.ipynb format)"""
@@ -189,7 +204,7 @@ class DatabricksNotebookExporter(BaseExporter):
             # 11. Custom tools (if any)
             if include_custom_tools:
                 logger.info(f"[Export Debug] All tools before filtering: {tools}")
-                custom_tools = [t for t in tools if t not in ['SerperDevTool', 'ScrapeWebsiteTool', 'DallETool']]
+                custom_tools = [t for t in tools if t not in _CREWAI_PROVIDED_TOOLS]
                 logger.info(f"[Export Debug] Custom tools after filtering: {custom_tools}")
                 if custom_tools:
                     cells.append(self._create_markdown_cell(
@@ -608,7 +623,7 @@ print("MLflow autologging enabled - all executions will be tracked")'''
         code = '"""\nEnvironment Configuration\n\nConfigure API keys for custom tools.\n"""\n\nimport os\n\n'
 
         # Check which custom tools need API keys
-        custom_tools = [t for t in tools if t not in ['SerperDevTool', 'ScrapeWebsiteTool', 'DallETool']]
+        custom_tools = [t for t in tools if t not in _CREWAI_PROVIDED_TOOLS]
 
         if 'PerplexityTool' in custom_tools:
             code += '# Perplexity API Key (required for PerplexityTool)\n'
@@ -881,7 +896,7 @@ print("   Click the 'Experiment' icon in the notebook toolbar")'''
         """
 
         has_tools = len(tools) > 0
-        custom_tools = [t for t in tools if t not in ['SerperDevTool', 'ScrapeWebsiteTool', 'DallETool']]
+        custom_tools = [t for t in tools if t not in _CREWAI_PROVIDED_TOOLS]
         has_custom_tools = len(custom_tools) > 0
 
         # Generate YAML configurations to embed directly in the deployment cell

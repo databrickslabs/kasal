@@ -10,7 +10,7 @@ import json
 from src.utils.sensitive_data_utils import mask_sensitive_fields
 
 # Import only the CrewAI tools we're keeping
-from src.services.tools.dalle import DallETool
+from src.services.tools.image_generation import ImageGenerationTool
 from src.services.tools.serper_search import SerperDevTool
 from src.services.tools.scrape_website import ScrapeWebsiteTool
 
@@ -257,7 +257,7 @@ class ToolFactory:
         # Map tool names to their implementations - ONLY THE TOOLS WE'RE KEEPING
         self._tool_implementations = {
             "PerplexityTool": PerplexitySearchTool,
-            "Dall-E Tool": DallETool,
+            "Image Generation Tool": ImageGenerationTool,
             "SerperDevTool": SerperDevTool,
             "ScrapeWebsiteTool": ScrapeWebsiteTool,
             "GenieTool": GenieTool,
@@ -1953,7 +1953,7 @@ class ToolFactory:
                     logger.error(f"[ToolFactory] Traceback: {traceback.format_exc()}")
                     raise
 
-            # For all other tools (ScrapeWebsiteTool, DallETool, DAX Generator, etc.)
+            # For all other tools (ScrapeWebsiteTool, ImageGenerationTool, DAX Generator, etc.)
             else:
                 # Check if the config has any data
                 if tool_config and isinstance(tool_config, dict):
