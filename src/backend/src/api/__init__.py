@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from src.api.a2a_router import router as a2a_router
 from src.api.agent_generation_router import router as agent_generation_router
 from src.api.agentbricks_router import router as agentbricks_router
 
@@ -70,6 +71,9 @@ api_router.include_router(crews_router)
 # Kasal as an MCP SERVER (what external agents call). Distinct from
 # mcp_router above, which is the MCP CLIENT registry.
 api_router.include_router(mcp_server_router)
+# Kasal as an A2A agent. Same External Invocation Layer underneath as the MCP
+# server above — the two are adapters, not parallel implementations.
+api_router.include_router(a2a_router)
 api_router.include_router(crews_export_router)
 api_router.include_router(databricks_router)
 api_router.include_router(ui_config_router)
