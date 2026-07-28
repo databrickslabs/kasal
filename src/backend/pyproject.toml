@@ -134,8 +134,6 @@ exclude = ["src/services/export/templates/"]
 [tool.ruff]
 line-length = 88
 target-version = "py311"
-select = ["E", "F", "I001"]
-ignore = []
 exclude = [
     ".git",
     ".venv",
@@ -143,6 +141,16 @@ exclude = [
     "alembic",
     "src/services/export/templates",
 ]
+
+[tool.ruff.lint]
+# Errors and pyflakes only — no opinionated extras. These were top-level keys,
+# which ruff has deprecated and warned about on every invocation.
+#
+# I001 (import sorting) is deliberately NOT selected: isort owns import order
+# here, with profile = "black" so the two agree. Selecting it in both means two
+# tools formatting the same thing, free to disagree the day their settings drift.
+select = ["E", "F"]
+ignore = []
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

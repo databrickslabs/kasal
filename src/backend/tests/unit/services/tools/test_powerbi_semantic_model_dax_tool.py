@@ -1978,7 +1978,7 @@ class TestResolveModelContextAdditional:
             @asynccontextmanager
             async def _ctx():
                 raise Exception("DB error")
-                yield  # noqa: unreachable
+                yield  # unreachable; present to make this a generator
 
             return _ctx
 
@@ -2586,7 +2586,7 @@ class TestSaveToConversionHistory:
             @asynccontextmanager
             async def _ctx():
                 raise Exception("DB error")
-                yield  # noqa: unreachable
+                yield  # unreachable; present to make this a generator
 
             return _ctx
 

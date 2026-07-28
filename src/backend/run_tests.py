@@ -137,25 +137,37 @@ def main():
     
     # Run linting if running all tests
     if args.type == "all" and success:
-        # Check if linting tools are available
+        # (probe, command, description). The probe is how we decide the tool is
+        # installed, and it must name THE TOOL BEING RUN. It used to probe
+        # `black --version` before every command, so with black present the loop
+        # happily ran `python -m flake8`, which is neither installed nor listed
+        # in pyproject.toml — while ruff, which IS both, was never invoked at all.
         linting_commands = [
-            ("python -m black --check src tests", "Black code formatting check"),
-            ("python -m isort --check-only src tests", "Import sorting check"),
-            ("python -m flake8 src tests", "Flake8 linting"),
-            ("python -m mypy src", "Type checking with mypy"),
+            ("python -m black --version",
+             "python -m black --check src tests", "Black code formatting check"),
+            ("python -m isort --version",
+             "python -m isort --check-only src tests", "Import sorting check"),
+            # Ruff replaces flake8 here. Configured in [tool.ruff.lint] as
+            # select = ["E", "F"] — errors and pyflakes, no opinionated extras.
+            # Import order stays with isort above, which is why I001 is not selected.
+            ("python -m ruff --version",
+             "python -m ruff check src tests", "Ruff linting"),
+            ("python -m mypy --version",
+             "python -m mypy src", "Type checking with mypy"),
             # Architecture contracts: routers > services > repositories > models,
             # and nothing below services imports upward. See [tool.importlinter]
             # in pyproject.toml — the ignore lists there are known violations
             # kept passing on purpose, and they are meant to shrink.
-            ("lint-imports", "Architecture contracts (import-linter)"),
+            ("lint-imports --help", "lint-imports", "Architecture contracts (import-linter)"),
         ]
-        
-        for cmd, desc in linting_commands:
+
+        for probe, cmd, desc in linting_commands:
             try:
-                subprocess.run("python -m black --version", shell=True, capture_output=True, check=True)
-                run_command(cmd, desc)
+                subprocess.run(probe, shell=True, capture_output=True, check=True)
             except subprocess.CalledProcessError:
                 print(f"⚠️  Skipping {desc} - tool not installed")
+                continue
+            run_command(cmd, desc)
     
     return 0 if success else 1
 

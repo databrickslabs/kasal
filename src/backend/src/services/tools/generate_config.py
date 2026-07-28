@@ -731,7 +731,11 @@ def derive_filter_sets(
     filter_sets: dict[str, list[str]] = {}
 
     # From SWITCH branches
-    for _table_key, decomps in switch_decomps.items():  # noqa: unused _table_key
+    # `_table_key` is unused; the leading underscore is the convention for that,
+    # and no linter flags an unused loop variable anyway. This line carried a
+    # suppression comment whose payload was prose rather than a rule code, so
+    # ruff rejected the directive and warned about it on every invocation.
+    for _table_key, decomps in switch_decomps.items():
         for decomp in decomps:
             branches = decomp.get("_detected_branches", [])
             if not branches:
