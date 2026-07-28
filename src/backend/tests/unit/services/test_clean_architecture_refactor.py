@@ -192,13 +192,11 @@ class TestGetExecutionGroupsWithCounts:
 
     @pytest.mark.asyncio
     async def test_returns_group_counts(self, service, mock_session):
-        mock_result = MagicMock()
-        mock_result.fetchall.return_value = [
+        service.history_repo.count_by_group = AsyncMock(return_value=[
             ("group-a", 5),
             ("group-b", 12),
             ("group-c", 1),
-        ]
-        mock_session.execute.return_value = mock_result
+        ])
 
         result = await service.get_execution_groups_with_counts()
 
@@ -209,9 +207,7 @@ class TestGetExecutionGroupsWithCounts:
 
     @pytest.mark.asyncio
     async def test_returns_empty_list_when_no_groups(self, service, mock_session):
-        mock_result = MagicMock()
-        mock_result.fetchall.return_value = []
-        mock_session.execute.return_value = mock_result
+        service.history_repo.count_by_group = AsyncMock(return_value=[])
 
         result = await service.get_execution_groups_with_counts()
 
@@ -219,7 +215,7 @@ class TestGetExecutionGroupsWithCounts:
 
     @pytest.mark.asyncio
     async def test_raises_on_db_error(self, service, mock_session):
-        mock_session.execute.side_effect = Exception("connection lost")
+        service.history_repo.count_by_group = AsyncMock(side_effect=Exception("connection lost"))
 
         with pytest.raises(Exception, match="connection lost"):
             await service.get_execution_groups_with_counts()

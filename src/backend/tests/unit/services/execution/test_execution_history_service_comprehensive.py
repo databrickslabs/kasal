@@ -504,9 +504,7 @@ class TestDeleteAllExecutions:
         """Test deletion when no executions found for groups."""
         group_ids = [str(uuid.uuid4())]
 
-        mock_result = MagicMock()
-        mock_result.fetchall.return_value = []
-        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_history_repo.get_job_ids_for_groups = AsyncMock(return_value=[])
 
         result = await service.delete_all_executions(group_ids=group_ids)
 

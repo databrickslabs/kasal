@@ -47,7 +47,6 @@ _BASELINE = {
     "services/catalog/agents.py",
     "services/execution/broadcast.py",
     "services/execution/cleanup.py",
-    "services/execution/history.py",
     "services/execution/logs/db_handler.py",
     "services/execution/service.py",
     "services/flow_builder/execution_service.py",
@@ -64,7 +63,6 @@ _BASELINE = {
     "services/tools/databricks_dashboard_creator_tool.py",
     "services/tools/metric_view_validator_tool.py",
     "services/trace/broadcast.py",
-    "services/trace/writer.py",
 }
 
 _SERVICES = pathlib.Path(__file__).resolve().parents[3] / "src" / "services"

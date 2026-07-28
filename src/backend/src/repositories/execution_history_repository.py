@@ -6,8 +6,9 @@ This module provides database operations for execution history models.
 
 import logging
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import Tuple, List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import distinct, func
 from sqlalchemy.future import select
 from sqlalchemy import desc, func, delete
 from sqlalchemy.exc import SQLAlchemyError
@@ -72,6 +73,25 @@ class ExecutionHistoryRepository:
 
         return runs, total_count
     
+    async def get_job_ids_for_groups(self, group_ids: List[str]) -> List[str]:
+        """Job ids belonging to any of these groups."""
+        if not group_ids:
+            return []
+        result = await self.session.execute(
+            select(ExecutionHistory.job_id).where(
+                ExecutionHistory.group_id.in_(group_ids)
+            )
+        )
+        return [row[0] for row in result.fetchall()]
+
+    async def count_by_group(self) -> List[Tuple[Optional[str], int]]:
+        """(group_id, run count) across every group. Admin reporting."""
+        result = await self.session.execute(
+            select(distinct(ExecutionHistory.group_id), func.count(ExecutionHistory.id))
+            .group_by(ExecutionHistory.group_id)
+        )
+        return [(row[0], row[1]) for row in result.fetchall()]
+
     async def get_recent(
         self, limit: int, status: Optional[str] = None
     ) -> List[ExecutionHistory]:

@@ -703,10 +703,7 @@ async def test_get_execution_groups_with_counts_success():
     session = AsyncMock()
     svc = make_service(session=session)
 
-    # Mock the session.execute result
-    mock_result = MagicMock()
-    mock_result.fetchall.return_value = [("group-1", 5), ("group-2", 3)]
-    session.execute = AsyncMock(return_value=mock_result)
+    svc.history_repo.count_by_group = AsyncMock(return_value=[("group-1", 5), ("group-2", 3)])
 
     result = await svc.get_execution_groups_with_counts()
     assert len(result) == 2
@@ -717,7 +714,7 @@ async def test_get_execution_groups_with_counts_success():
 async def test_get_execution_groups_with_counts_error():
     session = AsyncMock()
     svc = make_service(session=session)
-    session.execute = AsyncMock(side_effect=RuntimeError("db error"))
+    svc.history_repo.count_by_group = AsyncMock(side_effect=RuntimeError("db error"))
     with pytest.raises(RuntimeError):
         await svc.get_execution_groups_with_counts()
 
@@ -762,9 +759,7 @@ async def test_delete_all_executions_with_group_no_jobs():
     session = AsyncMock()
     svc = make_service(session=session)
 
-    mock_result = MagicMock()
-    mock_result.fetchall.return_value = []
-    session.execute = AsyncMock(return_value=mock_result)
+    svc.history_repo.get_job_ids_for_groups = AsyncMock(return_value=[])
 
     mock_trace_svc = MagicMock()
     mock_trace_svc.repository = AsyncMock()
@@ -785,9 +780,7 @@ async def test_delete_all_executions_with_group_and_jobs():
     session = AsyncMock()
     svc = make_service(session=session)
 
-    mock_result = MagicMock()
-    mock_result.fetchall.return_value = [("job-g1",), ("job-g2",)]
-    session.execute = AsyncMock(return_value=mock_result)
+    svc.history_repo.get_job_ids_for_groups = AsyncMock(return_value=["job-g1", "job-g2"])
 
     mock_trace_repo = AsyncMock()
     mock_trace_repo.delete_by_job_id = AsyncMock(return_value=1)

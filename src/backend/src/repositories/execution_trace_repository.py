@@ -128,6 +128,39 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             logger.error(f"Database error retrieving traces for run_id {run_id}: {str(e)}")
             raise
     
+    async def get_span_ids_by_event_type(self, job_id: str) -> Dict[str, str]:
+        """event_type -> span_id for a run's spans, earliest occurrence winning.
+
+        Used to find a run's ROOT span so later rows can be parented to it; a
+        span with no parent floats at the top of the trace as its own run.
+        """
+        result = await self.session.execute(
+            select(ExecutionTrace.event_type, ExecutionTrace.span_id)
+            .where(
+                ExecutionTrace.job_id == job_id,
+                ExecutionTrace.span_id.is_not(None),
+            )
+            .order_by(ExecutionTrace.id)
+        )
+        return {event_type: span_id for event_type, span_id in result.all()}
+
+    async def get_attribution_candidates(self, job_id: str) -> List[Tuple[Any, Any, Any]]:
+        """(event_source, event_context, trace_metadata) newest first.
+
+        The caller walks these to attribute an orphan row to the agent and task
+        that were most recently active.
+        """
+        result = await self.session.execute(
+            select(
+                ExecutionTrace.event_source,
+                ExecutionTrace.event_context,
+                ExecutionTrace.trace_metadata,
+            )
+            .where(ExecutionTrace.job_id == job_id)
+            .order_by(ExecutionTrace.id.desc())
+        )
+        return list(result.all())
+
     async def get_event_shape_by_job_id(
         self, job_id: str
     ) -> List[Tuple[Optional[str], Any, Any]]:

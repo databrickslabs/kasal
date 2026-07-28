@@ -33,20 +33,9 @@ async def _root_span_id(session: Any, job_id: str) -> Optional[str]:
     """The run's outermost span, so a written row hangs under it rather than
     floating at the top of the trace as if it were its own run."""
     try:
-        from sqlalchemy import select
+        from src.repositories.execution_trace_repository import ExecutionTraceRepository
 
-        from src.models.execution_trace import ExecutionTrace
-
-        result = await session.execute(
-            select(ExecutionTrace.event_type, ExecutionTrace.span_id)
-            .where(
-                ExecutionTrace.job_id == job_id,
-                ExecutionTrace.span_id.is_not(None),
-            )
-            .order_by(ExecutionTrace.id)
-        )
-        rows = result.all()
-        by_type = {event_type: span_id for event_type, span_id in rows}
+        by_type = await ExecutionTraceRepository(session).get_span_ids_by_event_type(job_id)
         for event_type in _ROOT_EVENT_TYPES:
             if by_type.get(event_type):
                 return by_type[event_type]
@@ -66,20 +55,10 @@ async def resolve_attribution(session: Any, job_id: str) -> Dict[str, Any]:
     """
     attribution: Dict[str, Any] = {}
     try:
-        from sqlalchemy import select
+        from src.repositories.execution_trace_repository import ExecutionTraceRepository
 
-        from src.models.execution_trace import ExecutionTrace
-
-        result = await session.execute(
-            select(
-                ExecutionTrace.event_source,
-                ExecutionTrace.event_context,
-                ExecutionTrace.trace_metadata,
-            )
-            .where(ExecutionTrace.job_id == job_id)
-            .order_by(ExecutionTrace.id.desc())
-        )
-        for source, context, metadata in result.all():
+        rows = await ExecutionTraceRepository(session).get_attribution_candidates(job_id)
+        for source, context, metadata in rows:
             if not source or source in _NON_AGENT_SOURCES:
                 continue
             attribution["event_source"] = source

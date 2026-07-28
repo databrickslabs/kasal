@@ -376,13 +376,7 @@ class ExecutionHistoryService:
 
             # Get job_ids for the group first (needed to delete related data)
             if group_ids and len(group_ids) > 0:
-                from sqlalchemy import select
-                from src.models.execution_history import ExecutionHistory
-                stmt = select(ExecutionHistory.job_id).where(
-                    ExecutionHistory.group_id.in_(group_ids)
-                )
-                result = await self.session.execute(stmt)
-                job_ids = [row[0] for row in result.fetchall()]
+                job_ids = await self.history_repo.get_job_ids_for_groups(group_ids)
 
                 if not job_ids:
                     # The request session commits on the way out, so the recipe
@@ -815,14 +809,7 @@ class ExecutionHistoryService:
             List of (group_id, execution_count) tuples
         """
         try:
-            from sqlalchemy import distinct, func, select
-            from src.models.execution_history import ExecutionHistory
-
-            stmt = select(
-                distinct(ExecutionHistory.group_id), func.count(ExecutionHistory.id)
-            ).group_by(ExecutionHistory.group_id)
-            result = await self.session.execute(stmt)
-            return [(row[0], row[1]) for row in result.fetchall()]
+            return await self.history_repo.count_by_group()
         except Exception as e:
             logger.error(f"Error getting execution groups with counts: {str(e)}")
             raise
