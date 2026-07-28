@@ -15,8 +15,14 @@ from src.schemas.crew_feedback import (
     CrewFeedbackResponse,
     CrewFeedbackSummaryEntry,
 )
+from src.schemas.crew_publication import (
+    CrewPublicationCreate,
+    CrewPublicationResponse,
+    CrewPublicationUpdate,
+)
 from src.services.catalog.crew_feedback import CrewFeedbackService
 from src.services.catalog.crews import CrewService
+from src.services.external.publication import PublicationService
 
 router = APIRouter(
     prefix="/crews",
@@ -335,3 +341,92 @@ async def delete_all_crews(
         raise ForbiddenError("Only admins can delete all crews")
 
     await service.delete_all_by_group(group_context)
+
+
+# ---------------------------------------------------------------------------
+# Publication — exposing a crew to callers OUTSIDE this Kasal instance.
+#
+# Publication lives on the crew rather than in a protocol-specific admin area,
+# because it is one decision ("expose this crew, over these protocols") and not
+# two features. One record drives both the MCP tool list and the A2A Agent
+# Card's skills[]; see services/external/ for why that is one record.
+# ---------------------------------------------------------------------------
+
+
+def get_publication_service(session: SessionDep) -> PublicationService:
+    return PublicationService(session)
+
+
+@router.post("/{crew_id}/publish", response_model=CrewPublicationResponse)
+async def publish_crew(
+    crew_id: Annotated[UUID, Path(title="The ID of the crew to publish")],
+    publication: CrewPublicationCreate,
+    crew_service: Annotated[CrewService, Depends(get_crew_service)],
+    service: Annotated[PublicationService, Depends(get_publication_service)],
+    group_context: GroupContextDep,
+):
+    """Expose a crew over the listed external protocols.
+
+    Idempotent: publishing an already-published crew updates its record.
+
+    Admins and editors only. Making a crew reachable from outside the workspace
+    is a higher-consequence action than editing one, and the same people who may
+    change a crew are the people who may expose it.
+    """
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can publish crews")
+
+    # Resolve the crew through the group-scoped service FIRST, so a caller
+    # cannot publish another workspace's crew by id.
+    crew = await crew_service.get_by_group(crew_id, group_context)
+    if not crew:
+        raise NotFoundError("Crew not found")
+
+    row = await service.publish(str(crew_id), publication, group_context)
+    return CrewPublicationResponse.model_validate(row)
+
+
+@router.get("/{crew_id}/publish", response_model=CrewPublicationResponse)
+async def get_crew_publication(
+    crew_id: Annotated[UUID, Path(title="The ID of the crew")],
+    service: Annotated[PublicationService, Depends(get_publication_service)],
+    group_context: GroupContextDep,
+):
+    """The crew's publication record, or 404 if it is not published."""
+    row = await service.repository.find_by_crew_id(
+        crew_id=str(crew_id), group_ids=group_context.group_ids or []
+    )
+    if not row:
+        raise NotFoundError("Crew is not published")
+    return CrewPublicationResponse.model_validate(row)
+
+
+@router.patch("/{crew_id}/publish", response_model=CrewPublicationResponse)
+async def update_crew_publication(
+    crew_id: Annotated[UUID, Path(title="The ID of the crew")],
+    publication: CrewPublicationUpdate,
+    service: Annotated[PublicationService, Depends(get_publication_service)],
+    group_context: GroupContextDep,
+):
+    """Adjust an existing publication. Omitted fields are left alone."""
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can change a publication")
+
+    row = await service.update(str(crew_id), publication, group_context)
+    if not row:
+        raise NotFoundError("Crew is not published")
+    return CrewPublicationResponse.model_validate(row)
+
+
+@router.delete("/{crew_id}/publish", status_code=status.HTTP_204_NO_CONTENT)
+async def unpublish_crew(
+    crew_id: Annotated[UUID, Path(title="The ID of the crew to unpublish")],
+    service: Annotated[PublicationService, Depends(get_publication_service)],
+    group_context: GroupContextDep,
+):
+    """Withdraw a crew from every external surface."""
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can unpublish crews")
+
+    if not await service.unpublish(str(crew_id), group_context):
+        raise NotFoundError("Crew is not published")

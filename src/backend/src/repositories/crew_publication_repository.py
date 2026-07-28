@@ -1,0 +1,93 @@
+from typing import List, Optional
+
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.base_repository import BaseRepository
+from src.models.crew_publication import CrewPublication
+
+
+class CrewPublicationRepository(BaseRepository[CrewPublication]):
+    """Data access for crew publications.
+
+    Every read here is group-filtered without exception. This repository backs
+    surfaces that are reachable by callers OUTSIDE the workspace, so a query
+    that forgets the filter is a cross-tenant data leak, not a display bug.
+    There is deliberately no ``list_all``.
+    """
+
+    def __init__(self, session: AsyncSession):
+        super().__init__(CrewPublication, session)
+
+    async def list_published_for_group(
+        self, group_ids: List[str], protocol: Optional[str] = None
+    ) -> List[CrewPublication]:
+        """Publications visible to ``group_ids``, optionally for one protocol.
+
+        The single most security-sensitive query in the external-invocation work:
+        it is what an MCP ``list_crews`` and an A2A Agent Card's ``skills[]`` both
+        read. The natural bug is returning the workspace catalogue.
+
+        An empty ``group_ids`` returns NOTHING rather than everything. A caller
+        whose group could not be resolved must see an empty capability list, not
+        every tenant's.
+
+        ``protocol`` is filtered in Python, not SQL: ``protocols`` is a JSON
+        column and JSON containment differs across SQLite / PostgreSQL /
+        Lakebase. The group filter — the one that matters — is done in SQL.
+        """
+        if not group_ids:
+            return []
+
+        query = select(self.model).where(self.model.group_id.in_(group_ids))
+        result = await self.session.execute(query)
+        rows = list(result.scalars().all())
+
+        if protocol is None:
+            return rows
+        return [r for r in rows if protocol in (r.protocols or [])]
+
+    async def find_by_crew_id(
+        self, crew_id: str, group_ids: List[str]
+    ) -> Optional[CrewPublication]:
+        """The publication for one crew, if the caller's group may see it."""
+        if not group_ids:
+            return None
+
+        query = select(self.model).where(
+            self.model.crew_id == crew_id,
+            self.model.group_id.in_(group_ids),
+        )
+        result = await self.session.execute(query)
+        return result.scalars().first()
+
+    async def find_by_external_name(
+        self, external_name: str, group_ids: List[str]
+    ) -> Optional[CrewPublication]:
+        """Resolve the name a caller used back to a publication.
+
+        This is the lookup an adapter performs on every inbound invocation, so it
+        is the point where a caller could reach another tenant's crew by guessing
+        its name. Group-filtered for that reason.
+        """
+        if not group_ids:
+            return None
+
+        query = select(self.model).where(
+            self.model.external_name == external_name,
+            self.model.group_id.in_(group_ids),
+        )
+        result = await self.session.execute(query)
+        return result.scalars().first()
+
+    async def delete_by_crew_id(self, crew_id: str, group_ids: List[str]) -> int:
+        """Unpublish a crew. Returns the number of rows removed."""
+        if not group_ids:
+            return 0
+
+        query = delete(self.model).where(
+            self.model.crew_id == crew_id,
+            self.model.group_id.in_(group_ids),
+        )
+        result = await self.session.execute(query)
+        return result.rowcount or 0

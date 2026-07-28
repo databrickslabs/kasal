@@ -9,6 +9,7 @@ from src.models.conversion import (
 )
 from src.models.crew import Crew, Plan
 from src.models.crew_feedback import CrewFeedback
+from src.models.crew_publication import CrewPublication
 from src.models.databricks_config import DatabricksConfig
 from src.models.engine_config import EngineConfig
 from src.models.execution_history import ErrorTrace, ExecutionHistory, TaskStatus
