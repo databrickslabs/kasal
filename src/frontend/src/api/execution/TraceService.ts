@@ -5,6 +5,10 @@ import { TaskDetails } from '../../types/execution/trace';
 // List of known run IDs for development/testing - this should be removed in production
 const KNOWN_RUN_IDS = [1]; // Based on the database, we only have run ID 1
 
+/** Characters of each row's long text the LIST request asks for. Enough for the
+ *  summary view's previews; the full text arrives when a row is opened. */
+const TRACE_LIST_PREVIEW_CHARS = 2000;
+
 // Define error interfaces
 interface ApiError {
   response?: {
@@ -237,7 +241,15 @@ export const TraceService = {
       // The API returns an object with a 'traces' field for both endpoints:
       // ExecutionTraceResponseByRunId or ExecutionTraceResponseByJobId
       // Use limit=500 (API max) to ensure error events at the end of long executions are included
-      const response = await apiClient.get(endpoint, { params: { limit: 1500 } });
+      //
+      // preview_chars trims each row's long text server-side. The timeline draws
+      // one-line labels from these rows, so shipping every prompt, tool result
+      // and composed surface means the browser downloads — and then HOLDS — a
+      // run's entire transcript to render a list. Rows carry their true sizes,
+      // and opening one fetches it whole via getTraceById.
+      const response = await apiClient.get(endpoint, {
+        params: { limit: 1500, preview_chars: TRACE_LIST_PREVIEW_CHARS },
+      });
       
       // Check if the response contains a traces field (from the API schemas)
       if (response.data && response.data.traces && Array.isArray(response.data.traces)) {
