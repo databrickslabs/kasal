@@ -97,11 +97,13 @@ class TestCapabilitiesAreAPromise:
         assert card.capabilities.pushNotifications is True
 
     @pytest.mark.asyncio
-    async def test_streaming_is_not_claimed_before_it_is_translated(self):
-        """SSE exists internally, but until it is rendered as
-        TaskStatusUpdateEvent the card must not promise it."""
+    async def test_streaming_is_claimed_now_that_it_is_translated(self):
+        """It was false while only Kasal's own frame shape existed. It flipped
+        when message:stream and :subscribe started emitting the spec's
+        TaskStatusUpdateEvent, and not before — a client cannot use a stream
+        whose schema it has to guess."""
         card = await _build([])
-        assert card.capabilities.streaming is False
+        assert card.capabilities.streaming is True
 
 
 class TestContract:

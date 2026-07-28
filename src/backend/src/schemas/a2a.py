@@ -147,3 +147,27 @@ class SendMessageRequest(BaseModel):
     #: Which published capability to run. A2A callers pick a skill from the card.
     skillId: Optional[str] = None
     taskId: Optional[str] = None
+
+
+class TaskStatusUpdateEvent(BaseModel):
+    """A task changed state. The spec's streaming event.
+
+    ``final`` is what tells a subscriber to stop listening — without it a client
+    cannot distinguish "still working" from "this is the last thing you will
+    hear", and either hangs or disconnects early.
+    """
+
+    taskId: str
+    kind: str = "status-update"
+    status: TaskStatus
+    final: bool = False
+    contextId: Optional[str] = None
+
+
+class TaskArtifactUpdateEvent(BaseModel):
+    """A task produced output."""
+
+    taskId: str
+    kind: str = "artifact-update"
+    artifact: Artifact
+    contextId: Optional[str] = None

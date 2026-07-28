@@ -94,3 +94,60 @@ def text_of(message: Message) -> str:
     that was sent.
     """
     return "\n".join(p.text for p in message.parts if p.kind == "text" and p.text)
+
+
+def to_stream_events(frame: dict) -> list:
+    """A canonical stream frame -> the A2A events a subscriber expects.
+
+    One frame can yield TWO events: a status update, and — when the run
+    finished with output — an artifact update. The spec separates them because
+    a subscriber may care about only one, and folding the output into the status
+    event would force everyone to parse both.
+    """
+    from src.schemas.a2a import (
+        Artifact,
+        Message,
+        Part,
+        TaskArtifactUpdateEvent,
+        TaskStatusUpdateEvent,
+    )
+    from src.services.external.state import ExternalTaskState, is_terminal
+
+    state = ExternalTaskState(frame["state"])
+    status = TaskStatus(state=to_wire_state(state))
+
+    # A paused run carries its question as the task's current message, which is
+    # what makes INPUT_REQUIRED actionable over a stream rather than merely
+    # informative.
+    waiting = frame.get("waiting_for") or []
+    if waiting:
+        status.message = Message(
+            role="agent",
+            parts=[Part(kind="text", text=waiting[0].get("prompt", ""))],
+            taskId=frame["run_id"],
+        )
+    elif frame.get("error"):
+        status.message = Message(
+            role="agent",
+            parts=[Part(kind="text", text=str(frame["error"]))],
+            taskId=frame["run_id"],
+        )
+
+    events = [
+        TaskStatusUpdateEvent(
+            taskId=frame["run_id"], status=status, final=is_terminal(state)
+        )
+    ]
+
+    artifact = frame.get("artifact")
+    if artifact and artifact.get("parts"):
+        events.append(
+            TaskArtifactUpdateEvent(
+                taskId=frame["run_id"],
+                artifact=Artifact(
+                    artifactId=f"{frame['run_id']}-output",
+                    parts=[Part(**p) for p in artifact["parts"]],
+                ),
+            )
+        )
+    return events

@@ -141,6 +141,83 @@ async def send_message(
         raise UnprocessableEntityError(str(exc))
 
 
+#: SSE headers. ``X-Accel-Buffering`` is not decoration — an nginx or Databricks
+#: Apps proxy in front of this will buffer the whole response otherwise, which
+#: turns a stream into a single delivery at the end and makes it worthless.
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
+
+
+@router.post("/a2a/v1/message:stream")
+async def stream_message(
+    body: SendMessageRequest, caller: CallerDep, session: SessionDep
+):
+    """SendStreamingMessage — start a task and stream its progress.
+
+    Start and subscribe in one call. Doing it as two (send, then subscribe)
+    leaves a window in which a fast task finishes before the subscription opens,
+    and the caller waits forever for events about a task that is already done.
+    """
+    from fastapi.responses import StreamingResponse
+
+    from src.services.a2a import stream as a2a_stream
+
+    try:
+        task = await a2a_tasks.send_message(
+            caller=caller,
+            message=body.message,
+            skill_id=body.skillId,
+            task_id=body.taskId,
+            session=session,
+        )
+    except a2a_tasks.UnknownSkillError as exc:
+        raise NotFoundError(str(exc))
+    except a2a_tasks.UnknownTaskError as exc:
+        raise NotFoundError(str(exc))
+    except ExternalAuthError as exc:
+        raise A2AAuthRequired(exc.detail)
+    except ExternalPermissionError as exc:
+        from src.core.exceptions import ForbiddenError
+
+        raise ForbiddenError(exc.detail)
+    except ValueError as exc:
+        raise UnprocessableEntityError(str(exc))
+
+    return StreamingResponse(
+        a2a_stream.stream_task(caller, task.id, session=session),
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
+    )
+
+
+@router.get("/a2a/v1/tasks/{task_id}:subscribe")
+async def subscribe_to_task(task_id: str, caller: CallerDep, session: SessionDep):
+    """SubscribeToTask — attach to a task already running.
+
+    The reconnect path: a dropped stream does not lose the task, and a caller
+    that started one with message:send can still follow it.
+    """
+    from fastapi.responses import StreamingResponse
+
+    from src.services.a2a import stream as a2a_stream
+
+    # Resolved before streaming so an unknown or foreign task is a 404 rather
+    # than a 200 whose body happens to contain nothing.
+    try:
+        await a2a_tasks.get_task(caller, task_id, session=session)
+    except a2a_tasks.UnknownTaskError as exc:
+        raise NotFoundError(str(exc))
+
+    return StreamingResponse(
+        a2a_stream.stream_task(caller, task_id, session=session),
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
+    )
+
+
 @router.get("/a2a/v1/tasks/{task_id}", response_model=Task)
 async def get_task(task_id: str, caller: CallerDep, session: SessionDep):
     """A task's state, its output, or the question it is waiting on."""

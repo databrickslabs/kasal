@@ -81,9 +81,12 @@ async def build_card(
         version=AGENT_VERSION,
         provider=AgentProvider(organization=name),
         capabilities=AgentCapabilities(
-            # Streaming is real (SSE already exists) but is not yet translated
-            # into TaskStatusUpdateEvent — so it stays false until it is.
-            streaming=False,
+            # True because message:stream and tasks/{id}:subscribe now render
+            # the shared stream frames as TaskStatusUpdateEvent /
+            # TaskArtifactUpdateEvent over SSE, terminating on final. It was
+            # false while only Kasal's own frame shape existed — a client cannot
+            # use a stream it has to guess the schema of.
+            streaming=True,
             # True because delivery now exists: subscribers are registered per
             # task and POSTed a status-update on every state change, from the
             # same choke point that announces to the browser. The flag was false
