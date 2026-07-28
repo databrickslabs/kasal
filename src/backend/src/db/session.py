@@ -830,6 +830,26 @@ async def _ensure_a2a_push_configs_table(conn) -> None:
         logger.warning(f"Could not ensure a2a_push_configs table: {e}")
 
 
+async def _ensure_skills_tables(conn) -> None:
+    """Idempotently create skills + skill_files (Agent Skills storage).
+
+    New tables, so a checkfirst-create reaches deployed installs identically on
+    SQLite, PostgreSQL and Lakebase — same as its neighbours here. Files after
+    skills: the child carries the foreign key.
+    """
+    try:
+        from src.models.skill import Skill, SkillFile
+
+        def _create(sync_conn):
+            Skill.__table__.create(sync_conn, checkfirst=True)
+            SkillFile.__table__.create(sync_conn, checkfirst=True)
+
+        await conn.run_sync(_create)
+        logger.info("Ensured skills tables exist")
+    except Exception as e:
+        logger.warning(f"Could not ensure skills tables: {e}")
+
+
 async def _ensure_a2a_agents_table(conn) -> None:
     """Idempotently create a2a_agents (remote agents Kasal can call).
 
@@ -1185,6 +1205,7 @@ async def run_schema_self_heal(conn) -> None:
     await _ensure_crew_publications_table(conn)
     await _ensure_a2a_push_configs_table(conn)
     await _ensure_a2a_agents_table(conn)
+    await _ensure_skills_tables(conn)
     await _ensure_crew_feedback_table(conn)
     await _ensure_powerbi_extraction_table(conn)
     await _ensure_prompt_optimization_runs_table(conn)

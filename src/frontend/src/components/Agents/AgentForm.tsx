@@ -35,6 +35,7 @@ import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { AgentService } from '../../api/workflow/AgentService';
+import SkillSelector from '../Common/SkillSelector';
 import { Agent, AgentFormProps, KnowledgeSource } from '../../types/workflow/agent';
 import { ModelService } from '../../api/config/ModelService';
 import { Models } from '../../types/config/models';
@@ -101,6 +102,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
       llm: initialData?.llm || getDefaultModel(),
       temperature: initialData?.temperature || undefined,
       tools: initialData?.tools ? initialData.tools.map(id => String(id)) : [],
+      skills: initialData?.skills ?? [],
       function_calling_llm: initialData?.function_calling_llm || undefined,
       max_iter: initialData?.max_iter || 25,
       max_rpm: initialData?.max_rpm ?? 10,
@@ -639,6 +641,22 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                 )
               }}
             />
+
+            {/* Skills — procedural know-how the agent can load on demand.
+                Its own section rather than buried in Execution Settings: a
+                skill changes HOW the agent works, which is the same kind of
+                decision as its backstory, not a tuning knob. */}
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography>Skills</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <SkillSelector
+                  value={formData.skills || []}
+                  onChange={(names) => handleInputChange('skills', names)}
+                />
+              </AccordionDetails>
+            </Accordion>
 
             {/* Templates Section */}
             <Accordion>

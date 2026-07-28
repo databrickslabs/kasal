@@ -254,6 +254,10 @@ class AgentConfig:
             "reasoning_config",
             "inject_date",
             "date_format",
+            # Agent Skills. This list is a WHITELIST — a field missing from it
+            # is silently dropped, which for skills means an agent that shows
+            # them configured in the UI and has none at run time.
+            "skills",
         ):
             val = getattr(agent_data, key, None)
             if val is not None:

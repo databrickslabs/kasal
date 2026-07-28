@@ -107,6 +107,10 @@ export function buildCrewConfig(plan: {
         'use_system_prompt', 'respect_context_window', 'reasoning',
         'max_reasoning_attempts', 'embedder_config', 'knowledge_sources',
         'tool_configs', 'inject_date', 'date_format',
+        // Agent Skills. This list is a WHITELIST — a field missing from it is
+        // dropped silently, which for skills means an agent that shows them
+        // attached in the form and has none at run time.
+        'skills',
       ];
       optionalFields.forEach((field) => {
         if (d[field] !== undefined && d[field] !== null) {

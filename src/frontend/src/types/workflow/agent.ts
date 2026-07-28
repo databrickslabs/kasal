@@ -66,6 +66,12 @@ export interface Agent {
   llm: string;
   temperature?: number;  // Temperature override (0-100, will be converted to 0.0-1.0 on backend)
   tools: string[];
+  /**
+   * Agent Skills, BY NAME. A skill's name is its identity in the format — it
+   * must match the folder it exports to — so a name survives an export/import
+   * round trip where an id would not.
+   */
+  skills?: string[];
   tool_configs?: Record<string, unknown>;  // User-specific tool configuration overrides
   function_calling_llm?: string;
   max_iter: number;

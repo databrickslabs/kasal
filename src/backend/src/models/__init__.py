@@ -1,4 +1,5 @@
 from src.models.a2a_agent import A2AAgent
+from src.models.skill import Skill, SkillFile
 from src.models.a2a_push_config import A2APushConfig
 from src.models.agent import Agent
 from src.models.api_key import ApiKey

@@ -6,6 +6,12 @@ requires-python = ">=3.11,<3.12"
 dependencies = [
     # Web framework
     "fastapi>=0.110.0",
+    # Agent Skills: the OFFICIAL reference validator (github.com/anthropics/agentskills).
+    # Used instead of hand-rolling frontmatter checks — a divergent validator is
+    # how a "compatible" implementation quietly stops being compatible, and the
+    # whole reason to adopt the format is that a skill authored here runs
+    # unchanged in Claude Code, Cursor, Codex and Gemini CLI.
+    "skills-ref>=0.1.1",
     "uvicorn[standard]>=0.27.0",
     "starlette>=0.49.1,<0.50.0", # >=0.49.1 fixes CVE-2025-54121 / CVE-2025-62727 (DoS); minimal bump from 0.40
     "limits>=3.6", # API rate-limiting engine. NOTE: we use limits directly in a

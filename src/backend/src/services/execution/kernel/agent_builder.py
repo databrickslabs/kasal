@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional
 
 from src.core.logger import LoggerManager
 from src.services.execution.kernel.agent_security import inject_security_preamble
+from src.services.execution.kernel.agent_skills import inject_skills
 from src.services.execution.runtime import Agent
 
 logger = LoggerManager.get_instance().crew
@@ -366,6 +367,11 @@ async def build_agent(
         f"[SECURITY] preamble injected into {injected_into} for agent '{label}', "
         f"starts with: {agent_kwargs[injected_into][:300]!r}"
     )
+
+    # Agent Skills: the tier-1 block plus the tools that read tiers 2 and 3.
+    # After the preamble so the security instructions still lead the prompt, and
+    # in the kernel so chat, crew and flow all get it from one place.
+    await inject_skills(agent_kwargs, spec, group_id=group_id, label=label)
 
     if extra_kwargs:
         agent_kwargs.update(extra_kwargs)

@@ -26,6 +26,7 @@ import CodeIcon from '@mui/icons-material/Code';
 import TextFormatIcon from '@mui/icons-material/TextFormat';
 import CloudIcon from '@mui/icons-material/Cloud';
 import HubIcon from '@mui/icons-material/Hub';
+import SchoolIcon from '@mui/icons-material/School';
 import EngineeringIcon from '@mui/icons-material/Engineering';
 import CloseIcon from '@mui/icons-material/Close';
 import MemoryIcon from '@mui/icons-material/Memory';
@@ -47,6 +48,7 @@ import Prompts from './Prompts';
 import DatabricksConfiguration from './DatabricksConfiguration';
 import MCPConfiguration from './MCP/MCPConfiguration';
 import RemoteAgents from './RemoteAgents/RemoteAgents';
+import SkillsConfiguration from './Skills/SkillsConfiguration';
 import EnginesConfiguration from './Engines';
 import { MemoryConfiguration } from '../MemoryBackend';
 import DatabaseManagement from './DatabaseManagement';
@@ -278,6 +280,15 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
       baseNavItems.push({
         label: t('configuration.mcp.workspace', { defaultValue: 'MCP (Teamspace)' }),
         icon: <CloudIcon fontSize="small" />,
+        index: currentIndex++,
+        group: 'workspace'
+      });
+      // Skills (Workspace) — procedural know-how attached to agents. Beside
+      // Tools because that is the comparison a user will make: a tool is code
+      // the agent calls, a skill is how it works.
+      baseNavItems.push({
+        label: t('configuration.skills.tab', { defaultValue: 'Skills' }),
+        icon: <SchoolIcon fontSize="small" />,
         index: currentIndex++,
         group: 'workspace'
       });
@@ -767,6 +778,15 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
               return (
                 <ContentPanel key={item.index} value={activeSection} index={item.index}>
                   <MCPConfiguration mode="workspace" />
+                </ContentPanel>
+              );
+            }
+
+            // Skills (Workspace)
+            if (item.label === t('configuration.skills.tab', { defaultValue: 'Skills' })) {
+              return (
+                <ContentPanel key={item.index} value={activeSection} index={item.index}>
+                  <SkillsConfiguration />
                 </ContentPanel>
               );
             }
