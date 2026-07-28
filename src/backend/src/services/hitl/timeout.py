@@ -82,8 +82,8 @@ class HITLTimeoutService:
         4. Sends webhook notifications for timeouts
         """
         from src.db.session import async_session_factory
-        from src.services.hitl_service import HITLService
-        from src.services.hitl_webhook_service import HITLWebhookService
+        from src.services.hitl.service import HITLService
+        from src.services.hitl.webhook import HITLWebhookService
         from src.repositories.hitl_repository import HITLApprovalRepository
 
         try:

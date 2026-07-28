@@ -1901,8 +1901,8 @@ class FlowMethodFactory:
                 FlowPausedForApprovalException,
             )
             from src.db.session import request_scoped_session
-            from src.services.hitl_service import HITLService
-            from src.services.hitl_webhook_service import HITLWebhookService
+            from src.services.hitl.service import HITLService
+            from src.services.hitl.webhook import HITLWebhookService
             from src.repositories.hitl_repository import HITLApprovalRepository
             from src.models.hitl_approval import HITLApprovalStatus
 

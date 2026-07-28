@@ -250,8 +250,8 @@ class TestLifespanStartup:
             "src.db.session.set_main_event_loop": MagicMock(),
             "src.db.session.dispose_engines": AsyncMock(),
             # hitl service imported lazily
-            "src.services.hitl_timeout_service.start_hitl_timeout_service": AsyncMock(),
-            "src.services.hitl_timeout_service.stop_hitl_timeout_service": AsyncMock(),
+            "src.services.hitl.timeout.start_hitl_timeout_service": AsyncMock(),
+            "src.services.hitl.timeout.stop_hitl_timeout_service": AsyncMock(),
             # trace/execution broadcast services imported lazily
             "src.services.trace.trace_broadcast_service": MagicMock(),
             "src.services.execution_broadcast_service.execution_broadcast_service": MagicMock(),

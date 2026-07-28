@@ -11,7 +11,7 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
-from src.services.hitl_timeout_service import (
+from src.services.hitl.timeout import (
     HITLTimeoutService,
     HITL_TIMEOUT_CHECK_INTERVAL,
     start_hitl_timeout_service,
@@ -22,8 +22,8 @@ from src.services.hitl_timeout_service import (
 # patch them at their *origin* modules rather than on the timeout service module.
 _PATCH_SESSION_FACTORY = "src.db.session.async_session_factory"
 _PATCH_APPROVAL_REPO = "src.repositories.hitl_repository.HITLApprovalRepository"
-_PATCH_HITL_SERVICE = "src.services.hitl_service.HITLService"
-_PATCH_WEBHOOK_SERVICE = "src.services.hitl_webhook_service.HITLWebhookService"
+_PATCH_HITL_SERVICE = "src.services.hitl.service.HITLService"
+_PATCH_WEBHOOK_SERVICE = "src.services.hitl.webhook.HITLWebhookService"
 
 
 @pytest.fixture(autouse=True)
@@ -134,7 +134,7 @@ class TestStart:
     async def test_start_sets_running_flag(self, service):
         """start() must set _running = True and enter the loop."""
         with patch(
-            "src.services.hitl_timeout_service.HITLTimeoutService._check_expired_approvals",
+            "src.services.hitl.timeout.HITLTimeoutService._check_expired_approvals",
             new_callable=AsyncMock,
         ) as mock_check:
             with patch("asyncio.sleep", side_effect=asyncio.CancelledError):
@@ -150,7 +150,7 @@ class TestStart:
         """Calling start() when already running returns immediately."""
         service._running = True
         with patch(
-            "src.services.hitl_timeout_service.HITLTimeoutService._check_expired_approvals",
+            "src.services.hitl.timeout.HITLTimeoutService._check_expired_approvals",
             new_callable=AsyncMock,
         ) as mock_check:
             await service.start()
@@ -168,7 +168,7 @@ class TestStart:
                 raise asyncio.CancelledError()
 
         with patch(
-            "src.services.hitl_timeout_service.HITLTimeoutService._check_expired_approvals",
+            "src.services.hitl.timeout.HITLTimeoutService._check_expired_approvals",
             new_callable=AsyncMock,
         ) as mock_check:
             with patch("asyncio.sleep", side_effect=counting_sleep):
@@ -196,7 +196,7 @@ class TestStart:
                 raise asyncio.CancelledError()
 
         with patch(
-            "src.services.hitl_timeout_service.HITLTimeoutService._check_expired_approvals",
+            "src.services.hitl.timeout.HITLTimeoutService._check_expired_approvals",
             side_effect=fail_then_succeed,
         ):
             with patch("asyncio.sleep", side_effect=limited_sleep):

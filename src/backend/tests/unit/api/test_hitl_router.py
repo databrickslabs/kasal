@@ -59,7 +59,7 @@ from src.schemas.hitl import (
     HITLWebhookListResponse,
     HITLWebhookEventEnum,
 )
-from src.services.hitl_service import (
+from src.services.hitl.service import (
     HITLService,
     HITLServiceError,
     HITLApprovalNotFoundError,
@@ -67,7 +67,7 @@ from src.services.hitl_service import (
     HITLApprovalExpiredError,
     HITLPermissionDeniedError,
 )
-from src.services.hitl_webhook_service import (
+from src.services.hitl.webhook import (
     HITLWebhookService,
     HITLWebhookServiceError,
     HITLWebhookNotFoundError,

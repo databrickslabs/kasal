@@ -30,7 +30,7 @@ from src.schemas.hitl import (
     HITLWebhookResponse,
     HITLWebhookUpdate,
 )
-from src.services.hitl_service import (
+from src.services.hitl.service import (
     HITLApprovalAlreadyProcessedError,
     HITLApprovalExpiredError,
     HITLApprovalNotFoundError,
@@ -38,7 +38,7 @@ from src.services.hitl_service import (
     HITLService,
     HITLServiceError,
 )
-from src.services.hitl_webhook_service import (
+from src.services.hitl.webhook import (
     HITLWebhookNotFoundError,
     HITLWebhookService,
     HITLWebhookServiceError,

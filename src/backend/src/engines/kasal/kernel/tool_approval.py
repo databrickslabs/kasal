@@ -82,7 +82,7 @@ async def _create_approval(
     gate_config: Dict[str, Any],
 ) -> Optional[str]:
     from src.db.session import request_scoped_session
-    from src.services.hitl_service import HITLService
+    from src.services.hitl.service import HITLService
 
     async with request_scoped_session() as session:
         service = HITLService(session)
@@ -139,43 +139,9 @@ async def _approval_status(approval_id: str) -> Optional[str]:
         return status.value if hasattr(status, "value") else str(status)
 
 
-async def _notify_sse(execution_id: str, payload: Dict[str, Any]) -> None:
-    from src.core.sse_manager import SSEEvent, sse_manager
-
-    # skip_replay: a replayed hitl_request after a reconnect would pop stale
-    # (often already-expired) gates. The DB row + GET /hitl/pending are the
-    # durable source of truth for clients that missed the live event.
-    await sse_manager.broadcast_to_job(
-        execution_id,
-        SSEEvent(data=payload, event="hitl_request"),
-        skip_replay=True,
-    )
-
-
-def _notify(execution_id: str, payload: Dict[str, Any]) -> None:
-    """Notify the UI that input is needed — path-appropriate transport."""
-    if os.environ.get("CREW_SUBPROCESS_MODE", "").lower() == "true":
-        # Subprocess: the parent's relay turns this frame into the same SSE
-        # event. The DB row stays the source of truth (pipe drops on full).
-        try:
-            from src.services import execution_event_pipe
-
-            writer = execution_event_pipe._active_writer
-            if writer is not None:
-                writer._put({"kind": "hitl_request", **payload})
-        except Exception as pipe_err:  # noqa: BLE001
-            logger.debug(f"[tool_approval] pipe notify skipped: {pipe_err}")
-        return
-    try:
-        from src.services.tools.async_bridge import run_async_with_context
-
-        run_async_with_context(_notify_sse(execution_id, payload), timeout=10)
-    except Exception as sse_err:  # noqa: BLE001
-        logger.debug(f"[tool_approval] SSE notify skipped: {sse_err}")
-
-
 def make_tool_approval_hook(execution_id: str, group_context: Optional[GroupContext]):
     """Build the pre-execution hook for one execution's tool calls."""
+    from src.services.hitl.notify import notify_input_needed
     from src.services.tools.async_bridge import run_async_with_context
 
     group_id = getattr(group_context, "primary_group_id", None) or "default"
@@ -239,7 +205,7 @@ def make_tool_approval_hook(execution_id: str, group_context: Optional[GroupCont
             f"[tool_approval] execution {execution_id}: '{tool_name}' waiting "
             f"for approval {approval_id} (timeout {timeout_seconds}s)"
         )
-        _notify(execution_id, {
+        notify_input_needed(execution_id, {
             "job_id": execution_id,
             "approval_id": approval_id,
             **gate_config,

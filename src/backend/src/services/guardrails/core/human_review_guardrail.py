@@ -50,7 +50,7 @@ class HumanReviewGuardrail:
 
     async def _create(self, raw_output: str) -> Optional[str]:
         from src.db.session import request_scoped_session
-        from src.services.hitl_service import HITLService
+        from src.services.hitl.service import HITLService
 
         gate_config = {
             "kind": "task_review",
@@ -106,7 +106,7 @@ class HumanReviewGuardrail:
     # ------------------------------ guardrail ------------------------------
 
     def __call__(self, task_output: Any) -> Tuple[bool, Any]:
-        from src.engines.kasal.kernel.tool_approval import _notify
+        from src.services.hitl.notify import notify_input_needed
         from src.services.tools.async_bridge import run_async_with_context
 
         raw = getattr(task_output, "raw", None)
@@ -126,7 +126,7 @@ class HumanReviewGuardrail:
             f"[task_review] execution {self.execution_id}: task "
             f"'{self.task_name}' waiting for approval {approval_id}"
         )
-        _notify(self.execution_id, {
+        notify_input_needed(self.execution_id, {
             "job_id": self.execution_id,
             "approval_id": approval_id,
             "kind": "task_review",

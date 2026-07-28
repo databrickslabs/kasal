@@ -9,7 +9,7 @@ import pytest
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
 
-from src.services.hitl_webhook_service import (
+from src.services.hitl.webhook import (
     HITLWebhookService,
     HITLWebhookServiceError,
     HITLWebhookNotFoundError,
@@ -108,8 +108,8 @@ class TestHITLWebhookServiceInit:
     """Tests for HITLWebhookService initialization."""
 
     def test_creates_webhook_repo_if_none(self, mock_session):
-        with patch("src.services.hitl_webhook_service.HITLWebhookRepository") as MockRepo:
-            with patch("src.services.hitl_webhook_service.HITLApprovalRepository"):
+        with patch("src.services.hitl.webhook.HITLWebhookRepository") as MockRepo:
+            with patch("src.services.hitl.webhook.HITLApprovalRepository"):
                 svc = HITLWebhookService(session=mock_session)
         MockRepo.assert_called_once_with(mock_session)
 
@@ -349,7 +349,7 @@ class TestSendWebhook:
         mock_response.is_success = True
         mock_response.status_code = 200
 
-        with patch("src.services.hitl_webhook_service.httpx.AsyncClient") as MockClient:
+        with patch("src.services.hitl.webhook.httpx.AsyncClient") as MockClient:
             instance = AsyncMock()
             instance.post = AsyncMock(return_value=mock_response)
             MockClient.return_value.__aenter__ = AsyncMock(return_value=instance)
@@ -372,7 +372,7 @@ class TestSendWebhook:
         mock_response.status_code = 400
         mock_response.text = "Bad Request"
 
-        with patch("src.services.hitl_webhook_service.httpx.AsyncClient") as MockClient:
+        with patch("src.services.hitl.webhook.httpx.AsyncClient") as MockClient:
             instance = AsyncMock()
             instance.post = AsyncMock(return_value=mock_response)
             MockClient.return_value.__aenter__ = AsyncMock(return_value=instance)
@@ -390,7 +390,7 @@ class TestSendWebhook:
         payload = MagicMock()
         payload.model_dump.return_value = {}
 
-        with patch("src.services.hitl_webhook_service.httpx.AsyncClient") as MockClient:
+        with patch("src.services.hitl.webhook.httpx.AsyncClient") as MockClient:
             instance = AsyncMock()
             instance.post = AsyncMock(side_effect=httpx.TimeoutException("timed out"))
             MockClient.return_value.__aenter__ = AsyncMock(return_value=instance)
@@ -408,7 +408,7 @@ class TestSendWebhook:
         payload = MagicMock()
         payload.model_dump.return_value = {}
 
-        with patch("src.services.hitl_webhook_service.httpx.AsyncClient") as MockClient:
+        with patch("src.services.hitl.webhook.httpx.AsyncClient") as MockClient:
             instance = AsyncMock()
             instance.post = AsyncMock(side_effect=httpx.RequestError("connection refused"))
             MockClient.return_value.__aenter__ = AsyncMock(return_value=instance)
@@ -434,7 +434,7 @@ class TestSendWebhook:
             captured_headers.update(headers)
             return mock_response
 
-        with patch("src.services.hitl_webhook_service.httpx.AsyncClient") as MockClient:
+        with patch("src.services.hitl.webhook.httpx.AsyncClient") as MockClient:
             instance = AsyncMock()
             instance.post = capture_post
             MockClient.return_value.__aenter__ = AsyncMock(return_value=instance)
@@ -460,7 +460,7 @@ class TestSendWebhook:
             captured_headers.update(headers)
             return mock_response
 
-        with patch("src.services.hitl_webhook_service.httpx.AsyncClient") as MockClient:
+        with patch("src.services.hitl.webhook.httpx.AsyncClient") as MockClient:
             instance = AsyncMock()
             instance.post = capture_post
             MockClient.return_value.__aenter__ = AsyncMock(return_value=instance)

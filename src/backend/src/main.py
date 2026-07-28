@@ -365,7 +365,7 @@ async def lifespan(app: FastAPI):
     hitl_timeout_started = False
     if db_initialized:
         try:
-            from src.services.hitl_timeout_service import start_hitl_timeout_service
+            from src.services.hitl.timeout import start_hitl_timeout_service
 
             await start_hitl_timeout_service()
             hitl_timeout_started = True
@@ -449,7 +449,7 @@ async def lifespan(app: FastAPI):
         if "hitl_timeout_started" in locals() and hitl_timeout_started:
             system_logger.info("Stopping HITL timeout service...")
             try:
-                from src.services.hitl_timeout_service import stop_hitl_timeout_service
+                from src.services.hitl.timeout import stop_hitl_timeout_service
 
                 await stop_hitl_timeout_service()
                 system_logger.info("HITL timeout service stopped successfully.")

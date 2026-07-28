@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.exc import SQLAlchemyError
 
-from src.services.hitl_service import (
+from src.services.hitl.service import (
     HITLService,
     HITLServiceError,
     HITLApprovalNotFoundError,
@@ -223,8 +223,8 @@ class TestHITLServiceInit:
 
     def test_init_with_session_only(self, mock_session):
         """Test initialization with session creates default repositories."""
-        with patch('src.services.hitl_service.HITLApprovalRepository') as mock_repo_class, \
-             patch('src.services.hitl_service.HITLWebhookRepository') as mock_webhook_class:
+        with patch('src.services.hitl.service.HITLApprovalRepository') as mock_repo_class, \
+             patch('src.services.hitl.service.HITLWebhookRepository') as mock_webhook_class:
             service = HITLService(session=mock_session)
 
             mock_repo_class.assert_called_once_with(mock_session)

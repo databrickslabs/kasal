@@ -651,8 +651,8 @@ class TestFlowMethodFactoryCreateHitlGate:
 
         with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
              patch("src.repositories.hitl_repository.HITLApprovalRepository") as MockRepo, \
-             patch("src.services.hitl_service.HITLService") as MockHITLSvc, \
-             patch("src.services.hitl_webhook_service.HITLWebhookService") as MockWebhook:
+             patch("src.services.hitl.service.HITLService") as MockHITLSvc, \
+             patch("src.services.hitl.webhook.HITLWebhookService") as MockWebhook:
 
             repo_instance = MagicMock()
             repo_instance.get_all_for_execution = AsyncMock(return_value=[])
@@ -701,8 +701,8 @@ class TestFlowMethodFactoryCreateHitlGate:
 
         with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
              patch("src.repositories.hitl_repository.HITLApprovalRepository") as MockRepo, \
-             patch("src.services.hitl_service.HITLService") as MockHITLSvc, \
-             patch("src.services.hitl_webhook_service.HITLWebhookService") as MockWebhook:
+             patch("src.services.hitl.service.HITLService") as MockHITLSvc, \
+             patch("src.services.hitl.webhook.HITLWebhookService") as MockWebhook:
 
             repo_instance = MagicMock()
             repo_instance.get_all_for_execution = AsyncMock(return_value=[])
