@@ -463,26 +463,46 @@ def _tree_snapshot(root):
     return found
 
 
-@pytest.fixture(scope="session", autouse=True)
-def no_source_tree_pollution():
+_pollution_snapshot: set = set()
+
+
+def pytest_configure(config):
+    """Snapshot the tree once, on the controller, before anything runs."""
+    global _pollution_snapshot
+    if hasattr(config, "workerinput"):
+        return  # an xdist worker; the controller owns this check
+    if os.environ.get("KASAL_ALLOW_TEST_ARTIFACTS") == "1":
+        return
+    import pathlib
+
+    _pollution_snapshot = _tree_snapshot(pathlib.Path(__file__).resolve().parent.parent)
+
+
+def pytest_sessionfinish(session, exitstatus):
     """Fail the run if it wrote anything outside tests/.artifacts/.
 
-    Opt out with KASAL_ALLOW_TEST_ARTIFACTS=1 when you are deliberately
-    generating fixtures.
+    A hook rather than a fixture, and only on the controller. As a
+    session-scoped fixture this ran once PER XDIST WORKER, so each worker saw
+    every other worker's log writes as new files and failed — intermittently,
+    and attributed to whichever test happened to be last. A guard that cries
+    wolf gets deleted, so it runs exactly once, where it can see the whole run.
     """
     import pathlib
 
+    if hasattr(session.config, "workerinput"):
+        return
     if os.environ.get("KASAL_ALLOW_TEST_ARTIFACTS") == "1":
-        yield
+        return
+    if not _pollution_snapshot:
         return
 
-    root = pathlib.Path(__file__).resolve().parent.parent  # src/backend
-    before = _tree_snapshot(root)
-    yield
-    created = sorted(_tree_snapshot(root) - before)
-    assert not created, (
-        "the test run created files outside tests/.artifacts/:\n  "
-        + "\n  ".join(created)
-        + "\n\nPoint whatever wrote them at tests/.artifacts (see the env vars at "
-          "the top of tests/conftest.py), or use tmp_path."
+    created = sorted(
+        _tree_snapshot(pathlib.Path(__file__).resolve().parent.parent) - _pollution_snapshot
     )
+    if created:
+        raise pytest.UsageError(
+            "the test run created files outside tests/.artifacts/:\n  "
+            + "\n  ".join(created)
+            + "\n\nPoint whatever wrote them at tests/.artifacts (see the env vars "
+              "at the top of tests/conftest.py), or use tmp_path."
+        )
