@@ -22,6 +22,9 @@ class _Ctx:
     def __init__(self, group_ids=("acme_corp",)):
         self.group_ids = list(group_ids)
         self.group_email = "agent@example.com"
+        self.user_role = "admin"
+        self.highest_role = "admin"
+        self.current_user = None
         self.access_token = "tok"
 
     @property
@@ -43,7 +46,7 @@ class TestSendMessage:
     @pytest.mark.asyncio
     async def test_starts_the_named_skill(self):
         publication = PublishedCapability(
-            crew_id="c1", name="acme_report", description="d"
+            entity_id="c1", name="acme_report", description="d"
         )
         with (
             patch("src.services.a2a.tasks.PublicationService") as svc,
@@ -67,7 +70,7 @@ class TestSendMessage:
     @pytest.mark.asyncio
     async def test_returns_immediately_rather_than_waiting(self):
         """Crew runs take minutes; SendMessage must hand back a handle."""
-        publication = PublishedCapability(crew_id="c1", name="x", description="d")
+        publication = PublishedCapability(entity_id="c1", name="x", description="d")
         with (
             patch("src.services.a2a.tasks.PublicationService") as svc,
             patch(

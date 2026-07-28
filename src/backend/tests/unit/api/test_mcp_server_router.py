@@ -44,6 +44,11 @@ def _resolved(group_ids=("acme_corp",)):
         def __init__(self):
             self.group_ids = list(group_ids)
             self.group_email = "caller@example.com"
+            # The surfaces resolve an effective role now; a context without one
+            # is not a caller the app would ever produce.
+            self.user_role = "admin"
+            self.highest_role = "admin"
+            self.current_user = None
 
         @property
         def primary_group_id(self):
@@ -145,7 +150,7 @@ class TestResolvedCaller:
             publications.return_value.list_capabilities = AsyncMock(
                 return_value=[
                     PublishedCapability(
-                        crew_id="c1",
+                        entity_id="c1",
                         name="analyse_powerbi_model",
                         description="Analyse a PowerBI semantic model.",
                     )

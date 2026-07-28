@@ -21,6 +21,9 @@ class _Ctx:
     def __init__(self, token="tok-123", group_ids=("acme_corp",)):
         self.group_ids = list(group_ids)
         self.group_email = "caller@example.com"
+        self.user_role = "admin"
+        self.highest_role = "admin"
+        self.current_user = None
         self.access_token = token
 
     @property

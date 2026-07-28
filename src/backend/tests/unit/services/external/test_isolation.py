@@ -32,6 +32,9 @@ class _Ctx:
     def __init__(self, group_ids, email="user@example.com"):
         self.group_ids = list(group_ids)
         self.group_email = email
+        self.user_role = "admin"
+        self.highest_role = "admin"
+        self.current_user = None
 
     @property
     def primary_group_id(self):
@@ -120,7 +123,7 @@ class TestNameResolutionIsGroupScoped:
     @pytest.mark.asyncio
     async def test_resolves_own_capability(self, seeded):
         row = await seeded.resolve_capability(_caller([ACME]), "acme_report")
-        assert row is not None and row.crew_id == "crew-acme"
+        assert row is not None and row.entity_id == "crew-acme"
 
     @pytest.mark.asyncio
     async def test_cannot_resolve_another_tenants_name(self, seeded):
@@ -256,5 +259,5 @@ class TestWritesAreGroupScoped:
 
         acme = await svc.resolve_capability(_caller([ACME]), "shared_name")
         globex = await svc.resolve_capability(_caller([GLOBEX]), "shared_name")
-        assert acme.crew_id == f"crew-{ACME}"
-        assert globex.crew_id == f"crew-{GLOBEX}"
+        assert acme.entity_id == f"crew-{ACME}"
+        assert globex.entity_id == f"crew-{GLOBEX}"

@@ -24,6 +24,9 @@ class _Ctx:
     def __init__(self, group_ids=("acme_corp",)):
         self.group_ids = list(group_ids)
         self.group_email = "caller@example.com"
+        self.user_role = "admin"
+        self.highest_role = "admin"
+        self.current_user = None
         self.access_token = "tok"
 
     @property
@@ -39,13 +42,13 @@ def _caller(protocol):
 
 _CAPABILITIES = [
     PublishedCapability(
-        crew_id="c1",
+        entity_id="c1",
         name="analyse_powerbi_model",
         description="Analyse a PowerBI semantic model and report on it.",
         input_schema={"type": "object", "properties": {"model": {"type": "string"}}},
     ),
     PublishedCapability(
-        crew_id="c2",
+        entity_id="c2",
         name="quarterly_review",
         description="Produce the quarterly review pack.",
     ),
@@ -157,7 +160,7 @@ class TestLayerTwoMatchesSkills:
         from src.services.mcp_server.server import list_tools
 
         clash = PublishedCapability(
-            crew_id="c9", name="start_crew", description="A crew named like a tool."
+            entity_id="c9", name="start_crew", description="A crew named like a tool."
         )
         with patch("src.services.mcp_server.tools.PublicationService") as mcp_svc:
             mcp_svc.return_value.list_capabilities = AsyncMock(return_value=[clash])

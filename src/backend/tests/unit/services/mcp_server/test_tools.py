@@ -19,6 +19,9 @@ class _Ctx:
     def __init__(self, group_ids):
         self.group_ids = list(group_ids)
         self.group_email = "caller@example.com"
+        self.user_role = "admin"
+        self.highest_role = "admin"
+        self.current_user = None
 
     @property
     def primary_group_id(self):
@@ -78,7 +81,9 @@ class TestDispatch:
         from src.services.external.invocation import InvocationResult
         from src.services.external.state import ExternalTaskState
 
-        publication = MagicMock(external_name="acme_report", crew_id="c1")
+        publication = MagicMock(
+            external_name="acme_report", entity_type="crew", entity_id="c1"
+        )
         with (
             patch("src.services.mcp_server.tools.PublicationService") as publications,
             patch(
@@ -133,7 +138,7 @@ class TestListCrews:
 
         fake = [
             PublishedCapability(
-                crew_id="c1", name="acme_report", description="Quarterly report."
+                entity_id="c1", name="acme_report", description="Quarterly report."
             )
         ]
         with patch("src.services.mcp_server.tools.PublicationService") as service_cls:

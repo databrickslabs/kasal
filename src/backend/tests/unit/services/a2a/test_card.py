@@ -18,6 +18,9 @@ class _Ctx:
     def __init__(self, group_ids=("acme_corp",)):
         self.group_ids = list(group_ids)
         self.group_email = "agent@example.com"
+        self.user_role = "admin"
+        self.highest_role = "admin"
+        self.current_user = None
         self.access_token = "tok"
 
     @property
@@ -45,7 +48,7 @@ class TestSkills:
         card = await _build(
             [
                 PublishedCapability(
-                    crew_id="c1",
+                    entity_id="c1",
                     name="analyse_powerbi_model",
                     description="Analyse a PowerBI semantic model.",
                 )
@@ -65,7 +68,7 @@ class TestSkills:
         card = await _build(
             [
                 PublishedCapability(
-                    crew_id="c1", name="x", description="d", input_schema=schema
+                    entity_id="c1", name="x", description="d", input_schema=schema
                 )
             ]
         )

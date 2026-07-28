@@ -294,7 +294,16 @@ async def start_run(
     caller.obo_token()
 
     entity_type = getattr(publication, "entity_type", "crew") or "crew"
-    entity_id = str(getattr(publication, "entity_id", None) or publication.crew_id)
+    # entity_id on the model; crew_id only on the older schema objects. Reading
+    # `.crew_id` off a Publication raises AttributeError — the column was
+    # renamed when flows became publishable, and only the CLASS kept an alias.
+    entity_id = str(
+        getattr(publication, "entity_id", None)
+        or getattr(publication, "crew_id", "")
+        or ""
+    )
+    if not entity_id:
+        raise ValueError("Publication carries no entity id")
 
     # Flows run on their own path with their own service. Branching HERE, rather
     # than threading entity_type down into a crew config, keeps the difference

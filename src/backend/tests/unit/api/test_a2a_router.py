@@ -46,6 +46,9 @@ def _resolved(group_ids=("acme_corp",)):
             self.group_ids = list(group_ids)
             self.group_email = "agent@example.com"
             self.access_token = "tok"
+            self.user_role = "admin"
+            self.highest_role = "admin"
+            self.current_user = None
 
         @property
         def primary_group_id(self):
