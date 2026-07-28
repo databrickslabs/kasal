@@ -13,7 +13,6 @@ import uuid
 from typing import Any, Dict, List, Optional, Union
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
 from src.core.logger import LoggerManager
 from src.models.execution_history import ExecutionHistory
@@ -97,10 +96,7 @@ class FlowExecutionService:
             logger.info(f"Generated default run_name: {run_name}")
 
         # Check if an execution record already exists (created by execution_service.py)
-        existing_execution = await self.session.execute(
-            select(ExecutionHistory).where(ExecutionHistory.job_id == job_id)
-        )
-        execution = existing_execution.scalar_one_or_none()
+        execution = await self.execution_repo.get_execution_by_job_id(job_id)
 
         if execution:
             # Update existing record with flow-specific fields
@@ -144,13 +140,7 @@ class FlowExecutionService:
         Returns:
             ExecutionHistory instance or None if not found
         """
-        result = await self.session.execute(
-            select(ExecutionHistory).where(
-                ExecutionHistory.id == execution_id,
-                ExecutionHistory.execution_type == "flow"
-            )
-        )
-        return result.scalar_one_or_none()
+        return await self.execution_repo.get_by_id_and_type(execution_id, "flow")
 
     async def get_execution_by_job_id(self, job_id: str) -> Optional[ExecutionHistory]:
         """
@@ -162,13 +152,7 @@ class FlowExecutionService:
         Returns:
             ExecutionHistory instance or None if not found
         """
-        result = await self.session.execute(
-            select(ExecutionHistory).where(
-                ExecutionHistory.job_id == job_id,
-                ExecutionHistory.execution_type == "flow"
-            )
-        )
-        return result.scalar_one_or_none()
+        return await self.execution_repo.get_by_job_id_and_type(job_id, "flow")
 
     async def get_executions_by_flow(
         self,
@@ -186,13 +170,7 @@ class FlowExecutionService:
         if isinstance(flow_id, str):
             flow_id = uuid.UUID(flow_id)
 
-        result = await self.session.execute(
-            select(ExecutionHistory).where(
-                ExecutionHistory.flow_id == flow_id,
-                ExecutionHistory.execution_type == "flow"
-            ).order_by(ExecutionHistory.created_at.desc())
-        )
-        return list(result.scalars().all())
+        return await self.execution_repo.get_by_flow_id_and_type(flow_id, "flow")
 
     async def update_execution_status(
         self,

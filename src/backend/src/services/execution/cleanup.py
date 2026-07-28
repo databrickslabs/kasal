@@ -9,11 +9,11 @@ import json
 import logging
 from typing import List, Optional
 
-from sqlalchemy import text
-
 from src.models.execution_status import ExecutionStatus
 from src.services.execution.status import ExecutionStatusService
 from src.repositories.execution_repository import ExecutionRepository
+from src.repositories.execution_history_repository import ExecutionHistoryRepository
+from src.repositories.execution_trace_repository import ExecutionTraceRepository
 from src.db.session import async_session_factory
 
 logger = logging.getLogger(__name__)
@@ -91,28 +91,24 @@ class ExecutionCleanupService:
         recovered = 0
         try:
             async with async_session_factory() as db:
-                result = await db.execute(text(
-                    "SELECT job_id FROM executionhistory WHERE status = 'RUNNING'"
-                ))
-                running_job_ids = [row[0] for row in result.fetchall()]
+                history_repo = ExecutionHistoryRepository(db)
+                running_job_ids = await history_repo.get_job_ids_by_statuses(["RUNNING"])
 
             for job_id in running_job_ids:
                 # Check whether the crew actually completed
                 async with async_session_factory() as db:
-                    trace = await db.execute(text(
-                        "SELECT output FROM execution_trace "
-                        "WHERE job_id = :job_id AND event_type = 'crew_completed' "
-                        "ORDER BY created_at DESC LIMIT 1"
-                    ), {"job_id": job_id})
-                    row = trace.fetchone()
+                    trace_repo = ExecutionTraceRepository(db)
+                    found, output = await trace_repo.has_completed_trace(
+                        job_id, "crew_completed"
+                    )
 
-                if not row:
+                if not found:
                     continue  # No completion trace → still running, leave it
 
                 # Crew finished but status update failed — recover it
                 final_result: Optional[str] = None
-                if row[0]:
-                    raw = row[0]
+                if output:
+                    raw = output
                     if isinstance(raw, dict):
                         final_result = raw.get("content")
                     else:

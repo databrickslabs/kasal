@@ -18,13 +18,12 @@ import asyncio
 import logging
 from typing import Dict, Optional, Set
 
-from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.sse_manager import sse_manager, SSEEvent
 from src.db.session import async_session_factory
-from src.models.execution_trace import ExecutionTrace
-from src.models.execution_history import ExecutionHistory
+from src.repositories.execution_trace_repository import ExecutionTraceRepository
+from src.repositories.execution_history_repository import ExecutionHistoryRepository
 from src.services.execution.event_pipe import suppresses_poller_broadcast
 
 logger = logging.getLogger(__name__)
@@ -108,12 +107,9 @@ class TraceBroadcastService:
             from src.utils.asyncio_utils import execute_db_operation_smart
 
             async def _query(s: AsyncSession) -> Set[str]:
-                query = (
-                    select(ExecutionHistory.job_id)
-                    .where(ExecutionHistory.status.in_(["RUNNING", "running"]))
-                )
-                result = await s.execute(query)
-                return {row[0] for row in result.fetchall() if row[0]}
+                repo = ExecutionHistoryRepository(s)
+                job_ids = await repo.get_job_ids_by_statuses(["RUNNING", "running"])
+                return set(job_ids)
 
             return await execute_db_operation_smart(_query)
         except Exception as e:
@@ -158,15 +154,11 @@ class TraceBroadcastService:
                 return
             # Initialize tracking for new jobs - start from current max ID
             # This avoids re-broadcasting traces that the initial fetch already loaded
+            trace_repo = ExecutionTraceRepository(session)
             for job_id in active_jobs:
                 if job_id not in self._last_trace_ids:
                     # Query for the current max trace ID for this job
-                    from sqlalchemy import func
-                    max_id_query = select(func.max(ExecutionTrace.id)).where(
-                        ExecutionTrace.job_id == job_id
-                    )
-                    result = await session.execute(max_id_query)
-                    max_id = result.scalar() or 0
+                    max_id = await trace_repo.get_max_id_for_job(job_id)
                     self._last_trace_ids[job_id] = max_id
                     logger.info(f"[TraceBroadcastService] Started tracking job {job_id} from trace_id={max_id}")
 
@@ -194,20 +186,8 @@ class TraceBroadcastService:
             # Query for traces newer than last_id
             # Using id > last_id is sufficient to avoid re-broadcasting
             # No time filter needed - avoids timezone issues between subprocess and main process
-            query = (
-                select(ExecutionTrace)
-                .where(
-                    and_(
-                        ExecutionTrace.job_id == job_id,
-                        ExecutionTrace.id > last_id
-                    )
-                )
-                .order_by(ExecutionTrace.id.asc())
-                .limit(50)  # Batch limit to avoid overwhelming
-            )
-
-            result = await session.execute(query)
-            traces = result.scalars().all()
+            trace_repo = ExecutionTraceRepository(session)
+            traces = await trace_repo.get_after_id(job_id, last_id, limit=50)
 
             if traces:
                 logger.info(f"[TraceBroadcastService] Found {len(traces)} new traces for job {job_id}")

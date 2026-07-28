@@ -667,6 +667,71 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             logger.error(f"Database error deleting traces older than {cutoff}: {str(e)}")
             raise
 
+    async def get_max_id_for_job(self, job_id: str) -> int:
+        """Highest trace id recorded for a job, or 0 if none exist.
+
+        Used to seed the SSE trace poller's cursor when it starts tracking a
+        job, so it doesn't re-broadcast traces the initial page load already
+        fetched.
+        """
+        result = await self.session.execute(
+            select(func.max(ExecutionTrace.id)).where(ExecutionTrace.job_id == job_id)
+        )
+        return result.scalar() or 0
+
+    async def get_after_id(
+        self, job_id: str, after_id: int, limit: int = 50
+    ) -> List[ExecutionTrace]:
+        """New traces for a job since a cursor, oldest first, capped.
+
+        Deliberately its own method rather than reusing ``get_by_job_id``'s
+        ``since_id`` parameter: that parameter is falsy-checked (``if
+        since_id:``), so a cursor of exactly 0 would skip the filter and
+        replay the job's entire trace history every poll interval. The SSE
+        poller's cursor legitimately starts at 0, so the filter here is
+        unconditional (``id > after_id``) instead.
+        """
+        stmt = (
+            select(ExecutionTrace)
+            .where(
+                ExecutionTrace.job_id == job_id,
+                ExecutionTrace.id > after_id,
+            )
+            .order_by(ExecutionTrace.id.asc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def has_completed_trace(
+        self, job_id: str, event_type: str = "crew_completed"
+    ) -> Tuple[bool, Optional[Any]]:
+        """Whether a completion span exists for a job, and its output if so.
+
+        Zombie-job recovery needs to distinguish "no crew_completed span yet"
+        (still genuinely running — leave it alone) from "span exists but its
+        output happens to be empty" (crew finished with nothing to report —
+        still safe to mark COMPLETED). A plain ``Optional[output]`` return
+        can't carry that distinction since both cases are falsy.
+
+        Returns:
+            (True, output) for the most recent event_type span, or
+            (False, None) if the job has no such span at all.
+        """
+        result = await self.session.execute(
+            select(ExecutionTrace.output)
+            .where(
+                ExecutionTrace.job_id == job_id,
+                ExecutionTrace.event_type == event_type,
+            )
+            .order_by(ExecutionTrace.created_at.desc())
+            .limit(1)
+        )
+        row = result.first()
+        if row is None:
+            return False, None
+        return True, row[0]
+
     async def get_crew_checkpoints_by_job_id(self, job_id: str) -> List[Dict[str, Any]]:
         """
         Get crew checkpoint information from traces for a specific job.

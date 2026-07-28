@@ -6,15 +6,17 @@ This module provides database operations for execution history models.
 
 import logging
 from datetime import datetime
-from typing import Tuple, List, Optional, Dict, Any
+from typing import Tuple, List, Optional, Dict, Any, Union
+from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import distinct, func
 from sqlalchemy.future import select
-from sqlalchemy import desc, func, delete
+from sqlalchemy import desc, func, delete, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.models.execution_history import ExecutionHistory, TaskStatus, ErrorTrace
 from src.models.execution_trace import ExecutionTrace
+from src.models.execution_status import ExecutionStatus
 from src.models.billing import LLMUsageBilling
 # Removed async_session_factory import - using injected session only
 
@@ -997,6 +999,118 @@ class ExecutionHistoryRepository:
                 exc_info=True,
             )
             return False
+
+    async def get_task_statuses_by_job_id(self, job_id: str) -> List[TaskStatus]:
+        """All TaskStatus rows for a job.
+
+        Used by the status-detail endpoint to compute task-progress counters
+        while a run is RUNNING/STOPPING. ``taskstatus.job_id`` FKs to
+        ``executionhistory.job_id``, so this table belongs to this repository
+        even though the caller is interested in progress, not history rows.
+        """
+        result = await self.session.execute(
+            select(TaskStatus).where(TaskStatus.job_id == job_id)
+        )
+        return list(result.scalars().all())
+
+    async def get_job_ids_by_statuses(self, statuses: List[str]) -> List[str]:
+        """Job ids currently in any of the given statuses, unfiltered by group.
+
+        Shared by two system-level background sweeps rather than tenant
+        requests: zombie-job recovery (looking for stuck RUNNING jobs) and the
+        trace SSE poller (finding jobs to watch when only the global stream
+        has listeners). Neither runs on behalf of one tenant, so there is no
+        group scoping here — callers must not expose this beyond that context.
+        """
+        result = await self.session.execute(
+            select(ExecutionHistory.job_id).where(ExecutionHistory.status.in_(statuses))
+        )
+        return [row[0] for row in result.fetchall() if row[0]]
+
+    async def get_by_id_and_type(
+        self, execution_id: int, execution_type: str
+    ) -> Optional[ExecutionHistory]:
+        """Single execution row scoped by both PK and execution_type.
+
+        The three execution paths (agent/crew/flow) share this table; the
+        flow-builder service filters on execution_type as well as id so it
+        never picks up a row created under a different path.
+        """
+        stmt = select(ExecutionHistory).where(
+            ExecutionHistory.id == execution_id,
+            ExecutionHistory.execution_type == execution_type,
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_by_job_id_and_type(
+        self, job_id: str, execution_type: str
+    ) -> Optional[ExecutionHistory]:
+        """Same lookup as ``get_execution_by_job_id`` but also scoped to execution_type."""
+        stmt = select(ExecutionHistory).where(
+            ExecutionHistory.job_id == job_id,
+            ExecutionHistory.execution_type == execution_type,
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_by_flow_id_and_type(
+        self, flow_id: Union[UUID, str], execution_type: str
+    ) -> List[ExecutionHistory]:
+        """All executions for one flow, newest first, scoped to execution_type."""
+        stmt = (
+            select(ExecutionHistory)
+            .where(
+                ExecutionHistory.flow_id == flow_id,
+                ExecutionHistory.execution_type == execution_type,
+            )
+            .order_by(ExecutionHistory.created_at.desc())
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def mark_stopping(
+        self, job_id: str, reason: Optional[str], requested_by: Optional[str]
+    ) -> None:
+        """Flip an execution to STOPPING and record who asked and why.
+
+        A bulk UPDATE rather than select-then-mutate: ``stop_execution`` races
+        the subprocess that owns this row while it attempts to terminate it,
+        so the write stays as narrow as possible instead of loading the ORM
+        object into this session too.
+        """
+        await self.session.execute(
+            update(ExecutionHistory)
+            .where(ExecutionHistory.job_id == job_id)
+            .values(
+                status=ExecutionStatus.STOPPING.value,
+                is_stopping=True,
+                stop_reason=reason,
+                stop_requested_by=requested_by,
+            )
+        )
+
+    async def mark_stopped(self, job_id: str, partial_results: Optional[Any]) -> None:
+        """Final transition to STOPPED once termination has been attempted."""
+        await self.session.execute(
+            update(ExecutionHistory)
+            .where(ExecutionHistory.job_id == job_id)
+            .values(
+                status=ExecutionStatus.STOPPED.value,
+                is_stopping=False,
+                stopped_at=datetime.utcnow(),
+                partial_results=partial_results,
+            )
+        )
+
+    async def mark_stop_failed(self, job_id: str, error_message: str) -> None:
+        """Clear is_stopping and record the error when a stop attempt itself
+        raises, so the row doesn't get stuck showing "stopping" forever."""
+        await self.session.execute(
+            update(ExecutionHistory)
+            .where(ExecutionHistory.job_id == job_id)
+            .values(is_stopping=False, error=error_message)
+        )
 
     async def delete_older_than(self, cutoff: datetime) -> Dict[str, int]:
         """

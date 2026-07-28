@@ -18,12 +18,11 @@ import asyncio
 import logging
 from typing import Dict, Optional, Set
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.sse_manager import sse_manager, SSEEvent
 from src.db.session import async_session_factory
-from src.models.execution_history import ExecutionHistory
+from src.repositories.execution_history_repository import ExecutionHistoryRepository
 
 logger = logging.getLogger(__name__)
 
@@ -134,9 +133,8 @@ class ExecutionBroadcastService:
         """
         try:
             # Query for current execution status
-            query = select(ExecutionHistory).where(ExecutionHistory.job_id == job_id)
-            result = await session.execute(query)
-            execution = result.scalar_one_or_none()
+            repo = ExecutionHistoryRepository(session)
+            execution = await repo.get_execution_by_job_id(job_id)
 
             if not execution:
                 return

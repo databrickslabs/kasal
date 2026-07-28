@@ -896,8 +896,6 @@ class ExecutionService:
             from src.repositories.execution_history_repository import (
                 ExecutionHistoryRepository,
             )
-            from src.models.execution_history import TaskStatus
-            from sqlalchemy import select
 
             if not self.session:
                 exec_logger.error("No database session available for getting execution status detail")
@@ -913,11 +911,7 @@ class ExecutionService:
 
             progress = None
             if execution.status in ["RUNNING", "STOPPING"]:
-                task_stmt = select(TaskStatus).where(
-                    TaskStatus.job_id == execution_id
-                )
-                task_result = await self.session.execute(task_stmt)
-                tasks = task_result.scalars().all()
+                tasks = await repository.get_task_statuses_by_job_id(execution_id)
 
                 if tasks:
                     completed = [t for t in tasks if t.status == "completed"]
@@ -1064,14 +1058,10 @@ class ExecutionService:
                         try:
                             # Use async query for the most recent flow from the database
                             from src.db.session import request_scoped_session
-                            from src.models.flow import Flow
-                            from sqlalchemy import select, desc
+                            from src.repositories.flow_repository import FlowRepository
 
                             async with request_scoped_session() as db:
-                                # Get the most recent flow using async query
-                                stmt = select(Flow).order_by(desc(Flow.created_at)).limit(1)
-                                result = await db.execute(stmt)
-                                most_recent_flow = result.scalars().first()
+                                most_recent_flow = await FlowRepository(db).get_most_recent()
 
                                 if most_recent_flow:
                                     flow_id = most_recent_flow.id
@@ -1667,8 +1657,7 @@ class ExecutionService:
         """
         from src.models.execution_status import ExecutionStatus
         from src.schemas.execution import StopExecutionResponse
-        from src.models.execution_history import ExecutionHistory
-        from sqlalchemy import update
+        from src.repositories.execution_history_repository import ExecutionHistoryRepository
         from datetime import datetime
 
         crew_logger.info(f"[STOP] ========== STOP EXECUTION CALLED ==========")
@@ -1677,26 +1666,15 @@ class ExecutionService:
         try:
             # Update execution status to STOPPING
             if db:
+                history_repo = ExecutionHistoryRepository(db)
+
                 # First set the is_stopping flag and status to STOPPING
-                update_stmt = (
-                    update(ExecutionHistory)
-                    .where(ExecutionHistory.job_id == execution_id)
-                    .values(
-                        status=ExecutionStatus.STOPPING.value,
-                        is_stopping=True,
-                        stop_reason=reason,
-                        stop_requested_by=requested_by
-                    )
-                )
-                await db.execute(update_stmt)
+                await history_repo.mark_stopping(execution_id, reason, requested_by)
                 await db.commit()
-                
+
                 # Get current execution state for partial results
-                from sqlalchemy import select
-                stmt = select(ExecutionHistory).where(ExecutionHistory.job_id == execution_id)
-                result = await db.execute(stmt)
-                execution = result.scalar_one_or_none()
-                
+                execution = await history_repo.get_execution_by_job_id(execution_id)
+
                 partial_results = None
                 if preserve_partial_results and execution:
                     partial_results = execution.result
@@ -1823,17 +1801,10 @@ class ExecutionService:
             
             # Final update to mark as STOPPED
             if db:
-                final_update_stmt = (
-                    update(ExecutionHistory)
-                    .where(ExecutionHistory.job_id == execution_id)
-                    .values(
-                        status=ExecutionStatus.STOPPED.value,
-                        is_stopping=False,
-                        stopped_at=datetime.utcnow(),
-                        partial_results=partial_results if preserve_partial_results else None
-                    )
+                await ExecutionHistoryRepository(db).mark_stopped(
+                    execution_id,
+                    partial_results if preserve_partial_results else None,
                 )
-                await db.execute(final_update_stmt)
                 await db.commit()
             
             return {
@@ -1849,15 +1820,9 @@ class ExecutionService:
             # Try to update status to indicate stop failed
             if db:
                 try:
-                    error_update_stmt = (
-                        update(ExecutionHistory)
-                        .where(ExecutionHistory.job_id == execution_id)
-                        .values(
-                            is_stopping=False,
-                            error=f"Failed to stop: {str(e)}"
-                        )
+                    await ExecutionHistoryRepository(db).mark_stop_failed(
+                        execution_id, f"Failed to stop: {str(e)}"
                     )
-                    await db.execute(error_update_stmt)
                     await db.commit()
                 except:
                     pass

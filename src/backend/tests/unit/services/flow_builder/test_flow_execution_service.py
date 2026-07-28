@@ -115,7 +115,7 @@ class TestFlowExecutionService:
         group_id = "group-123"
 
         # Mock no existing execution
-        mock_session.execute.return_value = MockScalarResult(None)
+        flow_execution_service.execution_repo.get_execution_by_job_id = AsyncMock(return_value=None)
 
         result = await flow_execution_service.create_execution(
             flow_id=flow_id,
@@ -136,7 +136,7 @@ class TestFlowExecutionService:
         mock_flow = MockFlow(id=flow_id, group_id="inherited-group")
 
         # Mock no existing execution
-        mock_session.execute.return_value = MockScalarResult(None)
+        flow_execution_service.execution_repo.get_execution_by_job_id = AsyncMock(return_value=None)
 
         # Patch where FlowRepository is imported (inside the function)
         with patch('src.repositories.flow_repository.FlowRepository') as MockFlowRepo:
@@ -162,7 +162,7 @@ class TestFlowExecutionService:
         job_id = "test-job-123"
 
         # Mock no existing execution
-        mock_session.execute.return_value = MockScalarResult(None)
+        flow_execution_service.execution_repo.get_execution_by_job_id = AsyncMock(return_value=None)
 
         await flow_execution_service.create_execution(
             flow_id=flow_id_str,
@@ -348,7 +348,7 @@ class TestFlowExecutionService:
         group_id = "tenant-abc"
 
         # Mock no existing execution
-        mock_session.execute.return_value = MockScalarResult(None)
+        flow_execution_service.execution_repo.get_execution_by_job_id = AsyncMock(return_value=None)
 
         await flow_execution_service.create_execution(
             flow_id=flow_id,
@@ -370,7 +370,9 @@ class TestFlowExecutionService:
         job_id = "existing-job"
 
         # Mock existing execution found
-        mock_session.execute.return_value = MockScalarResult(mock_execution)
+        flow_execution_service.execution_repo.get_execution_by_job_id = AsyncMock(
+            return_value=mock_execution
+        )
 
         await flow_execution_service.create_execution(
             flow_id=flow_id,

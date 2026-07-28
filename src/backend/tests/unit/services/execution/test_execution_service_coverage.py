@@ -644,19 +644,18 @@ class TestGetExecutionStatusDetail:
         task_running = SimpleNamespace(task_id="t1", status="running")
         task_completed = SimpleNamespace(task_id="t2", status="completed")
 
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [task_running, task_completed]
-        session.execute = AsyncMock(return_value=mock_result)
-
         mock_repo = AsyncMock()
         mock_repo.get_execution_by_job_id = AsyncMock(return_value=fake_exec)
-        # Patch select in the sqlalchemy module since it's imported locally
+        mock_repo.get_task_statuses_by_job_id = AsyncMock(
+            return_value=[task_running, task_completed]
+        )
         with _mock_exec_history_repo(mock_repo):
-            with patch("sqlalchemy.select", MagicMock(return_value=MagicMock())):
-                result = await svc.get_execution_status_detail("exec-1")
+            result = await svc.get_execution_status_detail("exec-1")
         assert result["status"] == "RUNNING"
-        if result["progress"]:
-            assert result["progress"]["total_tasks"] == 2
+        assert result["progress"]["total_tasks"] == 2
+        assert result["progress"]["completed_tasks"] == 1
+        assert result["progress"]["running_tasks"] == 1
+        assert result["progress"]["current_task"] == "t1"
 
     @pytest.mark.asyncio
     async def test_returns_none_on_exception(self):

@@ -52,17 +52,12 @@ _EXEMPT = (
 
 #: Files that already build queries. Shrink this; never add to it.
 _BASELINE = {
-    "services/execution/broadcast.py",
-    "services/execution/cleanup.py",
     "services/execution/logs/db_handler.py",
-    "services/execution/service.py",
-    "services/flow_builder/execution_service.py",
     "services/flow_builder/flow_execution_runner.py",
     "services/flow_builder/flow_service.py",
     "services/flow_builder/process_executor.py",
     "services/tools/databricks_dashboard_creator_tool.py",
     "services/tools/metric_view_validator_tool.py",
-    "services/trace/broadcast.py",
 }
 
 _SERVICES = pathlib.Path(__file__).resolve().parents[3] / "src" / "services"

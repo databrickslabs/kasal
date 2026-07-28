@@ -310,11 +310,10 @@ class TestCheckAndBroadcastStatus:
         service = ExecutionBroadcastService()
         mock_session = AsyncMock()
 
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        mock_session.execute.return_value = mock_result
+        with patch('src.services.execution.broadcast.sse_manager') as mock_manager, \
+                patch('src.services.execution.broadcast.ExecutionHistoryRepository') as MockRepo:
+            MockRepo.return_value.get_execution_by_job_id = AsyncMock(return_value=None)
 
-        with patch('src.services.execution.broadcast.sse_manager') as mock_manager:
             await service._check_and_broadcast_status(mock_session, "job-123")
 
             mock_manager.broadcast_to_job.assert_not_called()
@@ -326,11 +325,11 @@ class TestCheckAndBroadcastStatus:
         mock_session = AsyncMock()
 
         mock_execution = MockExecutionHistory(status="running")
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_execution
-        mock_session.execute.return_value = mock_result
 
-        with patch('src.services.execution.broadcast.sse_manager') as mock_manager:
+        with patch('src.services.execution.broadcast.sse_manager') as mock_manager, \
+                patch('src.services.execution.broadcast.ExecutionHistoryRepository') as MockRepo:
+            MockRepo.return_value.get_execution_by_job_id = AsyncMock(return_value=mock_execution)
+
             await service._check_and_broadcast_status(mock_session, "job-123")
 
             mock_manager.broadcast_to_job.assert_not_called()
@@ -345,11 +344,10 @@ class TestCheckAndBroadcastStatus:
         mock_session = AsyncMock()
 
         mock_execution = MockExecutionHistory(status="completed")
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_execution
-        mock_session.execute.return_value = mock_result
 
-        with patch('src.services.execution.broadcast.sse_manager') as mock_manager:
+        with patch('src.services.execution.broadcast.sse_manager') as mock_manager, \
+                patch('src.services.execution.broadcast.ExecutionHistoryRepository') as MockRepo:
+            MockRepo.return_value.get_execution_by_job_id = AsyncMock(return_value=mock_execution)
             mock_manager.broadcast_to_job = AsyncMock(return_value=1)
 
             await service._check_and_broadcast_status(mock_session, "job-123")
@@ -371,11 +369,10 @@ class TestCheckAndBroadcastStatus:
             group_id="group-abc",
             result={"output": "success"}
         )
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_execution
-        mock_session.execute.return_value = mock_result
 
-        with patch('src.services.execution.broadcast.sse_manager') as mock_manager:
+        with patch('src.services.execution.broadcast.sse_manager') as mock_manager, \
+                patch('src.services.execution.broadcast.ExecutionHistoryRepository') as MockRepo:
+            MockRepo.return_value.get_execution_by_job_id = AsyncMock(return_value=mock_execution)
             mock_manager.broadcast_to_job = AsyncMock(return_value=1)
 
             await service._check_and_broadcast_status(mock_session, "job-123")
@@ -397,11 +394,10 @@ class TestCheckAndBroadcastStatus:
         mock_session = AsyncMock()
 
         mock_execution = MockExecutionHistory(status="running")
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_execution
-        mock_session.execute.return_value = mock_result
 
-        with patch('src.services.execution.broadcast.sse_manager') as mock_manager:
+        with patch('src.services.execution.broadcast.sse_manager') as mock_manager, \
+                patch('src.services.execution.broadcast.ExecutionHistoryRepository') as MockRepo:
+            MockRepo.return_value.get_execution_by_job_id = AsyncMock(return_value=mock_execution)
             mock_manager.broadcast_to_job = AsyncMock(return_value=1)
 
             await service._check_and_broadcast_status(mock_session, "job-123")
@@ -418,11 +414,10 @@ class TestCheckAndBroadcastStatus:
 
         completed_time = datetime.now()
         mock_execution = MockExecutionHistory(status="completed", completed_at=completed_time)
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_execution
-        mock_session.execute.return_value = mock_result
 
-        with patch('src.services.execution.broadcast.sse_manager') as mock_manager:
+        with patch('src.services.execution.broadcast.sse_manager') as mock_manager, \
+                patch('src.services.execution.broadcast.ExecutionHistoryRepository') as MockRepo:
+            MockRepo.return_value.get_execution_by_job_id = AsyncMock(return_value=mock_execution)
             mock_manager.broadcast_to_job = AsyncMock(return_value=1)
 
             await service._check_and_broadcast_status(mock_session, "job-123")
@@ -456,11 +451,10 @@ class TestCheckAndBroadcastStatus:
             status="completed",
             result={"output": "test result", "count": 42}
         )
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_execution
-        mock_session.execute.return_value = mock_result
 
-        with patch('src.services.execution.broadcast.sse_manager') as mock_manager:
+        with patch('src.services.execution.broadcast.sse_manager') as mock_manager, \
+                patch('src.services.execution.broadcast.ExecutionHistoryRepository') as MockRepo:
+            MockRepo.return_value.get_execution_by_job_id = AsyncMock(return_value=mock_execution)
             mock_manager.broadcast_to_job = AsyncMock(return_value=1)
 
             await service._check_and_broadcast_status(mock_session, "job-123")

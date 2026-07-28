@@ -84,13 +84,11 @@ class TestGetExecutionStatusDetail:
         mock_repo = AsyncMock()
         mock_repo.get_execution_by_job_id.return_value = execution
 
-        # Mock task query
+        # Task statuses now come from the repository, not a raw query here.
         task1 = SimpleNamespace(status="completed", task_id="t1")
         task2 = SimpleNamespace(status="running", task_id="t2")
         task3 = SimpleNamespace(status="pending", task_id="t3")
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [task1, task2, task3]
-        mock_session.execute.return_value = mock_result
+        mock_repo.get_task_statuses_by_job_id.return_value = [task1, task2, task3]
 
         with patch(
             "src.repositories.execution_history_repository.ExecutionHistoryRepository",
@@ -118,9 +116,7 @@ class TestGetExecutionStatusDetail:
         mock_repo.get_execution_by_job_id.return_value = execution
 
         # Mock empty task query
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = []
-        mock_session.execute.return_value = mock_result
+        mock_repo.get_task_statuses_by_job_id.return_value = []
 
         with patch(
             "src.repositories.execution_history_repository.ExecutionHistoryRepository",
@@ -142,9 +138,7 @@ class TestGetExecutionStatusDetail:
         mock_repo.get_execution_by_job_id.return_value = execution
 
         # Mock empty task query for STOPPING status
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = []
-        mock_session.execute.return_value = mock_result
+        mock_repo.get_task_statuses_by_job_id.return_value = []
 
         with patch(
             "src.repositories.execution_history_repository.ExecutionHistoryRepository",

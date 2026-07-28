@@ -1,7 +1,7 @@
 from typing import List, Optional, Union
 import uuid
 from uuid import UUID
-from sqlalchemy import select, text
+from sqlalchemy import desc, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 # Session import removed - use AsyncSession only
 
@@ -94,6 +94,17 @@ class FlowRepository(BaseRepository[Flow]):
         result = await self.session.execute(query)
         return list(result.scalars().all())
     
+    async def get_most_recent(self) -> Optional[Flow]:
+        """The newest flow by created_at, or None.
+
+        A fallback for starting a flow execution with no flow_id and no
+        nodes/edges supplied — it picks whatever was authored last.
+        """
+        result = await self.session.execute(
+            select(Flow).order_by(desc(Flow.created_at)).limit(1)
+        )
+        return result.scalars().first()
+
     async def delete_with_executions(self, flow_id: uuid.UUID) -> bool:
         """
         Delete a flow and all its related execution records to handle foreign key constraints.
