@@ -46,6 +46,20 @@ class TaskOutput(BaseModel):
     messages: list[Any] = Field(
         description="Messages of the task", default_factory=list
     )
+    #: True when a guardrail rejected this output and ``guardrail_on_exhausted``
+    #: was "degrade", so it was accepted anyway.
+    #:
+    #: Structured, not just prose in ``raw``. Degradation used to surface as one
+    #: WARNING line and a "⚠️ Unverified" string appended to the text — so a run
+    #: that its own verifier refused three times was, to every caller and to the
+    #: UI, indistinguishable from one that passed. Anything deciding whether to
+    #: trust, display or reuse this output needs to be able to ASK.
+    degraded: bool = Field(
+        default=False, description="Output was accepted despite failing its guardrail"
+    )
+    degradation_reason: str | None = Field(
+        default=None, description="Why it was degraded, in terms a human can act on"
+    )
 
     def to_dict(self) -> dict[str, Any]:
         """Structured content: json_dict if present, else pydantic dump."""
@@ -94,6 +108,29 @@ class CrewOutput(BaseModel):
     json_dict: dict[str, Any] | None = None
     tasks_output: list[TaskOutput] = Field(default_factory=list)
     token_usage: UsageMetrics = Field(default_factory=UsageMetrics)
+
+    @property
+    def degraded(self) -> bool:
+        """True when ANY task was accepted despite failing verification.
+
+        Derived rather than stored: the tasks are the source of truth, and a
+        stored copy is one that can be set and then contradicted.
+
+        A crew reports the LAST task's output as its own, so a crew whose task
+        four ran on a dead source and whose task five wrote a confident summary
+        of nothing looked entirely clean. Whoever asks "can I trust this run?"
+        has to be told about task four.
+        """
+        return any(t.degraded for t in self.tasks_output)
+
+    @property
+    def degradation_reasons(self) -> list[str]:
+        """Why, per degraded task, in the order they ran."""
+        return [
+            t.degradation_reason
+            for t in self.tasks_output
+            if t.degraded and t.degradation_reason
+        ]
 
     @property
     def json(self) -> str | None:

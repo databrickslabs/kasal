@@ -8,11 +8,13 @@ Tool usage is emitted on the engine event bus, so kasal's tracing sees
 ToolUsageStarted/Finished/Error exactly as with crewAI.
 """
 
+import contextvars
 import inspect
 import json
 import logging
 import re
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -31,6 +33,104 @@ from src.services.tools.base import BaseTool, sanitize_tool_name
 logger = logging.getLogger(__name__)
 
 _PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+# --------------------------------------------------------------------------
+# Tool outcome ledger
+#
+# What a task's tools actually DID, so something other than the model can see
+# it. Nothing could, before: a tool that RETURNS an error string — which most
+# first-party tools and every MCP server do — emits ToolUsageFinishedEvent and
+# is indistinguishable from success at every layer above. A run whose every
+# source call returned 404/503 therefore completed, and the guardrail, seeing
+# only the output text, rejected it three times for "not defining named agents"
+# while the actual blocker was that the source was down.
+#
+# Scoped with a ContextVar rather than a module global: a crew runs its tasks
+# in a worker thread, and asyncio tasks branch their own copy, so concurrent
+# runs cannot bleed into each other's counts.
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class ToolOutcome:
+    """Per-tool tally for one task."""
+
+    calls: int = 0
+    failures: int = 0
+    errors: list[str] = field(default_factory=list)
+
+    @property
+    def wholly_failed(self) -> bool:
+        """Every call to this tool failed — the capability was unavailable."""
+        return self.calls > 0 and self.failures == self.calls
+
+
+#: Markers that identify a tool result which REPORTS a failure instead of
+#: raising one. Deliberately narrow, and matched only at the start of the
+#: result: these are the shapes Kasal's own tools produce ("Error: …",
+#: "Error executing …") and the shape an MCP server's isError result arrives as
+#: ("Tool error: …"). A broad match would classify a successful search for the
+#: word "error" as a failure, which is worse than missing one.
+_FAILURE_PREFIXES = ("tool error:", "error:", "error executing", "error from")
+
+_tool_ledger: contextvars.ContextVar[dict[str, ToolOutcome] | None] = (
+    contextvars.ContextVar("kasal_tool_ledger", default=None)
+)
+
+
+def reset_tool_ledger() -> None:
+    """Start a fresh tally. Called at the top of each task."""
+    _tool_ledger.set({})
+
+
+def tool_ledger() -> dict[str, ToolOutcome]:
+    """The current task's tally (empty when nothing has run)."""
+    return dict(_tool_ledger.get() or {})
+
+
+def _record_tool_outcome(name: str, failed: bool, error: str | None = None) -> None:
+    ledger = _tool_ledger.get()
+    if ledger is None:
+        return  # outside a task scope — nothing is watching
+    outcome = ledger.setdefault(name, ToolOutcome())
+    outcome.calls += 1
+    if failed:
+        outcome.failures += 1
+        if error and len(outcome.errors) < 3:
+            outcome.errors.append(error[:200])
+
+
+def looks_like_failure(output: Any) -> bool:
+    """Whether a tool RETURNED a failure rather than raising one."""
+    if not isinstance(output, str):
+        return False
+    head = output.lstrip()[:60].lower()
+    return any(head.startswith(marker) for marker in _FAILURE_PREFIXES)
+
+
+def tool_failure_summary() -> str:
+    """One line per tool that failed at all, or "" when everything worked.
+
+    Written for a reader who is deciding whether an answer can be trusted —
+    the guardrail, and the run's own report.
+    """
+    lines = []
+    for name, outcome in sorted(tool_ledger().items()):
+        if not outcome.failures:
+            continue
+        verdict = "ALL FAILED" if outcome.wholly_failed else "partly failed"
+        detail = f" — {outcome.errors[0]}" if outcome.errors else ""
+        lines.append(
+            f"- {name}: {outcome.failures}/{outcome.calls} calls failed "
+            f"({verdict}){detail}"
+        )
+    return "\n".join(lines)
+
+
+def wholly_failed_tools() -> list[str]:
+    """Tools that were called and never once succeeded."""
+    return sorted(n for n, o in tool_ledger().items() if o.wholly_failed)
 
 
 def interpolate_text(text: str | None, inputs: dict[str, Any]) -> str | None:
@@ -135,8 +235,19 @@ def wrap_tool(
                     if replaced is not None:
                         output = replaced
         except Exception as e:
+            _record_tool_outcome(tool.name, failed=True, error=str(e))
             event_bus.emit(tool, ToolUsageErrorEvent(error=str(e), **common))
             raise
+        # A tool that RETURNS "Error: ..." has failed just as surely as one that
+        # raised, and it still emits ToolUsageFinishedEvent — which is why no
+        # layer above could tell. Record the real outcome even though the event
+        # stream, for compatibility, keeps saying "finished".
+        returned_failure = looks_like_failure(output)
+        _record_tool_outcome(
+            tool.name,
+            failed=returned_failure,
+            error=str(output)[:200] if returned_failure else None,
+        )
         event_bus.emit(
             tool,
             ToolUsageFinishedEvent(

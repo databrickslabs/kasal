@@ -156,9 +156,7 @@ class TestDegradeInsteadOfAbort:
             task.execute_sync(_BudgetAgent())
 
     def test_budget_exhaustion_degrades_with_the_partial_answer(self):
-        task = Task(
-            description="d", expected_output="e", on_budget_exceeded="degrade"
-        )
+        task = Task(description="d", expected_output="e", on_budget_exceeded="degrade")
         output = task.execute_sync(_BudgetAgent(partial="what I found so far"))
         assert "what I found so far" in output.raw
         assert "⚠️ Truncated" in output.raw

@@ -31,7 +31,14 @@ from src.core.events.types import (
 from src.services.tools.base import BaseTool
 
 from .agent import BaseAgent
-from .executor import interpolate_text, json_schema_instruction, structured_from_raw
+from .executor import (
+    interpolate_text,
+    json_schema_instruction,
+    reset_tool_ledger,
+    structured_from_raw,
+    tool_failure_summary,
+    wholly_failed_tools,
+)
 from .types import OutputFormat, TaskOutput
 
 logger = logging.getLogger(__name__)
@@ -134,6 +141,10 @@ class Task(BaseModel):
                 f"Task {self.description[:50]!r} has no agent assigned and none was provided."
             )
         self.start_time = datetime.datetime.now(datetime.timezone.utc)
+        # Per-task, not per-run: the guardrail and the degradation notice below
+        # both ask "did THIS task's tools work?", and a previous task's 503s
+        # would otherwise be held against an answer they had nothing to do with.
+        reset_tool_ledger()
         event_bus.emit(self, TaskStartedEvent(context=context, task=self))
         try:
             return self._execute_core(executing_agent, context, tools)
@@ -180,6 +191,7 @@ class Task(BaseModel):
         output = self._apply_guardrails(
             output, executing_agent, context, tools, structured_model
         )
+        output = self._flag_unavailable_sources(output)
         self.output = output
         self.end_time = datetime.datetime.now(datetime.timezone.utc)
 
@@ -323,6 +335,45 @@ class Task(BaseModel):
         name = getattr(guardrail, "__qualname__", None)
         return str(name) if name else type(guardrail).__name__
 
+    def _flag_unavailable_sources(self, output: TaskOutput) -> TaskOutput:
+        """Mark an output whose tools never once worked.
+
+        The guardrail path already reports this, but only a task that HAS a
+        guardrail goes through it — and most do not. Without this, a task whose
+        every source call returned 503 produces a confident answer built on
+        nothing and is reported as a plain success. That is the failure this
+        whole seam exists to stop, and it is the common case rather than the
+        exceptional one.
+
+        FLAGGED, not raised. The engine cannot know that a dead tool was
+        essential: an agent with a search tool and a database tool may have been
+        asked something the database alone answers. Raising would fail runs that
+        legitimately succeeded, which is how a guard gets switched off. Marking
+        the output degraded gives every caller — the next task, the UI, recipe
+        mining — the fact, and lets each decide.
+        """
+        if output.degraded:
+            return output  # the guardrail path already said so, with more detail
+        dead = wholly_failed_tools()
+        if not dead:
+            return output
+        cause = (
+            f"every call to {', '.join(dead)} failed, so this answer was produced "
+            "without the information those tools were meant to supply"
+        )
+        logger.warning(
+            "task %r completed with wholly unavailable tool(s): %s",
+            self.name or self.description[:40],
+            ", ".join(dead),
+        )
+        return output.model_copy(
+            update={
+                "raw": f"{output.raw}\n\n> ⚠️ Unverified: {cause}",
+                "degraded": True,
+                "degradation_reason": cause,
+            }
+        )
+
     def _apply_guardrails(
         self,
         output: TaskOutput,
@@ -390,14 +441,37 @@ class Task(BaseModel):
                         # judge on the third try is the wrong trade; the next
                         # task needs to know the input is soft, not to never
                         # receive it.
+                        #
+                        # But say WHY it is soft. A run whose every source call
+                        # returned 503 was annotated "Unverified: does not
+                        # define named agents" — the judge's guess, not the
+                        # cause — and a reader had no way to tell a badly
+                        # written answer from one that never had any data.
+                        dead = wholly_failed_tools()
+                        cause = (
+                            f"every call to {', '.join(dead)} failed, so the "
+                            f"information this task needed was never available"
+                            if dead
+                            else str(result)
+                        )
                         logger.warning(
-                            "task %r failed guardrail %r after %d retries; degrading",
+                            "task %r failed guardrail %r after %d retries; "
+                            "degrading (%s)",
                             self.name or self.description[:40],
                             label,
                             retries,
+                            (
+                                f"tools wholly failed: {', '.join(dead)}"
+                                if dead
+                                else "output rejected"
+                            ),
                         )
                         return output.model_copy(
-                            update={"raw": f"{output.raw}\n\n> ⚠️ Unverified: {result}"}
+                            update={
+                                "raw": f"{output.raw}\n\n> ⚠️ Unverified: {cause}",
+                                "degraded": True,
+                                "degradation_reason": cause,
+                            }
                         )
                     raise ValueError(
                         f"Task guardrail failed after {retries} retries: {result}"
