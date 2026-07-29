@@ -37,8 +37,6 @@ interface WorkflowPanelsProps {
   // Runtime features props
   reasoningEnabled: boolean;
   setReasoningEnabled: (enabled: boolean) => void;
-  schemaDetectionEnabled: boolean;
-  setSchemaDetectionEnabled: (enabled: boolean) => void;
   // Model selection props
   selectedModel: string;
   setSelectedModel: (model: string) => void;
@@ -86,8 +84,6 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
   handleUIAwareFitView,
   reasoningEnabled,
   setReasoningEnabled,
-  schemaDetectionEnabled,
-  setSchemaDetectionEnabled,
   selectedModel,
   setSelectedModel,
   onOpenLogsDialog,
@@ -180,8 +176,6 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
           handleUIAwareFitView={handleUIAwareFitView}
           reasoningEnabled={reasoningEnabled}
           setReasoningEnabled={setReasoningEnabled}
-          schemaDetectionEnabled={schemaDetectionEnabled}
-          setSchemaDetectionEnabled={setSchemaDetectionEnabled}
           selectedModel={selectedModel}
           setSelectedModel={setSelectedModel}
           onOpenLogsDialog={onOpenLogsDialog}

@@ -71,8 +71,6 @@ interface CrewCanvasProps {
   // Runtime features props
   reasoningEnabled: boolean;
   setReasoningEnabled: (enabled: boolean) => void;
-  schemaDetectionEnabled: boolean;
-  setSchemaDetectionEnabled: (enabled: boolean) => void;
   // Model selection props
   selectedModel: string;
   setSelectedModel: (model: string) => void;
@@ -109,8 +107,6 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   handleUIAwareFitView,
   reasoningEnabled: _reasoningEnabled,
   setReasoningEnabled: _setReasoningEnabled,
-  schemaDetectionEnabled: _schemaDetectionEnabled,
-  setSchemaDetectionEnabled: _setSchemaDetectionEnabled,
   selectedModel: _selectedModelProp,
   setSelectedModel: _setSelectedModelProp,
   onOpenLogsDialog,

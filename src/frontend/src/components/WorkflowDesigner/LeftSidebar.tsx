@@ -59,8 +59,6 @@ interface LeftSidebarProps {
   // Runtime features props
   reasoningEnabled: boolean;
   setReasoningEnabled: (enabled: boolean) => void;
-  schemaDetectionEnabled: boolean;
-  setSchemaDetectionEnabled: (enabled: boolean) => void;
   processType?: 'sequential' | 'hierarchical' | 'parallel';
   setProcessType?: (type: 'sequential' | 'hierarchical' | 'parallel') => void;
 
@@ -85,8 +83,6 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   onToggleInteractivity,
   reasoningEnabled,
   setReasoningEnabled,
-  schemaDetectionEnabled,
-  setSchemaDetectionEnabled,
   processType = 'sequential',
   setProcessType,
   setIsConfigurationDialogOpen,
@@ -422,45 +418,11 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
             </Box>
           </Box>
 
-          {/* Schema Detection Section */}
-          <Box sx={{ mb: 2 }}>
-            <Typography
-              variant="subtitle2"
-              sx={{
-                color: theme.palette.primary.main,
-                mb: 1,
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px',
-                fontSize: '0.7rem'
-              }}
-            >
-              Schema Detection
-            </Typography>
-            <Divider sx={{ mb: 1 }} />
-
-            <Box
-              sx={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 1,
-                py: 0.5,
-                px: 0.5,
-                borderRadius: 1,
-              }}
-            >
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Typography variant="caption" sx={{ color: 'text.primary', fontSize: '0.75rem' }}>
-                  Auto Schema Detection
-                </Typography>
-                <Switch
-                  checked={schemaDetectionEnabled}
-                  onChange={(e) => setSchemaDetectionEnabled(e.target.checked)}
-                  size="small"
-                />
-              </Box>
-            </Box>
-          </Box>
+          {/* The "Auto Schema Detection" switch that used to live here was
+              removed: schema_detection_enabled is accepted by the API, stored,
+              and read as a condition nowhere in the backend, so the toggle
+              promised behaviour that did not exist. Structured output is now
+              driven by a task's output_schema + gate, not by a global switch. */}
             </>
           )}
         </Box>

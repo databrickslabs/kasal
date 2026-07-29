@@ -556,12 +556,10 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     isExecuting,
     selectedModel,
     reasoningEnabled,
-    schemaDetectionEnabled,
     tools,
     selectedTools,
     setSelectedModel,
     setReasoningEnabled,
-    setSchemaDetectionEnabled,
     setSelectedTools,
     handleRunClick,
     handleGenerateCrew,
@@ -1378,8 +1376,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               handleUIAwareFitView={handleUIAwareFitView}
               reasoningEnabled={reasoningEnabled}
               setReasoningEnabled={setReasoningEnabled}
-              schemaDetectionEnabled={schemaDetectionEnabled}
-              setSchemaDetectionEnabled={setSchemaDetectionEnabled}
               selectedModel={selectedModel}
               setSelectedModel={setSelectedModel}
               onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
@@ -1957,8 +1953,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             }}
             reasoningEnabled={reasoningEnabled}
             setReasoningEnabled={setReasoningEnabled}
-            schemaDetectionEnabled={schemaDetectionEnabled}
-            setSchemaDetectionEnabled={setSchemaDetectionEnabled}
 
             setIsConfigurationDialogOpen={dialogManager.setIsConfigurationDialogOpen}
             onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
