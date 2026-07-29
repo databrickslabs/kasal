@@ -82,17 +82,46 @@ class TestSettings:
         )
         assert settings.DATABASE_URI == expected_uri
 
-    def test_database_uri_sqlite(self):
-        """Test database URI assembly for SQLite."""
-        settings = Settings(DATABASE_TYPE="sqlite")
+    def test_database_uri_sqlite_follows_sqlite_db_path(self):
+        """The URI must be built from SQLITE_DB_PATH.
 
-        # The default SQLITE_DB_PATH is ABSOLUTE (anchored on the backend root)
-        # rather than the CWD-relative "./app.db" it used to be — a relative
-        # default created a stray database wherever the process happened to run.
+        It was not. SQLITE_DB_PATH was declared BELOW DATABASE_URI, and a
+        pydantic "before" validator only sees fields declared above it — so
+        ``info.data.get("SQLITE_DB_PATH", <default>)`` never found the field and
+        always used the default. Setting SQLITE_DB_PATH changed that attribute
+        and nothing else; every connection still went to BACKEND_ROOT/app.db.
+
+        That is not a test-only concern: it made the setting inert in production
+        too. It is how a suite configured for ``:memory:`` opened, and wrote to,
+        the real development database.
+        """
+        settings = Settings(DATABASE_TYPE="sqlite", SQLITE_DB_PATH="/tmp/custom.db")
+        assert settings.DATABASE_URI == "sqlite+aiosqlite:////tmp/custom.db"
+
+        in_memory = Settings(DATABASE_TYPE="sqlite", SQLITE_DB_PATH=":memory:")
+        assert in_memory.DATABASE_URI == "sqlite+aiosqlite:///:memory:"
+
+    def test_sqlite_db_path_is_declared_before_the_uris_that_read_it(self):
+        """Guards the fix directly: this is an ORDERING property, and reordering
+        the class would silently reintroduce the bug with every value still
+        looking plausible."""
+        fields = list(Settings.model_fields)
+        assert fields.index("SQLITE_DB_PATH") < fields.index("DATABASE_URI")
+        assert fields.index("SQLITE_DB_PATH") < fields.index("SYNC_DATABASE_URI")
+
+    def test_sqlite_db_path_default_is_absolute(self):
+        """The default is anchored on the backend root, not the CWD. A relative
+        "./app.db" created a stray database wherever the process happened to be
+        started from — three such strays existed in the tree."""
+        import os
+
         from src.core.paths import BACKEND_ROOT
 
-        expected_uri = f"sqlite+aiosqlite:///{BACKEND_ROOT / 'app.db'}"
-        assert settings.DATABASE_URI == expected_uri
+        # The field default is captured from the environment at class creation,
+        # and the suite sets SQLITE_DB_PATH — so assert on the expression's
+        # fallback rather than on the baked value.
+        assert os.path.isabs(str(BACKEND_ROOT / "app.db"))
+        assert str(BACKEND_ROOT).endswith("backend")
 
     def test_database_uri_custom_string(self):
         """Test database URI when provided as custom string."""
@@ -117,15 +146,15 @@ class TestSettings:
         )
         assert settings.SYNC_DATABASE_URI == expected_uri
 
-    def test_sync_database_uri_sqlite(self):
-        """Test sync database URI assembly for SQLite."""
-        settings = Settings(DATABASE_TYPE="sqlite")
+    def test_sync_database_uri_sqlite_follows_sqlite_db_path(self):
+        """Same ordering bug, same fix — SYNC_DATABASE_URI reads the field too,
+        so it was equally inert. Asserted separately because the two validators
+        are separate and only one of them being fixed is a plausible mistake."""
+        settings = Settings(DATABASE_TYPE="sqlite", SQLITE_DB_PATH="/tmp/custom.db")
+        assert settings.SYNC_DATABASE_URI == "sqlite:////tmp/custom.db"
 
-        # It uses the default SQLITE_DB_PATH which is "./app.db"
-        from src.core.paths import BACKEND_ROOT
-
-        expected_uri = f"sqlite:///{BACKEND_ROOT / 'app.db'}"
-        assert settings.SYNC_DATABASE_URI == expected_uri
+        in_memory = Settings(DATABASE_TYPE="sqlite", SQLITE_DB_PATH=":memory:")
+        assert in_memory.SYNC_DATABASE_URI == "sqlite:///:memory:"
 
     def test_sync_database_uri_custom_string(self):
         """Test sync database URI when provided as custom string."""

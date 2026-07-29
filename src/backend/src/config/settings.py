@@ -43,8 +43,6 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str = "postgres"
     POSTGRES_DB: str = "kasal"
     POSTGRES_PORT: str = "5432"
-    DATABASE_URI: Optional[str] = None
-    SYNC_DATABASE_URI: Optional[str] = None
 
     # Database file path for SQLite.
     #
@@ -52,10 +50,22 @@ class Settings(BaseSettings):
     # resolves against the process CWD — so a script run from the repo root or
     # from src/frontend/ silently created its own empty database there instead
     # of opening the real one. Three such strays existed in the tree.
+    #
+    # DECLARED BEFORE DATABASE_URI, and that ordering is load-bearing. A pydantic
+    # "before" validator only sees fields declared ABOVE it, via ``info.data``.
+    # While this sat below, ``assemble_db_connection``'s
+    # ``info.data.get("SQLITE_DB_PATH", <default>)`` never found the field and
+    # silently used the default — so SQLITE_DB_PATH was inert: setting it in the
+    # environment changed this attribute and nothing else, and every connection
+    # still went to BACKEND_ROOT/app.db. That is how a test suite configured for
+    # ``:memory:`` opened, and wrote to, the real development database.
     SQLITE_DB_PATH: Optional[str] = os.getenv(
         "SQLITE_DB_PATH", str(BACKEND_ROOT / "app.db")
     )
     DB_FILE_PATH: Optional[str] = os.getenv("DB_FILE_PATH", "sqlite.db")
+
+    DATABASE_URI: Optional[str] = None
+    SYNC_DATABASE_URI: Optional[str] = None
 
     @field_validator("DATABASE_URI", mode="before")
     def assemble_db_connection(cls, v: Optional[str], info) -> Any:

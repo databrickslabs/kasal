@@ -627,4 +627,14 @@ def pytest_sessionfinish(session, exitstatus):
             + "\n  ".join(created)
             + "\n\nPoint whatever wrote them at tests/.artifacts (see the env vars "
             "at the top of tests/conftest.py), or use tmp_path."
+            # This warning names a PATH, and some of those paths are also where
+            # the development server keeps live data — app.db above all. Say so:
+            # the obvious response to "a file appeared" is to delete it, and
+            # doing that to app.db destroys the dev database. (It happened. The
+            # file survived only because a lingering subprocess still held the
+            # unlinked inode open.) Inspect before removing; a stray file from a
+            # test run is empty, and the real one is not.
+            + "\n\nDo NOT blind-delete these. `app.db` is the DEV DATABASE when "
+            "the server has been run locally — check the size and table count "
+            "before removing anything (an empty stray is ~4KB with 0 tables)."
         )
