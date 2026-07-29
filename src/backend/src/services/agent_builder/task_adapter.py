@@ -10,10 +10,11 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Type
 
-from pydantic import BaseModel, create_model
+from pydantic import BaseModel
 
 from src.core.logger import LoggerManager
 from src.core.unit_of_work import UnitOfWork
+from src.services.agent_builder.schema_converter import build_model_from_schema
 from src.services.execution.kernel.task_builder import build_task_args
 from src.services.execution.kernel.tool_helpers import resolve_tool_ids_to_names
 from src.services.execution.runtime import Agent, Task, TaskOutput
@@ -55,6 +56,10 @@ async def get_pydantic_class_from_name(schema_name: str) -> Optional[Type[BaseMo
     """
     Get a Pydantic model class by its name from the schema database.
 
+    The JSON-Schema→Pydantic conversion itself lives in ``schema_converter`` and
+    is shared with inline (non-DB) schemas — a deep-research task mints its
+    envelope per run and has no row to look up.
+
     Args:
         schema_name: Name of the schema to retrieve
 
@@ -64,84 +69,18 @@ async def get_pydantic_class_from_name(schema_name: str) -> Optional[Type[BaseMo
     logger.info(f"Looking up schema '{schema_name}' in the database")
 
     try:
-        # Use async unit of work
         async with UnitOfWork() as uow:
-            # Look up the schema in the database
             schema = await uow.schema_repository.find_by_name(schema_name)
         if not schema:
             logger.warning(f"Schema '{schema_name}' not found in database")
             return None
 
-        logger.info(f"Found schema '{schema_name}' in database")
-
-        # Get the schema definition
         schema_def = schema.schema_definition
         if not schema_def or not isinstance(schema_def, dict):
             logger.error(f"Invalid schema definition for '{schema_name}': {schema_def}")
             return None
 
-        logger.debug(f"Schema definition: {schema_def}")
-
-        # Create field definitions for the Pydantic model
-        fields = {}
-        required_fields = schema_def.get("required", [])
-
-        for field_name, field_def in schema_def.get("properties", {}).items():
-            field_type = field_def.get("type")
-            field_nullable = field_def.get("nullable", False)
-            field_default = None if field_name in required_fields else ...
-
-            try:
-                if field_type == "string":
-                    fields[field_name] = (str, field_default)
-                elif field_type == "integer":
-                    fields[field_name] = (int, field_default)
-                elif field_type == "number":
-                    fields[field_name] = (float, field_default)
-                elif field_type == "boolean":
-                    fields[field_name] = (bool, field_default)
-                elif field_type == "array":
-                    item_type = field_def.get("items", {}).get("type", "string")
-                    if item_type == "string":
-                        fields[field_name] = (List[str], field_default)
-                    elif item_type == "integer":
-                        fields[field_name] = (List[int], field_default)
-                    elif item_type == "number":
-                        fields[field_name] = (List[float], field_default)
-                    elif item_type == "boolean":
-                        fields[field_name] = (List[bool], field_default)
-                    else:
-                        fields[field_name] = (List[Any], field_default)
-                elif field_type == "object":
-                    fields[field_name] = (Dict[str, Any], field_default)
-                else:
-                    fields[field_name] = (Any, field_default)
-
-                # If the field is nullable, make the type Optional
-                if field_nullable and field_name not in required_fields:
-                    current_type = fields[field_name][0]
-                    fields[field_name] = (Optional[current_type], field_default)
-            except Exception as e:
-                logger.warning(
-                    f"Error defining field '{field_name}': {str(e)}. Using Any type."
-                )
-                fields[field_name] = (Any, field_default)
-
-        # Create the Pydantic model class dynamically
-        try:
-            model_class = create_model(
-                schema_name,
-                **fields,
-                __doc__=schema_def.get("description", f"Model for {schema_name}"),
-            )
-
-            logger.info(
-                f"Successfully created Pydantic model class for '{schema_name}'"
-            )
-            return model_class
-        except Exception as e:
-            logger.error(f"Error creating Pydantic model for '{schema_name}': {str(e)}")
-            return None
+        return build_model_from_schema(schema_name, schema_def)
 
     except Exception as e:
         logger.error(

@@ -50,6 +50,24 @@ def adapt_config(config: CrewConfig) -> Dict[str, Any]:
     Returns:
         Dictionary with the engine format
     """
+    # Answer-mode behaviour (guardrails, execution caps, degrade policy, and in
+    # deep the JSON envelope + its gate). Applied HERE as well as in generation
+    # because a crew RE-RUN from the UI never passes through generation — it
+    # posts a previously generated config straight to the executions API, and
+    # without this it would run ungated while the identical auto-executed run
+    # was gated. The pass is idempotent, so covering both is a no-op the second
+    # time. Canvas crews carry no chat_mode_type and are untouched.
+    chat_mode_type = getattr(config, "chat_mode_type", None)
+    if chat_mode_type:
+        from src.services.generation.crew import apply_answer_mode
+
+        apply_answer_mode(
+            chat_mode_type,
+            config.agents_yaml or {},
+            config.tasks_yaml or {},
+            config.tasks_yaml or {},
+        )
+
     # Extract agents and tasks from YAML
     agents_data, tasks_data = extract_crew_yaml_data(
         config.agents_yaml, config.tasks_yaml
@@ -88,6 +106,9 @@ def adapt_config(config: CrewConfig) -> Dict[str, Any]:
         },
         "model": config.model or DEFAULT_ENGINE_MODEL,
         "max_rpm": config.inputs.get("max_rpm", 10) if config.inputs else 10,
+        # Read by CrewConfigBuilder to resolve the run-level wall clock from the
+        # same budget profile the per-agent caps above came from.
+        "chat_mode_type": chat_mode_type,
         # Include the original frontend configuration for logging
         "original_config": {
             "model": config.model,

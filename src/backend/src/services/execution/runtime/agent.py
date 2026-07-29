@@ -52,6 +52,13 @@ class BaseAgent(BaseModel):
     allow_delegation: bool = False
     tools: list[BaseTool] | None = Field(default_factory=list)
     max_iter: int = 25
+    #: Monotonic timestamp past which this agent must stop working, shared by
+    #: every agent in the run. Stamped by ``Crew.kickoff`` from
+    #: ``Crew.run_max_seconds``; the LLM transport takes the EARLIER of this and
+    #: its own per-call deadline. Carried per agent rather than in a module
+    #: global or a ContextVar because tasks run on a thread pool that copies
+    #: neither, and two runs can share a process.
+    run_deadline: float | None = Field(default=None, exclude=True)
     crew: Any | None = Field(default=None, exclude=True)
     max_tokens: int | None = None
     callbacks: list[Any] = Field(default_factory=list)

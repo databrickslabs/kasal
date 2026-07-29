@@ -45,7 +45,16 @@ class ExecutionBudgetExceededError(RuntimeError):
     round-cap RuntimeError keep working. When this propagates out of
     LLM.call(), the standard failure path emits LLMCallFailedEvent, so the
     breach is visible in traces/logs like any other terminal LLM failure.
+
+    ``partial`` carries whatever the model had already written when the budget
+    ran out. A caller that would rather degrade than abort (Task with
+    ``on_budget_exceeded='degrade'``) needs the work-in-progress; without it the
+    only options are an empty answer or losing the run.
     """
+
+    def __init__(self, message: str, partial: str = ""):
+        super().__init__(message)
+        self.partial = partial
 
 
 class ToolExecutionBlockedError(Exception):

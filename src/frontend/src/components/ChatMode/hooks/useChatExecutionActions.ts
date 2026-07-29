@@ -191,6 +191,12 @@ export function useChatExecutionActions({
           // matches what the mode (and save) produced.
           useExecutionStore.getState().chatModeType === 'research' ||
             useExecutionStore.getState().chatModeType === 'deep',
+          // …and the mode itself, so the backend applies the REST of what the
+          // mode means (guardrail retries, execution budget, and deep's JSON
+          // envelope + gate). A re-run from here skips generation entirely, so
+          // without this it would run ungated while the identical
+          // auto-executed run was gated.
+          useExecutionStore.getState().chatModeType,
         );
         const execution = await createExecution(crewConfig);
         const jobId = execution.job_id || execution.execution_id;

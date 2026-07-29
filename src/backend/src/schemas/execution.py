@@ -96,6 +96,14 @@ class CrewConfig(BaseModel):
     schema_detection_enabled: Optional[bool] = Field(
         True, description="Whether schema detection is enabled"
     )
+    chat_mode_type: Optional[str] = Field(
+        None,
+        description=(
+            "ChatMode answer mode (chat | research | deep). Selects the "
+            "execution budget profile and, for research/deep, the per-task "
+            "verification the mode implies. Absent for canvas crews."
+        ),
+    )
     flow_id: Optional[str] = Field(
         None, description="ID of the saved flow (for checkpoint tracking)"
     )

@@ -95,10 +95,10 @@ def _supports_native_structured_output(llm) -> bool:
     Handlers built on CrewAI's OpenAICompletion Responses API path (e.g. the
     Databricks gpt-5/codex handler) pass the task's output_pydantic to the model
     as ``text.format`` and validate the result, so the schema is enforced and a
-    typed object is returned. Such models must NOT be downgraded to the soft
-    output_json prompt: that downgrade sets ``output_json = True`` (a bool, not a
-    model), which CrewAI cannot validate, so the schema is silently dropped and
-    the model omits fields — breaking routers that branch on those fields.
+    typed object is returned. Such models keep ``output_pydantic`` rather than
+    taking the ``output_json`` route, which asks for the schema in the prompt and
+    parses best-effort — provider enforcement is strictly stronger, so there is
+    no reason to downgrade a model that has it.
     """
     cap = getattr(llm, "supports_native_structured_output", None)
     # Strict identity check (``is True``) so a MagicMock's auto-created attribute
@@ -170,8 +170,14 @@ def configure_output_json_approach(task_args, pydantic_class):
     # Simplify the schema
     simplified_schema = simplify_schema(json_schema)
 
-    # Add as JSON output format
-    task_args["output_json"] = True
+    # The MODEL CLASS, never ``True``. ``Task.output_json`` is typed
+    # ``type[BaseModel] | None``, so a bool here makes ``Task(**task_args)``
+    # raise ValidationError and takes the whole crew build down — which is what
+    # this line did, meaning structured output could not be switched on at all
+    # for the providers routed here (databricks, gemini). With the class, the
+    # engine validates the parse AND rewrites ``raw`` to the JSON dump, so the
+    # next task receives an object instead of prose.
+    task_args["output_json"] = pydantic_class
 
     # Add expectation in expected_output to format as JSON
     task_args["expected_output"] = (
@@ -180,6 +186,9 @@ def configure_output_json_approach(task_args, pydantic_class):
         f"```json\n{json.dumps(simplified_schema, indent=2)}\n```"
     )
 
-    logger.info("Using output_json=True instead of Pydantic model conversion")
+    logger.info(
+        "Using output_json=%s instead of Pydantic model conversion",
+        pydantic_class.__name__,
+    )
 
     return task_args

@@ -229,7 +229,7 @@ class TestGetPydanticClassFromName:
         mock_uow_class.return_value.__aexit__.return_value = None
 
         with patch(
-            "src.services.agent_builder.task_adapter.create_model",
+            "src.services.agent_builder.schema_converter.create_model",
             side_effect=Exception("Model creation failed"),
         ):
             result = await get_pydantic_class_from_name("ErrorSchema")

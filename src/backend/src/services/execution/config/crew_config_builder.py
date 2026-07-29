@@ -154,6 +154,20 @@ class CrewConfigBuilder:
         if "max_rpm" in self.config:
             crew_kwargs["max_rpm"] = self.config["max_rpm"]
 
+        # Run-level wall clock, for Deep Research only. The per-agent caps ride
+        # on the agent specs (stamped by the ChatMode crew-config builder); this
+        # is the one cap that belongs to the run as a whole, and without it
+        # "deep research can take up to an hour" is an accident rather than a
+        # promise. An explicit value in the config wins.
+        #
+        # Deliberately NOT applied to chat/research: capping a run that is not
+        # currently capped can only turn a slow success into a failure, and
+        # those modes are out of scope for this change. See
+        # generation/crew/answer_mode.GATED_MODES.
+        run_max_seconds = self._resolve_run_wall_clock()
+        if run_max_seconds:
+            crew_kwargs["run_max_seconds"] = run_max_seconds
+
         # NOTE: 'planning' / 'planning_llm' are deliberately NOT forwarded. The
         # CrewAI-style prose planner was removed — the engine has no planner, so
         # Crew.planning would be an inert field. Crews saved with planning=true just
@@ -166,6 +180,32 @@ class CrewConfigBuilder:
         # CrewPreparation._create_agents().
 
         return crew_kwargs
+
+    def _resolve_run_wall_clock(self) -> Optional[int]:
+        """Seconds the whole run may take, or None for no run-level cap."""
+        explicit = self.config.get("run_max_seconds")
+        if explicit:
+            return int(explicit)
+
+        from src.services.generation.crew.answer_mode import GATED_MODES
+
+        mode = self.config.get("chat_mode_type")
+        if mode not in GATED_MODES:
+            # Chat, research and canvas crews keep NO run-level cap. Capping a
+            # run that is not capped today can only turn a slow success into a
+            # failure, and those modes are out of scope for this change.
+            return None
+
+        from src.services.execution.config.budget_profile import (
+            resolve_budget_profile,
+        )
+
+        profile = resolve_budget_profile(mode)
+        logger.info(
+            f"Run wall clock set to {profile.run_wall_clock}s from the "
+            f"'{mode}' budget profile"
+        )
+        return profile.run_wall_clock
 
     async def add_llm_parameters(self, crew_kwargs: Dict[str, Any]) -> Dict[str, Any]:
         """

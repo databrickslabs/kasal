@@ -91,6 +91,13 @@ class Task(BaseModel):
         default=None, description="Deprecated alias for guardrail_max_retries."
     )
     guardrail_max_retries: int = 3
+    #: What to do when a guardrail still rejects after the last retry.
+    #: ``raise`` (default, unchanged behaviour) kills the run; ``degrade``
+    #: accepts the best attempt with the reviewer's objection appended, so an
+    #: expensive multi-task run is not lost to one task failing a judge.
+    guardrail_on_exhausted: str = "raise"
+    #: Same choice for a blown execution budget (tool rounds / wall clock).
+    on_budget_exceeded: str = "raise"
     start_time: datetime.datetime | None = None
     end_time: datetime.datetime | None = None
 
@@ -149,15 +156,11 @@ class Task(BaseModel):
                 structured_model
             )
             try:
-                raw = executing_agent.execute_task(
-                    self, context, list(tools) if tools else None
-                )
+                raw = self._run_agent(executing_agent, context, tools)
             finally:
                 self.expected_output = original_expected
         else:
-            raw = executing_agent.execute_task(
-                self, context, list(tools) if tools else None
-            )
+            raw = self._run_agent(executing_agent, context, tools)
 
         raw, pydantic_output, json_output, output_format = self._shape_output(
             raw, structured_model
@@ -174,7 +177,9 @@ class Task(BaseModel):
             output_format=output_format,
         )
 
-        output = self._apply_guardrails(output, executing_agent, context, tools)
+        output = self._apply_guardrails(
+            output, executing_agent, context, tools, structured_model
+        )
         self.output = output
         self.end_time = datetime.datetime.now(datetime.timezone.utc)
 
@@ -226,6 +231,40 @@ class Task(BaseModel):
 
     def _summary(self) -> str:
         return f"{' '.join(self.description.split(' ')[:10])}..."
+
+    def _run_agent(
+        self,
+        executing_agent: Any,
+        context: str | None,
+        tools: Sequence[Any] | None,
+    ) -> str:
+        """One agent turn, with the execution budget optionally soft.
+
+        A blown budget (tool rounds or wall clock) raises out of the LLM
+        transport and — caught nowhere — destroys the run along with every task
+        that already succeeded. For long research runs that is the wrong trade:
+        with ``on_budget_exceeded='degrade'`` the partial answer is kept and
+        annotated so the failure is visible downstream rather than fatal.
+        """
+        from src.core.llm.transport.exceptions import ExecutionBudgetExceededError
+
+        try:
+            return executing_agent.execute_task(
+                self, context, list(tools) if tools else None
+            )
+        except ExecutionBudgetExceededError as exc:
+            if self.on_budget_exceeded != "degrade":
+                raise
+            logger.warning(
+                "task %r exceeded its execution budget (%s); degrading",
+                self.name or self.description[:40],
+                exc,
+            )
+            partial = getattr(exc, "partial", "") or ""
+            return (
+                f"{partial}\n\n> ⚠️ Truncated: exceeded the execution budget "
+                f"({exc}). This answer is incomplete."
+            ).strip()
 
     def _shape_output(
         self, raw: str, structured_model: type[BaseModel] | None
@@ -290,6 +329,7 @@ class Task(BaseModel):
         agent: Any,
         context: str | None,
         tools: Sequence[Any] | None,
+        structured_model: type[BaseModel] | None = None,
     ) -> TaskOutput:
         guardrails = self._normalized_guardrails(agent)
         if not guardrails:
@@ -344,6 +384,21 @@ class Task(BaseModel):
                             task_name=self.name,
                         ),
                     )
+                    if self.guardrail_on_exhausted == "degrade":
+                        # Keep the best attempt, flagged. Losing a six-task
+                        # research run because task four could not satisfy a
+                        # judge on the third try is the wrong trade; the next
+                        # task needs to know the input is soft, not to never
+                        # receive it.
+                        logger.warning(
+                            "task %r failed guardrail %r after %d retries; degrading",
+                            self.name or self.description[:40],
+                            label,
+                            retries,
+                        )
+                        return output.model_copy(
+                            update={"raw": f"{output.raw}\n\n> ⚠️ Unverified: {result}"}
+                        )
                     raise ValueError(
                         f"Task guardrail failed after {retries} retries: {result}"
                     )
@@ -354,6 +409,22 @@ class Task(BaseModel):
                     else f"Your previous answer was rejected by a reviewer with this "
                     f"feedback:\n{result}\nPrevious answer:\n{output.raw}"
                 )
-                raw = agent.execute_task(self, feedback, list(tools) if tools else None)
-                output = output.model_copy(update={"raw": raw})
+                raw = self._run_agent(agent, feedback, tools)
+                # Re-shape, do not merely patch ``raw``. The first pass shaped
+                # the REJECTED answer, so patching raw alone leaves .pydantic /
+                # .json_dict holding it — and with output_json set, raw itself
+                # reverts from the JSON dump to the agent's unshaped prose. The
+                # retry that was supposed to fix the output would otherwise be
+                # what breaks the downstream JSON contract.
+                raw, pydantic_output, json_output, output_format = self._shape_output(
+                    raw, structured_model
+                )
+                output = output.model_copy(
+                    update={
+                        "raw": raw,
+                        "pydantic": pydantic_output,
+                        "json_dict": json_output,
+                        "output_format": output_format,
+                    }
+                )
         return output

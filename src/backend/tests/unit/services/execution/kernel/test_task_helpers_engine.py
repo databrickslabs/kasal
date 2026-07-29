@@ -192,7 +192,7 @@ class TestGetPydanticClassFromName:
 
         # Mock create_model to raise an exception
         with patch(
-            "src.services.agent_builder.task_adapter.create_model"
+            "src.services.agent_builder.schema_converter.create_model"
         ) as mock_create:
             mock_create.side_effect = Exception("Field error")
 

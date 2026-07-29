@@ -17,6 +17,11 @@ from typing import Any, Dict, List, Optional
 
 from src.core.logger import LoggerManager
 from src.services.execution.kernel.genie_formatting import apply_genie_mcp_space_id
+from src.services.execution.kernel.guardrail_stack import build_guardrail_stack
+from src.services.execution.kernel.output_contract import (
+    apply_output_schema,
+    build_detection_gate,
+)
 from src.services.guardrails.wrapper import GuardrailWrapper
 
 logger = LoggerManager.get_instance().crew
@@ -94,12 +99,33 @@ async def build_task_args(
     if task_config.get("output_pydantic"):
         await _apply_output_pydantic(task_args, task_config, agent, task_key)
 
+    # Guardrail layers, assembled cheapest-first at the end of this function.
+    # Each entry is (kind, guardrail); see kernel/guardrail_stack.
+    layers: List[Any] = []
+
+    # Inline schema (no DB row): the deep-research envelope is minted per run,
+    # so there is nothing to look up by name.
+    if task_config.get("output_schema"):
+        schema_gate = apply_output_schema(task_args, task_config, task_key)
+        if schema_gate is not None:
+            layers.append(("schema", schema_gate))
+
+    # Declarative acceptance rule over the parsed output.
+    if task_config.get("gate"):
+        detection = build_detection_gate(task_config, task_key)
+        if detection is not None:
+            layers.append(("detection", detection))
+
     # Task-boundary human approval (HITL): the crew must not advance past this
-    # task until a human approves its output. Attached as the LAST guardrail so
-    # the human reviews the final validated output; rejection feedback re-runs
-    # the task through the engine's guardrail retry loop.
+    # task until a human approves its output. Ranked LAST in the stack so the
+    # human reviews output the cheaper gates already accepted; rejection
+    # feedback re-runs the task through the engine's guardrail retry loop.
     if task_config.get("human_input"):
-        _apply_human_review(task_args, task_config, config, task_key)
+        review = _build_human_review(task_config, config, task_key)
+        if review is not None:
+            layers.append(("human", review))
+
+    build_guardrail_stack(task_args, layers, task_key)
 
     # Other optional Task fields.
     for field in (
@@ -108,6 +134,11 @@ async def build_task_args(
         "human_input",
         "converter_cls",
         "output_json",
+        # Degrade-vs-abort policy for a task that exhausts its guardrail
+        # retries or its execution budget. Both default to "raise" on the
+        # engine side, so untouched paths keep today's behaviour.
+        "guardrail_on_exhausted",
+        "on_budget_exceeded",
     ):
         if field in task_config:
             # output_json must be a BaseModel class, never a legacy string.
@@ -118,8 +149,8 @@ async def build_task_args(
     return task_args
 
 
-def _apply_human_review(task_args, task_config, config, task_key):
-    """Attach a HumanReviewGuardrail when the task enables human_input."""
+def _build_human_review(task_config, config, task_key):
+    """A HumanReviewGuardrail for a task that enables human_input, or None."""
     import os
 
     from src.services.guardrails.core.human_review_guardrail import (
@@ -135,18 +166,14 @@ def _apply_human_review(task_args, task_config, config, task_key):
             f"Task {task_key}: human_input enabled but no execution_id in "
             "config/env — review gate NOT attached"
         )
-        return
+        return None
     group_id = run_config.get("group_id") or "default"
-    review = HumanReviewGuardrail(
+    guardrail_logger.info(f"Task {task_key}: human review gate attached")
+    return HumanReviewGuardrail(
         task_name=str(task_config.get("name") or task_key),
         execution_id=str(execution_id),
         group_id=str(group_id),
     )
-    # The engine prefers `guardrails` (plural) over `guardrail`; fold any
-    # content guardrail in FIRST so the human reviews validated output.
-    existing = task_args.pop("guardrail", None)
-    task_args["guardrails"] = ([existing] if existing else []) + [review]
-    guardrail_logger.info(f"Task {task_key}: human review gate attached")
 
 
 def _apply_code_guardrail(task_args, task_config, agent, config, task_key):

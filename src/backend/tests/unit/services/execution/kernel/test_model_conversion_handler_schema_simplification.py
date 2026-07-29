@@ -214,13 +214,13 @@ class TestGetCompatibleConverterForModel:
 
 
 class TestConfigureOutputJsonApproach:
-    def test_adds_output_json_true(self):
+    def test_sets_output_json_to_the_model_class(self):
         task_args = {
             "description": "Do something",
             "expected_output": "Result",
         }
         result = configure_output_json_approach(task_args, SimpleModel)
-        assert result["output_json"] is True
+        assert result["output_json"] is SimpleModel
 
     def test_appends_schema_to_expected_output(self):
         task_args = {
@@ -278,5 +278,5 @@ class TestConfigureOutputJsonWithComplexSchema:
             "expected_output": "Complex output",
         }
         result = configure_output_json_approach(task_args, ComplexModel)
-        assert result["output_json"] is True
+        assert result["output_json"] is ComplexModel
         assert "json" in result["expected_output"].lower()

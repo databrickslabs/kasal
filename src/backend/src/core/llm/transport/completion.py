@@ -24,16 +24,14 @@ from src.core.events.types import (
 )
 
 from .base import BaseLLM
+from .budget import check_deadline, resolve_execution_budget, rounds_exhausted
 from .constants import CONTEXT_WINDOW_USAGE_RATIO, LLM_CONTEXT_WINDOW_SIZES
 from .exceptions import (
-    ExecutionBudgetExceededError,
     LLMContextLengthExceededError,
     is_context_length_exceeded,
 )
 
 logger = logging.getLogger(__name__)
-
-_MAX_TOOL_ROUNDS = 15
 
 #: Characters per token assumed when estimating a prompt's size.
 #:
@@ -271,29 +269,16 @@ class OpenAICompletion(BaseLLM):
         return params
 
     def _execution_budget(self, from_agent: Any) -> tuple[int, float | None]:
-        """Resolve (max tool rounds, wall-clock deadline) for one call().
+        """(max tool rounds, wall-clock deadline) for one call — see budget.py."""
+        return resolve_execution_budget(from_agent)
 
-        Agent.max_iter and Agent.max_execution_time were accepted-but-inert
-        fields (crewAI never enforced them either); here they become real.
-        Direct LLM calls with no agent keep the engine default round cap.
-        """
-        rounds = _MAX_TOOL_ROUNDS
-        deadline: float | None = None
-        if from_agent is not None:
-            max_iter = getattr(from_agent, "max_iter", None)
-            if isinstance(max_iter, int) and max_iter > 0:
-                rounds = max_iter
-            max_seconds = getattr(from_agent, "max_execution_time", None)
-            if isinstance(max_seconds, (int, float)) and max_seconds > 0:
-                deadline = time.monotonic() + float(max_seconds)
-        return rounds, deadline
-
-    def _check_deadline(self, deadline: float | None, rounds_done: int) -> None:
-        if deadline is not None and time.monotonic() >= deadline:
-            raise ExecutionBudgetExceededError(
-                f"max_execution_time exceeded after {rounds_done} tool round(s) "
-                f"for model {self.model}."
-            )
+    def _check_deadline(
+        self,
+        deadline: float | None,
+        rounds_done: int,
+        conversation: list[dict[str, Any]] | None = None,
+    ) -> None:
+        check_deadline(deadline, rounds_done, self.model, conversation)
 
     def _estimate_tokens(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None
@@ -563,7 +548,7 @@ class OpenAICompletion(BaseLLM):
         usage: dict[str, Any] | None = None
         rounds, deadline = self._execution_budget(from_agent)
         for _round in range(rounds):
-            self._check_deadline(deadline, _round)
+            self._check_deadline(deadline, _round, conversation)
             self._trim_conversation_to_window(conversation, from_agent)
             params = self._prepare_completion_params(conversation, tools)
             if self.stream:
@@ -608,10 +593,7 @@ class OpenAICompletion(BaseLLM):
                     )
                 continue
             return content or "", usage, call_type
-        raise ExecutionBudgetExceededError(
-            f"Tool-calling did not converge within {rounds} rounds "
-            f"for model {self.model}."
-        )
+        raise rounds_exhausted(rounds, self.model, conversation)
 
     def _stream_chat_completion(
         self, params: dict[str, Any]
@@ -770,7 +752,7 @@ class OpenAICompletion(BaseLLM):
         usage: dict[str, Any] | None = None
         rounds, deadline = self._execution_budget(from_agent)
         for _round in range(rounds):
-            self._check_deadline(deadline, _round)
+            self._check_deadline(deadline, _round, conversation)
             self._trim_conversation_to_window(conversation, from_agent)
             response = self.client.responses.create(
                 **self._prepare_responses_params(conversation, tools)
@@ -795,10 +777,7 @@ class OpenAICompletion(BaseLLM):
                     )
                 continue
             return text, usage, call_type
-        raise ExecutionBudgetExceededError(
-            f"Tool-calling did not converge within {rounds} rounds "
-            f"for model {self.model}."
-        )
+        raise rounds_exhausted(rounds, self.model, conversation)
 
     def _handle_responses(
         self,

@@ -42,6 +42,15 @@ export interface CrewExecutionConfig {
   session_id?: string;
   /** Memory READ scope: true = workspace-wide (default), false = this chat session only. */
   memory_workspace_scope?: boolean;
+  /**
+   * ChatMode answer mode. The BACKEND turns this into the mode's actual
+   * behaviour — execution budget, per-task guardrail retries, degrade-vs-abort,
+   * and in deep the JSON envelope and its gate — in one place
+   * (`generation/crew/answer_mode.py`, applied again at config adaptation so a
+   * re-run from here is gated identically to an auto-executed run). Do not
+   * reimplement any of that here; just say which mode this is.
+   */
+  chat_mode_type?: string;
 }
 
 export interface FlowExecutionConfig {
@@ -257,6 +266,7 @@ export function buildCrewConfigFromGenerated(
   userRequest?: string,
   agentBricksEndpoints: string[] = [],
   reasoning: boolean = false,
+  chatModeType?: string,
 ): CrewExecutionConfig {
   const agents_yaml: Record<string, Record<string, unknown>> = {};
   const tasks_yaml: Record<string, Record<string, unknown>> = {};
@@ -419,6 +429,15 @@ export function buildCrewConfigFromGenerated(
       output_file: (task.output_file as string) || `output/${id}.md`,
     };
 
+    // The generator writes an llm_guardrail for EVERY task (the prompt template
+    // requires one, aligned with expected_output) and this builder used to drop
+    // it, so every research/deep run executed ungated against a criterion that
+    // had already been written for it. The backend reads it straight off the
+    // task entry; carrying it is the whole fix.
+    if (task.llm_guardrail) {
+      taskEntry.llm_guardrail = task.llm_guardrail;
+    }
+
     // Inject tool_configs for tasks that have matching tools
     const taskApplicable = applicableToolConfigs(taskTools);
     // TASKS need the MCP selection too: CrewAI replaces the agent's tools with
@@ -447,6 +466,7 @@ export function buildCrewConfigFromGenerated(
     model: model || undefined,
     execution_type: 'crew',
     schema_detection_enabled: true,
+    chat_mode_type: chatModeType,
     // Memory scoping for chat. The backend generates its own deterministic
     // crew_id for tracing; we pass the chat session id purely as the memory
     // partition. The READ scope is controlled by `memory_workspace_scope`:

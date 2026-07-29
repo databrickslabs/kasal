@@ -410,11 +410,12 @@ class TestConfigureOutputJsonApproach:
 
         result = configure_output_json_approach(task_args, MockOutputModel)
 
-        assert result["output_json"] is True
+        assert result["output_json"] is MockOutputModel
         assert "JSON object following this schema" in result["expected_output"]
         assert "Generate data" in result["expected_output"]
         mock_logger.info.assert_called_with(
-            "Using output_json=True instead of Pydantic model conversion"
+            "Using output_json=%s instead of Pydantic model conversion",
+            "MockOutputModel",
         )
 
     def test_configure_preserves_args(self):
@@ -429,7 +430,7 @@ class TestConfigureOutputJsonApproach:
 
         assert result["description"] == "Test"
         assert result["agent"] == "test_agent"
-        assert result["output_json"] is True
+        assert result["output_json"] is MockOutputModel
 
     def test_configure_with_empty_expected_output(self):
         """Test configuration with empty expected output."""
@@ -437,7 +438,7 @@ class TestConfigureOutputJsonApproach:
 
         result = configure_output_json_approach(task_args, MockOutputModel)
 
-        assert result["output_json"] is True
+        assert result["output_json"] is MockOutputModel
         assert "JSON object following this schema" in result["expected_output"]
         assert result["expected_output"].startswith(
             "\n\nPlease provide"
@@ -460,7 +461,7 @@ class TestIntegrationAndEdgeCases:
         # Configure output JSON
         task_args = {"expected_output": "Generate data"}
         configured = configure_output_json_approach(task_args, MockOutputModel)
-        assert configured["output_json"] is True
+        assert configured["output_json"] is MockOutputModel
 
     @patch("src.services.execution.kernel.model_conversion_handler.logger")
     def test_full_workflow_databricks(self, mock_logger):
@@ -475,7 +476,7 @@ class TestIntegrationAndEdgeCases:
         # Configure output JSON
         task_args = {"expected_output": "Generate data"}
         configured = configure_output_json_approach(task_args, MockOutputModel)
-        assert configured["output_json"] is True
+        assert configured["output_json"] is MockOutputModel
 
     def test_standard_workflow(self):
         """Test standard model workflow."""

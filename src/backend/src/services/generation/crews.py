@@ -33,6 +33,7 @@ from src.services.generation.crew import (
     ConversationGenerationMixin,
     ProgressiveGenerationMixin,
     RecipeHooksMixin,
+    apply_answer_mode,
 )
 from src.services.tools.tool_service import ToolService
 from src.utils.user_context import GroupContext
@@ -501,9 +502,14 @@ class CrewGenerationService(
             agents_yaml[key] = cfg
 
         tasks_yaml: Dict[str, Dict[str, Any]] = {}
+        # The generated task, keyed the same way as its entry, so the answer-mode
+        # pass below can recover fields this builder does not copy across — the
+        # per-task ``llm_guardrail`` above all.
+        generated_by_key: Dict[str, Dict[str, Any]] = {}
         for task in clean_tasks:
             tid = str(task.get("id") or "")
             key = f"task_{tid}"
+            generated_by_key[key] = task
             agent_id = str(task.get("agent_id") or task.get("agent") or "")
             agent_key = agent_id_to_key.get(agent_id)
             context: List[str] = []
@@ -573,6 +579,13 @@ class CrewGenerationService(
         _reasoning = _reasoning_effort is not None
         _execution_type = "agent" if _mode == "chat" else "crew"
 
+        # Everything else the mode implies — the per-task guardrail that was
+        # generated and then dropped, execution caps, degrade-vs-abort, and (in
+        # deep) the JSON envelope and its gate. Reasoning effort alone was the
+        # ENTIRE difference between research and deep, and on a model without a
+        # native reasoning budget that was no difference at all.
+        apply_answer_mode(_mode, agents_yaml, tasks_yaml, generated_by_key)
+
         return {
             "agents_yaml": agents_yaml,
             "tasks_yaml": tasks_yaml,
@@ -586,6 +599,14 @@ class CrewGenerationService(
             "reasoning": _reasoning,
             "model": request.model or None,
             "execution_type": _execution_type,
+            # Read by the crew-config builder to resolve the run-level wall
+            # clock from the same budget profile the agent caps came from.
+            "chat_mode_type": _mode,
+            # NOTE: inert — accepted on ExecutionConfig, plumbed through four
+            # call sites, read as a condition nowhere. Kept because it is a
+            # public API field; retiring it is a breaking change of its own and
+            # does not belong in this one. Do not mistake it for the real
+            # schema work above (output_schema / gate).
             "schema_detection_enabled": True,
             "session_id": request.session_id,
             "memory_workspace_scope": request.memory_workspace_scope,

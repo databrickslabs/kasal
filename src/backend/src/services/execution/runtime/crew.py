@@ -20,6 +20,7 @@ import asyncio
 import concurrent.futures
 import hashlib
 import logging
+import time
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -72,6 +73,12 @@ class Crew(BaseModel):
     step_callback: Callable[..., Any] | None = None
     task_callback: Callable[..., Any] | None = None
     max_rpm: int | None = None
+    #: Wall-clock ceiling for the whole run. Without it the only clock is
+    #: per-agent-call and starts afresh on every call — including every
+    #: guardrail retry — so a six-task crew with three retries each had an
+    #: effective ceiling of 24× the per-call cap and no way to state how long
+    #: "deep research" can take. Set from the mode's budget profile.
+    run_max_seconds: float | None = None
     planning: bool | None = False
     planning_llm: Any | None = None
     stream: bool = False
@@ -119,8 +126,18 @@ class Crew(BaseModel):
         self._inputs = inputs
         if inputs:
             self._interpolate_inputs(inputs)
+        # One deadline for the whole run, computed HERE rather than at agent
+        # build time so the clock starts when work does.
+        run_deadline = (
+            time.monotonic() + float(self.run_max_seconds)
+            if self.run_max_seconds
+            else None
+        )
         for agent in self.agents:
             agent.crew = self
+            agent.run_deadline = run_deadline
+        if self.manager_agent is not None:
+            self.manager_agent.run_deadline = run_deadline
 
         # Checkpoint load happens AFTER input interpolation so restored task
         # keys (hashed from interpolated description|expected_output) only
