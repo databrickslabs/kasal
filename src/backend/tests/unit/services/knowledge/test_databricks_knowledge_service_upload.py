@@ -80,6 +80,8 @@ class TestUploadKnowledgeFile:
         svc.volume_repository.upload_file_to_volume = AsyncMock(
             return_value={"success": True}
         )
+        svc.embedding_service.file_already_embedded = AsyncMock(return_value=False)
+        svc.embedding_service.forget_file = AsyncMock(return_value=0)
         svc.embedding_service.embed_file = AsyncMock(return_value={"status": "success"})
         svc.read_knowledge_file = AsyncMock(
             return_value={"status": "success", "content": "file content"}
@@ -116,6 +118,8 @@ class TestUploadKnowledgeFile:
         svc.read_knowledge_file = AsyncMock(
             return_value={"status": "success", "content": "data"}
         )
+        svc.embedding_service.file_already_embedded = AsyncMock(return_value=False)
+        svc.embedding_service.forget_file = AsyncMock(return_value=0)
         svc.embedding_service.embed_file = AsyncMock(return_value={"status": "success"})
 
         with patch(
@@ -153,6 +157,8 @@ class TestUploadKnowledgeFile:
         svc.read_knowledge_file = AsyncMock(
             return_value={"status": "success", "content": "data"}
         )
+        svc.embedding_service.file_already_embedded = AsyncMock(return_value=False)
+        svc.embedding_service.forget_file = AsyncMock(return_value=0)
         svc.embedding_service.embed_file = AsyncMock(return_value={"status": "success"})
 
         with patch(
@@ -176,6 +182,8 @@ class TestUploadKnowledgeFile:
         svc = make_svc()
         file = make_upload_file()
 
+        svc.embedding_service.file_already_embedded = AsyncMock(return_value=False)
+        svc.embedding_service.forget_file = AsyncMock(return_value=0)
         svc.embedding_service.embed_file = AsyncMock(
             return_value={"status": "error", "message": "embedding model unavailable"}
         )
@@ -196,6 +204,8 @@ class TestUploadKnowledgeFile:
         """The temp-embed flow has no Databricks Volume dependency at all."""
         svc = make_svc()
         file = make_upload_file("notes.txt", b"some text")
+        svc.embedding_service.file_already_embedded = AsyncMock(return_value=False)
+        svc.embedding_service.forget_file = AsyncMock(return_value=0)
         svc.embedding_service.embed_file = AsyncMock(
             return_value={"status": "success", "chunks_embedded": 2}
         )
@@ -215,6 +225,8 @@ class TestUploadKnowledgeFile:
         uploading user (per-user isolation), after a TTL purge sweep."""
         svc = make_svc()
         file = make_upload_file("notes.txt", b"some text")
+        svc.embedding_service.file_already_embedded = AsyncMock(return_value=False)
+        svc.embedding_service.forget_file = AsyncMock(return_value=0)
         svc.embedding_service.embed_file = AsyncMock(
             return_value={"status": "success", "chunks_embedded": 2}
         )
@@ -242,6 +254,8 @@ class TestUploadKnowledgeFile:
 
         svc = make_svc()
         file = make_upload_file("notes.txt", b"some text")
+        svc.embedding_service.file_already_embedded = AsyncMock(return_value=False)
+        svc.embedding_service.forget_file = AsyncMock(return_value=0)
         svc.embedding_service.embed_file = AsyncMock(
             side_effect=Exception("embed boom")
         )
@@ -276,6 +290,8 @@ class TestUploadKnowledgeFile:
 
         svc = make_svc()
         file = make_upload_file("notes.txt", b"some text")
+        svc.embedding_service.file_already_embedded = AsyncMock(return_value=False)
+        svc.embedding_service.forget_file = AsyncMock(return_value=0)
         svc.embedding_service.embed_file = AsyncMock(
             return_value={"status": "success", "chunks_embedded": 1}
         )
@@ -339,6 +355,8 @@ class TestUploadKnowledgeFile:
         svc.read_knowledge_file = AsyncMock(
             return_value={"status": "success", "content": "data"}
         )
+        svc.embedding_service.file_already_embedded = AsyncMock(return_value=False)
+        svc.embedding_service.forget_file = AsyncMock(return_value=0)
         svc.embedding_service.embed_file = AsyncMock(return_value={"status": "success"})
 
         with patch(
@@ -360,6 +378,8 @@ class TestUploadKnowledgeFile:
 
         svc = make_svc()
         file = make_upload_file()
+        svc.embedding_service.file_already_embedded = AsyncMock(return_value=False)
+        svc.embedding_service.forget_file = AsyncMock(return_value=0)
         svc.embedding_service.embed_file = AsyncMock(
             side_effect=Exception("embed error")
         )
@@ -404,6 +424,8 @@ class TestUploadKnowledgeFile:
         svc.read_knowledge_file = AsyncMock(
             return_value={"status": "success", "content": "data"}
         )
+        svc.embedding_service.file_already_embedded = AsyncMock(return_value=False)
+        svc.embedding_service.forget_file = AsyncMock(return_value=0)
         svc.embedding_service.embed_file = AsyncMock(return_value={"status": "success"})
 
         with patch(
@@ -866,6 +888,8 @@ class TestAdditionalCoverage:
         svc.read_knowledge_file = AsyncMock(
             return_value={"status": "success", "content": "data"}
         )
+        svc.embedding_service.file_already_embedded = AsyncMock(return_value=False)
+        svc.embedding_service.forget_file = AsyncMock(return_value=0)
         svc.embedding_service.embed_file = AsyncMock(return_value={"status": "success"})
 
         # auth raises - should be swallowed, upload should still succeed

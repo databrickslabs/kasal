@@ -5,6 +5,7 @@ Databricks Knowledge Source Service
 import asyncio
 import io
 import logging
+import hashlib
 import os
 import tempfile
 from datetime import datetime
@@ -163,6 +164,61 @@ class DatabricksKnowledgeService:
                 # soft-filters by its basename; no physical file lives here.
                 file_path = f"uploads/{group_id}/{execution_id}/{safe_name}"
 
+                # Re-uploading the SAME bytes is a no-op. Without this, three
+                # uploads of one PDF stored three copies of all 110 chunks, and
+                # a 15-result search came back with 4 distinct passages — the
+                # rest were the same text again. Nothing malfunctioned; the
+                # embed simply appended, and nothing deduplicated afterwards.
+                #
+                # Hashing the EXTRACTED TEXT rather than the raw bytes: a PDF
+                # re-exported by the same tool differs byte-for-byte while
+                # saying the same thing, and re-embedding it would cost the
+                # same duplication for no new content.
+                content_hash = hashlib.sha256(
+                    (extraction.get("content") or "").encode("utf-8")
+                ).hexdigest()
+
+                unchanged = await self.embedding_service.file_already_embedded(
+                    file_path=file_path,
+                    content_hash=content_hash,
+                    created_by=self.created_by_email,
+                    user_token=user_token,
+                )
+                # `is True`, not truthiness: skipping the embed is the
+                # destructive reading of an ambiguous answer — the upload
+                # silently becomes a no-op and the user's file is never stored.
+                # Only an unambiguous True earns that.
+                if unchanged is True:
+                    logger.info(
+                        f"[UPLOAD] {safe_name} is already embedded with identical "
+                        "content — skipping re-embedding."
+                    )
+                    return {
+                        "status": "success",
+                        "unchanged": True,
+                        "path": file_path,
+                        "filename": safe_name,
+                        "size": file_size,
+                        "execution_id": execution_id,
+                        "uploaded_at": datetime.utcnow().isoformat(),
+                        "message": f"'{safe_name}' was already uploaded; reusing it.",
+                    }
+
+                # Changed content under the same name REPLACES the old chunks.
+                # Keeping both would leave the model retrieving passages from a
+                # version of the document the user has replaced — worse than a
+                # duplicate, because it is silently wrong.
+                replaced = await self.embedding_service.forget_file(
+                    file_path=file_path,
+                    created_by=self.created_by_email,
+                    user_token=user_token,
+                )
+                if replaced:
+                    logger.info(
+                        f"[UPLOAD] {safe_name} changed — removed {replaced} stale "
+                        "chunk(s) before re-embedding."
+                    )
+
                 logger.info(f"[UPLOAD] Starting embedding for file: {file_path}")
                 embedding_result = await self.embedding_service.embed_file(
                     file_path=file_path,
@@ -171,6 +227,7 @@ class DatabricksKnowledgeService:
                     agent_ids=agent_ids,
                     user_token=user_token,
                     created_by=self.created_by_email,
+                    content_hash=content_hash,
                 )
             finally:
                 # The raw upload never outlives the embedding attempt.

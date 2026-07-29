@@ -14,10 +14,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-# TTL for uploaded knowledge embeddings: rows older than this are purged
-# (opportunistically at upload time and excluded from search), so the store
-# never accumulates stale uploads. 0 or a negative value disables the TTL.
-KNOWLEDGE_TTL_DAYS = int(os.getenv("KNOWLEDGE_TTL_DAYS", "30"))
+# TTL for uploaded knowledge embeddings: rows older than this are purged and
+# excluded from search, so the store never accumulates stale uploads. 0 or a
+# negative value disables the TTL.
+#
+# Seven days, not thirty. These are attachments — someone drops a PDF to ask a
+# question about it — not a curated corpus. A month is longer than the intent,
+# and the shorter the window the smaller the answer to "what user data do you
+# still hold". Raise it with the env var where a workspace really does treat
+# uploads as a library.
+#
+# Enforced in three places, deliberately: search excludes expired rows so expiry
+# takes effect the moment it passes; ``purge_expired`` runs before each upload;
+# and a daily sweep (``main.py``) removes rows from disk even in a workspace
+# where nobody uploads again — without it, "we keep files for 7 days" would be
+# true of search results and false of the database.
+KNOWLEDGE_TTL_DAYS = int(os.getenv("KNOWLEDGE_TTL_DAYS", "7"))
 
 
 class KnowledgeEmbeddingService:
@@ -43,6 +55,7 @@ class KnowledgeEmbeddingService:
         agent_ids: Optional[List[str]] = None,
         user_token: Optional[str] = None,
         created_by: Optional[str] = None,
+        content_hash: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Embed a file's content into vector storage.
@@ -141,6 +154,12 @@ class KnowledgeEmbeddingService:
                     "created_at": datetime.utcnow().isoformat(),
                     "type": "knowledge_source",
                     "content_type": self._detect_content_type(filename),
+                    # Identity of the CONTENT, so a re-upload of the same file
+                    # can be recognised and skipped. Stored in metadata rather
+                    # than a column: it is read once per upload, by file_path,
+                    # and a new column on a table that exists in every deployed
+                    # install is a migration for something a JSON field answers.
+                    "content_hash": content_hash,
                 }
 
                 creates.append(
@@ -242,6 +261,88 @@ class KnowledgeEmbeddingService:
                 "error": str(e),
                 "message": f"Failed to embed file {file_path}",
             }
+
+    async def file_already_embedded(
+        self,
+        file_path: str,
+        content_hash: str,
+        created_by: Optional[str] = None,
+        user_token: Optional[str] = None,
+    ) -> bool:
+        """True when this exact content is already stored under this path.
+
+        Compares the hash carried in ``doc_metadata`` on any one existing chunk
+        — every chunk of a file carries the same one, so a single row answers
+        it. A file with no stored hash (uploaded before this existed) reads as
+        "not embedded", so the next upload replaces it and starts carrying one.
+
+        Never raises: a failure here must not block an upload. The cost of
+        guessing wrong is a duplicate, which is what happened before anyway.
+        """
+        if not content_hash:
+            return False
+        try:
+            from src.models.documentation_embedding import KnowledgeEmbedding
+            from src.repositories.documentation_embedding_repository import (
+                DocumentationEmbeddingRepository,
+            )
+            from src.services.knowledge.embedding_session import (
+                knowledge_embedding_session,
+            )
+
+            async with knowledge_embedding_session(
+                self.session, self.group_id, user_token
+            ) as (store_session, _is_lakebase):
+                repository = DocumentationEmbeddingRepository(
+                    store_session, model=KnowledgeEmbedding
+                )
+                stored = await repository.find_content_hash(
+                    group_id=self.group_id,
+                    file_path=file_path,
+                    created_by=created_by,
+                )
+            return bool(stored) and stored == content_hash
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not check whether %s is embedded: %s", file_path, exc)
+            return False
+
+    async def forget_file(
+        self,
+        file_path: str,
+        created_by: Optional[str] = None,
+        user_token: Optional[str] = None,
+    ) -> int:
+        """Remove every chunk stored under ``file_path``. Returns rows deleted.
+
+        Used when a file's content CHANGED (replace, not append) and when a user
+        detaches a file. Scoped to the group and, when supplied, the uploader —
+        one user must never delete another's knowledge.
+        """
+        try:
+            from src.models.documentation_embedding import KnowledgeEmbedding
+            from src.repositories.documentation_embedding_repository import (
+                DocumentationEmbeddingRepository,
+            )
+            from src.services.knowledge.embedding_session import (
+                knowledge_embedding_session,
+            )
+
+            async with knowledge_embedding_session(
+                self.session, self.group_id, user_token
+            ) as (store_session, _is_lakebase):
+                repository = DocumentationEmbeddingRepository(
+                    store_session, model=KnowledgeEmbedding
+                )
+                deleted = await repository.delete_by_path(
+                    group_id=self.group_id,
+                    file_path=file_path,
+                    created_by=created_by,
+                )
+                await store_session.commit()
+            return deleted
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not remove chunks for %s: %s", file_path, exc)
+            return 0
 
     async def purge_expired(self, user_token: Optional[str] = None) -> int:
         """Delete knowledge embeddings past the TTL (KNOWLEDGE_TTL_DAYS).

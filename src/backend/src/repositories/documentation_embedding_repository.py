@@ -191,6 +191,71 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
             )
             return deleted or 0
 
+    async def find_content_hash(
+        self,
+        group_id: str,
+        file_path: str,
+        created_by: Optional[str] = None,
+    ) -> Optional[str]:
+        """The content hash stored for a file, or None.
+
+        Every chunk of a file carries the same hash in ``doc_metadata``, so one
+        row answers "is this exact content already embedded?". Scoped to the
+        group and, when given, the uploader — reading another user's hash would
+        leak the fact that they uploaded a particular document.
+        """
+        from sqlalchemy import or_, select
+
+        conditions = [
+            self._model.group_id == group_id,
+            self._model.file_path == file_path,
+        ]
+        if created_by and hasattr(self._model, "created_by"):
+            conditions.append(
+                or_(
+                    self._model.created_by.is_(None),
+                    self._model.created_by == created_by,
+                )
+            )
+        result = await self.db.execute(
+            select(self._model.doc_metadata).where(*conditions).limit(1)
+        )
+        metadata = result.scalars().first()
+        if isinstance(metadata, dict):
+            value = metadata.get("content_hash")
+            return str(value) if value else None
+        return None
+
+    async def delete_by_path(
+        self,
+        group_id: str,
+        file_path: str,
+        created_by: Optional[str] = None,
+    ) -> int:
+        """Delete every chunk stored under an exact ``file_path``.
+
+        Distinct from ``delete_by_file``, which matches on execution id and
+        filename with LIKE. This is the exact-identity delete used when a file
+        is replaced or detached, so it cannot catch a same-named file uploaded
+        into a different session.
+        """
+        from sqlalchemy import delete as sa_delete
+        from sqlalchemy import or_
+
+        conditions = [
+            self._model.group_id == group_id,
+            self._model.file_path == file_path,
+        ]
+        if created_by and hasattr(self._model, "created_by"):
+            conditions.append(
+                or_(
+                    self._model.created_by.is_(None),
+                    self._model.created_by == created_by,
+                )
+            )
+        result = await self.db.execute(sa_delete(self._model).where(*conditions))
+        return int(getattr(result, "rowcount", 0) or 0)
+
     async def delete_expired(self, group_id: str, cutoff: datetime) -> int:
         """Delete rows for ``group_id`` older than ``cutoff``; returns rows deleted.
 
@@ -208,6 +273,25 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
                 self._model.group_id == group_id,
                 self._model.created_at < cutoff,
             )
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    async def delete_expired_all(self, cutoff: datetime) -> int:
+        """Delete rows older than ``cutoff`` in EVERY group. Returns rows deleted.
+
+        Deliberately unscoped, unlike ``delete_expired`` next door, and that is
+        the difference between the two: this backs the system-wide TTL sweep,
+        which has no user and no group — it runs on a timer to make the
+        retention window true of the database and not only of search results.
+
+        Retention is the one thing that must not be per-tenant here: a workspace
+        nobody has uploaded to in a month is exactly the one whose expired rows
+        would otherwise sit forever.
+        """
+        from sqlalchemy import delete as sa_delete
+
+        result = await self.db.execute(
+            sa_delete(self._model).where(self._model.created_at < cutoff)
         )
         return int(getattr(result, "rowcount", 0) or 0)
 

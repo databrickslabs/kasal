@@ -222,6 +222,30 @@ async def lifespan(app: FastAPI):
             "[ZombieCleanup] Periodic zombie cleanup task started (every 2 min)"
         )
 
+    # Knowledge retention. Expiry was already applied at search time and before
+    # each upload, which makes expired uploads unreachable but not gone — a
+    # workspace where nobody uploads again keeps them indefinitely. This sweep
+    # is what makes "we keep uploads for KNOWLEDGE_TTL_DAYS" true of the
+    # database rather than only of what search will show.
+    async def _knowledge_ttl_loop():
+        import asyncio as _a
+
+        from src.services.knowledge.retention import sweep_expired_knowledge
+
+        # One pass shortly after startup catches whatever expired while the app
+        # was down, then daily. Not on the critical path: the delay keeps it out
+        # of the way of the first requests.
+        await _a.sleep(300)
+        while True:
+            try:
+                await sweep_expired_knowledge()
+            except Exception as _ke:  # noqa: BLE001
+                system_logger.error(f"[KnowledgeTTL] Sweep error: {_ke}")
+            await _a.sleep(24 * 60 * 60)
+
+    _asyncio.create_task(_knowledge_ttl_loop())
+    system_logger.info("[KnowledgeTTL] Daily knowledge retention sweep started")
+
     # Workflow recipes: distil completed crew runs into reusable recipes.
     #
     # Mining is EVENT-DRIVEN — process_crew_executor triggers it the moment a
