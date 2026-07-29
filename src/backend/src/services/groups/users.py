@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -12,6 +13,42 @@ from src.schemas.user import UserPermissionUpdate, UserRole, UserUpdate
 # Removed password hash import - using OAuth proxy authentication
 
 logger = logging.getLogger(__name__)
+
+# One in-flight get-or-create per email, process-wide.
+#
+# The read-then-write in get_or_create_user_by_email is not atomic, and on SQLite
+# it cannot be made safe by retrying. The SQLite engine uses StaticPool — ONE
+# shared connection (see db/session.get_sqlite_poolclass) — so two concurrent
+# callers land in the SAME transaction:
+#
+#   A: SELECT -> none      B: SELECT -> none
+#   A: INSERT (flush)      B: INSERT (flush) -> UNIQUE violation, because it
+#                             sees A's uncommitted row on the shared connection
+#   B: rollback            <- and this discards A's INSERT too
+#   B: SELECT -> none      <- "UNIQUE constraint error but user still not found"
+#
+# Both callers then fail, and the second one's use of the session after the
+# failed flush is what produces "greenlet_spawn has not been called". Retrying
+# harder cannot fix it: the recovery is what destroys the winner's work.
+#
+# Serialising in-process closes the window that actually occurs here — the
+# racers are coroutines in one uvicorn process (startup seeding vs the first
+# authenticated request). Cross-process races are still caught by the UNIQUE
+# constraint and the refetch below, which works when the other transaction has
+# genuinely committed.
+_user_creation_locks: Dict[str, asyncio.Lock] = {}
+_user_creation_locks_guard = asyncio.Lock()
+
+
+async def _lock_for_email(email: str) -> asyncio.Lock:
+    """The lock for one email, created once. Guarded so two coroutines cannot
+    each make their own lock and then not share it."""
+    async with _user_creation_locks_guard:
+        lock = _user_creation_locks.get(email)
+        if lock is None:
+            lock = asyncio.Lock()
+            _user_creation_locks[email] = lock
+        return lock
 
 
 class UserService:
@@ -139,6 +176,21 @@ class UserService:
         return await self.user_repo.get(user_id)
 
     async def get_or_create_user_by_email(
+        self, email: str, update_login: bool = False
+    ) -> Optional[User]:
+        """Get or create a user by email, one caller at a time.
+
+        The lock is the fix, not a mitigation: see ``_user_creation_locks`` at
+        the top of this module for why retrying after the UNIQUE violation
+        cannot work on a shared SQLite connection.
+        """
+        if not email:
+            return await self._get_or_create_user_by_email_unlocked(email, update_login)
+        lock = await _lock_for_email(email)
+        async with lock:
+            return await self._get_or_create_user_by_email_unlocked(email, update_login)
+
+    async def _get_or_create_user_by_email_unlocked(
         self, email: str, update_login: bool = False
     ) -> Optional[User]:
         """
