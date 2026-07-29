@@ -1941,11 +1941,18 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                       groupId={localStorage.getItem('groupId') || 'default'}
                       hasAgents={nodes.some(n => n.type === 'agentNode')}
                       hasTasks={nodes.some(n => n.type === 'taskNode')}
+                      // No Databricks-config gate: uploads embed into the
+                      // LOCAL knowledge store (SQLite, or Lakebase pgvector when
+                      // deployed) and the search reads the same table, so a
+                      // memory backend and a knowledge volume are not needed —
+                      // Chat mode calls this endpoint with no gate at all. The
+                      // agent/task conditions stay because the canvas WIRES the
+                      // uploaded file into an agent's knowledge sources and a
+                      // task's tool config; with neither there is nothing to
+                      // attach it to.
                       disabled={
                         isLoading ||
                         !!executingJobId ||
-                        !isMemoryBackendConfigured ||
-                        !isKnowledgeSourceEnabled ||
                         !nodes.some(n => n.type === 'agentNode') ||
                         !nodes.some(n => n.type === 'taskNode')
                       }

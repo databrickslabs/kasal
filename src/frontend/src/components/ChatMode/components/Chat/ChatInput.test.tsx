@@ -6,7 +6,10 @@ import { uploadKnowledgeFile } from '../../api/knowledge';
 import { useExecutionStore } from '../../store/executionStore';
 import { useAppStore } from '../../store/appStore';
 
-vi.mock('../../api/knowledge', () => ({ uploadKnowledgeFile: vi.fn() }));
+vi.mock('../../api/knowledge', () => ({
+  uploadKnowledgeFile: vi.fn(),
+  forgetKnowledgeFile: vi.fn().mockResolvedValue(true),
+}));
 const mockUpload = vi.mocked(uploadKnowledgeFile);
 
 const MODELS: ModelConfigResponse[] = [

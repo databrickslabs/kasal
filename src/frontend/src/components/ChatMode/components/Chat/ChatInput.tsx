@@ -8,7 +8,7 @@ import {
   modelDisplayName as resolveModelDisplayName,
   modelLacksReasoning,
 } from '../../utils/answerModes';
-import { uploadKnowledgeFile } from '../../api/knowledge';
+import { forgetKnowledgeFile, uploadKnowledgeFile } from '../../api/knowledge';
 import { improveChatPrompt } from '../../api/prompt';
 import McpPicker from './McpPicker';
 import TrifectaNotice from './TrifectaNotice';
@@ -352,8 +352,17 @@ const ChatInput: React.FC<ChatInputProps> = ({
     });
   };
 
-  const removeAttachment = (id: string) =>
+  const removeAttachment = (id: string) => {
+    // Delete the embedded chunks too. Dropping only the chip left the file
+    // searchable until the TTL expired it, which is not what "remove" means to
+    // the person who clicked it. Fire-and-forget: the chip goes either way, and
+    // a failed cleanup is still caught by the retention sweep.
+    const attachment = attachments.find((a) => a.id === id);
+    if (attachment?.status === 'ready') {
+      void forgetKnowledgeFile(sessionId || uploadScopeId.current, attachment.name);
+    }
     setAttachments((prev) => prev.filter((a) => a.id !== id));
+  };
 
   const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {

@@ -55,3 +55,32 @@ export async function uploadKnowledgeFile(
     filename: (data.filename as string) || file.name,
   };
 }
+
+
+/**
+ * Forget an uploaded knowledge file.
+ *
+ * Detaching a file in the composer used to drop the chip and leave the
+ * embedded chunks in the store — searchable until the TTL expired them, which
+ * is not what "remove" looks like to the person clicking it. The endpoint
+ * deletes the chunks; there is no raw file to delete, since the upload's temp
+ * file is discarded once it has been embedded.
+ *
+ * Never throws: the chip is going away either way, and a failed cleanup is a
+ * retention concern the TTL sweep still resolves, not something to block the
+ * user's edit on.
+ */
+export async function forgetKnowledgeFile(
+  executionId: string,
+  filename: string
+): Promise<boolean> {
+  try {
+    await getClient().delete(
+      `/databricks/knowledge/delete/${encodeURIComponent(executionId)}/${encodeURIComponent(filename)}`
+    );
+    return true;
+  } catch (err) {
+    console.warn(`Could not remove the uploaded copy of ${filename}:`, err);
+    return false;
+  }
+}
