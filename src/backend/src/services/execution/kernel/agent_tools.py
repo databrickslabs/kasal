@@ -40,6 +40,63 @@ def resolve_tool_override(tool_factory, tool_id, tool_configs):
     return None
 
 
+def _warn_on_empty_mcp_servers(
+    label: str, requested: Any, mcp_tools: List[Any]
+) -> None:
+    """Say so when a server was asked for and handed back nothing.
+
+    This is the mismatch worth shouting about, because it is not a judgement
+    call: the crew asked for a capability, the server produced no way to use it,
+    and the agent runs anyway with a goal it now cannot reach. The existing
+    "Added 0 MCP tools" is an INFO line among dozens of others.
+
+    Tools are named ``<server>_<tool>``, so per-server attribution is by prefix.
+    Only reported as a WARNING — never raised — because an agent that lost one
+    of three servers may still do useful work, and a run killed at build time
+    tells an operator less than a run that produces a degraded answer with the
+    cause recorded (see runtime/task._flag_unavailable_sources).
+    """
+    names = [str(getattr(t, "name", "")) for t in mcp_tools]
+    servers = list(requested) if isinstance(requested, (list, tuple, set)) else []
+    empty = [s for s in servers if not any(n.startswith(f"{s}_") for n in names)]
+    if not empty:
+        return
+    logger.warning(
+        "[CAPABILITY] Agent %s requested MCP server(s) %s which returned NO tools "
+        "— the agent will run without that capability. Check the server is "
+        "reachable and the credentials are valid.",
+        label,
+        ", ".join(sorted(empty)),
+    )
+
+
+def _log_capability_inventory(label: str, tools: List[Any]) -> None:
+    """One line naming what this agent can actually do.
+
+    The facts were always in the log, spread over twenty lines of per-server
+    detail, which is why three consecutive runs were given the goal "Source
+    Swiss apartment listings from available data sources" together with four
+    database-introspection tools and nothing that could fetch a listing. Nobody
+    reading the log noticed, and ~135 tool calls were spent finding out.
+
+    Deliberately an INVENTORY, not a verdict. Deciding whether a toolset can
+    satisfy a goal means reading intent from prose, and a warning that guesses
+    wrong gets switched off — which costs more than it saves. So this states
+    what is there and leaves the judgement to the reader, who has the goal in
+    front of them.
+    """
+    if not tools:
+        return
+    groups: Dict[str, int] = {}
+    for tool in tools:
+        name = str(getattr(tool, "name", "") or type(tool).__name__)
+        # MCP tools are '<server>_<tool>'; anything else stands for itself.
+        prefix = name.split("_", 1)[0] if "_" in name else name
+        groups[prefix] = groups.get(prefix, 0) + 1
+    inventory = ", ".join(f"{k}({v})" for k, v in sorted(groups.items()))
+    logger.info(f"[CAPABILITY] Agent {label} can use: {inventory}")
+
+
 async def add_mcp_tools(
     mcp_config: Dict[str, Any], label: str, call_config: Any
 ) -> List[Any]:
@@ -53,9 +110,10 @@ async def add_mcp_tools(
     try:
         from src.services.tools.mcp_integration import MCPIntegration
 
-        if MCPIntegration._extract_mcp_servers_from_config(
+        requested = MCPIntegration._extract_mcp_servers_from_config(
             (mcp_config or {}).get("tool_configs", {})
-        ):
+        )
+        if requested:
             from src.db.session import request_scoped_session
             from src.services.mcp.mcp_client.service import MCPService
 
@@ -66,6 +124,7 @@ async def add_mcp_tools(
                 )
                 tools.extend(mcp_tools)
                 logger.info(f"Added {len(mcp_tools)} MCP tools to agent {label}")
+                _warn_on_empty_mcp_servers(label, requested, mcp_tools)
     except Exception as e:
         import traceback
 
@@ -221,6 +280,7 @@ async def build_agent_with_tools(
 
     if tools:
         logger.info(f"Agent {label} will have access to {len(tools)} tool(s)")
+        _log_capability_inventory(label, tools)
     else:
         logger.info(f"Agent {label} will not have any tools")
 
