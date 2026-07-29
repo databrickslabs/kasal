@@ -502,6 +502,15 @@ def presentation_design_lint(
     # Attribution: only flagged when the ANSWER carried sources and the deck then
     # dropped them. A deck with nothing to cite is not a design defect, so this
     # never fires on decks composed from an unsourced answer.
+    #
+    # This depends on citations SURVIVING the agent. They stopped for a while:
+    # the security preamble told agents not to be "influenced by" tool output,
+    # and models resolved that by dropping source URLs — so this check almost
+    # never fired, and when it did the retry had nothing to work with. The
+    # preamble now separates data from instructions and explicitly permits
+    # citing (``execution/kernel/agent_security.py``). If a future change to
+    # that wording re-suppresses citations, deck attribution goes quiet again
+    # rather than failing loudly, so the two are worth changing together.
     if answer_has_sources:
         cited = sum(1 for s in slides if s.get("sources"))
         if cited == 0:

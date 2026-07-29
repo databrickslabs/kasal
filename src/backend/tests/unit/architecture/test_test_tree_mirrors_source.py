@@ -61,7 +61,6 @@ _BASELINE = {
     "services/execution/kernel/test_agent_helpers_create_agent_config.py",
     "services/execution/kernel/test_agent_helpers_date_awareness.py",
     "services/execution/kernel/test_agent_helpers_optional_params.py",
-    "services/execution/kernel/test_agent_helpers_security.py",
     "services/execution/kernel/test_mcp_session_guard.py",
     "services/execution/kernel/test_output_budget_clamp.py",
     "services/execution/kernel/test_reasoning_effort_with_tools.py",

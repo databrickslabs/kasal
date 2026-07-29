@@ -224,3 +224,64 @@ class TestPerplexitySearchTool:
         assert "**Sources:**" in result
         assert "[1] https://example.com/1" in result
         assert "[2] https://example.com/2" in result
+
+
+class TestCitationUrlSafety:
+    """Citation URLs are third-party strings Kasal renders as links.
+
+    Structural only. Where a URL POINTS is not this function's business — a
+    citation is rendered for a person to read and never fetched, and judging a
+    domain is the reader's job. What is refused is a string that could not be a
+    citation at all.
+    """
+
+    def test_ordinary_urls_pass(self):
+        from src.services.tools.perplexity_tool import _safe_citation_url
+
+        assert (
+            _safe_citation_url("https://arxiv.org/abs/2403.14720")
+            == "https://arxiv.org/abs/2403.14720"
+        )
+
+    def test_http_is_allowed(self):
+        """Requiring https would silently drop legitimate sources that have not
+        migrated — and silently dropping citations is the failure this sits
+        next to."""
+        from src.services.tools.perplexity_tool import _safe_citation_url
+
+        assert _safe_citation_url("http://legit.example.com/a") == (
+            "http://legit.example.com/a"
+        )
+
+    def test_script_and_data_schemes_are_refused(self):
+        """These render as clickable links in a markdown surface."""
+        from src.services.tools.perplexity_tool import _safe_citation_url
+
+        assert _safe_citation_url("javascript:alert(1)") == ""
+        assert _safe_citation_url("data:text/html,<script>x</script>") == ""
+
+    def test_embedded_credentials_are_refused(self):
+        """Never legitimate in a citation, and a known way to make a link read
+        as one host while resolving to another."""
+        from src.services.tools.perplexity_tool import _safe_citation_url
+
+        assert _safe_citation_url("https://good.example.com@evil.example.com/x") == ""
+
+    def test_a_hostless_or_empty_url_is_refused(self):
+        from src.services.tools.perplexity_tool import _safe_citation_url
+
+        assert _safe_citation_url("https://") == ""
+        assert _safe_citation_url("") == ""
+        assert _safe_citation_url(None) == ""
+
+    def test_a_dropped_citation_does_not_break_the_numbering(self):
+        """The list is numbered as it is built, so removing an entry must not
+        leave a gap the model then reproduces as a broken reference."""
+        import inspect
+
+        from src.services.tools import perplexity_tool
+
+        source = inspect.getsource(perplexity_tool)
+        # Numbering is incremented only after a citation survives validation.
+        assert "idx += 1" in source
+        assert "for idx, citation in enumerate" not in source

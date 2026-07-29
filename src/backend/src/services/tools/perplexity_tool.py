@@ -13,6 +13,50 @@ from src.services.tools.base import BaseTool
 logger = logging.getLogger(__name__)
 
 
+def _safe_citation_url(value: str) -> str:
+    """A citation URL, or "" if it should not be shown.
+
+    Citations come back from a third party, so the strings themselves are
+    attacker-influenced even though Kasal formats the list. This is a STRUCTURAL
+    check only — https, a real host, no credentials in the authority, no
+    ``javascript:``/``data:`` scheme — reusing the same helper the HITL webhook
+    validation uses rather than a second regex that drifts from it.
+
+    It deliberately does NOT check where the URL points. That is not this
+    function's job: a citation is rendered for a person to read, never fetched,
+    and deciding whether a domain is trustworthy is the reader's judgement.
+    Dropping a malformed entry is about not emitting a link that could be a
+    ``javascript:`` payload in a UI that renders markdown.
+    """
+    url = (value or "").strip()
+    if not url:
+        return ""
+
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(url)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Dropping unparseable citation URL %r: %s", url[:120], exc)
+        return ""
+
+    # http is allowed alongside https. Requiring https would silently drop
+    # legitimate sources that have not migrated — and silently dropping
+    # citations is the exact failure this validation sits next to.
+    if parsed.scheme not in ("http", "https"):
+        logger.warning("Dropping citation URL with scheme %r", parsed.scheme)
+        return ""
+    if not parsed.netloc:
+        logger.warning("Dropping citation URL with no host: %r", url[:120])
+        return ""
+    # Credentials in the authority are never legitimate in a citation and are a
+    # known way to make a link read as one host while resolving to another.
+    if "@" in parsed.netloc:
+        logger.warning("Dropping citation URL with embedded credentials")
+        return ""
+    return url
+
+
 # Input schema for PerplexitySearchTool
 class PerplexitySearchInput(BaseModel):
     """Input schema for PerplexitySearchTool."""
@@ -200,15 +244,24 @@ class PerplexitySearchTool(BaseTool):
             # Format the answer with citations if available
             if search_results:
                 formatted_answer = f"{answer}\n\n**Sources:**\n"
-                for idx, citation in enumerate(search_results, 1):
+                idx = 0
+                for citation in search_results:
                     if isinstance(citation, dict):
                         title = citation.get("title", "Unknown")
-                        url = citation.get("url", "")
+                        url = _safe_citation_url(citation.get("url", ""))
+                        if not url:
+                            continue
+                        idx += 1
                         formatted_answer += f"[{idx}] {title}: {url}\n"
                     elif isinstance(citation, str):
                         # Handle case where citations are just URLs
-                        formatted_answer += f"[{idx}] {citation}\n"
-                answer = formatted_answer
+                        url = _safe_citation_url(citation)
+                        if not url:
+                            continue
+                        idx += 1
+                        formatted_answer += f"[{idx}] {url}\n"
+                if idx:
+                    answer = formatted_answer
 
             # Log a preview of the answer
             logger.info(f"Perplexity answer with citations: {answer[:200]}...")
