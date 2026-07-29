@@ -54,6 +54,14 @@ class TestClassifyingAFailure:
             ("Error: describe what the remote agent should do.", True),
             ("Error executing MCP tool foo", True),
             ("Error from Perplexity API: 429", True),
+            # The literal message perplexity_tool emits on requests.Timeout. A
+            # search that timed out is a dead source, not an answer, and the
+            # tool has no way to say so except through this prefix.
+            (
+                "Error: Perplexity API did not respond within the timeout "
+                "(10, 300) (connect, read) seconds: Read timed out.",
+                True,
+            ),
             # Not failures — the word appears, but the call worked.
             ("Found 3 errors in the build log", False),
             ("The error rate dropped to 0.2%", False),

@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import requests
 
 from src.services.tools.perplexity_tool import (
     PerplexitySearchInput,
@@ -285,3 +286,83 @@ class TestCitationUrlSafety:
         # Numbering is incremented only after a citation survives validation.
         assert "idx += 1" in source
         assert "for idx, citation in enumerate" not in source
+
+
+class TestRequestTimeout:
+    """A search that never answers must fail rather than block.
+
+    `requests` applies no timeout by default, so before this the call could hold
+    its thread for the life of the process. It also made a slow-but-healthy call
+    indistinguishable from a hung one — both sit in ssl.read — which is how one
+    run was misdiagnosed as a hang when the tool was simply taking 2m36s.
+    """
+
+    def test_a_timeout_is_passed_to_requests(self):
+        with patch("requests.post") as mock_post:
+            mock_response = MagicMock()
+            mock_response.ok = True
+            mock_response.json.return_value = {
+                "choices": [{"message": {"content": "answer"}}]
+            }
+            mock_post.return_value = mock_response
+
+            PerplexitySearchTool(api_key="test-key")._run("Test query")
+
+        assert (
+            mock_post.call_args.kwargs.get("timeout") is not None
+        ), "without timeout= a hung socket blocks this thread forever"
+
+    def test_connect_is_tight_and_read_is_generous(self):
+        """A handshake either completes quickly or the host is unreachable; the
+        search itself is legitimately slow and must not be cut off at 2m36s,
+        which has been observed succeeding."""
+        connect, read = PerplexitySearchTool(api_key="test-key")._timeout
+        assert connect <= 15
+        assert read >= 180
+
+    def test_the_timeout_is_configurable(self):
+        tool = PerplexitySearchTool(api_key="test-key", timeout=(1, 2))
+        assert tool._timeout == (1, 2)
+
+        with patch("requests.post") as mock_post:
+            mock_post.side_effect = requests.Timeout("boom")
+            tool._run("Test query")
+        assert mock_post.call_args.kwargs["timeout"] == (1, 2)
+
+    def test_a_timeout_reports_the_cause_and_the_budget(self):
+        with patch("requests.post") as mock_post:
+            mock_post.side_effect = requests.Timeout("Read timed out.")
+            result = PerplexitySearchTool(api_key="test-key")._run("Test query")
+
+        assert "timeout" in result.lower()
+        assert "300" in result, "an operator needs to know which budget was hit"
+
+    def test_a_timeout_message_keeps_the_failure_prefix(self):
+        """A timed-out search must not read as an answer.
+
+        runtime/executor's tool ledger classifies a RETURNED string as a failure
+        by prefix, so if this message stops starting with "Error:" the task
+        reports success over a dead source. The other half of the contract —
+        that the ledger recognises this prefix — is asserted from the ledger's
+        own suite (test_tool_outcome_ledger.py), which is where the executor can
+        be imported safely; importing it from inside the tools suite picks up a
+        sibling test's sys.modules stub instead of the real module.
+        """
+        with patch("requests.post") as mock_post:
+            mock_post.side_effect = requests.Timeout("Read timed out.")
+            result = PerplexitySearchTool(api_key="test-key")._run("Test query")
+
+        assert result.lower().startswith("error:")
+
+    def test_a_slow_but_successful_call_is_not_disturbed(self):
+        """Guard against a future "fix" that tightens read below what works."""
+        with patch("requests.post") as mock_post:
+            mock_response = MagicMock()
+            mock_response.ok = True
+            mock_response.json.return_value = {
+                "choices": [{"message": {"content": "the answer"}}]
+            }
+            mock_post.return_value = mock_response
+            result = PerplexitySearchTool(api_key="test-key")._run("Test query")
+
+        assert "the answer" in result

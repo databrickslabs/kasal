@@ -12,6 +12,21 @@ from src.services.tools.base import BaseTool
 # Configure logger
 logger = logging.getLogger(__name__)
 
+# (connect, read), in seconds. `requests` applies NO timeout by default, so a
+# socket that never answers blocks this thread for the life of the process — and
+# from the outside a hung call and a slow one look identical (both sit in
+# ssl.read), which is exactly how one run was misread as a hang.
+#
+# The two halves are deliberately far apart. A TCP+TLS handshake either completes
+# quickly or the endpoint is unreachable, so 10s is generous for connect. A
+# search itself is legitimately slow — 2m36s has been observed and must still
+# succeed — so the read budget is 5 minutes: an upper bound, not a target.
+#
+# Note this is a per-read timeout, not a total-call budget; a response that keeps
+# trickling bytes can outlive it. It converts "hangs forever" into "fails with a
+# ReadTimeout", which is the property that matters here.
+DEFAULT_TIMEOUT = (10, 300)
+
 
 def _safe_citation_url(value: str) -> str:
     """A citation URL, or "" if it should not be shown.
@@ -89,6 +104,7 @@ class PerplexitySearchTool(BaseTool):
     _web_search_options: Dict[str, Any] = PrivateAttr(
         default={"search_context_size": "high"}
     )
+    _timeout: Any = PrivateAttr(default=DEFAULT_TIMEOUT)
 
     def __init__(
         self,
@@ -106,6 +122,7 @@ class PerplexitySearchTool(BaseTool):
         presence_penalty: Optional[float] = None,
         frequency_penalty: Optional[float] = None,
         web_search_options: Optional[Dict[str, Any]] = None,
+        timeout: Optional[Any] = None,
         result_as_answer: bool = False,
     ):
         super().__init__()
@@ -167,6 +184,8 @@ class PerplexitySearchTool(BaseTool):
             self._frequency_penalty = frequency_penalty
         if web_search_options is not None:
             self._web_search_options = web_search_options
+        if timeout is not None:
+            self._timeout = timeout
 
     def _run(self, query: str) -> str:
         """
@@ -218,7 +237,9 @@ class PerplexitySearchTool(BaseTool):
             logger.info(f"Executing Perplexity API request with query: {query}")
             logger.debug(f"Perplexity API payload: {json.dumps(payload, indent=2)}")
 
-            response = requests.post(url, json=payload, headers=headers)
+            response = requests.post(
+                url, json=payload, headers=headers, timeout=self._timeout
+            )
             if not response.ok:
                 logger.error(
                     f"Error from Perplexity API: {response.status_code} - {response.text}"
@@ -280,6 +301,19 @@ class PerplexitySearchTool(BaseTool):
             # Return the formatted answer with citations
             logger.debug(f"Structured output: {json.dumps(output, indent=2)}")
             return answer
+
+        except requests.Timeout as e:
+            # Named separately so the log says "the endpoint stopped answering"
+            # rather than leaving an operator to infer it from a stack trace. The
+            # "Error:" prefix matters: runtime/executor's tool ledger classifies a
+            # RETURNED string as a failure by prefix, and a search that timed out
+            # must count as a dead source, not as an answer.
+            error_msg = (
+                f"Error: Perplexity API did not respond within the timeout "
+                f"{self._timeout} (connect, read) seconds: {e}"
+            )
+            logger.error(error_msg)
+            return error_msg
 
         except Exception as e:
             error_msg = f"Error executing Perplexity API request: {str(e)}"
