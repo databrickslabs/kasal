@@ -1,7 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
-  Card,
-  CardContent,
   Typography,
   Box,
   Table,
@@ -23,11 +21,14 @@ import {
   Tooltip,
   AlertColor,
   CircularProgress,
+  InputAdornment,
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import KeyIcon from '@mui/icons-material/Key';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
+import SearchIcon from '@mui/icons-material/Search';
+import ClearIcon from '@mui/icons-material/Clear';
 
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
@@ -50,6 +51,8 @@ import { useAPIKeys } from '../../../hooks/global/useAPIKeys';
 import { useAPIKeysStore } from '../../../store/apiKeys';
 import { NotificationState } from '../../../types/common';
 
+import { matchesSearch } from './searchApiKeys';
+
 function APIKeys(): JSX.Element {
   const { secrets: apiKeys, loading, error, updateSecrets: updateApiKeys } = useAPIKeys();
   const { editDialogOpen, providerToEdit, closeApiKeyEditor } = useAPIKeysStore();
@@ -61,6 +64,7 @@ function APIKeys(): JSX.Element {
     message: '',
     severity: 'success'
   });
+  const [searchTerm, setSearchTerm] = useState<string>('');
   const [createDialog, setCreateDialog] = useState<boolean>(false);
   const [newApiKey, setNewApiKey] = useState<ApiKeyCreate>({
     name: '',
@@ -175,17 +179,15 @@ function APIKeys(): JSX.Element {
 
   if (error) {
     return (
-      <Card sx={{ mt: 8 }}>
-        <CardContent>
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-            <KeyIcon sx={{ mr: 1, color: 'error.main' }} />
-            <Typography variant="h5">API Keys</Typography>
-          </Box>
-          <Alert severity="error" sx={{ mb: 2 }}>
-            {error}
-          </Alert>
-        </CardContent>
-      </Card>
+      <Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+          <KeyIcon sx={{ mr: 1, color: 'error.main' }} />
+          <Typography variant="h5">API Keys</Typography>
+        </Box>
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+      </Box>
     );
   }
 
@@ -338,7 +340,9 @@ function APIKeys(): JSX.Element {
             {apiKeysList.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={4} align="center">
-                  No API keys found
+                  {searchTerm
+                    ? `No API keys match "${searchTerm}"`
+                    : 'No API keys found'}
                 </TableCell>
               </TableRow>
             ) : (
@@ -409,9 +413,14 @@ function APIKeys(): JSX.Element {
     return [...apiKeys, ...modelPlaceholders, ...localPlaceholders];
   })();
 
+  const visibleKeys = allKeys.filter(key => matchesSearch(key, searchTerm));
+
+  // No Card/CardContent wrapper: the Configuration content column is already a
+  // `background.paper` surface with p:2, and ContentPanel adds py:2 on top. A
+  // Card here nested a second surface inside the first and stacked a third 16px
+  // of padding, which is the gap that showed above the heading.
   return (
-    <Card sx={{ mt: 8 }}>
-      <CardContent>
+    <Box>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
             <KeyIcon sx={{ mr: 1 }} />
@@ -450,7 +459,38 @@ function APIKeys(): JSX.Element {
           return null;
         })()}
 
-        {renderApiKeysTable(allKeys)}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <TextField
+            fullWidth
+            size="small"
+            placeholder="Search keys by name or description..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" />
+                </InputAdornment>
+              ),
+              endAdornment: searchTerm ? (
+                <InputAdornment position="end">
+                  <Tooltip title="Clear search">
+                    <IconButton size="small" onClick={() => setSearchTerm('')}>
+                      <ClearIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                </InputAdornment>
+              ) : null,
+            }}
+          />
+          {searchTerm && (
+            <Typography variant="body2" sx={{ color: 'text.secondary', whiteSpace: 'nowrap' }}>
+              {visibleKeys.length} of {allKeys.length}
+            </Typography>
+          )}
+        </Box>
+
+        {renderApiKeysTable(visibleKeys)}
 
 
 
@@ -558,8 +598,7 @@ function APIKeys(): JSX.Element {
             {notification.message}
           </Alert>
         </Snackbar>
-      </CardContent>
-    </Card>
+    </Box>
   );
 }
 
