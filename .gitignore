@@ -69,10 +69,19 @@ __pycache__/
 # their own copies (databricksdist/, dist/, .venv/) are ignored separately.
 
 # Logs
-logs/
+#
+# ANCHORED. Unanchored, `logs/` matches a directory called `logs` at ANY depth,
+# and it silently swallowed the SOURCE package
+# src/backend/src/services/execution/logs/ — three files, including its
+# __init__.py, were never committed. `git status` showed nothing, because that
+# is what ignoring means; a fresh clone lost the package and the suite failed on
+# an import error that read like test rot. Anchor rules for GENERATED
+# directories, or they will eventually match source.
+/logs/
+src/backend/logs/
 *.log
 build_*.log
-deploy_*.log 
+deploy_*.log
 .databricks
 .databricks_seeded
 
@@ -113,8 +122,10 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Anchored: a venv's lib/ is at the root. Unanchored, this matched the export
+# template's REAL frontend source dirs named lib/ (see the note below).
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -151,7 +162,8 @@ venv/
 ENV/
 
 # Logs
-logs/
+# Anchored — see the note on the first Logs block above.
+/logs/
 *.log
 
 # IDE files

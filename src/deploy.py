@@ -43,7 +43,13 @@ logging.basicConfig(
 logger = logging.getLogger("deploy")
 
 def custom_ignore_function(excluded_dirs, excluded_patterns):
-    """Create a robust ignore function that excludes specific directories and patterns."""
+    """Create a robust ignore function that excludes specific directories and patterns.
+
+    NOTE: ``excluded_dirs`` matches by NAME AT ANY DEPTH. That is correct for
+    caches that appear all over a tree (``__pycache__``, ``node_modules``), and
+    dangerous for anything whose name a source package might also use — see the
+    comment on ``backend_excluded_dirs`` at the backend copy below.
+    """
     def _ignore(directory, contents):
         ignored = []
         for item in contents:
@@ -578,8 +584,20 @@ def deploy_source_to_databricks(
                 if not (backend_src / "src").exists():
                     logger.error("backend/src folder not found!")
                     raise FileNotFoundError("backend/src folder not found")
+                # Matched by NAME AT ANY DEPTH, so only names no source package
+                # would ever use belong here.
+                #
+                # 'logs' and 'tmp' were in this set and have been removed: the
+                # copy root is backend/src, the runtime dirs they were aimed at
+                # (src/backend/logs, src/backend/tmp) are OUTSIDE it and never
+                # visited, and the only thing 'logs' actually matched was the
+                # SOURCE package src/services/execution/logs/ — so the deployed
+                # app shipped without its execution-logging modules, which
+                # subprocess_bootstrap imports on startup. The repo's .gitignore
+                # made the identical unanchored-name mistake on the same
+                # directory; see the note at the top of .gitignore.
                 backend_excluded_dirs = {
-                    '__pycache__', '.pytest_cache', '.mypy_cache', 'node_modules', 'logs', 'tmp'
+                    '__pycache__', '.pytest_cache', '.mypy_cache', 'node_modules'
                 }
                 backend_excluded_patterns = [
                     '*.pyc', '*.pyo', '*.log', '*.db', '*.db-shm', '*.db-wal',

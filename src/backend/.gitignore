@@ -1,5 +1,17 @@
+# ANCHOR RUNTIME-ARTIFACT DIRECTORY RULES WITH A LEADING SLASH.
+#
+# `logs/` (no leading slash) matches a directory called `logs` at ANY depth, so
+# it silently swallowed the SOURCE package `src/services/execution/logs/`.
+# Three files there — including its `__init__.py` — were never committed: git
+# status shows nothing, because that is exactly what ignoring means. A fresh
+# clone lost the package and 144 tests failed on an import error that read like
+# test rot. `/logs/` matches only src/backend/logs/, which is what was meant.
+#
+# The same mistake is already recorded below for `lib/`. If you add a rule for a
+# generated directory, anchor it.
+
 # Logs
-logs/
+/logs/
 *.log
 
 # Python
@@ -15,18 +27,14 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
-# The Databricks-App export template ships real frontend source dirs named
-# `lib/` (shadcn utils, markdown renderer, deck themes) — both frontend/src/lib/
-# AND the vendored renderer's frontend/src/a2ui/lib/. These are NOT Python venv
-# libs — keep them tracked despite the `lib/` rule above, else exports break on a
-# fresh clone (the files exist locally but never get committed, and the vendored
-# a2ui components import from a2ui/lib/deckThemes.ts that isn't there).
-!src/engines/kasal/exporters/templates/databricks_app/frontend/src/lib/
-!src/engines/kasal/exporters/templates/databricks_app/frontend/src/lib/**
-!src/engines/kasal/exporters/templates/databricks_app/frontend/src/a2ui/lib/
-!src/engines/kasal/exporters/templates/databricks_app/frontend/src/a2ui/lib/**
+# Anchored, for the reason at the top of this file. Unanchored, `lib/` matched
+# the export template's REAL frontend source dirs (shadcn utils, markdown
+# renderer, deck themes) and had to be undone with four negation lines — which
+# then rotted silently when the refactor moved the template out of
+# src/engines/, leaving a new file there swallowable all over again. A venv's
+# lib/ is at the root; anchoring says so and needs no exceptions.
+/lib/
+/lib64/
 parts/
 sdist/
 var/
