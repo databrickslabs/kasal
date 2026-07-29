@@ -32,6 +32,7 @@ from src.seeds.skills_data import (
     agentic_ai_news,
     analysis_findings,
     databricks_sql,
+    presentation_content,
     query_validation,
     task_authoring,
     team_updates,
@@ -44,6 +45,7 @@ BUILTIN_SKILLS: List[Dict[str, Any]] = [
     analysis_findings.SKILL,
     team_updates.SKILL,
     agentic_ai_news.SKILL,
+    presentation_content.SKILL,
 ]
 
 __all__ = ["BUILTIN_SKILLS"]

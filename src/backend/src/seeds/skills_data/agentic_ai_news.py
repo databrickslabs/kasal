@@ -48,6 +48,17 @@ revolutionary.
 - When two sources disagree on a benchmark number, the difference is almost
   always the harness — scaffolding, tool access, number of attempts — not the
   model.
+
+## Carrying the link through
+
+Search tools return a numbered source list alongside their answer. That list is
+the deliverable, not scaffolding — copy the URLs into your output exactly as
+received. Summarising a source without its link converts a checkable claim into
+an unverifiable one, which for this subject matter is most of the value gone.
+
+If a tool answered with no URL for a claim, report the claim AND the gap:
+"reported by <tool>, no primary source returned". A reader can act on that. A
+claim that quietly appears sourceless reads as though it were verified.
 """
 
 _JUDGING = """# Telling a capability change from an announcement
@@ -101,9 +112,11 @@ SKILL = {
         "capability from announcement. Use when asked what is new in AI or "
         "agentic AI, for a weekly or monthly AI news digest, a competitive or "
         "landscape scan, whether a specific model or agent capability is real, "
-        "or to monitor a vendor's releases. Trigger when the user mentions AI "
-        "news, latest models, agent frameworks, LLM benchmarks, what changed "
-        "this week in AI, or keeping up with agentic AI."
+        "or to monitor a vendor's releases. Always answers with source links. "
+        "Trigger when the user mentions AI news, latest models, agent "
+        "frameworks, LLM benchmarks, what changed this week in AI, keeping up "
+        "with agentic AI, or asks for the links, sources or papers behind an "
+        "answer."
     ),
     "body": """# Tracking agentic AI
 
@@ -146,7 +159,47 @@ not capability changes, and saying so is most of the value.
 `references/judging-claims.md` has the classification table and the questions to
 ask of a benchmark number.
 
-## 4. Write it
+## 4. Cite everything — this is not optional
+
+An unsourced claim about this field is worthless. Nobody can check it, and half
+of what circulates is wrong. Every item you report carries its link.
+
+**Reproduce URLs exactly as your tools returned them.** Search tools return a
+numbered source list; copy those URLs character for character into your answer.
+Do not shorten them, do not describe them ("the arXiv paper"), do not replace
+them with a search query, and never write a URL you did not receive — a
+plausible-looking invented link is worse than no link, because it will be
+believed and then fail.
+
+Format each item like this:
+
+```
+**Claude Opus 5 tool-use benchmark** — 74.3% on SWE-bench Verified, up from
+61.2%, measured with the vendor's own harness at 3 attempts.
+Source: https://example.com/model-card
+```
+
+And close with a plain list of every source used:
+
+```
+## Sources
+[1] Anthropic — Claude Opus 5 model card — https://example.com/model-card
+[2] arXiv 2504.01234 — Multi-agent coordination under partial observability —
+    https://arxiv.org/abs/2504.01234
+```
+
+Rules that matter:
+
+- **One link per claim, the PRIMARY one.** Link the model card, not the article
+  about the model card.
+- **If a tool gave you an answer with no URL, say so** — "reported by <tool>, no
+  primary source returned" — rather than dropping the item or dressing it up.
+- **Keep the URL visible.** Bare links, not "click here": the reader judges a
+  source partly by its domain.
+- **A benchmark number without a link to its methodology is not reportable.**
+  Either find the source or state that the claim is unverifiable.
+
+## 5. Write it
 
 - **Lead with what changed**, not with who announced it.
 - One item per paragraph, each with: what it is, what it measurably does, and
@@ -157,7 +210,7 @@ ask of a benchmark number.
   be packaging. That is a finding.
 - Date every claim. A capability statement without a date rots quietly.
 
-## 5. Say what you could not check
+## 6. Say what you could not check
 
 Paywalled papers, vendor-only benchmarks, claims with no eval. A digest that
 lists its own gaps is one a reader can act on.
