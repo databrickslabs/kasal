@@ -9,16 +9,56 @@ from pydantic import BaseModel, Field
 
 
 class ExportFormat(str, Enum):
-    """Available export formats.
+    """Export formats.
 
-    ``python_project`` and ``databricks_notebook`` were removed: both generated
-    projects that ran on ``pip install crewai``, a second engine to keep in
-    agreement with Kasal's by hand. A request naming either now fails validation
-    with a 422 listing the valid formats — a clear error rather than an export
-    that silently produces something unsupported.
+    ``DATABRICKS_APP`` is the only one that produces an export.
+
+    ``PYTHON_PROJECT`` and ``DATABRICKS_NOTEBOOK`` are RETIRED but deliberately
+    still members. Both generated projects that ran on ``pip install crewai``, a
+    second agent engine to keep in agreement with Kasal's by hand, and their
+    exporters are gone.
+
+    Dropping the members outright was the first attempt, and it was the wrong
+    failure: pydantic rejects the request before it reaches any of our code, so
+    a caller that had been exporting notebooks for months gets a bare 422
+    ``Input should be 'databricks_app'`` with no hint that the format was
+    removed, when, or what to do instead. Keeping them lets
+    ``CrewExportService`` answer with a 410 that says all three.
+
+    The cost of keeping them: a genuinely unknown format now gets a 422 reading
+    "Input should be 'databricks_app', 'python_project' or 'databricks_notebook'",
+    which offers two formats that do not work. Accepted knowingly — picking one
+    of them yields the 410 that explains, so the caller is one informative step
+    from the answer either way, and that beats a first step that explains
+    nothing.
+
+    See ``RETIRED_EXPORT_FORMATS`` for the messages.
     """
 
     DATABRICKS_APP = "databricks_app"
+
+    # Retired — accepted by validation, refused with 410 Gone. See above.
+    PYTHON_PROJECT = "python_project"
+    DATABRICKS_NOTEBOOK = "databricks_notebook"
+
+
+#: Retired format -> why it went, and what to use instead. A caller hitting one
+#: of these gets this text, so it has to be enough to act on without reading the
+#: changelog.
+RETIRED_EXPORT_FORMATS: Dict[ExportFormat, str] = {
+    ExportFormat.PYTHON_PROJECT: (
+        "The 'python_project' export format has been removed. It generated a "
+        "project that ran on CrewAI, a second agent engine Kasal no longer "
+        "ships. Export as 'databricks_app' instead — it runs Kasal's own "
+        "runtime, so an exported crew behaves the same as it does in Kasal."
+    ),
+    ExportFormat.DATABRICKS_NOTEBOOK: (
+        "The 'databricks_notebook' export format has been removed. It generated "
+        "a notebook that ran on CrewAI, a second agent engine Kasal no longer "
+        "ships. Export as 'databricks_app' instead — it runs Kasal's own "
+        "runtime and deploys straight to Databricks Apps."
+    ),
+}
 
 
 class DeploymentTarget(str, Enum):

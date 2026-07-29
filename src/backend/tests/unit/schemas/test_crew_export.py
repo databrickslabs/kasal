@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.schemas.crew_export import (
+    RETIRED_EXPORT_FORMATS,
     CrewExportRequest,
     CrewExportResponse,
     DeploymentRequest,
@@ -29,14 +30,33 @@ class TestExportFormat:
         """Test DATABRICKS_APP enum value."""
         assert ExportFormat.DATABRICKS_APP == "databricks_app"
 
-    def test_databricks_app_is_the_only_format(self):
-        """``python_project`` and ``databricks_notebook`` were removed with the
-        CrewAI-based exporters that produced them. A request naming either must
-        fail validation rather than fall through to something unsupported."""
-        assert [f.value for f in ExportFormat] == ["databricks_app"]
-        for removed in ("python_project", "databricks_notebook"):
-            with pytest.raises(ValidationError):
-                CrewExportRequest(export_format=removed)
+    def test_retired_formats_still_validate(self):
+        """``python_project`` and ``databricks_notebook`` are RETIRED but must
+        remain enum members.
+
+        Dropping them makes pydantic reject the request before it reaches our
+        code, so a caller that had been exporting notebooks gets a bare
+        "Input should be 'databricks_app'" with no hint that the format was
+        removed or what replaced it. Keeping them lets the service answer with
+        a 410 that explains — see TestRetiredFormats in the service tests."""
+        for retired in ("python_project", "databricks_notebook"):
+            request = CrewExportRequest(export_format=retired)
+            assert request.export_format in RETIRED_EXPORT_FORMATS
+
+    def test_every_retired_format_has_a_message_naming_the_replacement(self):
+        """The message is all a caller gets, so it has to be actionable."""
+        assert set(RETIRED_EXPORT_FORMATS) == {
+            ExportFormat.PYTHON_PROJECT,
+            ExportFormat.DATABRICKS_NOTEBOOK,
+        }
+        for fmt, message in RETIRED_EXPORT_FORMATS.items():
+            assert fmt.value in message, f"{fmt} message does not name the format"
+            assert "databricks_app" in message, f"{fmt} message names no replacement"
+
+    def test_databricks_app_is_the_only_format_that_exports(self):
+        assert ExportFormat.DATABRICKS_APP not in RETIRED_EXPORT_FORMATS
+        live = [f for f in ExportFormat if f not in RETIRED_EXPORT_FORMATS]
+        assert live == [ExportFormat.DATABRICKS_APP]
 
     def test_export_format_is_string_enum(self):
         """Test that ExportFormat is a string enum."""

@@ -7,7 +7,12 @@ from uuid import uuid4
 
 import pytest
 
-from src.schemas.crew_export import ExportFormat, ExportOptions
+from src.core.exceptions import GoneError
+from src.schemas.crew_export import (
+    RETIRED_EXPORT_FORMATS,
+    ExportFormat,
+    ExportOptions,
+)
 from src.services.deployment.crew_export import CrewExportService
 
 
@@ -668,3 +673,69 @@ class TestExtractMcpNames:
         assert CrewExportService._extract_mcp_names(None) == []
         assert CrewExportService._extract_mcp_names({}) == []
         assert CrewExportService._extract_mcp_names({"MCP_SERVERS": "nope"}) == []
+
+
+class TestRetiredFormats:
+    """`python_project` and `databricks_notebook` are accepted by validation and
+    refused here, so a caller still on one gets an explanation rather than a
+    bare pydantic 422."""
+
+    @pytest.fixture
+    def service(self):
+        return CrewExportService(session=MagicMock())
+
+    @pytest.fixture
+    def group_context(self):
+        context = MagicMock()
+        context.group_ids = ["test-group"]
+        context.is_valid.return_value = True
+        return context
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("retired", sorted(RETIRED_EXPORT_FORMATS, key=str))
+    async def test_retired_format_raises_gone(self, service, group_context, retired):
+        with pytest.raises(GoneError) as excinfo:
+            await service.export_crew(
+                crew_id="test-id",
+                export_format=retired,
+                options=ExportOptions(),
+                group_context=group_context,
+            )
+        assert excinfo.value.status_code == 410
+        # The response body is all the caller gets; it must name both the dead
+        # format and its replacement.
+        assert retired.value in excinfo.value.detail
+        assert "databricks_app" in excinfo.value.detail
+
+    @pytest.mark.asyncio
+    async def test_the_crew_is_never_loaded_for_a_retired_format(
+        self, service, group_context
+    ):
+        """Checked before the DB read: a retired format on a mistyped crew id
+        must report the format, not send the caller chasing a 404."""
+        with patch.object(
+            service, "_get_crew_with_details", new=AsyncMock()
+        ) as mock_get:
+            with pytest.raises(GoneError):
+                await service.export_crew(
+                    crew_id="does-not-exist",
+                    export_format=ExportFormat.PYTHON_PROJECT,
+                    options=ExportOptions(),
+                    group_context=group_context,
+                )
+        mock_get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_databricks_app_is_unaffected(self, service, group_context):
+        with patch.object(
+            service,
+            "_get_crew_with_details",
+            return_value={"id": "x", "name": "T", "agents": [], "tasks": []},
+        ):
+            result = await service.export_crew(
+                crew_id="x",
+                export_format=ExportFormat.DATABRICKS_APP,
+                options=ExportOptions(),
+                group_context=group_context,
+            )
+        assert result["export_format"] == "databricks_app"

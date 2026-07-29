@@ -23,11 +23,15 @@ workflow you designed on the canvas runs in production.
 The exported app runs **Kasal's own agent runtime**, vendored into the bundle —
 the same engine Kasal itself runs. It has no CrewAI dependency.
 
-> **Removed formats.** `python_project` and `databricks_notebook` are gone. Both
+> **Retired formats.** `python_project` and `databricks_notebook` are gone. Both
 > generated projects that ran on `pip install crewai`, which meant a second
 > engine to keep in agreement with Kasal's by hand — and the divergence was not
-> hypothetical (an exported app once ran a planner Kasal had disabled). The API
-> rejects both with a 422.
+> hypothetical (an exported app once ran a planner Kasal had disabled).
+>
+> Requesting either returns **410 Gone** with a message naming `databricks_app`
+> as the replacement. They are still accepted as *values* so that message can be
+> returned at all; dropping them would fail the request at validation, before
+> anything could explain what happened.
 
 ## Features
 

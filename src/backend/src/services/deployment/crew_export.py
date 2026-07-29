@@ -8,11 +8,16 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.exceptions import GoneError
 from src.repositories.agent_repository import AgentRepository
 from src.repositories.crew_repository import CrewRepository
 from src.repositories.task_repository import TaskRepository
 from src.repositories.tool_repository import ToolRepository
-from src.schemas.crew_export import ExportFormat, ExportOptions
+from src.schemas.crew_export import (
+    RETIRED_EXPORT_FORMATS,
+    ExportFormat,
+    ExportOptions,
+)
 from src.services.export import DatabricksAppExporter
 from src.services.export.secret_hints import SECRET_KEY_HINTS
 from src.utils.user_context import GroupContext
@@ -60,15 +65,29 @@ class CrewExportService:
         """
         logger.info(f"Exporting crew {crew_id} to format {export_format}")
 
+        # Checked BEFORE loading the crew: the format is wrong whether or not
+        # the crew exists, so this avoids a pointless read and — more to the
+        # point — a caller using a retired format on a mistyped crew id gets
+        # told about the format rather than a 404 that sends them looking in the
+        # wrong place. A 410 rather than a 404 or a validation error: the
+        # request is well-formed, the format is simply gone. The message names
+        # the replacement so the call can be fixed from the response alone.
+        retired = RETIRED_EXPORT_FORMATS.get(export_format)
+        if retired:
+            logger.warning(
+                f"Rejected retired export format {export_format} for crew {crew_id}"
+            )
+            raise GoneError(retired)
+
         # Get crew data with group check
         crew_data = await self._get_crew_with_details(crew_id, group_context)
 
         # Convert options to dict
         options_dict = options.dict() if options else {}
 
-        # Select appropriate exporter. ``databricks_app`` is the only format;
-        # the branch stays so adding a second one is a change here rather than a
-        # restructure, and so an unknown format fails loudly.
+        # ``databricks_app`` is the only format that exports; the branch stays
+        # so adding a second one is a change here rather than a restructure,
+        # and so an unknown format fails loudly.
         if export_format == ExportFormat.DATABRICKS_APP:
             exporter = DatabricksAppExporter()
         else:

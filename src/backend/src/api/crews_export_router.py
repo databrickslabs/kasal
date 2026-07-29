@@ -98,9 +98,11 @@ async def export_crew(
     **Export Formats:**
     - `databricks_app`: Complete Databricks App project (downloaded as .zip)
 
-    The `python_project` and `databricks_notebook` formats were removed: both
+    The `python_project` and `databricks_notebook` formats were retired: both
     generated projects that ran on `pip install crewai`, a second engine kept in
-    agreement with Kasal's by hand. Requesting either now returns 422.
+    agreement with Kasal's by hand. Requesting either returns **410 Gone** with a
+    message naming the replacement — they remain valid enum values precisely so
+    the answer can say that, rather than a bare validation error.
 
     **Options:**
     - `include_custom_tools`: Include custom tool implementations (default: true)
