@@ -8,6 +8,8 @@ export interface GeneratedAgent {
   goal: string;
   backstory: string;
   tools?: string[];
+  /** Agent Skills, by name. */
+  skills?: string[];
   advanced_config?: {
     llm?: string;
     [key: string]: unknown;

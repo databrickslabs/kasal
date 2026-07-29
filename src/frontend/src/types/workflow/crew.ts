@@ -47,6 +47,8 @@ export interface AgentYaml {
   goal: string;
   backstory: string;
   tools?: string[] | number[];
+  /** Agent Skills, BY NAME — the identity the format uses. */
+  skills?: string[];
   tool_configs?: Record<string, any>;  // User-specific tool configuration overrides
   llm?: string;
   function_calling_llm?: string;

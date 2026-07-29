@@ -164,4 +164,12 @@ def build_skill_tools(group_ids: Optional[List[str]] = None) -> List[Any]:
     "see references/pricing.md" is a dead end if the agent can load the skill
     but not its files.
     """
-    return [LoadSkillTool(group_ids=group_ids), ReadSkillFileTool(group_ids=group_ids)]
+    tools = [LoadSkillTool(group_ids=group_ids), ReadSkillFileTool(group_ids=group_ids)]
+    for tool in tools:
+        # Survives a task-level tool selection. A task that picks its own tools
+        # replaces the agent's, and these are not a selection — the agent's
+        # prompt already tells the model to call load_skill, so dropping them
+        # leaves it instructed to use something it cannot see, which is worse
+        # than never advertising the skill at all.
+        object.__setattr__(tool, "_kasal_always_available", True)
+    return tools

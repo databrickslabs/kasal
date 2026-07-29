@@ -114,6 +114,36 @@ class Agent(BaseAgent):
         if effective_tools is None:
             effective_tools = task.tools or self.tools
 
+        # A task's tool selection REPLACES the agent's, which is what picking
+        # tools per task means. But some of the agent's tools are not a
+        # selection — they are machinery the agent's own PROMPT refers to, and
+        # dropping them leaves the model instructed to call something it cannot
+        # see, which is worse than never mentioning it.
+        #
+        # Applied even when the caller passed an explicit list, because that is
+        # how the crew invokes this (``task.execute_sync(agent, context,
+        # task.tools)``): the list is the task's selection arriving by another
+        # route, not a deliberate exclusion. Skipping it there is what made an
+        # attached skill invisible to the model.
+        #
+        # The runtime does not know what these tools ARE and must not — it
+        # honours a flag the builder sets, so ``runtime/`` keeps its rule of
+        # never depending on ``services/``.
+        always_on = [
+            tool
+            for tool in (self.tools or [])
+            if getattr(tool, "_kasal_always_available", False)
+        ]
+        if always_on:
+            chosen = list(effective_tools or [])
+            present = {id(tool) for tool in chosen}
+            names = {getattr(tool, "name", None) for tool in chosen}
+            effective_tools = chosen + [
+                tool
+                for tool in always_on
+                if id(tool) not in present and getattr(tool, "name", None) not in names
+            ]
+
         event_bus.emit(
             self,
             AgentExecutionStartedEvent(

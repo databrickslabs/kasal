@@ -89,6 +89,7 @@ export const createAgentGenerationHandler = (
             backstory: savedAgent.backstory,
             llm: savedAgent.llm,
             tools: savedAgent.tools || [],
+            skills: savedAgent.skills || [],
             agent: savedAgent,
           },
         };
@@ -170,6 +171,7 @@ export const createAgentGenerationHandler = (
           backstory: agentData.backstory,
           llm: agentData.advanced_config?.llm || selectedModel,
           tools: agentData.tools || [],
+          skills: agentData.skills || [],
           agent: agentData,
         },
       };

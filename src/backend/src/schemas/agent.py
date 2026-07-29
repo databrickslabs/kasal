@@ -22,7 +22,19 @@ class AgentBase(BaseModel):
     )
     tools: List[Any] = Field(default_factory=list)
     #: Agent Skills, by name. See the model for why names rather than ids.
-    skills: List[str] = Field(default_factory=list)
+    #:
+    #: Optional[...] with a None->[] coercion, not a bare List[str]: the column
+    #: is nullable and every agent created before it existed holds NULL, which a
+    #: strict List[str] rejects — turning the whole LIST endpoint into a 500 the
+    #: moment one such row exists. A schema added to an existing table has to
+    #: tolerate the rows already in it.
+    skills: Optional[List[str]] = Field(default_factory=list)
+
+    @field_validator("skills", mode="before")
+    @classmethod
+    def _skills_never_none(cls, value):
+        return value if value is not None else []
+
     tool_configs: Optional[Dict[str, Dict[str, Any]]] = Field(
         default_factory=dict
     )  # Tool-specific config overrides

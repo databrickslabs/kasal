@@ -14,10 +14,15 @@ session does not exist. An isolated session is the only thing that behaves the
 same on both sides of that boundary.
 """
 
-import logging
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+from src.core.logger import LoggerManager
+
+#: The CREW logger, not ``logging.getLogger(__name__)``. The subprocess forwards
+#: only LoggerManager's crew records to execution logs, so a module logger here
+#: writes somewhere nobody reading a failed run will look — which is exactly how
+#: "did my skill attach?" stayed unanswerable while the answer was being logged.
+logger = LoggerManager.get_instance().crew
 
 
 def skill_names_of(spec: Dict[str, Any]) -> List[str]:
@@ -73,6 +78,18 @@ async def inject_skills(
         return 0
 
     if not skills or not section:
+        # Logged, because "is my skill actually being used?" was otherwise
+        # unanswerable from the logs — silence looked identical whether the
+        # agent had none attached or the attachment was dropped upstream.
+        if names:
+            logger.warning(
+                "[skills] agent '%s' asked for %s but none resolved for group %s.",
+                label,
+                ", ".join(names),
+                group_id,
+            )
+        else:
+            logger.debug("[skills] agent '%s' has no skills attached.", label)
         return 0
 
     field = "system_template" if agent_kwargs.get("system_template") else "backstory"

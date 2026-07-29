@@ -1157,3 +1157,48 @@ class TestDateAwarenessSerialization:
 
         assert agent.inject_date is False
         assert agent.date_format == "%d/%m/%Y"
+
+
+class TestSkillsOnExistingRows:
+    """A field added to an existing table has to tolerate the rows already in it.
+
+    `skills` is a nullable column, so every agent created before it existed
+    holds NULL. Declared as a bare `List[str]` that rejected None, which did not
+    fail on the row itself — it failed the whole LIST endpoint with a 500 the
+    moment one such row existed, and the symptom was a skill selection silently
+    not reaching a run.
+    """
+
+    def test_a_null_skills_column_reads_as_an_empty_list(self):
+        from src.schemas.agent import Agent as AgentSchema
+
+        agent = AgentSchema.model_validate(
+            {
+                "id": "a",
+                "name": "n",
+                "role": "r",
+                "goal": "g",
+                "backstory": "b",
+                "created_at": "2026-01-01T00:00:00",
+                "updated_at": "2026-01-01T00:00:00",
+                "skills": None,
+            }
+        )
+        assert agent.skills == []
+
+    def test_a_populated_skills_column_is_preserved(self):
+        from src.schemas.agent import Agent as AgentSchema
+
+        agent = AgentSchema.model_validate(
+            {
+                "id": "a",
+                "name": "n",
+                "role": "r",
+                "goal": "g",
+                "backstory": "b",
+                "created_at": "2026-01-01T00:00:00",
+                "updated_at": "2026-01-01T00:00:00",
+                "skills": ["tracking-agentic-ai-news"],
+            }
+        )
+        assert agent.skills == ["tracking-agentic-ai-news"]

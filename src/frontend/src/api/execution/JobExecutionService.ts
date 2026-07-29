@@ -5,6 +5,7 @@ import { AgentYaml, TaskYaml } from '../../types/workflow/crew';
 import { Task } from '../../types/workflow/task';
 import { JobResult } from '../../types/common';
 import { ModelService } from '../config/ModelService';
+import { AgentService } from '../workflow/AgentService';
 import { Models } from '../../types/config/models';
 import { buildFlowConfiguration } from '../../utils/flowConfigBuilder';
 
@@ -169,6 +170,22 @@ export class JobExecutionService {
           models = this.modelService.getActiveModelsSync();
         }
         
+        // Skills are resolved from the SAVED AGENT, keyed by agentId, rather
+        // than from the canvas node. Node data is assembled by several different
+        // builders, each with its own field list, and a selection made on the
+        // agent has to survive all of them — reading the agent itself is the
+        // only version of this that cannot be broken by adding a new builder.
+        const skillsByAgentId = new Map<string, string[]>();
+        try {
+          for (const saved of await AgentService.listAgents()) {
+            if (saved.id && Array.isArray(saved.skills)) {
+              skillsByAgentId.set(String(saved.id), saved.skills);
+            }
+          }
+        } catch (error) {
+          console.error('Could not load agent skills for this run:', error);
+        }
+
         // First pass: Create basic configurations
         nodes.forEach(node => {
           if (node.type === 'agentNode') {
@@ -183,6 +200,20 @@ export class JobExecutionService {
               goal: agentData.goal || '',
               backstory: agentData.backstory || '',
               tools: Array.isArray(agentData.tools) ? agentData.tools : [],
+              // Agent Skills, by name. This object is a WHITELIST — a field
+              // missing from it never reaches the run, which for skills means an
+              // agent that shows them attached and has none at execution time.
+              // Read from the node data, falling back to the agent object the
+              // node carries. Node builders copy a subset of fields onto `data`,
+              // so a skill selection saved on the AGENT would otherwise be lost
+              // for any node created before that builder learned about skills.
+              // agentId first; then the node id, which is built as
+              // `agent-<agent uuid>` when a saved agent is placed on the canvas;
+              // then whatever the node data itself carries.
+              skills:
+                skillsByAgentId.get(String(agentData.agentId ?? '')) ??
+                skillsByAgentId.get(node.id.replace(/^agent-/, '')) ??
+                (Array.isArray(agentData.skills) ? agentData.skills : []),
               tool_configs: agentData.tool_configs,  // Include tool_configs for MCP server configuration
               llm: agentData.llm,
               function_calling_llm: agentData.function_calling_llm,

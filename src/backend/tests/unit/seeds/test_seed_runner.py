@@ -79,6 +79,7 @@ class TestSeedersRegistration:
             "api_keys",
             "example_crews",
             "bi_specialist_crews",
+            "skills",
         }
         for name in seed_runner.SEEDERS:
             assert name in known, f"Unexpected seeder registered: {name}"

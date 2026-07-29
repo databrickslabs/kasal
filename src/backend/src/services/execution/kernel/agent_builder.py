@@ -371,7 +371,15 @@ async def build_agent(
     # Agent Skills: the tier-1 block plus the tools that read tiers 2 and 3.
     # After the preamble so the security instructions still lead the prompt, and
     # in the kernel so chat, crew and flow all get it from one place.
-    await inject_skills(agent_kwargs, spec, group_id=group_id, label=label)
+    #
+    # Logged unconditionally, including the zero case. Whether a skill attached
+    # is the first question asked of a run that ignored one, and inferring it
+    # from the absence of a line is how three rounds of debugging went past it.
+    attached = await inject_skills(agent_kwargs, spec, group_id=group_id, label=label)
+    logger.info(
+        f"[skills] agent '{label}': requested={spec.get('skills') or []} "
+        f"attached={attached} tools={[getattr(t, 'name', '?') for t in agent_kwargs.get('tools') or []]}"
+    )
 
     if extra_kwargs:
         agent_kwargs.update(extra_kwargs)
