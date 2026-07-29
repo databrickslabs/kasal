@@ -15,6 +15,7 @@ The two properties that matter and are easy to get wrong:
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import select
 
 from src.repositories.workflow_recipe_repository import WorkflowRecipeRepository
 from src.services.recipes.recipes import (
@@ -700,3 +701,134 @@ class TestDeletion:
         async with factory() as session:
             repo = WorkflowRecipeRepository(session)
             assert await repo.list_by_group(["g1", "g2"]) == []
+
+
+class TestGuardrailRejectedRunsAreNotMined:
+    """COMPLETED is wider than it looks.
+
+    ``guardrail_on_exhausted`` is "degrade" for deep tasks, so a task the
+    guardrail refused three times still finishes and the run still reads
+    COMPLETED. The first five recipes ever mined in a real workspace were runs
+    like that; not one of them wrote anything to the database it claimed to
+    populate. Recency ranking cannot rescue a corpus whose members are all
+    failures, so the filter has to be at ingest.
+    """
+
+    @staticmethod
+    async def _factory():
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        from src.models.execution_history import ExecutionHistory
+        from src.models.execution_trace import ExecutionTrace
+        from src.models.workflow_recipe import WorkflowRecipe
+
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with engine.begin() as conn:
+            for model in (ExecutionHistory, ExecutionTrace, WorkflowRecipe):
+                await conn.run_sync(model.__table__.create)
+        return async_sessionmaker(engine, expire_on_commit=False)
+
+    @staticmethod
+    def _run(job, name):
+        from src.models.execution_history import ExecutionHistory
+
+        return ExecutionHistory(
+            job_id=job,
+            status="COMPLETED",
+            run_name=name,
+            group_id="g1",
+            inputs={
+                "execution_type": "crew",
+                "agents_yaml": {"a": {"role": "Analyst"}},
+                "tasks_yaml": {"t": {"description": f"Do {name}"}},
+            },
+        )
+
+    @staticmethod
+    def _guardrail(job, failed):
+        from src.models.execution_trace import ExecutionTrace
+
+        return ExecutionTrace(
+            job_id=job,
+            event_source="crew",
+            event_context="crew",
+            event_type="llm_guardrail",
+            span_name=(
+                "kasal.guardrail.failed" if failed else "kasal.guardrail.completed"
+            ),
+            output={"content": "verdict"},
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_degraded_run_is_skipped_and_a_clean_one_is_kept(self):
+        from src.models.workflow_recipe import WorkflowRecipe
+
+        factory = await self._factory()
+        async with factory() as session:
+            session.add(self._run("job-degraded", "Ingest listings"))
+            session.add(self._guardrail("job-degraded", failed=True))
+            session.add(self._run("job-clean", "Collect news"))
+            session.add(self._guardrail("job-clean", failed=False))
+            await session.commit()
+
+        async with factory() as session:
+            mined = await WorkflowRecipeService(session).mine_new_executions()
+
+        async with factory() as session:
+            rows = (await session.execute(select(WorkflowRecipe))).scalars().all()
+
+        assert mined == 1, "only the clean run should be distilled"
+        assert [r.source_job_id for r in rows] == ["job-clean"]
+
+    @pytest.mark.asyncio
+    async def test_a_run_with_no_guardrail_at_all_is_still_mined(self):
+        """Most crews have no guardrail. Absence of a rejection is not a
+        rejection — treating it as one would empty the corpus entirely."""
+        from src.models.workflow_recipe import WorkflowRecipe
+
+        factory = await self._factory()
+        async with factory() as session:
+            session.add(self._run("job-plain", "Load companies"))
+            await session.commit()
+
+        async with factory() as session:
+            mined = await WorkflowRecipeService(session).mine_new_executions()
+
+        async with factory() as session:
+            rows = (await session.execute(select(WorkflowRecipe))).scalars().all()
+
+        assert mined == 1
+        assert rows[0].source_job_id == "job-plain"
+
+    @pytest.mark.asyncio
+    async def test_a_failing_tool_alone_does_not_disqualify_a_run(self):
+        """A crew that hit a 503, recovered and produced a verified result is a
+        perfectly good exemplar. The disqualifier is the VERDICT, not the noise
+        along the way — otherwise every crew that ever retried is excluded."""
+        from src.models.execution_trace import ExecutionTrace
+        from src.models.workflow_recipe import WorkflowRecipe
+
+        factory = await self._factory()
+        async with factory() as session:
+            session.add(self._run("job-recovered", "Load companies"))
+            session.add(
+                ExecutionTrace(
+                    job_id="job-recovered",
+                    event_source="agent",
+                    event_context="Analyst",
+                    event_type="tool_usage",
+                    span_name="CrewAI.tool.complete",
+                    trace_metadata={"tool_name": "Parse", "tool_args": {}},
+                    output={"content": 'Tool error: {"ok": false}'},
+                )
+            )
+            await session.commit()
+
+        async with factory() as session:
+            mined = await WorkflowRecipeService(session).mine_new_executions()
+
+        async with factory() as session:
+            rows = (await session.execute(select(WorkflowRecipe))).scalars().all()
+
+        assert mined == 1, "a tool failure is not a verdict"
+        assert rows[0].error_span_count == 1, "but it IS recorded"

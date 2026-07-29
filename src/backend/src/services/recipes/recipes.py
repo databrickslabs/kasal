@@ -15,6 +15,7 @@ status write, and it back-fills history on first pass.
 """
 
 import hashlib
+import json
 import logging
 import os
 import random
@@ -131,6 +132,44 @@ class ExemplarDecision:
         return max(scores) if scores else None
 
 
+#: How a failing tool reports itself in a completion span's output. The engine
+#: hands the model a string rather than raising, so this text IS the failure —
+#: there is no error span type to look for.
+_TOOL_ERROR_MARKERS = ("tool error:", '"ok": false', "'ok': false")
+
+#: Keys ``_trace_shape`` returns that inform the MINE-or-SKIP decision but are
+#: not columns on WorkflowRecipe. Stripped before the result is written, so
+#: adding a new signal here never needs a migration and never silently fails on
+#: ``setattr`` of a non-existent attribute.
+_SHAPE_SIGNALS = ("distinct_tool_call_count", "guardrail_failure_count")
+
+
+def _is_tool_error(output: Any) -> bool:
+    """Whether a tool-completion span carries a failure rather than a result."""
+    if isinstance(output, dict):
+        content = output.get("content")
+    else:
+        content = output
+    if not isinstance(content, str):
+        return False
+    lowered = content[:400].lower()
+    return any(marker in lowered for marker in _TOOL_ERROR_MARKERS)
+
+
+def _stable_args(tool_args: Any) -> str:
+    """A comparable form of a call's arguments, for spotting repeats.
+
+    Sorted so key order cannot make two identical calls look different, and
+    truncated because the point is only to tell repeats apart.
+    """
+    try:
+        if isinstance(tool_args, dict):
+            return json.dumps(tool_args, sort_keys=True, default=str)[:300]
+        return str(tool_args)[:300]
+    except Exception:  # noqa: BLE001 — a signature is diagnostics, never fatal
+        return ""
+
+
 def _roles(agents_yaml: Optional[Dict[str, Any]]) -> List[str]:
     """Agent roles, for a compact exemplar line."""
     return [
@@ -214,35 +253,72 @@ class WorkflowRecipeService:
         Tools are taken from trace spans rather than the configured tool list: a
         tool that was bound but never called is not part of what made this crew
         work, and shipping it in a recipe would propagate dead configuration.
+
+        Three fields are read from places that are NOT obvious, each because the
+        obvious place is empty:
+
+        - ``tool_name`` is in ``trace_metadata``. ``output`` carries only
+          ``{duration_ms, extra_data}``, so reading it from there returned None
+          for every span and every recipe recorded ``tool_names=[]`` and
+          ``tool_call_count=0`` — including runs with 59 real tool calls.
+        - a tool FAILURE is text inside ``output.content`` (``"Tool error: …"``),
+          not an event type. No span type contains the word "error", so counting
+          ``"error" in event_type`` counted nothing.
+        - a guardrail REJECTION is only visible in ``span_name``
+          (``kasal.guardrail.failed``); its ``event_type`` is ``llm_guardrail``,
+          exactly as a pass is.
+
+        ``distinct_tool_call_count`` is new and cheap: a crew that calls the same
+        tool with the same arguments over and over is looping, not working, and
+        the ratio against ``tool_call_count`` is the clearest available signal of
+        that. One observed run made 59 calls of which ~12 were distinct.
         """
         rows = await self.trace_repository.get_event_shape_by_job_id(job_id)
 
         tools: set = set()
+        signatures: set = set()
         tool_calls = 0
         errors = 0
+        guardrail_failures = 0
         stamps = []
-        for event_type, output, created_at in rows:
+        for event_type, output, created_at, metadata, span_name in rows:
             if created_at is not None:
                 stamps.append(created_at)
-            if event_type and "error" in str(event_type):
+
+            span = str(span_name or "")
+            # Count a tool call once: every call emits a start AND a completion
+            # span, and both carry event_type 'tool_usage'.
+            is_completion = "complete" in span or "finish" in span
+
+            if span.endswith("guardrail.failed"):
+                guardrail_failures += 1
                 errors += 1
-            name = None
-            if isinstance(output, dict):
-                name = output.get("tool_name")
-            if name:
+            elif event_type and "error" in str(event_type):
+                errors += 1
+            elif is_completion and _is_tool_error(output):
+                errors += 1
+
+            meta = metadata if isinstance(metadata, dict) else {}
+            name = meta.get("tool_name")
+            if name and not is_completion:
                 tools.add(str(name))
                 tool_calls += 1
+                signatures.add(f"{name}|{_stable_args(meta.get('tool_args'))}")
 
         duration_ms = None
         if len(stamps) >= 2:
             duration_ms = int((max(stamps) - min(stamps)).total_seconds() * 1000)
 
         return {
+            # --- persisted columns ---
             "tool_names": sorted(tools),
             "tool_call_count": tool_calls,
             "error_span_count": errors,
             "span_count": len(rows),
             "duration_ms": duration_ms,
+            # --- decision signals, NOT columns (see _SHAPE_SIGNALS) ---
+            "distinct_tool_call_count": len(signatures),
+            "guardrail_failure_count": guardrail_failures,
         }
 
     @staticmethod
@@ -698,7 +774,29 @@ class WorkflowRecipeService:
                 ):
                     continue  # already folded in — nothing to do
 
-                fields.update(await self._trace_shape(execution.job_id))
+                shape = await self._trace_shape(execution.job_id)
+
+                # A run whose OWN verifier rejected it is not a reusable plan.
+                # ``COMPLETED`` is wider than it looks: guardrail_on_exhausted
+                # is "degrade" for deep tasks, so a task the guardrail refused
+                # three times still finishes and still reads COMPLETED. Four of
+                # the first five recipes ever mined in this workspace were runs
+                # like that — every one of them wrote nothing to the database it
+                # claimed to have populated. Recency ranking cannot save a
+                # corpus whose members are all failures, so the filter belongs
+                # at INGEST, not at retrieval.
+                if shape.get("guardrail_failure_count"):
+                    logger.info(
+                        f"[WorkflowRecipes] Skipped {execution.job_id}: "
+                        f"guardrail rejected it "
+                        f"({shape['guardrail_failure_count']} failure(s)); a run "
+                        "its own verifier refused is not an exemplar"
+                    )
+                    continue
+
+                for signal in _SHAPE_SIGNALS:
+                    shape.pop(signal, None)
+                fields.update(shape)
 
                 if existing is not None:
                     # Same intent as a recipe we already hold. Refresh it to the

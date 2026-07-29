@@ -173,18 +173,28 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
 
     async def get_event_shape_by_job_id(
         self, job_id: str
-    ) -> List[Tuple[Optional[str], Any, Any]]:
-        """(event_type, output, created_at) for every span of a run.
+    ) -> List[Tuple[Optional[str], Any, Any, Any, Optional[str]]]:
+        """(event_type, output, created_at, trace_metadata, span_name) per span.
 
         A narrow projection on purpose: recipe mining reads what a crew ACTUALLY
         did, and pulling whole ExecutionTrace rows for that would drag every
         output blob into memory.
+
+        ``trace_metadata`` and ``span_name`` are part of that projection because
+        the things mining needs are only there: ``tool_name`` lives in
+        ``trace_metadata`` (``output`` holds ``{duration_ms, extra_data}``), and
+        a guardrail rejection is only distinguishable by ``span_name``
+        (``kasal.guardrail.failed`` — its ``event_type`` is the same
+        ``llm_guardrail`` a PASS carries). Selecting only event_type/output made
+        every recipe record ``tool_names=[]`` and ``tool_call_count=0``.
         """
         result = await self.session.execute(
             select(
                 ExecutionTrace.event_type,
                 ExecutionTrace.output,
                 ExecutionTrace.created_at,
+                ExecutionTrace.trace_metadata,
+                ExecutionTrace.span_name,
             ).where(ExecutionTrace.job_id == job_id)
         )
         return list(result.all())
