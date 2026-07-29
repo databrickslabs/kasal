@@ -7,16 +7,12 @@ import {
   Button,
   FormControl,
   FormLabel,
-  Checkbox,
-  FormControlLabel,
   TextField,
   Box,
   Alert,
   CircularProgress,
   Typography,
   IconButton,
-  ToggleButtonGroup,
-  ToggleButton,
   LinearProgress,
   Link,
   InputLabel,
@@ -45,10 +41,6 @@ interface ExportCrewDialogProps {
 }
 
 const FORMAT_LABELS: Record<string, { label: string; description: string }> = {
-  [ExportFormat.DATABRICKS_NOTEBOOK]: {
-    label: 'Notebook',
-    description: 'Databricks Notebook (.ipynb) - ready for Databricks import',
-  },
   [ExportFormat.DATABRICKS_APP]: {
     label: 'App',
     description:
@@ -62,15 +54,12 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
   crewId,
   crewName
 }) => {
-  const [exportFormat, setExportFormat] = useState<ExportFormat>(
-    ExportFormat.DATABRICKS_APP
-  );
+  // One format; kept as a constant rather than state so the request payload
+  // and the isApp checks below read the same as before.
+  const exportFormat = ExportFormat.DATABRICKS_APP;
   const [options, setOptions] = useState<ExportOptions>({
     include_custom_tools: true,
     include_comments: true,
-    include_tracing: true,
-    include_evaluation: true,
-    include_deployment: true,
     include_static_frontend: true,
     include_obo_auth: true,
     model_override: ''
@@ -199,24 +188,6 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
     }
   };
 
-  const handleFormatChange = (
-    _event: React.MouseEvent<HTMLElement>,
-    newFormat: ExportFormat | null
-  ) => {
-    if (newFormat) {
-      setExportFormat(newFormat);
-    }
-  };
-
-  const handleOptionChange = (option: keyof ExportOptions) => (
-    event: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    setOptions(prev => ({
-      ...prev,
-      [option]: event.target.checked
-    }));
-  };
-
   const handleModelOverrideChange = (event: SelectChangeEvent<string>) => {
     setOptions(prev => ({
       ...prev,
@@ -241,19 +212,8 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
 
       // Determine filename based on format
       const sanitizedName = exportResponse.metadata.sanitized_name;
-      const filename =
-        exportFormat === ExportFormat.DATABRICKS_APP
-          ? `${sanitizedName}_app.zip`
-          : `${sanitizedName}.ipynb`;
-
-      // Trigger download
-      CrewExportService.triggerDownload(blob, filename);
-
-      const formatLabel =
-        exportFormat === ExportFormat.DATABRICKS_APP
-          ? 'Databricks App'
-          : 'Databricks Notebook';
-      setSuccess(`Successfully exported crew as ${formatLabel}`);
+      CrewExportService.triggerDownload(blob, `${sanitizedName}_app.zip`);
+      setSuccess('Successfully exported crew as Databricks App');
 
       // Close dialog after successful export
       setTimeout(() => {
@@ -277,7 +237,6 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
     }
   };
 
-  const isNotebook = exportFormat === ExportFormat.DATABRICKS_NOTEBOOK;
   const isApp = exportFormat === ExportFormat.DATABRICKS_APP;
 
   return (
@@ -305,68 +264,12 @@ const ExportCrewDialog: React.FC<ExportCrewDialogProps> = ({
 
       <DialogContent dividers>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {/* Format Selector */}
-          <FormControl component="fieldset">
-            <FormLabel component="legend">Export Format</FormLabel>
-            <ToggleButtonGroup
-              value={exportFormat}
-              exclusive
-              onChange={handleFormatChange}
-              size="small"
-              sx={{ mt: 1 }}
-            >
-              {/* Notebook export temporarily hidden from the UI — re-enable by
-                  uncommenting this ToggleButton. */}
-              {/* <ToggleButton value={ExportFormat.DATABRICKS_NOTEBOOK}>
-                Databricks Notebook
-              </ToggleButton> */}
-              <ToggleButton value={ExportFormat.DATABRICKS_APP}>
-                Databricks App
-              </ToggleButton>
-            </ToggleButtonGroup>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-              {FORMAT_LABELS[exportFormat]?.description}
-            </Typography>
-          </FormControl>
-
-          {/* Custom tool implementations, comments, static UI and OBO auth are
-              always included for app exports — no toggles needed. */}
-
-          {/* Notebook-specific Features */}
-          {isNotebook && (
-            <FormControl component="fieldset">
-              <FormLabel component="legend">Notebook Features</FormLabel>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1 }}>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={options.include_tracing ?? true}
-                      onChange={handleOptionChange('include_tracing')}
-                    />
-                  }
-                  label="Include MLflow tracing/autolog"
-                />
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={options.include_evaluation ?? true}
-                      onChange={handleOptionChange('include_evaluation')}
-                    />
-                  }
-                  label="Include evaluation metrics"
-                />
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={options.include_deployment ?? true}
-                      onChange={handleOptionChange('include_deployment')}
-                    />
-                  }
-                  label="Include deployment code"
-                />
-              </Box>
-            </FormControl>
-          )}
+          {/* One export format, so no selector: the app bundle is what Kasal
+              produces. The notebook and python-project formats were removed
+              along with the CrewAI runtime they generated. */}
+          <Typography variant="body2" color="text.secondary">
+            {FORMAT_LABELS[ExportFormat.DATABRICKS_APP].description}
+          </Typography>
 
           {/* App deployment configuration */}
           {isApp && (

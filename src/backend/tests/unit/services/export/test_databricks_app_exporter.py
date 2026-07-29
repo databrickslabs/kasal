@@ -23,6 +23,45 @@ from src.services.export.databricks_app_exporter import (
 # expressions in deploy.yml are intentionally left untouched.
 _TOKEN_RE = re.compile(r"\{\{[A-Z_]+\}\}")
 
+# Canonical sources for the vendored copies that ship inside the template tree.
+# TEMPLATE_DIR is <repo>/src/backend/src/services/export/templates/databricks_app,
+# so parents[3] is <repo>/src/backend/src and parents[5] is <repo>/src.
+# These are module-level so the drift guards below fail loudly (not skip) when a
+# canonical directory moves — see test_vendor_in_sync_with_frontend_source.
+CANONICAL_CODEX_HANDLER = (
+    TEMPLATE_DIR.parents[3]
+    / "services"
+    / "llm"
+    / "handlers"
+    / "databricks_responses_llm.py"
+)
+FRONTEND_A2UI_SOURCE_DIR = (
+    TEMPLATE_DIR.parents[5] / "frontend" / "src" / "shared" / "a2ui"
+)
+
+# The vendored codex handler imports the same two symbols as the canonical one,
+# but from wherever the exported app can reach them. Rewrite the export's import
+# lines to the canonical spelling before comparing, so path differences are not
+# reported as drift while real changes still are.
+_CODEX_IMPORT_ALIASES = [
+    (
+        "from crewai.events.types.llm_events import LLMCallType",
+        "from src.core.events import LLMCallType",
+    ),
+    (
+        "from crewai.llms.providers.openai.completion import OpenAICompletion",
+        "from src.core.llm.transport import OpenAICompletion",
+    ),
+    (
+        "from agent_server.kasal_runtime.core.events import LLMCallType",
+        "from src.core.events import LLMCallType",
+    ),
+    (
+        "from agent_server.kasal_runtime.core.llm.transport import OpenAICompletion",
+        "from src.core.llm.transport import OpenAICompletion",
+    ),
+]
+
 
 @pytest.fixture
 def exporter():
@@ -158,13 +197,23 @@ class TestDatabricksAppExporter:
                 yaml.safe_load(f["content"])
 
     @pytest.mark.asyncio
-    async def test_agent_is_crewai_not_openai(self, exporter, crew_data):
-        """agent.py wraps CrewAI behind ResponsesAgent; no OpenAI Agents SDK leaks."""
+    async def test_agent_runs_on_the_kasal_runtime_not_the_openai_sdk(
+        self, exporter, crew_data
+    ):
+        """agent.py wraps Kasal's runtime behind ResponsesAgent.
+
+        The crew classes come from the vendored runtime, NOT from crewai — an
+        exported crew must run on the same engine Kasal runs, or the two drift
+        (which they demonstrably did: deep mode once re-enabled a planner the
+        crew had disabled). The OpenAI Agents SDK must still not leak in."""
         files = _files(await exporter.export(crew_data, {}))
         agent = files["agent_server/agent.py"]
         assert "crew.kickoff" in agent
-        assert "from crewai import" in agent
+        assert (
+            "from agent_server.kasal_runtime.services.execution.runtime import" in agent
+        )
         for banned in (
+            "from crewai import",
             "databricks_openai",
             "openai-agents",
             "from agents",
@@ -172,7 +221,6 @@ class TestDatabricksAppExporter:
         ):
             assert banned not in agent
         pyproject = files["pyproject.toml"]
-        assert "crewai" in pyproject
         assert "openai-agents" not in pyproject and "databricks-openai" not in pyproject
 
     @pytest.mark.asyncio
@@ -351,7 +399,9 @@ class TestDatabricksAppExporter:
     @pytest.mark.asyncio
     async def test_codex_model_uses_responses_api(self, exporter, crew_data):
         """gpt-5-3-codex is routed via the Databricks Responses API, not chat."""
-        agent = _files(await exporter.export(crew_data, {}))["agent_server/agent.py"]
+        agent = _files(await exporter.export(crew_data, {}))[
+            "agent_server/llm_factory.py"
+        ]
         assert "_is_codex_model" in agent
         assert "gpt-5-3-codex" in agent
         assert 'api="responses"' in agent
@@ -363,12 +413,24 @@ class TestDatabricksAppExporter:
         failing with: "Model us.anthropic.claude-opus-4-8 does not support the
         temperature parameter." Extract the vendored helper from the rendered
         agent.py and assert it behaves like Kasal's model_rejects_temperature, and
-        that _make_llm is wired to drop the param via additional_drop_params."""
-        agent = _files(await exporter.export(crew_data, {}))["agent_server/agent.py"]
+        that _make_llm never sets the param for a rejecting model.
 
-        # _make_llm only sets temperature behind the reject check, and drops it.
+        Omission is now the ENTIRE mechanism. `additional_drop_params` was a
+        litellm knob, needed only because litellm's DatabricksConfig re-added
+        temperature behind our back; the vendored transport sends exactly the
+        params it is given, so there is nothing to drop and nothing to fight."""
+        agent = _files(await exporter.export(crew_data, {}))[
+            "agent_server/llm_factory.py"
+        ]
+
+        # _make_llm only sets temperature behind the reject check.
         assert "_model_rejects_temperature" in agent
-        assert 'kwargs["additional_drop_params"] = ["temperature"]' in agent
+        assert "if not _model_rejects_temperature(endpoint):" in agent
+        assert 'kwargs["temperature"] = temperature' in agent
+        assert 'kwargs["additional_drop_params"]' not in agent, (
+            "additional_drop_params is a litellm knob; the transport has no "
+            "drop-params safety net and never reads it"
+        )
 
         # Pull the standalone helper out of the (placeholder-laden) template and
         # exec just that function to assert real behavior across model families.
@@ -459,18 +521,18 @@ class TestDatabricksAppExporter:
 
     @pytest.mark.asyncio
     async def test_mcp_package_dep_added_when_mcp_servers(self, exporter, crew_data):
-        """When MCP servers are configured, `mcp` is a dependency so the adapter
-        never tries to interactively prompt-install it (which aborts in a server)."""
+        """When MCP servers are configured, `mcp` is a dependency so the app can
+        connect to them; when none are, it is not shipped at all."""
         with_mcp = _files(await exporter.export(crew_data, {}))["pyproject.toml"]
         assert "mcp>=" in with_mcp
-        # MCPServerAdapter imports mcpadapt.core — both are required, else it
-        # fails with a misleading "missing the 'mcp' package" prompt.
-        assert "mcpadapt" in with_mcp
+        # mcpadapt existed ONLY because crewai_tools' MCPServerAdapter imported
+        # mcpadapt.core. The app now uses the mcp SDK directly, so shipping it
+        # would be a dependency nothing imports.
+        assert "mcpadapt" not in with_mcp
 
         no_mcp_crew = dict(crew_data, mcp_servers=[])
         without = _files(await exporter.export(no_mcp_crew, {}))["pyproject.toml"]
         assert "mcp>=" not in without
-        assert "mcpadapt" not in without
 
     @pytest.mark.asyncio
     async def test_pins_compatible_crewai_and_litellm(self, exporter, crew_data):
@@ -483,14 +545,77 @@ class TestDatabricksAppExporter:
 
     @pytest.mark.asyncio
     async def test_llm_passes_explicit_databricks_auth(self, exporter, crew_data):
-        """_make_llm must pass an explicit api_base + api_key for the databricks/
-        LiteLLM route (the Apps runtime won't auto-provide Databricks env to
-        LiteLLM)."""
-        agent = _files(await exporter.export(crew_data, {}))["agent_server/agent.py"]
+        """_make_llm must pass an explicit base_url + api_key: the Apps runtime
+        does not export Databricks credentials into the environment, so an LLM
+        built without them authenticates as nobody."""
+        agent = _files(await exporter.export(crew_data, {}))[
+            "agent_server/llm_factory.py"
+        ]
         assert "def _databricks_host_token" in agent
-        assert '"api_base"' in agent and '"api_key"' in agent
-        # AI Gateway-aware base for the chat (LiteLLM) route.
+        assert '"base_url"' in agent and '"api_key"' in agent
+        # AI Gateway-aware base for the chat-completions route.
         assert "ai-gateway/mlflow/v1" in agent and "serving-endpoints" in agent
+        # Apps rotate credentials mid-run; the LLM must be able to fetch a fresh one.
+        assert '"token_provider"' in agent
+
+    @pytest.mark.asyncio
+    async def test_databricks_llm_runs_on_the_vendored_transport(
+        self, exporter, crew_data
+    ):
+        """Every LLM path goes through Kasal's transport, not CrewAI/LiteLLM."""
+        files = _files(await exporter.export(crew_data, {}))
+        assert "agent_server/databricks_llm.py" in files, "DatabricksLLM not shipped"
+        handler = files["agent_server/databricks_llm.py"]
+        assert (
+            "from agent_server.kasal_runtime.core.llm.transport import" in handler
+        ), "DatabricksLLM must subclass the vendored transport"
+
+        factory = files["agent_server/llm_factory.py"]
+        assert "from agent_server.databricks_llm import DatabricksLLM" in factory
+        assert "return DatabricksLLM(**kwargs)" in factory
+        # No LLM path may still come from crewai.
+        agent = files["agent_server/agent.py"]
+        assert "from crewai import LLM" not in agent
+        assert "from crewai" not in factory
+        assert "crewai.llms.providers" not in agent
+
+        codex = files["agent_server/databricks_responses_llm.py"]
+        assert "from crewai" not in codex, "codex handler still imports crewai"
+        assert "from agent_server.kasal_runtime.core.llm.transport import" in codex
+
+    @pytest.mark.asyncio
+    async def test_databricks_llm_keeps_the_explicit_call_signature(
+        self, exporter, crew_data
+    ):
+        """``runtime/executor.call_llm`` passes only the kwargs the signature
+        declares. Under ``*args, **kwargs`` it sees just ``messages`` and
+        silently drops ``tools`` — the agent still answers, but never calls a
+        tool. Assert the parameters are spelled out."""
+        handler = _files(await exporter.export(crew_data, {}))[
+            "agent_server/databricks_llm.py"
+        ]
+        tree = ast.parse(handler)
+        cls = next(
+            n
+            for n in tree.body
+            if isinstance(n, ast.ClassDef) and n.name == "DatabricksLLM"
+        )
+        for method in ("call", "acall"):
+            fn = next(
+                n
+                for n in cls.body
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and n.name == method
+            )
+            params = {a.arg for a in fn.args.args}
+            assert {
+                "messages",
+                "tools",
+                "available_functions",
+                "from_task",
+                "from_agent",
+            } <= params, f"DatabricksLLM.{method} would drop tools: {sorted(params)}"
+            assert fn.args.kwarg is None, f"{method} must not use **kwargs"
 
     @pytest.mark.asyncio
     async def test_app_creates_uc_bound_experiment_for_tracing(
@@ -528,8 +653,8 @@ class TestDatabricksAppExporter:
     async def test_obo_toggle(self, exporter, crew_data):
         on = _files(await exporter.export(crew_data, {"include_obo_auth": True}))
         off = _files(await exporter.export(crew_data, {"include_obo_auth": False}))
-        assert "ENABLE_OBO = True" in on["agent_server/agent.py"]
-        assert "ENABLE_OBO = False" in off["agent_server/agent.py"]
+        assert "ENABLE_OBO = True" in on["agent_server/llm_factory.py"]
+        assert "ENABLE_OBO = False" in off["agent_server/llm_factory.py"]
 
     @pytest.mark.asyncio
     async def test_model_override_applied(self, exporter, crew_data):
@@ -585,8 +710,19 @@ class TestDatabricksAppExporter:
                 }
             ],
         }
-        pyproject = _files(await exporter.export(crew, {}))["pyproject.toml"]
-        assert "beautifulsoup4" in pyproject
+        files = _files(await exporter.export(crew, {}))
+        # Kasal's ScrapeWebsiteTool extracts text with an html.parser subclass,
+        # so scraping needs no third-party parser at all. beautifulsoup4 was a
+        # crewai_tools requirement and left with it.
+        assert "beautifulsoup4" not in files["pyproject.toml"]
+        # The tool still ships, and comes from the vendored runtime.
+        assert (
+            "agent_server/kasal_runtime/services/tools/scrape_website.py" in files
+        ), "the scraper implementation is not shipped"
+        assert (
+            "from agent_server.kasal_runtime.services.tools.scrape_website import"
+            in files["agent_server/agent.py"]
+        )
 
     @staticmethod
     def _genie_crew(tool_configs=None):
@@ -1392,9 +1528,10 @@ class TestDatabricksAppControls:
     async def test_turn_timeout_and_llm_caps(self, exporter, crew_data):
         files = _files(await exporter.export(crew_data, {}))
         agent = files["agent_server/agent.py"]
+        # The per-call LLM timeout lives with the LLM it configures.
         assert (
             'LLM_REQUEST_TIMEOUT = int(os.environ.get("LLM_REQUEST_TIMEOUT", "300"))'
-            in agent
+            in files["agent_server/llm_factory.py"]
         )
         assert (
             'CREW_TIMEOUT_SECONDS = int(os.environ.get("CREW_TIMEOUT_SECONDS", "600"))'
@@ -1633,11 +1770,18 @@ class TestA2uiFrontendVendor:
 
     def test_vendor_in_sync_with_frontend_source(self):
         """The committed template copy must match the canonical frontend A2UI
-        source. On failure, re-vendor: copy src/frontend/src/services/a2ui into
-        SHARED_A2UI_FRONTEND_DIR (excluding *.test.*)."""
-        canonical = TEMPLATE_DIR.parents[6] / "frontend" / "src" / "shared" / "a2ui"
-        if not canonical.is_dir():
-            pytest.skip("frontend source not present (backend-only checkout)")
+        source. On failure, re-vendor: copy src/frontend/src/shared/a2ui into
+        SHARED_A2UI_FRONTEND_DIR (excluding *.test.* and CLAUDE.md).
+
+        This guard MUST NOT skip when the canonical tree is missing: a drift
+        guard that vanishes when a directory moves reads as green while
+        protecting nothing (which is exactly what happened here — it pointed at
+        ``<repo>/frontend/...`` and skipped silently for months)."""
+        canonical = FRONTEND_A2UI_SOURCE_DIR
+        assert canonical.is_dir(), (
+            f"canonical frontend A2UI source not found at {canonical} — the "
+            "directory moved; fix FRONTEND_A2UI_SOURCE_DIR rather than skipping"
+        )
         want = _rel_text_files(canonical)
         got = _rel_text_files(SHARED_A2UI_FRONTEND_DIR)
         assert set(got) == set(want), (
@@ -1658,48 +1802,49 @@ class TestCodexHandlerVendor:
         assert (
             "agent_server/databricks_responses_llm.py" in files
         ), "handler not shipped"
-        agent_py = files["agent_server/agent.py"]
+        factory = files["agent_server/llm_factory.py"]
         assert (
-            "DatabricksResponsesLLM" in agent_py
+            "DatabricksResponsesLLM" in factory
         ), "codex branch not wired to the handler"
         # The bare OpenAICompletion path must no longer be used for codex.
         assert (
             "from agent_server.databricks_responses_llm import DatabricksResponsesLLM"
-            in agent_py
+            in factory
         )
 
     def test_codex_handler_in_sync_with_source(self):
-        """The vendored handler must byte-match Kasal's canonical
-        src/core/llm/handlers/databricks_responses_llm.py. On failure, re-copy it."""
-        canonical = (
-            TEMPLATE_DIR.parents[4]
-            / "core"
-            / "llm"
-            / "handlers"
-            / "databricks_responses_llm.py"
-        )
+        """The vendored handler must match Kasal's canonical
+        src/services/llm/handlers/databricks_responses_llm.py. On failure, re-copy it.
+
+        Compared as ASTs, not bytes: the canonical file is black-formatted and
+        the template tree is excluded from black (pyproject.toml), so a byte
+        comparison fails on pure reformatting. A guard that cries wolf gets
+        weakened; an AST guard only fires on semantic drift.
+
+        Missing canonical is a hard failure, not a skip — see
+        test_vendor_in_sync_with_frontend_source for why."""
         vendored = TEMPLATE_DIR / "agent_server" / "databricks_responses_llm.py"
         assert vendored.is_file(), "vendored codex handler missing from the template"
-        if not canonical.is_file():
-            pytest.skip("canonical handler not present (backend-only checkout)")
+        assert CANONICAL_CODEX_HANDLER.is_file(), (
+            f"canonical codex handler not found at {CANONICAL_CODEX_HANDLER} — the "
+            "file moved; fix CANONICAL_CODEX_HANDLER rather than skipping"
+        )
 
-        # The runtime handler imports from kasal_engine; the vendored copy
-        # ships to external deployments that install crewai. Normalize the
-        # two known import lines so real drift is still caught.
+        # The two copies import the same symbols from different paths: the
+        # backend from its own package, the export from the vendored runtime it
+        # ships. Normalize those import lines so real drift is still caught.
         def _normalize(text: str) -> str:
-            return text.replace(
-                "from crewai.llms.providers.openai.completion import OpenAICompletion",
-                "from src.core.llm.transport import OpenAICompletion",
-            ).replace(
-                "from crewai.events.types.llm_events import LLMCallType",
-                "from src.core.events import LLMCallType",
-            )
+            for stale, canonical_import in _CODEX_IMPORT_ALIASES:
+                text = text.replace(stale, canonical_import)
+            return text
 
-        assert _normalize(vendored.read_text(encoding="utf-8")) == _normalize(
-            canonical.read_text(encoding="utf-8")
-        ), (
-            "codex handler drift — re-copy src/core/llm/handlers/databricks_responses_llm.py "
-            "into the template's agent_server/"
+        want = ast.dump(
+            ast.parse(_normalize(CANONICAL_CODEX_HANDLER.read_text("utf-8")))
+        )
+        got = ast.dump(ast.parse(_normalize(vendored.read_text("utf-8"))))
+        assert got == want, (
+            "codex handler drift — re-copy "
+            f"{CANONICAL_CODEX_HANDLER} into the template's agent_server/"
         )
 
 

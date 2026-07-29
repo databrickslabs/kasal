@@ -782,12 +782,14 @@ def log_mlflow_state(
     alog.info(f"[SUBPROCESS] MLflow state ({phase}):")
     try:
         try:
-            import crewai as _c
+            # crewai used to be logged here too. It is no longer installed or
+            # imported anywhere in Kasal — the agent runtime is first-party code
+            # under services/execution/runtime — so the import only ever
+            # succeeded in resolving to nothing and fell into the except below.
             import litellm as _lt
 
             alog.info(
                 f"[SUBPROCESS] - Versions: mlflow={getattr(mlflow, '__version__', '?')}, "
-                f"crewai={getattr(_c, '__version__', '?')}, "
                 f"litellm={getattr(_lt, '__version__', '?')}"
             )
         except Exception:

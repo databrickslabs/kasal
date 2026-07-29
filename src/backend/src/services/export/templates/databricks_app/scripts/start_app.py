@@ -34,7 +34,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Readiness patterns
-BACKEND_READY = [r"Uvicorn running on", r"Application startup complete", r"Started server process"]
+BACKEND_READY = [
+    r"Uvicorn running on",
+    r"Application startup complete",
+    r"Started server process",
+]
 
 
 def check_port_available(port: int) -> bool:
@@ -80,7 +84,9 @@ class ProcessManager:
                 print(f"[{name}] {line}")
 
                 # Check readiness
-                if not is_ready and any(re.search(p, line, re.IGNORECASE) for p in patterns):
+                if not is_ready and any(
+                    re.search(p, line, re.IGNORECASE) for p in patterns
+                ):
                     is_ready = True
                     self.backend_ready = True
                     print("✓ Backend is ready!")
@@ -91,7 +97,9 @@ class ProcessManager:
                     else:
                         print("✓ App is ready!")
                         print(f"✓ Open the app at http://localhost:{self.port}")
-                        print(f"✓ API available at http://localhost:{self.port}/invocations")
+                        print(
+                            f"✓ API available at http://localhost:{self.port}/invocations"
+                        )
                     print("=" * 50 + "\n")
 
             process.wait()
@@ -105,11 +113,18 @@ class ProcessManager:
     def start_process(self, cmd, name, log_file, patterns, cwd=None):
         print(f"Starting {name}...")
         process = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, cwd=cwd
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            cwd=cwd,
         )
 
         thread = threading.Thread(
-            target=self.monitor_process, args=(process, name, log_file, patterns), daemon=True
+            target=self.monitor_process,
+            args=(process, name, log_file, patterns),
+            daemon=True,
         )
         thread.start()
         return process
@@ -152,7 +167,9 @@ class ProcessManager:
 
         for cmd, desc in [("npm install", "install"), ("npm run build", "build")]:
             print(f"Running npm {desc}...")
-            result = subprocess.run(cmd.split(), cwd=frontend_dir, capture_output=True, text=True)
+            result = subprocess.run(
+                cmd.split(), cwd=frontend_dir, capture_output=True, text=True
+            )
             if result.returncode != 0:
                 print(f"npm {desc} failed:\n{result.stdout}\n{result.stderr}")
                 return False
@@ -193,7 +210,9 @@ class ProcessManager:
                     break
 
             exit_code = self.backend_process.returncode if self.backend_process else 1
-            print(f"\n{'=' * 42}\nERROR: backend process exited with code {exit_code}\n{'=' * 42}")
+            print(
+                f"\n{'=' * 42}\nERROR: backend process exited with code {exit_code}\n{'=' * 42}"
+            )
             self.print_logs("backend.log")
             return exit_code
 

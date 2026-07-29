@@ -8,7 +8,7 @@ import zipfile
 from typing import Annotated, Any, Dict
 
 from fastapi import APIRouter, Depends, Query, status
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import StreamingResponse
 
 from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
@@ -92,17 +92,19 @@ async def export_crew(
     group_context: GroupContextDep,
 ):
     """
-    Export crew to Python project or Databricks notebook.
+    Export crew as a deployable Databricks App.
     Only Editors and Admins can export crews.
 
     **Export Formats:**
-    - `python_project`: Complete Python project with multiple files (downloaded as .zip)
-    - `databricks_notebook`: Single Databricks-compatible .ipynb notebook file
+    - `databricks_app`: Complete Databricks App project (downloaded as .zip)
+
+    The `python_project` and `databricks_notebook` formats were removed: both
+    generated projects that ran on `pip install crewai`, a second engine kept in
+    agreement with Kasal's by hand. Requesting either now returns 422.
 
     **Options:**
     - `include_custom_tools`: Include custom tool implementations (default: true)
     - `include_comments`: Add explanatory comments (default: true)
-    - `include_tests`: Include test files - python_project only (default: true)
     - `model_override`: Override default LLM model for all agents (optional)
 
     Args:
@@ -112,7 +114,7 @@ async def export_crew(
         group_context: Group context from headers
 
     Returns:
-        Export result with files/notebook and metadata
+        Export result with files and metadata
     """
     # Log the export request options for debugging
     logger.info(
@@ -157,9 +159,6 @@ async def download_export(
         True, description="Include custom tool implementations"
     ),
     include_comments: bool = Query(True, description="Add explanatory comments"),
-    include_tracing: bool = Query(True, description="Include MLflow tracing"),
-    include_evaluation: bool = Query(True, description="Include evaluation metrics"),
-    include_deployment: bool = Query(True, description="Include deployment code"),
     model_override: str = Query(None, description="Override LLM model"),
     include_static_frontend: bool = Query(
         True, description="Include static frontend (databricks_app only)"
@@ -173,23 +172,21 @@ async def download_export(
     Only Editors and Admins can download exports.
 
     **Returns:**
-    - Python project: .zip archive containing project structure
-    - Databricks notebook: .ipynb file ready for Databricks import
+    - Databricks App: .zip archive containing the deployable project
 
     **Usage:**
     1. Call /export endpoint to generate export
     2. Use the download_url from response to download file
-    3. For Python Project: Extract .zip and follow README.md
-    4. For Databricks Notebook: Import .ipynb into Databricks workspace
+    3. Extract the .zip and follow README.md
 
     Args:
         crew_id: ID of the crew to download
         service: Export service injected by dependency
         group_context: Group context from headers
-        format: Export format (python_project or databricks_notebook)
+        format: Export format (only `databricks_app`)
 
     Returns:
-        File download (zip or ipynb)
+        File download (zip)
     """
     # Check permissions
     if not check_role_in_context(group_context, ["admin", "editor"]):
@@ -206,9 +203,6 @@ async def download_export(
         export_options = ExportOptions(
             include_custom_tools=include_custom_tools,
             include_comments=include_comments,
-            include_tracing=include_tracing,
-            include_evaluation=include_evaluation,
-            include_deployment=include_deployment,
             model_override=model_override if model_override else None,
             include_static_frontend=include_static_frontend,
             include_obo_auth=include_obo_auth,
@@ -227,54 +221,22 @@ async def download_export(
         crew_name = result["crew_name"]
         sanitized_name = crew_name.lower().replace(" ", "_")
 
-        if format == ExportFormat.PYTHON_PROJECT:
-            # Create zip archive
-            zip_buffer = io.BytesIO()
+        # ``databricks_app`` is the only format the ExportFormat enum accepts, so
+        # anything else has already failed validation before reaching here.
+        zip_buffer = io.BytesIO()
+        prefix = f"{sanitized_name}_app"
 
-            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                for file_info in result["files"]:
-                    file_path = f"{sanitized_name}/{file_info['path']}"
-                    zip_file.writestr(file_path, file_info["content"])
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            for file_info in result["files"]:
+                zip_file.writestr(f"{prefix}/{file_info['path']}", file_info["content"])
 
-            zip_buffer.seek(0)
+        zip_buffer.seek(0)
 
-            return StreamingResponse(
-                zip_buffer,
-                media_type="application/zip",
-                headers={
-                    "Content-Disposition": f'attachment; filename="{sanitized_name}_project.zip"'
-                },
-            )
-
-        elif format == ExportFormat.DATABRICKS_APP:
-            # Create zip archive with _app suffix
-            zip_buffer = io.BytesIO()
-            prefix = f"{sanitized_name}_app"
-
-            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                for file_info in result["files"]:
-                    file_path = f"{prefix}/{file_info['path']}"
-                    zip_file.writestr(file_path, file_info["content"])
-
-            zip_buffer.seek(0)
-
-            return StreamingResponse(
-                zip_buffer,
-                media_type="application/zip",
-                headers={"Content-Disposition": f'attachment; filename="{prefix}.zip"'},
-            )
-
-        else:  # databricks_notebook
-            # Return notebook as .ipynb file
-            notebook_content = result["notebook_content"]
-
-            return Response(
-                content=notebook_content,
-                media_type="application/x-ipynb+json",
-                headers={
-                    "Content-Disposition": f'attachment; filename="{sanitized_name}.ipynb"'
-                },
-            )
+        return StreamingResponse(
+            zip_buffer,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{prefix}.zip"'},
+        )
 
     except ValueError as e:
         logger.error(f"Crew not found: {e}")

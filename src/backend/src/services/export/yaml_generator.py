@@ -1,13 +1,62 @@
 """
-YAML configuration generator for CrewAI agents and tasks.
+YAML configuration generator for exported agents and tasks.
 """
 
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
 import yaml
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_task_guardrail(task: Dict[str, Any]) -> Optional[tuple]:
+    """Classify a task's guardrail for export.
+
+    Mirrors the runtime detection in ``execution/kernel/task_builder.py``:
+    - LLM guardrail (``llm_guardrail`` dict, or a ``guardrail`` carrying a
+      description / llm_model and no ``type``) → an ``LLMGuardrail``, which the
+      exported app can reproduce from a plain description in tasks.yaml.
+    - Code/factory guardrail (a ``type`` string or bare function name) → a Kasal
+      built-in that cannot run standalone, so it is omitted from the export.
+
+    Lived in ``code_generator.py`` until that module was deleted with the
+    notebook and python-project exporters; this is its only remaining caller.
+
+    Returns:
+        ('llm', description, llm_model) | ('code', name) | None
+    """
+
+    def _coerce(value):
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                return value
+        return value
+
+    lg = _coerce(task.get("llm_guardrail"))
+    if isinstance(lg, dict) and (lg.get("description") or lg.get("llm_model")):
+        return (
+            "llm",
+            lg.get("description", "Validate the task output"),
+            lg.get("llm_model"),
+        )
+
+    g = _coerce(task.get("guardrail"))
+    if isinstance(g, dict):
+        if "type" in g:
+            return ("code", str(g.get("type")))
+        if g.get("description") or g.get("llm_model"):
+            return (
+                "llm",
+                g.get("description", "Validate the task output"),
+                g.get("llm_model"),
+            )
+    elif isinstance(g, str) and g.strip():
+        return ("code", g.strip())
+    return None
 
 
 class YAMLGenerator:
@@ -229,8 +278,6 @@ class YAMLGenerator:
             # guardrails are Kasal built-ins that can't run standalone, so they are
             # intentionally omitted (no guardrail) rather than hardcoded into the app.
             if include_guardrails:
-                from .code_generator import _parse_task_guardrail
-
                 parsed = _parse_task_guardrail(task)
                 if parsed and parsed[0] == "llm":
                     task_config["guardrail"] = parsed[1]

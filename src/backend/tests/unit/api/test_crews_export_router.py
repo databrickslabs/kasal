@@ -103,15 +103,14 @@ class TestExportCrew:
         """Test successful crew export."""
         crew_id = "test-crew-123"
         request = CrewExportRequest(
-            export_format=ExportFormat.DATABRICKS_NOTEBOOK, options=ExportOptions()
+            export_format=ExportFormat.DATABRICKS_APP, options=ExportOptions()
         )
 
         mock_service.export_crew.return_value = {
             "crew_id": crew_id,
             "crew_name": "Test Crew",
-            "export_format": "databricks_notebook",
-            "notebook": {},
-            "notebook_content": "{}",
+            "export_format": "databricks_app",
+            "files": [{"path": "README.md", "content": "# Test", "type": "markdown"}],
             "metadata": {},
             "generated_at": "2025-01-01 00:00:00 UTC",
         }
@@ -137,7 +136,7 @@ class TestExportCrew:
         """Test that non-editors cannot export crews."""
         crew_id = "test-crew-123"
         request = CrewExportRequest(
-            export_format=ExportFormat.DATABRICKS_NOTEBOOK, options=ExportOptions()
+            export_format=ExportFormat.DATABRICKS_APP, options=ExportOptions()
         )
 
         with patch(
@@ -159,7 +158,7 @@ class TestExportCrew:
         """Test export with invalid group context."""
         crew_id = "test-crew-123"
         request = CrewExportRequest(
-            export_format=ExportFormat.DATABRICKS_NOTEBOOK, options=ExportOptions()
+            export_format=ExportFormat.DATABRICKS_APP, options=ExportOptions()
         )
 
         invalid_context = MagicMock()
@@ -184,7 +183,7 @@ class TestExportCrew:
         """Test export when crew is not found."""
         crew_id = "non-existent-crew"
         request = CrewExportRequest(
-            export_format=ExportFormat.DATABRICKS_NOTEBOOK, options=ExportOptions()
+            export_format=ExportFormat.DATABRICKS_APP, options=ExportOptions()
         )
 
         mock_service.export_crew.side_effect = ValueError("Crew not found")
@@ -219,82 +218,6 @@ class TestDownloadExport:
         return context
 
     @pytest.mark.asyncio
-    async def test_download_python_project(self, mock_service, valid_group_context):
-        """Test downloading a Python project export."""
-        crew_id = "test-crew-123"
-
-        mock_service.export_crew.return_value = {
-            "crew_id": crew_id,
-            "crew_name": "Test Crew",
-            "export_format": "python_project",
-            "files": [
-                {"path": "README.md", "content": "# Test"},
-                {"path": "requirements.txt", "content": "crewai>=0.80.0"},
-            ],
-            "metadata": {},
-            "generated_at": "2025-01-01 00:00:00 UTC",
-        }
-
-        with patch(
-            "src.api.crews_export_router.check_role_in_context", return_value=True
-        ):
-            result = await download_export(
-                crew_id=crew_id,
-                service=mock_service,
-                group_context=valid_group_context,
-                format=ExportFormat.PYTHON_PROJECT,
-                include_custom_tools=True,
-                include_comments=True,
-                include_tracing=True,
-                include_evaluation=True,
-                include_deployment=True,
-                model_override=None,
-                include_static_frontend=True,
-                include_obo_auth=True,
-            )
-
-        # Check that it returns a streaming response
-        assert result.media_type == "application/zip"
-
-    @pytest.mark.asyncio
-    async def test_download_databricks_notebook(
-        self, mock_service, valid_group_context
-    ):
-        """Test downloading a Databricks notebook export."""
-        crew_id = "test-crew-123"
-
-        mock_service.export_crew.return_value = {
-            "crew_id": crew_id,
-            "crew_name": "Test Crew",
-            "export_format": "databricks_notebook",
-            "notebook": {},
-            "notebook_content": '{"cells": []}',
-            "metadata": {},
-            "generated_at": "2025-01-01 00:00:00 UTC",
-        }
-
-        with patch(
-            "src.api.crews_export_router.check_role_in_context", return_value=True
-        ):
-            result = await download_export(
-                crew_id=crew_id,
-                service=mock_service,
-                group_context=valid_group_context,
-                format=ExportFormat.DATABRICKS_NOTEBOOK,
-                include_custom_tools=True,
-                include_comments=True,
-                include_tracing=True,
-                include_evaluation=True,
-                include_deployment=True,
-                model_override=None,
-                include_static_frontend=True,
-                include_obo_auth=True,
-            )
-
-        # Check that it returns an ipynb response
-        assert result.media_type == "application/x-ipynb+json"
-
-    @pytest.mark.asyncio
     async def test_download_databricks_app(self, mock_service, valid_group_context):
         """Test downloading a Databricks App export as zip."""
         crew_id = "test-crew-123"
@@ -321,9 +244,6 @@ class TestDownloadExport:
                 format=ExportFormat.DATABRICKS_APP,
                 include_custom_tools=True,
                 include_comments=True,
-                include_tracing=True,
-                include_evaluation=True,
-                include_deployment=True,
                 model_override=None,
                 include_static_frontend=True,
                 include_obo_auth=True,
@@ -341,7 +261,7 @@ class TestDownloadExport:
         mock_service.export_crew.return_value = {
             "crew_id": crew_id,
             "crew_name": "Test Crew",
-            "export_format": "python_project",
+            "export_format": "databricks_app",
             "files": [{"path": "README.md", "content": "# Test"}],
             "metadata": {},
             "generated_at": "2025-01-01 00:00:00 UTC",
@@ -354,12 +274,9 @@ class TestDownloadExport:
                 crew_id=crew_id,
                 service=mock_service,
                 group_context=valid_group_context,
-                format=ExportFormat.PYTHON_PROJECT,
+                format=ExportFormat.DATABRICKS_APP,
                 include_custom_tools=True,
                 include_comments=True,
-                include_tracing=True,
-                include_evaluation=True,
-                include_deployment=True,
                 model_override="gpt-4o",
                 include_static_frontend=True,
                 include_obo_auth=True,
@@ -381,12 +298,9 @@ class TestDownloadExport:
                     crew_id="crew-1",
                     service=mock_service,
                     group_context=valid_group_context,
-                    format=ExportFormat.PYTHON_PROJECT,
+                    format=ExportFormat.DATABRICKS_APP,
                     include_custom_tools=True,
                     include_comments=True,
-                    include_tracing=True,
-                    include_evaluation=True,
-                    include_deployment=True,
                     model_override=None,
                     include_static_frontend=True,
                     include_obo_auth=True,
@@ -406,12 +320,9 @@ class TestDownloadExport:
                     crew_id="crew-1",
                     service=mock_service,
                     group_context=invalid_context,
-                    format=ExportFormat.PYTHON_PROJECT,
+                    format=ExportFormat.DATABRICKS_APP,
                     include_custom_tools=True,
                     include_comments=True,
-                    include_tracing=True,
-                    include_evaluation=True,
-                    include_deployment=True,
                     model_override=None,
                     include_static_frontend=True,
                     include_obo_auth=True,
@@ -428,12 +339,9 @@ class TestDownloadExport:
                     crew_id="crew-1",
                     service=mock_service,
                     group_context=None,
-                    format=ExportFormat.PYTHON_PROJECT,
+                    format=ExportFormat.DATABRICKS_APP,
                     include_custom_tools=True,
                     include_comments=True,
-                    include_tracing=True,
-                    include_evaluation=True,
-                    include_deployment=True,
                     model_override=None,
                     include_static_frontend=True,
                     include_obo_auth=True,
@@ -452,12 +360,9 @@ class TestDownloadExport:
                     crew_id="missing",
                     service=mock_service,
                     group_context=valid_group_context,
-                    format=ExportFormat.PYTHON_PROJECT,
+                    format=ExportFormat.DATABRICKS_APP,
                     include_custom_tools=True,
                     include_comments=True,
-                    include_tracing=True,
-                    include_evaluation=True,
-                    include_deployment=True,
                     model_override=None,
                     include_static_frontend=True,
                     include_obo_auth=True,

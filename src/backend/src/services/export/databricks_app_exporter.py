@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 import aiofiles
 
 from .base_exporter import BaseExporter
+from .runtime_vendor import kasal_runtime_files, rewrite_import_root
 from .secret_hints import SECRET_KEY_HINTS as _SECRET_KEY_HINTS
 from .yaml_generator import YAMLGenerator
 
@@ -54,26 +55,37 @@ CUSTOM_TOOLS_DIR = Path(__file__).parent.parent / "tools"
 #                 source is "bundled" (BUNDLED_TOOLS_DIR) or "custom" (CUSTOM_TOOLS_DIR)
 #   special     — custom factory builder key (e.g. "genie")
 _BUNDLEABLE_TOOLS: Dict[str, Dict[str, Any]] = {
+    # These three used to map onto crewai_tools (SerperDevTool, ScrapeWebsiteTool,
+    # DallETool) because the exported app could not ship a Kasal BaseTool. It
+    # ships the whole runtime now, so they point at KASAL'S OWN implementations,
+    # vendored under agent_server/kasal_runtime/ — the exported crew searches and
+    # scrapes with exactly the code live Kasal uses, not a lookalike whose
+    # behaviour is another library's to change.
     "SerperDevTool": {
-        "import": "from crewai_tools import SerperDevTool",
+        "import": (
+            "from agent_server.kasal_runtime.services.tools.serper_search import "
+            "SerperDevTool"
+        ),
         "class": "SerperDevTool",
         "config_keys": ["n_results", "country", "locale", "location", "search_type"],
         "env": ["SERPER_API_KEY"],
     },
     "ScrapeWebsiteTool": {
-        "import": "from crewai_tools import ScrapeWebsiteTool",
+        "import": (
+            "from agent_server.kasal_runtime.services.tools.scrape_website import "
+            "ScrapeWebsiteTool"
+        ),
         "class": "ScrapeWebsiteTool",
         "config_keys": ["website_url"],
-        "deps": ['"beautifulsoup4>=4.12.0"'],
+        # No beautifulsoup4: Kasal's scraper extracts text with an html.parser
+        # subclass, so this tool is stdlib-only.
     },
-    # NOTE: the exported app is still a CrewAI runtime (see pyproject.toml.template,
-    # which pins crewai[tools]), so image generation maps onto crewai_tools'
-    # DallETool rather than Kasal's own ImageGenerationTool — the latter subclasses
-    # OUR BaseTool, which the exported app does not ship. The config carries the
-    # model through, so a crew configured for gpt-image-1 exports as gpt-image-1.
     "Image Generation Tool": {
-        "import": "from crewai_tools import DallETool",
-        "class": "DallETool",
+        "import": (
+            "from agent_server.kasal_runtime.services.tools.image_generation import "
+            "ImageGenerationTool"
+        ),
+        "class": "ImageGenerationTool",
         "config_keys": ["model", "size", "quality", "n"],
         "env": ["OPENAI_API_KEY"],
     },
@@ -294,6 +306,11 @@ class DatabricksAppExporter(BaseExporter):
         # 1c. Vendor the shared FRONTEND renderer verbatim under frontend/src/a2ui/
         #     so the deployed UI draws surfaces with the SAME renderer as live chat.
         files.extend(await self._a2ui_frontend_files())
+
+        # 1d. Vendor Kasal's agent runtime under agent_server/kasal_runtime/ so the
+        #     exported crew runs on the SAME engine Kasal runs, not a second one.
+        #     Read from live backend source at export time — see runtime_vendor.py.
+        files.extend(await kasal_runtime_files(self.logger))
 
         # 2. Generated crew config (read at runtime by agent_server/agent.py).
         files.append(
@@ -599,14 +616,13 @@ class DatabricksAppExporter(BaseExporter):
                 continue
             deps.extend(spec.get("deps", []))
         if has_mcp:
-            # crewai_tools' MCPServerAdapter needs the `crewai-tools[mcp]` extra,
-            # which is BOTH `mcp` AND `mcpadapt` (the adapter imports
-            # `mcpadapt.core`). Shipping only `mcp` makes the adapter fail at
-            # import with a misleading "missing the 'mcp' package" prompt and skip
-            # every server. Pin `mcp` to the range crewai 1.14.5 requires; add
-            # `mcpadapt` (matching Kasal's tested combo) so the adapter loads.
+            # The app talks to MCP servers with the SDK directly
+            # (agent_server/mcp_tools.py), so `mcp` is the only requirement.
+            # `mcpadapt` is gone: it was needed solely because crewai_tools'
+            # MCPServerAdapter imported `mcpadapt.core`, and shipping one without
+            # the other made every server fail at import with a misleading
+            # "missing the 'mcp' package" message.
             deps.append('"mcp>=1.26.0,<1.27.0"')
-            deps.append('"mcpadapt>=0.1.9,<0.2.0"')
         for dep in deps:
             if dep not in seen:
                 seen.add(dep)
@@ -738,7 +754,14 @@ class DatabricksAppExporter(BaseExporter):
         return files
 
     async def _bundle_tool_files(self, tools: List[str]) -> List[Dict[str, str]]:
-        """Emit self-contained impls for the bundled tools the crew uses."""
+        """Emit self-contained impls for the bundled tools the crew uses.
+
+        Their ``src.`` imports are re-rooted onto the vendored runtime, exactly
+        as the runtime's own files are. Without this, ``perplexity_tool.py``
+        shipped with a live ``from src.services.tools.base import BaseTool`` —
+        a module that does not exist in a standalone app, so the tool raised
+        ImportError on first use in every export that carried it.
+        """
         files: List[Dict[str, str]] = []
         emitted: set = set()
         for tool in tools:
@@ -760,7 +783,11 @@ class DatabricksAppExporter(BaseExporter):
                 self.logger.warning(f"Could not read bundled tool {filename}: {exc}")
                 continue
             files.append(
-                {"path": f"tools/{filename}", "content": code, "type": "python"}
+                {
+                    "path": f"tools/{filename}",
+                    "content": rewrite_import_root(code),
+                    "type": "python",
+                }
             )
             emitted.add(filename)
         return files

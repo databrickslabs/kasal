@@ -1,4 +1,4 @@
-"""CrewAI agent exposed through MLflow's AgentServer (ResponsesAgent interface).
+"""A Kasal crew exposed through MLflow's AgentServer (ResponsesAgent interface).
 
 The crew structure lives in ``config/agents.yaml`` and ``config/tasks.yaml`` —
 edit those to change agents/tasks. This module loads that config, builds the
@@ -24,7 +24,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 import agent_server.conversation as conversation
 import mlflow
 import yaml
-from agent_server import a2ui_store, cancel, crew_progress, progress
+from agent_server import a2ui_store, cancel, crew_progress, mlflow_bridge, progress
 
 # The ONE shared, stdlib-only A2UI composer (vendored verbatim from Kasal's
 # src.services.a2ui into agent_server/a2ui/) — the SAME code live Kasal chat runs,
@@ -32,8 +32,13 @@ from agent_server import a2ui_store, cancel, crew_progress, progress
 from agent_server.a2ui.compose import compose_a2ui as _compose_surface
 from agent_server.a2ui.compose import guidance_for as _a2ui_guidance_for
 from agent_server.a2ui.compose import load_catalog as _load_a2ui_catalog
+from agent_server.kasal_runtime.services.execution.runtime import (
+    Agent,
+    Crew,
+    Process,
+    Task,
+)
 from agent_server.utils import get_session_id, get_user_id, get_user_workspace_client
-from crewai import LLM, Agent, Crew, Process, Task
 from mlflow.genai.agent_server import invoke, stream
 from mlflow.types.responses import (
     ResponsesAgentRequest,
@@ -43,11 +48,10 @@ from mlflow.types.responses import (
 
 # --- Runaway / hang guards (so a stuck turn can't burn tokens forever) ---------
 # All env-tunable; generous defaults that only act as safety nets.
-#   LLM_REQUEST_TIMEOUT   — per LLM HTTP call; a hung call fails instead of hanging.
 #   CREW_TIMEOUT_SECONDS  — whole-turn wall clock; on expiry the turn is cancelled
 #                           cooperatively (see agent_server.cancel). 0 disables.
 #   AGENT_MAX_EXECUTION_TIME — optional native per-agent cap (0 = unset).
-LLM_REQUEST_TIMEOUT = int(os.environ.get("LLM_REQUEST_TIMEOUT", "300"))
+#   (LLM_REQUEST_TIMEOUT is the third; it lives in llm_factory.py with the LLM.)
 CREW_TIMEOUT_SECONDS = int(os.environ.get("CREW_TIMEOUT_SECONDS", "600"))
 AGENT_MAX_EXECUTION_TIME = int(os.environ.get("AGENT_MAX_EXECUTION_TIME", "0")) or None
 
@@ -67,10 +71,10 @@ FAST_MAX_ITER = int(os.environ.get("FAST_MAX_ITER", "5"))
 FAST_MODE_DISABLED_TOOLS = {
     t.strip() for t in os.environ.get("FAST_MODE_DISABLED_TOOLS", "").split(",") if t.strip()
 }
-# CrewAI's agent *reasoning* makes the model emit a structured ``StepObservation``
+# Agent *reasoning* makes the model emit a structured ``StepObservation``
 # (whose ``suggested_refinements`` must be objects). Weaker / local OpenAI-compatible
 # models often return those as plain strings, so the reasoning step fails Pydantic
-# validation and CrewAI falls back to a "conservative replan" — noisy, slower, and
+# validation and the runtime falls back to a "conservative replan" — noisy, slower, and
 # degraded. Default reasoning ON, but OFF when a local model is configured
 # (LOCAL_LLM_BASE_URL set); override explicitly with AGENT_REASONING=true/false.
 _REASONING_DEFAULT = "false" if os.environ.get("LOCAL_LLM_BASE_URL") else "true"
@@ -123,7 +127,7 @@ def _with_citations(backstory: str) -> str:
         return backstory
     return f"{backstory}{CITATION_DIRECTIVE}"
 
-# Configure where CrewAI + LLM traces are stored. This app OWNS its MLflow
+# Configure where crew + LLM traces are stored. This app OWNS its MLflow
 # experiment and creates it here, because a Unity Catalog trace location can ONLY
 # be bound at experiment-creation time — it cannot be added to an existing
 # experiment (Databricks: "an experiment can only be bound to a UC trace location
@@ -207,12 +211,15 @@ if not _traces_configured:
         "No MLflow experiment configured — traces will not be written. "
         "Choose an MLflow experiment + SQL warehouse in the Kasal deploy screen."
     )
-try:
-    mlflow.crewai.autolog()
-except Exception as e:  # noqa: BLE001
-    print(f"mlflow.crewai.autolog() failed: {e}")
+# Span tracing. This used to be ``mlflow.crewai.autolog()``, which hooked CrewAI
+# internals; with the crew on Kasal's runtime there is nothing for it to hook, and
+# ``otel.py`` covers logs only — so without the bridge below a turn traces as an
+# empty ``@mlflow.trace`` span with no crew, task, agent, LLM or tool inside it.
+# The bridge subscribes to the runtime's event bus and builds the span tree from
+# the causality the bus already stamps. See mlflow_bridge.py.
+mlflow_bridge.install()
 
-# Subtle live progress (which task / which tool) via CrewAI's event bus — written
+# Subtle live progress (which task / which tool) via the runtime's event bus — written
 # to the ephemeral progress channel the UI polls; nothing is persisted.
 crew_progress.install()
 
@@ -229,7 +236,6 @@ INPUT_KEY = '{{INPUT_KEY}}'
 # explain capabilities and gather the right input.
 CREW_PURPOSE = """{{CREW_PURPOSE}}"""
 # Authenticate Databricks-managed tools/MCP as the requesting user (OBO).
-ENABLE_OBO = {{ENABLE_OBO}}
 # MCP servers auto-attached to the crew, as (name, url, transport) tuples.
 # transport is "streamable-http" for Databricks-managed MCP, else "sse".
 MCP_SERVERS = [
@@ -238,10 +244,10 @@ MCP_SERVERS = [
 PROCESS = "{{PROCESS}}"  # 'sequential' or 'hierarchical'
 # NOTE: no PLANNING / PLANNING_LLM. Kasal removed the prose planner (a plan-first
 # pass over a capable executor measurably hurt results), so exported apps never
-# enable CrewAI's Crew(planning=...) either.
+# enable Crew(planning=...) either.
 REASONING = {{REASONING}}  # agents reason/reflect before acting
 MANAGER_LLM = {{MANAGER_LLM}}  # None, or a model name for the hierarchical manager
-MEMORY = {{MEMORY}}  # enable CrewAI memory
+MEMORY = {{MEMORY}}  # enable crew memory
 # A2UI generative UI: when enabled, the agent's text answer is also composed into
 # a declarative A2UI surface (custom_outputs.a2ui) the frontend renders as rich UI
 # (presentation/dashboard/mindmap/document/...). A2UI_HINT biases the surface kind
@@ -265,7 +271,14 @@ TASKS_CONFIG = _load_yaml("tasks.yaml")
 
 
 def _build_tools(tool_names: List[str], mcp_tools: List[Any] | None = None) -> list:
-    """Instantiate configured tools, plus any runtime-resolved MCP tools."""
+    """Instantiate configured tools, plus any runtime-resolved MCP tools.
+
+    Everything is passed through ``as_kasal_tools``: ``runtime.Agent.tools`` is
+    typed ``list[BaseTool]``, so a crewai_tools built-in or an MCP tool reaches
+    the agent as a pydantic ValidationError unless it is adapted first.
+    """
+    from agent_server.tool_adapter import as_kasal_tools
+
     tools: list = list(mcp_tools or [])
     for name in tool_names:
         factory = TOOL_MAP.get(name)
@@ -274,150 +287,21 @@ def _build_tools(tool_names: List[str], mcp_tools: List[Any] | None = None) -> l
                 tools.append(factory())
             except Exception as exc:  # noqa: BLE001
                 print(f"Could not instantiate tool {name}: {exc}")
-    return tools
+    return as_kasal_tools(tools)
 
 
-def _is_codex_model(model_name: str) -> bool:
-    """gpt-5-3-codex on Databricks only works via the OpenAI Responses API."""
-    return bool(model_name) and "gpt-5-3-codex" in str(model_name).lower()
-
-
-def _model_rejects_temperature(model_name: str) -> bool:
-    """True for models whose Databricks endpoint 400s on the `temperature` param.
-
-    Covers GPT-5 / reasoning models and the newest Anthropic models (Claude Opus
-    4.7+, Fable 5) — e.g. ``databricks-claude-opus-4-8`` (served as
-    ``us.anthropic.claude-opus-4-8``) raises BAD_REQUEST: "Model ... does not
-    support the temperature parameter." litellm's DatabricksConfig lists
-    temperature as supported, so we must drop it explicitly. Mirrors Kasal's
-    src/utils/model_config.model_rejects_temperature so the exported app behaves
-    like live chat.
-    """
-    if not model_name:
-        return False
-    m = str(model_name).lower()
-    if "gpt-5" in m or "gpt5" in m:
-        return True
-    if "claude-opus-4-7" in m or "claude-opus-4-8" in m:
-        return True
-    if "claude-fable" in m:
-        return True
-    return False
-
-
-def _gateway_on() -> bool:
-    """Whether the workspace routes model traffic through the AI Gateway."""
-    return os.environ.get("DATABRICKS_AI_GATEWAY_ENABLED", "false").lower() in (
-        "1",
-        "true",
-        "yes",
-    )
-
-
-def _databricks_host_token() -> tuple:
-    """Resolve the workspace host + a bearer token (OBO user token, else app SP).
-
-    Uses ``config.authenticate()`` so the token is valid for any auth type (OBO,
-    app service-principal OAuth, or PAT).
-    """
-    from databricks.sdk import WorkspaceClient
-
-    w = get_user_workspace_client() if ENABLE_OBO else WorkspaceClient()
-    host = (
-        getattr(w.config, "host", None) or os.environ.get("DATABRICKS_HOST", "")
-    ).rstrip("/")
-    try:
-        token = (
-            (w.config.authenticate() or {}).get("Authorization", "").split(" ", 1)[-1]
-        )
-    except Exception:  # noqa: BLE001
-        token = os.environ.get("DATABRICKS_TOKEN", "")
-    return host, token
-
-
-def _make_llm(model_name: str, temperature: float = 0.7):
-    """Build the LLM for an agent.
-
-    Databricks models route through CrewAI's LiteLLM fallback as
-    ``databricks/<endpoint>`` with an EXPLICIT ``api_base`` + ``api_key`` — so the
-    app authenticates with its own identity (OBO/SP) instead of relying on
-    LiteLLM picking up Databricks env vars (it won't in the Apps runtime). This
-    mirrors how Kasal configures the LLM at runtime. gpt-5-3-codex is the
-    exception — the Chat Completions route returns 404 "Supervisor API is not
-    enabled", so it must use the Databricks Responses API (OpenAICompletion).
-
-    Local/self-hosted serving: when LOCAL_LLM_BASE_URL is set (an OpenAI-compatible
-    endpoint, e.g. a vLLM server), EVERY model routes there instead of Databricks,
-    so the whole app — crew + conversation + A2UI composer — runs with no Databricks
-    auth. The crew's configured model names (e.g. ``databricks-gpt-5-3-codex``) won't
-    exist on a local server, so set LOCAL_LLM_MODEL to the one model that server
-    actually serves and every call uses it. No-op when LOCAL_LLM_BASE_URL is unset.
-    """
-    local_base = os.environ.get("LOCAL_LLM_BASE_URL")
-    if local_base:
-        from crewai.llms.providers.openai.completion import OpenAICompletion
-
-        # Prefer an explicit local model name; otherwise fall back to the
-        # configured name (stripping any "provider/" prefix).
-        endpoint = os.environ.get("LOCAL_LLM_MODEL") or (
-            model_name.split("/", 1)[1] if "/" in str(model_name) else model_name
-        )
-        # Some hosted models pin the sampling temperature (e.g. Kimi K2 only
-        # accepts 1); LOCAL_LLM_TEMPERATURE overrides the caller's value when set.
-        temp_override = os.environ.get("LOCAL_LLM_TEMPERATURE")
-        return OpenAICompletion(
-            model=endpoint,
-            base_url=local_base,
-            api_key=os.environ.get("LOCAL_LLM_API_KEY", "dummy"),
-            temperature=float(temp_override) if temp_override else temperature,
-            timeout=LLM_REQUEST_TIMEOUT,
-        )
-    host, token = _databricks_host_token()
-    if _is_codex_model(model_name):
-        # gpt-5-3-codex ONLY works via the Databricks Responses API, and plain
-        # OpenAICompletion(api="responses") does NOT complete the tool-execution
-        # loop — it emits a tool call and stops (the raw tool-call is returned
-        # instead of the answer). DatabricksResponsesLLM (vendored verbatim from
-        # Kasal's llm_manager) adds the two things that make tool-calling work:
-        #   • phase preservation — re-injects prior output items WITH their `phase`
-        #     field so codex doesn't early-stop after the first tool call;
-        #   • a forced tool loop (tool_choice="required" until enough tool calls).
-        from agent_server.databricks_responses_llm import DatabricksResponsesLLM
-
-        # Responses API: AI Gateway on -> /ai-gateway/openai/v1 ; off -> /serving-endpoints.
-        base_path = "ai-gateway/openai/v1" if _gateway_on() else "serving-endpoints"
-        return DatabricksResponsesLLM(
-            model=model_name,
-            api="responses",
-            base_url=f"{host}/{base_path}",
-            api_key=token,
-            timeout=max(LLM_REQUEST_TIMEOUT, 300),
-        )
-    endpoint = (
-        model_name.split("/", 1)[1]
-        if str(model_name).startswith("databricks/")
-        else model_name
-    )
-    # LiteLLM's Databricks provider appends /chat/completions to api_base:
-    # AI Gateway on -> /ai-gateway/mlflow/v1 ; off -> /serving-endpoints.
-    kwargs = {
-        "model": f"databricks/{endpoint}",
-        "timeout": LLM_REQUEST_TIMEOUT,
-    }
-    # Newer frontier models (GPT-5, Claude Opus 4.7+, Fable 5) 400 on `temperature`.
-    # Drop it from the call AND set additional_drop_params so litellm doesn't
-    # re-add it (its DatabricksConfig advertises temperature as supported).
-    if _model_rejects_temperature(endpoint):
-        kwargs["additional_drop_params"] = ["temperature"]
-    else:
-        kwargs["temperature"] = temperature
-    if host:
-        kwargs["api_base"] = (
-            f"{host}/ai-gateway/mlflow/v1" if _gateway_on() else f"{host}/serving-endpoints"
-        )
-    if token:
-        kwargs["api_key"] = token
-    return LLM(**kwargs)
+# LLM construction (endpoint routing, auth, parameter shaping) lives in its
+# own module — see llm_factory.py. Imported under the original private names
+# so the call sites below, and anything monkeypatching them, are unchanged.
+from agent_server.llm_factory import (  # noqa: E402
+    ENABLE_OBO,
+    LLM_REQUEST_TIMEOUT,
+    _databricks_host_token,
+    _gateway_on,
+    _is_codex_model,
+    _make_llm,
+    _model_rejects_temperature,
+)
 
 
 def _build_agents(mcp_by_server: Dict[str, List[Any]] | None = None) -> Dict[str, Agent]:
@@ -450,7 +334,7 @@ def _build_agents(mcp_by_server: Dict[str, List[Any]] | None = None) -> Dict[str
             max_iter=min(cfg.get("max_iter", 25), FAST_MAX_ITER)
             if mode == "research"
             else cfg.get("max_iter", 25),
-            # Optional hard wall-clock cap per agent (CrewAI raises when exceeded);
+            # Optional hard wall-clock cap per agent (the runtime raises when exceeded);
             # off unless AGENT_MAX_EXECUTION_TIME (or per-agent config) is set.
             max_execution_time=cfg.get("max_execution_time", AGENT_MAX_EXECUTION_TIME),
             # Reasoning in research + deep. (No planner in any mode — see build_crew.)
@@ -466,7 +350,7 @@ def _make_task_guardrail(cfg: Dict[str, Any]):
     """Build the output guardrail for a task FROM ITS PLAN (config/tasks.yaml), or None.
 
     The crew plan is the single source of truth: a task with a ``guardrail``
-    description (string) gets a CrewAI ``LLMGuardrail`` reproducing it; a task with
+    description (string) gets an ``LLMGuardrail`` reproducing it; a task with
     no ``guardrail`` in the plan gets none. Edit tasks.yaml to change or remove it —
     nothing is hardcoded here. (Kasal built-in code/factory guardrails can't run
     standalone, so the exporter omits them from the plan rather than baking one in.)
@@ -477,7 +361,7 @@ def _make_task_guardrail(cfg: Dict[str, Any]):
     if not isinstance(text, str) or not text.strip():
         return None
     try:
-        from crewai.tasks.llm_guardrail import LLMGuardrail
+        from agent_server.kasal_runtime.services.execution.runtime import LLMGuardrail
 
         return LLMGuardrail(
             description=text.strip(),
@@ -516,7 +400,7 @@ def build_crew(
     Honors the crew's configured process (sequential/hierarchical), reasoning and
     memory settings — mirroring how Kasal runs it. Kasal removed the prose planner
     (it was a measurable regression over a capable executor), so this app never
-    enables CrewAI planning either.
+    enables planning either.
 
     When ``conversation_id`` is given, the crew's step/task callbacks abort the
     kickoff (raising :class:`cancel.CrewCancelled`) as soon as that conversation
@@ -524,11 +408,14 @@ def build_crew(
     LLM call rather than running to completion.
     """
     agents = _build_agents(mcp_by_server)
-    # No `planning=` kwarg at all (CrewAI defaults it off). Deep mode used to
+    # No `planning=` kwarg at all (the runtime defaults it off). Deep mode used to
     # re-enable the planner here even when the crew had it disabled, so an exported
     # app planned where Kasal did not; deep mode now means a larger REASONING
     # budget instead.
     kwargs: Dict[str, Any] = dict(
+        # Names the crew's trace span. Without it every export traces as the
+        # runtime default, "crew.crew".
+        name=NAME,
         agents=list(agents.values()),
         tasks=_build_tasks(agents),
         process=Process.hierarchical if PROCESS == "hierarchical" else Process.sequential,
@@ -601,8 +488,12 @@ def _open_mcp_tools(stack) -> Dict[str, List[Any]]:
     authorized for (e.g. a Genie space the service principal lacks access to) is
     skipped with a log, instead of taking down ALL MCP tools (the old single
     ``MCPServerAdapter([all])`` was all-or-nothing).
+
+    Connections are made with the raw ``mcp`` SDK (see agent_server.mcp_tools),
+    which the bundle already shipped — ``crewai-tools[mcp]`` was only ever a
+    wrapper around it.
     """
-    from crewai_tools import MCPServerAdapter
+    from agent_server.mcp_tools import open_mcp_server
 
     # Databricks-managed MCP uses RELATIVE urls and needs Databricks auth; that auth
     # path hangs against a dummy host, so in local mode (LOCAL_LLM_BASE_URL set) we
@@ -631,10 +522,9 @@ def _open_mcp_tools(stack) -> Dict[str, List[Any]]:
     by_server: Dict[str, List[Any]] = {}
     for name, url, transport in servers:
         try:
-            adapter = stack.enter_context(
-                MCPServerAdapter([_mcp_param(name, url, transport, host, db_headers)])
+            all_tools = open_mcp_server(
+                stack, name, _mcp_param(name, url, transport, host, db_headers)
             )
-            all_tools = list(adapter)
             server_tools = [t for t in all_tools if getattr(t, "name", "") not in disabled]
             by_server[name] = server_tools
             dropped = len(all_tools) - len(server_tools)
@@ -977,7 +867,7 @@ async def _run_turn(
 ) -> str:
     """Run one turn in a worker thread with a hard wall-clock cap.
 
-    The crew runs synchronously in a thread (CrewAI refuses a live event loop and
+    The crew runs synchronously in a thread (Crew.kickoff is synchronous, and
     a thread can't be force-killed), so on timeout we flip the cooperative cancel
     flag: the crew's callbacks abort it before the next LLM call. We clear any
     stale flag first so a previous turn's Stop/timeout never kills this one.
@@ -1003,7 +893,7 @@ async def _run_turn(
 
 @invoke()
 async def invoke_agent(request: ResponsesAgentRequest) -> ResponsesAgentResponse:
-    # The conversation layer (and crew kickoff) is synchronous and CrewAI refuses
+    # The conversation layer (and crew kickoff) is synchronous and must not block
     # to run from a live event loop — offload it to a worker thread.
     message = _latest_user_message(request)
     # Capture session + user identity ON the request thread (the forwarded

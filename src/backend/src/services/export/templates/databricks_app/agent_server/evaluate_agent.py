@@ -22,8 +22,11 @@ from mlflow.types.responses import ResponsesAgentRequest
 load_dotenv(dotenv_path=".env", override=True)
 logging.getLogger("mlflow.utils.autologging_utils").setLevel(logging.ERROR)
 
-# need to import agent for our @invoke-registered function to be found
-from agent_server import agent  # noqa: F401
+# need to import agent for our @invoke-registered function to be found.
+# E402: this import MUST come after load_dotenv() above — agent.py reads the
+# MLflow experiment env vars at import time, so hoisting it silently disables
+# tracing for the evaluation run.
+from agent_server import agent  # noqa: F401,E402
 
 # Create your evaluation dataset
 # Refer to documentation for evaluations:
@@ -74,6 +77,7 @@ if asyncio.iscoroutinefunction(invoke_fn):
         loop = asyncio.get_event_loop()
         response = loop.run_until_complete(invoke_fn(req))
         return response.model_dump()
+
 else:
 
     def predict_fn(input: list[dict], **kwargs) -> dict:

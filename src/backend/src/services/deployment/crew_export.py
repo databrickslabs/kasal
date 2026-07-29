@@ -13,11 +13,7 @@ from src.repositories.crew_repository import CrewRepository
 from src.repositories.task_repository import TaskRepository
 from src.repositories.tool_repository import ToolRepository
 from src.schemas.crew_export import ExportFormat, ExportOptions
-from src.services.export import (
-    DatabricksAppExporter,
-    DatabricksNotebookExporter,
-    PythonProjectExporter,
-)
+from src.services.export import DatabricksAppExporter
 from src.services.export.secret_hints import SECRET_KEY_HINTS
 from src.utils.user_context import GroupContext
 
@@ -55,12 +51,12 @@ class CrewExportService:
 
         Args:
             crew_id: ID of crew to export
-            export_format: Target format (python_project or databricks_notebook)
+            export_format: Target format (only ``databricks_app``)
             options: Export options
             group_context: Group context for authorization
 
         Returns:
-            Export result with files/notebook and metadata
+            Export result with files and metadata
         """
         logger.info(f"Exporting crew {crew_id} to format {export_format}")
 
@@ -70,12 +66,10 @@ class CrewExportService:
         # Convert options to dict
         options_dict = options.dict() if options else {}
 
-        # Select appropriate exporter
-        if export_format == ExportFormat.PYTHON_PROJECT:
-            exporter = PythonProjectExporter()
-        elif export_format == ExportFormat.DATABRICKS_NOTEBOOK:
-            exporter = DatabricksNotebookExporter()
-        elif export_format == ExportFormat.DATABRICKS_APP:
+        # Select appropriate exporter. ``databricks_app`` is the only format;
+        # the branch stays so adding a second one is a change here rather than a
+        # restructure, and so an unknown format fails loudly.
+        if export_format == ExportFormat.DATABRICKS_APP:
             exporter = DatabricksAppExporter()
         else:
             raise ValueError(f"Unsupported export format: {export_format}")

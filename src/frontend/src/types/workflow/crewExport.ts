@@ -2,9 +2,13 @@
  * Types for crew export and deployment functionality
  */
 
+/**
+ * The only export format. `python_project` and `databricks_notebook` were
+ * removed: both generated projects that ran on `pip install crewai`, a second
+ * engine kept in agreement with Kasal's by hand. The backend enum matches, so
+ * requesting either now fails validation with a 422.
+ */
 export enum ExportFormat {
-  PYTHON_PROJECT = 'python_project',
-  DATABRICKS_NOTEBOOK = 'databricks_notebook',
   DATABRICKS_APP = 'databricks_app'
 }
 
@@ -23,12 +27,7 @@ export enum DeploymentStatus {
 export interface ExportOptions {
   include_custom_tools?: boolean;
   include_comments?: boolean;
-  include_tests?: boolean;
   model_override?: string;
-  // Databricks notebook options
-  include_tracing?: boolean;
-  include_evaluation?: boolean;
-  include_deployment?: boolean;
   // Databricks App options
   include_static_frontend?: boolean;
   include_obo_auth?: boolean;
@@ -49,12 +48,10 @@ export interface CrewExportResponse {
   crew_name: string;
   export_format: string;
   files?: FileInfo[];
-  notebook_content?: string;
   metadata: {
     agents_count: number;
     tasks_count: number;
     tools_count: number;
-    cells_count?: number;
     sanitized_name: string;
   };
   generated_at: string;

@@ -102,7 +102,9 @@ def print_troubleshooting_auth() -> None:
 
 def print_troubleshooting_api() -> None:
     print("\nTroubleshooting tips:")
-    print("  • Your authentication token may have expired - try 'databricks auth login' to refresh")
+    print(
+        "  • Your authentication token may have expired - try 'databricks auth login' to refresh"
+    )
     print("  • Verify your profile is valid with 'databricks auth profiles'")
     print("  • Check network connectivity to your Databricks workspace")
 
@@ -170,14 +172,20 @@ def check_missing_prerequisites(prereqs: dict[str, bool]) -> list[str]:
     missing = []
 
     if not prereqs["uv"]:
-        missing.append("uv - Install with: curl -LsSf https://astral.sh/uv/install.sh | sh")
+        missing.append(
+            "uv - Install with: curl -LsSf https://astral.sh/uv/install.sh | sh"
+        )
 
     if not prereqs["node"] or not prereqs["npm"]:
-        missing.append("Node.js 20 - Install with: nvm install 20 (or download from nodejs.org)")
+        missing.append(
+            "Node.js 20 - Install with: nvm install 20 (or download from nodejs.org)"
+        )
 
     if not prereqs["databricks"]:
         if platform.system() == "Darwin":
-            missing.append("Databricks CLI - Install with: brew install databricks/tap/databricks")
+            missing.append(
+                "Databricks CLI - Install with: brew install databricks/tap/databricks"
+            )
         else:
             missing.append(
                 "Databricks CLI - Install with: curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh"
@@ -461,7 +469,7 @@ def setup_databricks_auth(profile_arg: str = None, host_arg: str = None) -> str:
             print_error("Databricks authentication failed")
             print_troubleshooting_auth()
             sys.exit(1)
-        print_success(f"Successfully authenticated with Databricks")
+        print_success("Successfully authenticated with Databricks")
 
     # Update .env with profile
     update_env_file("DATABRICKS_CONFIG_PROFILE", profile_name)
@@ -475,7 +483,15 @@ def get_databricks_host(profile_name: str) -> str:
     """Get the Databricks workspace host URL from the profile."""
     try:
         result = run_command(
-            ["databricks", "auth", "env", "--profile", profile_name, "--output", "json"],
+            [
+                "databricks",
+                "auth",
+                "env",
+                "--profile",
+                profile_name,
+                "--output",
+                "json",
+            ],
             check=False,
         )
         if result.returncode == 0:
@@ -517,7 +533,9 @@ def create_mlflow_experiment(profile_name: str, username: str) -> tuple[str, str
         try:
             exp = w.experiments.get_experiment(experiment_id=existing_id).experiment
             if exp and exp.name:
-                print_success(f"Reusing existing experiment '{exp.name}' (ID: {existing_id})")
+                print_success(
+                    f"Reusing existing experiment '{exp.name}' (ID: {existing_id})"
+                )
                 return exp.name, existing_id
         except Exception:
             pass
@@ -528,8 +546,13 @@ def create_mlflow_experiment(profile_name: str, username: str) -> tuple[str, str
     try:
         # Try to create with default name
         try:
-            experiment_id = w.experiments.create_experiment(name=experiment_name).experiment_id or ""
-            print_success(f"Created experiment '{experiment_name}' with ID: {experiment_id}")
+            experiment_id = (
+                w.experiments.create_experiment(name=experiment_name).experiment_id
+                or ""
+            )
+            print_success(
+                f"Created experiment '{experiment_name}' with ID: {experiment_id}"
+            )
             return experiment_name, experiment_id
         except Exception:
             pass
@@ -538,8 +561,12 @@ def create_mlflow_experiment(profile_name: str, username: str) -> tuple[str, str
         print("Experiment name already exists, creating with random suffix...")
         random_suffix = secrets.token_hex(4)
         experiment_name = f"/Users/{username}/agents-on-apps-{random_suffix}"
-        experiment_id = w.experiments.create_experiment(name=experiment_name).experiment_id or ""
-        print_success(f"Created experiment '{experiment_name}' with ID: {experiment_id}")
+        experiment_id = (
+            w.experiments.create_experiment(name=experiment_name).experiment_id or ""
+        )
+        print_success(
+            f"Created experiment '{experiment_name}' with ID: {experiment_id}"
+        )
         return experiment_name, experiment_id
 
     except Exception as e:
@@ -598,7 +625,10 @@ def get_existing_lakebase_config() -> dict | None:
 def validate_lakebase_config(profile_name: str, config: dict) -> bool:
     """Validate that an existing Lakebase config from .env is accessible in the current workspace."""
     if config["type"] == "provisioned":
-        return validate_lakebase_instance(profile_name, config["instance_name"]) is not None
+        return (
+            validate_lakebase_instance(profile_name, config["instance_name"])
+            is not None
+        )
     elif config["type"] == "autoscaling":
         return (
             validate_lakebase_autoscaling_endpoint(profile_name, config["endpoint"])
@@ -706,7 +736,7 @@ def create_lakebase_instance(profile_name: str, name: str = None) -> dict:
             print_error(
                 "Could not determine endpoint name for the created Lakebase instance.\n"
                 "  Please find the endpoint name in the Databricks UI and use:\n"
-                f"  uv run quickstart --lakebase-autoscaling-endpoint <endpoint-name>"
+                "  uv run quickstart --lakebase-autoscaling-endpoint <endpoint-name>"
             )
             sys.exit(1)
 
@@ -789,7 +819,9 @@ def select_lakebase_interactive(profile_name: str) -> dict:
 
     # Existing instance
     print("\nWhat type of Lakebase instance?")
-    print("  See https://docs.databricks.com/aws/en/oltp/#feature-comparison for details.")
+    print(
+        "  See https://docs.databricks.com/aws/en/oltp/#feature-comparison for details."
+    )
     print("  1) Autoscaling (recommended)")
     print("  2) Provisioned")
     print()
@@ -846,7 +878,9 @@ def validate_lakebase_instance(profile_name: str, lakebase_name: str) -> dict | 
         print_error(
             "The 'databricks database' command requires a newer version of the Databricks CLI."
         )
-        print("  Please upgrade: https://docs.databricks.com/dev-tools/cli/install.html")
+        print(
+            "  Please upgrade: https://docs.databricks.com/dev-tools/cli/install.html"
+        )
         return None
 
     error_msg = result.stderr.lower() if result.stderr else ""
@@ -854,7 +888,11 @@ def validate_lakebase_instance(profile_name: str, lakebase_name: str) -> dict | 
         print_error(
             f"Lakebase instance '{lakebase_name}' not found. Please check the instance name."
         )
-    elif "permission" in error_msg or "forbidden" in error_msg or "unauthorized" in error_msg:
+    elif (
+        "permission" in error_msg
+        or "forbidden" in error_msg
+        or "unauthorized" in error_msg
+    ):
         print_error(f"No permission to access Lakebase instance '{lakebase_name}'")
     else:
         print_error(
@@ -863,7 +901,9 @@ def validate_lakebase_instance(profile_name: str, lakebase_name: str) -> dict | 
     return None
 
 
-def validate_lakebase_autoscaling_endpoint(profile_name: str, endpoint: str) -> dict | None:
+def validate_lakebase_autoscaling_endpoint(
+    profile_name: str, endpoint: str
+) -> dict | None:
     """Validate that the Lakebase autoscaling endpoint exists.
 
     Uses the postgres API to verify the endpoint, then fetches the branch and
@@ -899,7 +939,11 @@ def validate_lakebase_autoscaling_endpoint(profile_name: str, endpoint: str) -> 
         error_msg = result.stderr.lower() if result.stderr else ""
         if "not found" in error_msg or "404" in error_msg:
             print_error(f"Lakebase autoscaling endpoint '{endpoint}' not found.")
-        elif "permission" in error_msg or "forbidden" in error_msg or "unauthorized" in error_msg:
+        elif (
+            "permission" in error_msg
+            or "forbidden" in error_msg
+            or "unauthorized" in error_msg
+        ):
             print_error(f"No permission to access Lakebase endpoint '{endpoint}'")
         else:
             print_error(
@@ -1032,7 +1076,9 @@ def setup_lakebase(
     # If --lakebase-autoscaling-endpoint was provided
     if autoscaling_endpoint:
         print(f"Using autoscaling Lakebase endpoint: {autoscaling_endpoint}")
-        endpoint_info = validate_lakebase_autoscaling_endpoint(profile_name, autoscaling_endpoint)
+        endpoint_info = validate_lakebase_autoscaling_endpoint(
+            profile_name, autoscaling_endpoint
+        )
         if not endpoint_info:
             sys.exit(1)
         update_env_file("LAKEBASE_AUTOSCALING_ENDPOINT", autoscaling_endpoint)
@@ -1114,9 +1160,7 @@ def setup_lakebase(
         update_env_file("PGDATABASE", "databricks_postgres")
         print_success("PGDATABASE set to 'databricks_postgres'")
 
-        print_success(
-            f"Lakebase autoscaling endpoint saved to .env: {endpoint}"
-        )
+        print_success(f"Lakebase autoscaling endpoint saved to .env: {endpoint}")
         # Merge branch/database from endpoint validation into selection
         selection["branch"] = endpoint_info["branch"]
         selection["database"] = endpoint_info["database"]
@@ -1156,7 +1200,10 @@ def _replace_lakebase_env_vars(content: str, lakebase_config: dict) -> str:
             continue
 
         # Match only the LAKEBASE_ env vars that quickstart manages
-        if re.search(r"- name: LAKEBASE_(INSTANCE_NAME|AUTOSCALING_ENDPOINT|AUTOSCALING_PROJECT|AUTOSCALING_BRANCH)", stripped):
+        if re.search(
+            r"- name: LAKEBASE_(INSTANCE_NAME|AUTOSCALING_ENDPOINT|AUTOSCALING_PROJECT|AUTOSCALING_BRANCH)",
+            stripped,
+        ):
             if insert_idx is None:
                 insert_idx = len(result)
             skip_next_value = True
@@ -1256,8 +1303,14 @@ def _replace_lakebase_resource(content: str, lakebase_config: dict) -> str:
                 for offset in [-1, 1]:
                     neighbor_idx = i + offset
                     if 0 <= neighbor_idx < len(lines):
-                        neighbor_bare = lines[neighbor_idx].strip().lstrip("#").strip().lower()
-                        if neighbor_bare in LAKEBASE_COMMENTS or "database" in neighbor_bare or "postgres" in neighbor_bare:
+                        neighbor_bare = (
+                            lines[neighbor_idx].strip().lstrip("#").strip().lower()
+                        )
+                        if (
+                            neighbor_bare in LAKEBASE_COMMENTS
+                            or "database" in neighbor_bare
+                            or "postgres" in neighbor_bare
+                        ):
                             is_lakebase_area = True
                             break
 
@@ -1306,7 +1359,11 @@ def _replace_lakebase_resource(content: str, lakebase_config: dict) -> str:
             i += 1
             while i < len(lines):
                 next_stripped = lines[i].strip()
-                if next_stripped and not next_stripped.startswith("-") and not next_stripped.startswith("#"):
+                if (
+                    next_stripped
+                    and not next_stripped.startswith("-")
+                    and not next_stripped.startswith("#")
+                ):
                     i += 1
                 else:
                     break
@@ -1358,7 +1415,11 @@ def _replace_lakebase_resource(content: str, lakebase_config: dict) -> str:
             i += 1
             while i < len(lines):
                 next_stripped = lines[i].strip()
-                if next_stripped and not next_stripped.startswith("-") and not next_stripped.startswith("#"):
+                if (
+                    next_stripped
+                    and not next_stripped.startswith("-")
+                    and not next_stripped.startswith("#")
+                ):
                     i += 1
                 else:
                     break
@@ -1398,7 +1459,11 @@ def _replace_lakebase_resource(content: str, lakebase_config: dict) -> str:
     # removed it), append the resource block after the last resource entry.
     # Only do this if we found some lakebase resource (database or comments), indicating
     # this is a lakebase-enabled template.
-    if lakebase_config["type"] == "autoscaling" and not found_postgres and found_database:
+    if (
+        lakebase_config["type"] == "autoscaling"
+        and not found_postgres
+        and found_database
+    ):
         insert_idx = _find_last_resource_insert_idx(result)
         if insert_idx is not None:
             if resource_indent is None:
@@ -1422,7 +1487,11 @@ def _find_last_resource_insert_idx(lines: list[str]) -> int | None:
             insert_idx = idx + 1
             while insert_idx < len(lines):
                 next_stripped = lines[insert_idx].strip()
-                if next_stripped and not next_stripped.startswith("-") and not next_stripped.startswith("#"):
+                if (
+                    next_stripped
+                    and not next_stripped.startswith("-")
+                    and not next_stripped.startswith("#")
+                ):
                     insert_idx += 1
                 else:
                     break
@@ -1442,7 +1511,6 @@ def update_databricks_yml_lakebase(lakebase_config: dict) -> None:
     if updated != content:
         yml_path.write_text(updated)
         print_success("Updated databricks.yml with Lakebase config")
-
 
 
 def get_databricks_yml_experiment_id() -> str:
@@ -1477,12 +1545,16 @@ def update_databricks_yml_experiment(experiment_id: str) -> None:
     for app_val in apps.values():
         for resource in app_val.get("resources", []):
             if "experiment" in resource:
-                resource["experiment"]["experiment_id"] = DoubleQuotedScalarString(experiment_id)
+                resource["experiment"]["experiment_id"] = DoubleQuotedScalarString(
+                    experiment_id
+                )
     _save_yml(yaml, data, yml_path)
     print_success("Updated databricks.yml with experiment ID")
 
 
-def update_databricks_yml_app_name(app_name: str, budget_policy_id: str | None = None) -> str:
+def update_databricks_yml_app_name(
+    app_name: str, budget_policy_id: str | None = None
+) -> str:
     """Update the app name field in databricks.yml.
 
     Args:
@@ -1507,7 +1579,9 @@ def update_databricks_yml_app_name(app_name: str, budget_policy_id: str | None =
 
     if budget_policy_id:
         if "budget_policy_id" not in app_map:
-            app_map.insert(1, "budget_policy_id", DoubleQuotedScalarString(budget_policy_id))
+            app_map.insert(
+                1, "budget_policy_id", DoubleQuotedScalarString(budget_policy_id)
+            )
         else:
             app_map["budget_policy_id"] = DoubleQuotedScalarString(budget_policy_id)
 
@@ -1581,7 +1655,9 @@ Examples:
             print_step("Missing prerequisites:")
             for item in missing:
                 print(f"  • {item}")
-            print("\nPlease install the missing prerequisites and run this script again.")
+            print(
+                "\nPlease install the missing prerequisites and run this script again."
+            )
             sys.exit(1)
 
         # Check Node.js version meets Vite requirements
@@ -1601,8 +1677,12 @@ Examples:
         app_name = args.app_name
         if not app_name and sys.stdin.isatty():
             print_step("Optional: Bind to an existing Databricks app")
-            print("If you created an app via the Databricks UI before cloning this template,")
-            print("you can bind this bundle to it to avoid a 'app already exists' error.")
+            print(
+                "If you created an app via the Databricks UI before cloning this template,"
+            )
+            print(
+                "you can bind this bundle to it to avoid a 'app already exists' error."
+            )
             answer = input(
                 "Enter the existing app name to bind to (or press Enter to skip): "
             ).strip()
@@ -1640,8 +1720,10 @@ Examples:
                             and parts[0] == "projects"
                             and parts[2] == "branches"
                         ):
-                            endpoint_path, endpoint_host = _fetch_autoscaling_endpoint_info(
-                                profile_name, parts[1], parts[3]
+                            endpoint_path, endpoint_host = (
+                                _fetch_autoscaling_endpoint_info(
+                                    profile_name, parts[1], parts[3]
+                                )
                             )
                             if endpoint_path:
                                 lakebase_config["endpoint"] = endpoint_path
@@ -1683,12 +1765,12 @@ Examples:
                             f"Using database resource from app: {instance_name}"
                         )
 
-            print(f"\nTo bind this bundle to your existing app, run:")
+            print("\nTo bind this bundle to your existing app, run:")
             if bundle_key:
                 print(
                     f"  databricks bundle deployment bind {bundle_key} {app_name} --auto-approve"
                 )
-            print(f"  databricks bundle deploy")
+            print("  databricks bundle deploy")
 
         # Step 5: Get username and create MLflow experiment
         print_step("Getting Databricks username...")
@@ -1708,7 +1790,9 @@ Examples:
             w = get_workspace_client(profile_name)
             if w:
                 try:
-                    exp = w.experiments.get_experiment(experiment_id=experiment_id).experiment
+                    exp = w.experiments.get_experiment(
+                        experiment_id=experiment_id
+                    ).experiment
                     if exp and exp.name:
                         experiment_name = exp.name
                 except Exception:
@@ -1726,7 +1810,9 @@ Examples:
                 if yml_experiment_id:
                     update_env_file("MLFLOW_EXPERIMENT_ID", yml_experiment_id)
 
-            experiment_name, experiment_id = create_mlflow_experiment(profile_name, username)
+            experiment_name, experiment_id = create_mlflow_experiment(
+                profile_name, username
+            )
             update_env_file("MLFLOW_EXPERIMENT_ID", experiment_id)
             print_success("Updated .env with experiment ID")
             update_databricks_yml_experiment(experiment_id)
@@ -1746,10 +1832,12 @@ Examples:
         elif lakebase_memory_required:
             # Check for existing config (idempotency)
             existing_lakebase = get_existing_lakebase_config()
-            if existing_lakebase and not args.lakebase_provisioned_name and not (
-                args.lakebase_autoscaling_endpoint
-            ) and not args.lakebase_create_new and validate_lakebase_config(
-                profile_name, existing_lakebase
+            if (
+                existing_lakebase
+                and not args.lakebase_provisioned_name
+                and not (args.lakebase_autoscaling_endpoint)
+                and not args.lakebase_create_new
+                and validate_lakebase_config(profile_name, existing_lakebase)
             ):
                 print_step("Reusing existing Lakebase config from .env")
                 lakebase_config = existing_lakebase
@@ -1765,15 +1853,21 @@ Examples:
         elif not args.skip_lakebase:
             # Optional for non-memory templates — for UI chat history
             existing_lakebase = get_existing_lakebase_config()
-            if existing_lakebase and validate_lakebase_config(profile_name, existing_lakebase):
+            if existing_lakebase and validate_lakebase_config(
+                profile_name, existing_lakebase
+            ):
                 print_step("Reusing existing Lakebase config from .env")
                 lakebase_config = existing_lakebase
             else:
                 print_step("Optional: Set up Lakebase for chat UI")
-                print("The built-in chat UI can save conversation history across sessions")
+                print(
+                    "The built-in chat UI can save conversation history across sessions"
+                )
                 print("if connected to Lakebase. This is for the UI to persist chats —")
                 print("not for the agent itself.")
-                answer = input("Set up Lakebase for chat history? [Y/n]: ").strip().lower()
+                answer = (
+                    input("Set up Lakebase for chat history? [Y/n]: ").strip().lower()
+                )
                 if answer != "n":
                     lakebase_config = setup_lakebase(
                         profile_name,
@@ -1801,7 +1895,11 @@ Examples:
             summary += f"\n  {host}/ml/experiments/{experiment_id}"
 
         if lakebase_config:
-            lakebase_purpose = "agent memory" if lakebase_memory_required else "chat UI conversation history"
+            lakebase_purpose = (
+                "agent memory"
+                if lakebase_memory_required
+                else "chat UI conversation history"
+            )
             if lakebase_config["type"] == "provisioned":
                 lakebase_name = lakebase_config["instance_name"]
                 summary += f"\n\n✓ Lakebase for {lakebase_purpose}: {lakebase_name}"

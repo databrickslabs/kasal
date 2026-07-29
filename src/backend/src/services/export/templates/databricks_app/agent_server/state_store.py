@@ -189,7 +189,10 @@ class _PostgresBackend(_Backend):
             if not user:
                 # In Databricks Apps the PG role is the app SP's client id;
                 # locally it's the developer's user name.
-                user = os.environ.get("DATABRICKS_CLIENT_ID") or w.current_user.me().user_name
+                user = (
+                    os.environ.get("DATABRICKS_CLIENT_ID")
+                    or w.current_user.me().user_name
+                )
             if not password:
                 cred = w.database.generate_database_credential(
                     request_id=str(uuid.uuid4()),
@@ -300,7 +303,9 @@ def backend_name() -> str:
     return _get_backend().name
 
 
-def get_text(cid: Optional[str], key: str, max_age: Optional[float] = None) -> Optional[str]:
+def get_text(
+    cid: Optional[str], key: str, max_age: Optional[float] = None
+) -> Optional[str]:
     """The stored value, or None when absent/expired. Never raises."""
     if not cid:
         return None

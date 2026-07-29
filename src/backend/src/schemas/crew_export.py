@@ -9,10 +9,15 @@ from pydantic import BaseModel, Field
 
 
 class ExportFormat(str, Enum):
-    """Available export formats"""
+    """Available export formats.
 
-    PYTHON_PROJECT = "python_project"
-    DATABRICKS_NOTEBOOK = "databricks_notebook"
+    ``python_project`` and ``databricks_notebook`` were removed: both generated
+    projects that ran on ``pip install crewai``, a second engine to keep in
+    agreement with Kasal's by hand. A request naming either now fails validation
+    with a 422 listing the valid formats — a clear error rather than an export
+    that silently produces something unsupported.
+    """
+
     DATABRICKS_APP = "databricks_app"
 
 
@@ -30,25 +35,11 @@ class ExportOptions(BaseModel):
         True, description="Include custom tool implementations"
     )
     include_comments: bool = Field(True, description="Add explanatory comments")
-    include_tests: bool = Field(
-        True, description="Include test files (python_project only)"
-    )
     model_override: Optional[str] = Field(
         None, description="Override LLM model for all agents"
     )
     include_memory_config: bool = Field(
         True, description="Include memory backend configuration"
-    )
-
-    # Databricks notebook options
-    include_tracing: bool = Field(
-        True, description="Include MLflow tracing/autolog (databricks_notebook only)"
-    )
-    include_evaluation: bool = Field(
-        True, description="Include MLflow evaluation cell (databricks_notebook only)"
-    )
-    include_deployment: bool = Field(
-        True, description="Include model deployment cell (databricks_notebook only)"
     )
 
     # Databricks App options
@@ -109,12 +100,8 @@ class CrewExportResponse(BaseModel):
     crew_name: str
     export_format: ExportFormat
 
-    # For python_project format
+    # The generated project, zipped by the router for download.
     files: Optional[List[ExportFile]] = None
-
-    # For databricks_notebook format
-    notebook: Optional[Dict[str, Any]] = None
-    notebook_content: Optional[str] = None  # JSON string for download
 
     # Common metadata
     metadata: Dict[str, Any] = Field(default_factory=dict)

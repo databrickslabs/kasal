@@ -62,57 +62,6 @@ class TestCrewExportService:
         }
 
     @pytest.mark.asyncio
-    async def test_export_crew_databricks_notebook(
-        self, service, sample_crew_data, mock_group_context
-    ):
-        """Test exporting crew as Databricks notebook."""
-        with patch.object(
-            service, "_get_crew_with_details", return_value=sample_crew_data
-        ):
-            result = await service.export_crew(
-                crew_id=sample_crew_data["id"],
-                export_format=ExportFormat.DATABRICKS_NOTEBOOK,
-                options=ExportOptions(),
-                group_context=mock_group_context,
-            )
-
-        assert result["crew_id"] == sample_crew_data["id"]
-        assert result["crew_name"] == "Test Crew"
-        assert result["export_format"] == "databricks_notebook"
-        assert "notebook" in result
-        assert "notebook_content" in result
-        assert "metadata" in result
-        assert "generated_at" in result
-
-    @pytest.mark.asyncio
-    async def test_export_crew_python_project(
-        self, service, sample_crew_data, mock_group_context
-    ):
-        """Test exporting crew as Python project."""
-        with patch.object(
-            service, "_get_crew_with_details", return_value=sample_crew_data
-        ):
-            result = await service.export_crew(
-                crew_id=sample_crew_data["id"],
-                export_format=ExportFormat.PYTHON_PROJECT,
-                options=ExportOptions(),
-                group_context=mock_group_context,
-            )
-
-        assert result["crew_id"] == sample_crew_data["id"]
-        assert result["crew_name"] == "Test Crew"
-        assert result["export_format"] == "python_project"
-        assert "files" in result
-        assert len(result["files"]) > 0
-
-        # Check that expected files are included
-        file_paths = [f["path"] for f in result["files"]]
-        assert "README.md" in file_paths
-        assert "requirements.txt" in file_paths
-        assert any("agents.yaml" in p for p in file_paths)
-        assert any("tasks.yaml" in p for p in file_paths)
-
-    @pytest.mark.asyncio
     async def test_export_crew_with_custom_tools(
         self, service, mock_session, mock_group_context
     ):
@@ -146,7 +95,7 @@ class TestCrewExportService:
         with patch.object(service, "_get_crew_with_details", return_value=crew_data):
             result = await service.export_crew(
                 crew_id=crew_data["id"],
-                export_format=ExportFormat.DATABRICKS_NOTEBOOK,
+                export_format=ExportFormat.DATABRICKS_APP,
                 options=ExportOptions(include_custom_tools=True),
                 group_context=mock_group_context,
             )
@@ -165,7 +114,7 @@ class TestCrewExportService:
         ):
             result = await service.export_crew(
                 crew_id=sample_crew_data["id"],
-                export_format=ExportFormat.DATABRICKS_NOTEBOOK,
+                export_format=ExportFormat.DATABRICKS_APP,
                 options=ExportOptions(model_override=model_override),
                 group_context=mock_group_context,
             )
@@ -182,66 +131,12 @@ class TestCrewExportService:
             with pytest.raises(ValueError) as exc_info:
                 await service.export_crew(
                     crew_id=str(uuid4()),
-                    export_format=ExportFormat.DATABRICKS_NOTEBOOK,
+                    export_format=ExportFormat.DATABRICKS_APP,
                     options=ExportOptions(),
                     group_context=mock_group_context,
                 )
 
         assert "not found" in str(exc_info.value)
-
-    @pytest.mark.asyncio
-    async def test_export_crew_with_tracing_disabled(
-        self, service, sample_crew_data, mock_group_context
-    ):
-        """Test exporting crew with MLflow tracing disabled."""
-        with patch.object(
-            service, "_get_crew_with_details", return_value=sample_crew_data
-        ):
-            result = await service.export_crew(
-                crew_id=sample_crew_data["id"],
-                export_format=ExportFormat.DATABRICKS_NOTEBOOK,
-                options=ExportOptions(include_tracing=False),
-                group_context=mock_group_context,
-            )
-
-        assert result is not None
-        # Verify tracing-related code is not included
-        notebook_content = result.get("notebook_content", "")
-        # The notebook should have fewer cells when tracing is disabled
-
-    @pytest.mark.asyncio
-    async def test_export_crew_with_evaluation_disabled(
-        self, service, sample_crew_data, mock_group_context
-    ):
-        """Test exporting crew with evaluation disabled."""
-        with patch.object(
-            service, "_get_crew_with_details", return_value=sample_crew_data
-        ):
-            result = await service.export_crew(
-                crew_id=sample_crew_data["id"],
-                export_format=ExportFormat.DATABRICKS_NOTEBOOK,
-                options=ExportOptions(include_evaluation=False),
-                group_context=mock_group_context,
-            )
-
-        assert result is not None
-
-    @pytest.mark.asyncio
-    async def test_export_crew_with_deployment_disabled(
-        self, service, sample_crew_data, mock_group_context
-    ):
-        """Test exporting crew with deployment disabled."""
-        with patch.object(
-            service, "_get_crew_with_details", return_value=sample_crew_data
-        ):
-            result = await service.export_crew(
-                crew_id=sample_crew_data["id"],
-                export_format=ExportFormat.DATABRICKS_NOTEBOOK,
-                options=ExportOptions(include_deployment=False),
-                group_context=mock_group_context,
-            )
-
-        assert result is not None
 
     @pytest.mark.asyncio
     async def test_export_crew_databricks_app(
@@ -353,64 +248,6 @@ class TestExportFormatSelection:
         context.group_ids = ["test-group"]
         context.is_valid.return_value = True
         return context
-
-    @pytest.mark.asyncio
-    async def test_python_project_exporter_selected(self, service, mock_group_context):
-        """Test that Python project exporter is selected for PYTHON_PROJECT format."""
-        sample_data = {
-            "id": "test-id",
-            "name": "Test",
-            "agents": [],
-            "tasks": [],
-        }
-
-        with patch.object(service, "_get_crew_with_details", return_value=sample_data):
-            with patch(
-                "src.services.deployment.crew_export.PythonProjectExporter"
-            ) as mock_exporter:
-                mock_instance = AsyncMock()
-                mock_exporter.return_value = mock_instance
-                mock_instance.export.return_value = {"export_format": "python_project"}
-
-                await service.export_crew(
-                    crew_id="test-id",
-                    export_format=ExportFormat.PYTHON_PROJECT,
-                    options=ExportOptions(),
-                    group_context=mock_group_context,
-                )
-
-                mock_exporter.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_databricks_notebook_exporter_selected(
-        self, service, mock_group_context
-    ):
-        """Test that Databricks notebook exporter is selected for DATABRICKS_NOTEBOOK format."""
-        sample_data = {
-            "id": "test-id",
-            "name": "Test",
-            "agents": [],
-            "tasks": [],
-        }
-
-        with patch.object(service, "_get_crew_with_details", return_value=sample_data):
-            with patch(
-                "src.services.deployment.crew_export.DatabricksNotebookExporter"
-            ) as mock_exporter:
-                mock_instance = AsyncMock()
-                mock_exporter.return_value = mock_instance
-                mock_instance.export.return_value = {
-                    "export_format": "databricks_notebook"
-                }
-
-                await service.export_crew(
-                    crew_id="test-id",
-                    export_format=ExportFormat.DATABRICKS_NOTEBOOK,
-                    options=ExportOptions(),
-                    group_context=mock_group_context,
-                )
-
-                mock_exporter.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_databricks_app_exporter_selected(self, service, mock_group_context):

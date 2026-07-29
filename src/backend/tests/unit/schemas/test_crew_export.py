@@ -25,17 +25,22 @@ from src.schemas.crew_export import (
 class TestExportFormat:
     """Tests for ExportFormat enum."""
 
-    def test_python_project_value(self):
-        """Test PYTHON_PROJECT enum value."""
-        assert ExportFormat.PYTHON_PROJECT == "python_project"
+    def test_databricks_app_value(self):
+        """Test DATABRICKS_APP enum value."""
+        assert ExportFormat.DATABRICKS_APP == "databricks_app"
 
-    def test_databricks_notebook_value(self):
-        """Test DATABRICKS_NOTEBOOK enum value."""
-        assert ExportFormat.DATABRICKS_NOTEBOOK == "databricks_notebook"
+    def test_databricks_app_is_the_only_format(self):
+        """``python_project`` and ``databricks_notebook`` were removed with the
+        CrewAI-based exporters that produced them. A request naming either must
+        fail validation rather than fall through to something unsupported."""
+        assert [f.value for f in ExportFormat] == ["databricks_app"]
+        for removed in ("python_project", "databricks_notebook"):
+            with pytest.raises(ValidationError):
+                CrewExportRequest(export_format=removed)
 
     def test_export_format_is_string_enum(self):
         """Test that ExportFormat is a string enum."""
-        assert isinstance(ExportFormat.PYTHON_PROJECT, str)
+        assert isinstance(ExportFormat.DATABRICKS_APP, str)
 
 
 class TestDeploymentTarget:
@@ -83,28 +88,24 @@ class TestExportOptions:
 
         assert options.include_custom_tools is True
         assert options.include_comments is True
-        assert options.include_tests is True
         assert options.model_override is None
         assert options.include_memory_config is True
-        assert options.include_tracing is True
-        assert options.include_evaluation is True
-        assert options.include_deployment is True
+        assert options.include_static_frontend is True
+        assert options.include_obo_auth is True
 
     def test_custom_values(self):
         """Test custom values for ExportOptions."""
         options = ExportOptions(
             include_custom_tools=False,
             include_comments=False,
-            include_tests=False,
             model_override="custom-model",
-            include_tracing=False,
+            include_static_frontend=False,
         )
 
         assert options.include_custom_tools is False
         assert options.include_comments is False
-        assert options.include_tests is False
         assert options.model_override == "custom-model"
-        assert options.include_tracing is False
+        assert options.include_static_frontend is False
 
 
 class TestCrewExportRequest:
@@ -117,19 +118,19 @@ class TestCrewExportRequest:
 
     def test_valid_request(self):
         """Test valid request creation."""
-        request = CrewExportRequest(export_format=ExportFormat.DATABRICKS_NOTEBOOK)
+        request = CrewExportRequest(export_format=ExportFormat.DATABRICKS_APP)
 
-        assert request.export_format == ExportFormat.DATABRICKS_NOTEBOOK
+        assert request.export_format == ExportFormat.DATABRICKS_APP
         assert request.options is not None
 
     def test_request_with_options(self):
         """Test request with custom options."""
         request = CrewExportRequest(
-            export_format=ExportFormat.PYTHON_PROJECT,
-            options=ExportOptions(include_tests=False),
+            export_format=ExportFormat.DATABRICKS_APP,
+            options=ExportOptions(include_custom_tools=False),
         )
 
-        assert request.options.include_tests is False
+        assert request.options.include_custom_tools is False
 
 
 class TestExportFile:
@@ -162,13 +163,13 @@ class TestCrewExportResponse:
         response = CrewExportResponse(
             crew_id="test-id",
             crew_name="Test Crew",
-            export_format=ExportFormat.PYTHON_PROJECT,
+            export_format=ExportFormat.DATABRICKS_APP,
             generated_at="2025-01-01 00:00:00 UTC",
         )
 
         assert response.crew_id == "test-id"
         assert response.crew_name == "Test Crew"
-        assert response.export_format == ExportFormat.PYTHON_PROJECT
+        assert response.export_format == ExportFormat.DATABRICKS_APP
 
     def test_response_with_files(self):
         """Test response with files list."""
@@ -177,26 +178,18 @@ class TestCrewExportResponse:
         response = CrewExportResponse(
             crew_id="test-id",
             crew_name="Test",
-            export_format=ExportFormat.PYTHON_PROJECT,
+            export_format=ExportFormat.DATABRICKS_APP,
             files=files,
             generated_at="2025-01-01 00:00:00 UTC",
         )
 
         assert len(response.files) == 1
 
-    def test_response_with_notebook(self):
-        """Test response with notebook."""
-        response = CrewExportResponse(
-            crew_id="test-id",
-            crew_name="Test",
-            export_format=ExportFormat.DATABRICKS_NOTEBOOK,
-            notebook={"cells": []},
-            notebook_content="{}",
-            generated_at="2025-01-01 00:00:00 UTC",
-        )
-
-        assert response.notebook is not None
-        assert response.notebook_content == "{}"
+    def test_the_notebook_fields_are_gone(self):
+        """``notebook`` / ``notebook_content`` existed only for the removed
+        notebook exporter; the response carries a file list and nothing else."""
+        assert "notebook" not in CrewExportResponse.model_fields
+        assert "notebook_content" not in CrewExportResponse.model_fields
 
 
 class TestModelServingConfig:

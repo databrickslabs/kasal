@@ -47,6 +47,7 @@ def start_server(port: int) -> subprocess.Popen:
     )
 
     lines_queue: list[str] = []
+
     def _reader():
         for line in iter(proc.stderr.readline, ""):
             lines_queue.append(line)

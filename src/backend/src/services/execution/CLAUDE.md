@@ -104,15 +104,21 @@ There is no `kasal_engine` package. What was a 6,594-line library sitting beside
 | was | is |
 |---|---|
 | `kasal_engine/core/` | `services/execution/runtime/` — Agent, Task, Crew, the tool-call loop |
-| `kasal_engine/events/` | `services/execution/events/` — the run event bus |
+| `kasal_engine/events/` | `src/core/events/` — the run event bus |
 | `kasal_engine/llm/` | `src/core/llm/transport/` — under the config layer that drives it |
 | `kasal_engine/tools/base.py` | `services/tools/base.py` — beside its 38 subclasses |
 | `kasal_engine/memory/` | `services/memory/engine/` |
 | `kasal_engine/flow/` | `services/flow_builder/runtime/` |
 
+The event bus is in `src/core/`, NOT `services/execution/` — this table said
+`services/execution/events/` for a while, a directory that has never existed.
+The bus spent a few hours under services during the flattening and that inverted
+the layering: `core/llm/transport` emits events, so a service-layer bus made
+`core` import `services` at module level. See `src/core/events/__init__.py`.
+
 **The direction of dependency is now a convention, not a fact.** It used to be
 structural: that package could not import `src` because it shipped separately.
-It can now. It must not. `runtime/` and `events/` are called BY the app — the
+It can now. It must not. `runtime/` and `core/events/` are called BY the app — the
 moment one of them reaches for a repository, a session or a `GroupContext`, the
 agent loop stops being runnable from anywhere that is not a full Kasal process,
 and every import graph in this directory develops a cycle.

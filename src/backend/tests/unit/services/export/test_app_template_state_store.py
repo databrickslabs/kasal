@@ -38,6 +38,20 @@ def template_env(tmp_path, monkeypatch):
     _purge_agent_server_modules()
 
 
+@pytest.fixture
+def rendered_env(app_bundle, tmp_path, monkeypatch):
+    """Like ``template_env``, but against a rendered export.
+
+    Needed by anything that imports a module depending on the vendored runtime
+    (``conversation``), which the raw template tree does not contain."""
+    monkeypatch.setenv("AGENT_STATE_SQLITE", str(tmp_path / "state.sqlite"))
+    for var in ("LAKEBASE_INSTANCE_NAME", "PGHOST"):
+        monkeypatch.delenv(var, raising=False)
+    _purge_agent_server_modules()
+    yield tmp_path
+    _purge_agent_server_modules()
+
+
 def _import(name):
     return importlib.import_module(f"agent_server.{name}")
 
@@ -173,9 +187,19 @@ class TestProgressDurability:
 
 
 class TestConversationHistoryDurability:
-    def test_history_survives_restart(self, template_env):
-        pytest.importorskip("crewai")
-        pytest.importorskip("mlflow")
+    """These run against a RENDERED bundle, not the raw template dir.
+
+    ``conversation.py`` imports the vendored Kasal runtime (via mlflow_bridge),
+    and ``kasal_runtime/`` only exists after an export — so importing it from
+    TEMPLATE_DIR now fails. It used to work only because the module imported
+    ``crewai``, which another test file stubs into ``sys.modules``.
+
+    The ``pytest.importorskip("crewai")`` guards these carried are gone with it:
+    crewai is not a dependency of this app any more, and a guard that skips the
+    whole durability suite whenever an unrelated package is absent is a test
+    that reads green while checking nothing."""
+
+    def test_history_survives_restart(self, rendered_env):
         conversation = _import("conversation")
         messages = [
             {"role": "user", "content": "hi"},
@@ -189,9 +213,7 @@ class TestConversationHistoryDurability:
         conversation._HISTORY.clear()  # in-process cache really is lost
         assert conversation.get_history("c1") == messages
 
-    def test_history_trimmed_to_cap(self, template_env):
-        pytest.importorskip("crewai")
-        pytest.importorskip("mlflow")
+    def test_history_trimmed_to_cap(self, rendered_env):
         conversation = _import("conversation")
         many = [{"role": "user", "content": str(i)} for i in range(50)]
         conversation._save_history("c1", many)
@@ -199,9 +221,7 @@ class TestConversationHistoryDurability:
         assert len(got) == conversation._HISTORY_MAX_MESSAGES
         assert got[-1]["content"] == "49"
 
-    def test_empty_history_for_unknown_or_none(self, template_env):
-        pytest.importorskip("crewai")
-        pytest.importorskip("mlflow")
+    def test_empty_history_for_unknown_or_none(self, rendered_env):
         conversation = _import("conversation")
         assert conversation.get_history(None) == []
         assert conversation.get_history("never-seen") == []

@@ -56,7 +56,8 @@ dependencies = [
     "langchain",
     "langchain-text-splitters", # langchain 1.x moved text splitters out of core
     "mcp>=1.26.0,<1.27.0", # Kasal's own MCP integration
-    "mcpadapt",
+    # `mcpadapt` was here only because crewai-tools[mcp] imported mcpadapt.core.
+    # crewai is gone and nothing imports it, so it went with it.
     # Observability
     "mlflow>=3.11,<4", # >=3.11 required for Unity Catalog trace storage (OTel tables)
     "opentelemetry-sdk>=1.27.0,<2.0.0",
@@ -113,21 +114,46 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
-# NOTE: src/services/export/templates/ holds a bundled Databricks
-# agent-app TEMPLATE shipped verbatim to exported projects. Its *.py files
-# contain {{TOKEN}} placeholders (invalid Python until rendered) and import
-# packages (crewai, mlflow.genai) not in this backend's env, so every linter
-# below must skip that tree.
+# src/services/export/templates/ holds the Databricks agent-app TEMPLATE shipped
+# to exported projects. The WHOLE tree used to be excluded from every linter, for
+# two stated reasons: its *.py files carry {{TOKEN}} placeholders ("invalid
+# Python until rendered"), and they imported packages absent from this env
+# (crewai). That cost ~3,000 lines of shipped code any quality gate ever seeing
+# it, and it accumulated real debt — 14 files needed reformatting and 11 ruff
+# findings were waiting when the exclusion was finally narrowed.
+#
+# Both reasons are now dealt with, and the first was never quite true:
+#
+#   * crewai is gone. The exported app runs Kasal's own vendored runtime, so its
+#     code imports first-party modules and stdlib only.
+#   * The token-bearing files DO parse — `{{X}}` is a valid set-of-set literal,
+#     and a token inside a string is just a string. What actually breaks is
+#     narrower: where a token stands in for CODE, ruff reports the placeholder
+#     name as undefined (F821) and black reformats around it. That is true of
+#     exactly two files, agent.py and llm_factory.py. otel.py's one token sits
+#     inside a string literal, so it is linted like anything else.
+#
+# tests/unit/services/export/test_template_lint_scope.py derives that criterion
+# from the files themselves and asserts this list matches, so a new template file
+# is linted by default, and a file that gains or loses a code-position token is
+# caught here rather than by a confusing CI failure.
+#
+# mypy is the exception and still skips the whole tree: the app's modules import
+# `agent_server.*`, a package that only exists in a RENDERED export, so mypy
+# cannot resolve them from here no matter how the files are formatted.
 
 [tool.black]
 line-length = 88
 target-version = ["py311"]
-extend-exclude = "src/services/export/templates/"
+extend-exclude = "src/services/export/templates/databricks_app/agent_server/(agent|llm_factory)\\.py"
 
 [tool.isort]
 profile = "black"
 line_length = 88
-extend_skip_glob = ["*/exporters/templates/*"]
+extend_skip_glob = [
+    "*/export/templates/databricks_app/agent_server/agent.py",
+    "*/export/templates/databricks_app/agent_server/llm_factory.py",
+]
 
 [tool.mypy]
 python_version = "3.11"
@@ -145,7 +171,9 @@ exclude = [
     ".venv",
     "__pycache__",
     "alembic",
-    "src/services/export/templates",
+    # Only the token-bearing template files — see the note above [tool.black].
+    "src/services/export/templates/databricks_app/agent_server/agent.py",
+    "src/services/export/templates/databricks_app/agent_server/llm_factory.py",
 ]
 
 [tool.ruff.lint]

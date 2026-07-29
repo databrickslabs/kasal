@@ -6,17 +6,22 @@ poll-until-complete loop. Authentication prefers the requesting user's
 forwarded OBO token (so Genie runs as the user and respects their table grants)
 and falls back to the app's service principal.
 
-This module is intentionally standalone — it has no Kasal (``src.*``)
-dependencies — so it runs unchanged inside the deployed app. The Genie space is
-taken from the ``GENIE_SPACE_ID`` env var or the ``space_id`` baked in by Kasal
-at export time.
+This module has no Kasal service dependencies beyond ``BaseTool`` — the tool
+contract itself, which the export vendors. The exporter re-roots that one import
+onto the vendored runtime on the way out (see ``runtime_vendor``), which is the
+same treatment ``perplexity_tool.py`` gets, so both bundled tools are written
+against Kasal's real import path rather than each inventing its own.
+
+The Genie space is taken from the ``GENIE_SPACE_ID`` env var or the ``space_id``
+baked in by Kasal at export time.
 """
 
 import os
 from typing import Optional, Type
 
-from crewai.tools import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
+
+from src.services.tools.base import BaseTool
 
 
 class _GenieInput(BaseModel):
@@ -131,7 +136,11 @@ class GenieTool(BaseTool):
         header_cells = cols or [f"col{i}" for i in range(ncols)]
 
         def _cell(value) -> str:
-            return str("" if value is None else value).replace("|", "\\|").replace("\n", " ")
+            return (
+                str("" if value is None else value)
+                .replace("|", "\\|")
+                .replace("\n", " ")
+            )
 
         header = "| " + " | ".join(header_cells) + " |"
         sep = "| " + " | ".join("---" for _ in header_cells) + " |"

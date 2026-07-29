@@ -109,7 +109,7 @@ else:
 # It needs a git checkout (apps-deploy has none), so it creates a junk
 # "<name>-no-git" LoggedModel, sets it active, and links every trace to that
 # model instead of leaving them clean in the experiment. Traces still flow to
-# MLFLOW_EXPERIMENT_ID via mlflow.crewai.autolog() + the @mlflow.trace on each
+# MLFLOW_EXPERIMENT_ID via agent_server.mlflow_bridge + the @mlflow.trace on each
 # conversation turn — no version tracking needed.
 
 

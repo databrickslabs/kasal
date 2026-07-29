@@ -7,15 +7,15 @@ what the crew can do, gathers/clarifies the input the crew needs, and only runs
 the crew once it has enough. Multi-turn history is kept per conversation id.
 
 Each turn is a single deterministic pass: classify -> (gather|run) -> reply.
-(Implemented with plain agent calls rather than a CrewAI Flow to avoid the Flow
+(Implemented with plain agent calls rather than a Flow to avoid the Flow
 event bus re-entering / looping inside the server.)
 """
 
 from typing import Any, Callable, Dict, List, Optional
 
 import mlflow
-from agent_server import cancel, progress, state_store
-from crewai import Agent
+from agent_server import cancel, mlflow_bridge, progress, state_store
+from agent_server.kasal_runtime.services.execution.runtime import Agent
 
 # Injected once by agent.configure_conversation() — keeps this layer crew-agnostic.
 _CFG: Dict[str, Any] = {
@@ -220,13 +220,14 @@ def respond(
       deep     -> same flow as research but the crew uses deep tools + reasoning.
 
     Traced with ``@mlflow.trace`` so every turn (including pure gather/clarify
-    turns that don't run the crew) is written to the experiment; nested crew/LLM
-    calls attach as child spans via ``mlflow.crewai.autolog()``. The conversation
-    id doubles as the MLflow session id so the whole chat groups together in the
-    Traces UI.
+    turns that don't run the crew) is written to the experiment; nested crew /
+    task / agent / LLM / tool calls attach as child spans via
+    ``agent_server.mlflow_bridge``, which builds them from the runtime's event
+    bus. The conversation id doubles as the MLflow session id so the whole chat
+    groups together in the Traces UI.
     """
     _tag_trace_session(conversation_id, user_id)
-    # Bind this thread to the conversation so the CrewAI event-bus listener
+    # Bind this thread to the conversation so the event-bus listener
     # (crew_progress) can report live, ephemeral "doing X" status for this turn.
     progress.set_current(conversation_id)
     try:
@@ -271,3 +272,7 @@ def respond(
         # compose step. The handler clears it.
         cancel.clear(conversation_id)
         progress.clear_current()
+        # Close any span the turn left open. A Stop (or a timeout) unwinds
+        # through CrewCancelled, which never reaches the runtime's completion
+        # events — and one unclosed span makes the whole trace unrenderable.
+        mlflow_bridge.end_turn()

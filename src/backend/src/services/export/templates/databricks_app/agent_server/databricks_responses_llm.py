@@ -39,8 +39,8 @@ import json
 import logging
 from typing import Any
 
-from crewai.events.types.llm_events import LLMCallType
-from crewai.llms.providers.openai.completion import OpenAICompletion
+from agent_server.kasal_runtime.core.events import LLMCallType
+from agent_server.kasal_runtime.core.llm.transport import OpenAICompletion
 
 # Use the "crew" logger so messages appear in crew.log alongside other
 # subprocess output (the root logger is set to WARNING in subprocesses).
@@ -122,10 +122,13 @@ class DatabricksResponsesLLM(OpenAICompletion):
         # tokens. Override via KASAL_CODEX_MAX_OUTPUT_TOKENS when a workload
         # genuinely needs more.
         import os as _os
+
         cap = int(_os.environ.get("KASAL_CODEX_MAX_OUTPUT_TOKENS", "16000"))
         current = params.get("max_output_tokens")
         if current is None:
-            explicit = getattr(self, "max_completion_tokens", None) or getattr(self, "max_tokens", None)
+            explicit = getattr(self, "max_completion_tokens", None) or getattr(
+                self, "max_tokens", None
+            )
             params["max_output_tokens"] = min(int(explicit), cap) if explicit else cap
         elif int(current) > cap:
             params["max_output_tokens"] = cap
@@ -144,7 +147,11 @@ class DatabricksResponsesLLM(OpenAICompletion):
                 item = dict(item)  # shallow copy
 
                 # Truncate oversized IDs
-                if "id" in item and isinstance(item["id"], str) and len(item["id"]) > 64:
+                if (
+                    "id" in item
+                    and isinstance(item["id"], str)
+                    and len(item["id"]) > 64
+                ):
                     item["id"] = item["id"][:64]
 
                 # Convert role:"tool" → function_call_output
@@ -153,11 +160,13 @@ class DatabricksResponsesLLM(OpenAICompletion):
                     output = item.get("content", "")
                     if output is None:
                         output = ""
-                    sanitised_input.append({
-                        "type": "function_call_output",
-                        "call_id": call_id,
-                        "output": str(output),
-                    })
+                    sanitised_input.append(
+                        {
+                            "type": "function_call_output",
+                            "call_id": call_id,
+                            "output": str(output),
+                        }
+                    )
                     continue
 
                 # Convert assistant tool_calls → function_call items
@@ -165,12 +174,14 @@ class DatabricksResponsesLLM(OpenAICompletion):
                     tool_calls = item.get("tool_calls", [])
                     for tc in tool_calls:
                         func = tc.get("function", {})
-                        sanitised_input.append({
-                            "type": "function_call",
-                            "call_id": tc.get("id", ""),
-                            "name": func.get("name", ""),
-                            "arguments": func.get("arguments", "{}"),
-                        })
+                        sanitised_input.append(
+                            {
+                                "type": "function_call",
+                                "call_id": tc.get("id", ""),
+                                "name": func.get("name", ""),
+                                "arguments": func.get("arguments", "{}"),
+                            }
+                        )
                     continue
 
                 # Replace null content with empty string
@@ -370,8 +381,7 @@ class DatabricksResponsesLLM(OpenAICompletion):
                 # tool_choice="auto".
                 self._tool_call_count += len(function_calls)
                 logger.info(
-                    "[DatabricksCodex] Tool call count now %d "
-                    "(+%d this turn)",
+                    "[DatabricksCodex] Tool call count now %d " "(+%d this turn)",
                     self._tool_call_count,
                     len(function_calls),
                 )
@@ -496,23 +506,38 @@ class DatabricksResponsesLLM(OpenAICompletion):
                     item_dict = item
                 else:
                     # Fallback: try to convert to dict
-                    item_dict = dict(item) if hasattr(item, "__iter__") else {"type": str(type(item).__name__)}
+                    item_dict = (
+                        dict(item)
+                        if hasattr(item, "__iter__")
+                        else {"type": str(type(item).__name__)}
+                    )
 
                 # The Responses API enforces a 64-char max on input[].id.
                 # Output items may carry longer IDs (e.g. response IDs);
                 # truncate them to avoid BAD_REQUEST errors on re-injection.
-                if "id" in item_dict and isinstance(item_dict["id"], str) and len(item_dict["id"]) > 64:
+                if (
+                    "id" in item_dict
+                    and isinstance(item_dict["id"], str)
+                    and len(item_dict["id"]) > 64
+                ):
                     item_dict["id"] = item_dict["id"][:64]
 
                 items.append(item_dict)
             except Exception:
-                logger.debug("[DatabricksCodex] Could not serialise output item: %s", type(item).__name__)
+                logger.debug(
+                    "[DatabricksCodex] Could not serialise output item: %s",
+                    type(item).__name__,
+                )
 
         self._last_output_items = items
 
         phases = [it.get("phase") for it in items if it.get("phase")]
         if phases:
-            logger.debug("[DatabricksCodex] Captured %d output items, phases: %s", len(items), phases)
+            logger.debug(
+                "[DatabricksCodex] Captured %d output items, phases: %s",
+                len(items),
+                phases,
+            )
 
     # ------------------------------------------------------------------
     # Diagnostics
@@ -524,7 +549,9 @@ class DatabricksResponsesLLM(OpenAICompletion):
         input_count = len(params.get("input", []))
         has_instructions = bool(params.get("instructions"))
         tool_choice = params.get("tool_choice", "not set")
-        tool_names = [t.get("name", "?") for t in params.get("tools", []) if isinstance(t, dict)]
+        tool_names = [
+            t.get("name", "?") for t in params.get("tools", []) if isinstance(t, dict)
+        ]
 
         logger.info(
             "[DatabricksCodex] Responses API request: model=%s, input_items=%d, "
@@ -563,7 +590,9 @@ class DatabricksResponsesLLM(OpenAICompletion):
                     phases.append(phase)
 
         function_calls = self._extract_function_calls_from_response(response)
-        text_len = len(response.output_text or "") if hasattr(response, "output_text") else 0
+        text_len = (
+            len(response.output_text or "") if hasattr(response, "output_text") else 0
+        )
 
         logger.info(
             "[DatabricksCodex] Responses API response: output_items=%s, "

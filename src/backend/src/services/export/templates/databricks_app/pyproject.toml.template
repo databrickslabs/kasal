@@ -10,15 +10,19 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.129.0",
     "uvicorn>=0.41.0",
-    # Pin crewai + litellm to the exact pair Kasal tests against. CrewAI routes
-    # Databricks models (databricks/<endpoint>) through its LiteLLM fallback, but
-    # crewai 1.14.5 only enables that fallback when an EXACTLY compatible litellm
-    # is importable (it imports version-sensitive litellm submodules at startup).
-    # This app ships no uv.lock, so loose floors let `uv sync` resolve a
-    # mismatched crewai+litellm pair and fail at runtime with
-    # "the LiteLLM fallback package is not installed". These pins avoid that.
-    "crewai[tools]==1.14.5",
-    "litellm==1.74.9",
+    # Kasal's vendored agent runtime (agent_server/kasal_runtime/) — its ENTIRE
+    # third-party footprint. The transport imports openai lazily, so a missing
+    # openai surfaces at the first LLM call rather than at startup.
+    #
+    # crewai and litellm used to be here, pinned to an exact pair
+    # (crewai[tools]==1.14.5 + litellm==1.74.9) because this app ships no
+    # uv.lock and loose floors let `uv sync` resolve a mismatched pair that
+    # failed at runtime. Both are gone: the app runs Kasal's own runtime, which
+    # drives endpoints with the openai SDK directly. That removes the whole
+    # class of problem — there is no second engine to keep in agreement, and no
+    # transitive resolution to get unlucky with.
+    "pydantic>=2.6.1",
+    "openai>=1.99",
     "databricks-agents>=1.4.0",
     "databricks-sdk>=0.102.0",
     "mlflow>=3.11,<4",

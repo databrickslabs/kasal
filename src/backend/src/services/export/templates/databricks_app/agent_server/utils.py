@@ -49,7 +49,9 @@ def get_user_id(request: ResponsesAgentRequest) -> Optional[str]:
     return None
 
 
-def get_databricks_host(workspace_client: Optional[WorkspaceClient] = None) -> Optional[str]:
+def get_databricks_host(
+    workspace_client: Optional[WorkspaceClient] = None,
+) -> Optional[str]:
     workspace_client = workspace_client or WorkspaceClient()
     try:
         return workspace_client.config.host
