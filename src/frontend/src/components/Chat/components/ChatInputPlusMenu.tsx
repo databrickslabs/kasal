@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   Badge,
-  Box,
   Divider,
   IconButton,
   ListItemIcon,
@@ -17,6 +16,7 @@ import {
   Add as AddIcon,
   AttachFile as AttachFileIcon,
   Check as CheckIcon,
+  ChevronRight as ChevronRightIcon,
 } from '@mui/icons-material';
 import { useCrewExecutionStore, ReasoningConfig } from '../../../store/crewExecution';
 import {
@@ -44,8 +44,8 @@ import {
  * **Rows, not nested dropdowns.** An MUI `Select` inside a `Menu` opens a second
  * popover on top of the first and renders as a heavy boxed field in a surface
  * that is otherwise a list. Every choice here is a short closed set, so each is
- * a row with a check — which is what a menu is for. The one exception is the
- * manager model, a long open-ended list.
+ * a row with a check — which is what a menu is for. The manager model is the
+ * one open-ended list, so it opens a submenu instead of filling the sheet.
  *
  * Settings read and write ``useCrewExecutionStore`` directly, the same source
  * the left sidebar used, so there is exactly ONE control for each.
@@ -130,6 +130,7 @@ const ChatInputPlusMenu: React.FC<ChatInputPlusMenuProps> = ({
   disabled = false,
 }) => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [managerAnchorEl, setManagerAnchorEl] = useState<null | HTMLElement>(null);
   const open = Boolean(anchorEl);
 
   const {
@@ -214,38 +215,25 @@ const ChatInputPlusMenu: React.FC<ChatInputPlusMenuProps> = ({
           />
         ))}
 
-        {/* An open-ended list, so this one stays a select rather than becoming
-            one row per model. Only shown where it applies — a hierarchical run
-            with no manager is the failure this pairing exists to prevent. */}
+        {/* An open-ended list, so it opens a SUBMENU rather than becoming one
+            row per model in the main sheet — the same shape the reference "+"
+            menus use for their long lists. Shown only for the hierarchical
+            process: a hierarchical run with no manager is the failure this
+            pairing exists to prevent. */}
         {processType === 'hierarchical' && (
-          <Box sx={{ px: 2, py: 1 }}>
-            <Typography variant="caption" sx={{ fontSize: '0.68rem', color: 'text.secondary' }}>
-              Manager model
-            </Typography>
-            <Box
-              component="select"
-              value={managerLLM || ''}
-              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setManagerLLM(e.target.value)}
-              sx={{
-                width: '100%',
-                mt: 0.5,
-                fontSize: '0.75rem',
-                padding: '6px 8px',
-                borderRadius: 1,
-                border: '1px solid',
-                borderColor: 'divider',
-                bgcolor: 'background.paper',
-                color: 'text.primary',
-              }}
-            >
-              <option value="">Default</option>
-              {Object.entries(models).map(([key, model]) => (
-                <option key={key} value={key}>
-                  {model?.name || key}
-                </option>
-              ))}
-            </Box>
-          </Box>
+          <MenuItem
+            onClick={(e) => setManagerAnchorEl(e.currentTarget)}
+            sx={ROW_SX}
+          >
+            <ListItemIcon sx={{ minWidth: 28 }} />
+            <ListItemText
+              primary="Manager model"
+              secondary={managerLLM ? models[managerLLM]?.name || managerLLM : 'Default'}
+              primaryTypographyProps={{ fontSize: '0.8rem' }}
+              secondaryTypographyProps={{ fontSize: '0.68rem', noWrap: true }}
+            />
+            <ChevronRightIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+          </MenuItem>
         )}
 
         <Divider sx={{ my: 0.5 }} />
@@ -294,6 +282,37 @@ const ChatInputPlusMenu: React.FC<ChatInputPlusMenuProps> = ({
             {reasoningUnsupportedReason(agentModelNames)}
           </Typography>
         )}
+      </Menu>
+
+      <Menu
+        anchorEl={managerAnchorEl}
+        open={Boolean(managerAnchorEl)}
+        onClose={() => setManagerAnchorEl(null)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+        slotProps={{ paper: { sx: { maxHeight: 320, minWidth: 220 } } }}
+      >
+        <ChoiceRow
+          label="Default"
+          hint="The crew's own model"
+          selected={!managerLLM}
+          onClick={() => {
+            setManagerLLM('');
+            setManagerAnchorEl(null);
+          }}
+        />
+        {Object.entries(models).map(([key, model]) => (
+          <ChoiceRow
+            key={key}
+            label={model?.name || key}
+            hint=""
+            selected={managerLLM === key}
+            onClick={() => {
+              setManagerLLM(key);
+              setManagerAnchorEl(null);
+            }}
+          />
+        ))}
       </Menu>
     </>
   );
