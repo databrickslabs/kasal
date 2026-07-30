@@ -127,6 +127,13 @@ async def _teamspace_name(session: Any, group_id: Optional[str]) -> Optional[str
         return group_id
 
 
+def _local_slug(teamspace: Optional[str]) -> str:
+    """The per-teamspace experiment name, shared with the local backend."""
+    from src.services.mlflow.local import experiment_slug
+
+    return experiment_slug(teamspace)
+
+
 def _databricks_configured() -> bool:
     """Whether this process has Databricks credentials to trace with.
 
@@ -482,7 +489,18 @@ async def configure_mlflow_in_subprocess(
         # -------------------------------------------------------
         # 5. Experiment name + UC trace storage resolution
         # -------------------------------------------------------
-        experiment_name = "/Shared/kasal-crew-execution-traces"  # default
+        # Per-teamspace by default, matching the local backend. One global
+        # experiment collecting every teamspace's traces makes the one you want
+        # unfindable on a shared workspace, which is the whole reason the local
+        # backend names them this way — the two backends should not disagree
+        # about what an experiment is called.
+        #
+        # NOTE this supersedes rather than renames: runs already traced to
+        # /Shared/kasal-crew-execution-traces stay there, and new ones land in
+        # the per-teamspace experiment. Nothing is lost, but history splits.
+        # Set MLFLOW_CREW_TRACES_EXPERIMENT (or the workspace's configured
+        # experiment name) to keep everything in one place.
+        experiment_name = f"/Shared/{_local_slug(teamspace_name)}"
         uc_catalog = None
         uc_schema = None
         warehouse_id = None
@@ -495,6 +513,12 @@ async def configure_mlflow_in_subprocess(
                     session=session,
                     group_id=group_id,
                 )
+                if teamspace_name is None:
+                    # Not resolved earlier (the legacy flag short-circuited the
+                    # lookup); do it on the session already open here rather
+                    # than paying a second round trip.
+                    teamspace_name = await _teamspace_name(session, group_id)
+                    experiment_name = f"/Shared/{_local_slug(teamspace_name)}"
                 fresh_config = await databricks_service.get_databricks_config()
                 if fresh_config:
                     if fresh_config.mlflow_experiment_name:

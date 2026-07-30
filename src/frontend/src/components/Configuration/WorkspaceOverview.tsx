@@ -15,7 +15,8 @@ import {
   Button,
 } from '@mui/material';
 import CloudIcon from '@mui/icons-material/Cloud';
-import MemoryIcon from '@mui/icons-material/Memory';
+// Brain, not a RAM chip — matches the Memory nav entry and the run table.
+import MemoryIcon from '@mui/icons-material/Psychology';
 import StorageIcon from '@mui/icons-material/Storage';
 import GroupIcon from '@mui/icons-material/Group';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';

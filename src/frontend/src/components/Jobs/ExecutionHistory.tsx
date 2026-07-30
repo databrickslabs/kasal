@@ -25,6 +25,8 @@ import SearchIcon from '@mui/icons-material/Search';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import InsightsIcon from '@mui/icons-material/Insights';
 import RecipeCurationButton from './RecipeCurationButton';
+import ExecutionMemoryButton from './ExecutionMemoryButton';
+import ExecutionHistorySkeleton from './ExecutionHistorySkeleton';
 import { refreshRecipeIndexIfStale } from './recipeIndexCache';
 import RecipeEffectivenessDialog from './RecipeEffectivenessDialog';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
@@ -615,140 +617,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
   }));
 
   if (showSkeleton) {
-    return (
-      <Card sx={{ boxShadow: 'none', height: '100%' }}>
-        <CardContent sx={{ p: 0, height: '100%', '&:last-child': { pb: 0 }, display: 'flex', flexDirection: 'column' }}>
-          <TableContainer sx={{ flex: '1 1 auto', overflow: 'auto' }}>
-            <Table size="small" stickyHeader>
-              <TableHead>
-                <TableRow>
-                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      {t('jobs.runName')}
-                    </Box>
-                  </TableCell>
-                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper }}>
-                    {t('jobs.status')}
-                  </TableCell>
-                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper }}>
-                    {t('jobs.duration')}
-                  </TableCell>
-                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper }}>
-                    {t('jobs.date')}
-                  </TableCell>
-                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center' }}>
-                    {t('jobs.actions')}
-                  </TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {/* Skeleton loading rows */}
-                {Array.from({ length: 3 }, (_, index) => (
-                  <TableRow key={`skeleton-${index}`}>
-                    <TableCell sx={{ py: 0.25, fontSize: '0.75rem' }}>
-                      <Box 
-                        sx={{ 
-                          height: '1rem', 
-                          backgroundColor: theme => theme.palette.action.hover,
-                          borderRadius: '4px',
-                          animation: 'pulse 1.5s ease-in-out infinite',
-                          '@keyframes pulse': {
-                            '0%': { opacity: 1 },
-                            '50%': { opacity: 0.4 },
-                            '100%': { opacity: 1 }
-                          }
-                        }} 
-                      />
-                    </TableCell>
-                    <TableCell sx={{ py: 0.25, fontSize: '0.75rem' }}>
-                      <Box 
-                        sx={{ 
-                          height: '1.5rem', 
-                          width: '60px',
-                          backgroundColor: theme => theme.palette.action.hover,
-                          borderRadius: '12px',
-                          animation: 'pulse 1.5s ease-in-out infinite',
-                          '@keyframes pulse': {
-                            '0%': { opacity: 1 },
-                            '50%': { opacity: 0.4 },
-                            '100%': { opacity: 1 }
-                          }
-                        }} 
-                      />
-                    </TableCell>
-                    <TableCell sx={{ py: 0.25, fontSize: '0.75rem' }}>
-                      <Box 
-                        sx={{ 
-                          height: '1rem', 
-                          width: '40px',
-                          backgroundColor: theme => theme.palette.action.hover,
-                          borderRadius: '4px',
-                          animation: 'pulse 1.5s ease-in-out infinite',
-                          '@keyframes pulse': {
-                            '0%': { opacity: 1 },
-                            '50%': { opacity: 0.4 },
-                            '100%': { opacity: 1 }
-                          }
-                        }} 
-                      />
-                    </TableCell>
-                    <TableCell sx={{ py: 0.25, fontSize: '0.75rem' }}>
-                      <Box 
-                        sx={{ 
-                          height: '1rem', 
-                          width: '80px',
-                          backgroundColor: theme => theme.palette.action.hover,
-                          borderRadius: '4px',
-                          animation: 'pulse 1.5s ease-in-out infinite',
-                          '@keyframes pulse': {
-                            '0%': { opacity: 1 },
-                            '50%': { opacity: 0.4 },
-                            '100%': { opacity: 1 }
-                          }
-                        }} 
-                      />
-                    </TableCell>
-                    <TableCell sx={{ py: 0.25, fontSize: '0.75rem' }}>
-                      <Box 
-                        sx={{ 
-                          height: '1rem', 
-                          width: '50px',
-                          backgroundColor: theme => theme.palette.action.hover,
-                          borderRadius: '4px',
-                          animation: 'pulse 1.5s ease-in-out infinite',
-                          '@keyframes pulse': {
-                            '0%': { opacity: 1 },
-                            '50%': { opacity: 0.4 },
-                            '100%': { opacity: 1 }
-                          }
-                        }} 
-                      />
-                    </TableCell>
-                    <TableCell sx={{ py: 0.25, fontSize: '0.75rem', textAlign: 'center' }}>
-                      <Box 
-                        sx={{ 
-                          height: '1.5rem', 
-                          width: '60px',
-                          backgroundColor: theme => theme.palette.action.hover,
-                          borderRadius: '4px',
-                          animation: 'pulse 1.5s ease-in-out infinite',
-                          '@keyframes pulse': {
-                            '0%': { opacity: 1 },
-                            '50%': { opacity: 0.4 },
-                            '100%': { opacity: 1 }
-                          },
-                          margin: '0 auto'
-                        }} 
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </CardContent>
-      </Card>
-    );
+    return <ExecutionHistorySkeleton />;
   }
 
   if (error) {
@@ -862,6 +731,9 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                     Trace
                   </TableCell>
                   <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center', display: isMobile ? 'none' : 'table-cell' }}>
+                    Memory
+                  </TableCell>
+                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center', display: isMobile ? 'none' : 'table-cell' }}>
                     Schedule Execution
                   </TableCell>
                   {/* Reuse judgement sits next to Result and Trace on purpose:
@@ -931,7 +803,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
               <TableBody>
                 {displayedRuns.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={isMobile ? 4 : 11} align="center" sx={{ py: 1, fontSize: '0.8125rem' }}>
+                    <TableCell colSpan={isMobile ? 4 : 12} align="center" sx={{ py: 1, fontSize: '0.8125rem' }}>
                       {searchQuery ? t('runHistory.noSearchResults') : t('runHistory.noRuns')}
                     </TableCell>
                   </TableRow>
@@ -1051,6 +923,12 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                             <VisibilityIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
+                      </TableCell>
+                      <TableCell align="center" sx={{ display: isMobile ? 'none' : 'table-cell' }}>
+                        {/* Renders nothing when the workspace has no cognitive
+                            memory store, so the column stays quiet instead of
+                            showing a dead icon on every row. */}
+                        <ExecutionMemoryButton jobId={run.job_id} />
                       </TableCell>
                       <TableCell align="center" sx={{ display: isMobile ? 'none' : 'table-cell' }}>
                         <Tooltip title={t('runHistory.actions.schedule')}>

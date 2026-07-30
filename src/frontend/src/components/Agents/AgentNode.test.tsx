@@ -248,22 +248,21 @@ describe('AgentNode', () => {
 
     it('renders memory icon when memory is true (default provider)', () => {
       renderNode({ memory: true });
-      // Two MemoryIcons: one in the LLM badge, one for the memory indicator
-      const icons = screen.getAllByTestId('MemoryIcon');
-      expect(icons.length).toBeGreaterThanOrEqual(2);
+      // The memory indicator is the brain; the LLM badge carries its own
+      // (ModelTraining) icon, so the two no longer share a test id.
+      expect(screen.getByTestId('PsychologyIcon')).toBeInTheDocument();
     });
 
     it('renders memory icon with custom embedder provider', () => {
       renderNode({ memory: true, embedder_config: { provider: 'huggingface' } });
-      const icons = screen.getAllByTestId('MemoryIcon');
-      expect(icons.length).toBeGreaterThanOrEqual(2);
+      expect(screen.getByTestId('PsychologyIcon')).toBeInTheDocument();
     });
 
-    it('does not render extra memory icon when memory is false', () => {
+    it('does not render the memory icon when memory is false', () => {
       renderNode({ memory: false });
-      // Only the LLM badge MemoryIcon should be present, not the memory indicator one
-      const icons = screen.getAllByTestId('MemoryIcon');
-      expect(icons.length).toBe(1); // Only the one in the LLM badge
+      expect(screen.queryByTestId('PsychologyIcon')).not.toBeInTheDocument();
+      // The LLM badge is unaffected — it has its own model icon.
+      expect(screen.getByTestId('ModelTrainingIcon')).toBeInTheDocument();
     });
 
     it('renders loading overlay when loading is true', () => {

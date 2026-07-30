@@ -19,7 +19,7 @@ import {
 import SettingsIcon from '@mui/icons-material/Settings';
 import TranslateIcon from '@mui/icons-material/Translate';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
-import ModelIcon from '@mui/icons-material/Psychology';
+import ModelIcon from '@mui/icons-material/ModelTraining';
 import KeyIcon from '@mui/icons-material/Key';
 import BuildIcon from '@mui/icons-material/Build';
 import CodeIcon from '@mui/icons-material/Code';
@@ -29,7 +29,9 @@ import HubIcon from '@mui/icons-material/Hub';
 import SchoolIcon from '@mui/icons-material/School';
 import EngineeringIcon from '@mui/icons-material/Engineering';
 import CloseIcon from '@mui/icons-material/Close';
-import MemoryIcon from '@mui/icons-material/Memory';
+// Same brain the run table's Memory column uses — the hardware chip icon read
+// as RAM, not as what an agent remembers.
+import MemoryIcon from '@mui/icons-material/Psychology';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import StorageIcon from '@mui/icons-material/Storage';
 import WorkspacesIcon from '@mui/icons-material/Workspaces';

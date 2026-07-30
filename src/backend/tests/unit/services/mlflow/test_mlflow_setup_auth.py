@@ -29,6 +29,48 @@ def _databricks_path_only(monkeypatch):
     monkeypatch.setattr(local, "local_tracking_uri", lambda: None)
 
 
+@pytest.fixture(autouse=True)
+def _no_real_database(monkeypatch):
+    """Keep this unit test off a live database.
+
+    ``configure_mlflow_in_subprocess`` fetches the Databricks config, which
+    reaches asyncpg for a REAL PostgreSQL connection. That SEGFAULTS the
+    interpreter — not an exception, a native crash in asyncpg's SSL connect —
+    once another test file in the same process has already used an event loop.
+    It is the hazard the backend CLAUDE.md names: "asyncpg connections can
+    conflict across multiple event loops".
+
+    The crash was blamed on pytest-xdist for a while, because xdist reports a
+    dead worker as a batch of failed tests. It is not: the pair
+
+        pytest tests/unit/services/mlflow/test_mlflow_service.py \
+               tests/unit/services/mlflow/test_mlflow_setup_auth.py -n 0
+
+    reproduces it serially with no xdist at all.
+
+    The config fetch is incidental to what this file asserts (SPN credential
+    handling), so it is stubbed rather than served — a unit test should not be
+    opening a database connection to check how a token is extracted.
+    """
+    import src.db.session as db_session
+    from src.services.databricks.workspace.service import DatabricksService
+
+    def _no_session(*args, **kwargs):
+        # Stopping the SESSION FACTORY rather than each repository that uses it:
+        # configure_mlflow_in_subprocess reads the enable flag, the teamspace
+        # name and the Databricks config, and stubbing them one by one just moved
+        # the crash to the next query. Every one of those reads is already
+        # wrapped in a try/except that falls back to the passed-in db_config, so
+        # refusing the connection exercises the real fallback path.
+        raise RuntimeError("no database in unit tests")
+
+    async def _no_config(self, *args, **kwargs):
+        return None
+
+    monkeypatch.setattr(db_session, "async_session_factory", _no_session)
+    monkeypatch.setattr(DatabricksService, "get_databricks_config", _no_config)
+
+
 import pytest
 
 from src.services.otel_tracing.mlflow_setup import (

@@ -33,7 +33,7 @@ import {
   DialogContentText
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
-import ModelIcon from '@mui/icons-material/Psychology';
+import ModelIcon from '@mui/icons-material/ModelTraining';
 import SaveIcon from '@mui/icons-material/Save';
 import EditIcon from '@mui/icons-material/Edit';
 import AddIcon from '@mui/icons-material/Add';

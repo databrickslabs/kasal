@@ -7,7 +7,11 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import CodeIcon from '@mui/icons-material/Code';
 import ErrorIcon from '@mui/icons-material/Error';
-import MemoryIcon from '@mui/icons-material/Memory';
+// Brain = what the agent remembers, ModelTraining = which model it runs on.
+// Both used to be the RAM-chip Memory icon, which made the LLM badge and the
+// memory indicator indistinguishable on the node.
+import MemoryIcon from '@mui/icons-material/Psychology';
+import ModelIcon from '@mui/icons-material/ModelTraining';
 import { Agent, AgentService } from '../../api/workflow/AgentService';
 import AgentForm from './AgentForm';
 import LLMSelectionDialog from './LLMSelectionDialog';
@@ -562,7 +566,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
           }
         }}
       >
-        <MemoryIcon sx={{
+        <ModelIcon sx={{
           fontSize: '0.65rem',
           mr: 0.25,
           color: (theme: Theme) => theme.palette.primary.main,
