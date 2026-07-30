@@ -48,6 +48,7 @@ from .response_parsing import (
     reasoning_items,
     responses_token_usage,
 )
+from .rpm import throttle
 from .tool_rounds import run_chat_round, run_responses_round
 
 logger = logging.getLogger(__name__)
@@ -603,6 +604,7 @@ class OpenAICompletion(BaseLLM):
         rounds, deadline = self._execution_budget(from_agent)
         for _round in range(rounds):
             self._check_deadline(deadline, _round, conversation)
+            throttle(from_agent)
             self._trim_conversation_to_window(conversation, from_agent)
             params = self._prepare_completion_params(conversation, tools)
             if self.stream:
@@ -816,6 +818,7 @@ class OpenAICompletion(BaseLLM):
         rounds, deadline = self._execution_budget(from_agent)
         for _round in range(rounds):
             self._check_deadline(deadline, _round, conversation)
+            throttle(from_agent)
             self._trim_conversation_to_window(conversation, from_agent)
             response = self.client.responses.create(
                 **self._prepare_responses_params(conversation, tools)

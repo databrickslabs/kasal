@@ -29,6 +29,7 @@ from pydantic import UUID4, BaseModel, ConfigDict, Field, PrivateAttr
 
 from src.core.events.bus import event_bus
 from src.core.events.types import CrewKickoffCompletedEvent, CrewKickoffStartedEvent
+from src.core.llm.transport.rpm import RPMController
 
 from .agent import Agent, BaseAgent
 from .executor import delegation_tools, interpolate_text
@@ -133,11 +134,29 @@ class Crew(BaseModel):
             if self.run_max_seconds
             else None
         )
+        # One limiter for the whole crew, for the same reason as the deadline:
+        # a per-agent limit would let a six-agent crew issue six times the
+        # requests per minute the user asked for. A crew-level max_rpm REPLACES
+        # whatever the agent built for itself; without one, each agent keeps its
+        # own.
+        rpm_controller = RPMController(self.max_rpm) if self.max_rpm else None
+        if rpm_controller is not None:
+            # Logged because the limiter is otherwise silent until it has to
+            # wait — and a run that never reaches the limit is indistinguishable
+            # from one with no limiter at all, which is exactly how max_rpm went
+            # unnoticed as an inert field for so long.
+            logger.info(
+                "crew %r: pacing every agent at max_rpm=%d", self.name, self.max_rpm
+            )
         for agent in self.agents:
             agent.crew = self
             agent.run_deadline = run_deadline
+            if rpm_controller is not None:
+                agent.rpm_controller = rpm_controller
         if self.manager_agent is not None:
             self.manager_agent.run_deadline = run_deadline
+            if rpm_controller is not None:
+                self.manager_agent.rpm_controller = rpm_controller
 
         # Checkpoint load happens AFTER input interpolation so restored task
         # keys (hashed from interpolated description|expected_output) only

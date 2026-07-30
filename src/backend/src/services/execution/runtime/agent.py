@@ -15,7 +15,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any, Literal
 
-from pydantic import UUID4, BaseModel, ConfigDict, Field
+from pydantic import UUID4, BaseModel, ConfigDict, Field, model_validator
 
 from src.core.events.bus import event_bus
 from src.core.events.types import (
@@ -25,6 +25,7 @@ from src.core.events.types import (
     LiteAgentExecutionErrorEvent,
     LiteAgentExecutionStartedEvent,
 )
+from src.core.llm.transport.rpm import RPMController
 from src.services.tools.base import BaseTool
 
 from .executor import (
@@ -59,6 +60,12 @@ class BaseAgent(BaseModel):
     #: global or a ContextVar because tasks run on a thread pool that copies
     #: neither, and two runs can share a process.
     run_deadline: float | None = Field(default=None, exclude=True)
+    #: Paces this agent's LLM calls against ``max_rpm``. Built below when the
+    #: agent carries its own limit (the Chat path runs one agent with no crew);
+    #: ``Crew.kickoff`` REPLACES it with one shared instance when the crew sets
+    #: ``max_rpm``, so a crew-level limit is not silently multiplied by the
+    #: number of agents. Read by the transport via rpm.throttle.
+    rpm_controller: Any | None = Field(default=None, exclude=True, repr=False)
     crew: Any | None = Field(default=None, exclude=True)
     max_tokens: int | None = None
     callbacks: list[Any] = Field(default_factory=list)
@@ -68,6 +75,18 @@ class BaseAgent(BaseModel):
     def key(self) -> str:
         source = f"{self.role}|{self.goal}|{self.backstory}"
         return hashlib.md5(source.encode(), usedforsecurity=False).hexdigest()
+
+    @model_validator(mode="after")
+    def _build_rpm_controller(self) -> "BaseAgent":
+        """Give an agent with its own ``max_rpm`` a limiter to enforce it.
+
+        Here rather than at each call site because the Chat path builds a lone
+        agent and never touches ``Crew.kickoff``, which is where a crew-wide
+        limiter is stamped. An agent inside a crew gets this one replaced.
+        """
+        if self.rpm_controller is None and self.max_rpm:
+            object.__setattr__(self, "rpm_controller", RPMController(self.max_rpm))
+        return self
 
 
 class Agent(BaseAgent):
