@@ -1,5 +1,6 @@
 import logging
 import uuid
+from datetime import datetime
 from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
@@ -19,6 +20,7 @@ from src.schemas.execution_history import (
     CrewCheckpointInfo,
 )
 from src.schemas.flow import FlowCreate, FlowResponse, FlowUpdate
+from src.services.execution.checkpointing.service import CheckpointService
 from src.services.execution.history import ExecutionHistoryService
 from src.services.external.publication import PublicationService
 from src.services.flow_builder.flow_service import FlowService
@@ -45,6 +47,11 @@ def get_execution_history_service(session: SessionDep) -> ExecutionHistoryServic
 # Dependency to get ExecutionTraceRepository
 def get_execution_trace_repository(session: SessionDep) -> ExecutionTraceRepository:
     return ExecutionTraceRepository(session)
+
+
+# Dependency to get the shared CheckpointService
+def get_checkpoint_service(session: SessionDep) -> CheckpointService:
+    return CheckpointService(session)
 
 
 def clean_null_values(obj: Any) -> Any:
@@ -286,6 +293,16 @@ async def delete_all_flows(
     return {"status": "success", "message": "All flows deleted successfully"}
 
 
+def _parse_completed_at(value):
+    """Coerce a stored ISO timestamp to a datetime, tolerating a trailing Z."""
+    if not isinstance(value, str):
+        return value
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
 @router.get("/{flow_id}/checkpoints", response_model=CheckpointListResponse)
 async def get_flow_checkpoints(
     flow_id: Annotated[
@@ -298,6 +315,7 @@ async def get_flow_checkpoints(
     trace_repository: Annotated[
         ExecutionTraceRepository, Depends(get_execution_trace_repository)
     ],
+    checkpoint_service: Annotated[CheckpointService, Depends(get_checkpoint_service)],
     group_context: GroupContextDep,
     status_filter: Annotated[
         Optional[str], Query(title="Filter by checkpoint status")
@@ -305,6 +323,13 @@ async def get_flow_checkpoints(
 ):
     """
     Get available checkpoints for a flow.
+
+    **Deprecated.** Checkpoints belong to an EXECUTION, not to the thing that
+    was executed, and hanging them off ``/flows`` is why crew executions never
+    got an equivalent. Use ``GET /executions/{job_id}/checkpoints``, which
+    serves both paths. This endpoint stays for one release so the frontend can
+    migrate on its own schedule; it is flow-scoped ("every checkpoint for this
+    saved flow"), which the per-execution route deliberately is not.
 
     Returns checkpoints from previous executions that can be resumed.
     Only returns checkpoints with 'active' status by default.
@@ -324,40 +349,60 @@ async def get_flow_checkpoints(
     # First verify the flow exists and user has access
     await flow_service.get_flow_with_group_check(flow_id, group_context)
 
-    # Get checkpoints for this flow
-    checkpoints = await execution_service.get_checkpoints_for_flow(
+    # One source of truth: the written checkpoint, via the shared service. The
+    # trace reconstruction below is reached only for executions that predate the
+    # recorder — see ExecutionTraceRepository.get_crew_checkpoints_by_job_id.
+    summaries = await checkpoint_service.list_for_flow(
+        flow_id=flow_id, group_context=group_context, status_filter=status_filter
+    )
+    summarised_job_ids = {summary["job_id"] for summary in summaries}
+
+    checkpoint_infos = []
+    for summary in summaries:
+        checkpoint_infos.append(
+            CheckpointInfo(
+                execution_id=summary["execution_id"],
+                job_id=summary["job_id"],
+                flow_uuid=summary.get("flow_uuid"),
+                checkpoint_method=summary.get("checkpoint_method"),
+                checkpoint_status=summary.get("status") or "active",
+                created_at=summary["created_at"],
+                run_name=summary.get("run_name"),
+                crew_checkpoints=[
+                    CrewCheckpointInfo(
+                        crew_name=unit.get("name") or "Unknown Crew",
+                        sequence=int(unit.get("key") or 0),
+                        status="completed",
+                        output_preview=unit.get("output_preview"),
+                        completed_at=_parse_completed_at(unit.get("completed_at")),
+                    )
+                    for unit in summary.get("units", [])
+                ],
+            )
+        )
+
+    # Legacy: executions with no written checkpoint at all. Their crews are
+    # reconstructed from traces, which cannot be backfilled and is not
+    # fidelity-equivalent; the per-execution API reports this as `derived`.
+    legacy = await execution_service.get_checkpoints_for_flow(
         flow_id=flow_id,
         group_id=group_context.primary_group_id,
         status_filter=status_filter,
     )
+    for cp in legacy:
+        if cp.job_id in summarised_job_ids:
+            continue
 
-    # Build checkpoint info with crew checkpoints
-    checkpoint_infos = []
-    for cp in checkpoints:
-        # Get crew checkpoints from traces for this execution
-        crew_checkpoints_data = await trace_repository.get_crew_checkpoints_by_job_id(
-            cp.job_id
-        )
-
-        # Convert to CrewCheckpointInfo objects
         crew_checkpoints = []
-        for crew_cp in crew_checkpoints_data:
+        for crew_cp in await trace_repository.get_crew_checkpoints_by_job_id(cp.job_id):
             try:
-                from datetime import datetime
-
-                completed_at = crew_cp.get("completed_at")
-                if isinstance(completed_at, str):
-                    completed_at = datetime.fromisoformat(
-                        completed_at.replace("Z", "+00:00")
-                    )
-
                 crew_checkpoints.append(
                     CrewCheckpointInfo(
                         crew_name=crew_cp.get("crew_name", "Unknown Crew"),
                         sequence=crew_cp.get("sequence", 0),
                         status=crew_cp.get("status", "completed"),
                         output_preview=crew_cp.get("output_preview"),
-                        completed_at=completed_at,
+                        completed_at=_parse_completed_at(crew_cp.get("completed_at")),
                     )
                 )
             except Exception as e:

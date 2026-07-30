@@ -956,6 +956,44 @@ async def _ensure_agent_columns(conn) -> None:
         logger.warning(f"Could not ensure agents.skills column: {e}")
 
 
+async def _ensure_execution_history_columns(conn) -> None:
+    """Idempotently add executionhistory.resumed_from_execution_id.
+
+    Resuming a run creates a NEW execution pointing at the one it came from.
+    ``create_all`` never ALTERs an existing table, so a database created before
+    that column existed keeps a schema the model no longer matches — and because
+    SQLAlchemy selects every mapped column, EVERY read of executionhistory fails
+    with "no such column", not just the resume path. There is an Alembic
+    migration for this too; this covers dev databases that were built from the
+    models and have no alembic_version at all.
+    """
+    is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")
+    try:
+        if is_sqlite:
+            res = await conn.exec_driver_sql("PRAGMA table_info(executionhistory)")
+            existing = {row[1] for row in res.fetchall()}
+            if not existing:
+                return  # table not created yet (create_all handles fresh DBs)
+            if "resumed_from_execution_id" not in existing:
+                await conn.exec_driver_sql(
+                    "ALTER TABLE executionhistory "
+                    "ADD COLUMN resumed_from_execution_id INTEGER"
+                )
+                logger.info(
+                    "Added executionhistory.resumed_from_execution_id (SQLite self-heal)"
+                )
+        else:
+            await conn.exec_driver_sql(
+                "ALTER TABLE executionhistory "
+                "ADD COLUMN IF NOT EXISTS resumed_from_execution_id INTEGER"
+            )
+            logger.info("Ensured executionhistory.resumed_from_execution_id column")
+    except Exception as e:
+        logger.warning(
+            f"Could not ensure executionhistory.resumed_from_execution_id: {e}"
+        )
+
+
 async def _ensure_crew_columns(conn) -> None:
     """Idempotently add reasoning_config to crews. create_all never ALTERs an
     existing table, so DBs created before this column existed (e.g. deployed
@@ -1235,6 +1273,7 @@ async def run_schema_self_heal(conn) -> None:
     await _ensure_prompt_optimization_runs_table(conn)
     await _ensure_agent_columns(conn)
     await _ensure_crew_columns(conn)
+    await _ensure_execution_history_columns(conn)
     await _ensure_ui_config_columns(conn)
     await _ensure_hot_polling_indexes(conn)
     await _heal_personal_group_names(conn)

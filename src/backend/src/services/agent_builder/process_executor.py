@@ -1050,7 +1050,7 @@ def run_crew_in_process(
                     # output so a killed/crashed run can resume without redoing
                     # finished tasks (POST /executions/{id}/resume). Fail-open.
                     try:
-                        from src.services.execution.checkpoint import (
+                        from src.services.agent_builder.checkpoint_adapter import (
                             CrewTaskCheckpointRecorder,
                         )
 

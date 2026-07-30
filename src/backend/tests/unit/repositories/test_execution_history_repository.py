@@ -408,7 +408,7 @@ class TestDeleteExecution:
     @pytest.mark.asyncio
     async def test_delete_execution_success(self, repository, mock_session):
         """Test successful execution deletion."""
-        mock_execution = MagicMock(id=1, job_id="job-123")
+        mock_execution = MagicMock(id=1, job_id="job-123", flow_uuid="flow-uuid-1")
         mock_find_result = MagicMock()
         mock_find_result.scalars.return_value.first.return_value = mock_execution
 
@@ -422,6 +422,7 @@ class TestDeleteExecution:
                 mock_task_delete_result,
                 mock_error_delete_result,
                 mock_run_delete_result,
+                MagicMock(rowcount=1),  # delete orphaned FlowState
             ]
         )
 
@@ -432,6 +433,7 @@ class TestDeleteExecution:
         assert result["job_id"] == "job-123"
         assert result["task_status_count"] == 2
         assert result["error_trace_count"] == 1
+        assert result["flow_state_count"] == 1
         mock_session.flush.assert_called_once()
 
     @pytest.mark.asyncio
@@ -465,7 +467,7 @@ class TestDeleteExecutionByJobId:
     @pytest.mark.asyncio
     async def test_delete_by_job_id_success(self, repository, mock_session):
         """Test successful deletion by job_id."""
-        mock_execution = MagicMock(id=1, job_id="job-123")
+        mock_execution = MagicMock(id=1, job_id="job-123", flow_uuid=None)
         mock_find_result = MagicMock()
         mock_find_result.scalars.return_value.first.return_value = mock_execution
 
@@ -486,6 +488,8 @@ class TestDeleteExecutionByJobId:
 
         assert result is not None
         assert result["job_id"] == "job-123"
+        # A crew run has no flow_uuid, so no flow_states query is issued at all.
+        assert result["flow_state_count"] == 0
 
 
 class TestDeleteAllExecutions:
@@ -509,17 +513,23 @@ class TestDeleteAllExecutions:
         """Test deleting all executions for specific groups."""
         # Mock finding executions for the group
         mock_exec_result = MagicMock()
-        mock_exec_result.fetchall.return_value = [(1, "job-1"), (2, "job-2")]
+        mock_exec_result.fetchall.return_value = [
+            (1, "job-1", "flow-uuid-1"),
+            (2, "job-2", None),
+        ]
 
         mock_task_delete_result = MagicMock(rowcount=5)
         mock_error_delete_result = MagicMock(rowcount=2)
         mock_run_delete_result = MagicMock(rowcount=2)
 
-        # The group path issues 7 executes in order: select the rows, delete
+        # The group path issues 8 executes in order: select the rows, delete
         # TaskStatus, delete ErrorTrace, delete ExecutionTrace (by run_id then
-        # job_id), delete LLMUsageBilling, then delete ExecutionHistory. The FK
-        # children are cleared before the run rows so the delete never violates
-        # a constraint; their results are unused (run_count = len(execution_ids)).
+        # job_id), delete LLMUsageBilling, delete ExecutionHistory, then delete
+        # the flow_states no surviving run references. The FK children are
+        # cleared before the run rows so the delete never violates a constraint;
+        # their results are unused (run_count = len(execution_ids)). The
+        # flow_states delete comes LAST because "orphaned" is only true once the
+        # runs are gone.
         mock_session.execute = AsyncMock(
             side_effect=[
                 mock_exec_result,
@@ -529,6 +539,7 @@ class TestDeleteAllExecutions:
                 MagicMock(),  # delete ExecutionTrace by job_id
                 MagicMock(),  # delete LLMUsageBilling
                 mock_run_delete_result,  # delete ExecutionHistory
+                MagicMock(rowcount=1),  # delete orphaned FlowState
             ]
         )
 
@@ -537,6 +548,7 @@ class TestDeleteAllExecutions:
         assert result["run_count"] == 2
         assert result["task_status_count"] == 5
         assert result["error_trace_count"] == 2
+        assert result["flow_state_count"] == 1
 
     @pytest.mark.asyncio
     async def test_delete_all_without_group_filter(self, repository, mock_session):
@@ -547,9 +559,11 @@ class TestDeleteAllExecutions:
         mock_count_result.scalar.return_value = 5
         mock_run_delete_result = MagicMock(rowcount=5)
 
-        # The admin (no-group) path issues 6 executes in order: delete
+        # The admin (no-group) path issues 7 executes in order: delete
         # TaskStatus, delete ErrorTrace, delete ExecutionTrace, delete
-        # LLMUsageBilling, count ExecutionHistory, then delete ExecutionHistory.
+        # LLMUsageBilling, count ExecutionHistory, delete ExecutionHistory, then
+        # delete every FlowState row — with no executions left, all flow state
+        # is orphaned, so this one is unfiltered.
         # FK children are cleared before the run rows; run_count comes from the
         # count select, not the delete rowcount.
         mock_session.execute = AsyncMock(
@@ -560,6 +574,7 @@ class TestDeleteAllExecutions:
                 MagicMock(),  # delete LLMUsageBilling
                 mock_count_result,
                 mock_run_delete_result,  # delete ExecutionHistory
+                MagicMock(rowcount=4),  # delete all FlowState
             ]
         )
 
@@ -567,6 +582,7 @@ class TestDeleteAllExecutions:
 
         assert result["run_count"] == 5
         assert result["task_status_count"] == 10
+        assert result["flow_state_count"] == 4
 
     @pytest.mark.asyncio
     async def test_delete_all_empty_result(self, repository, mock_session):
@@ -581,6 +597,7 @@ class TestDeleteAllExecutions:
         assert result["run_count"] == 0
         assert result["task_status_count"] == 0
         assert result["error_trace_count"] == 0
+        assert result["flow_state_count"] == 0
 
 
 class TestUpdateMlflowEvaluationRunId:
@@ -822,188 +839,6 @@ class TestSetCheckpointInfo:
         assert result is False
 
 
-class TestAddCrewCheckpoint:
-    """Tests for add_crew_checkpoint method."""
-
-    @pytest.fixture
-    def mock_session(self):
-        """Create mock async session."""
-        session = MagicMock(spec=AsyncSession)
-        session.execute = AsyncMock()
-        session.flush = AsyncMock()
-        return session
-
-    @pytest.fixture
-    def repository(self, mock_session):
-        """Create repository with mock session."""
-        return ExecutionHistoryRepository(mock_session)
-
-    @pytest.mark.asyncio
-    async def test_add_crew_checkpoint_new(self, repository, mock_session):
-        """Test adding first crew checkpoint."""
-        mock_execution = MagicMock()
-        mock_execution.checkpoint_data = None
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_execution
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        result = await repository.add_crew_checkpoint(
-            job_id="job-123",
-            crew_node_id="node-1",
-            crew_name="Research Crew",
-            sequence=1,
-            status="completed",
-            output_preview="First 500 chars...",
-            completed_at="2024-01-01T12:00:00Z",
-        )
-
-        assert result is True
-        assert mock_execution.checkpoint_data is not None
-        assert len(mock_execution.checkpoint_data["crew_checkpoints"]) == 1
-
-    @pytest.mark.asyncio
-    async def test_add_crew_checkpoint_existing(self, repository, mock_session):
-        """Test adding additional crew checkpoint."""
-        existing_checkpoint = {
-            "crew_checkpoints": [{"crew_node_id": "node-1", "sequence": 1}]
-        }
-        mock_execution = MagicMock()
-        mock_execution.checkpoint_data = existing_checkpoint
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_execution
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        result = await repository.add_crew_checkpoint(
-            job_id="job-123",
-            crew_node_id="node-2",
-            crew_name="Analysis Crew",
-            sequence=2,
-            status="completed",
-            output_preview="Output...",
-            completed_at="2024-01-01T12:01:00Z",
-        )
-
-        assert result is True
-        assert len(mock_execution.checkpoint_data["crew_checkpoints"]) == 2
-
-    @pytest.mark.asyncio
-    async def test_add_crew_checkpoint_not_found(self, repository, mock_session):
-        """Test adding checkpoint when execution not found."""
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        result = await repository.add_crew_checkpoint(
-            job_id="non-existent",
-            crew_node_id="node-1",
-            crew_name="Crew",
-            sequence=1,
-            status="completed",
-            output_preview="",
-            completed_at="2024-01-01T12:00:00Z",
-        )
-
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_add_crew_checkpoint_truncates_output(self, repository, mock_session):
-        """Test that output preview is truncated to 500 chars."""
-        mock_execution = MagicMock()
-        mock_execution.checkpoint_data = None
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_execution
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        long_output = "x" * 1000
-
-        await repository.add_crew_checkpoint(
-            job_id="job-123",
-            crew_node_id="node-1",
-            crew_name="Crew",
-            sequence=1,
-            status="completed",
-            output_preview=long_output,
-            completed_at="2024-01-01T12:00:00Z",
-        )
-
-        # Verify output was truncated
-        checkpoint = mock_execution.checkpoint_data["crew_checkpoints"][0]
-        assert len(checkpoint["output_preview"]) == 500
-
-
-class TestGetCrewCheckpoints:
-    """Tests for get_crew_checkpoints method."""
-
-    @pytest.fixture
-    def mock_session(self):
-        """Create mock async session."""
-        session = MagicMock(spec=AsyncSession)
-        session.execute = AsyncMock()
-        return session
-
-    @pytest.fixture
-    def repository(self, mock_session):
-        """Create repository with mock session."""
-        return ExecutionHistoryRepository(mock_session)
-
-    @pytest.mark.asyncio
-    async def test_get_crew_checkpoints_success(self, repository, mock_session):
-        """Test getting crew checkpoints."""
-        checkpoints = [
-            {"crew_node_id": "node-1", "sequence": 1},
-            {"crew_node_id": "node-2", "sequence": 2},
-        ]
-        mock_execution = MagicMock()
-        mock_execution.checkpoint_data = {"crew_checkpoints": checkpoints}
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_execution
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        result = await repository.get_crew_checkpoints("job-123")
-
-        assert len(result) == 2
-        assert result[0]["crew_node_id"] == "node-1"
-
-    @pytest.mark.asyncio
-    async def test_get_crew_checkpoints_empty(self, repository, mock_session):
-        """Test getting checkpoints when none exist."""
-        mock_execution = MagicMock()
-        mock_execution.checkpoint_data = {}
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_execution
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        result = await repository.get_crew_checkpoints("job-123")
-
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_get_crew_checkpoints_not_found(self, repository, mock_session):
-        """Test getting checkpoints when execution not found."""
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        result = await repository.get_crew_checkpoints("non-existent")
-
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_get_crew_checkpoints_no_checkpoint_data(
-        self, repository, mock_session
-    ):
-        """Test getting checkpoints when checkpoint_data is None."""
-        mock_execution = MagicMock()
-        mock_execution.checkpoint_data = None
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_execution
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        result = await repository.get_crew_checkpoints("job-123")
-
-        assert result == []
-
-
 class TestErrorHandling:
     """Tests for error handling across repository methods."""
 
@@ -1067,26 +902,6 @@ class TestErrorHandling:
 
         assert result is False
 
-    @pytest.mark.asyncio
-    async def test_add_crew_checkpoint_error_handling(self, repository, mock_session):
-        """Test error handling in add_crew_checkpoint."""
-        mock_session.execute = AsyncMock(side_effect=Exception("Insert failed"))
-
-        result = await repository.add_crew_checkpoint(
-            "job-123", "node-1", "Crew", 1, "completed", "", "2024-01-01"
-        )
-
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_get_crew_checkpoints_error_handling(self, repository, mock_session):
-        """Test error handling in get_crew_checkpoints."""
-        mock_session.execute = AsyncMock(side_effect=Exception("Query failed"))
-
-        result = await repository.get_crew_checkpoints("job-123")
-
-        assert result == []
-
 
 class TestDeleteOlderThan:
     """Tests for delete_older_than method."""
@@ -1114,8 +929,8 @@ class TestDeleteOlderThan:
         # Mock: select returns executions to delete
         mock_fetch_result = MagicMock()
         mock_fetch_result.fetchall.return_value = [
-            (1, "job-1"),
-            (2, "job-2"),
+            (1, "job-1", "flow-uuid-1"),
+            (2, "job-2", None),
         ]
 
         # Mock: delete task_status returns rowcount
@@ -1130,12 +945,17 @@ class TestDeleteOlderThan:
         mock_run_result = MagicMock()
         mock_run_result.rowcount = 2
 
+        # Mock: delete orphaned flow_states returns rowcount
+        mock_flow_state_result = MagicMock()
+        mock_flow_state_result.rowcount = 1
+
         mock_session.execute = AsyncMock(
             side_effect=[
                 mock_fetch_result,  # select execution ids
                 mock_task_status_result,  # delete taskstatus
                 mock_error_trace_result,  # delete errortrace
                 mock_run_result,  # delete executionhistory
+                mock_flow_state_result,  # delete orphaned flow_states
             ]
         )
 
@@ -1145,9 +965,11 @@ class TestDeleteOlderThan:
             "executionhistory": 2,
             "taskstatus": 3,
             "errortrace": 1,
+            "flow_states": 1,
         }
         mock_session.flush.assert_called_once()
-        assert mock_session.execute.call_count == 4
+        # +1 for the orphaned flow_states delete
+        assert mock_session.execute.call_count == 5
 
     @pytest.mark.asyncio
     async def test_delete_older_than_no_matching_records(
@@ -1167,6 +989,7 @@ class TestDeleteOlderThan:
             "executionhistory": 0,
             "taskstatus": 0,
             "errortrace": 0,
+            "flow_states": 0,
         }
         # Only the initial select should be called
         mock_session.execute.assert_called_once()

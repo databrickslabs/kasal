@@ -6,7 +6,7 @@ This module provides database operations for execution history models.
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 from uuid import UUID
 
 from sqlalchemy import delete, desc, distinct, func, update
@@ -18,10 +18,16 @@ from src.models.billing import LLMUsageBilling
 from src.models.execution_history import ErrorTrace, ExecutionHistory, TaskStatus
 from src.models.execution_status import ExecutionStatus
 from src.models.execution_trace import ExecutionTrace
+from src.models.flow_state import FlowState
 
 # Removed async_session_factory import - using injected session only
 
 logger = logging.getLogger(__name__)
+
+# Distinguishes "leave this column alone" from "set it to NULL" on partial
+# updates, where None is itself a meaningful value rather than an absent
+# argument.
+_UNSET = object()
 
 
 class ExecutionHistoryRepository:
@@ -243,6 +249,50 @@ class ExecutionHistoryRepository:
         count = result.scalar() or 0
         return count > 0
 
+    @staticmethod
+    async def _delete_orphaned_flow_states(
+        session: AsyncSession, flow_uuids: Iterable[Optional[str]]
+    ) -> int:
+        """
+        Delete flow_states rows nothing references any more.
+
+        ``flow_states`` is append-only — one row per flow method completion —
+        and holds the mid-graph state a flow resumes from. It has no foreign key
+        to executionhistory, so deleting an execution used to leave its state
+        behind forever; a workspace that ran flows and then cleared its history
+        kept every state row it had ever written.
+
+        MUST be called AFTER the executionhistory rows are deleted: a flow_uuid
+        can be shared by several executions (a resume chain reuses the source's
+        state id), so "orphaned" means "no SURVIVING execution references it".
+        Deleting on the strength of the rows being removed alone would pull the
+        state out from under a run that is still there.
+
+        Args:
+            session: Session to delete on
+            flow_uuids: flow_uuid values from the executions just deleted
+
+        Returns:
+            Number of flow_states rows deleted
+        """
+        uuids = {u for u in flow_uuids if u}
+        if not uuids:
+            return 0
+
+        still_referenced = select(ExecutionHistory.flow_uuid).where(
+            ExecutionHistory.flow_uuid.in_(uuids)
+        )
+        result = await session.execute(
+            delete(FlowState).where(
+                FlowState.flow_uuid.in_(uuids),
+                FlowState.flow_uuid.notin_(still_referenced),
+            )
+        )
+        count = result.rowcount or 0
+        if count:
+            logger.info(f"Deleted {count} orphaned flow_states row(s)")
+        return count
+
     async def delete_execution(self, execution_id: int) -> Optional[Dict[str, Any]]:
         """
         Delete a specific execution and its associated data.
@@ -284,6 +334,7 @@ class ExecutionHistoryRepository:
                 return None
 
             job_id = run.job_id
+            flow_uuid = run.flow_uuid
             logger.debug(
                 f"[DELETE] Found execution {execution_id} with job_id={job_id}"
             )
@@ -310,6 +361,11 @@ class ExecutionHistoryRepository:
                 f"[DELETE] Deleted execution record, affected rows: {delete_result.rowcount}"
             )
 
+            # After the run is gone, so "still referenced" is accurate.
+            result["flow_state_count"] = await self._delete_orphaned_flow_states(
+                session, [flow_uuid]
+            )
+
             # Flush to ensure operations are sent to database
             await session.flush()
             logger.debug("[DELETE] Flushed delete operations to database")
@@ -330,6 +386,7 @@ class ExecutionHistoryRepository:
                 "job_id": job_id,
                 "task_status_count": result["task_status_count"],
                 "error_trace_count": result["error_trace_count"],
+                "flow_state_count": result["flow_state_count"],
             }
         except Exception as e:
             if commit:
@@ -372,6 +429,7 @@ class ExecutionHistoryRepository:
                 return None
 
             execution_id = run.id
+            flow_uuid = run.flow_uuid
             result = {}
 
             # Delete associated task statuses
@@ -390,6 +448,11 @@ class ExecutionHistoryRepository:
             run_stmt = delete(ExecutionHistory).where(ExecutionHistory.job_id == job_id)
             await session.execute(run_stmt)
 
+            # After the run is gone, so "still referenced" is accurate.
+            result["flow_state_count"] = await self._delete_orphaned_flow_states(
+                session, [flow_uuid]
+            )
+
             # Flush to ensure operations are sent to database
             await session.flush()
 
@@ -402,6 +465,7 @@ class ExecutionHistoryRepository:
                 "job_id": job_id,
                 "task_status_count": result["task_status_count"],
                 "error_trace_count": result["error_trace_count"],
+                "flow_state_count": result["flow_state_count"],
             }
         except Exception as e:
             if commit:
@@ -494,20 +558,24 @@ class ExecutionHistoryRepository:
             # If group_ids provided, only delete executions for those groups
             if group_ids and len(group_ids) > 0:
                 # First get all job_ids and execution_ids for the group
-                stmt = select(ExecutionHistory.id, ExecutionHistory.job_id).where(
-                    ExecutionHistory.group_id.in_(group_ids)
-                )
+                stmt = select(
+                    ExecutionHistory.id,
+                    ExecutionHistory.job_id,
+                    ExecutionHistory.flow_uuid,
+                ).where(ExecutionHistory.group_id.in_(group_ids))
                 exec_result = await session.execute(stmt)
                 executions = exec_result.fetchall()
 
                 execution_ids = [row[0] for row in executions]
                 job_ids = [row[1] for row in executions]
+                flow_uuids = [row[2] for row in executions]
 
                 if not execution_ids:
                     return {
                         "run_count": 0,
                         "task_status_count": 0,
                         "error_trace_count": 0,
+                        "flow_state_count": 0,
                     }
 
                 # Delete task statuses for these job_ids
@@ -547,6 +615,13 @@ class ExecutionHistoryRepository:
                     ExecutionHistory.group_id.in_(group_ids)
                 )
                 await session.execute(run_stmt)
+
+                # Flow method state, once nothing references it. Another group
+                # can legitimately share a flow_uuid, so this is filtered on
+                # surviving references rather than wiping the table.
+                result["flow_state_count"] = await self._delete_orphaned_flow_states(
+                    session, flow_uuids
+                )
             else:
                 # No group filtering - delete ALL (admin/system access)
                 # Delete all task statuses
@@ -573,6 +648,10 @@ class ExecutionHistoryRepository:
                 run_stmt = delete(ExecutionHistory)
                 await session.execute(run_stmt)
 
+                # Every execution is gone, so every flow state is orphaned.
+                flow_state_result = await session.execute(delete(FlowState))
+                result["flow_state_count"] = flow_state_result.rowcount or 0
+
             # Flush to ensure operations are sent to database
             await session.flush()
 
@@ -584,6 +663,7 @@ class ExecutionHistoryRepository:
                 "run_count": run_count,
                 "task_status_count": result["task_status_count"],
                 "error_trace_count": result["error_trace_count"],
+                "flow_state_count": result.get("flow_state_count", 0),
             }
         except Exception as e:
             if commit:
@@ -784,195 +864,23 @@ class ExecutionHistoryRepository:
             )
             return False
 
-    async def add_crew_checkpoint(
-        self,
-        job_id: str,
-        crew_node_id: str,
-        crew_name: str,
-        sequence: int,
-        status: str,
-        output_preview: str,
-        completed_at: str,
-    ) -> bool:
-        """
-        Add a crew checkpoint to the execution's checkpoint_data.
-
-        This allows granular resume functionality - users can choose which crew to resume from.
-
-        Args:
-            job_id: Job ID of the execution
-            crew_node_id: Node ID of the crew in the flow
-            crew_name: Human-readable name of the crew
-            sequence: Order in which the crew executed (1, 2, 3...)
-            status: Status of the crew ('completed' or 'failed')
-            output_preview: First 500 chars of the crew output
-            completed_at: ISO timestamp when the crew completed
-
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            # Find the execution
-            result = await self.session.execute(
-                select(ExecutionHistory).where(ExecutionHistory.job_id == job_id)
-            )
-            execution = result.scalar_one_or_none()
-
-            if not execution:
-                logger.warning(f"Execution not found for job_id: {job_id}")
-                return False
-
-            # Get existing checkpoint_data or initialize
-            checkpoint_data = execution.checkpoint_data or {}
-            crew_checkpoints = checkpoint_data.get("crew_checkpoints", [])
-
-            # Add the new crew checkpoint
-            new_checkpoint = {
-                "crew_node_id": crew_node_id,
-                "crew_name": crew_name,
-                "sequence": sequence,
-                "status": status,
-                "output_preview": output_preview[:500] if output_preview else "",
-                "completed_at": completed_at,
-            }
-            crew_checkpoints.append(new_checkpoint)
-
-            # Update checkpoint_data
-            checkpoint_data["crew_checkpoints"] = crew_checkpoints
-            execution.checkpoint_data = checkpoint_data
-
-            # Flush changes
-            await self.session.flush()
-            logger.info(
-                f"Added crew checkpoint for job {job_id}: crew={crew_name}, sequence={sequence}"
-            )
-            return True
-
-        except Exception as e:
-            logger.error(
-                f"Error adding crew checkpoint for job {job_id}: {str(e)}",
-                exc_info=True,
-            )
-            return False
-
-    async def upsert_crew_task_checkpoint(
-        self,
-        job_id: str,
-        entry: Dict[str, Any],
-        task_count: int,
-        process: Optional[str] = None,
-    ) -> bool:
-        """
-        Merge one completed-task entry into the crew task checkpoint.
-
-        Stores under checkpoint_data["crew_task_checkpoint"] keyed by task
-        index, so retried writes and resume runs are idempotent. Written from
-        the crew subprocess after every TaskCompletedEvent; fail-open (a
-        checkpoint write failure must never fail the run).
-
-        Args:
-            job_id: Job ID of the execution
-            entry: Completed-task entry (must contain "index")
-            task_count: Total number of tasks in the crew (resume validation)
-            process: Crew process type ("sequential"/"hierarchical")
-
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            result = await self.session.execute(
-                select(ExecutionHistory).where(ExecutionHistory.job_id == job_id)
-            )
-            execution = result.scalar_one_or_none()
-
-            if not execution:
-                logger.warning(f"Execution not found for job_id: {job_id}")
-                return False
-
-            # Rebuild the dict from scratch — reassigning the same (mutated)
-            # object would not register as a change on a JSON column.
-            checkpoint_data = dict(execution.checkpoint_data or {})
-            task_checkpoint = dict(checkpoint_data.get("crew_task_checkpoint") or {})
-            completed = dict(task_checkpoint.get("completed") or {})
-            completed[str(entry["index"])] = entry
-
-            task_checkpoint.update(
-                version=1,
-                task_count=task_count,
-                process=process,
-                completed=completed,
-                updated_at=datetime.utcnow().isoformat(),
-            )
-            checkpoint_data["crew_task_checkpoint"] = task_checkpoint
-            execution.checkpoint_data = checkpoint_data
-
-            await self.session.flush()
-            logger.info(
-                f"Crew task checkpoint for job {job_id}: task index "
-                f"{entry.get('index')} recorded ({len(completed)}/{task_count} complete)"
-            )
-            return True
-
-        except Exception as e:
-            logger.error(
-                f"Error upserting crew task checkpoint for job {job_id}: {str(e)}",
-                exc_info=True,
-            )
-            return False
-
-    async def clear_crew_task_checkpoint(self, job_id: str) -> bool:
-        """
-        Remove the crew task checkpoint after a successful run.
-
-        Args:
-            job_id: Job ID of the execution
-
-        Returns:
-            True if successful (including no-op), False on error
-        """
-        try:
-            result = await self.session.execute(
-                select(ExecutionHistory).where(ExecutionHistory.job_id == job_id)
-            )
-            execution = result.scalar_one_or_none()
-
-            if not execution:
-                logger.warning(f"Execution not found for job_id: {job_id}")
-                return False
-
-            if (
-                not execution.checkpoint_data
-                or "crew_task_checkpoint" not in execution.checkpoint_data
-            ):
-                return True
-
-            checkpoint_data = dict(execution.checkpoint_data)
-            checkpoint_data.pop("crew_task_checkpoint", None)
-            execution.checkpoint_data = checkpoint_data or None
-
-            await self.session.flush()
-            logger.info(f"Cleared crew task checkpoint for job {job_id}")
-            return True
-
-        except Exception as e:
-            logger.error(
-                f"Error clearing crew task checkpoint for job {job_id}: {str(e)}",
-                exc_info=True,
-            )
-            return False
-
-    async def get_crew_task_checkpoint(
+    async def get_checkpoint_data(
         self, job_id: str, group_ids: Optional[List[str]] = None
     ) -> Optional[Dict[str, Any]]:
         """
-        Get the crew task checkpoint for an execution (group-scoped).
+        Get the raw checkpoint_data column for an execution (group-scoped).
+
+        Returns the column as stored. Interpreting it — which key holds the
+        resume record, what version it is, how to migrate an old one — belongs
+        to services/execution/checkpointing/schema.py; this layer must not
+        import it, so it does not parse what it returns.
 
         Args:
             job_id: Job ID of the execution
             group_ids: Group IDs for tenant isolation
 
         Returns:
-            The crew_task_checkpoint dict, or None if absent
+            The checkpoint_data dict, or None if absent
         """
         try:
             filters = [ExecutionHistory.job_id == job_id]
@@ -983,26 +891,89 @@ class ExecutionHistoryRepository:
             )
             execution = result.scalar_one_or_none()
 
-            if not execution or not execution.checkpoint_data:
+            if not execution:
                 return None
-            return execution.checkpoint_data.get("crew_task_checkpoint")
+            return execution.checkpoint_data
 
         except Exception as e:
             logger.error(
-                f"Error getting crew task checkpoint for job {job_id}: {str(e)}",
+                f"Error getting checkpoint data for job {job_id}: {str(e)}",
                 exc_info=True,
             )
             return None
 
-    async def get_crew_checkpoints(self, job_id: str) -> list:
+    async def set_checkpoint_status(
+        self,
+        job_id: str,
+        status: Optional[str],
+        group_ids: Optional[List[str]] = None,
+    ) -> bool:
         """
-        Get crew checkpoints for an execution.
+        Move an execution's checkpoint_status, addressed by job_id.
+
+        The flow path's update_checkpoint_status() takes the integer primary
+        key; the unified checkpoint API addresses executions by job_id like
+        every other /executions route, so both exist.
 
         Args:
             job_id: Job ID of the execution
+            status: New lifecycle status, or None to clear it
+            group_ids: Group IDs for tenant isolation
 
         Returns:
-            List of crew checkpoint dictionaries
+            True if updated, False if not found or on error
+        """
+        try:
+            filters = [ExecutionHistory.job_id == job_id]
+            if group_ids:
+                filters.append(ExecutionHistory.group_id.in_(group_ids))
+
+            result = await self.session.execute(
+                select(ExecutionHistory).where(*filters)
+            )
+            execution = result.scalar_one_or_none()
+
+            if not execution:
+                logger.warning(f"Execution not found for job_id: {job_id}")
+                return False
+
+            execution.checkpoint_status = status
+            await self.session.flush()
+            return True
+
+        except Exception as e:
+            logger.error(
+                f"Error setting checkpoint status for job {job_id}: {str(e)}",
+                exc_info=True,
+            )
+            return False
+
+    async def set_checkpoint_data(
+        self,
+        job_id: str,
+        checkpoint_data: Optional[Dict[str, Any]],
+        checkpoint_status: Any = _UNSET,
+    ) -> bool:
+        """
+        Replace the checkpoint_data column, and optionally the status with it.
+
+        The caller passes the FULL column value it wants stored (the
+        checkpointing store merges the record into the existing keys before
+        calling this), so sibling keys — HITL edited_config, ucmv_yaml_edits —
+        survive only because the caller carried them over. That is deliberate:
+        a repository that merged would need to know which key is the record.
+
+        Called from the crew and flow SUBPROCESSES as units complete;
+        fail-open, since a checkpoint write must never fail the run.
+
+        Args:
+            job_id: Job ID of the execution
+            checkpoint_data: The complete column value (None clears it)
+            checkpoint_status: New lifecycle status; omit to leave unchanged,
+                pass None to clear it
+
+        Returns:
+            True if successful, False otherwise
         """
         try:
             result = await self.session.execute(
@@ -1010,17 +981,27 @@ class ExecutionHistoryRepository:
             )
             execution = result.scalar_one_or_none()
 
-            if not execution or not execution.checkpoint_data:
-                return []
+            if not execution:
+                logger.warning(f"Execution not found for job_id: {job_id}")
+                return False
 
-            return execution.checkpoint_data.get("crew_checkpoints", [])
+            # A new dict, not the mutated original — reassigning the same object
+            # would not register as a change on a JSON column.
+            execution.checkpoint_data = (
+                dict(checkpoint_data) if checkpoint_data else None
+            )
+            if checkpoint_status is not _UNSET:
+                execution.checkpoint_status = checkpoint_status
+
+            await self.session.flush()
+            return True
 
         except Exception as e:
             logger.error(
-                f"Error getting crew checkpoints for job {job_id}: {str(e)}",
+                f"Error setting checkpoint data for job {job_id}: {str(e)}",
                 exc_info=True,
             )
-            return []
+            return False
 
     async def update_execution_result(
         self, job_id: str, result_data: dict, group_ids: list[str] = None
@@ -1237,17 +1218,25 @@ class ExecutionHistoryRepository:
 
         try:
             # Get execution ids and job_ids for records older than cutoff
-            stmt = select(ExecutionHistory.id, ExecutionHistory.job_id).where(
-                ExecutionHistory.created_at < cutoff
-            )
+            stmt = select(
+                ExecutionHistory.id,
+                ExecutionHistory.job_id,
+                ExecutionHistory.flow_uuid,
+            ).where(ExecutionHistory.created_at < cutoff)
             exec_result = await self.session.execute(stmt)
             executions = exec_result.fetchall()
 
             execution_ids = [row[0] for row in executions]
             job_ids = [row[1] for row in executions]
+            flow_uuids = [row[2] for row in executions]
 
             if not execution_ids:
-                return {"executionhistory": 0, "taskstatus": 0, "errortrace": 0}
+                return {
+                    "executionhistory": 0,
+                    "taskstatus": 0,
+                    "errortrace": 0,
+                    "flow_states": 0,
+                }
 
             # Delete associated task statuses
             task_status_stmt = delete(TaskStatus).where(TaskStatus.job_id.in_(job_ids))
@@ -1268,12 +1257,20 @@ class ExecutionHistoryRepository:
             run_result = await self.session.execute(run_stmt)
             run_count = run_result.rowcount
 
+            # Flow method state for the purged runs. flow_states has no FK to
+            # executionhistory, so housekeeping never reached it and the table
+            # grew without bound on any workspace that ran flows.
+            flow_state_count = await self._delete_orphaned_flow_states(
+                self.session, flow_uuids
+            )
+
             await self.session.flush()
 
             return {
                 "executionhistory": run_count,
                 "taskstatus": task_status_count,
                 "errortrace": error_trace_count,
+                "flow_states": flow_state_count,
             }
         except Exception as e:
             logger.error(

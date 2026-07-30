@@ -764,7 +764,27 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
 
     async def get_crew_checkpoints_by_job_id(self, job_id: str) -> List[Dict[str, Any]]:
         """
-        Get crew checkpoint information from traces for a specific job.
+        LEGACY. Reconstruct crew checkpoints from traces for one job.
+
+        .. deprecated::
+            Superseded by the written checkpoint recorded by
+            ``FlowCrewCheckpointRecorder``. Read through
+            ``services/execution/checkpointing`` instead; this remains ONLY as a
+            fallback for flow executions that ran before that recorder existed.
+
+        Why it is going: ``execution_trace`` is TELEMETRY. It can be sampled,
+        truncated, retention-pruned or reshaped for reasons that have nothing to
+        do with resume — this repository's own ``delete_older_than`` purges it on
+        a schedule — and a resume that silently degrades when a trace row is
+        missing is worse than one that reports "no checkpoint". It also cannot
+        distinguish a crew that genuinely completed from one whose completion
+        trace merely survived.
+
+        Deletion gate: it cannot be backfilled (pre-recorder runs never wrote a
+        checkpoint and never will), so it goes when flow executions older than
+        the retention window are gone — not before. Callers that fall back to it
+        must tell the user, which is what the ``derived`` flag on the checkpoint
+        API is for.
 
         This extracts crew completion events from traces to support
         granular checkpoint resume functionality.
@@ -888,6 +908,16 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
 
     async def get_crew_outputs_for_resume(self, job_id: str) -> Dict[str, Any]:
         """
+        LEGACY. Full crew outputs from traces, for resuming a pre-recorder run.
+
+        .. deprecated::
+            Same gate and the same reasons as
+            :meth:`get_crew_checkpoints_by_job_id`. The only caller is the
+            fallback branch of ``flow_builder/checkpoint_resume.py``, which logs
+            a warning when it takes it. Note this one reads traces UNTRUNCATED,
+            where written checkpoints cap a unit at 500,000 characters and flag
+            it — so the two are not fidelity-equivalent in either direction.
+
         Get full crew outputs from traces for checkpoint resume.
 
         This returns a dictionary mapping crew names to their full outputs,

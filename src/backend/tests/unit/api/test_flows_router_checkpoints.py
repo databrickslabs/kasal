@@ -45,6 +45,9 @@ class TestGetFlowCheckpoints:
         exec_svc = AsyncMock()
         exec_svc.get_checkpoints_for_flow = AsyncMock(return_value=[])
 
+        ckpt_svc = AsyncMock()
+        ckpt_svc.list_for_flow = AsyncMock(return_value=[])
+
         trace_repo = AsyncMock()
         trace_repo.get_crew_checkpoints_by_job_id = AsyncMock(return_value=[])
 
@@ -53,6 +56,7 @@ class TestGetFlowCheckpoints:
             flow_service=flow_svc,
             execution_service=exec_svc,
             trace_repository=trace_repo,
+            checkpoint_service=ckpt_svc,
             group_context=gc(),
         )
         assert result.total == 0
@@ -80,6 +84,9 @@ class TestGetFlowCheckpoints:
                 "completed_at": datetime.utcnow().isoformat(),
             }
         ]
+        ckpt_svc = AsyncMock()
+        ckpt_svc.list_for_flow = AsyncMock(return_value=[])
+
         trace_repo = AsyncMock()
         trace_repo.get_crew_checkpoints_by_job_id = AsyncMock(return_value=crew_cp_data)
 
@@ -88,6 +95,7 @@ class TestGetFlowCheckpoints:
             flow_service=flow_svc,
             execution_service=exec_svc,
             trace_repository=trace_repo,
+            checkpoint_service=ckpt_svc,
             group_context=gc(),
         )
         assert result.total == 1
@@ -109,6 +117,9 @@ class TestGetFlowCheckpoints:
 
         # Malformed entry - missing required fields
         crew_cp_data = [{"bad_key": "bad_value"}]
+        ckpt_svc = AsyncMock()
+        ckpt_svc.list_for_flow = AsyncMock(return_value=[])
+
         trace_repo = AsyncMock()
         trace_repo.get_crew_checkpoints_by_job_id = AsyncMock(return_value=crew_cp_data)
 
@@ -117,6 +128,7 @@ class TestGetFlowCheckpoints:
             flow_service=flow_svc,
             execution_service=exec_svc,
             trace_repository=trace_repo,
+            checkpoint_service=ckpt_svc,
             group_context=gc(),
         )
         assert result.total == 1
@@ -135,6 +147,9 @@ class TestGetFlowCheckpoints:
         exec_svc = AsyncMock()
         exec_svc.get_checkpoints_for_flow = AsyncMock(return_value=[])
 
+        ckpt_svc = AsyncMock()
+        ckpt_svc.list_for_flow = AsyncMock(return_value=[])
+
         trace_repo = AsyncMock()
 
         await get_flow_checkpoints(
@@ -142,6 +157,7 @@ class TestGetFlowCheckpoints:
             flow_service=flow_svc,
             execution_service=exec_svc,
             trace_repository=trace_repo,
+            checkpoint_service=ckpt_svc,
             group_context=gc(),
             status_filter="expired",
         )
@@ -165,6 +181,9 @@ class TestGetFlowCheckpoints:
         exec_svc = AsyncMock()
         exec_svc.get_checkpoints_for_flow = AsyncMock(return_value=[])
 
+        ckpt_svc = AsyncMock()
+        ckpt_svc.list_for_flow = AsyncMock(return_value=[])
+
         trace_repo = AsyncMock()
 
         await get_flow_checkpoints(
@@ -172,6 +191,7 @@ class TestGetFlowCheckpoints:
             flow_service=flow_svc,
             execution_service=exec_svc,
             trace_repository=trace_repo,
+            checkpoint_service=ckpt_svc,
             group_context=ctx,
         )
         call_kwargs = exec_svc.get_checkpoints_for_flow.call_args[1]
@@ -198,6 +218,9 @@ class TestGetFlowCheckpoints:
                 "completed_at": datetime.utcnow(),  # datetime object, not string
             }
         ]
+        ckpt_svc = AsyncMock()
+        ckpt_svc.list_for_flow = AsyncMock(return_value=[])
+
         trace_repo = AsyncMock()
         trace_repo.get_crew_checkpoints_by_job_id = AsyncMock(return_value=crew_cp_data)
 
@@ -206,6 +229,7 @@ class TestGetFlowCheckpoints:
             flow_service=flow_svc,
             execution_service=exec_svc,
             trace_repository=trace_repo,
+            checkpoint_service=ckpt_svc,
             group_context=gc(),
         )
         assert result.checkpoints[0].crew_checkpoints[0].crew_name == "Crew B"
@@ -254,3 +278,101 @@ class TestDeleteCheckpoint:
             group_context=gc(),
         )
         flow_svc.get_flow_with_group_check.assert_called_once_with(flow_id, gc())
+
+
+class TestGetFlowCheckpointsWrittenSource:
+    """The written checkpoint is preferred; traces are the legacy fallback."""
+
+    @pytest.mark.asyncio
+    async def test_prefers_the_written_checkpoint(self):
+        flow_id = uuid4()
+
+        flow_svc = AsyncMock()
+        flow_svc.get_flow_with_group_check = AsyncMock(return_value=MagicMock())
+
+        ckpt_svc = AsyncMock()
+        ckpt_svc.list_for_flow = AsyncMock(
+            return_value=[
+                {
+                    "job_id": "job-written",
+                    "execution_id": 7,
+                    "flow_uuid": "uuid-7",
+                    "checkpoint_method": "step_two",
+                    "status": "active",
+                    "created_at": datetime.utcnow(),
+                    "run_name": "Written Run",
+                    "units": [
+                        {
+                            "key": "1",
+                            "name": "research",
+                            "output_preview": "found it",
+                            "completed_at": "2026-07-30T10:00:00Z",
+                        }
+                    ],
+                }
+            ]
+        )
+
+        exec_svc = AsyncMock()
+        exec_svc.get_checkpoints_for_flow = AsyncMock(return_value=[])
+
+        trace_repo = AsyncMock()
+
+        result = await get_flow_checkpoints(
+            flow_id=flow_id,
+            flow_service=flow_svc,
+            execution_service=exec_svc,
+            trace_repository=trace_repo,
+            checkpoint_service=ckpt_svc,
+            group_context=gc(),
+        )
+
+        assert result.total == 1
+        checkpoint = result.checkpoints[0]
+        assert checkpoint.job_id == "job-written"
+        assert [c.crew_name for c in checkpoint.crew_checkpoints] == ["research"]
+        assert checkpoint.crew_checkpoints[0].sequence == 1
+        # Traces are never consulted when a written checkpoint exists.
+        trace_repo.get_crew_checkpoints_by_job_id.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_does_not_list_a_run_twice(self):
+        """A run with a written checkpoint must not also appear via the fallback."""
+        flow_id = uuid4()
+
+        flow_svc = AsyncMock()
+        flow_svc.get_flow_with_group_check = AsyncMock(return_value=MagicMock())
+
+        ckpt_svc = AsyncMock()
+        ckpt_svc.list_for_flow = AsyncMock(
+            return_value=[
+                {
+                    "job_id": "job-1",
+                    "execution_id": 1,
+                    "flow_uuid": "uuid-1",
+                    "checkpoint_method": None,
+                    "status": "active",
+                    "created_at": datetime.utcnow(),
+                    "run_name": "Run",
+                    "units": [],
+                }
+            ]
+        )
+
+        exec_svc = AsyncMock()
+        exec_svc.get_checkpoints_for_flow = AsyncMock(
+            return_value=[make_checkpoint(id=1, job_id="job-1")]
+        )
+
+        trace_repo = AsyncMock()
+
+        result = await get_flow_checkpoints(
+            flow_id=flow_id,
+            flow_service=flow_svc,
+            execution_service=exec_svc,
+            trace_repository=trace_repo,
+            checkpoint_service=ckpt_svc,
+            group_context=gc(),
+        )
+
+        assert result.total == 1

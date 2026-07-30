@@ -1,4 +1,9 @@
-"""Unit tests for ExecutionService.resume_execution (crew checkpoint resume)."""
+"""Unit tests for ExecutionService.resume_execution.
+
+Resume creates a NEW execution linked to the source rather than re-running the
+source record in place. The tests that used to assert the in-place behaviour
+now assert the opposite, deliberately: the crashed run must stay FAILED.
+"""
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -7,6 +12,20 @@ import pytest
 
 from src.services.execution.service import ExecutionService
 from src.utils.user_context import GroupContext
+
+NEW_JOB_ID = "00000000-0000-0000-0000-00000000beef"
+
+LEGACY_CHECKPOINT = {
+    "crew_task_checkpoint": {
+        "version": 1,
+        "task_count": 3,
+        "process": "sequential",
+        "completed": {
+            "1": {"index": 1, "task_key": "k1", "output_raw": "b"},
+            "0": {"index": 0, "task_key": "k0", "output_raw": "a"},
+        },
+    }
+}
 
 
 @pytest.fixture
@@ -19,8 +38,11 @@ def group_context():
 
 @pytest.fixture
 def service():
-    svc = ExecutionService(session=MagicMock())
+    session = MagicMock()
+    session.commit = AsyncMock()
+    svc = ExecutionService(session=session)
     yield svc
+    ExecutionService.executions.pop(NEW_JOB_ID, None)
     ExecutionService.executions.pop("job-1", None)
 
 
@@ -28,14 +50,17 @@ def make_execution_row(
     status="FAILED",
     execution_type="crew",
     checkpoint_data=None,
+    checkpoint_status="active",
     inputs=None,
 ):
     row = MagicMock()
+    row.id = 42
     row.job_id = "job-1"
     row.status = status
     row.execution_type = execution_type
     row.run_name = "My Run"
     row.checkpoint_data = checkpoint_data
+    row.checkpoint_status = checkpoint_status
     row.inputs = (
         inputs
         if inputs is not None
@@ -54,12 +79,30 @@ def make_execution_row(
 def patch_repo(row):
     repo = MagicMock()
     repo.get_execution_by_job_id = AsyncMock(return_value=row)
+    repo.set_checkpoint_status = AsyncMock(return_value=True)
+    repo.get_checkpoint_data = AsyncMock(
+        return_value=row.checkpoint_data if row else None
+    )
+    repo.set_checkpoint_data = AsyncMock(return_value=True)
     return (
         patch(
             "src.repositories.execution_history_repository.ExecutionHistoryRepository",
             return_value=repo,
         ),
         repo,
+    )
+
+
+def resume_patches():
+    """The collaborators a successful resume touches."""
+    return (
+        patch.object(ExecutionService, "_run_in_background", new_callable=AsyncMock),
+        patch(
+            "src.services.execution.service.ExecutionStatusService.create_execution",
+            new_callable=AsyncMock,
+            return_value=True,
+        ),
+        patch("src.services.execution.service.uuid.uuid4", return_value=NEW_JOB_ID),
     )
 
 
@@ -72,25 +115,52 @@ class TestResumeExecutionValidation:
                 await service.resume_execution("job-1", group_context)
 
     @pytest.mark.asyncio
-    async def test_flow_execution_rejected(self, service, group_context):
-        patcher, _ = patch_repo(make_execution_row(execution_type="flow"))
+    async def test_flow_execution_is_accepted(self, service, group_context):
+        """Flows used to be rejected outright; unification is the point."""
+        row = make_execution_row(execution_type="flow", checkpoint_data=None)
+        patcher, _ = patch_repo(row)
+        run_bg, create_exec, uuid4 = resume_patches()
+
+        with patcher, run_bg, create_exec, uuid4:
+            result = await service.resume_execution("job-1", group_context)
+            await asyncio.sleep(0)
+
+        assert result["execution_id"] == NEW_JOB_ID
+
+    @pytest.mark.asyncio
+    async def test_chat_execution_rejected(self, service, group_context):
+        """The chat path has nothing to resume and must say so."""
+        patcher, _ = patch_repo(make_execution_row(execution_type="agent"))
         with patcher:
-            with pytest.raises(ValueError, match="Only crew executions"):
+            with pytest.raises(ValueError, match="no checkpointing"):
                 await service.resume_execution("job-1", group_context)
 
     @pytest.mark.asyncio
     async def test_running_execution_rejected(self, service, group_context):
         patcher, _ = patch_repo(make_execution_row(status="RUNNING"))
         with patcher:
-            with pytest.raises(ValueError, match="only failed/stopped"):
+            with pytest.raises(ValueError, match="still RUNNING"):
                 await service.resume_execution("job-1", group_context)
 
     @pytest.mark.asyncio
-    async def test_completed_execution_rejected(self, service, group_context):
-        patcher, _ = patch_repo(make_execution_row(status="COMPLETED"))
-        with patcher:
-            with pytest.raises(ValueError):
-                await service.resume_execution("job-1", group_context)
+    async def test_completed_execution_is_accepted(self, service, group_context):
+        """Re-running a SUCCESSFUL run from the middle is a first-class action.
+
+        It is how you iterate: change a downstream crew, keep the upstream
+        results you were happy with.
+        """
+        row = make_execution_row(status="COMPLETED", checkpoint_data=LEGACY_CHECKPOINT)
+        patcher, _ = patch_repo(row)
+        run_bg, create_exec, uuid4 = resume_patches()
+
+        with patcher, run_bg, create_exec, uuid4:
+            result = await service.resume_execution(
+                "job-1", group_context, from_unit="1"
+            )
+            await asyncio.sleep(0)
+
+        assert result["execution_id"] == NEW_JOB_ID
+        assert result["restored_tasks"] == 1
 
     @pytest.mark.asyncio
     async def test_missing_stored_config_rejected(self, service, group_context):
@@ -110,60 +180,113 @@ class TestResumeExecutionValidation:
         )
 
 
-class TestResumeExecutionHappyPath:
+class TestResumeCreatesNewExecution:
     @pytest.mark.asyncio
     async def test_resume_with_checkpoint(self, service, group_context):
-        checkpoint_data = {
-            "crew_task_checkpoint": {
-                "version": 1,
-                "task_count": 3,
-                "process": "sequential",
-                "completed": {
-                    "1": {"index": 1, "task_key": "k1", "output_raw": "b"},
-                    "0": {"index": 0, "task_key": "k0", "output_raw": "a"},
-                },
-            }
-        }
-        row = make_execution_row(status="FAILED", checkpoint_data=checkpoint_data)
-        patcher, _ = patch_repo(row)
+        row = make_execution_row(status="FAILED", checkpoint_data=LEGACY_CHECKPOINT)
+        patcher, repo = patch_repo(row)
+        run_bg_p, create_p, uuid_p = resume_patches()
 
-        with (
-            patcher,
-            patch.object(
-                ExecutionService, "_run_in_background", new_callable=AsyncMock
-            ) as run_bg,
-            patch(
-                "src.services.execution.service.ExecutionStatusService.update_status",
-                new_callable=AsyncMock,
-                return_value=True,
-            ) as update_status,
-        ):
+        with patcher, run_bg_p as run_bg, create_p as create_exec, uuid_p:
             result = await service.resume_execution("job-1", group_context)
-            # let the created background task start/finish
             await asyncio.sleep(0)
 
-        assert result["execution_id"] == "job-1"
+        # A NEW execution, not the old one re-run.
+        assert result["execution_id"] == NEW_JOB_ID
+        assert result["resumed_from"] == "job-1"
         assert result["status"] == "RUNNING"
         assert result["run_name"] == "My Run"
         assert result["restored_tasks"] == 2
 
-        # status flipped back to RUNNING with a resume message
-        update_status.assert_awaited_once()
-        kwargs = update_status.await_args.kwargs
-        assert kwargs["job_id"] == "job-1"
-        assert kwargs["status"] == "RUNNING"
-        assert "2 completed task(s) restored" in kwargs["message"]
+        # ...linked back to the source by database id.
+        create_exec.assert_awaited_once()
+        execution_data = create_exec.await_args.args[0]
+        assert execution_data["job_id"] == NEW_JOB_ID
+        assert execution_data["resumed_from_execution_id"] == 42
+        assert execution_data["status"] == "RUNNING"
 
-        # relaunched with the checkpoint threaded through the CrewConfig
+        # The source checkpoint is spent, so the same crash cannot be resumed
+        # twice in parallel.
+        repo.set_checkpoint_status.assert_awaited_once()
+        assert repo.set_checkpoint_status.await_args.args[1] == "resumed"
+
+        # Relaunched under the NEW id with the checkpoint threaded through.
         run_bg.assert_awaited_once()
         bg_kwargs = run_bg.await_args.kwargs
-        assert bg_kwargs["execution_id"] == "job-1"
+        assert bg_kwargs["execution_id"] == NEW_JOB_ID
         assert bg_kwargs["execution_type"] == "crew"
         config = bg_kwargs["config"]
-        assert config.resume_checkpoint is not None
         assert [e["index"] for e in config.resume_checkpoint["completed"]] == [0, 1]
         assert config.agents_yaml == {"agent_1": {"role": "worker"}}
-        assert config.tasks_yaml == {"task_1": {"description": "do it"}}
+
+    @pytest.mark.asyncio
+    async def test_source_record_is_never_flipped_back_to_running(
+        self, service, group_context
+    ):
+        row = make_execution_row(status="FAILED", checkpoint_data=LEGACY_CHECKPOINT)
+        patcher, _ = patch_repo(row)
+        run_bg_p, create_p, uuid_p = resume_patches()
+
+        with (
+            patcher,
+            run_bg_p,
+            create_p,
+            uuid_p,
+            patch(
+                "src.services.execution.service.ExecutionStatusService.update_status",
+                new_callable=AsyncMock,
+            ) as update_status,
+        ):
+            await service.resume_execution("job-1", group_context)
+            await asyncio.sleep(0)
+
+        # The whole point of the new semantic: a terminal record stays terminal.
+        update_status.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_seeds_the_new_runs_checkpoint_from_the_restored_prefix(
+        self, service, group_context
+    ):
+        row = make_execution_row(status="FAILED", checkpoint_data=LEGACY_CHECKPOINT)
+        patcher, _ = patch_repo(row)
+        run_bg_p, create_p, uuid_p = resume_patches()
+
+        with (
+            patcher,
+            run_bg_p,
+            create_p,
+            uuid_p,
+            patch(
+                "src.services.execution.checkpointing.store.write_record",
+                new_callable=AsyncMock,
+                return_value=True,
+            ) as write_record,
+        ):
+            await service.resume_execution("job-1", group_context)
+            await asyncio.sleep(0)
+
+        # So a SECOND crash resumes from everything already done, not only from
+        # what this attempt manages to redo.
+        write_record.assert_awaited_once()
+        seeded = write_record.await_args.args[2]
+        assert set(seeded["units"]) == {"0", "1"}
+
+    @pytest.mark.asyncio
+    async def test_from_unit_rewinds_further_back(self, service, group_context):
+        row = make_execution_row(status="FAILED", checkpoint_data=LEGACY_CHECKPOINT)
+        patcher, _ = patch_repo(row)
+        run_bg_p, create_p, uuid_p = resume_patches()
+
+        with patcher, run_bg_p as run_bg, create_p, uuid_p:
+            result = await service.resume_execution(
+                "job-1", group_context, from_unit="1"
+            )
+            await asyncio.sleep(0)
+
+        # Resume AT unit 1 → only unit 0 restored; unit 1 onward re-runs.
+        assert result["restored_tasks"] == 1
+        config = run_bg.await_args.kwargs["config"]
+        assert [e["index"] for e in config.resume_checkpoint["completed"]] == [0]
 
     @pytest.mark.asyncio
     async def test_resume_without_checkpoint_reruns_from_scratch(
@@ -171,41 +294,33 @@ class TestResumeExecutionHappyPath:
     ):
         row = make_execution_row(status="STOPPED", checkpoint_data=None)
         patcher, _ = patch_repo(row)
+        run_bg_p, create_p, uuid_p = resume_patches()
 
-        with (
-            patcher,
-            patch.object(
-                ExecutionService, "_run_in_background", new_callable=AsyncMock
-            ) as run_bg,
-            patch(
-                "src.services.execution.service.ExecutionStatusService.update_status",
-                new_callable=AsyncMock,
-                return_value=True,
-            ) as update_status,
-        ):
+        with patcher, run_bg_p as run_bg, create_p, uuid_p:
             result = await service.resume_execution("job-1", group_context)
             await asyncio.sleep(0)
 
+        # A missing checkpoint is not an error — the run simply starts over.
         assert result["restored_tasks"] == 0
-        assert "no checkpoint found" in update_status.await_args.kwargs["message"]
         assert run_bg.await_args.kwargs["config"].resume_checkpoint is None
 
     @pytest.mark.asyncio
-    async def test_status_update_failure_aborts_resume(self, service, group_context):
+    async def test_create_failure_aborts_before_launching(self, service, group_context):
         row = make_execution_row(status="FAILED")
         patcher, _ = patch_repo(row)
+        run_bg_p, _, uuid_p = resume_patches()
 
         with (
             patcher,
-            patch.object(
-                ExecutionService, "_run_in_background", new_callable=AsyncMock
-            ) as run_bg,
+            run_bg_p as run_bg,
+            uuid_p,
             patch(
-                "src.services.execution.service.ExecutionStatusService.update_status",
+                "src.services.execution.service.ExecutionStatusService.create_execution",
                 new_callable=AsyncMock,
                 return_value=False,
             ),
         ):
-            with pytest.raises(ValueError, match="Failed to reset status"):
+            with pytest.raises(ValueError, match="Failed to create resumed execution"):
                 await service.resume_execution("job-1", group_context)
+
         run_bg.assert_not_awaited()

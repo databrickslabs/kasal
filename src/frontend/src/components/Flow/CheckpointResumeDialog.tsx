@@ -19,10 +19,7 @@ import {
   Alert,
   Divider,
   Tooltip,
-  Collapse,
-  Radio,
-  RadioGroup,
-  FormControlLabel
+  Collapse
 } from '@mui/material';
 import {
   PlayArrow as PlayArrowIcon,
@@ -30,11 +27,11 @@ import {
   Delete as DeleteIcon,
   History as HistoryIcon,
   ExpandMore as ExpandMoreIcon,
-  ExpandLess as ExpandLessIcon,
-  CheckCircle as CheckCircleIcon
+  ExpandLess as ExpandLessIcon
 } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
 import { FlowCheckpoint, CrewCheckpoint } from '../../api/workflow/FlowService';
+import CheckpointUnitPicker from '../Checkpoints/CheckpointUnitPicker';
 
 interface CheckpointResumeDialogProps {
   open: boolean;
@@ -124,9 +121,39 @@ const CheckpointResumeDialog: React.FC<CheckpointResumeDialogProps> = ({
     }
   };
 
+  /**
+   * Translate a UI selection into the backend's resume_from_crew_sequence.
+   *
+   * The two count differently, and conflating them re-ran work the user asked
+   * to keep. The backend value is the sequence of the crew **to run** — it
+   * skips crews with `sequence < resume_from` (flow_builder.py:660) — whereas
+   * the options here name a crew to resume **after**. So the value is always
+   * one past the crew the user picked.
+   *
+   * Omitting it entirely skips nothing, which is why "resume from end" cannot
+   * be left undefined: that re-ran the whole flow while claiming to resume it.
+   */
+  const resumeFromSequence = (
+    checkpoint: FlowCheckpoint,
+    selected: number | null
+  ): number | undefined => {
+    if (selected !== null) {
+      return selected + 1;
+    }
+    const sequences = (checkpoint.crew_checkpoints ?? []).map(c => c.sequence);
+    if (sequences.length === 0) {
+      return undefined; // nothing completed — there is nothing to skip
+    }
+    // Resume from end = start at the first crew that did NOT complete.
+    return Math.max(...sequences) + 1;
+  };
+
   // Handle resume from checkpoint
   const handleResumeFromCheckpoint = (checkpoint: FlowCheckpoint) => {
-    onResumeFromCheckpoint(checkpoint, selectedCrewSequence ?? undefined);
+    onResumeFromCheckpoint(
+      checkpoint,
+      resumeFromSequence(checkpoint, selectedCrewSequence)
+    );
     setExpandedCheckpoint(null);
     setSelectedCrewSequence(null);
   };
@@ -300,66 +327,26 @@ const CheckpointResumeDialog: React.FC<CheckpointResumeDialogProps> = ({
                           Select where to resume from:
                         </Typography>
 
-                        <RadioGroup
-                          value={selectedCrewSequence ?? ''}
-                          onChange={(e) => setSelectedCrewSequence(e.target.value ? Number(e.target.value) : null)}
-                        >
-                          {/* Option to resume from the end (all crews completed) */}
-                          <FormControlLabel
-                            value=""
-                            control={<Radio size="small" />}
-                            label={
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <Typography variant="body2">
-                                  Resume from end (all {checkpoint.crew_checkpoints?.length} crews completed)
-                                </Typography>
-                              </Box>
-                            }
-                          />
-
-                          {/* Individual crew checkpoints */}
-                          {checkpoint.crew_checkpoints?.map((crew: CrewCheckpoint) => (
-                            <FormControlLabel
-                              key={crew.sequence}
-                              value={crew.sequence}
-                              control={<Radio size="small" />}
-                              label={
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                  <CheckCircleIcon
-                                    fontSize="small"
-                                    color="success"
-                                    sx={{ fontSize: 16 }}
-                                  />
-                                  <Typography variant="body2">
-                                    Resume after &quot;{crew.crew_name}&quot;
-                                  </Typography>
-                                  <Chip
-                                    label={`#${crew.sequence}`}
-                                    size="small"
-                                    variant="outlined"
-                                    sx={{ height: 20, fontSize: '0.7rem' }}
-                                  />
-                                  {crew.output_preview && (
-                                    <Tooltip title={crew.output_preview}>
-                                      <Typography
-                                        variant="caption"
-                                        color="text.secondary"
-                                        sx={{
-                                          maxWidth: 200,
-                                          overflow: 'hidden',
-                                          textOverflow: 'ellipsis',
-                                          whiteSpace: 'nowrap'
-                                        }}
-                                      >
-                                        {crew.output_preview.substring(0, 50)}...
-                                      </Typography>
-                                    </Tooltip>
-                                  )}
-                                </Box>
-                              }
-                            />
-                          ))}
-                        </RadioGroup>
+                        <CheckpointUnitPicker
+                          units={(checkpoint.crew_checkpoints ?? []).map(
+                            (crew: CrewCheckpoint) => ({
+                              key: String(crew.sequence),
+                              name: crew.crew_name,
+                              outputPreview: crew.output_preview,
+                            })
+                          )}
+                          value={
+                            selectedCrewSequence === null
+                              ? ''
+                              : String(selectedCrewSequence)
+                          }
+                          onChange={(v) =>
+                            setSelectedCrewSequence(v ? Number(v) : null)
+                          }
+                          defaultOptionLabel={`Resume from end (all ${checkpoint.crew_checkpoints?.length} crews completed)`}
+                          renderUnitLabel={(unit) => `Resume after "${unit.name}"`}
+                          previewLength={50}
+                        />
 
                         <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
                           <Button

@@ -54,6 +54,11 @@ services/
     │                        #   agent_builder, agent_tools, task_builder,
     │                        #   agent_security, model_conversion_handler,
     │                        #   tool_approval, execution_callback, trace_context
+    ├── checkpointing/       # crash-resume, SHARED by crew and flow:
+    │                        #   record (storage contract, versioned + migrate
+    │                        #   on read), store, recorder, lifecycle, resume,
+    │                        #   service. Path adapters live with their path:
+    │                        #   {agent,flow}_builder/checkpoint_adapter.py
     ├── logs/                # execution-log capture → queue → DB
     └── subprocess_bootstrap.py  # what a spawned interpreter calls first
 ```
@@ -88,6 +93,13 @@ services/
 - **Logging**: `src/core/logger.py` owns loggers; `execution/logs/` owns capture;
   `execution/subprocess_bootstrap.py` sets a child interpreter up. Note
   `logs/writer_task.py` drives the LOGS writer — it has never written a trace.
+- **Checkpointing**: one contract for both subprocess paths — a unit is a TASK
+  for a crew and a CREW for a flow, and that is the only difference. Written by
+  an event-bus recorder, never derived from traces: telemetry can be sampled or
+  retention-pruned for unrelated reasons, and a resume that silently degrades is
+  worse than one that reports "no checkpoint". Resume creates a NEW execution
+  linked by `resumed_from_execution_id`; the failed run stays failed. The Chat
+  path has none and must not get one. See `src/docs/CHECKPOINTING.md`.
 - **Guardrails**: build via `GuardrailFactory.create_guardrail` from
   `src.services.guardrails`.
 - **Memory**: `src.services.memory` — `MemoryBackendFactory` + `CrewMemoryService`,

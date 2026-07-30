@@ -86,6 +86,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from src.core.logger import LoggerManager
+from src.services.flow_builder.checkpoint_adapter import FlowCrewCheckpointRecorder
 
 # Use the flow logger for all flow-related operations
 logger = LoggerManager.get_instance().flow
@@ -353,6 +354,12 @@ def run_flow_in_process(
                     f"[FLOW_SUBPROCESS] Lakebase activation error (non-fatal): {lb_err}"
                 )
 
+            # Bound before the setup block below, which can fail ahead of the
+            # registration: the completion hook that reads this sits outside
+            # that try, so an unbound name here would turn a non-fatal setup
+            # failure into a NameError that kills the run.
+            flow_checkpoint_recorder = None
+
             # Initialize LogWriterTask and event listeners FIRST (in same loop as execution)
             # This is CRITICAL - LogWriterTask must be started in the same loop that will call stop_writer()
             try:
@@ -368,6 +375,38 @@ def run_flow_in_process(
                 async_logger.info(
                     f"[FLOW_SUBPROCESS] LogWriterTask writer started for {execution_id}"
                 )
+
+                # Crash-resume checkpointing: persist every crew's output as
+                # it completes, so a flow killed part-way through its method
+                # graph resumes from the last crew that finished instead of
+                # re-running everything. Written, not derived from traces —
+                # telemetry can be sampled or pruned for reasons that have
+                # nothing to do with resume, and a resume that silently
+                # degrades is worse than one that reports "no checkpoint".
+                #
+                # Registered BEFORE and OUTSIDE the OTel block on purpose:
+                # checkpointing is crash recovery, not telemetry, and must not
+                # be switched off by tracing being unavailable.
+                #
+                # FlowCrewCheckpointRecorder is imported at MODULE level, not
+                # here: it pulls in src.core.events.types, and importing that
+                # inside a window where a test has stubbed src.core.events into
+                # sys.modules caches a mock-holding module that then breaks
+                # unrelated suites on the same worker (see
+                # services/execution/CLAUDE.md).
+                try:
+                    flow_checkpoint_recorder = FlowCrewCheckpointRecorder(
+                        execution_id,
+                        flow_uuid=flow_config.get("flow_uuid")
+                        or flow_config.get("resume_from_flow_uuid"),
+                    ).register(event_bus)
+                    async_logger.info(
+                        f"[FLOW_SUBPROCESS] Flow checkpoint recorder registered for {execution_id}"
+                    )
+                except Exception as ckpt_err:
+                    async_logger.warning(
+                        f"[FLOW_SUBPROCESS] Checkpoint recorder not installed (non-fatal): {ckpt_err}"
+                    )
 
                 # Initialize OTel tracing (always-on, sole trace source)
                 otel_provider = None
@@ -654,6 +693,15 @@ def run_flow_in_process(
                     async_logger.info(
                         "[FLOW_SUBPROCESS] Flow execution completed successfully"
                     )
+
+                    # Drop the checkpoint — a flow that finished has nothing to
+                    # resume, and leaving it would list the run as resumable.
+                    # Unlike a crew there is no single completion EVENT to hang
+                    # this on: CrewKickoffCompletedEvent fires once per crew
+                    # inside the flow and the last one is indistinguishable from
+                    # the others while it happens.
+                    if flow_checkpoint_recorder is not None:
+                        flow_checkpoint_recorder.finish()
 
                     # CRITICAL: Flush the CrewAI event bus to ensure all event handlers
                     # (agent execution started/completed, tool usage, etc.) complete their

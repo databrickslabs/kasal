@@ -142,6 +142,40 @@ _FLOW_CONDITION_CALLS = frozenset(
 )
 
 
+def _crew_may_be_skipped(crew_name, crew_tasks, checkpoint_identities) -> bool:
+    """Whether a crew's stored output may stand in for running it.
+
+    Verified identical -> skip. Verified different -> re-run, because replaying
+    the old output would silently discard the edit. No identity on either side
+    (a checkpoint written before identities existed, or a trace-derived one) ->
+    skip as it always did, but say that nothing was checked.
+    """
+    from src.services.flow_builder.checkpoint_identity import (
+        CHANGED,
+        MATCH,
+        compute_crew_identity,
+        verify_crew_identity,
+    )
+
+    verdict = verify_crew_identity(
+        compute_crew_identity(crew_name, crew_tasks),
+        (checkpoint_identities or {}).get(crew_name),
+    )
+
+    if verdict == CHANGED:
+        logger.warning(
+            f"  🔄 RE-RUNNING crew '{crew_name}': it has changed since the "
+            f"checkpoint was written, so its stored output is stale"
+        )
+        return False
+    if verdict != MATCH:
+        logger.warning(
+            f"  ⚠️  Skipping crew '{crew_name}' UNVERIFIED — the checkpoint "
+            f"carries no identity, so an edit to this crew cannot be detected"
+        )
+    return True
+
+
 class FlowBuilder:
     """
     Helper class for building CrewAI flows.
@@ -168,8 +202,11 @@ class FlowBuilder:
             callbacks: Dictionary of callbacks (optional)
             group_context: Group context for multi-tenant isolation (optional)
             restore_uuid: UUID of a previous flow execution to resume from (optional)
-            resume_from_crew_sequence: Crew sequence number to resume from (optional).
-                When provided, crews with sequence <= this value will be skipped.
+            resume_from_crew_sequence: Sequence of the crew to RESUME AT (optional).
+                Crews with sequence < this value are skipped and replaced by
+                their checkpointed output; this crew and everything after it
+                re-run. Note the strict <: passing a completed crew's own
+                sequence RE-RUNS that crew rather than skipping it.
             resume_from_execution_id: Execution ID of checkpoint to resume from (optional).
                 Used to query execution traces for previous crew outputs.
             user_token: User access token for OBO authentication (optional)
@@ -181,7 +218,9 @@ class FlowBuilder:
         logger.info("Building CrewAI Flow")
         if resume_from_crew_sequence is not None:
             logger.info(
-                f"Resume from crew sequence: {resume_from_crew_sequence} (will skip crews 1-{resume_from_crew_sequence})"
+                f"Resume from crew sequence: {resume_from_crew_sequence} "
+                f"(will skip crews 1-{resume_from_crew_sequence - 1}, "
+                f"running {resume_from_crew_sequence} onward)"
             )
         if resume_from_execution_id is not None:
             logger.info(
@@ -359,59 +398,22 @@ class FlowBuilder:
                     logger.error(f"  ❌ Task {task_id} NOT found in all_tasks!")
                     logger.error(f"  Available task IDs: {list(all_tasks.keys())}")
 
-            # Load checkpoint outputs from execution traces if resuming from a specific execution
-            checkpoint_outputs = {}
-            if resume_from_execution_id and repositories:
-                try:
-                    # resume_from_execution_id is the job_id (UUID string), not the integer database ID
-                    execution_history_repo = repositories.get("execution_history")
-                    execution_trace_repo = repositories.get("execution_trace")
+            # Outputs for the crews this resume skips: read from the written
+            # checkpoint, falling back to the legacy trace reconstruction for
+            # executions that predate it. See flow_builder/checkpoint_resume.py.
+            from src.services.flow_builder.checkpoint_resume import (
+                load_resume_outputs,
+            )
 
-                    if execution_history_repo and execution_trace_repo:
-                        logger.info(
-                            f"Looking up execution for job_id: {resume_from_execution_id}"
-                        )
-                        # Use get_execution_by_job_id since we're passing the job_id (UUID)
-                        execution = (
-                            await execution_history_repo.get_execution_by_job_id(
-                                resume_from_execution_id
-                            )
-                        )
-
-                        if execution and execution.job_id:
-                            job_id = execution.job_id
-                            logger.info(f"Found execution with job_id: {job_id}")
-
-                            # Now query traces using the job_id
-                            checkpoint_outputs = (
-                                await execution_trace_repo.get_crew_outputs_for_resume(
-                                    job_id
-                                )
-                            )
-                            logger.info(
-                                f"Loaded checkpoint outputs for {len(checkpoint_outputs)} crews: {list(checkpoint_outputs.keys())}"
-                            )
-                            for crew_name, output in checkpoint_outputs.items():
-                                output_preview = (
-                                    str(output)[:200] + "..."
-                                    if len(str(output)) > 200
-                                    else str(output)
-                                )
-                                logger.info(
-                                    f"  📦 Checkpoint output for '{crew_name}': {output_preview}"
-                                )
-                        else:
-                            logger.warning(
-                                f"No execution found for ID: {resume_from_execution_id}"
-                            )
-                    else:
-                        logger.warning(
-                            "Missing repositories for loading checkpoint outputs (need execution_history and execution_trace)"
-                        )
-                except Exception as e:
-                    logger.error(
-                        f"Failed to load checkpoint outputs: {e}", exc_info=True
-                    )
+            (
+                checkpoint_outputs,
+                _checkpoint_derived,
+                checkpoint_identities,
+            ) = await load_resume_outputs(
+                resume_from_execution_id,
+                repositories,
+                from_unit=resume_from_crew_sequence,
+            )
 
             # Pass the processed listener_methods (with crew grouping) instead of raw listeners
             dynamic_flow = await FlowBuilder._create_dynamic_flow(
@@ -428,6 +430,7 @@ class FlowBuilder:
                 checkpoint_outputs,
                 user_token=user_token,
                 group_id=group_id,
+                checkpoint_identities=checkpoint_identities,
             )
 
             logger.info("=" * 100)
@@ -560,6 +563,7 @@ class FlowBuilder:
         checkpoint_outputs=None,
         user_token=None,
         group_id=None,
+        checkpoint_identities=None,
     ):
         """
         Create a dynamic flow class with all start, listener, and router methods.
@@ -579,8 +583,11 @@ class FlowBuilder:
             callbacks: Dictionary of callback handlers for execution logging
             group_context: Group context for multi-tenant isolation
             restore_uuid: UUID of a previous flow execution to resume from (optional)
-            resume_from_crew_sequence: Crew sequence number to resume from (optional).
-                When provided, crews with sequence <= this value will be skipped.
+            resume_from_crew_sequence: Sequence of the crew to RESUME AT (optional).
+                Crews with sequence < this value are skipped and replaced by
+                their checkpointed output; this crew and everything after it
+                re-run. Note the strict <: passing a completed crew's own
+                sequence RE-RUNS that crew rather than skipping it.
             checkpoint_outputs: Checkpoint outputs from previous execution (optional)
             user_token: User access token for OBO authentication (optional)
             group_id: Group ID for multi-tenant isolation (optional)
@@ -700,6 +707,14 @@ class FlowBuilder:
                 resume_from_crew_sequence is not None
                 and current_crew_sequence < resume_from_crew_sequence
             )
+
+            # ...but only if the crew is still the crew that produced the
+            # stored output. Skipping an EDITED crew replays a stale result and
+            # makes the edit look like it did nothing.
+            if should_skip_crew:
+                should_skip_crew = _crew_may_be_skipped(
+                    crew_name, crew_tasks, checkpoint_identities
+                )
 
             if should_skip_crew:
                 logger.info(
@@ -1050,6 +1065,14 @@ class FlowBuilder:
                 resume_from_crew_sequence is not None
                 and current_crew_sequence < resume_from_crew_sequence
             )
+
+            # ...but only if the crew is still the crew that produced the
+            # stored output. Skipping an EDITED crew replays a stale result and
+            # makes the edit look like it did nothing.
+            if should_skip_crew:
+                should_skip_crew = _crew_may_be_skipped(
+                    crew_name, listener_tasks, checkpoint_identities
+                )
 
             if should_skip_crew:
                 logger.info(

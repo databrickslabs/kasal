@@ -799,6 +799,10 @@ class DatabaseManagementService:
                 "executionhistory": history_result.get("executionhistory", 0),
                 "taskstatus": history_result.get("taskstatus", 0),
                 "errortrace": history_result.get("errortrace", 0),
+                # Flow method state for the purged runs. flow_states has no FK
+                # to executionhistory, so nothing used to reach it and it grew
+                # without bound on any workspace that ran flows.
+                "flow_states": history_result.get("flow_states", 0),
                 "execution_trace": trace_count,
                 "execution_logs": logs_count,
                 "llmlog": llm_count,

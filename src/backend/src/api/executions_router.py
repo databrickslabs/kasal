@@ -11,7 +11,14 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    Header,
+    HTTPException,
+    Query,
+)
 
 from src.config.settings import settings
 from src.core.dependencies import GroupContextDep, SessionDep
@@ -29,6 +36,12 @@ from src.schemas.execution import (
     StopExecutionRequest,
     StopExecutionResponse,
 )
+from src.schemas.execution_history import (
+    CheckpointUnitDetail,
+    ExecutionCheckpointResponse,
+    ResumeExecutionRequest,
+)
+from src.services.execution.checkpointing.service import CheckpointService
 from src.services.execution.config_adapter import get_execution_logger
 from src.services.execution.service import ExecutionService
 from src.services.flow_builder.flow_service import FlowService
@@ -400,28 +413,146 @@ async def stop_execution(
     return StopExecutionResponse(**stop_result)
 
 
+# ---------------------------------------------------------------------------
+# Checkpoints.
+#
+# These hang off /executions rather than /flows because a checkpoint belongs to
+# an EXECUTION, not to the thing that was executed. The flow-scoped endpoints in
+# flows_router.py are the older, narrower form and are now thin deprecated
+# aliases over the same service; crews never had an equivalent at all, which is
+# precisely the gap this closes.
+# ---------------------------------------------------------------------------
+
+
+def get_checkpoint_service(session: SessionDep) -> CheckpointService:
+    """Factory for CheckpointService with an explicit session dependency."""
+    return CheckpointService(session)
+
+
+CheckpointServiceDep = Annotated[CheckpointService, Depends(get_checkpoint_service)]
+
+
+@router.get("/{execution_id}/checkpoints", response_model=ExecutionCheckpointResponse)
+async def get_execution_checkpoint(
+    execution_id: str,
+    service: CheckpointServiceDep,
+    group_context: GroupContextDep,
+):
+    """
+    Get an execution's checkpoint: which units completed and what they produced.
+
+    Works for crew and flow executions alike — a unit is a task for a crew and a
+    crew for a flow. Outputs come back as previews; fetch a single unit for its
+    full output, because a checkpoint can hold half a megabyte per unit.
+
+    Args:
+        execution_id: The job_id of the execution
+        service: Checkpoint service (injected)
+        group_context: Group context for tenant isolation
+
+    Returns:
+        ExecutionCheckpointResponse describing the checkpoint
+
+    Raises:
+        NotFoundError: The execution does not exist, is outside the caller's
+            groups, or has no checkpoint
+    """
+    checkpoint = await service.get_checkpoint(execution_id, group_context)
+    if not checkpoint:
+        raise NotFoundError(f"No checkpoint found for execution {execution_id}")
+    return ExecutionCheckpointResponse(**checkpoint)
+
+
+@router.get(
+    "/{execution_id}/checkpoints/{unit_key}", response_model=CheckpointUnitDetail
+)
+async def get_execution_checkpoint_unit(
+    execution_id: str,
+    unit_key: str,
+    service: CheckpointServiceDep,
+    group_context: GroupContextDep,
+):
+    """
+    Get one checkpoint unit with its full stored output.
+
+    Args:
+        execution_id: The job_id of the execution
+        unit_key: Unit identity — task index for a crew, crew sequence for a flow
+        service: Checkpoint service (injected)
+        group_context: Group context for tenant isolation
+
+    Returns:
+        CheckpointUnitDetail including the full output
+    """
+    unit = await service.get_unit(execution_id, unit_key, group_context)
+    if not unit:
+        raise NotFoundError(
+            f"No checkpoint unit '{unit_key}' for execution {execution_id}"
+        )
+    return CheckpointUnitDetail(**unit)
+
+
+@router.delete("/{execution_id}/checkpoints")
+async def expire_execution_checkpoint(
+    execution_id: str,
+    service: CheckpointServiceDep,
+    group_context: GroupContextDep,
+):
+    """
+    Expire an execution's checkpoint so it stops offering itself as resumable.
+
+    The recorded units are NOT deleted: expiring is a listing decision, and
+    keeping the outputs means an operator can still inspect what the failed run
+    produced. Admins and editors only, matching resume.
+
+    Args:
+        execution_id: The job_id of the execution
+        service: Checkpoint service (injected)
+        group_context: Group context for access control
+
+    Returns:
+        Success message
+    """
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only admins and editors can expire checkpoints")
+
+    if not await service.expire(execution_id, group_context):
+        raise NotFoundError(f"Execution {execution_id} not found")
+
+    return {"status": "success", "message": "Checkpoint expired successfully"}
+
+
 @router.post("/{execution_id}/resume", response_model=ExecutionCreateResponse)
 async def resume_execution(
     execution_id: str,
     service: Annotated[ExecutionService, Depends(get_execution_service)],
     group_context: GroupContextDep,
+    request: Optional[ResumeExecutionRequest] = None,
 ):
     """
-    Resume a crashed or stopped crew execution from its task checkpoint.
+    Resume a crashed or stopped execution from its checkpoint.
 
-    Only Admins and Editors can resume executions. The execution must be a
-    crew execution in a terminal-failed state (FAILED/STOPPED/CANCELLED).
-    Completed task outputs recorded during the original run are restored and
-    the crew continues from the first incomplete task; if no checkpoint was
-    recorded, the crew re-runs from scratch under the same execution id.
+    Only Admins and Editors can resume executions, and the execution must be in
+    a terminal-failed state (FAILED/STOPPED/CANCELLED). Completed units recorded
+    during the original run are restored and work continues from the first
+    incomplete one; if no checkpoint was recorded, the run starts from scratch.
+
+    Resuming creates a NEW execution linked to the original by
+    resumed_from_execution_id rather than re-running the old record in place, so
+    the failed run stays failed. That keeps the audit trail append-only, makes
+    each attempt's token cost attributable to itself, and stops a resumed run's
+    traces and logs from interleaving with the crashed attempt's under one
+    job_id.
 
     Args:
         execution_id: The job_id of the execution to resume
         service: Execution service (injected)
         group_context: Group context for access control
+        request: Optional body; ``from_unit`` rewinds further back than the
+            crash point to redo work
 
     Returns:
-        ExecutionCreateResponse with execution_id, status and run_name
+        ExecutionCreateResponse for the NEW execution
     """
     if not check_role_in_context(group_context, ["admin", "editor"]):
         raise ForbiddenError("Only admins and editors can resume executions")
@@ -430,6 +561,7 @@ async def resume_execution(
         result = await service.resume_execution(
             execution_id=execution_id,
             group_context=group_context,
+            from_unit=request.from_unit if request else None,
         )
     except ValueError as e:
         message = str(e)

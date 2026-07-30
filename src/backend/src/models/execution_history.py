@@ -157,8 +157,25 @@ class ExecutionHistory(Base):
     checkpoint_method = Column(
         String(255), nullable=True
     )  # Last checkpointed method name
-    # Crew-level checkpoint data for granular resume functionality
-    # Structure: {"crew_checkpoints": [{"crew_node_id": "...", "crew_name": "...", "sequence": 1, "status": "completed", "output_preview": "...", "completed_at": "..."}]}
+    # The execution this one was resumed FROM, if any.
+    #
+    # Resuming creates a new execution rather than re-running the old record in
+    # place. The failed run stays FAILED — the audit trail is append-only, each
+    # attempt's token cost is attributable to itself, and a resumed run's traces
+    # and logs (both keyed by job_id) no longer interleave with the crashed
+    # attempt's under a single id.
+    #
+    # Deliberately NOT a ForeignKey: purging an old run must not cascade away
+    # the successful resume that replaced it, and execution_history is already
+    # reached by job_id from several tables without FK constraints.
+    resumed_from_execution_id = Column(Integer, nullable=True, index=True)
+    # A SHARED JSON bag, not the checkpoint's private space. Keys in use:
+    #   "checkpoint"     — the unified resume record (crew tasks OR flow crews);
+    #                      shape and versioning owned by
+    #                      services/execution/checkpointing/schema.py
+    #   "edited_config"  — HITL edits replayed by flow_methods.py
+    #   "ucmv_yaml_edits" — user-edited metric-view YAML
+    # Anything writing here must MERGE, never replace the column wholesale.
     checkpoint_data = Column(JSON, nullable=True, default=None)
 
     # Relationships

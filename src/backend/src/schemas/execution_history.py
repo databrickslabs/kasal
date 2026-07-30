@@ -173,6 +173,99 @@ class CheckpointListResponse(BaseModel):
     total: int = Field(description="Total number of checkpoints")
 
 
+class CheckpointUnitInfo(BaseModel):
+    """One completed unit of work inside a checkpoint.
+
+    A unit is a TASK for a crew and a CREW for a flow — the same shape either
+    way, which is what lets one UI serve both.
+    """
+
+    key: str = Field(description="Unit identity: task index, or crew sequence")
+    name: Optional[str] = Field(None, description="Task or crew name")
+    agent: Optional[str] = Field(None, description="Agent that produced the output")
+    output_preview: Optional[str] = Field(
+        None, description="First 200 chars of the output"
+    )
+    truncated: bool = Field(
+        False,
+        description=(
+            "The stored output was capped. Present so a resume with reduced "
+            "fidelity is visible rather than silent."
+        ),
+    )
+    completed_at: Optional[str] = Field(None, description="ISO completion timestamp")
+
+
+class CheckpointUnitDetail(CheckpointUnitInfo):
+    """One unit WITH its full output."""
+
+    output_raw: str = Field("", description="The unit's full stored output")
+    output_json: Optional[Dict[str, Any]] = Field(
+        None, description="Structured output, when the unit produced one"
+    )
+
+
+class ExecutionCheckpointResponse(BaseModel):
+    """An execution's checkpoint — crew or flow, same shape."""
+
+    job_id: str = Field(description="Job ID of the execution")
+    execution_id: int = Field(description="Database ID of the execution")
+    kind: Optional[str] = Field(None, description="'crew' or 'flow'")
+    version: Optional[int] = Field(None, description="Checkpoint schema version")
+    status: Optional[str] = Field(
+        None, description="Lifecycle status: active, resumed, expired"
+    )
+    execution_status: Optional[str] = Field(
+        None, description="Status of the execution itself"
+    )
+    run_name: Optional[str] = Field(None, description="Name of the run")
+    created_at: Optional[datetime] = Field(None, description="When the run started")
+    unit_count: Optional[int] = Field(
+        None, description="Total units the execution has, when known"
+    )
+    completed_count: int = Field(description="Units recorded as complete")
+    truncated: bool = Field(False, description="Any unit's output was capped")
+    derived: bool = Field(
+        False,
+        description=(
+            "Reconstructed from a pre-unification payload rather than written "
+            "by the recorder — fidelity is not guaranteed."
+        ),
+    )
+    resumable: bool = Field(description="Whether this checkpoint can be resumed now")
+    blocked_reason: Optional[str] = Field(
+        None, description="Why it cannot be resumed, when it cannot"
+    )
+    units: List[CheckpointUnitInfo] = Field(
+        default_factory=list, description="Completed units, in execution order"
+    )
+    # Flow-only, absent for crews.
+    flow_uuid: Optional[str] = Field(None, description="Flow state id, for flows")
+    checkpoint_method: Optional[str] = Field(
+        None, description="Last checkpointed flow method"
+    )
+
+
+class ExecutionCheckpointListResponse(BaseModel):
+    """A list of checkpoints."""
+
+    checkpoints: List[ExecutionCheckpointResponse] = Field(default_factory=list)
+    total: int = Field(description="Number of checkpoints returned")
+
+
+class ResumeExecutionRequest(BaseModel):
+    """Optional body for POST /executions/{id}/resume."""
+
+    from_unit: Optional[str] = Field(
+        None,
+        description=(
+            "Unit key to resume AT — everything before it is restored, it and "
+            "everything after re-runs. Omit to continue from the first "
+            "incomplete unit."
+        ),
+    )
+
+
 class ResumeFromCheckpointRequest(BaseModel):
     """Schema for requesting execution resume from checkpoint."""
 
