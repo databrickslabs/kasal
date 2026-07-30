@@ -49,6 +49,23 @@ class BudgetProfile:
     guardrail_max_retries: int
 
 
+#: The engine's own fallback when nothing sets ``max_execution_time``
+#: (``kernel/agent_builder.DEFAULT_AGENT_MAX_EXECUTION_TIME``, env-overridable,
+#: 900s). Duplicated as a NUMBER rather than imported because this module sits
+#: under ``config/`` and ``agent_builder`` pulls in the whole kernel; the test
+#: ``test_deep_is_not_starved_relative_to_an_unprofiled_mode`` fails if the two
+#: drift apart.
+#:
+#: It matters here because a mode with NO profile gets this value, so any
+#: profile below it makes the mode that is supposed to think longer think for
+#: LESS time. That is not hypothetical: deep shipped at 600 against research's
+#: effective 900, while ALSO swapping Perplexity to a search model that answers
+#: in minutes instead of seconds. Deep was starved by a third and handed a tool
+#: an order of magnitude slower, which is why deep runs blew their budget and
+#: research runs never did. The tool swap has since been removed; this floor
+#: is what stops the other half of it coming back.
+_ENGINE_DEFAULT_MAX_EXECUTION_TIME = 900
+
 #: Only ``deep`` is APPLIED today (see generation/crew/answer_mode.GATED_MODES).
 #: The chat and research rows are the floor this function falls back to and the
 #: shape a future widening would take — they are not currently stamped onto any
@@ -66,9 +83,19 @@ _PROFILES = {
         run_wall_clock=900,
         guardrail_max_retries=1,
     ),
+    # Above the engine default, because deep genuinely does more per turn than
+    # an unprofiled mode: a high reasoning budget makes each call slower, and
+    # the envelope contract ("every claim needs a source") makes the agent
+    # gather more before it will answer. NOT more than that — deep no longer
+    # swaps in a minutes-per-call search model (see
+    # generation/crew/answer_mode), so the tool it runs is the same fast one
+    # research uses, and a ceiling sized for the slow model would only let a
+    # stuck run burn an hour before anyone noticed.
+    #
+    # Both numbers are ceilings. A run ends when its tasks finish.
     "deep": BudgetProfile(
         max_iter=30,
-        max_execution_time=600,
+        max_execution_time=1200,
         run_wall_clock=3600,
         guardrail_max_retries=3,
     ),

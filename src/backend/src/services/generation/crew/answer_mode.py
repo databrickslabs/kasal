@@ -11,8 +11,27 @@ or built and never switched on:
   ungated against a criterion already written for them.
 * No execution caps of any kind were set, so every mode ran on identical bare
   engine defaults.
-* No tool distinction: the export template gates slow deep-research tools behind
-  a mode, the in-app builder never did.
+
+**Deep does not reconfigure tools.** It briefly did: the mode carried the
+catalog id ``"31"`` and repointed ``PerplexityTool`` at ``sonar-deep-research``.
+That was removed, and the removal is the point of this note. Two reasons, and
+the second is the expensive one:
+
+* **Vendor knowledge does not belong in a mode.** A hardcoded id and class name
+  meant exactly one tool got the treatment, every other research tool got
+  nothing, and a reseed that renumbered the catalog would have disabled it in
+  silence. If a tool has a slower, deeper setting, that fact belongs with the
+  tool — where the parameter names are, and where a second tool can declare it
+  without editing this file.
+* **It was the cause of the runaway deep runs.** ``sonar-deep-research`` answers
+  in minutes rather than seconds, so a single round fanning out to a handful of
+  searches blew the per-call budget several times over; the overrun was then
+  retried, and each retry paid it again. Deep now uses whatever the tool is
+  configured with, exactly as research does.
+
+What still separates deep from research is the crew shape, the reasoning
+budget, the execution caps below, the generated guardrail, and the envelope
+contract — none of which name a vendor.
 
 **Scope: this touches ``deep`` and NOTHING else.** ``chat`` and ``research``
 keep exactly the behaviour they have today, including their bare engine
@@ -52,20 +71,6 @@ GATED_MODES = ("deep",)
 #: the description a second time.
 _APPLIED_MARKER = "_answer_mode"
 
-#: Catalog id of the search tool deep mode reconfigures. Deep does not ADD tools
-#: the generator did not pick, and does not take any away from other modes — it
-#: only changes how the ones already equipped are configured.
-PERPLEXITY_TOOL_ID = "31"
-
-#: Perplexity's deep-research model, and the headroom its answers need. The seed
-#: default is the fast `sonar`; deep mode is precisely the case the slow model
-#: exists for.
-_PERPLEXITY_DEEP_CONFIG = {
-    "model": "sonar-deep-research",
-    "max_tokens": 4000,
-    "search_recency_filter": "year",
-}
-
 
 def apply_answer_mode(
     mode: Optional[str],
@@ -95,12 +100,10 @@ def apply_answer_mode(
 
     for spec in agents_yaml.values():
         _apply_agent_budget(spec, profile)
-        _apply_deep_tool_policy(spec)
 
     for key, entry in pending.items():
         source = generated_tasks.get(key) or {}
         _apply_task_verification(entry, source, profile)
-        _apply_deep_tool_policy(entry)
         entry[_APPLIED_MARKER] = normalized
 
     logger.info(
@@ -115,13 +118,34 @@ def apply_answer_mode(
 
 
 def _apply_agent_budget(spec: Dict[str, Any], profile) -> None:
-    """Per-agent caps, unless the generator set its own.
+    """Per-agent caps: the mode's numbers are a FLOOR, not a default.
 
-    Only fills what is absent: an explicit value in the plan is a decision, and
-    a mode default should not overrule it.
+    This was ``setdefault`` — "an explicit value in the plan is a decision, and
+    a mode default should not overrule it". True for a value the plan raises;
+    wrong for one that lowers it. A crew re-run from the UI carries whatever
+    ``max_execution_time`` its saved agents hold (the form ships 300), and that
+    silently undercut deep mode's budget. The agent had been configured before
+    anyone chose an answer mode; choosing deep is the later, more specific
+    instruction.
+
+    So: raise, never lower. A plan asking for MORE than the mode still wins.
     """
-    spec.setdefault("max_iter", profile.max_iter)
-    spec.setdefault("max_execution_time", profile.max_execution_time)
+    for field in ("max_iter", "max_execution_time"):
+        spec[field] = max(_positive(spec.get(field)), getattr(profile, field))
+
+
+def _positive(value: Any) -> int:
+    """``value`` as a positive int, or 0 when it is absent or unusable.
+
+    0 is the identity for ``max`` here, so a missing, null, non-numeric or
+    nonsensical (<= 0) value falls through to the profile rather than raising
+    mid-generation over a field the user cannot see.
+    """
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return number if number > 0 else 0
 
 
 def _apply_task_verification(
@@ -178,26 +202,3 @@ def _with_envelope_instruction(description: str) -> str:
         "Do not invent sources. If you cannot source a claim, leave it out and "
         "record the gap in `open_questions` instead."
     ).strip()
-
-
-def _apply_deep_tool_policy(spec: Dict[str, Any]) -> None:
-    """Point the slow high-value tools at their deep settings.
-
-    ADDITIVE only. An earlier version also stripped these tools from research
-    runs — the inverse of the export template's FAST_MODE_DISABLED_TOOLS. That
-    was removed: taking a tool away from a mode nobody asked to change is a
-    behaviour regression wearing a consistency argument. Deep upgrades what it
-    has; no other mode is touched.
-    """
-    tools = spec.get("tools")
-    if not isinstance(tools, list):
-        return
-
-    if any(str(tool) == PERPLEXITY_TOOL_ID for tool in tools):
-        configs = spec.setdefault("tool_configs", {})
-        existing = configs.get("PerplexityTool")
-        configs["PerplexityTool"] = {
-            **(existing if isinstance(existing, dict) else {}),
-            **_PERPLEXITY_DEEP_CONFIG,
-        }
-        logger.info("Deep mode: PerplexityTool set to sonar-deep-research")

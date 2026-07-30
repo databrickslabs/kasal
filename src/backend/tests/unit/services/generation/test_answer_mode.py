@@ -7,10 +7,13 @@ reasoning budget. These tests pin the differences that now exist.
 
 import copy
 
-from src.services.generation.crew.answer_mode import (
-    PERPLEXITY_TOOL_ID,
-    apply_answer_mode,
-)
+import pytest
+
+from src.services.generation.crew.answer_mode import apply_answer_mode
+
+#: A search tool's catalog id. Just a fixture value now — the module under test
+#: no longer knows any tool's id, which is the property TestToolPolicy asserts.
+_SEARCH_TOOL_ID = "31"
 
 
 def _fixture():
@@ -19,7 +22,7 @@ def _fixture():
             "role": "Researcher",
             "goal": "g",
             "backstory": "b",
-            "tools": ["26", PERPLEXITY_TOOL_ID],
+            "tools": ["26", _SEARCH_TOOL_ID],
         }
     }
     tasks = {
@@ -27,7 +30,7 @@ def _fixture():
             "id": "t1",
             "description": "Find facts",
             "expected_output": "A report",
-            "tools": [PERPLEXITY_TOOL_ID],
+            "tools": [_SEARCH_TOOL_ID],
             "output_file": "output/t1.md",
         }
     }
@@ -114,32 +117,88 @@ class TestBudgets:
         agents, tasks, generated = _fixture()
         apply_answer_mode("deep", agents, tasks, generated)
         assert agents["agent_a1"]["max_iter"] == 30
-        assert agents["agent_a1"]["max_execution_time"] == 600
+        assert agents["agent_a1"]["max_execution_time"] == 1200
 
-    def test_an_explicit_plan_value_wins(self):
+    def test_a_plan_asking_for_more_wins(self):
+        agents, tasks, generated = _fixture()
+        agents["agent_a1"]["max_iter"] = 77
+        apply_answer_mode("deep", agents, tasks, generated)
+        assert agents["agent_a1"]["max_iter"] == 77
+
+    def test_a_plan_asking_for_less_cannot_lower_the_mode_floor(self):
+        """The bug this replaced ``setdefault`` for: a crew re-run from the UI
+        carries its saved agents' caps (the form ships 300), which silently
+        undercut deep mode while deep was ALSO using the slow Perplexity model.
+        The agent was configured before anyone picked an answer mode; picking
+        deep is the later and more specific instruction."""
         agents, tasks, generated = _fixture()
         agents["agent_a1"]["max_iter"] = 7
+        agents["agent_a1"]["max_execution_time"] = 300
         apply_answer_mode("deep", agents, tasks, generated)
-        assert agents["agent_a1"]["max_iter"] == 7
+        assert agents["agent_a1"]["max_iter"] == 30
+        assert agents["agent_a1"]["max_execution_time"] == 1200
+
+    @pytest.mark.parametrize("junk", [None, "", "soon", 0, -5, [], {}])
+    def test_an_unusable_plan_value_falls_through_to_the_profile(self, junk):
+        """Generation must not die over a field the user cannot see."""
+        agents, tasks, generated = _fixture()
+        agents["agent_a1"]["max_execution_time"] = junk
+        apply_answer_mode("deep", agents, tasks, generated)
+        assert agents["agent_a1"]["max_execution_time"] == 1200
+
+    def test_a_numeric_string_is_still_a_number(self):
+        agents, tasks, generated = _fixture()
+        agents["agent_a1"]["max_iter"] = "99"
+        apply_answer_mode("deep", agents, tasks, generated)
+        assert agents["agent_a1"]["max_iter"] == 99
 
 
 class TestToolPolicy:
-    def test_deep_upgrades_perplexity_without_changing_the_tool_list(self):
-        """Deep reconfigures what the generator already picked. It does not add
-        tools, and — unlike an earlier version of this pass — it does not take
-        any away from other modes."""
+    """Deep treats tools exactly as research does: it does not touch them.
+
+    It briefly did — the module carried a tool's catalog id and repointed that
+    tool at a slow deep-research model. That put vendor knowledge in a mode
+    (so exactly one tool benefited and a catalog renumber would have silently
+    disabled it) and, because the substituted model answers in minutes rather
+    than seconds, it was the direct cause of deep runs blowing their execution
+    budget while research runs never did.
+    """
+
+    def test_the_tool_list_is_untouched(self):
         agents, tasks, generated = _fixture()
         before = list(agents["agent_a1"]["tools"])
         apply_answer_mode("deep", agents, tasks, generated)
         assert agents["agent_a1"]["tools"] == before
-        config = agents["agent_a1"]["tool_configs"]["PerplexityTool"]
-        assert config["model"] == "sonar-deep-research"
 
-    def test_perplexity_config_is_not_invented_without_the_tool(self):
+    def test_no_tool_config_is_written(self):
         agents, tasks, generated = _fixture()
-        agents["agent_a1"]["tools"] = []
         apply_answer_mode("deep", agents, tasks, generated)
         assert "tool_configs" not in agents["agent_a1"]
+        assert "tool_configs" not in tasks["task_t1"]
+
+    def test_an_existing_tool_config_is_left_alone(self):
+        """A model the user pinned is a decision this mode has no opinion on."""
+        agents, tasks, generated = _fixture()
+        agents["agent_a1"]["tool_configs"] = {"PerplexityTool": {"model": "sonar-pro"}}
+        apply_answer_mode("deep", agents, tasks, generated)
+        assert agents["agent_a1"]["tool_configs"] == {
+            "PerplexityTool": {"model": "sonar-pro"}
+        }
+
+    def test_the_module_names_no_tool(self):
+        """The property that makes this untangled: a new research tool needs no
+        edit here, and no catalog id can drift out from under it."""
+        import inspect
+
+        from src.services.generation.crew import answer_mode
+
+        source = inspect.getsource(answer_mode)
+        for vendor in ("Perplexity", "sonar", "PERPLEXITY"):
+            assert vendor not in source.replace(
+                # The docstring explains the removal; that mention is the point.
+                answer_mode.__doc__ or "",
+                "",
+            )
 
 
 class TestIdempotence:

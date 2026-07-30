@@ -30,6 +30,26 @@ class TestProfiles:
             profile = resolve_budget_profile(mode)
             assert profile.run_wall_clock > profile.max_execution_time
 
+    def test_deep_is_not_starved_relative_to_an_unprofiled_mode(self):
+        """The bug this guards: deep shipped at 600s while research — which has
+        NO profile and so falls to the engine default of 900s — effectively got
+        more. Deep was simultaneously swapped onto `sonar-deep-research`, which
+        answers in minutes rather than seconds, so the mode meant to think
+        longest had the least time and the slowest tool. Any applied profile
+        must be at least the default it displaces."""
+        from src.services.execution.config.budget_profile import (
+            _ENGINE_DEFAULT_MAX_EXECUTION_TIME,
+        )
+        from src.services.execution.kernel.agent_builder import (
+            DEFAULT_AGENT_MAX_EXECUTION_TIME,
+        )
+        from src.services.generation.crew.answer_mode import GATED_MODES
+
+        assert _ENGINE_DEFAULT_MAX_EXECUTION_TIME == DEFAULT_AGENT_MAX_EXECUTION_TIME
+        for mode in GATED_MODES:
+            profile = resolve_budget_profile(mode)
+            assert profile.max_execution_time >= DEFAULT_AGENT_MAX_EXECUTION_TIME
+
     @pytest.mark.parametrize("mode", [None, "", "nonsense", "DEEP RESEARCH"])
     def test_unknown_modes_fall_back_to_the_tightest_profile(self, mode):
         """A typo must not accidentally buy an hour of runtime."""
@@ -41,8 +61,10 @@ class TestProfiles:
 
 class TestEnvOverrides:
     def test_override_applies(self, monkeypatch):
-        monkeypatch.setenv("KASAL_BUDGET_DEEP_RUN_WALL_CLOCK", "7200")
-        assert resolve_budget_profile("deep").run_wall_clock == 7200
+        # Deliberately not the shipped default, or the test would pass with the
+        # override wired to nothing.
+        monkeypatch.setenv("KASAL_BUDGET_DEEP_RUN_WALL_CLOCK", "5400")
+        assert resolve_budget_profile("deep").run_wall_clock == 5400
 
     def test_override_is_scoped_to_its_mode(self, monkeypatch):
         monkeypatch.setenv("KASAL_BUDGET_DEEP_MAX_ITER", "99")
