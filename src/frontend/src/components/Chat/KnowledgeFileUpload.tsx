@@ -45,6 +45,11 @@ export interface UploadedFile {
   error?: string;
 }
 
+/** Imperative handle so a "+" menu item can open the file picker. */
+export interface KnowledgeFileUploadHandle {
+  open: () => void;
+}
+
 interface KnowledgeFileUploadProps {
   executionId: string;
   groupId: string;
@@ -57,6 +62,14 @@ interface KnowledgeFileUploadProps {
   onTaskFileRemoved?: (removedFilePath: string) => void;
   disabled?: boolean;
   compact?: boolean;
+  /**
+   * Hide the paperclip, keeping the chips. Used when the composer's "+" menu
+   * owns the "Add files" ACTION: the action moves into the menu, but the
+   * attached-file chips stay visible in the composer — a chip is state that
+   * will be sent with the next message, and hiding it is how people re-upload
+   * a file they already attached, or send one they forgot about.
+   */
+  hideTrigger?: boolean;
   /**
    * The agents ON THE CANVAS. Used for the upload's access control and for the
    * "files attached" indicator on the agent.
@@ -72,25 +85,34 @@ const ACCEPTED = '.pdf,.txt,.json,.csv,.doc,.docx,.md';
 const attachmentsKey = (executionId: string) =>
   `kasal-canvas-attachments-${executionId}`;
 
-export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
-  executionId,
-  groupId: _groupId,
-  onFilesUploaded,
-  onAgentsUpdated,
-  onTasksUpdated,
-  onTaskFileRemoved,
-  disabled = false,
-  compact = false,
-  availableAgents = [],
-  hasAgents = false,
-  hasTasks = false,
-}) => {
+export const KnowledgeFileUpload = React.forwardRef<
+  KnowledgeFileUploadHandle,
+  KnowledgeFileUploadProps
+>(function KnowledgeFileUpload(
+  {
+    executionId,
+    groupId: _groupId,
+    onFilesUploaded,
+    onAgentsUpdated,
+    onTasksUpdated,
+    onTaskFileRemoved,
+    disabled = false,
+    compact = false,
+    availableAgents = [],
+    hasAgents = false,
+    hasTasks = false,
+    hideTrigger = false,
+  },
+  ref,
+) {
   const [attached, setAttached] = useState<UploadedFile[]>([]);
   const [uploading, setUploading] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hydrated = useRef(false);
   const { updateAgent } = useAgentStore();
+
+  React.useImperativeHandle(ref, () => ({ open: () => fileInputRef.current?.click() }), []);
 
   const agentIds = availableAgents
     .map((a) => a.id)
@@ -283,6 +305,7 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
         onChange={handleFilesSelected}
       />
 
+      {!hideTrigger && (
       <Tooltip title={tooltip}>
         <span>
           <IconButton
@@ -311,6 +334,7 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
           </IconButton>
         </span>
       </Tooltip>
+      )}
 
       {/* One chip per attached file, each with its own detach.
           No file icon: the paperclip beside it already says "attachment", and
@@ -341,6 +365,6 @@ export const KnowledgeFileUpload: React.FC<KnowledgeFileUploadProps> = ({
       />
     </Box>
   );
-};
+});
 
 export default KnowledgeFileUpload;

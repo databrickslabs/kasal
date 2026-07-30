@@ -56,6 +56,15 @@ export interface ModelConfig {
   max_output_tokens?: number;
   enabled: boolean;
   provider?: string;
+  /**
+   * Whether this model accepts a native reasoning-effort budget. Derived
+   * server-side from the same allow-list the engine uses, and ALREADY present
+   * at runtime — `ModelService.getEnabledModels` sets it and the caller casts
+   * its response to this type. Declaring it stops the composer's reasoning
+   * control reading `undefined` and disabling itself on a model that does
+   * support a budget. Same field as `types/config/models.ts`.
+   */
+  supports_reasoning_effort?: boolean;
 }
 
 export interface WorkflowChatProps {

@@ -1951,9 +1951,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               // Toggle interactivity if needed
               console.log('Toggle interactivity');
             }}
-            reasoningEnabled={reasoningEnabled}
-            setReasoningEnabled={setReasoningEnabled}
-
             setIsConfigurationDialogOpen={dialogManager.setIsConfigurationDialogOpen}
             onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
             showRunHistory={showRunHistory}
@@ -1962,7 +1959,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               console.log('[WorkflowDesigner] Opening tutorial from LeftSidebar');
               dialogManager.setIsTutorialOpen(true);
             }}
-            hideRuntimeFilters={areFlowsVisible}
           />
         )}
 

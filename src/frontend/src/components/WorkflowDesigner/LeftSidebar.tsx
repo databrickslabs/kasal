@@ -1,21 +1,10 @@
-import { getDefaultModel } from '../../config/defaultModel';
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   IconButton,
   Tooltip,
-  Divider,
   Paper,
   useTheme,
-  Typography,
-  Switch,
-  FormControl,
-  FormHelperText,
-  InputLabel,
-  Select,
-  MenuItem,
-  CircularProgress,
-  SelectChangeEvent,
   Badge
 } from '@mui/material';
 import {
@@ -23,32 +12,14 @@ import {
   ZoomIn as ZoomInIcon,
   ZoomOut as ZoomOutIcon,
   CenterFocusStrong as FitViewIcon,
-  Tune as TuneIcon,
   SwapHoriz as SwapHorizIcon,
-
   Settings as SettingsIcon,
-  InfoOutlined as InfoOutlinedIcon,
   HelpOutline as HelpOutlineIcon,
 } from '@mui/icons-material';
-import { Models } from '../../types/config/models';
-import { ModelService } from '../../api/config/ModelService';
-import { useCrewExecutionStore, ReasoningConfig } from '../../store/crewExecution';
-import { usePermissionStore } from '../../store/permissions';
 import { useWorkflowStore } from '../../store/workflow';
-import { useTabManagerStore } from '../../store/tabManager';
 import { useUILayoutStore } from '../../store/uiLayout';
 
 
-// Default fallback model when API is down
-const DEFAULT_FALLBACK_MODEL = {
-  [getDefaultModel()]: {
-    name: getDefaultModel(),
-    temperature: 0.7,
-    context_window: 128000,
-    max_output_tokens: 4096,
-    enabled: true
-  }
-};
 
 interface LeftSidebarProps {
   onClearCanvas: () => void;
@@ -57,10 +28,6 @@ interface LeftSidebarProps {
   onFitView: () => void;
   onToggleInteractivity: () => void;
   // Runtime features props
-  reasoningEnabled: boolean;
-  setReasoningEnabled: (enabled: boolean) => void;
-  processType?: 'sequential' | 'hierarchical' | 'parallel';
-  setProcessType?: (type: 'sequential' | 'hierarchical' | 'parallel') => void;
 
   // New prop for configuration
   setIsConfigurationDialogOpen?: (open: boolean) => void;
@@ -72,7 +39,6 @@ interface LeftSidebarProps {
   // Tutorial dialog prop
   onOpenTutorial?: () => void;
   // Hide runtime filters when on flow canvas
-  hideRuntimeFilters?: boolean;
 }
 
 const LeftSidebar: React.FC<LeftSidebarProps> = ({
@@ -81,21 +47,14 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   onZoomOut,
   onFitView,
   onToggleInteractivity,
-  reasoningEnabled,
-  setReasoningEnabled,
-  processType = 'sequential',
-  setProcessType,
   setIsConfigurationDialogOpen,
   onOpenLogsDialog,
   showRunHistory,
   executionHistoryHeight = 200,
-  onOpenTutorial,
-  hideRuntimeFilters = false
+  onOpenTutorial
 }) => {
   const theme = useTheme();
   const [activeSection, setActiveSection] = useState<string | null>(null);
-  const [models, setModels] = useState<Models>(DEFAULT_FALLBACK_MODEL);
-  const [isLoadingModels, setIsLoadingModels] = useState(true);
   const { layoutOrientation, setLayoutOrientation } = useUILayoutStore();
 
   const toggleLayoutOrientation = useCallback(() => {
@@ -107,7 +66,6 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
     }, 50);
   }, [layoutOrientation, setLayoutOrientation]);
 
-  const [managerModel, setManagerModel] = useState<string>('');
   const { setLeftSidebarExpanded } = useUILayoutStore();
 
   // Reflect expanded state of the left sidebar (when a section is active) into the UI layout store
@@ -116,100 +74,8 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   }, [activeSection, setLeftSidebarExpanded]);
 
 
-  const {
-    setProcessType: setStoreProcessType,
-    setManagerLLM,
-    processType: storeProcessType,
-    managerLLM: storeManagerLLM,
-    reasoningConfig,
-    setReasoningConfig,
-  } = useCrewExecutionStore();
-
-  // Get user permissions
-  const { userRole } = usePermissionStore();
-  const isOperator = userRole === 'operator';
-
   // Get tutorial status
   const { hasSeenTutorial } = useWorkflowStore();
-
-  // Canvas nodes come from the ACTIVE TAB, not useWorkflowStore: that store has
-  // a single shared nodes array that goes stale when switching between the crew
-  // and flow canvases (the same reason handleRunClick resolves from the tab).
-  const activeTabNodes = useTabManagerStore(
-    (s) => s.tabs.find((t) => t.id === s.activeTabId)?.nodes,
-  );
-
-  // Reasoning applies to each AGENT's own model, so whether the control can do
-  // anything depends on the agents currently on the canvas — not on a crew-level
-  // model setting. Distinct models first, so the helper text names them.
-  const agentModelNames = useMemo(() => {
-    const seen = new Set<string>();
-    for (const node of activeTabNodes || []) {
-      if (node.type !== 'agentNode') continue;
-      const llm = (node.data as { llm?: string } | undefined)?.llm;
-      if (llm) seen.add(llm);
-    }
-    return Array.from(seen);
-  }, [activeTabNodes]);
-
-  // Enabled when ANY agent's model has a reasoning budget: a mixed crew still
-  // benefits, and the engine applies the effort per agent.
-  const reasoningSupported = useMemo(
-    () => agentModelNames.some((key: string) => models[key]?.supports_reasoning_effort),
-    [agentModelNames, models],
-  );
-
-  // Fetch models on component mount
-  useEffect(() => {
-    const fetchModels = async () => {
-      setIsLoadingModels(true);
-      try {
-        const modelService = ModelService.getInstance();
-        const response = await modelService.getEnabledModels();
-        setModels(response);
-
-        // Initialize manager model when models are loaded
-        if (response && Object.keys(response).length > 0) {
-          // Use store value if available, otherwise set first model
-          if (storeManagerLLM && response[storeManagerLLM]) {
-            setManagerModel(storeManagerLLM);
-          } else if (!managerModel) {
-            const firstModel = Object.keys(response)[0];
-            setManagerModel(firstModel);
-            setManagerLLM(firstModel);
-          }
-        }
-      } catch (error) { /* ignore error to keep UI responsive */ } finally {
-        setIsLoadingModels(false);
-      }
-    };
-
-    fetchModels();
-  }, [managerModel, setManagerLLM, storeManagerLLM]);
-
-  // Sync local state with store values when they change (e.g., when loading a crew)
-  useEffect(() => {
-    if (storeManagerLLM && storeManagerLLM !== managerModel) {
-      console.log('LeftSidebar: Syncing manager model from store:', storeManagerLLM);
-      setManagerModel(storeManagerLLM);
-    }
-  }, [storeManagerLLM, managerModel]);
-
-  const handleManagerModelChange = useCallback((event: SelectChangeEvent) => {
-    const value = event.target.value;
-    setManagerModel(value);
-    setManagerLLM(value);
-  }, [setManagerLLM]);
-
-  const handleProcessTypeChange = useCallback((event: SelectChangeEvent) => {
-    const value = event.target.value as 'sequential' | 'hierarchical' | 'parallel';
-
-    setStoreProcessType(value);
-    // Also call the prop setter if it exists for backward compatibility
-    if (setProcessType) {
-      setProcessType(value);
-    }
-  }, [setProcessType, setStoreProcessType]);
 
   const sidebarItems = [
     {
@@ -227,207 +93,6 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
       dataTour: 'help-button'
     },
 
-    // Only show runtime-features for non-operators AND when not on flow canvas
-    ...(!isOperator && !hideRuntimeFilters ? [{
-      id: 'runtime-features',
-      icon: <TuneIcon />,
-      tooltip: 'Runtime Features',
-      dataTour: 'runtime-features',
-      content: (
-        <Box
-          sx={{
-            maxHeight: showRunHistory ? `calc(100vh - 48px - ${executionHistoryHeight}px - 20px)` : 'calc(100vh - 48px - 20px)',
-            overflowY: 'auto',
-            p: 1,
-          }}
-        >
-          {/* Process Type Section */}
-          <Box sx={{ mb: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-              <Typography
-                variant="subtitle2"
-                sx={{
-                  color: theme.palette.primary.main,
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px',
-                  fontSize: '0.7rem'
-                }}
-              >
-                Process Type
-              </Typography>
-              <Tooltip title="Determines how agents collaborate. Sequential: agents work one after another in a fixed order. Parallel: tasks that don't depend on another task's output all start at once, and any task that does consume one still waits for it — use this for fan-outs like researching several topics independently. Hierarchical: a manager agent dynamically delegates tasks to specialized agents; use it for complex workflows needing adaptive task distribution." placement="right">
-                <InfoOutlinedIcon sx={{ ml: 0.5, fontSize: 14, color: theme.palette.primary.main, cursor: 'help' }} />
-              </Tooltip>
-            </Box>
-            <Divider sx={{ mb: 1 }} />
-
-            <Box
-              sx={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 1,
-                py: 0.5,
-                px: 0.5,
-                borderRadius: 1,
-              }}
-            >
-              <FormControl size="small" fullWidth>
-                <InputLabel sx={{ fontSize: '0.75rem' }}>Execution Process</InputLabel>
-                <Select
-                  value={storeProcessType}
-                  onChange={handleProcessTypeChange}
-                  label="Execution Process"
-                  sx={{ fontSize: '0.75rem' }}
-                >
-                  <MenuItem value="sequential" sx={{ fontSize: '0.75rem' }}>
-                    Sequential - Linear task execution
-                  </MenuItem>
-                  <MenuItem value="hierarchical" sx={{ fontSize: '0.75rem' }}>
-                    Hierarchical - Manager-based delegation
-                  </MenuItem>
-                  <MenuItem value="parallel" sx={{ fontSize: '0.75rem' }}>
-                    Parallel - Independent tasks run at once
-                  </MenuItem>
-                </Select>
-              </FormControl>
-
-              {(storeProcessType || processType) === 'hierarchical' && (
-                <FormControl size="small" fullWidth sx={{ mt: 1 }}>
-                  <InputLabel sx={{ fontSize: '0.75rem' }}>Manager LLM</InputLabel>
-                  <Select
-                    value={managerModel}
-                    onChange={handleManagerModelChange}
-                    label="Manager LLM"
-                    disabled={isLoadingModels}
-                    sx={{ fontSize: '0.75rem' }}
-                    renderValue={(selected: string) => {
-                      const model = models[selected];
-                      return model ? model.name : selected;
-                    }}
-                  >
-                    {isLoadingModels ? (
-                      <MenuItem value="">
-                        <CircularProgress size={16} />
-                      </MenuItem>
-                    ) : Object.keys(models).length === 0 ? (
-                      <MenuItem value="">No models available</MenuItem>
-                    ) : (
-                      Object.entries(models).map(([key, model]) => (
-                        <MenuItem key={key} value={key} sx={{ fontSize: '0.75rem' }}>
-                          <span>{model.name}</span>
-                        </MenuItem>
-                      ))
-                    )}
-                  </Select>
-                </FormControl>
-              )}
-
-              {(storeProcessType || processType) === 'hierarchical' && (
-                <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem', mt: 0.5 }}>
-                  Manager coordinates task delegation to agents
-                </Typography>
-              )}
-            </Box>
-          </Box>
-
-          {/* Runtime Filters - Hidden when on flow canvas */}
-          {!hideRuntimeFilters && (
-            <>
-              {/* Reasoning Section */}
-          <Box sx={{ mb: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-              <Typography
-                variant="subtitle2"
-                sx={{
-                  color: theme.palette.primary.main,
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px',
-                  fontSize: '0.7rem'
-                }}
-              >
-                Reasoning
-              </Typography>
-              <Tooltip title="Sets the model's native reasoning (thinking) budget for this crew's agents. Higher effort lets the model think longer before answering — better on hard, multi-step problems, slower and more expensive on simple ones. Applied only to models that support a reasoning budget; models without it ignore the setting silently." placement="right">
-                <InfoOutlinedIcon sx={{ ml: 0.5, fontSize: 14, color: theme.palette.primary.main, cursor: 'help' }} />
-              </Tooltip>
-            </Box>
-            <Divider sx={{ mb: 1 }} />
-
-            <Box
-              sx={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 1,
-                py: 0.5,
-                px: 0.5,
-                borderRadius: 1,
-              }}
-            >
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Typography variant="caption" sx={{ color: 'text.primary', fontSize: '0.75rem' }}>
-                  Agent Level Reasoning
-                </Typography>
-                <Switch
-                  checked={reasoningEnabled}
-                  onChange={(e) => setReasoningEnabled(e.target.checked)}
-                  size="small"
-                />
-              </Box>
-
-              {/* No "Reasoning LLM" picker: reasoning is the model's OWN native
-                  thinking budget applied to each agent's configured LLM, not a
-                  separate model. The backend has ignored reasoning_llm since the
-                  planner was removed (crew_config_builder logs a warning and
-                  drops it), so the control only ever implied a capability that
-                  does not exist. */}
-              {reasoningEnabled && (
-                <>
-                  {/* Thinking budget — the model's native reasoning effort.
-                      Disabled when no agent on the canvas runs a model that has
-                      one: the engine drops the setting in that case, so offering
-                      it would let the user pick High and see nothing change. */}
-                  <FormControl
-                    size="small"
-                    fullWidth
-                    sx={{ mt: 1 }}
-                    disabled={!reasoningSupported}
-                  >
-                    <InputLabel sx={{ fontSize: '0.75rem' }}>Reasoning Effort</InputLabel>
-                    <Select
-                      value={reasoningConfig.reasoning_effort ?? 'low'}
-                      label="Reasoning Effort"
-                      onChange={(e) => setReasoningConfig({ reasoning_effort: e.target.value as ReasoningConfig['reasoning_effort'] })}
-                      sx={{ fontSize: '0.75rem' }}
-                    >
-                      <MenuItem value="low" sx={{ fontSize: '0.75rem' }}>Low — minimal thinking (fastest)</MenuItem>
-                      <MenuItem value="medium" sx={{ fontSize: '0.75rem' }}>Medium — balanced thinking</MenuItem>
-                      <MenuItem value="high" sx={{ fontSize: '0.75rem' }}>High — maximum thinking (slowest)</MenuItem>
-                    </Select>
-                    {!reasoningSupported && (
-                      <FormHelperText sx={{ fontSize: '0.65rem' }}>
-                        {agentModelNames.length
-                          ? `${agentModelNames.join(', ')} has no reasoning budget — this setting would be ignored.`
-                          : 'Add an agent whose model has a reasoning budget (e.g. a GPT-5 / o3 / o4 model).'}
-                      </FormHelperText>
-                    )}
-                  </FormControl>
-                </>
-              )}
-            </Box>
-          </Box>
-
-          {/* The "Auto Schema Detection" switch that used to live here was
-              removed: schema_detection_enabled is accepted by the API, stored,
-              and read as a condition nowhere in the backend, so the toggle
-              promised behaviour that did not exist. Structured output is now
-              driven by a task's output_schema + gate, not by a global switch. */}
-            </>
-          )}
-        </Box>
-      )
-    }] : [])
   ];
 
   // Separate help item to render it at the very bottom of the activity bar

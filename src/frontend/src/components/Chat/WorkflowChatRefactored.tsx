@@ -78,7 +78,8 @@ import { useExecutionMonitoring } from './hooks/useExecutionMonitoring';
 // Import components
 import { ChatMessageItem } from './components/ChatMessageItem';
 import { GroupedTraceMessages } from './components/GroupedTraceMessages';
-import { KnowledgeFileUpload } from './KnowledgeFileUpload';
+import { KnowledgeFileUpload, KnowledgeFileUploadHandle } from './KnowledgeFileUpload';
+import ChatInputPlusMenu from './components/ChatInputPlusMenu';
 import SlashCommandMenu from './components/SlashCommandMenu';
 import { HtmlPreviewDialog } from './components/HtmlPreviewDialog';
 
@@ -130,6 +131,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Lets the composer's "+" menu open the knowledge-file picker, whose input
+  // and chips live inside KnowledgeFileUpload.
+  const knowledgeUploadRef = useRef<KnowledgeFileUploadHandle>(null);
   const { setNodes, setEdges } = useWorkflowStore();
   const { setInputMode, inputMode, setInputVariables, executeCrew, executeFlow } = useCrewExecutionStore();
   const uiLayoutState = useUILayoutState();
@@ -1934,9 +1938,33 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                     padding: '2px 4px',
                   }}
                 >
-                  {/* Knowledge File Upload */}
+                  {/* The composer's "+" — the ADD-FILES action plus the run
+                      settings that used to sit in the left sidebar. The
+                      attachment CHIPS stay below, rendered by the uploader
+                      itself: an attached file is state that goes out with the
+                      next message, so hiding it behind a menu is how people
+                      re-upload a file they already attached. */}
+                  <ChatInputPlusMenu
+                    onAddFiles={() => knowledgeUploadRef.current?.open()}
+                    models={models}
+                    disabled={isLoading || !!executingJobId}
+                    attachDisabled={
+                      !nodes.some(n => n.type === 'agentNode') ||
+                      !nodes.some(n => n.type === 'taskNode')
+                    }
+                    attachDisabledReason={
+                      !nodes.some(n => n.type === 'agentNode')
+                        ? 'Add at least one agent to the canvas before attaching files'
+                        : 'Add at least one task to the canvas before attaching files'
+                    }
+                  />
+
+                  {/* Knowledge File Upload — trigger hidden (the "+" owns it),
+                      chips still rendered here. */}
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
                     <KnowledgeFileUpload
+                      ref={knowledgeUploadRef}
+                      hideTrigger
                       executionId={sessionId || 'default'}
                       groupId={localStorage.getItem('groupId') || 'default'}
                       hasAgents={nodes.some(n => n.type === 'agentNode')}
