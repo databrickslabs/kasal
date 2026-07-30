@@ -56,6 +56,11 @@ _EVENT_SPAN_MAP = {
     # Task lifecycle
     "TaskStartedEvent": ("CrewAI.task.execute", "task_started"),
     "TaskCompletedEvent": ("CrewAI.task.complete", "task_completed"),
+    # A task restored from a checkpoint rather than executed.
+    "TaskCheckpointRestoredEvent": (
+        "kasal.task.checkpoint_restored",
+        "task_checkpoint_restored",
+    ),
     "TaskFailedEvent": ("CrewAI.task.fail", "task_failed"),
     # Agent execution
     "AgentExecutionStartedEvent": ("CrewAI.agent.execute", "agent_execution"),
@@ -306,6 +311,7 @@ _EVENT_CLASSES = [
     # Task lifecycle
     ("src.core.events", "TaskStartedEvent"),
     ("src.core.events", "TaskCompletedEvent"),
+    ("src.core.events", "TaskCheckpointRestoredEvent"),
     ("src.core.events", "TaskFailedEvent"),
     # Tool usage
     ("src.core.events", "ToolUsageStartedEvent"),

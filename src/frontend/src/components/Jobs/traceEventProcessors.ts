@@ -738,6 +738,7 @@ export const ICON_CONFIG: Record<string, IconConfig> = {
   // icon and colour on purpose: the timeline shows the whole flow, but restored
   // work must not read as work that just ran.
   crew_checkpoint_restored: { Component: HistoryIcon, color: 'info' },
+  task_checkpoint_restored: { Component: HistoryIcon, color: 'info' },
   flow_started: { Component: PlayCircleIcon, color: 'primary' },
   flow_created: { Component: PlayCircleIcon, color: 'primary' },
   flow_completed: { Component: CheckCircleIcon, color: 'success' },

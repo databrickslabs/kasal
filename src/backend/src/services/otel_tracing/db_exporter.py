@@ -28,6 +28,7 @@ SPAN_NAME_MAP: Dict[str, str] = {
     # Task lifecycle
     "CrewAI.task.execute": "task_started",
     "CrewAI.task.complete": "task_completed",
+    "kasal.task.checkpoint_restored": "task_checkpoint_restored",
     "CrewAI.task.fail": "task_failed",
     # Agent execution
     "CrewAI.agent.execute": "agent_execution",

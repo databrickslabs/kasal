@@ -416,6 +416,25 @@ class TaskCompletedEvent(BaseEvent):
     task: Any | None = None
 
 
+class TaskCheckpointRestoredEvent(BaseEvent):
+    """A task was RESTORED from a checkpoint instead of being executed.
+
+    The crew counterpart of CrewCheckpointRestoredEvent. A resumed crew skips
+    every task in the restored prefix, and skipping used to be completely
+    silent — correct while a resume reused the original run's record, and wrong
+    now that it creates a NEW execution with its own trace, where those tasks
+    left no mark at all and the run read as though it had started midway.
+
+    Not a synthetic TaskCompletedEvent: that would claim the task ran, and it
+    would also reach the checkpoint recorder and the callbacks/sinks that
+    already fired on the original attempt.
+    """
+
+    output: Any
+    type: Literal["task_checkpoint_restored"] = "task_checkpoint_restored"
+    task: Any | None = None
+
+
 class TaskFailedEvent(BaseEvent):
     """Emitted when a task fails."""
 

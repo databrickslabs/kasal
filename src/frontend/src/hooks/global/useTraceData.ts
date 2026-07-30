@@ -112,11 +112,12 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
     t.event_type === 'crew_started' || t.event_type === 'execution_started';
   const isCrewEnd = (t: Trace) =>
     t.event_type === 'crew_completed' || t.event_type === 'execution_completed';
-  // A crew restored from a checkpoint rather than executed. Run-level like the
-  // crew boundaries: it belongs to the spine, not inside an agent's task, and
-  // its event_source is 'crew' so the agent pass would drop it entirely.
+  // Work a resume RESTORED rather than executed — a CREW in a flow, a TASK in
+  // a crew. Run-level like the crew boundaries: it belongs to the spine, not
+  // inside an agent's task, and would otherwise be dropped by the agent pass.
   const isCrewRestored = (t: Trace) =>
-    t.event_type === 'crew_checkpoint_restored';
+    t.event_type === 'crew_checkpoint_restored' ||
+    t.event_type === 'task_checkpoint_restored';
   const isRunLevel = (t: Trace) =>
     isFlowStart(t) || isFlowEnd(t) || isCrewStart(t) || isCrewEnd(t) ||
     isCrewRestored(t);
@@ -511,7 +512,12 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
     timelineItems.push({
       kind: 'crew-restored',
       trace,
-      crewName: (meta?.crew_name as string | undefined) || trace.event_source || undefined,
+      // A crew run names the restored unit by TASK; a flow names it by CREW.
+      crewName:
+        (meta?.crew_name as string | undefined) ||
+        (meta?.task_name as string | undefined) ||
+        trace.event_source ||
+        undefined,
     });
   });
 

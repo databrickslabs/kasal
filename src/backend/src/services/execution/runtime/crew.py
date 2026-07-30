@@ -28,7 +28,11 @@ from typing import Any
 from pydantic import UUID4, BaseModel, ConfigDict, Field, PrivateAttr
 
 from src.core.events.bus import event_bus
-from src.core.events.types import CrewKickoffCompletedEvent, CrewKickoffStartedEvent
+from src.core.events.types import (
+    CrewKickoffCompletedEvent,
+    CrewKickoffStartedEvent,
+    TaskCheckpointRestoredEvent,
+)
 from src.core.llm.transport.rpm import RPMController
 
 from .agent import Agent, BaseAgent
@@ -431,10 +435,20 @@ class Crew(BaseModel):
         for index, task in enumerate(self.tasks):
             restored = seeded.get(index)
             if restored is not None:
-                # Restored from checkpoint: no execution, no events, no
-                # callbacks/sinks (they already ran in the original attempt).
+                # Restored from checkpoint: no execution, no callbacks/sinks
+                # (they already ran in the original attempt).
+                #
+                # ONE event is emitted, and it is not a completion: a resume is
+                # a NEW execution with its own trace, so a silently skipped
+                # prefix left that trace starting midway through the crew with
+                # no sign the earlier tasks existed. This says the task was
+                # restored without claiming it ran.
                 task.output = restored
                 completed.append((task, restored))
+                event_bus.emit(
+                    self,
+                    TaskCheckpointRestoredEvent(output=restored, task=task),
+                )
                 continue
             agent = task.agent
             if agent is None:
