@@ -26,6 +26,7 @@ from src.services.a2ui.compose import (
     resolve_directives,
     wants_rich_surface,
 )
+from src.services.a2ui.structured_text import render_research_envelope
 
 logger = logging.getLogger(__name__)
 
@@ -598,6 +599,15 @@ async def wrap_result_with_surface(
     text = _result_text(result)
     if not text.strip():
         return result
+    # Deep Research's output_schema routes through output_json, which rewrites
+    # `raw` to a JSON dump — so the composer was being handed a JSON document,
+    # produced a prose-only `document`, and had it dropped by the data-component
+    # gate. A dropped surface leaves the result a plain string, which is how raw
+    # envelope JSON ended up in the chat. Render it first: the composer then sees
+    # a markdown table and emits a Table, and the fallback text is readable
+    # either way. See services/a2ui/structured_text.
+    rendered = render_research_envelope(text)
+    text = rendered or text
     try:
         surface = await compose_surface(
             text,
@@ -613,4 +623,8 @@ async def wrap_result_with_surface(
         return result
     if surface:
         return {"text": text, "a2ui": surface}
-    return result
+    # No surface. Still return the rendered markdown when there was one — the
+    # whole point is that a reader never sees the raw JSON, whether or not A2UI
+    # produced a surface. `result` is returned untouched otherwise so a
+    # non-envelope answer keeps its exact original shape.
+    return rendered if rendered else result
