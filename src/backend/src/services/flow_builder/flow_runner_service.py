@@ -345,45 +345,68 @@ class FlowRunnerService:
                 config.get("resume_from_execution_id") if config else None
             )
 
+            execution = None
+
             if resume_from_execution_id:
-                # RESUME SCENARIO: Reuse existing execution record.
-                # resume_from_execution_id is normally the job_id (a UUID string) — that
-                # is what the HITL resume path passes (HITLApproval.execution_id is a FK to
-                # executionhistory.job_id). Older callers may pass the integer PK, so look
-                # up by job_id first and fall back to the integer id when it parses as int.
-                logger.info(
-                    f"🔄 RESUME: Reusing existing execution for execution_id={resume_from_execution_id}"
-                )
-
                 exec_repo = ExecutionHistoryRepository(self.db)
-                existing_execution = await exec_repo.get_execution_by_job_id(
-                    str(resume_from_execution_id)
-                )
-                if not existing_execution:
-                    try:
-                        existing_execution = await exec_repo.get_execution_by_id(
-                            int(resume_from_execution_id)
-                        )
-                    except (TypeError, ValueError):
-                        existing_execution = None
 
-                if existing_execution:
+                # A record may ALREADY exist for THIS job_id, because a
+                # checkpoint resume deliberately creates a NEW execution seeded
+                # from an old one before handing over. When it does, that is
+                # this run's own record — use it and leave the source alone.
+                #
+                # Reusing the SOURCE row here is what made a resume look like
+                # two jobs: the finished run it was resumed from got flipped
+                # back to RUNNING and never reached a terminal status again.
+                own_execution = await exec_repo.get_execution_by_job_id(str(job_id))
+                if own_execution is not None:
+                    execution = own_execution
+                    execution.status = FlowExecutionStatus.RUNNING.value
+                    await self.db.commit()
+                    logger.info(
+                        f"🔄 RESUME: using this run's own execution record "
+                        f"{execution.id} for job {job_id}; source "
+                        f"{resume_from_execution_id} left untouched"
+                    )
+                else:
+                    # LEGACY IN-PLACE RESUME: no record for this job_id, so the
+                    # caller means "continue that other run under its record".
+                    # This is the HITL path — HITLApproval.execution_id is a FK
+                    # to executionhistory.job_id — and it genuinely resumes the
+                    # SAME run. Older callers may pass the integer PK, so look
+                    # up by job_id first and fall back to the id.
+                    logger.info(
+                        f"🔄 RESUME: Reusing existing execution for execution_id={resume_from_execution_id}"
+                    )
+
+                    existing_execution = await exec_repo.get_execution_by_job_id(
+                        str(resume_from_execution_id)
+                    )
+                    if not existing_execution:
+                        try:
+                            existing_execution = await exec_repo.get_execution_by_id(
+                                int(resume_from_execution_id)
+                            )
+                        except (TypeError, ValueError):
+                            existing_execution = None
+
+                    if not existing_execution:
+                        logger.error(
+                            f"🔄 RESUME: Could not find execution for execution_id={resume_from_execution_id}"
+                        )
+                        raise HTTPException(
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"Execution not found for resume: {resume_from_execution_id}",
+                        )
+
                     execution = existing_execution
-                    # Update status to RUNNING for the resume
                     execution.status = FlowExecutionStatus.RUNNING.value
                     await self.db.commit()
                     logger.info(
                         f"🔄 RESUME: Found existing execution with ID {execution.id}, status set to RUNNING"
                     )
-                else:
-                    logger.error(
-                        f"🔄 RESUME: Could not find execution for execution_id={resume_from_execution_id}"
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Execution not found for resume: {resume_from_execution_id}",
-                    )
-            else:
+
+            if execution is None:
                 # NEW EXECUTION: Create a flow execution record via service layer
                 execution = await self.flow_execution_service.create_execution(
                     flow_id=flow_id,  # None for ad-hoc executions, UUID for saved flows

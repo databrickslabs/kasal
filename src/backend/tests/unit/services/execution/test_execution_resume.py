@@ -61,6 +61,9 @@ def make_execution_row(
     row.run_name = "My Run"
     row.checkpoint_data = checkpoint_data
     row.checkpoint_status = checkpoint_status
+    # Concrete, not MagicMock: these are pydantic-validated on the flow path.
+    row.flow_uuid = None
+    row.flow_id = None
     row.inputs = (
         inputs
         if inputs is not None
@@ -126,6 +129,115 @@ class TestResumeExecutionValidation:
             await asyncio.sleep(0)
 
         assert result["execution_id"] == NEW_JOB_ID
+
+
+FLOW_CHECKPOINT = {
+    "checkpoint": {
+        "version": 1,
+        "kind": "flow",
+        "unit_count": 3,
+        "units": {
+            "1": {"key": "1", "name": "swiss news", "output_raw": "headlines"},
+            "2": {"key": "2", "name": "send an email", "output_raw": "sent"},
+        },
+        "meta": {},
+    }
+}
+
+
+class TestResumeFlowExecution:
+    """A flow stores nodes/edges, never agents_yaml.
+
+    Requiring a crew configuration rejected every flow resume with a 409 —
+    the endpoint accepted flows at the type check and then ran crew-only code.
+    """
+
+    def _flow_row(self, checkpoint_data=FLOW_CHECKPOINT, **kw):
+        row = make_execution_row(
+            execution_type="flow",
+            checkpoint_data=checkpoint_data,
+            inputs={
+                "nodes": [{"id": "n1"}],
+                "edges": [{"source": "n1"}],
+                "flow_config": {"startingPoints": []},
+                "flow_id": "flow-uuid-1",
+                "inputs": {"topic": "swiss news"},
+                "model": "some-model",
+            },
+            **kw,
+        )
+        row.flow_uuid = "state-uuid-1"
+        row.flow_id = "flow-uuid-1"
+        return row
+
+    @pytest.mark.asyncio
+    async def test_a_completed_flow_resumes_without_a_crew_config(
+        self, service, group_context
+    ):
+        patcher, _ = patch_repo(self._flow_row(status="COMPLETED"))
+        run_bg_p, create_p, uuid_p = resume_patches()
+
+        with patcher, run_bg_p as run_bg, create_p as create_exec, uuid_p:
+            result = await service.resume_execution("job-1", group_context)
+            await asyncio.sleep(0)
+
+        assert result["execution_id"] == NEW_JOB_ID
+        # Relaunched as a FLOW, not shoehorned through the crew path.
+        assert run_bg.await_args.kwargs["execution_type"] == "flow"
+        assert create_exec.await_args.args[0]["execution_type"] == "flow"
+
+        config = run_bg.await_args.kwargs["config"]
+        assert config.execution_type == "flow"
+        assert config.nodes == [{"id": "n1"}]
+        assert config.edges == [{"source": "n1"}]
+        # Two crews completed, so the next one to run is sequence 3.
+        assert config.resume_from_crew_sequence == 3
+        assert config.resume_from_execution_id == "job-1"
+        assert config.resume_from_flow_uuid == "state-uuid-1"
+        assert result["restored_tasks"] == 2
+
+    @pytest.mark.asyncio
+    async def test_from_unit_selects_the_crew_to_re_run(self, service, group_context):
+        patcher, _ = patch_repo(self._flow_row(status="COMPLETED"))
+        run_bg_p, create_p, uuid_p = resume_patches()
+
+        with patcher, run_bg_p as run_bg, create_p, uuid_p:
+            result = await service.resume_execution(
+                "job-1", group_context, from_unit="2"
+            )
+            await asyncio.sleep(0)
+
+        # Redo from crew 2: crew 1 restored, crew 2 onward re-runs.
+        assert run_bg.await_args.kwargs["config"].resume_from_crew_sequence == 2
+        assert result["restored_tasks"] == 1
+
+    @pytest.mark.asyncio
+    async def test_the_resumed_run_stays_attached_to_its_flow(
+        self, service, group_context
+    ):
+        patcher, _ = patch_repo(self._flow_row(status="FAILED"))
+        run_bg_p, create_p, uuid_p = resume_patches()
+
+        with patcher, run_bg_p, create_p as create_exec, uuid_p:
+            await service.resume_execution("job-1", group_context)
+            await asyncio.sleep(0)
+
+        # Without flow_id the resumed run vanishes from its flow's checkpoint list.
+        execution_data = create_exec.await_args.args[0]
+        assert execution_data["flow_id"] == "flow-uuid-1"
+        assert execution_data["resumed_from_execution_id"] == 42
+
+    @pytest.mark.asyncio
+    async def test_a_flow_with_no_checkpoint_runs_whole(self, service, group_context):
+        patcher, _ = patch_repo(self._flow_row(checkpoint_data=None, status="FAILED"))
+        run_bg_p, create_p, uuid_p = resume_patches()
+
+        with patcher, run_bg_p as run_bg, create_p, uuid_p:
+            result = await service.resume_execution("job-1", group_context)
+            await asyncio.sleep(0)
+
+        assert run_bg.await_args.kwargs["config"].resume_from_crew_sequence is None
+        assert result["restored_tasks"] == 0
 
     @pytest.mark.asyncio
     async def test_chat_execution_rejected(self, service, group_context):

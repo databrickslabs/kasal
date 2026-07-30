@@ -8,7 +8,6 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.exceptions import ForbiddenError
 from src.core.permissions import check_role_in_context
-from src.repositories.execution_trace_repository import ExecutionTraceRepository
 from src.schemas.crew_publication import (
     CrewPublicationCreate,
     CrewPublicationResponse,
@@ -42,11 +41,6 @@ def get_flow_service(session: SessionDep) -> FlowService:
 # Dependency to get ExecutionHistoryService
 def get_execution_history_service(session: SessionDep) -> ExecutionHistoryService:
     return ExecutionHistoryService(session)
-
-
-# Dependency to get ExecutionTraceRepository
-def get_execution_trace_repository(session: SessionDep) -> ExecutionTraceRepository:
-    return ExecutionTraceRepository(session)
 
 
 # Dependency to get the shared CheckpointService
@@ -309,12 +303,6 @@ async def get_flow_checkpoints(
         uuid.UUID, Path(title="The ID of the flow to get checkpoints for")
     ],
     flow_service: Annotated[FlowService, Depends(get_flow_service)],
-    execution_service: Annotated[
-        ExecutionHistoryService, Depends(get_execution_history_service)
-    ],
-    trace_repository: Annotated[
-        ExecutionTraceRepository, Depends(get_execution_trace_repository)
-    ],
     checkpoint_service: Annotated[CheckpointService, Depends(get_checkpoint_service)],
     group_context: GroupContextDep,
     status_filter: Annotated[
@@ -338,8 +326,7 @@ async def get_flow_checkpoints(
     Args:
         flow_id: UUID of the flow
         flow_service: Flow service for group check
-        execution_service: Execution history service
-        trace_repository: Execution trace repository for crew checkpoints
+        checkpoint_service: Shared checkpoint service
         group_context: Group context from headers
         status_filter: Filter checkpoints by status (default: 'active')
 
@@ -349,14 +336,11 @@ async def get_flow_checkpoints(
     # First verify the flow exists and user has access
     await flow_service.get_flow_with_group_check(flow_id, group_context)
 
-    # One source of truth: the written checkpoint, via the shared service. The
-    # trace reconstruction below is reached only for executions that predate the
-    # recorder — see ExecutionTraceRepository.get_crew_checkpoints_by_job_id.
+    # One source: the written checkpoint, via the shared service. A run with
+    # none simply does not appear — it is not reconstructed from traces.
     summaries = await checkpoint_service.list_for_flow(
         flow_id=flow_id, group_context=group_context, status_filter=status_filter
     )
-    summarised_job_ids = {summary["job_id"] for summary in summaries}
-
     checkpoint_infos = []
     for summary in summaries:
         checkpoint_infos.append(
@@ -378,47 +362,6 @@ async def get_flow_checkpoints(
                     )
                     for unit in summary.get("units", [])
                 ],
-            )
-        )
-
-    # Legacy: executions with no written checkpoint at all. Their crews are
-    # reconstructed from traces, which cannot be backfilled and is not
-    # fidelity-equivalent; the per-execution API reports this as `derived`.
-    legacy = await execution_service.get_checkpoints_for_flow(
-        flow_id=flow_id,
-        group_id=group_context.primary_group_id,
-        status_filter=status_filter,
-    )
-    for cp in legacy:
-        if cp.job_id in summarised_job_ids:
-            continue
-
-        crew_checkpoints = []
-        for crew_cp in await trace_repository.get_crew_checkpoints_by_job_id(cp.job_id):
-            try:
-                crew_checkpoints.append(
-                    CrewCheckpointInfo(
-                        crew_name=crew_cp.get("crew_name", "Unknown Crew"),
-                        sequence=crew_cp.get("sequence", 0),
-                        status=crew_cp.get("status", "completed"),
-                        output_preview=crew_cp.get("output_preview"),
-                        completed_at=_parse_completed_at(crew_cp.get("completed_at")),
-                    )
-                )
-            except Exception as e:
-                logger.warning(f"Error parsing crew checkpoint: {e}")
-                continue
-
-        checkpoint_infos.append(
-            CheckpointInfo(
-                execution_id=cp.id,
-                job_id=cp.job_id,
-                flow_uuid=cp.flow_uuid,
-                checkpoint_method=cp.checkpoint_method,
-                checkpoint_status=cp.checkpoint_status,
-                created_at=cp.created_at,
-                run_name=cp.run_name,
-                crew_checkpoints=crew_checkpoints,
             )
         )
 

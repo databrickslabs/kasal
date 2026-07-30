@@ -112,8 +112,14 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
     t.event_type === 'crew_started' || t.event_type === 'execution_started';
   const isCrewEnd = (t: Trace) =>
     t.event_type === 'crew_completed' || t.event_type === 'execution_completed';
+  // A crew restored from a checkpoint rather than executed. Run-level like the
+  // crew boundaries: it belongs to the spine, not inside an agent's task, and
+  // its event_source is 'crew' so the agent pass would drop it entirely.
+  const isCrewRestored = (t: Trace) =>
+    t.event_type === 'crew_checkpoint_restored';
   const isRunLevel = (t: Trace) =>
-    isFlowStart(t) || isFlowEnd(t) || isCrewStart(t) || isCrewEnd(t);
+    isFlowStart(t) || isFlowEnd(t) || isCrewStart(t) || isCrewEnd(t) ||
+    isCrewRestored(t);
 
   const flowStarts = sorted.filter(isFlowStart);
   const flowEnds = sorted.filter(isFlowEnd);
@@ -124,6 +130,7 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
 
   const crewStarts = sorted.filter(isCrewStart);
   const crewEnds = sorted.filter(isCrewEnd);
+  const crewRestored = sorted.filter(isCrewRestored);
 
   // span_id -> parent_span_id, for walking the DAG up to an owning crew span.
   const spanToParent = new Map<string, string>();
@@ -493,6 +500,21 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
 
   // Flatten the spine into render order.
   const timelineItems: TimelineItem[] = [];
+
+  // Restored crews first: a resume replays them before running anything, and
+  // they are what makes the timeline read as the whole flow rather than only
+  // the tail that re-executed.
+  crewRestored.forEach(trace => {
+    const meta = trace.trace_metadata && typeof trace.trace_metadata === 'object'
+      ? trace.trace_metadata as Record<string, unknown>
+      : null;
+    timelineItems.push({
+      kind: 'crew-restored',
+      trace,
+      crewName: (meta?.crew_name as string | undefined) || trace.event_source || undefined,
+    });
+  });
+
   crewSections.forEach(section => {
     if (section.start) {
       timelineItems.push({ kind: 'crew-start', trace: section.start, crewName: section.crewName });

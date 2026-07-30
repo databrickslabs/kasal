@@ -432,3 +432,37 @@ describe('processTraces — one clock for both transports', () => {
     expect(types.indexOf('llm')).toBeLessThan(types.indexOf('task_complete'));
   });
 });
+
+describe('restored crews on the spine', () => {
+  it('shows a crew the resume restored instead of dropping it', () => {
+    // Its event_source is 'crew', which the agent pass discards — so without
+    // run-level handling a resumed run's timeline showed only what re-ran.
+    const result = processTraces([
+      makeTrace({ event_source: 'flow', event_type: 'flow_started', event_context: 'flow',
+        created_at: '2026-07-30T10:00:00Z' }),
+      makeTrace({ event_source: 'crew', event_type: 'crew_checkpoint_restored',
+        event_context: 'crew', created_at: '2026-07-30T10:00:01Z',
+        trace_metadata: { crew_name: 'swiss news' } }),
+      makeTrace({ event_source: 'crew', event_type: 'crew_started', event_context: 'crew',
+        created_at: '2026-07-30T10:00:02Z', trace_metadata: { crew_name: 'send an email' } }),
+    ]);
+
+    const restored = result.timelineItems.filter(i => i.kind === 'crew-restored');
+    expect(restored).toHaveLength(1);
+    expect(restored[0].kind === 'crew-restored' && restored[0].crewName).toBe('swiss news');
+  });
+
+  it('puts restored crews before the crews that ran', () => {
+    const result = processTraces([
+      makeTrace({ event_source: 'crew', event_type: 'crew_started', event_context: 'crew',
+        created_at: '2026-07-30T10:00:02Z' }),
+      makeTrace({ event_source: 'crew', event_type: 'crew_checkpoint_restored',
+        event_context: 'crew', created_at: '2026-07-30T10:00:01Z',
+        trace_metadata: { crew_name: 'swiss news' } }),
+    ]);
+
+    const kinds = result.timelineItems.map(i => i.kind);
+    expect(kinds.indexOf('crew-restored')).toBeLessThan(kinds.indexOf('crew-start'));
+  });
+
+});

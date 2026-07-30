@@ -38,12 +38,14 @@ Four properties the recorder guarantees:
 - **Event-driven** — no hooks in business logic.
 
 Flow checkpoints used to be *derived* from execution traces rather than written.
-That is no longer how it works, and the reason matters: traces are **telemetry**.
-They can be sampled, truncated or retention-pruned for reasons that have nothing
-to do with resume, so a resume built on them degrades silently when a row is
-missing. Flow runs that predate the recorder still fall back to the trace
-reconstruction — those runs can never be backfilled — and anything reading one is
-told so, via a `derived` flag the UI shows as **Legacy checkpoint**.
+That is gone entirely. Traces are **telemetry**: they are retention-pruned on a
+schedule, and can be sampled, truncated or reshaped for reasons that have
+nothing to do with resume — so a crew whose trace row had aged out simply looked
+like it never ran, and the resume built a plausible result on top of the gap.
+
+A flow that ran before checkpoints were written therefore has none, and runs
+from the start. That is slower and correct; the alternative was a resume that
+quietly skipped work it could no longer see.
 
 ## Lifecycle
 
@@ -117,11 +119,10 @@ So you can edit anywhere in the flow, not just downstream of the resume point.
 An edited crew re-runs; everything genuinely unchanged is still reused.
 
 **One exception, and it is visible in the log.** Checkpoints written before
-identities existed — and trace-derived ones, which can never have them — carry
-no hash. Those crews are still skipped, exactly as they always were, and the run
-logs `Skipping crew 'X' UNVERIFIED`. Refusing them instead would have made every
-existing checkpoint worthless. Run the flow once more and its checkpoint gains
-identities.
+identities existed carry no hash. Those crews are still skipped, exactly as they
+always were, and the run logs `Skipping crew 'X' UNVERIFIED`. Refusing them
+instead would have made every existing checkpoint worthless. Run the flow once
+more and its checkpoint gains identities.
 
 ### When resume is unavailable
 
@@ -149,7 +150,9 @@ Resuming and expiring require the **Admin** or **Editor** role.
 The older flow-scoped endpoints (`/flows/{flow_id}/checkpoints`) still work and
 are scoped to a saved flow rather than to one run. They are deprecated: they are
 why crew runs had no checkpoint UI for so long, since checkpoints were filed
-under the thing being executed rather than under the execution.
+under the thing being executed rather than under the execution. They now read
+the same written checkpoints as everything else — a run with none does not
+appear.
 
 ## What is not checkpointed
 

@@ -11,7 +11,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.models.execution_status import ExecutionStatus
 
@@ -125,8 +125,15 @@ class CrewConfig(BaseModel):
     resume_from_flow_uuid: Optional[str] = Field(
         None, description="CrewAI state.id to resume flow from checkpoint"
     )
-    resume_from_execution_id: Optional[int] = Field(
-        None, description="Execution ID of checkpoint to resume from"
+    resume_from_execution_id: Optional[Union[int, str]] = Field(
+        None,
+        description=(
+            "Execution to resume from — either the integer row id or the "
+            "job_id. Both are accepted because both are sent: the flow resume "
+            "dialog has always passed the row id, while the backend resolves "
+            "it by job_id. Typing this as int alone made a job_id fail "
+            "validation, and an int silently match no execution."
+        ),
     )
     resume_from_crew_sequence: Optional[int] = Field(
         None,
@@ -508,6 +515,30 @@ class StopExecutionResponse(BaseModel):
     execution_id: str = Field(..., description="ID of the execution being stopped")
     status: str = Field(..., description="Current status of the execution")
     message: str = Field(..., description="Status message")
+
+    @field_validator("partial_results", mode="before")
+    @classmethod
+    def _wrap_non_dict_results(cls, value):
+        """Accept whatever the run actually produced.
+
+        ``partial_results`` is filled from ``ExecutionHistory.result``, a JSON
+        column that in practice holds a STRING — the run's final text. Typing it
+        as a dict alone meant stopping any run that had produced output failed
+        validation, so the stop reached the engine and then returned a 500. It
+        only looked healthy when the run was stopped before producing anything.
+
+        Non-dict values are wrapped rather than widened, so the shape stays
+        consistent with ``result`` elsewhere in this API, which the executions
+        route already coerces the same way.
+        """
+        if value is None or isinstance(value, dict):
+            return value
+        if isinstance(value, list):
+            return {"items": value}
+        if isinstance(value, bool):
+            return {"success": value}
+        return {"value": value}
+
     partial_results: Optional[Dict[str, Any]] = Field(
         None, description="Partial results if available"
     )

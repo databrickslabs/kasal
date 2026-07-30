@@ -117,7 +117,12 @@ class TestCrewRecorder:
         # Absence of the flag must never read as an assertion of fidelity.
         assert "truncated" not in unit
 
-    def test_clears_checkpoint_when_its_own_crew_completes(self):
+    def test_keeps_the_checkpoint_when_its_own_crew_completes(self):
+        """A crew checkpoint is a re-run point, not only crash recovery.
+
+        Clearing it on success made a completed run look like it had no
+        checkpoint, so you could not re-run from task 3 after editing task 4.
+        """
         crew = make_crew(1)
         recorder = CrewTaskCheckpointRecorder("job-1", crew)
         cleared = capture_clear(recorder)
@@ -125,7 +130,7 @@ class TestCrewRecorder:
         recorder._on_crew_completed(
             crew, CrewKickoffCompletedEvent(crew_name="c", output=None, total_tokens=0)
         )
-        assert cleared == [True]
+        assert cleared == []
 
     def test_another_crews_completion_is_ignored(self):
         crew = make_crew(1)

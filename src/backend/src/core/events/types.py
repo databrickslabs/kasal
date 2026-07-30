@@ -88,6 +88,26 @@ class CrewKickoffCompletedEvent(CrewBaseEvent):
     total_tokens: int = 0
 
 
+class CrewCheckpointRestoredEvent(CrewBaseEvent):
+    """A crew was RESTORED from a checkpoint instead of being executed.
+
+    Emitted by a flow resume for every crew it skips. Without it those crews
+    leave no trace at all, so a resumed run's timeline shows only the part that
+    re-ran and reads as a partial job.
+
+    Deliberately its OWN event rather than a synthetic CrewKickoffCompletedEvent:
+    that would put rows in the trace claiming work ran when it did not, and it
+    would also reach the checkpoint recorder, which would re-record the crew
+    from a stub that has no tasks and so overwrite a verified identity with an
+    unverifiable one.
+    """
+
+    output: Any
+    type: Literal["crew_checkpoint_restored"] = "crew_checkpoint_restored"
+    #: The run this output was originally produced by, when known.
+    restored_from: str | None = None
+
+
 class CrewKickoffStartedEvent(CrewBaseEvent):
     """Engine replacement for crewai.events.CrewKickoffStartedEvent"""
 

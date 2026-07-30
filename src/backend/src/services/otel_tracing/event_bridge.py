@@ -46,6 +46,13 @@ _EVENT_SPAN_MAP = {
     # Crew lifecycle
     "CrewKickoffStartedEvent": ("CrewAI.crew.kickoff", "crew_started"),
     "CrewKickoffCompletedEvent": ("CrewAI.crew.complete", "crew_completed"),
+    # A crew restored from a checkpoint rather than executed. Its own
+    # event_type so the timeline can show it as restored instead of passing it
+    # off as a run that happened.
+    "CrewCheckpointRestoredEvent": (
+        "kasal.crew.checkpoint_restored",
+        "crew_checkpoint_restored",
+    ),
     # Task lifecycle
     "TaskStartedEvent": ("CrewAI.task.execute", "task_started"),
     "TaskCompletedEvent": ("CrewAI.task.complete", "task_completed"),
@@ -292,6 +299,7 @@ _EVENT_CLASSES = [
     # Crew lifecycle
     ("src.core.events", "CrewKickoffStartedEvent"),
     ("src.core.events", "CrewKickoffCompletedEvent"),
+    ("src.core.events", "CrewCheckpointRestoredEvent"),
     # Agent execution
     ("src.core.events", "AgentExecutionStartedEvent"),
     ("src.core.events", "AgentExecutionCompletedEvent"),

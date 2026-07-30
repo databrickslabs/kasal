@@ -21,17 +21,15 @@ import { useUserPreferencesStore } from '../../store/userPreferencesStore';
 const FAILED_STATUSES = ['failed', 'stopped', 'cancelled'];
 
 /**
- * A SUCCESSFUL run is resumable too, but only for flows.
+ * A SUCCESSFUL run is resumable too.
  *
- * A flow keeps its checkpoint after completing, so it can be re-run from the
- * middle once a downstream crew changes — the upstream results are reused. A
- * crew discards its checkpoint on success (it is crash recovery, not a re-run
- * point), so offering the control on a completed crew run would be a dead
- * button on every successful row.
+ * Both crews and flows keep their checkpoint after completing, so either can be
+ * re-run from the middle after an edit, reusing the parts that were already
+ * good. The dialog says so plainly when a run turns out to have no checkpoint.
  *
  * The backend re-checks all of this; this only decides what to offer.
  */
-const RESUMABLE_ON_SUCCESS_TYPES = ['flow'];
+const COMPLETED_STATUS = 'completed';
 
 interface RunActionsProps {
   run: Run;
@@ -58,9 +56,7 @@ const RunActions: React.FC<RunActionsProps> = ({
 
   const status = run.status?.toLowerCase() || '';
   const isResumable =
-    FAILED_STATUSES.includes(status) ||
-    (status === 'completed' &&
-      RESUMABLE_ON_SUCCESS_TYPES.includes(run.execution_type || ''));
+    FAILED_STATUSES.includes(status) || status === COMPLETED_STATUS;
 
   const resumeButton = isResumable ? (
     <Tooltip title="View checkpoint and resume">

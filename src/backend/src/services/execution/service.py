@@ -1626,6 +1626,64 @@ class ExecutionService:
     # services/execution/checkpointing/lifecycle.py, so the endpoint, the UI's
     # "why is resume disabled" message and this method cannot disagree.
 
+    @staticmethod
+    def _build_flow_resume_config(source, stored_inputs, record, from_unit):
+        """Build the config and restored-unit count for resuming a FLOW.
+
+        A flow resumes by rebuilding itself from its saved nodes and edges and
+        SKIPPING the crews it already completed, replaying their stored output.
+        Which crews get skipped is driven by ``resume_from_crew_sequence``,
+        which names the crew to RUN (crews with a lower sequence are skipped).
+
+        Args:
+            source: The execution being resumed from
+            stored_inputs: Its stored inputs (nodes/edges/flow_config)
+            record: Its normalized checkpoint record, if any
+            from_unit: Optional crew sequence to resume AT
+
+        Returns:
+            ``(CrewConfig, restored_crew_count)``
+        """
+        from src.services.execution.checkpointing import ordered_units
+
+        units = ordered_units(record)
+
+        if from_unit not in (None, ""):
+            try:
+                resume_at = int(from_unit)
+            except (TypeError, ValueError):
+                raise ValueError(f"Invalid resume point '{from_unit}'")
+        elif units:
+            # Continue after everything recorded: the first crew that did not
+            # complete is one past the highest sequence stored.
+            resume_at = max(int(u["key"]) for u in units) + 1
+        else:
+            resume_at = None  # nothing recorded — run the whole flow
+
+        restored = sum(
+            1 for u in units if resume_at is None or int(u["key"]) < resume_at
+        )
+
+        return (
+            CrewConfig(
+                agents_yaml={},
+                tasks_yaml={},
+                inputs=stored_inputs.get("inputs") or {},
+                model=stored_inputs.get("model"),
+                execution_type="flow",
+                flow_id=stored_inputs.get("flow_id"),
+                nodes=stored_inputs.get("nodes"),
+                edges=stored_inputs.get("edges"),
+                flow_config=stored_inputs.get("flow_config"),
+                # The flow builder resolves this with get_execution_by_job_id,
+                # so it is the SOURCE run's job_id, not the integer row id.
+                resume_from_execution_id=source.job_id,
+                resume_from_flow_uuid=source.flow_uuid,
+                resume_from_crew_sequence=resume_at,
+            ),
+            restored,
+        )
+
     async def resume_execution(
         self,
         execution_id: str,
@@ -1699,29 +1757,42 @@ class ExecutionService:
             raise ValueError(f"Execution {execution_id} cannot be resumed: {blocker}")
 
         stored_inputs = source.inputs or {}
-        if not stored_inputs.get("agents_yaml") or not stored_inputs.get("tasks_yaml"):
-            raise ValueError(
-                f"Execution {execution_id} has no stored crew configuration to resume from"
-            )
-
         record = normalize(source.checkpoint_data)
-        checkpoint = build_crew_payload(record, from_unit=from_unit)
-        restored_units = len(checkpoint.get("completed") or []) if checkpoint else 0
 
-        config = CrewConfig(
-            agents_yaml=stored_inputs.get("agents_yaml") or {},
-            tasks_yaml=stored_inputs.get("tasks_yaml") or {},
-            inputs=stored_inputs.get("inputs") or {},
-            # Legacy executions may still carry a stored "planning" key; it is
-            # ignored on resume because CrewConfig no longer models planning.
-            reasoning=bool(stored_inputs.get("reasoning", False)),
-            model=stored_inputs.get("model"),
-            execution_type="crew",
-            schema_detection_enabled=stored_inputs.get(
-                "schema_detection_enabled", True
-            ),
-            resume_checkpoint=checkpoint,
-        )
+        # The two paths store completely different things and restart in
+        # completely different ways. A flow keeps nodes/edges/flow_config and
+        # replays completed CREWS; a crew keeps agents_yaml/tasks_yaml and
+        # replays completed TASKS. Running one through the other's config was a
+        # 409 on every flow resume, because a flow has no agents_yaml.
+        if execution_type == "flow":
+            config, restored_units = self._build_flow_resume_config(
+                source, stored_inputs, record, from_unit
+            )
+        else:
+            if not stored_inputs.get("agents_yaml") or not stored_inputs.get(
+                "tasks_yaml"
+            ):
+                raise ValueError(
+                    f"Execution {execution_id} has no stored crew configuration to resume from"
+                )
+
+            checkpoint = build_crew_payload(record, from_unit=from_unit)
+            restored_units = len(checkpoint.get("completed") or []) if checkpoint else 0
+
+            config = CrewConfig(
+                agents_yaml=stored_inputs.get("agents_yaml") or {},
+                tasks_yaml=stored_inputs.get("tasks_yaml") or {},
+                inputs=stored_inputs.get("inputs") or {},
+                # Legacy executions may still carry a stored "planning" key; it
+                # is ignored on resume because CrewConfig no longer models it.
+                reasoning=bool(stored_inputs.get("reasoning", False)),
+                model=stored_inputs.get("model"),
+                execution_type="crew",
+                schema_detection_enabled=stored_inputs.get(
+                    "schema_detection_enabled", True
+                ),
+                resume_checkpoint=checkpoint,
+            )
 
         new_execution_id = str(uuid.uuid4())
         run_name = source.run_name
@@ -1739,9 +1810,14 @@ class ExecutionService:
             ),
             "run_name": run_name,
             "created_at": datetime.now(),
-            "execution_type": "crew",
+            "execution_type": execution_type,
             "resumed_from_execution_id": source.id,
         }
+        if source.flow_id:
+            execution_data["flow_id"] = source.flow_id
+        if source.flow_uuid:
+            execution_data["flow_uuid"] = source.flow_uuid
+
         created = await ExecutionStatusService.create_execution(
             execution_data, group_context=group_context
         )
@@ -1785,7 +1861,7 @@ class ExecutionService:
             ExecutionService._run_in_background(
                 execution_id=new_execution_id,
                 config=config,
-                execution_type="crew",
+                execution_type=execution_type,
                 group_context=group_context,
                 session=self.session,
             )

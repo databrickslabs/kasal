@@ -285,11 +285,16 @@ class TestRunFlow:
             repo_instance = MagicMock()
             existing = MagicMock()
             existing.id = 42
-            repo_instance.get_execution_by_job_id = AsyncMock(return_value=existing)
+            job_uuid = "e089f9fd-d6ea-4565-96ee-f039d5925992"
+
+            # Only the SOURCE has a record; this job_id has none, which is what
+            # puts the call on the legacy in-place path.
+            async def by_job_id(value):
+                return existing if value == job_uuid else None
+
+            repo_instance.get_execution_by_job_id = AsyncMock(side_effect=by_job_id)
             repo_instance.get_execution_by_id = AsyncMock(return_value=None)
             MockRepo.return_value = repo_instance
-
-            job_uuid = "e089f9fd-d6ea-4565-96ee-f039d5925992"
             svc._run_dynamic_flow = AsyncMock(
                 return_value={"success": True, "result": "ok"}
             )
@@ -305,7 +310,10 @@ class TestRunFlow:
             )
 
             # Looked up by job_id (UUID), and int() fallback never attempted.
-            repo_instance.get_execution_by_job_id.assert_awaited_once_with(job_uuid)
+            # Two lookups now: this job_id (no record -> legacy path), then
+            # the source by job_id.
+            assert repo_instance.get_execution_by_job_id.await_count == 2
+            assert repo_instance.get_execution_by_job_id.await_args.args[0] == job_uuid
             repo_instance.get_execution_by_id.assert_not_awaited()
             assert result["status"] == FlowExecutionStatus.COMPLETED
 
@@ -412,10 +420,60 @@ class TestRunFlow:
             )
         assert exc_info.value.status_code == 500
 
+    # ---------------------------------------------------------------------------
+    # _get_required_providers
+    # ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# _get_required_providers
-# ---------------------------------------------------------------------------
+    @pytest.mark.asyncio
+    async def test_run_flow_checkpoint_resume_never_touches_the_source(self):
+        """A checkpoint resume runs under its OWN record.
+
+        It creates a new execution before handing over, so the run it was
+        resumed FROM must be left alone. Flipping the source back to RUNNING
+        left the finished run stuck at "running" and showed two live jobs for
+        one resume.
+        """
+        svc = self._service_with_mocks()
+        svc.db.commit = AsyncMock()
+
+        with patch(
+            "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
+        ) as MockRepo:
+            repo_instance = MagicMock()
+
+            own = MagicMock()
+            own.id = 99
+            own.status = "RUNNING"
+            source = MagicMock()
+            source.id = 42
+            source.status = "COMPLETED"
+
+            async def by_job_id(value):
+                return own if value == "new-job" else source
+
+            repo_instance.get_execution_by_job_id = AsyncMock(side_effect=by_job_id)
+            repo_instance.get_execution_by_id = AsyncMock(return_value=source)
+            MockRepo.return_value = repo_instance
+
+            svc._run_dynamic_flow = AsyncMock(
+                return_value={"success": True, "result": "ok"}
+            )
+
+            result = await svc.run_flow(
+                flow_id=None,
+                job_id="new-job",
+                config={
+                    "nodes": [{"id": "n1"}],
+                    "edges": [],
+                    "resume_from_execution_id": "source-job",
+                },
+            )
+
+            # Ran under its own record...
+            assert result["execution_id"] == 99
+            assert svc._run_dynamic_flow.await_args.args[0] == 99
+            # ...and the source keeps the terminal status it earned.
+            assert source.status == "COMPLETED"
 
 
 class TestGetRequiredProviders:

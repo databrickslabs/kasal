@@ -157,7 +157,16 @@ export interface CrewSection {
 export type TimelineItem =
   | { kind: 'crew-start'; trace: Trace; crewName?: string }
   | { kind: 'crew-end'; trace: Trace }
-  | { kind: 'agent'; agentIdx: number; nested: boolean };
+  | { kind: 'agent'; agentIdx: number; nested: boolean }
+  /**
+   * A crew a resume RESTORED from a checkpoint instead of running.
+   *
+   * Its own kind rather than a crew-start/end pair: it has no agents, no tasks
+   * and no duration, and rendering it as a normal crew would claim work
+   * happened that did not. Without it the timeline of a resumed run shows only
+   * the part that re-ran and reads as a partial job.
+   */
+  | { kind: 'crew-restored'; trace: Trace; crewName?: string };
 
 export interface ProcessedTraces {
   globalStart?: Date;

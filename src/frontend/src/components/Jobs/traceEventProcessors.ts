@@ -5,6 +5,7 @@
 
 import React from 'react';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import HistoryIcon from '@mui/icons-material/History';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import PreviewIcon from '@mui/icons-material/Preview';
 import TerminalIcon from '@mui/icons-material/Terminal';
@@ -733,6 +734,10 @@ export const ICON_CONFIG: Record<string, IconConfig> = {
   knowledge_operation: { Component: TimelineIcon, color: 'action' },
   crew_started: { Component: PlayCircleIcon, color: 'primary' },
   crew_completed: { Component: CheckCircleIcon, color: 'success' },
+  // A crew a resume RESTORED from a checkpoint rather than executed. Its own
+  // icon and colour on purpose: the timeline shows the whole flow, but restored
+  // work must not read as work that just ran.
+  crew_checkpoint_restored: { Component: HistoryIcon, color: 'info' },
   flow_started: { Component: PlayCircleIcon, color: 'primary' },
   flow_created: { Component: PlayCircleIcon, color: 'primary' },
   flow_completed: { Component: CheckCircleIcon, color: 'success' },

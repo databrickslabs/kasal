@@ -97,7 +97,8 @@ services/
   for a crew and a CREW for a flow, and that is the only difference. Written by
   an event-bus recorder, never derived from traces: telemetry can be sampled or
   retention-pruned for unrelated reasons, and a resume that silently degrades is
-  worse than one that reports "no checkpoint". Resume creates a NEW execution
+  worse than one that reports "no checkpoint". The trace reconstruction the flow
+  path used to fall back on has been DELETED — do not reintroduce it. Resume creates a NEW execution
   linked by `resumed_from_execution_id`; the failed run stays failed. The Chat
   path has none and must not get one. See `src/docs/CHECKPOINTING.md`.
 - **Guardrails**: build via `GuardrailFactory.create_guardrail` from

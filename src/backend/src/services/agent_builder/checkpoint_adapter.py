@@ -63,7 +63,23 @@ class CrewTaskCheckpointRecorder(CheckpointRecorder):
         # completion means this execution is done.
         if source is not None and source is not self._crew:
             return
-        self._clear()
+
+        # The checkpoint is KEPT, not cleared.
+        #
+        # It was cleared here originally, on the reasoning that a checkpoint is
+        # crash recovery and a run that finished has nothing to recover. That is
+        # true of a crash, and wrong about how crews are actually worked on: you
+        # run one, like the first three tasks, change the fourth, and want to
+        # re-run from there without redoing the first three. Discarding the
+        # checkpoint the moment a run succeeded made exactly that impossible,
+        # and made a successful run look like it had no checkpoint at all.
+        #
+        # Task identity (``Task.key``) means a restored task is verified before
+        # it is reused, so keeping it cannot silently replay stale work.
+        logger.info(
+            f"[CHECKPOINT] Crew {self._job_id} completed; checkpoint retained "
+            f"for re-runs"
+        )
 
     # ------------------------- unit construction -------------------------
 

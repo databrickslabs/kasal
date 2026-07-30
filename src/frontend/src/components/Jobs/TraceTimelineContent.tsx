@@ -26,6 +26,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import HistoryIcon from '@mui/icons-material/History';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import StorageIcon from '@mui/icons-material/Storage';
@@ -419,6 +420,39 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
                 One ordered stream rather than a nested tree — depth is carried by
                 `nested`, which indents a crew's agents under its banner. */}
             {timelineItems.map((item, itemIdx) => {
+              if (item.kind === 'crew-restored') {
+                // A crew a resume RESTORED rather than ran. Sits on the spine at
+                // crew level so the flow reads end to end, but is visibly not an
+                // execution: no duration, no agents, and its own icon/colour.
+                // Showing it as a normal crew would claim work that never
+                // happened; omitting it made a resumed run look like a partial.
+                return (
+                  <Box
+                    key={`${item.kind}-${itemIdx}`}
+                    sx={{
+                      ml: crewIndent,
+                      mt: itemIdx > 0 ? 2 : 0,
+                      mb: 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1,
+                    }}
+                  >
+                    <HistoryIcon color="info" fontSize="small" />
+                    <Typography variant="body2" color="text.secondary">
+                      RESTORED FROM CHECKPOINT
+                    </Typography>
+                    {item.crewName && (
+                      <Typography variant="body2" fontWeight="bold">{item.crewName}</Typography>
+                    )}
+                    <Tooltip title="This crew was not re-run. Its output was reused from the checkpoint of the run this was resumed from.">
+                      <Typography variant="caption" color="text.secondary">
+                        (not re-run)
+                      </Typography>
+                    </Tooltip>
+                  </Box>
+                );
+              }
               if (item.kind === 'crew-start' || item.kind === 'crew-end') {
                 // A crew is a CHILD of the flow, so it sits one level in from the
                 // FLOW STARTED / FLOW COMPLETED rows. Start and end are rendered

@@ -411,6 +411,33 @@ def collect_task_agents(task_list: List[Any]) -> List[Any]:
     return agents
 
 
+
+def _emit_checkpoint_restored(crew_name: str, output: Any) -> None:
+    """Put a restored crew on the trace, marked as restored.
+
+    A skipped crew used to emit nothing, so a resumed run's timeline showed
+    only the part that re-ran and read as a partial job. This gives it a row
+    of its own — ``crew_checkpoint_restored`` — rather than a synthetic
+    completion event, so the trace shows the whole flow WITHOUT claiming the
+    crew executed.
+
+    Fail-open: a trace row is never worth failing a run for.
+    """
+    try:
+        from src.core.events import event_bus
+        from src.core.events.types import CrewCheckpointRestoredEvent
+
+        event_bus.emit(
+            None,
+            CrewCheckpointRestoredEvent(crew_name=crew_name, output=output),
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            f"Could not emit checkpoint-restored event for '{crew_name}' "
+            f"(non-fatal): {e}"
+        )
+
+
 class FlowMethodFactory:
     """
     Factory for creating dynamic flow methods (starting points, listeners, routers).
@@ -1787,6 +1814,8 @@ class FlowMethodFactory:
                         f"  📦 Stored output in state['{method_name}'] and state['{crew_name}']"
                     )
 
+                _emit_checkpoint_restored(crew_name, result_output)
+
                 logger.info("=" * 80)
                 return result_output
 
@@ -1847,6 +1876,8 @@ class FlowMethodFactory:
                     logger.info(
                         f"  📦 Stored output in state['{method_name}'] and state['{crew_name}']"
                     )
+
+                _emit_checkpoint_restored(crew_name, result_output)
 
                 logger.info("=" * 80)
                 return result_output

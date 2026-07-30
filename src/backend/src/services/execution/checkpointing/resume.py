@@ -126,9 +126,9 @@ def build_flow_outputs(
 ) -> Dict[str, Any]:
     """Build ``{crew_name: output}`` for a flow resume.
 
-    This is the written-checkpoint replacement for
-    ``ExecutionTraceRepository.get_crew_outputs_for_resume``, which
-    reconstructed the same mapping from telemetry.
+    Reads only what the recorder wrote. The trace reconstruction this
+    replaced has been deleted: telemetry is retention-pruned, so a crew whose
+    trace row had aged out looked like it never ran.
     """
     if not record or record.get("kind") not in (KIND_FLOW, None):
         return {}

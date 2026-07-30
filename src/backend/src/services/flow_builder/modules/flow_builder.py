@@ -405,11 +405,7 @@ class FlowBuilder:
                 load_resume_outputs,
             )
 
-            (
-                checkpoint_outputs,
-                _checkpoint_derived,
-                checkpoint_identities,
-            ) = await load_resume_outputs(
+            checkpoint_outputs, checkpoint_identities = await load_resume_outputs(
                 resume_from_execution_id,
                 repositories,
                 from_unit=resume_from_crew_sequence,
