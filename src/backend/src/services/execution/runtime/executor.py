@@ -27,7 +27,10 @@ from src.core.events.types import (
     ToolUsageStartedEvent,
 )
 from src.core.llm.json_extraction import extract_json_dict
-from src.core.llm.transport.exceptions import ToolExecutionBlockedError
+from src.core.llm.transport.exceptions import (
+    ExecutionBudgetExceededError,
+    ToolExecutionBlockedError,
+)
 from src.services.tools.base import BaseTool, sanitize_tool_name
 
 logger = logging.getLogger(__name__)
@@ -260,6 +263,12 @@ def wrap_tool(
         return output
 
     run.__name__ = sanitize_tool_name(tool.name)
+    # Carried on the wrapper because the transport only ever sees these
+    # callables, never the BaseTool instances. `result_as_answer` has been a
+    # field on BaseTool and seeded per tool since the engine was vendored, and
+    # was plumbed all the way to the instance without anything reading it; the
+    # tool-call loop reads it here (see transport/tool_rounds).
+    run.result_as_answer = bool(getattr(tool, "result_as_answer", False))
     return run
 
 
@@ -378,6 +387,19 @@ def run_agent(
                 from_agent=agent,
             )
             break
+        except ExecutionBudgetExceededError:
+            # NOT transient, so not retryable. `messages` is built once above
+            # and never touched in the loop, and the deadline is recomputed
+            # fresh inside every `call_llm` — so a retry sends the identical
+            # prompt, the model makes the identical (slow) tool calls, and the
+            # identical budget blows again. Observed: three full rounds of
+            # deep-research searches spent to reach the outcome the first
+            # attempt already had.
+            #
+            # Hand it straight to Task._run_agent, which keeps the partial when
+            # on_budget_exceeded is 'degrade'. Modes that raise would have
+            # raised anyway, just three attempts later.
+            raise
         except Exception as e:
             last_error = e
             logger.warning("agent %r LLM call failed: %s", agent.role, e)

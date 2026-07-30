@@ -24,12 +24,31 @@ from src.core.events.types import (
 )
 
 from .base import BaseLLM
-from .budget import check_deadline, resolve_execution_budget, rounds_exhausted
+from .budget import (
+    check_deadline,
+    exhausted_mid_round,
+    resolve_execution_budget,
+    rounds_exhausted,
+    wrapup_conversation,
+)
 from .constants import CONTEXT_WINDOW_USAGE_RATIO, LLM_CONTEXT_WINDOW_SIZES
 from .exceptions import (
     LLMContextLengthExceededError,
     is_context_length_exceeded,
 )
+
+# Aliased: `function_calls` is the local variable name throughout the round
+# loops, and a module-level import of the same name would shadow confusingly.
+from .response_parsing import (
+    builtin_tool_outputs,
+    chat_token_usage,
+)
+from .response_parsing import function_calls as parse_function_calls
+from .response_parsing import (
+    reasoning_items,
+    responses_token_usage,
+)
+from .tool_rounds import run_chat_round, run_responses_round
 
 logger = logging.getLogger(__name__)
 
@@ -279,6 +298,41 @@ class OpenAICompletion(BaseLLM):
         conversation: list[dict[str, Any]] | None = None,
     ) -> None:
         check_deadline(deadline, rounds_done, self.model, conversation)
+
+    def _executor(
+        self, available_functions: dict[str, Callable[..., Any]] | None
+    ) -> Callable[[str, Any], Any]:
+        """A (name, arguments) -> result callable over this call's tool table."""
+        return lambda name, arguments: self._handle_tool_execution(
+            name, arguments, available_functions
+        )
+
+    def _answer_within_budget(
+        self,
+        error: Exception,
+        conversation: list[dict[str, Any]],
+        usage: dict[str, Any] | None,
+    ) -> tuple[str, dict[str, Any] | None, LLMCallType]:
+        """One last tool-less call, so a spent budget still yields an answer.
+
+        Raising discarded everything the agent had gathered — for a run eleven
+        searches deep, the worst available outcome. crewAI
+        (``handle_max_iterations_exceeded``) and LangChain
+        (``early_stopping_method="generate"``) both spend one call here instead.
+
+        No tools are passed, so the round loop returns immediately and cannot
+        recurse. If this call fails or says nothing, the original budget error
+        is raised as before and the degrade path still keeps the partial.
+        """
+        try:
+            text = self.call(wrapup_conversation(conversation))
+        except Exception as wrapup_failed:
+            logger.warning("wrap-up call after %s failed: %s", error, wrapup_failed)
+            raise error from wrapup_failed
+        if not (text and text.strip()):
+            raise error
+        logger.warning("budget spent (%s); answered from what was gathered", error)
+        return text, usage, LLMCallType.LLM_CALL
 
     def _estimate_tokens(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None
@@ -561,39 +615,27 @@ class OpenAICompletion(BaseLLM):
                 content = response.choices[0].message.content
             if function_calls and available_functions:
                 call_type = LLMCallType.TOOL_CALL
-                conversation.append(
-                    {
-                        "role": "assistant",
-                        "content": content,
-                        "tool_calls": [
-                            {
-                                "id": fc["id"],
-                                "type": "function",
-                                "function": {
-                                    "name": fc["name"],
-                                    "arguments": fc["arguments"],
-                                },
-                            }
-                            for fc in function_calls
-                        ],
-                    }
+                outcome = run_chat_round(
+                    conversation,
+                    content,
+                    function_calls,
+                    self._executor(available_functions),
+                    deadline,
+                    available_functions,
                 )
-                for fc in function_calls:
-                    result = self._handle_tool_execution(
-                        fc["name"], fc["arguments"], available_functions
-                    )
-                    conversation.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": fc["id"],
-                            "content": (
-                                result if result is not None else "Tool not found."
-                            ),
-                        }
+                if outcome.final_answer is not None:
+                    return outcome.final_answer, usage, call_type
+                if outcome.exhausted:
+                    return self._answer_within_budget(
+                        exhausted_mid_round(self.model, conversation),
+                        conversation,
+                        usage,
                     )
                 continue
             return content or "", usage, call_type
-        raise rounds_exhausted(rounds, self.model, conversation)
+        return self._answer_within_budget(
+            rounds_exhausted(rounds, self.model, conversation), conversation, usage
+        )
 
     def _stream_chat_completion(
         self, params: dict[str, Any]
@@ -658,50 +700,16 @@ class OpenAICompletion(BaseLLM):
         ]
         return "".join(chunks), usage, function_calls
 
+    # Delegates: the bodies live in response_parsing.py, but these names are a
+    # subclass contract (DatabricksResponsesLLM calls them; its tests patch
+    # them), so they stay methods.
     def _extract_chat_token_usage(self, response: Any) -> dict[str, Any] | None:
-        usage = getattr(response, "usage", None)
-        if usage is None:
-            return None
-        details = getattr(usage, "prompt_tokens_details", None)
-        return {
-            "prompt_tokens": getattr(usage, "prompt_tokens", 0),
-            "completion_tokens": getattr(usage, "completion_tokens", 0),
-            "total_tokens": getattr(usage, "total_tokens", 0),
-            "cached_prompt_tokens": (
-                getattr(details, "cached_tokens", 0) if details else 0
-            ),
-        }
+        return chat_token_usage(response)
 
     def _extract_function_calls_from_response(
         self, response: Any
     ) -> list[dict[str, Any]]:
-        """Normalized tool calls from a chat completion or a Responses object."""
-        calls: list[dict[str, Any]] = []
-        choices = getattr(response, "choices", None)
-        if choices:
-            tool_calls = getattr(choices[0].message, "tool_calls", None) or []
-            for tc in tool_calls:
-                function = getattr(tc, "function", None)
-                if function is not None:
-                    calls.append(
-                        {
-                            "id": tc.id,
-                            "name": function.name,
-                            "arguments": function.arguments,
-                        }
-                    )
-            return calls
-        for item in getattr(response, "output", None) or []:
-            if getattr(item, "type", None) == "function_call":
-                calls.append(
-                    {
-                        "id": getattr(item, "call_id", None)
-                        or getattr(item, "id", None),
-                        "name": item.name,
-                        "arguments": item.arguments,
-                    }
-                )
-        return calls
+        return parse_function_calls(response)
 
     # ----------------------------- responses api -----------------------------
 
@@ -817,22 +825,26 @@ class OpenAICompletion(BaseLLM):
             text, function_calls = self._handle_responses(response)
             if function_calls and available_functions:
                 call_type = LLMCallType.TOOL_CALL
-                for fc in function_calls:
-                    result = self._handle_tool_execution(
-                        fc["name"], fc["arguments"], available_functions
-                    )
-                    conversation.append(
-                        {
-                            "type": "function_call_output",
-                            "call_id": fc["id"],
-                            "output": (
-                                result if result is not None else "Tool not found."
-                            ),
-                        }
+                outcome = run_responses_round(
+                    conversation,
+                    function_calls,
+                    self._executor(available_functions),
+                    deadline,
+                    available_functions,
+                )
+                if outcome.final_answer is not None:
+                    return outcome.final_answer, usage, call_type
+                if outcome.exhausted:
+                    return self._answer_within_budget(
+                        exhausted_mid_round(self.model, conversation),
+                        conversation,
+                        usage,
                     )
                 continue
             return text, usage, call_type
-        raise rounds_exhausted(rounds, self.model, conversation)
+        return self._answer_within_budget(
+            rounds_exhausted(rounds, self.model, conversation), conversation, usage
+        )
 
     def _handle_responses(
         self,
@@ -859,37 +871,10 @@ class OpenAICompletion(BaseLLM):
         return text, self._extract_function_calls_from_response(response)
 
     def _extract_responses_token_usage(self, response: Any) -> dict[str, Any] | None:
-        usage = getattr(response, "usage", None)
-        if usage is None:
-            return None
-        return {
-            "prompt_tokens": getattr(usage, "input_tokens", 0),
-            "completion_tokens": getattr(usage, "output_tokens", 0),
-            "total_tokens": getattr(usage, "total_tokens", 0),
-        }
+        return responses_token_usage(response)
 
     def _extract_reasoning_items(self, response: Any) -> list[Any]:
-        return [
-            item
-            for item in (getattr(response, "output", None) or [])
-            if getattr(item, "type", None) == "reasoning"
-        ]
+        return reasoning_items(response)
 
     def _extract_builtin_tool_outputs(self, response: Any) -> list[dict[str, Any]]:
-        outputs = []
-        for item in getattr(response, "output", None) or []:
-            item_type = getattr(item, "type", "")
-            if item_type in (
-                "web_search_call",
-                "file_search_call",
-                "code_interpreter_call",
-                "computer_call",
-            ):
-                outputs.append(
-                    {
-                        "id": getattr(item, "id", None),
-                        "status": getattr(item, "status", None),
-                        "type": item_type,
-                    }
-                )
-        return outputs
+        return builtin_tool_outputs(response)

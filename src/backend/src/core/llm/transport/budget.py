@@ -71,6 +71,11 @@ def resolve_execution_budget(from_agent: Any) -> tuple[int, float | None]:
     return rounds, deadline
 
 
+def deadline_passed(deadline: float | None) -> bool:
+    """Whether the wall clock has run out. No deadline means never."""
+    return deadline is not None and time.monotonic() >= deadline
+
+
 def check_deadline(
     deadline: float | None,
     rounds_done: int,
@@ -78,12 +83,55 @@ def check_deadline(
     conversation: list[dict[str, Any]] | None = None,
 ) -> None:
     """Raise if the wall clock has run out, carrying the partial answer."""
-    if deadline is not None and time.monotonic() >= deadline:
+    if deadline_passed(deadline):
         raise ExecutionBudgetExceededError(
             f"max_execution_time exceeded after {rounds_done} tool round(s) "
             f"for model {model}.",
             partial=last_assistant_text(conversation),
         )
+
+
+def exhausted_mid_round(
+    model: str, conversation: list[dict[str, Any]] | None = None
+) -> ExecutionBudgetExceededError:
+    """The error for a clock that ran out WHILE a round's tools were running.
+
+    Distinct wording from ``check_deadline`` on purpose. That message reports
+    the round count and so read "exceeded after 1 tool round(s)" for a batch of
+    eleven searches — technically true (the check fires at the top of the next
+    round) and thoroughly misleading about where the time went.
+    """
+    return ExecutionBudgetExceededError(
+        f"max_execution_time exceeded during tool execution for model {model}.",
+        partial=last_assistant_text(conversation),
+    )
+
+
+#: Asked of the model when its budget is gone, in place of raising.
+#:
+#: crewAI (``force_final_answer``) and LangChain (``early_stopping_method=
+#: "generate"``) both spend one extra call here rather than discarding the turn,
+#: and both are right: an agent eleven searches deep has the material for an
+#: answer, and throwing it away to raise "did not converge" is the worst of the
+#: available outcomes. No tools are offered on this call, so it cannot open
+#: another round.
+FORCE_FINAL_ANSWER = (
+    "Your time budget for this task is spent. Stop using tools and answer now, "
+    "using only what you have already gathered. Do not start new research and "
+    "do not apologise for stopping — give your best possible answer from the "
+    "material above, and state briefly what is missing or unverified."
+)
+
+
+def wrapup_conversation(
+    conversation: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """``conversation`` plus the stop-and-answer instruction, as a new list.
+
+    A copy, not an append: the caller's list is still the live conversation the
+    partial answer is read from if this last call also fails.
+    """
+    return [*conversation, {"role": "user", "content": FORCE_FINAL_ANSWER}]
 
 
 def rounds_exhausted(
