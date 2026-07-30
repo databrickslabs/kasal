@@ -705,6 +705,52 @@ class OpenAICompletion(BaseLLM):
 
     # ----------------------------- responses api -----------------------------
 
+    def _responses_text_format(self) -> dict[str, Any] | None:
+        """``self.response_format`` as the Responses API's ``text.format``.
+
+        Same intent as the ``response_format`` param on chat completions, but the
+        two APIs disagree on the envelope: completions nests the schema under
+        ``json_schema``, Responses puts ``name``/``schema`` at the top level of
+        the format object. ``strict`` is what makes a required field actually
+        required rather than a suggestion.
+
+        Without this, ``response_format`` was accepted on the LLM and then never
+        sent for anything on the Responses API — the whole GPT-5/Codex family.
+        A schema that does not reach the endpoint is indistinguishable from no
+        schema, so a caller ends up trusting fields the model was never obliged
+        to return.
+
+        Accepts what callers actually set: a pydantic model, a dict already in
+        Responses shape, or one in completions shape (unwrapped here rather than
+        ignored, since copying the chat-completions form is the easy mistake).
+        Returns None only when nothing was requested or the dict is in neither
+        shape — and then no ``text`` param is sent at all.
+        """
+        fmt = self.response_format
+        if fmt is None:
+            return None
+        if isinstance(fmt, type) and issubclass(fmt, BaseModel):
+            return {
+                "type": "json_schema",
+                "name": fmt.__name__,
+                "schema": fmt.model_json_schema(),
+                "strict": True,
+            }
+        if isinstance(fmt, dict):
+            # Already a Responses-shaped format object.
+            if "schema" in fmt or fmt.get("type") == "json_object":
+                return fmt
+            # A completions-shaped one — unwrap the nested envelope.
+            nested = fmt.get("json_schema")
+            if isinstance(nested, dict) and "schema" in nested:
+                return {
+                    "type": "json_schema",
+                    "name": nested.get("name", "response"),
+                    "schema": nested["schema"],
+                    "strict": nested.get("strict", True),
+                }
+        return None
+
     def _prepare_responses_params(
         self,
         messages: list[dict[str, Any]],
@@ -724,6 +770,15 @@ class OpenAICompletion(BaseLLM):
             params["temperature"] = self.temperature
         if self.reasoning_effort is not None:
             params["reasoning"] = {"effort": self.reasoning_effort}
+        # Structured output, spelled the Responses way. The chat-completions path
+        # sends `response_format`; this API takes `text.format` with the schema
+        # inline. Without this branch `response_format` was accepted on the LLM
+        # and then silently dropped for the whole GPT-5/Codex family — which is
+        # indistinguishable from having no schema at all, and is how a caller
+        # ends up trusting fields the model never had to return.
+        text_format = self._responses_text_format()
+        if text_format is not None:
+            params["text"] = {"format": text_format}
         if tools:
             params["tools"] = [
                 (

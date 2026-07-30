@@ -10,6 +10,8 @@ transport takes whichever comes first.
 import time
 from types import SimpleNamespace
 
+from pydantic import BaseModel
+
 from src.core.llm.transport.completion import OpenAICompletion
 from src.services.execution.runtime import Agent as _AgentBase
 
@@ -102,3 +104,68 @@ class TestCrewStampsTheDeadline:
         )
         crew.kickoff()
         assert agent.run_deadline is None
+
+
+class TestStructuredOutputReachesBothApis:
+    """A schema must be sent on the path the request actually takes.
+
+    Chat completions take `response_format`; the Responses API takes
+    `text.format` with the schema inline. Only the first was implemented, so
+    setting `response_format` on a GPT-5/Codex model — the whole family that runs
+    on the Responses API — was accepted and then silently dropped. A schema that
+    never reaches the endpoint is indistinguishable from no schema, which is how
+    a caller ends up trusting fields the model was never required to return: a
+    4.3k-char prompt asked gpt-5-3-codex for scope/produces/needs_tools and it
+    replied with none of them.
+    """
+
+    class _Shape(BaseModel):
+        name: str
+        needed: bool
+
+    def test_the_responses_api_gets_the_schema(self):
+        llm = OpenAICompletion(model="gpt-5-3-codex", api="responses")
+        llm.response_format = self._Shape
+        params = llm._prepare_responses_params([{"role": "user", "content": "x"}])
+        fmt = params["text"]["format"]
+        assert fmt["type"] == "json_schema"
+        assert fmt["name"] == "_Shape"
+        assert fmt["schema"]["required"] == ["name", "needed"]
+
+    def test_strict_is_set_because_that_is_what_binds_the_fields(self):
+        """Without strict, "required" is a suggestion."""
+        llm = OpenAICompletion(model="gpt-5-3-codex", api="responses")
+        llm.response_format = self._Shape
+        params = llm._prepare_responses_params([{"role": "user", "content": "x"}])
+        assert params["text"]["format"]["strict"] is True
+
+    def test_chat_completions_still_use_their_own_envelope(self):
+        """The two APIs disagree on shape; neither may be given the other's."""
+        llm = OpenAICompletion(model="some-model")
+        llm.response_format = self._Shape
+        params = llm._prepare_completion_params([{"role": "user", "content": "x"}])
+        assert params["response_format"]["type"] == "json_schema"
+        assert params["response_format"]["json_schema"]["name"] == "_Shape"
+
+    def test_no_schema_requested_sends_no_format(self):
+        llm = OpenAICompletion(model="gpt-5-3-codex", api="responses")
+        params = llm._prepare_responses_params([{"role": "user", "content": "x"}])
+        assert "text" not in params
+
+    def test_a_responses_shaped_dict_passes_through(self):
+        llm = OpenAICompletion(model="gpt-5-3-codex", api="responses")
+        llm.response_format = {"type": "json_object"}
+        params = llm._prepare_responses_params([{"role": "user", "content": "x"}])
+        assert params["text"]["format"] == {"type": "json_object"}
+
+    def test_a_completions_shaped_dict_is_translated(self):
+        """Callers copying the chat-completions form must not be silently
+        ignored — that is the bug this whole class exists for."""
+        llm = OpenAICompletion(model="gpt-5-3-codex", api="responses")
+        llm.response_format = {
+            "type": "json_schema",
+            "json_schema": {"name": "Thing", "schema": {"type": "object"}},
+        }
+        params = llm._prepare_responses_params([{"role": "user", "content": "x"}])
+        fmt = params["text"]["format"]
+        assert fmt["name"] == "Thing" and fmt["schema"] == {"type": "object"}

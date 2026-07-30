@@ -416,6 +416,7 @@ class LLMManager:
         extra_headers: Optional[Dict[str, str]] = None,
         fallback_drop_system_on_400: bool = False,
         with_served_model: bool = False,
+        response_format: Optional[Any] = None,
     ) -> Union[str, Tuple[str, str]]:
         """
         Unified async completion method that routes through CrewAI's LLM class.
@@ -449,6 +450,14 @@ class LLMManager:
         """
         group_id = LLMManager._get_group_id_from_context(required=True)
         llm = await LLMManager.configure_kasal_llm(model, group_id, temperature)
+        if response_format is not None:
+            # Constrains the REQUEST: the transport turns a pydantic model into a
+            # {"type": "json_schema", …} param, so a required field cannot be
+            # omitted from the reply. Deliberately NOT passed as ``call``'s
+            # ``response_model``, which would coerce the reply into the model —
+            # this method's own logging and its 38+ callers expect a str, and the
+            # callers that want structure already parse the JSON themselves.
+            llm.response_format = response_format
         # The model that actually serves this call — configure_kasal_llm may have
         # substituted one. Reporting the requested name is what made the logs
         # claim a Databricks model ran on a workspace where no Databricks
