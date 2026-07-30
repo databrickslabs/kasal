@@ -61,6 +61,13 @@ export interface ChatInputPlusMenuProps {
   /** Model catalogue — decides whether reasoning can do anything, and lists
    *  the manager models for the hierarchical process. */
   models: ReasoningModelCatalogue & Record<string, { name?: string } | undefined>;
+  /**
+   * The composer's currently selected model. Counted alongside the canvas
+   * agents' models when deciding whether reasoning is available, because it is
+   * what generation stamps on the agents it is about to create — without it the
+   * menu blames a stale canvas agent for a model the user has just changed.
+   */
+  selectedModel?: string;
   /** The whole menu is unavailable while a run is in flight. */
   disabled?: boolean;
 }
@@ -119,6 +126,7 @@ const ChatInputPlusMenu: React.FC<ChatInputPlusMenuProps> = ({
   attachDisabled = false,
   attachDisabledReason,
   models,
+  selectedModel,
   disabled = false,
 }) => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
@@ -135,7 +143,7 @@ const ChatInputPlusMenu: React.FC<ChatInputPlusMenuProps> = ({
     setReasoningConfig,
   } = useCrewExecutionStore();
 
-  const { agentModelNames, supported: reasoningSupported } = useReasoningSupport(models);
+  const { agentModelNames, supported: reasoningSupported } = useReasoningSupport(models, selectedModel);
 
   // What the user changed away from the defaults, so hidden state stays
   // discoverable — the one real cost of moving settings into a menu.

@@ -30,6 +30,7 @@ export type ReasoningModelCatalogue = Record<
 
 export function useReasoningSupport(
   models: ReasoningModelCatalogue,
+  selectedModel?: string,
 ): ReasoningSupport {
   // Canvas nodes come from the ACTIVE TAB, not useWorkflowStore: that store has
   // a single shared nodes array that goes stale when switching between the crew
@@ -38,18 +39,28 @@ export function useReasoningSupport(
     (s) => s.tabs.find((t) => t.id === s.activeTabId)?.nodes,
   );
 
+  // The models the NEXT run could actually use — both halves matter.
+  //
+  // The agents already on the canvas keep whatever llm they were created with.
+  // But the composer's selected model is what generation stamps on the agents it
+  // is about to create (WorkflowChatRefactored dispatches with `model:
+  // selectedModel`), so leaving it out produced the reported bug exactly: pick a
+  // GPT model in the composer, and the menu still reported the canvas's stale
+  // Qwen agent as the reason reasoning was unavailable — naming a model the user
+  // had just replaced.
   const agentModelNames = useMemo(() => {
     const seen = new Set<string>();
+    if (selectedModel) seen.add(selectedModel);
     for (const node of activeTabNodes || []) {
       if (node.type !== 'agentNode') continue;
       const llm = (node.data as { llm?: string } | undefined)?.llm;
       if (llm) seen.add(llm);
     }
     return Array.from(seen);
-  }, [activeTabNodes]);
+  }, [activeTabNodes, selectedModel]);
 
-  // Enabled when ANY agent's model has a budget: a mixed crew still benefits,
-  // and the engine applies the effort per agent.
+  // Enabled when ANY candidate has a budget: a mixed crew still benefits, and
+  // the engine applies the effort per agent.
   const supported = useMemo(
     () => agentModelNames.some((key) => models[key]?.supports_reasoning_effort),
     [agentModelNames, models],

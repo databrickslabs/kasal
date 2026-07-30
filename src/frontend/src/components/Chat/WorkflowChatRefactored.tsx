@@ -1947,6 +1947,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                   <ChatInputPlusMenu
                     onAddFiles={() => knowledgeUploadRef.current?.open()}
                     models={models}
+                    selectedModel={selectedModel}
                     disabled={isLoading || !!executingJobId}
                     attachDisabled={
                       !nodes.some(n => n.type === 'agentNode') ||
