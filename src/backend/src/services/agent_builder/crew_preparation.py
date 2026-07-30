@@ -715,46 +715,33 @@ class CrewPreparation:
                     execution_name=execution_name,
                 )
 
-                # Self-hosted vLLM: CrewAI engages NATIVE tool-calling only when the
-                # executing AGENT carries the tools (the executor gates native mode on
-                # bool(original_tools), populated from agent.tools — NOT task.tools).
-                # The dispatcher frequently attaches tools to the TASK with an empty
-                # agent.tools, so the agent's executor is built with zero tools, native
-                # calling never engages, and Qwen3-Coder falls back to ReAct text and
-                # skips the tool entirely. Mirror the task's resolved tools onto its
-                # agent and rebuild the executor so they are present at execution.
-                # Scoped to vLLM agents (the VLLMFunctionCallingLLM subclass) so
-                # Databricks/other providers are unaffected. De-dup by tool name.
-                try:
-                    from src.services.llm.handlers.vllm import VLLMFunctionCallingLLM
-
-                    task_tools = getattr(task, "tools", None) or []
-                    if task_tools and isinstance(
-                        getattr(agent, "llm", None), VLLMFunctionCallingLLM
-                    ):
-                        existing = {
-                            getattr(t, "name", id(t)) for t in (agent.tools or [])
-                        }
-                        added = [
-                            t
-                            for t in task_tools
-                            if getattr(t, "name", id(t)) not in existing
-                        ]
-                        if added:
-                            agent.tools = list(agent.tools or []) + added
-                            if hasattr(agent, "create_agent_executor"):
-                                agent.create_agent_executor(tools=agent.tools)
-                            logger.info(
-                                f"[CrewPreparation] Propagated {len(added)} task tool(s) onto "
-                                f"agent '{agent_name}' for native vLLM tool-calling: "
-                                f"{[getattr(t, 'name', '?') for t in added]} "
-                                f"(agent.tools={len(agent.tools)})"
-                            )
-                except Exception as _prop_err:
-                    logger.warning(
-                        f"[CrewPreparation] Could not propagate task tools to agent "
-                        f"'{agent_name}': {_prop_err}"
-                    )
+                # A vLLM workaround used to live here: it copied each task's
+                # resolved tools onto its AGENT, because crewAI engaged native
+                # tool-calling only when `agent.tools` was populated (its executor
+                # gated native mode on `bool(original_tools)`, taken from the agent,
+                # not the task). Without it Qwen3-Coder fell back to ReAct text and
+                # skipped the tool.
+                #
+                # Both halves of that are gone. The engine passes a task's tools
+                # straight into the LLM call (`Agent.execute_task` → `run_agent` →
+                # `build_tool_context` → `call_llm(tools=…)`), so native calling now
+                # depends on what is PASSED, and `Agent.create_agent_executor` — the
+                # rebuild the workaround relied on — is a documented no-op ("the
+                # engine builds execution state per call").
+                #
+                # So its only surviving effect was the mutation, and the mutation
+                # leaked: `agent.tools` persisted for the agent's WHOLE run, and
+                # `Agent.execute_task` falls back to `task.tools or self.tools`
+                # (with `Task._run_agent` collapsing an empty list to None on the
+                # way). A later task configured with NO tools therefore inherited
+                # the earlier task's. Run 2d7133e2 is the shape of it: task 2's run
+                # config read `tools: (none)` and it made three PerplexityTool calls
+                # anyway — after its own task_started and llm_call spans, so it was
+                # genuinely executing them, not mis-attributed. Every generation-side
+                # fix for that duplicate search was aimed at the wrong layer.
+                #
+                # NOT replaced with a per-task assign/restore: nothing needs the
+                # agent to hold them any more.
 
                 self.tasks.append(task)
                 # Store in our dictionary for context resolution
