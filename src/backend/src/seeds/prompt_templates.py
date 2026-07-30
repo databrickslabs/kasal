@@ -148,6 +148,12 @@ GENERATE_TASK_TEMPLATE = """You are an expert at designing AI task configuration
 {"name": "concise, descriptive name", "description": "what the task does — context, objectives, methodology (>= 20 words)", "expected_output": "specific deliverable — sections, structure, quality standards (>= 15 words)", "tools": [], "llm_guardrail": {"description": "validation criteria aligned with expected_output"}}
 Omit every other field — the platform fills defaults (async_execution, retries, priority, dependencies, etc.). Do NOT set output_file, output_json, or output_pydantic.
 
+SCOPE — obey it when the request gives you one:
+- You are writing ONE task inside a crew. When the request states this task's SCOPE, describe ONLY that. The other tasks cover the rest, and repeating their work makes the crew do the same job several times.
+- When the request states what this task RECEIVES from earlier tasks, treat that as already done and available. Do not re-do it; build on it.
+- When the request states what this task PRODUCES, your expected_output describes that artifact and no more.
+- Do not restate the crew's overall goal as this task's description. A narrow, specific task is correct even when the user's request was broad.
+
 QUALITY:
 - description: >= 20 words, detailed (context, objectives, methodology). expected_output: >= 15 words, specific about content and structure. No placeholders like "TBD"/"N/A".
 - llm_guardrail.description: write one for EVERY task, aligned with expected_output, answering "what makes this task's output valid and complete?" (e.g. "Must contain clear methodology, data-backed findings, and actionable recommendations.").
@@ -224,14 +230,14 @@ Count the distinct action verbs in the user's message. Each distinct verb typica
 - 3+ verbs = match the verb count up to the stated maximum
 When verbs are closely related sub-steps of one action (e.g., "extract, transform, and load" = ETL), they MAY be combined into a single task. Use the minimum number of agents needed to cover the tasks.
 
-OUTPUT — respond with ONLY this JSON shape (no markdown, no commentary):
-{"complexity": "light|standard|complex", "process_type": "sequential|parallel", "agents": [{"name": "...", "role": "..."}], "tasks": [{"name": "...", "assigned_agent": "...", "context": []}]}
+OUTPUT — ONLY this JSON, no markdown or commentary. The response schema defines every field; obey its descriptions:
+{"complexity", "process_type", "agents": [{"name", "role"}], "tasks": [{"name", "assigned_agent", "context", "scope", "produces"}]}
 
 Rules:
 1. Every task's assigned_agent must be the name of one of the agents.
 2. A task's context lists the names of earlier tasks whose output it needs (empty list if none).
 3. Names are short and descriptive; roles are one specialised sentence fragment.
-4. Do NOT include descriptions, goals, backstories, or tools.
+4. Do NOT include descriptions, goals, backstories, or tool names.
 5. Every agent MUST be the assigned_agent of at least one task — an agent with no task is discarded."""
 
 GENERATE_CREW_TEMPLATE = """You are an expert at creating AI crews. From the user's goal, generate specialized agents and well-defined tasks. Each task is assigned to one agent and may depend on earlier tasks.

@@ -21,6 +21,7 @@ from src.repositories.log_repository import LLMLogRepository
 from src.schemas.crew import (
     CrewGenerationRequest,
     CrewGenerationResponse,
+    CrewPlan,
     CrewStreamingRequest,
 )
 from src.schemas.task_generation import Agent as TaskGenAgent
@@ -449,6 +450,9 @@ class ProgressiveGenerationMixin:
                         )
                         agent_results: List[Dict[str, Any]] = []
                         task_results: List[Dict[str, Any]] = []
+                        # Plan-task name -> tool ids it received, so a task cannot
+                        # re-take a tool one of its dependencies already holds.
+                        tools_by_task: Dict[str, List[Any]] = {}
                         global_task_index = 0
 
                         # If no persistent memory backend is configured, disable memory on
@@ -561,10 +565,8 @@ class ProgressiveGenerationMixin:
                                     )
 
                                     task_request = TaskGenerationRequest(
-                                        text=(
-                                            f"Create a task named '{task_name}' "
-                                            f"for a crew that: {request.prompt}. "
-                                            f"THIS SPECIFIC TASK is '{task_name}'."
+                                        text=self._task_brief(
+                                            task_plan, task_name, request.prompt
                                         ),
                                         model=model,
                                         agent=agent_context,
@@ -580,23 +582,16 @@ class ProgressiveGenerationMixin:
                                         task_plan, agent_results
                                     )
 
-                                    # Convert tool names to DB IDs
-                                    task_tool_ids = [
-                                        tool_name_to_id_map[
-                                            (
-                                                t.get("name")
-                                                if isinstance(t, dict)
-                                                else str(t)
-                                            )
-                                        ]
-                                        for t in (task_response.tools or [])
-                                        if (
-                                            t.get("name")
-                                            if isinstance(t, dict)
-                                            else str(t)
-                                        )
-                                        in tool_name_to_id_map
-                                    ]
+                                    task_tool_ids = self._task_tool_ids(
+                                        task_response.tools,
+                                        tool_name_to_id_map,
+                                        self._ancestor_tool_ids(
+                                            task_plan, plan_tasks, tools_by_task
+                                        ),
+                                    )
+                                    tools_by_task[str(task_plan.get("name") or "")] = (
+                                        task_tool_ids
+                                    )
 
                                     task_data = {
                                         "name": task_response.name,
@@ -694,9 +689,8 @@ class ProgressiveGenerationMixin:
                                 )
 
                                 task_request = TaskGenerationRequest(
-                                    text=(
-                                        f"Create a task named '{task_name}' "
-                                        f"for a crew that: {request.prompt}"
+                                    text=self._task_brief(
+                                        task_plan, task_name, request.prompt
                                     ),
                                     model=model,
                                     agent=agent_context,
@@ -710,16 +704,16 @@ class ProgressiveGenerationMixin:
                                     task_plan, agent_results
                                 )
 
-                                task_tool_ids = [
-                                    tool_name_to_id_map[
-                                        t.get("name") if isinstance(t, dict) else str(t)
-                                    ]
-                                    for t in (task_response.tools or [])
-                                    if (
-                                        t.get("name") if isinstance(t, dict) else str(t)
-                                    )
-                                    in tool_name_to_id_map
-                                ]
+                                task_tool_ids = self._task_tool_ids(
+                                    task_response.tools,
+                                    tool_name_to_id_map,
+                                    self._ancestor_tool_ids(
+                                        task_plan, plan_tasks, tools_by_task
+                                    ),
+                                )
+                                tools_by_task[str(task_plan.get("name") or "")] = (
+                                    task_tool_ids
+                                )
 
                                 task_data = {
                                     "name": task_response.name,
@@ -1110,7 +1104,28 @@ class ProgressiveGenerationMixin:
                 f"distinct action verbs in the message."
             )
 
-        user_message = request.prompt + cap_instruction
+        # Plan against what the USER actually asked, not a restatement of it.
+        #
+        # ChatMode reaches this through the dispatcher, which passes its LLM
+        # rewrite (``suggested_prompt``) as ``prompt`` and keeps the real message
+        # in ``original_prompt``. The rewrite reliably grows steps: "gather the
+        # latest innovation around agent memory and give me a table" came back as
+        # "Research AND compile a table …, INCLUDING the innovation name and
+        # citation links", and since the constraint below asks the planner to
+        # match task count to the distinct action verbs in the message, those
+        # manufactured verbs became manufactured tasks — three agents, three
+        # tasks, two of them separately searching the web for the same thing.
+        # The crew canvas plans against the typed message and produces the right
+        # crew, which is the same code doing better work on better input.
+        #
+        # The rewrite is not discarded: it still grounds the RUN (crews.py's
+        # "USER REQUEST" block) and still shapes each task's write-up. It just no
+        # longer decides how many tasks there are.
+        typed = getattr(request, "original_prompt", None)
+        planning_prompt = (
+            typed if isinstance(typed, str) and typed.strip() else request.prompt
+        )
+        user_message = planning_prompt + cap_instruction
 
         messages = [
             # Exemplars go on the SYSTEM message so they cannot displace the
@@ -1164,6 +1179,12 @@ class ProgressiveGenerationMixin:
             model=model,
             temperature=0.3,
             max_tokens=4000,
+            # The shape is REQUIRED of the model, not merely described to it.
+            # Asked in prose for scope/produces/needs_tools, gpt-5-3-codex read a
+            # 4.3k-char instruction carrying all three and answered with the old
+            # three-field shape and six tasks for a two-task request. A field a
+            # model may decline to emit cannot be built on.
+            response_format=CrewPlan,
         )
 
         # Log via an independent session (the request-scoped session is closed
@@ -1254,6 +1275,150 @@ class ProgressiveGenerationMixin:
                     backstory=agent.get("backstory", ""),
                 )
         return None
+
+    @staticmethod
+    def _task_brief(task_plan: Dict[str, Any], task_name: str, crew_prompt: str) -> str:
+        """What to tell the LLM that writes ONE task's description.
+
+        This used to be the task's name plus the WHOLE user request, and nothing
+        about the other tasks. Each task is written by its own call, so N calls
+        were each asked to satisfy the entire request — and each did. Asked to
+        "gather the latest innovations in agent memory and give me a table", all
+        three tasks came back describing gathering, all three took
+        PerplexityTool, and run 499624b2 spent 4 searches on one question, two of
+        them differing only by a hyphen.
+
+        The plan already decided the division of work; it just was not passed on.
+        So the brief now leads with this task's SCOPE, names what it RECEIVES
+        from earlier tasks and what it must PRODUCE, and carries the user's
+        request only as background. The template's SCOPE section tells the model
+        what to do with those.
+
+        Only data goes in here — the instructions live in the generate_task
+        template, which is DB-backed and editable. When the plan supplies no
+        scope (an older plan, or a model that dropped the field) the wording
+        falls back to exactly what it was before, so nothing regresses.
+        """
+        scope = " ".join(str(task_plan.get("scope") or "").split())
+        produces = " ".join(str(task_plan.get("produces") or "").split())
+        context_names = [
+            str(name).strip()
+            for name in (task_plan.get("context") or [])
+            if str(name).strip()
+        ]
+
+        if not scope and not produces and not context_names:
+            return (
+                f"Create a task named '{task_name}' for a crew that: "
+                f"{crew_prompt}. THIS SPECIFIC TASK is '{task_name}'."
+            )
+
+        lines = [f"Create a task named '{task_name}'."]
+        if scope:
+            lines.append(f"THIS TASK'S SCOPE — its only responsibility: {scope}")
+        if context_names:
+            lines.append(
+                "It RECEIVES the output of these earlier tasks, already done: "
+                + ", ".join(context_names)
+            )
+        if produces:
+            lines.append(f"It PRODUCES: {produces}")
+        # Last, and labelled as background: leading with it is what made every
+        # task restate the whole job.
+        lines.append(f"For background, the crew as a whole: {crew_prompt}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _ancestor_tool_ids(
+        task_plan: Dict[str, Any],
+        plan_tasks: List[Dict[str, Any]],
+        tools_by_task: Dict[str, List[Any]],
+    ) -> set:
+        """Tool ids already held by the tasks this one depends on, transitively.
+
+        The one thing neither the prompt nor the schema could fix. Told that
+        "find the sources" and "collect their links" are the same lookup, given a
+        schema that REQUIRED an answer, and finally planning against the user's
+        own words with no rewrite in the way, the planner still returned:
+
+            {"name": "Extract Citation Links",
+             "context": ["Gather Latest Innovation Information"],
+             "needs_tools": true}
+
+        A second web search for links the first search had already returned. Runs
+        97ff3d3a and after spent PerplexityTool on both tasks.
+
+        A dependency is the crew stating "this task receives that task's output",
+        so re-taking the same capability along that chain is doing the upstream
+        task's work again. That is a structural fact about the plan, not a
+        judgement, so it is settled here instead of argued about in a prompt.
+
+        Keyed on the TOOL, not on the kind of work — which is what keeps it
+        general. A "fetch the numbers -> publish the dashboard" chain is
+        untouched, because the publisher's tool is a different one. And it follows
+        only dependencies, so independent tasks in a fan-out ("one for sports, one
+        for politics") still share a tool: they act on different subjects.
+        """
+        by_name = {
+            str(t.get("name") or ""): t for t in plan_tasks if isinstance(t, dict)
+        }
+        seen: set = set()
+        frontier = [
+            str(name).strip() for name in (task_plan.get("context") or []) if name
+        ]
+        held: set = set()
+        while frontier:
+            name = frontier.pop()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            held.update(tools_by_task.get(name, []))
+            ancestor = by_name.get(name)
+            if isinstance(ancestor, dict):
+                frontier.extend(
+                    str(n).strip() for n in (ancestor.get("context") or []) if n
+                )
+        return held
+
+    @staticmethod
+    def _task_tool_ids(
+        tools: Optional[List[Any]],
+        name_to_id: Dict[str, Any],
+        exclude: Optional[set] = None,
+    ) -> List[Any]:
+        """Map generated tool NAMES onto workspace tool ids.
+
+        ``exclude`` carries the tools this task's dependencies already hold (see
+        ``_ancestor_tool_ids``) — the one structural rule applied here, because a
+        prompt rule is a preference and a model can name a tool it was never
+        offered. An unknown name is dropped rather than failing the whole
+        generation: the model is told to use only the names it was given, but it
+        is a model.
+
+        There is deliberately no "this task may not use tools" flag. One existed,
+        driven by the plan's ``needs_tools``, and it turned a planner misjudgement
+        into a capability loss: asked to "gather swiss news and create a
+        presentation and send it to <address>", the planner marked *Gather Swiss
+        News* as needing no tools, so the search task was never shown the tool
+        list and ran blind, while *Send Presentation via Email* — the only task
+        the plan marked — took the workspace's only tool, PerplexityTool, which
+        cannot send anything. The dependency rule alone gets that plan right:
+        gather keeps the tool, the two tasks downstream of it do not.
+        """
+        already_held = exclude or set()
+        resolved: List[Any] = []
+        for entry in tools or []:
+            name = entry.get("name") if isinstance(entry, dict) else str(entry)
+            if not name or name not in name_to_id:
+                continue
+            tool_id = name_to_id[name]
+            if tool_id in already_held:
+                logger.info(
+                    "Dropping %s: a task this one depends on already holds it", name
+                )
+                continue
+            resolved.append(tool_id)
+        return resolved
 
     @staticmethod
     def _resolve_agent_id(

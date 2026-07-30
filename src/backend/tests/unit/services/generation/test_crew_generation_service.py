@@ -4350,3 +4350,312 @@ class TestChatFastPath:
             await svc.create_crew_progressive(req, None, "gen-1", mlflow_enabled=False)
         fast.assert_not_called()
         plan.assert_awaited_once()
+
+
+class TestThePlanDividesTheWork:
+    """Each task is written up by its own LLM call. Those calls used to receive
+    the task's name and the WHOLE user request, and nothing about the other
+    tasks — so N calls were each asked to satisfy the entire request, and each
+    did. Asked to "gather the latest innovations in agent memory and give me a
+    table", all three tasks described gathering, all three took PerplexityTool,
+    and run 499624b2 spent 4 searches on one question (two differing by a
+    hyphen).
+
+    The plan had already divided the work; it simply was not passed on. It now
+    states each task's scope, what it receives and what it produces.
+    """
+
+    PROMPT = "gather the latest innovation around agent memory and give me a table"
+
+    def _brief(self, task_plan, name="Format the table"):
+        return CrewGenerationService._task_brief(task_plan, name, self.PROMPT)
+
+    def test_the_scope_leads_and_the_request_is_only_background(self):
+        """Order matters: leading with the whole request is what made every task
+        restate the whole job."""
+        brief = self._brief({"scope": "Turn the sourced findings into a table"})
+        assert brief.index("SCOPE") < brief.index("For background")
+
+    def test_the_scope_is_stated_as_the_only_responsibility(self):
+        brief = self._brief({"scope": "Turn the sourced findings into a table"})
+        assert "its only responsibility" in brief
+        assert "Turn the sourced findings into a table" in brief
+
+    def test_earlier_work_is_named_as_already_done(self):
+        brief = self._brief({"scope": "Format it", "context": ["Source findings"]})
+        assert "already done" in brief
+        assert "Source findings" in brief
+
+    def test_the_artifact_it_owes_is_stated(self):
+        brief = self._brief({"scope": "Format it", "produces": "a comparison table"})
+        assert "PRODUCES: a comparison table" in brief
+
+    def test_the_user_request_is_still_present(self):
+        """Dropping it entirely would leave a task with no idea what it serves."""
+        brief = self._brief({"scope": "Format it"})
+        assert self.PROMPT in brief
+
+    def test_a_plan_without_the_contract_falls_back_to_the_old_wording(self):
+        """An older plan, or a model that dropped the fields. Must not regress."""
+        brief = CrewGenerationService._task_brief({}, "Research", self.PROMPT)
+        assert brief == (
+            f"Create a task named 'Research' for a crew that: {self.PROMPT}. "
+            "THIS SPECIFIC TASK is 'Research'."
+        )
+
+    def test_blank_contract_fields_are_treated_as_absent(self):
+        brief = CrewGenerationService._task_brief(
+            {"scope": "   ", "produces": "", "context": []}, "Research", self.PROMPT
+        )
+        assert "SCOPE" not in brief
+
+    def test_empty_context_names_are_dropped(self):
+        brief = self._brief({"scope": "Format it", "context": ["", "  ", "Source"]})
+        assert "RECEIVES" in brief and "Source" in brief
+        assert ", ," not in brief
+
+    def test_whitespace_in_a_scope_is_collapsed(self):
+        brief = self._brief({"scope": "line one\n\n   line two"})
+        assert "line one line two" in brief
+
+    def test_the_template_tells_the_model_to_obey_the_scope(self):
+        """The brief carries DATA; the instruction lives in the DB-backed
+        template. Neither half works alone."""
+        from src.seeds.prompt_templates import GENERATE_TASK_TEMPLATE as T
+
+        assert "SCOPE" in T
+        assert "describe ONLY that" in T
+        assert "Do not restate the crew's overall goal" in T
+
+    def test_the_plan_template_asks_for_the_contract(self):
+        from src.seeds.prompt_templates import GENERATE_CREW_PLAN_TEMPLATE as T
+
+        assert '"scope"' in T and '"produces"' in T
+        # The MEANING of each field lives in the schema, not here: it is sent as a
+        # strict json_schema response_format, so the model reads those descriptions
+        # as part of the contract it must satisfy. Restating them in the template
+        # only spent prompt budget — the plan template has a 2000-char cap
+        # (tests/unit/seeds/test_prompt_templates_diet.py) that exists because the
+        # old approach shipped a 9.4k template and told the model to ignore most.
+        assert "The response schema defines" in T
+
+    def test_the_schema_forbids_two_tasks_sharing_a_scope(self):
+        """The merge rule, stated where the model is obliged to read it."""
+        from src.schemas.crew import CrewPlanTask
+
+        scope = CrewPlanTask.model_fields["scope"].description or ""
+        assert "share a scope are one task" in scope
+
+    def test_the_plan_template_still_forbids_tool_names(self):
+        """The plan says WHO acts, never WHICH tool — it is never given the
+        workspace tool list, so a name there would be invented."""
+        from src.seeds.prompt_templates import GENERATE_CREW_PLAN_TEMPLATE as T
+
+        assert "or tool names" in T
+
+
+class TestToolIdsAreHeldToThePlan:
+    """Enforcement: a prompt rule is a preference, this is the check."""
+
+    MAP = {"PerplexityTool": "31", "GenieTool": 7}
+
+    def test_names_become_ids_for_an_acting_task(self):
+        assert CrewGenerationService._task_tool_ids(["PerplexityTool"], self.MAP) == [
+            "31"
+        ]
+
+    def test_dict_entries_are_accepted(self):
+        assert CrewGenerationService._task_tool_ids(
+            [{"name": "GenieTool"}], self.MAP
+        ) == [7]
+
+    def test_an_invented_name_is_dropped_not_raised(self):
+        assert CrewGenerationService._task_tool_ids(["NoSuchTool"], self.MAP) == []
+
+    def test_order_is_preserved(self):
+        assert CrewGenerationService._task_tool_ids(
+            ["GenieTool", "PerplexityTool"], self.MAP
+        ) == [7, "31"]
+
+    def test_nothing_requested_is_nothing_assigned(self):
+        assert CrewGenerationService._task_tool_ids(None, self.MAP) == []
+        assert CrewGenerationService._task_tool_ids([], self.MAP) == []
+
+
+class TestThePlanUsesTheUsersOwnWords:
+    """ChatMode reaches the planner through the dispatcher, which substitutes its
+    own LLM rewrite for the user's message. The rewrite reliably grows steps:
+
+        typed:   "gather the latest innovation around agent memory and give me
+                  a table with the innovation and the citation link"
+        rewrite: "Research AND compile a table of the latest innovations in agent
+                  memory, INCLUDING the innovation name and citation links"
+
+    The constraint appended to that same message asks the planner to match task
+    count to the distinct action verbs in it, so the manufactured verbs became
+    manufactured tasks — run 97ff3d3a got three agents and three tasks, two of
+    them separately searching the web for the same thing. The crew canvas plans
+    against the typed message and produces the right crew: the same code, doing
+    better work on better input.
+
+    The rewrite is still used — it grounds the run and shapes each task's
+    write-up. It just no longer decides how many tasks exist.
+    """
+
+    def setup_method(self):
+        self.service = CrewGenerationService(MagicMock())
+        self.service.log_service = MagicMock()
+
+    async def _plan_with(self, prompt, original_prompt):
+        request = Mock()
+        request.prompt = prompt
+        request.original_prompt = original_prompt
+        plan = {
+            "agents": [{"name": "A", "role": "r"}],
+            "tasks": [{"name": "T", "assigned_agent": "A"}],
+            "process_type": "sequential",
+            "complexity": "light",
+        }
+        with (
+            patch("src.services.generation.crew.progressive.TemplateService") as ts,
+            patch("src.services.generation.crew.progressive.LLMManager") as lm,
+            patch("src.services.generation.crew.progressive.robust_json_parser") as rjp,
+        ):
+            ts.get_effective_template_content = AsyncMock(return_value="system")
+            lm.completion = AsyncMock(return_value="{}")
+            rjp.return_value = plan
+            self.service.log_service.create_log = AsyncMock()
+            await self.service._generate_crew_plan(request, None, "test-model")
+            sent = lm.completion.await_args.kwargs["messages"]
+        # The plan call sends verb-to-task few-shots as user/assistant pairs, so
+        # the real message is the LAST user message, not the first.
+        return [m["content"] for m in sent if m["role"] == "user"][-1]
+
+    @pytest.mark.asyncio
+    async def test_the_typed_message_is_what_gets_planned(self):
+        user_message = await self._plan_with(
+            prompt="Research AND compile a table, INCLUDING citation links",
+            original_prompt="gather the latest agent memory innovations in a table",
+        )
+        assert "gather the latest agent memory innovations" in user_message
+
+    @pytest.mark.asyncio
+    async def test_the_rewrite_does_not_reach_the_planner(self):
+        """The specific harm: its extra verbs become extra tasks."""
+        user_message = await self._plan_with(
+            prompt="Research AND compile a table, INCLUDING citation links",
+            original_prompt="gather the latest agent memory innovations in a table",
+        )
+        assert "INCLUDING citation links" not in user_message
+
+    @pytest.mark.asyncio
+    async def test_the_canvas_path_is_unchanged(self):
+        """The canvas sends no rewrite, so prompt is already the typed message —
+        it must keep planning against exactly that."""
+        user_message = await self._plan_with(
+            prompt="build a data pipeline crew", original_prompt=None
+        )
+        assert "build a data pipeline crew" in user_message
+
+    @pytest.mark.asyncio
+    async def test_an_empty_rewrite_falls_back_to_prompt(self):
+        user_message = await self._plan_with(
+            prompt="build a data pipeline crew", original_prompt=""
+        )
+        assert "build a data pipeline crew" in user_message
+
+    @pytest.mark.asyncio
+    async def test_the_cap_constraint_is_still_appended(self):
+        user_message = await self._plan_with(
+            prompt="rewrite", original_prompt="typed message"
+        )
+        assert "CONSTRAINT" in user_message
+
+
+class TestATaskCannotRetakeItsDependencysTool:
+    """The failure neither the prompt nor the schema could fix.
+
+    Told that "find the sources" and "collect their links" are the same lookup,
+    given a schema that REQUIRED an answer, and finally planning against the
+    user's own words with no rewrite in the way, the planner still returned:
+
+        {"name": "Extract Citation Links",
+         "context": ["Gather Latest Innovation Information"],
+         "needs_tools": true}
+
+    A second web search for links the first search had already returned.
+
+    A dependency is the crew stating "this task receives that task's output", so
+    re-taking the same capability along that chain is doing the upstream task's
+    work again — a structural fact about the plan, not a judgement call. Keyed on
+    the TOOL, not the kind of work, which is what keeps it general.
+    """
+
+    MAP = {"PerplexityTool": "31", "EmailTool": 9}
+
+    PLAN = [
+        {"name": "Gather", "context": [], "needs_tools": True},
+        {"name": "Extract Links", "context": ["Gather"], "needs_tools": True},
+        {"name": "Format", "context": ["Extract Links"], "needs_tools": False},
+    ]
+
+    def _ancestors(self, name, held):
+        plan_task = next(t for t in self.PLAN if t["name"] == name)
+        return CrewGenerationService._ancestor_tool_ids(plan_task, self.PLAN, held)
+
+    def test_the_first_task_keeps_the_tool(self):
+        assert self._ancestors("Gather", {}) == set()
+        assert CrewGenerationService._task_tool_ids(
+            ["PerplexityTool"], self.MAP, set()
+        ) == ["31"]
+
+    def test_the_dependent_task_loses_the_same_tool(self):
+        """The exact regression: a second search for what it was just handed."""
+        exclude = self._ancestors("Extract Links", {"Gather": ["31"]})
+        assert exclude == {"31"}
+        assert (
+            CrewGenerationService._task_tool_ids(["PerplexityTool"], self.MAP, exclude)
+            == []
+        )
+
+    def test_a_different_tool_survives_the_same_chain(self):
+        """ "fetch the numbers -> publish the dashboard" must keep working: the
+        publisher depends on the fetcher but performs a different act."""
+        exclude = self._ancestors("Extract Links", {"Gather": ["31"]})
+        assert CrewGenerationService._task_tool_ids(
+            ["EmailTool"], self.MAP, exclude
+        ) == [9]
+
+    def test_exclusion_follows_the_chain_transitively(self):
+        held = {"Gather": ["31"], "Extract Links": []}
+        assert self._ancestors("Format", held) == {"31"}
+
+    def test_independent_tasks_may_share_a_tool(self):
+        """A fan-out — one per sports/politics/economy — acts on different
+        subjects, so sharing a tool is correct, not duplication."""
+        fan_out = [
+            {"name": "Sports", "context": [], "needs_tools": True},
+            {"name": "Politics", "context": [], "needs_tools": True},
+        ]
+        exclude = CrewGenerationService._ancestor_tool_ids(
+            fan_out[1], fan_out, {"Sports": ["31"]}
+        )
+        assert exclude == set()
+        assert CrewGenerationService._task_tool_ids(
+            ["PerplexityTool"], self.MAP, exclude
+        ) == ["31"]
+
+    def test_a_cycle_in_the_plan_does_not_hang(self):
+        cyclic = [{"name": "A", "context": ["B"]}, {"name": "B", "context": ["A"]}]
+        assert CrewGenerationService._ancestor_tool_ids(
+            cyclic[0], cyclic, {"B": ["31"]}
+        ) == {"31"}
+
+    def test_an_unknown_context_name_is_ignored(self):
+        stale = [{"name": "X", "context": ["DeletedTask"]}]
+        assert CrewGenerationService._ancestor_tool_ids(stale[0], stale, {}) == set()
+
+    def test_no_exclusion_set_behaves_as_before(self):
+        assert CrewGenerationService._task_tool_ids(["PerplexityTool"], self.MAP) == [
+            "31"
+        ]
