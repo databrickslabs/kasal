@@ -169,6 +169,24 @@ def _safe_str(val: Any, max_len: int = 500) -> str:
     return s[:max_len] if len(s) > max_len else s
 
 
+def _elide_middle(val: Any, max_len: int) -> str:
+    """Truncate from the MIDDLE, keeping both ends.
+
+    Head truncation is the wrong shape for a system prompt: everything appended
+    to one lands at the END — the date-awareness block, and any later addition —
+    so ``s[:max_len]`` would drop exactly the part someone opens the trace to
+    check. The first question asked of this field was "is the date in there?",
+    which a head-truncated copy cannot answer.
+    """
+    if val is None:
+        return ""
+    s = str(val)
+    if len(s) <= max_len:
+        return s
+    keep = (max_len - 5) // 2
+    return f"{s[:keep]}\n…\n{s[-keep:]}"
+
+
 def _get_agent_name(event: Any) -> str:
     """Extract agent name from an event object.
 
@@ -1204,6 +1222,23 @@ class OTelEventBridge:
                 if user_msgs:
                     last_user = user_msgs[-1].get("content", "")
                     span.set_attribute("kasal.extra.prompt", str(last_user))
+                # The SYSTEM message, which was dropped entirely. It carries the
+                # role, the security preamble and the date-awareness block, so a
+                # trace without it cannot answer "what was this agent actually
+                # told?" — and `message_count: 2` alongside a single captured
+                # message read as though only one had been sent, which is how
+                # this looked like a missing-system-prompt bug rather than a
+                # missing-system-prompt LOG.
+                system_msgs = [
+                    m
+                    for m in messages
+                    if isinstance(m, dict) and m.get("role") == "system"
+                ]
+                if system_msgs:
+                    span.set_attribute(
+                        "kasal.extra.system_prompt",
+                        _elide_middle(system_msgs[0].get("content", ""), 4000),
+                    )
                 span.set_attribute("kasal.extra.message_count", len(messages))
             else:
                 span.set_attribute("kasal.extra.prompt", str(messages))

@@ -305,6 +305,22 @@ def build_agent_kwargs(
             f"{DEFAULT_AGENT_MAX_EXECUTION_TIME}s for agent {label}"
         )
 
+    # Log settings that came from a DEFAULT rather than the spec. The loop above
+    # only reports what the spec set, so anything defaulted was invisible in
+    # every log and trace we keep — and the assembled system prompt, where the
+    # date actually lands, is not recorded anywhere either. That combination is
+    # why "is inject_date working?" had no answer short of reading the source.
+    #
+    # Date awareness is the case that matters: no generated crew sets it (the
+    # generation templates tell the model to omit platform defaults), so it is
+    # ALWAYS defaulted and therefore was never once logged.
+    date_source = "spec" if spec.get("inject_date") is not None else "default"
+    logger.info(
+        f"Date awareness for agent {label}: "
+        f"inject_date={agent_kwargs.get('inject_date', True)} (from {date_source}), "
+        f"date_format={agent_kwargs.get('date_format', '%Y-%m-%d')}"
+    )
+
     # NOTE: reasoning is NOT an Agent kwarg. Kasal's reasoning control is the model's
     # native thinking budget and is applied to the agent's LLM in build_agent_llm
     # (_apply_reasoning_effort). The engine has no plan/replan loop, so Agent's inert

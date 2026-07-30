@@ -341,6 +341,36 @@ def default_system_prompt(agent: Any) -> str:
     )
 
 
+def date_awareness(now: datetime, date_format: str) -> str:
+    """The date-awareness block appended when ``inject_date`` is on.
+
+    This was one bare line — ``Current date: 2026-07-30`` — and a bare fact lost
+    to the model's training prior every time. Observed against a live deep
+    research run: the date was demonstrably in the system prompt, and the agent
+    still issued ``site:arxiv.org agent memory ... publication 2025 ...``. The
+    model was not contradicting the date; it never connected it to the query it
+    was writing.
+
+    So the block states the fact, says it OUTRANKS what the model remembers,
+    and names the specific act to change — putting a recalled year into a search
+    query. The year is given as a bare number alongside the formatted date
+    because ``date_format`` is user-configurable and may not contain one in a
+    form that is easy to lift (e.g. ``%B %d, %y``).
+
+    Deliberately short. It sits at the end of the system prompt, after the role,
+    backstory and the ~730-character security preamble, and a long block there
+    competes with the instructions it is meant to support.
+    """
+    return (
+        f"\n\nCurrent date: {now.strftime(date_format)} (current year: {now.year}).\n"
+        "This is authoritative and is LATER than your training data. The newest "
+        "work you know of is probably not the newest that exists, so do not "
+        "describe it as current or assume no more has appeared since.\n"
+        f"When a search query or a recency judgement needs a year, use {now.year} "
+        "or omit the year entirely — never a year you recall from training."
+    )
+
+
 def build_messages(agent: Any, user_prompt: str) -> list[dict[str, str]]:
     system = (
         agent.system_template.replace("{role}", agent.role)
@@ -351,7 +381,7 @@ def build_messages(agent: Any, user_prompt: str) -> list[dict[str, str]]:
     )
     if getattr(agent, "inject_date", False):
         date_format = getattr(agent, "date_format", "%Y-%m-%d") or "%Y-%m-%d"
-        system += f"\nCurrent date: {datetime.now(timezone.utc).strftime(date_format)}"
+        system += date_awareness(datetime.now(timezone.utc), date_format)
     if agent.prompt_template:
         user_prompt = agent.prompt_template.replace("{input}", user_prompt)
     if agent.use_system_prompt is False:

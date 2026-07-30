@@ -113,7 +113,17 @@ class Agent(BaseAgent):
     respect_context_window: bool = True
     max_retry_limit: int = 2
     max_context_window_size: int | None = None
-    inject_date: bool = False
+    #: Default True to match every other layer that has an opinion:
+    #: ``schemas/agent.py`` defaults True and coerces None to True, the agent
+    #: form ships the toggle on, and the exported app passes
+    #: ``cfg.get("inject_date", True)``. This was the one False, so an agent
+    #: spec that simply omitted the key — which is EVERY generated crew, since
+    #: the generation templates tell the model to omit fields the platform
+    #: defaults — silently got no date while the UI showed the switch enabled.
+    #:
+    #: Opting out still works: ``kernel/agent_builder`` copies any spec value
+    #: that ``is not None``, and False is not None.
+    inject_date: bool = True
     date_format: str = "%Y-%m-%d"
     planning: bool = False
     planning_config: PlanningConfig | None = None
