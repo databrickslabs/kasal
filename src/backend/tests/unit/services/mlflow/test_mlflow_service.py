@@ -12,6 +12,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.services.mlflow.service import MLflowService
 
+
+@pytest.fixture(autouse=True)
+def _databricks_backend(monkeypatch):
+    """These tests exercise the DATABRICKS deep-link path.
+
+    ``get_trace_deeplink`` now short-circuits to the local (OSS) backend when no
+    Databricks workspace is configured — which these tests do not configure, and
+    which on any machine running an MLflow server would take over before a single
+    assertion below was reached. Forcing a workspace URL keeps the file testing
+    the branch it describes rather than the developer's environment.
+    """
+    monkeypatch.setattr(
+        MLflowService,
+        "_configured_workspace_url",
+        lambda self: _async_value("https://test.databricks.com"),
+    )
+
+
+def _async_value(value):
+    async def _coro():
+        return value
+
+    return _coro()
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

@@ -7,10 +7,45 @@ from src.schemas.mlflow import (
     MLflowConfigUpdate,
     MLflowEvaluateRequest,
     MLflowEvaluateResponse,
+    MLflowSettings,
+    MLflowSettingsUpdate,
 )
 from src.services.mlflow.service import MLflowService
 
 router = APIRouter(prefix="/mlflow", tags=["mlflow"])
+
+
+@router.get("/settings", response_model=MLflowSettings)
+async def get_mlflow_settings(
+    session: SessionDep, group_ctx: GroupContextDep
+) -> MLflowSettings:
+    """Everything the MLflow configuration section renders, in one call.
+
+    One endpoint rather than four, because the section's fields are read
+    together and the backend half is derived from the others.
+    """
+    if not group_ctx or not group_ctx.primary_group_id:
+        raise ForbiddenError("Group context required for MLflow operations")
+    svc = MLflowService(session, group_id=group_ctx.primary_group_id)
+    return MLflowSettings(**await svc.get_settings())
+
+
+@router.patch("/settings", response_model=MLflowSettings)
+async def update_mlflow_settings(
+    payload: MLflowSettingsUpdate, session: SessionDep, group_ctx: GroupContextDep
+) -> MLflowSettings:
+    """Partial update; an omitted field is left alone. Returns the new state so
+    the UI never has to guess what the backend resolved to."""
+    if not group_ctx or not group_ctx.primary_group_id:
+        raise ForbiddenError("Group context required for MLflow operations")
+    svc = MLflowService(session, group_id=group_ctx.primary_group_id)
+    return MLflowSettings(
+        **await svc.update_settings(
+            enabled=payload.enabled,
+            evaluation_enabled=payload.evaluation_enabled,
+            experiment_name=payload.experiment_name,
+        )
+    )
 
 
 @router.get("/status", response_model=MLflowConfigResponse)

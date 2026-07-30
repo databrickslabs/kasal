@@ -71,6 +71,167 @@ class MLflowService:
         )
         return ok
 
+    async def get_settings(self) -> Dict[str, Any]:
+        """Everything the MLflow configuration section renders.
+
+        The BACKEND half is derived, never stored: Databricks when a workspace
+        is configured, else a local OSS server, else nothing. A stored preference
+        could only ever disagree with what is actually available.
+        """
+        from src.services.mlflow import local
+
+        enabled = await self.repo.is_enabled(group_id=self.group_id)
+        evaluation_enabled = await self.repo.is_evaluation_enabled(
+            group_id=self.group_id
+        )
+        experiment_name = await self.repo.get_experiment_name(group_id=self.group_id)
+        teamspace = await self._teamspace_name()
+
+        workspace_url = await self._configured_workspace_url()
+        if workspace_url:
+            experiment = local.local_experiment_name(experiment_name, teamspace)
+            backend = {
+                "kind": "databricks",
+                "uri": workspace_url,
+                # Reachability for Databricks is an auth question, not a socket
+                # one, so it is deliberately not answered here.
+                "reachable": None,
+                "experiment": f"/Shared/{experiment}",
+                "url": f"{workspace_url}/ml/experiments",
+            }
+        else:
+            uri = local.local_tracking_uri()
+            if uri:
+                experiment = local.local_experiment_name(experiment_name, teamspace)
+                backend = {
+                    "kind": "local",
+                    "uri": uri,
+                    "reachable": local.is_reachable(uri),
+                    "experiment": experiment,
+                    "url": f"{uri}/#/experiments",
+                }
+            else:
+                backend = {"kind": "none", "uri": None, "reachable": None}
+
+        return {
+            "enabled": enabled,
+            "evaluation_enabled": evaluation_enabled,
+            "experiment_name": experiment_name,
+            "backend": backend,
+        }
+
+    async def update_settings(
+        self,
+        enabled: Optional[bool] = None,
+        evaluation_enabled: Optional[bool] = None,
+        experiment_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Apply a partial update; an omitted field is left alone."""
+        if enabled is not None:
+            await self.set_enabled(enabled)
+        if evaluation_enabled is not None:
+            await self.repo.set_evaluation_enabled(
+                enabled=evaluation_enabled, group_id=self.group_id
+            )
+        if experiment_name is not None:
+            await self.repo.set_experiment_name(experiment_name, group_id=self.group_id)
+        return await self.get_settings()
+
+    async def _trace_id_for(self, job_id: Optional[str]) -> Optional[str]:
+        """The MLflow trace id recorded for a job, if any."""
+        if not job_id:
+            return None
+        try:
+            exec_obj = await self.exec_repo.get_execution_by_job_id(
+                job_id, group_ids=[self.group_id]
+            )
+        except Exception as e:  # noqa: BLE001 — a deep link must never raise
+            logger.warning(
+                f"[MLflowService] Failed to get trace ID for job {job_id}: {e}"
+            )
+            return None
+        value = getattr(exec_obj, "mlflow_trace_id", None) if exec_obj else None
+        return str(value) if value else None
+
+    def _local_deeplink(
+        self, trace_id: Optional[str], teamspace: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Deep link into the local MLflow UI. Runs in a thread — it does I/O."""
+        from src.services.mlflow import local
+
+        uri = local.local_tracking_uri()
+        if not uri:
+            return {
+                "url": None,
+                "experiment_id": "",
+                "trace_id": trace_id,
+                "workspace_url": None,
+                "workspace_id": None,
+                "message": (
+                    "No MLflow backend is configured. Set a Databricks workspace, "
+                    "or start a local MLflow server and launch Kasal with "
+                    "MLFLOW_TRACKING_URI pointing at it."
+                ),
+            }
+
+        name = local.local_experiment_name(teamspace=teamspace)
+        exp_id = local.experiment_id(uri, name)
+        return {
+            "url": local.traces_url(uri, exp_id, trace_id),
+            "experiment_id": exp_id,
+            "trace_id": trace_id,
+            # Named workspace_* for response-shape compatibility with the
+            # Databricks branch: the frontend reads `url` and ignores the rest,
+            # and diverging the shape by backend would give it a reason not to.
+            "workspace_url": uri,
+            "workspace_id": None,
+        }
+
+    async def _teamspace_name(self) -> Optional[str]:
+        """The group's display name, which the default experiment is named for.
+
+        The NAME rather than the id: it is what a person reads in the MLflow UI,
+        and ``user_dev_localhost`` tells them less than "Acme Corporation" does.
+        Falls back to None (and so to a slugless default) rather than raising —
+        an experiment name must never be the thing that fails a run.
+        """
+        try:
+            from src.repositories.group_repository import GroupRepository
+
+            name = await GroupRepository(self.session).get_name(self.group_id)
+            # Fall back to the group ID when no row names it. A synthetic
+            # teamspace (the dev "user_dev_localhost", an auto-created group)
+            # has no `groups` entry, and naming its experiment after the id it
+            # DOES have beats the anonymous "kasal-traces" — one experiment
+            # shared by every unnamed teamspace is exactly the collision the
+            # per-teamspace default exists to avoid.
+            return name or self.group_id
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"[MLflowService] Could not resolve teamspace name: {exc}")
+            return self.group_id
+
+    async def _configured_workspace_url(self) -> Optional[str]:
+        """The workspace URL, or None when Databricks is not configured.
+
+        Deliberately reads the STORED configuration rather than the auth chain:
+        the auth chain falls back to ambient environment variables, which on a
+        developer machine can report a workspace nobody configured and would
+        route tracing away from the local server.
+        """
+        try:
+            from src.services.databricks.workspace.service import DatabricksService
+
+            cfg = await DatabricksService(self.session).get_databricks_config()
+        except Exception as exc:  # noqa: BLE001 — absence is a normal dev state
+            logger.debug(f"[MLflowService] No Databricks configuration: {exc}")
+            return None
+        url = (getattr(cfg, "workspace_url", "") or "").strip() if cfg else ""
+        if not url:
+            return None
+        if not url.startswith("http"):
+            url = f"https://{url}"
+        return url.rstrip("/")
+
     async def _setup_mlflow_auth(self) -> Optional[Any]:
         """
         Setup MLflow authentication using SPN → PAT priority (matching Lakebase pattern).
@@ -243,6 +404,17 @@ class MLflowService:
         import asyncio
 
         from src.utils.databricks_auth import get_auth_context
+
+        # Local backend FIRST: when no Databricks workspace is configured, every
+        # step below resolves to nothing and this returned {"url": null,
+        # "message": "please configure Databricks credentials"} — which the UI
+        # turns into an href of "#", so clicking the MLflow Trace button did
+        # nothing at all. A dev machine tracing to a local server has a perfectly
+        # good link; it was simply never built.
+        if not await self._configured_workspace_url():
+            trace_id = await self._trace_id_for(job_id)
+            teamspace = await self._teamspace_name()
+            return await asyncio.to_thread(self._local_deeplink, trace_id, teamspace)
 
         # Get workspace URL and ID from unified auth
         workspace_url = ""

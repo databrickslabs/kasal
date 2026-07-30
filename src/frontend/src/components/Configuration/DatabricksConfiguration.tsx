@@ -49,10 +49,6 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
     ai_gateway_enabled: false,
 
     // MLflow configuration
-    mlflow_enabled: false,
-    mlflow_experiment_name: 'kasal-crew-execution-traces',
-    evaluation_enabled: false,
-    evaluation_judge_model: '',
 
     // Volume configuration fields
     volume_enabled: false,
@@ -282,50 +278,6 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
   };
 
 
-  const handleMlflowToggle = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const newEnabled = event.target.checked;
-    // Optimistically update UI state
-    setConfig(prev => ({ ...prev, mlflow_enabled: newEnabled }));
-
-    // Try to persist immediately via MLflow endpoint (doesn't require full config payload)
-    try {
-      await apiClient.post('/mlflow/status', { enabled: newEnabled });
-    } catch (error) {
-      const axErr = error as AxiosError;
-      // If no Databricks config exists yet, backend returns 404; advise user to save main config
-      if (axErr?.response?.status === 404) {
-        setNotification({
-          open: true,
-          message: t('configuration.databricks.mlflow.saveFirst', { defaultValue: 'Please save Databricks settings first to persist MLflow.' }),
-          severity: 'error',
-        });
-      } else {
-        console.error('Failed to persist MLflow toggle:', error);
-      }
-    }
-  };
-
-  const handleEvaluationToggle = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const newEnabled = event.target.checked;
-    // Optimistically update UI state
-    setConfig(prev => ({ ...prev, evaluation_enabled: newEnabled }));
-
-    try {
-      await apiClient.post('/mlflow/evaluation-status', { enabled: newEnabled });
-    } catch (error) {
-      const axErr = error as AxiosError;
-      if (axErr?.response?.status === 404) {
-        setNotification({
-          open: true,
-          message: t('configuration.databricks.mlflow.saveFirst', { defaultValue: 'Please save Databricks settings first to persist MLflow Evaluation.' }),
-          severity: 'error',
-        });
-      } else {
-        console.error('Failed to persist MLflow evaluation toggle:', error);
-      }
-    }
-  };
-
   const handleAiGatewayToggle = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const newEnabled = event.target.checked;
     // Optimistically update UI state
@@ -416,83 +368,6 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
       <Stack spacing={2} sx={{ mb: 3 }}>
         <Divider sx={{ my: 2 }} />
 
-        {/* MLflow Tracking Section */}
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Box>
-            <Typography variant="subtitle2" color="text.secondary">
-              {t('configuration.databricks.mlflow.title', { defaultValue: 'MLflow Tracking' })}
-            </Typography>
-            <a
-              href="https://docs.databricks.com/aws/en/dev-tools/databricks-apps/mlflow"
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ fontSize: '0.75em' }}
-            >
-              How to add MLflow experiment to your Databricks App
-            </a>
-          </Box>
-          <FormControlLabel
-            control={
-              <Switch
-                checked={!!config.mlflow_enabled}
-                onChange={handleMlflowToggle}
-                color="primary"
-                disabled={!config.enabled}
-              />
-            }
-            label={config.mlflow_enabled ? t('common.enabled') : t('common.disabled')}
-          />
-        </Box>
-
-        {/* MLflow Experiment Name */}
-        {config.mlflow_enabled && (
-          <TextField
-            label={t('configuration.databricks.mlflow.experimentName', { defaultValue: 'MLflow Experiment Name' })}
-            value={config.mlflow_experiment_name || 'kasal-crew-execution-traces'}
-            onChange={handleInputChange('mlflow_experiment_name')}
-            fullWidth
-            disabled={loading || !config.enabled || !config.mlflow_enabled}
-            size="small"
-            placeholder="kasal-crew-execution-traces"
-            helperText={t('configuration.databricks.mlflow.experimentNameHelp', { defaultValue: 'Name of the MLflow experiment for crew execution traces' })}
-          />
-        )}
-
-        {/* MLflow Evaluation Section */}
-        {config.mlflow_enabled && (
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 1 }}>
-          <Typography variant="subtitle2" color="text.secondary">
-            {t('configuration.databricks.evaluation.title', { defaultValue: 'MLflow Evaluation' })}
-          </Typography>
-          <FormControlLabel
-            control={
-              <Switch
-                checked={!!config.evaluation_enabled}
-                onChange={handleEvaluationToggle}
-                color="primary"
-                disabled={!config.enabled || !config.mlflow_enabled}
-              />
-            }
-            label={config.evaluation_enabled ? t('common.enabled') : t('common.disabled')}
-          />
-
-        {/* Databricks Judge Model for MLflow Evaluation */}
-        {config.mlflow_enabled && config.evaluation_enabled && (
-          <TextField
-            sx={{ mt: 1 }}
-            label={t('configuration.databricks.evaluation.judgeModel', { defaultValue: 'Databricks Judge Endpoint (databricks:/...)' })}
-            value={config.evaluation_judge_model || ''}
-            onChange={handleInputChange('evaluation_judge_model')}
-            fullWidth
-            disabled={loading || !config.enabled}
-            size="small"
-            placeholder="databricks:/your-judge-endpoint"
-            helperText={t('configuration.databricks.evaluation.judgeModelHelp', { defaultValue: 'Route for the judge model served on Databricks. Must start with databricks:/. Used to score evaluations.' })}
-          />
-        )}
-
-        </Box>
-        )}
 
         <Divider sx={{ my: 2 }} />
 

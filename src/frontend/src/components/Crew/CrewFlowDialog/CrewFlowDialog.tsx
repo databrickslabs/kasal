@@ -37,6 +37,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import UploadIcon from '@mui/icons-material/Upload';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import CrewOptimizeDialog from '../CrewOptimizeDialog';
+import { useMLflowEnabled } from '../../../hooks/global/useMLflowEnabled';
 import FileUploadIcon from '@mui/icons-material/FileUpload';
 import EditFlowForm from '../../Flow/EditFlowForm';
 import { AgentService } from '../../../api/workflow/AgentService';
@@ -110,6 +111,9 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
   const [tabValue, setTabValue] = useState(initialTab);
   // Crew whose prompts are being optimized (opens CrewOptimizeDialog).
   const [optimizeCrew, setOptimizeCrew] = useState<CrewResponse | null>(null);
+  // Optimization writes prompt versions to an MLflow registry, so the action is
+  // withheld when MLflow is off rather than offered and then failing.
+  const mlflowEnabled = useMLflowEnabled();
   
   // When showing only one tab, always use that tab's value
   useEffect(() => {
@@ -1663,7 +1667,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                                 borderColor: 'divider',
                               }}
                             >
-                                {canEdit && (
+                                {canEdit && mlflowEnabled && (
                                   <Tooltip title="Optimize Prompts">
                                     <IconButton
                                       size="small"

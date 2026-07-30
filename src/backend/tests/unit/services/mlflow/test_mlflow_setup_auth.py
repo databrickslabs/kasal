@@ -13,6 +13,24 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _databricks_path_only(monkeypatch):
+    """These tests are about the DATABRICKS auth path.
+
+    Local (OSS) MLflow is now checked first, so on any machine that happens to
+    be running an MLflow server the local branch would take over and none of the
+    credential assertions below would be reached. Neutralising it keeps the file
+    testing what it says it tests, rather than testing what the developer's
+    laptop happens to have listening.
+    """
+    from src.services.mlflow import local
+
+    monkeypatch.setattr(local, "local_tracking_uri", lambda: None)
+
+
+import pytest
+
 from src.services.otel_tracing.mlflow_setup import (
     configure_mlflow_in_subprocess,
 )

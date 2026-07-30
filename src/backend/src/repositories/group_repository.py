@@ -21,6 +21,18 @@ class GroupRepository(BaseRepository[Group]):
     def __init__(self, session: AsyncSession):
         super().__init__(Group, session)
 
+    async def get_name(self, group_id: str) -> Optional[str]:
+        """The group's display name, or None when no such group exists.
+
+        Just the name: callers that only need it for a label should not pull the
+        whole row, and the query belongs here rather than in a service (see
+        tests/unit/architecture/test_service_query_construction).
+        """
+        result = await self.session.execute(
+            select(Group.name).where(Group.id == group_id)
+        )
+        return result.scalar_one_or_none()
+
     async def get_with_users(self, group_id: str) -> Optional[Group]:
         """Get a group with its users loaded"""
         query = (

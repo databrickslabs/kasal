@@ -1,180 +1,154 @@
-"""Unit tests for MLflowRepository – covers all methods including auto-create."""
+"""MLflowRepository — the settings live in their OWN table now.
 
-import os
-from unittest.mock import AsyncMock, MagicMock, patch
+They used to be columns on ``databricksconfig``, which the previous version of
+this file mocked (``repo.dbx_repo`` / ``repo._base_repo``). That coupling was not
+merely untidy: ``is_enabled`` read the flag off the Databricks row and returned
+False whenever no such row existed, so a workspace with no Databricks
+configuration could never turn MLflow on — by construction, not by choice.
+
+These run against a REAL in-memory SQLite session rather than mocked
+collaborators. The old suite asserted which methods were called on a mock, which
+is precisely the shape of test that keeps passing while the storage underneath is
+wrong; what matters is what a later read sees.
+"""
 
 import pytest
+import pytest_asyncio
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
 
+from src.models.mlflow_config import MLflowConfig
 from src.repositories.mlflow_repository import MLflowRepository
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+
+@pytest_asyncio.fixture
+async def session():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(MLflowConfig.__table__.create)
+    maker = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with maker() as s:
+        yield s
+    await engine.dispose()
 
 
-def _make_repo():
-    """Build an MLflowRepository with mocked collaborators."""
-    session = AsyncMock()
-    repo = MLflowRepository(session)
-    repo.dbx_repo = AsyncMock()
-    repo._base_repo = AsyncMock()
-    return repo
+@pytest_asyncio.fixture
+async def repo(session):
+    return MLflowRepository(session)
 
 
-def _fake_config(**overrides):
-    cfg = MagicMock()
-    cfg.id = overrides.get("id", 42)
-    cfg.mlflow_enabled = overrides.get("mlflow_enabled", False)
-    cfg.evaluation_enabled = overrides.get("evaluation_enabled", False)
-    return cfg
+async def _row_count(session) -> int:
+    result = await session.execute(select(func.count()).select_from(MLflowConfig))
+    return result.scalar()
 
 
-# ---------------------------------------------------------------------------
-# set_enabled
-# ---------------------------------------------------------------------------
-class TestSetEnabled:
-    @pytest.mark.asyncio
-    async def test_updates_existing_config(self):
-        repo = _make_repo()
-        existing = _fake_config(id=7)
-        repo.dbx_repo.get_active_config.return_value = existing
-        repo._base_repo.update.return_value = existing
-
-        result = await repo.set_enabled(True, group_id="g1")
-
-        repo.dbx_repo.get_active_config.assert_awaited_once_with(group_id="g1")
-        repo._base_repo.update.assert_awaited_once_with(7, {"mlflow_enabled": True})
-        assert result is True
+class TestDefaults:
+    """A workspace that has never touched MLflow."""
 
     @pytest.mark.asyncio
-    async def test_auto_creates_config_when_missing(self):
-        repo = _make_repo()
-        repo.dbx_repo.get_active_config.return_value = None
-        created = _fake_config(id=99)
-        repo.dbx_repo.create_config.return_value = created
-        repo._base_repo.update.return_value = created
-
-        with patch.dict(
-            os.environ, {"DATABRICKS_HOST": "https://my-ws.cloud.databricks.com"}
-        ):
-            result = await repo.set_enabled(True, group_id="g2")
-
-        repo.dbx_repo.create_config.assert_awaited_once()
-        call_data = repo.dbx_repo.create_config.call_args[0][0]
-        assert call_data["workspace_url"] == "https://my-ws.cloud.databricks.com"
-        assert call_data["group_id"] == "g2"
-        assert call_data["is_active"] is True
-        repo._base_repo.update.assert_awaited_once_with(99, {"mlflow_enabled": True})
-        repo.session.commit.assert_awaited_once()
-        assert result is True
+    async def test_disabled_by_default(self, repo):
+        assert await repo.is_enabled(group_id="g1") is False
 
     @pytest.mark.asyncio
-    async def test_auto_creates_config_no_host_env(self):
-        """When DATABRICKS_HOST is not set, workspace_url defaults to empty string."""
-        repo = _make_repo()
-        repo.dbx_repo.get_active_config.return_value = None
-        created = _fake_config(id=10)
-        repo.dbx_repo.create_config.return_value = created
-        repo._base_repo.update.return_value = created
-
-        with patch.dict(os.environ, {}, clear=True):
-            result = await repo.set_enabled(False, group_id="g3")
-
-        call_data = repo.dbx_repo.create_config.call_args[0][0]
-        assert call_data["workspace_url"] == ""
-        assert result is True
-
-
-# ---------------------------------------------------------------------------
-# set_evaluation_enabled
-# ---------------------------------------------------------------------------
-class TestSetEvaluationEnabled:
-    @pytest.mark.asyncio
-    async def test_updates_existing_config(self):
-        repo = _make_repo()
-        existing = _fake_config(id=5)
-        repo.dbx_repo.get_active_config.return_value = existing
-        repo._base_repo.update.return_value = existing
-
-        result = await repo.set_evaluation_enabled(True, group_id="g1")
-
-        repo._base_repo.update.assert_awaited_once_with(5, {"evaluation_enabled": True})
-        assert result is True
+    async def test_evaluation_disabled_by_default(self, repo):
+        assert await repo.is_evaluation_enabled(group_id="g1") is False
 
     @pytest.mark.asyncio
-    async def test_auto_creates_config_when_missing(self):
-        repo = _make_repo()
-        repo.dbx_repo.get_active_config.return_value = None
-        created = _fake_config(id=88)
-        repo.dbx_repo.create_config.return_value = created
-        repo._base_repo.update.return_value = created
+    async def test_reading_does_not_create_a_row(self, repo, session):
+        """Otherwise every status poll seeds a row for a feature nobody enabled."""
+        await repo.is_enabled(group_id="g1")
+        await repo.is_evaluation_enabled(group_id="g1")
+        assert await _row_count(session) == 0
 
-        with patch.dict(os.environ, {"DATABRICKS_HOST": "https://ws.databricks.com"}):
-            result = await repo.set_evaluation_enabled(True, group_id="g4")
 
-        repo.dbx_repo.create_config.assert_awaited_once()
-        repo._base_repo.update.assert_awaited_once_with(
-            88, {"evaluation_enabled": True}
+class TestEnableWithoutDatabricks:
+    """The bug this move exists to fix."""
+
+    @pytest.mark.asyncio
+    async def test_can_be_enabled_with_no_databricks_config_anywhere(self, repo):
+        # There is no databricksconfig table in this database at all.
+        assert await repo.set_enabled(True, group_id="g1") is True
+        assert await repo.is_enabled(group_id="g1") is True
+
+
+class TestToggles:
+    @pytest.mark.asyncio
+    async def test_enable_then_disable(self, repo):
+        await repo.set_enabled(True, group_id="g1")
+        await repo.set_enabled(False, group_id="g1")
+        assert await repo.is_enabled(group_id="g1") is False
+
+    @pytest.mark.asyncio
+    async def test_evaluation_is_independent_of_tracing(self, repo):
+        """A more expensive opt-in, hence its own flag rather than a mode."""
+        await repo.set_enabled(True, group_id="g1")
+        assert await repo.is_evaluation_enabled(group_id="g1") is False
+
+        await repo.set_evaluation_enabled(True, group_id="g1")
+        assert await repo.is_enabled(group_id="g1") is True
+        assert await repo.is_evaluation_enabled(group_id="g1") is True
+
+    @pytest.mark.asyncio
+    async def test_repeated_writes_reuse_one_row(self, repo, session):
+        for value in (True, False, True):
+            await repo.set_enabled(value, group_id="g1")
+        assert await _row_count(session) == 1
+
+
+class TestGroupIsolation:
+    @pytest.mark.asyncio
+    async def test_groups_do_not_see_each_other(self, repo):
+        await repo.set_enabled(True, group_id="g1")
+        assert await repo.is_enabled(group_id="g2") is False
+
+    @pytest.mark.asyncio
+    async def test_each_group_gets_its_own_row(self, repo, session):
+        await repo.set_enabled(True, group_id="g1")
+        await repo.set_enabled(True, group_id="g2")
+        assert await _row_count(session) == 2
+
+
+class TestExperimentName:
+    @pytest.mark.asyncio
+    async def test_a_new_row_stores_no_name_so_the_backend_derives_one(self, repo):
+        """No column default on purpose.
+
+        A stored default is indistinguishable from a name the user typed, so it
+        silently outranks the derived ``kasal-<teamspace>-traces`` — which is
+        exactly what an earlier ``default="kasal-crew-execution-traces"`` did.
+        NULL is the only value the resolver can safely override."""
+        await repo.set_enabled(True, group_id="g1")
+        assert await repo.get_experiment_name(group_id="g1") is None
+
+    @pytest.mark.asyncio
+    async def test_round_trips(self, repo):
+        await repo.set_experiment_name("my-traces", group_id="g1")
+        assert await repo.get_experiment_name(group_id="g1") == "my-traces"
+
+    @pytest.mark.asyncio
+    async def test_blank_is_stored_as_unset(self, repo):
+        await repo.set_experiment_name("   ", group_id="g1")
+        assert await repo.get_experiment_name(group_id="g1") is None
+
+
+class TestJudgeModel:
+    @pytest.mark.asyncio
+    async def test_none_when_no_row(self, repo):
+        assert await repo.get_evaluation_judge_model(group_id="g1") is None
+
+    @pytest.mark.asyncio
+    async def test_none_when_blank(self, repo, session):
+        session.add(MLflowConfig(group_id="g1", evaluation_judge_model="   "))
+        await session.commit()
+        assert await repo.get_evaluation_judge_model(group_id="g1") is None
+
+    @pytest.mark.asyncio
+    async def test_returned_when_set(self, repo, session):
+        session.add(
+            MLflowConfig(group_id="g1", evaluation_judge_model="databricks:/judge")
         )
-        assert result is True
-
-
-# ---------------------------------------------------------------------------
-# is_enabled / is_evaluation_enabled (read-only, no auto-create)
-# ---------------------------------------------------------------------------
-class TestReadMethods:
-    @pytest.mark.asyncio
-    async def test_is_enabled_true(self):
-        repo = _make_repo()
-        repo.dbx_repo.get_active_config.return_value = _fake_config(mlflow_enabled=True)
-        assert await repo.is_enabled(group_id="g") is True
-
-    @pytest.mark.asyncio
-    async def test_is_enabled_no_config(self):
-        repo = _make_repo()
-        repo.dbx_repo.get_active_config.return_value = None
-        assert await repo.is_enabled(group_id="g") is False
-
-    @pytest.mark.asyncio
-    async def test_is_evaluation_enabled_true(self):
-        repo = _make_repo()
-        repo.dbx_repo.get_active_config.return_value = _fake_config(
-            evaluation_enabled=True
-        )
-        assert await repo.is_evaluation_enabled(group_id="g") is True
-
-    @pytest.mark.asyncio
-    async def test_is_evaluation_enabled_no_config(self):
-        repo = _make_repo()
-        repo.dbx_repo.get_active_config.return_value = None
-        assert await repo.is_evaluation_enabled(group_id="g") is False
-
-
-# ---------------------------------------------------------------------------
-# get_evaluation_judge_model
-# ---------------------------------------------------------------------------
-class TestGetEvaluationJudgeModel:
-    @pytest.mark.asyncio
-    async def test_returns_model_when_set(self):
-        repo = _make_repo()
-        cfg = _fake_config()
-        cfg.evaluation_judge_model = "databricks-claude-sonnet-4"
-        repo.dbx_repo.get_active_config.return_value = cfg
+        await session.commit()
         assert (
-            await repo.get_evaluation_judge_model(group_id="g")
-            == "databricks-claude-sonnet-4"
+            await repo.get_evaluation_judge_model(group_id="g1") == "databricks:/judge"
         )
-
-    @pytest.mark.asyncio
-    async def test_returns_none_for_blank(self):
-        repo = _make_repo()
-        cfg = _fake_config()
-        cfg.evaluation_judge_model = "   "
-        repo.dbx_repo.get_active_config.return_value = cfg
-        assert await repo.get_evaluation_judge_model(group_id="g") is None
-
-    @pytest.mark.asyncio
-    async def test_returns_none_when_no_config(self):
-        repo = _make_repo()
-        repo.dbx_repo.get_active_config.return_value = None
-        assert await repo.get_evaluation_judge_model(group_id="g") is None

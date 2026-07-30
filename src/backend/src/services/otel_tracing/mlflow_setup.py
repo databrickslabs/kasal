@@ -108,6 +108,97 @@ class MlflowSetupResult:
     )
 
 
+async def _teamspace_name(session: Any, group_id: Optional[str]) -> Optional[str]:
+    """The group's display name, which the default experiment is named after.
+
+    Resolved on the session that already read the enable flag, so the local
+    branch costs no extra round trip on the spawn→kickoff critical path.
+    """
+    if not group_id:
+        return None
+    try:
+        from src.repositories.group_repository import GroupRepository
+
+        name = await GroupRepository(session).get_name(group_id)
+        # Fall back to the id when no row names the group — see the matching
+        # comment in MLflowService._teamspace_name.
+        return name or group_id
+    except Exception:  # noqa: BLE001 — a name must never fail a run
+        return group_id
+
+
+def _databricks_configured() -> bool:
+    """Whether this process has Databricks credentials to trace with.
+
+    Deliberately the same env vars the SPN path below checks, so "we took the
+    local branch" can never mean "we skipped a Databricks setup that would have
+    worked". A host with no credential alongside it is not a usable backend.
+    """
+    host = os.environ.get("DATABRICKS_HOST", "")
+    if not host:
+        return False
+    return bool(
+        os.environ.get("DATABRICKS_CLIENT_ID")
+        or os.environ.get("DATABRICKS_TOKEN")
+        or os.environ.get("DATABRICKS_API_KEY")
+    )
+
+
+def _setup_local_mlflow(
+    *,
+    uri: str,
+    execution_id: str,
+    group_id: Optional[str],
+    teamspace: Optional[str],
+    alog: Any,
+) -> "MlflowSetupResult":
+    """Point tracing at a local OSS MLflow server.
+
+    Much shorter than the Databricks path because almost everything there is
+    authentication and Unity Catalog trace storage, neither of which exists
+    here: set the tracking URI, bind an experiment, done. The default tracing
+    destination is the active experiment on the tracking server, so no explicit
+    destination is set — pinning one is what the Databricks branch needs to
+    reach UC tables.
+
+    Never raises. An unreachable server or a failed import disables tracing for
+    this run and leaves the crew to execute normally.
+    """
+    from src.services.mlflow import local as _local
+
+    if not _local.is_reachable(uri):
+        alog.info(
+            "[SUBPROCESS] No MLflow server at %s; continuing without tracing", uri
+        )
+        return MlflowSetupResult(
+            enabled=True, tracing_ready=False, error=f"no MLflow server at {uri}"
+        )
+
+    try:
+        import mlflow
+
+        mlflow.set_tracking_uri(uri)
+        name = _local.local_experiment_name(teamspace=teamspace)
+        experiment = mlflow.set_experiment(name)
+        experiment_id = str(getattr(experiment, "experiment_id", "") or "")
+        alog.info(
+            "[SUBPROCESS] MLflow tracing to local server %s, experiment %s (ID: %s)",
+            uri,
+            name,
+            experiment_id,
+        )
+        return MlflowSetupResult(
+            enabled=True,
+            tracing_ready=True,
+            experiment_name=name,
+            experiment_id=experiment_id,
+            auth_method="local",
+        )
+    except Exception as exc:  # noqa: BLE001 — tracing must never fail a run
+        alog.warning("[SUBPROCESS] Local MLflow setup failed: %s", exc)
+        return MlflowSetupResult(enabled=True, tracing_ready=False, error=str(exc))
+
+
 async def configure_mlflow_in_subprocess(
     db_config: Any,
     job_id: str,
@@ -143,11 +234,52 @@ async def configure_mlflow_in_subprocess(
     # -----------------------------------------------------------
     # 1. Check if MLflow is enabled for this workspace
     # -----------------------------------------------------------
-    enabled_for_workspace = False
+    # The flag moved off the Databricks config row onto its own table, because
+    # reading it from there meant a workspace with no Databricks configuration
+    # could never enable MLflow at all. `db_config` is still accepted and still
+    # consulted as a FALLBACK: the old column is left populated by the migration,
+    # so a subprocess started against a database that has not been upgraded yet
+    # keeps working instead of silently losing tracing.
+    # EITHER source enabling it is enough, deliberately.
+    #
+    # The flag moved off the Databricks config row onto its own table, because
+    # reading it from there meant a workspace with no Databricks configuration
+    # could never enable MLflow at all. But a database that has not run the
+    # migration yet has no row in the new table — and treating "no row" as
+    # "disabled" would silently switch tracing OFF for every existing workspace
+    # the moment this code deployed. The old column is still populated (the
+    # migration copies rather than moves), so it stays authoritative until it
+    # says no.
     try:
-        enabled_for_workspace = bool(getattr(db_config, "mlflow_enabled", False))
-    except Exception:
-        enabled_for_workspace = False
+        legacy_enabled = bool(getattr(db_config, "mlflow_enabled", False))
+    except Exception:  # noqa: BLE001
+        legacy_enabled = False
+
+    # Only consult the database when the legacy flag has NOT already said yes.
+    # Since either source enabling it is sufficient, a True here makes the query
+    # redundant — and this runs on the subprocess spawn→kickoff critical path,
+    # where an avoidable round trip is exactly what PERF-036 was about. It also
+    # keeps the connection out of every caller that already knows the answer,
+    # which matters because opening an asyncpg session from a function invoked
+    # across many event loops is a known source of connection conflicts here.
+    enabled_for_workspace = legacy_enabled
+    teamspace_name: Optional[str] = None
+    if not legacy_enabled:
+        try:
+            from src.db.session import async_session_factory
+            from src.repositories.mlflow_repository import MLflowRepository
+
+            async with async_session_factory() as session:
+                enabled_for_workspace = await MLflowRepository(session).is_enabled(
+                    group_id=group_id
+                )
+                teamspace_name = await _teamspace_name(session, group_id)
+        except Exception as exc:  # noqa: BLE001 — tracing must never fail a run
+            alog.warning(
+                "[SUBPROCESS] Could not read MLflow settings (%s); "
+                "using the Databricks config flag",
+                exc,
+            )
 
     alog.info(f"[SUBPROCESS] MLflow enabled_for_workspace={enabled_for_workspace}")
 
@@ -158,6 +290,38 @@ async def configure_mlflow_in_subprocess(
         return MlflowSetupResult(enabled=False, tracing_ready=False)
 
     alog.info(f"[SUBPROCESS] Configuring MLflow for execution {execution_id}")
+
+    # -------------------------------------------------------
+    # 1b. Local (OSS) MLflow — checked BEFORE the Databricks credential path.
+    #
+    # Everything below this point requires SPN/PAT credentials and then
+    # hardcodes set_tracking_uri("databricks"), so a developer machine with a
+    # local MLflow server got tracing_ready=False no matter what it had running.
+    # The launch-time tracking URI was preserved by main.py and then read by
+    # nothing.
+    #
+    # Ordered first because it is also the CHEAP path: no credential probing, no
+    # workspace round trip. And it fails soft — an unreachable server disables
+    # tracing for the run rather than raising, so a machine whose MLflow is not
+    # running behaves exactly as it does today instead of paying a connect
+    # timeout on every execution.
+    # -------------------------------------------------------
+    try:
+        from src.services.mlflow import local as _local
+
+        local_uri = None if _databricks_configured() else _local.local_tracking_uri()
+    except Exception as exc:  # noqa: BLE001 — never break a run over tracing
+        alog.warning("[SUBPROCESS] Local MLflow resolution failed: %s", exc)
+        local_uri = None
+
+    if local_uri:
+        return _setup_local_mlflow(
+            uri=local_uri,
+            execution_id=execution_id,
+            group_id=group_id,
+            teamspace=teamspace_name,
+            alog=alog,
+        )
 
     try:
         # -------------------------------------------------------

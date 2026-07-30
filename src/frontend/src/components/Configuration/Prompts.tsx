@@ -10,6 +10,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import { useTranslation } from 'react-i18next';
 import PromptConfiguration from './PromptConfiguration';
+import { useMLflowEnabled } from '../../hooks/global/useMLflowEnabled';
 import PromptOptimization from './PromptOptimization';
 
 /**
@@ -20,10 +21,15 @@ import PromptOptimization from './PromptOptimization';
 const Prompts: React.FC = () => {
   const { t } = useTranslation();
   const [optimizeTarget, setOptimizeTarget] = useState<string | null>(null);
+  // Optimization writes prompt versions to an MLflow registry, so the action
+  // is withheld rather than offered and then failing at the point of use.
+  const mlflowEnabled = useMLflowEnabled();
 
   return (
     <Box>
-      <PromptConfiguration onOptimize={(name) => setOptimizeTarget(name)} />
+      <PromptConfiguration
+        onOptimize={mlflowEnabled ? (name) => setOptimizeTarget(name) : undefined}
+      />
 
       <Dialog
         open={optimizeTarget !== null}

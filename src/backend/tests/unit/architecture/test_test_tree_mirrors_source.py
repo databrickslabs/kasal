@@ -75,8 +75,6 @@ _BASELINE = {
     "services/guardrails/test_guardrail_trace_integration.py",
     "services/memory/test_disabled_memory_backend.py",
     "services/memory/test_memory_optimization.py",
-    "services/mlflow/test_mlflow_setup_auth.py",
-    "services/mlflow/test_mlflow_setup_failfast.py",
     "services/mlflow/test_mlflow_trace_label.py",
     "test_chat_history_workflow.py",
     "test_execution_workflow.py",

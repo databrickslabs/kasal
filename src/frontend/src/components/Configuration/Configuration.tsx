@@ -30,6 +30,7 @@ import SchoolIcon from '@mui/icons-material/School';
 import EngineeringIcon from '@mui/icons-material/Engineering';
 import CloseIcon from '@mui/icons-material/Close';
 import MemoryIcon from '@mui/icons-material/Memory';
+import TimelineIcon from '@mui/icons-material/Timeline';
 import StorageIcon from '@mui/icons-material/Storage';
 import WorkspacesIcon from '@mui/icons-material/Workspaces';
 import ViewQuiltIcon from '@mui/icons-material/ViewQuilt';
@@ -46,6 +47,7 @@ import ObjectManagement from './ObjectManagement';
 import ToolsConfiguration from './Tools/ToolsConfiguration';
 import Prompts from './Prompts';
 import DatabricksConfiguration from './DatabricksConfiguration';
+import MLflowConfiguration from './MLflowConfiguration';
 import MCPConfiguration from './MCP/MCPConfiguration';
 import RemoteAgents from './RemoteAgents/RemoteAgents';
 import SkillsConfiguration from './Skills/SkillsConfiguration';
@@ -258,6 +260,12 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
       baseNavItems.push({
         label: t('configuration.memoryBackend.tab', { defaultValue: 'Memory' }),
         icon: <MemoryIcon fontSize="small" />,
+        index: currentIndex++,
+        group: 'workspace'
+      });
+      baseNavItems.push({
+        label: t('configuration.mlflow.tab', { defaultValue: 'MLflow' }),
+        icon: <TimelineIcon fontSize="small" />,
         index: currentIndex++,
         group: 'workspace'
       });
@@ -823,6 +831,16 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
               return (
                 <ContentPanel key={item.index} value={activeSection} index={item.index}>
                   <MemoryConfiguration />
+                </ContentPanel>
+              );
+            }
+
+            // MLflow — its own section: the backend may be Databricks or a
+            // local server, so it cannot live inside the Databricks tab.
+            if (item.label === t('configuration.mlflow.tab', { defaultValue: 'MLflow' })) {
+              return (
+                <ContentPanel key={item.index} value={activeSection} index={item.index}>
+                  <MLflowConfiguration />
                 </ContentPanel>
               );
             }
