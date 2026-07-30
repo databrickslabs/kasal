@@ -1423,6 +1423,53 @@ def run_crew_in_process(
                         async_logger.warning(f"Memory write flush skipped: {flush_err}")
                 async_logger.info("✅ Crew execution completed successfully")
 
+                # Announce completion HERE, not after teardown.
+                #
+                # The terminal status used to be written by the PARENT, in the
+                # finally block of run_crew_in_process, which cannot run until
+                # this subprocess returns. Everything below — MLflow's
+                # post-execution flush, the event-bus flush, the OTel shutdown
+                # and MLflow's "flushing the async trace logging queue before
+                # program exit" — sat between the crew finishing and the UI
+                # being told, ~10s on a short run. The UI fell back to its 10s
+                # reconciliation poll, which is why a finished run took so long
+                # to look finished.
+                #
+                # The crew has its answer at this point, so it says so. The
+                # status write also relays over the event pipe (see
+                # ExecutionStatusService's is_subprocess branch), so the parent
+                # broadcasts it on SSE immediately.
+                #
+                # The parent still writes the final status afterwards, with the
+                # A2UI-composed result it can only build once this process has
+                # exited. That second write is not redundant — it upgrades the
+                # plain answer stored here to the composed surface, in the same
+                # "text first, surface after" order the chat path already uses.
+                # Fail-open: a late announcement must never fail a run that
+                # actually succeeded.
+                try:
+                    from src.services.execution.status import ExecutionStatusService
+
+                    _early_result = getattr(result, "raw", None)
+                    if _early_result is None and result is not None:
+                        _early_result = str(result)
+
+                    await ExecutionStatusService.update_status(
+                        job_id=execution_id,
+                        status="COMPLETED",
+                        message="Crew execution completed",
+                        result=_early_result,
+                    )
+                    async_logger.info(
+                        f"[SUBPROCESS] Announced COMPLETED for {execution_id} "
+                        f"ahead of teardown"
+                    )
+                except Exception as _announce_err:  # noqa: BLE001
+                    async_logger.warning(
+                        f"[SUBPROCESS] Early completion announcement failed "
+                        f"(non-fatal, the parent still finalises): {_announce_err}"
+                    )
+
                 await post_execution_mlflow_cleanup(
                     mlflow_result=mlflow_result,
                     execution_id=execution_id,

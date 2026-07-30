@@ -694,14 +694,47 @@ def run_flow_in_process(
                         "[FLOW_SUBPROCESS] Flow execution completed successfully"
                     )
 
-                    # Drop the checkpoint — a flow that finished has nothing to
-                    # resume, and leaving it would list the run as resumable.
-                    # Unlike a crew there is no single completion EVENT to hang
-                    # this on: CrewKickoffCompletedEvent fires once per crew
-                    # inside the flow and the last one is indistinguishable from
-                    # the others while it happens.
+                    # The checkpoint is KEPT, not dropped: a flow checkpoint is
+                    # a re-run point, not crash recovery, so a completed flow
+                    # stays resumable from the middle. Called here because a
+                    # flow has no single completion EVENT to hang it on —
+                    # CrewKickoffCompletedEvent fires once per crew inside the
+                    # flow and the last is indistinguishable while it happens.
                     if flow_checkpoint_recorder is not None:
                         flow_checkpoint_recorder.finish()
+
+                    # Announce completion HERE, not after teardown — same reason
+                    # as the crew path. The terminal status was written by the
+                    # PARENT once this subprocess returned, so the event-bus
+                    # flush and OTel shutdown below sat between the flow
+                    # finishing and the UI hearing about it (~5s), leaving the
+                    # UI on its 10s reconciliation poll.
+                    #
+                    # The status write relays over the event pipe, so the parent
+                    # broadcasts it on SSE straight away. The parent still
+                    # finalises afterwards; this only moves the good news
+                    # earlier. Fail-open.
+                    try:
+                        from src.models.execution_status import ExecutionStatus
+                        from src.services.execution.status import (
+                            ExecutionStatusService,
+                        )
+
+                        await ExecutionStatusService.update_status(
+                            job_id=execution_id,
+                            status=ExecutionStatus.COMPLETED.value,
+                            message="Flow execution completed",
+                        )
+                        async_logger.info(
+                            f"[FLOW_SUBPROCESS] Announced COMPLETED for "
+                            f"{execution_id} ahead of teardown"
+                        )
+                    except Exception as _announce_err:  # noqa: BLE001
+                        async_logger.warning(
+                            f"[FLOW_SUBPROCESS] Early completion announcement "
+                            f"failed (non-fatal, the parent still finalises): "
+                            f"{_announce_err}"
+                        )
 
                     # CRITICAL: Flush the CrewAI event bus to ensure all event handlers
                     # (agent execution started/completed, tool usage, etc.) complete their

@@ -70,6 +70,11 @@ _BASELINE = {
     "services/execution/kernel/test_task_helpers_mcp_exclusion.py",
     "services/execution/kernel/test_task_helpers_pydantic_field_types.py",
     "services/execution/kernel/test_ui_document.py",
+    # Asserts ONE invariant across BOTH subprocess entry points — the crew's
+    # and the flow's process_executor — namely that the terminal status is
+    # announced before teardown rather than after the process exits. It cannot
+    # sit beside either module without implying it covers only that one.
+    "services/execution/test_early_completion_announce.py",
     "services/execution/test_process_log_queue.py",
     "services/guardrails/test_guardrail_events.py",
     "services/guardrails/test_guardrail_trace_integration.py",
