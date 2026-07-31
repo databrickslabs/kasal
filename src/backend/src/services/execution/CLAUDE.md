@@ -7,13 +7,13 @@ memory that mentions `src.engines.kasal.*` is stale.
 ## The three paths (this is the core mental model)
 
 There are **three distinct answer paths**. Opening a file, first ask "which path
-am I in?" The `execution_type` string selects it (`services/execution_service.py`):
+am I in?" The `execution_type` string selects it (`services/execution/service.py`):
 
 | `execution_type` | UI name | Package | Where it runs |
 |---|---|---|---|
 | `"agent"` | **Chat** (ChatMode) | `services/chat/` | **in-process**, `Agent.kickoff_async`, sub-second |
-| `"crew"` | **Agent Builder** | `services/agent_builder/` | **subprocess** (`services/process_crew_executor.py`) |
-| `"flow"` | **Flow Builder** | `services/flow_builder/` | **subprocess** (`services/process_flow_executor.py`) |
+| `"crew"` | **Agent Builder** | `services/agent_builder/` | **subprocess** (`agent_builder/process_executor.py`) |
+| `"flow"` | **Flow Builder** | `services/flow_builder/` | **subprocess** (`flow_builder/process_executor.py`) |
 
 `execution/engine_service.py` (`KasalEngineService`) is the **hub**: it resolves
 the path and delegates. It holds no path-specific business logic.

@@ -2,7 +2,7 @@
 Agent Builder — the crew path, named for what the UI calls it.
 
 A crew of agents over a task graph, built here and run in a SUBPROCESS
-(``services/process_crew_executor.py``) so a crashing run cannot take the API
+(``agent_builder/process_executor.py``) so a crashing run cannot take the API
 with it. ``crew_preparation`` assembles it; the adapters translate stored
 agent/task rows into engine objects via ``services/execution/kernel``.
 

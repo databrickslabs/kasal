@@ -1,7 +1,7 @@
 """Centralized MLflow subprocess setup for Kasal executors.
 
 This module consolidates all MLflow initialization logic that was previously
-inline in process_crew_executor.py (~450 lines) into a single reusable function.
+inline in the crew executor (~450 lines) into a single reusable function.
 Both crew and flow executors call ``configure_mlflow_in_subprocess()`` to get
 consistent MLflow tracing setup including:
 
@@ -216,8 +216,8 @@ async def configure_mlflow_in_subprocess(
 ) -> MlflowSetupResult:
     """Configure MLflow tracing inside a subprocess (crew or flow).
 
-    This function encapsulates all MLflow setup previously done inline in
-    ``process_crew_executor.py`` (lines 601-1055).  It is safe to call from
+    This function encapsulates all MLflow setup previously done inline in the
+    crew executor (``agent_builder/process_executor.py``).  It is safe to call from
     any subprocess — crew or flow — and returns a :class:`MlflowSetupResult`
     describing what was configured.
 

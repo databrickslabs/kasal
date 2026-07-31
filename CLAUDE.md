@@ -100,11 +100,28 @@ one another engineer can name:
 - **Keep the public import path stable.** Re-export from the package
   `__init__.py` / `index.ts` so call sites do not churn.
 
-**Known offenders** (do not add to these; shrink when you are in them):
-`powerbi_analysis_tool.py`, `process_crew_executor.py`,
-`prompt_optimization_service.py`, `flow_methods.py`, `dispatcher_service.py`,
-`execution_service.py`, `tool_factory.py`, `ChatWorkspace.tsx`,
-`a2ui/components.tsx`, `WorkflowDesigner.tsx`, `TaskForm.tsx`.
+**Known offenders** — every file currently over the 800 ceiling. Do not add to
+them; shrink when you are in them. Paths, not bare names: three used to be
+listed under filenames that no longer exist, and a rule you cannot look up is a
+rule nobody applies.
+
+| File | Lines |
+|---|---|
+| `services/agent_builder/process_executor.py` | 3051 |
+| `services/tools/tool_factory.py` | 2694 |
+| `services/execution/service.py` | 2430 |
+| `Tasks/TaskForm.tsx` | 2126 |
+| `services/flow_builder/modules/flow_methods.py` | 2159 |
+| `services/chat/dispatcher.py` | 2090 |
+| `WorkflowDesigner/WorkflowDesigner.tsx` | 2047 |
+| `services/tools/powerbi_analysis_tool.py` | 908 |
+
+Three former entries have come back under the ceiling and are off the list:
+`shared/a2ui/components.tsx` (split into `shared/a2ui/components/`, largest
+piece 591), `ChatMode/ChatWorkspace.tsx` (758) and
+`services/prompt_optimization/service.py` (697). All three are still over the
+400 target, so they are not free of the rule — they are just no longer the
+worst of it.
 
 Check before you commit: `wc -l <files you touched>`.
 

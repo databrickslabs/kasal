@@ -2,7 +2,7 @@
 Flow Builder — sequencing crews into a workflow, named for what the UI calls it.
 
 A graph of crews with routers, state and checkpoints, built here and run in a
-SUBPROCESS (``services/process_flow_executor.py``). ``flow_runner_service``
+SUBPROCESS (``flow_builder/process_executor.py``). ``flow_runner_service``
 drives a run; ``backend_flow`` wraps the engine Flow; ``modules/`` holds the
 build pieces (``flow_builder`` constructs the Flow object, ``flow_methods``
 generates the per-node methods, ``flow_processors`` handles results).
