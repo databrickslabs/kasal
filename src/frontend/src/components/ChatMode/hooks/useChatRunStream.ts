@@ -307,7 +307,9 @@ export function useChatRunStream({ pendingActionsRef }: UseChatRunStreamArgs) {
     // markdown. So a LATE completion that brings a surface is not a duplicate —
     // it is the half of the answer that was not ready yet.
     if (surface && jobId && finishedJobsRef.current.has(jobId)) {
-      useExecutionStore.getState().attachSurface(jobId, surface);
+      // The text rides along: a flow's second announcement carries the answer
+      // AND the surface composed from it, and they are different content.
+      useExecutionStore.getState().attachSurface(jobId, surface, resultText);
       return;
     }
     finishOnce(jobId, () => {

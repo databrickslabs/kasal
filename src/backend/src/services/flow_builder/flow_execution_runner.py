@@ -181,6 +181,36 @@ async def run_flow_in_process(
         elif result.get("status") == "COMPLETED":
             final_status = ExecutionStatus.COMPLETED.value
             final_result = result.get("result")
+
+            # Compose an A2UI surface, exactly as the crew path does. This was
+            # MISSING from the flow path entirely — `wrap_result_with_surface`
+            # had a single caller, in agent_builder — so a flow's answer reached
+            # the chat as raw text and rendered as nothing. The composer is
+            # shared on purpose: chat, Agent Builder, flows and the exported app
+            # all render through ONE implementation, and a second one here is
+            # how they would drift.
+            #
+            # Runs in the PARENT, after the subprocess has exited, so the
+            # composition must name the execution explicitly — the OTel bridge
+            # that would otherwise attribute it went with the child.
+            try:
+                from src.services.a2ui.runner import wrap_result_with_surface
+
+                final_result = await wrap_result_with_surface(
+                    final_result,
+                    config=config,
+                    group_id=(
+                        group_context.primary_group_id if group_context else None
+                    ),
+                    inputs=user_inputs,
+                    execution_id=execution_id,
+                    group_context=group_context,
+                )
+            except Exception as a2ui_err:  # noqa: BLE001 — never break a finished run
+                logger.debug(
+                    f"[a2ui] flow surface skipped for {execution_id}: {a2ui_err}"
+                )
+
             warnings = result.get("warnings", [])
             if warnings:
                 final_message = "Flow execution completed with warnings: " + "; ".join(

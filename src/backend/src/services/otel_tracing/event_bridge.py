@@ -269,6 +269,31 @@ def _get_tool_name(event: Any) -> str:
     return ""
 
 
+#: Where a structured output object keeps the text a human is meant to read.
+#: A TaskOutput/CrewOutput is a pydantic model, so ``str()`` on it yields its
+#: REPR — ``description='...' name='...' raw='...' agent='...'`` — and that repr
+#: was what landed in the trace, in the chat's task summary, and in anything else
+#: that treats a trace as text. The answer was inside it the whole time, quoted
+#: and escaped, one field along.
+_OUTPUT_TEXT_ATTRS = ("raw", "output", "result")
+
+
+def _output_text(val: Any) -> str:
+    """The readable text of an output value.
+
+    Unwraps a structured output to its ``raw`` before falling back to ``str()``,
+    so a trace carries the answer rather than a description of the object that
+    held it.
+    """
+    if isinstance(val, str):
+        return val
+    for attr in _OUTPUT_TEXT_ATTRS:
+        inner = getattr(val, attr, None)
+        if isinstance(inner, str) and inner:
+            return inner
+    return str(val)
+
+
 def _get_output(event: Any) -> str:
     """Extract output/result content from an event object."""
     for attr in (
@@ -284,7 +309,7 @@ def _get_output(event: Any) -> str:
     ):
         val = getattr(event, attr, None)
         if val is not None:
-            return str(val)
+            return _output_text(val)
     return ""
 
 

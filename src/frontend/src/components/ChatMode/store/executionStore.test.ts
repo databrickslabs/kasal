@@ -13,6 +13,7 @@ vi.mock('./sessionStore', () => {
     addMessageToTargetSession: vi.fn(),
     updateMessageInTargetSession: vi.fn(),
     updateMessage: vi.fn(),
+    messages: [] as { id: string; content: string }[],
   };
   return {
     useSessionStore: {
@@ -711,29 +712,24 @@ describe('executionStore - completeExecution', () => {
     expect(useExecutionStore.getState().executionOwnerSessionId).toBeNull();
   });
 
-  it('empty resultText with ownerSession: posts "Execution completed."', () => {
+  it('empty resultText posts NOTHING — the notice was not an answer', () => {
+    // "Execution completed." was a status line dressed as a reply. The
+    // run-activity row already says the run finished, so it added nothing and
+    // read as the answer — particularly on a flow, which lands here routinely
+    // because its early announcement carries unreadable raw output.
     setCurrentSessionId('sess-O');
     useExecutionStore.setState({ executionOwnerSessionId: 'sess-O' });
     useExecutionStore.getState().completeExecution('');
-    expect(sessionState().addMessageToTargetSession).toHaveBeenCalledWith(
-      'sess-O',
-      'assistant',
-      'Execution completed.',
-      undefined,
-    );
+    expect(sessionState().addMessageToTargetSession).not.toHaveBeenCalled();
     // parsePreviewContent not invoked because resultText falsy
     expect(mockedParse).not.toHaveBeenCalled();
   });
 
-  it('empty resultText without ownerSession: addMessage "Execution completed."', () => {
+  it('empty resultText without an owner session posts nothing either', () => {
     setCurrentSessionId(null);
     useExecutionStore.setState({ executionOwnerSessionId: null });
     useExecutionStore.getState().completeExecution('');
-    expect(sessionState().addMessage).toHaveBeenCalledWith(
-      'assistant',
-      'Execution completed.',
-      undefined,
-    );
+    expect(sessionState().addMessage).not.toHaveBeenCalled();
   });
 
   it('preview parsed but ownerSession falsy: surfaces preview without persisting (line 189 false branch)', () => {
@@ -1616,5 +1612,223 @@ describe('a late surface never blanks what the reader is looking at', () => {
 
     const update = sessionState().updateMessageInTargetSession.mock.calls.at(-1)[2];
     expect(update).not.toHaveProperty('content');
+  });
+});
+
+describe('a flow finishes with no readable text, then its surface arrives', () => {
+  // The path that dropped a composed mindmap on a real run. A flow's early
+  // announcement carries the last crew's raw output, which is often not
+  // readable text, so the run finalizes on the bare "Execution completed."
+  // line — and the surface, composed 14s later, needs somewhere to land. The
+  // message id was only registered on the branches that HAD text, so
+  // attachSurface found nothing and the deck was discarded after being built,
+  // stored and paid for.
+  const surface = {
+    surfaceKind: 'mindmap',
+    root: 'r',
+    components: [],
+    dataModel: {},
+  } as never;
+
+  it('registers the run so a later surface can still land', () => {
+    setCurrentSessionId('sess-F');
+    mockedParse.mockReturnValue(null);
+    useExecutionStore.getState().startExecution('job-F', 'sess-F');
+    // No result text at all — the flow case.
+    useExecutionStore.getState().completeExecution('', 'job-F');
+
+    expect(useExecutionStore.getState().attachSurface('job-F', surface)).toBe(true);
+  });
+
+  it('POSTS the surface as its own message, since none was posted', () => {
+    // No notice was written, so there is nothing to fill — the surface is the
+    // whole answer and arrives as its own message.
+    setCurrentSessionId('sess-G');
+    mockedParse.mockReturnValue(null);
+    useExecutionStore.getState().startExecution('job-G', 'sess-G');
+    useExecutionStore.getState().completeExecution('', 'job-G');
+    sessionState().addMessageToTargetSession.mockClear();
+
+    useExecutionStore.getState().attachSurface('job-G', surface);
+
+    expect(sessionState().addMessageToTargetSession).toHaveBeenCalledWith(
+      'sess-G',
+      'assistant',
+      '',
+      { executionId: 'job-G', resultType: 'a2ui', resultData: surface },
+    );
+  });
+
+  it('carries the answer TEXT alongside the surface', () => {
+    // A flow's second announcement brings both, and they are different things:
+    // the surface is a mindmap, the text is the news it was drawn from. Posting
+    // the surface alone dropped half of what the run produced.
+    setCurrentSessionId('sess-I');
+    mockedParse.mockReturnValue(null);
+    useExecutionStore.getState().startExecution('job-I', 'sess-I');
+    useExecutionStore.getState().completeExecution('', 'job-I');
+    sessionState().addMessageToTargetSession.mockClear();
+
+    useExecutionStore.getState().attachSurface('job-I', surface, '# Lebanese News');
+
+    expect(sessionState().addMessageToTargetSession).toHaveBeenCalledWith(
+      'sess-I',
+      'assistant',
+      '# Lebanese News',
+      { executionId: 'job-I', resultType: 'a2ui', resultData: surface },
+    );
+  });
+
+  it('a REAL answer is still kept when the surface lands', () => {
+    sessionState().addMessageToTargetSession.mockReturnValue('msg-real');
+    sessionState().messages = [{ id: 'msg-real', content: '# The answer' }];
+    setCurrentSessionId('sess-H');
+    mockedParse.mockReturnValue(null);
+    useExecutionStore.getState().startExecution('job-H', 'sess-H');
+    useExecutionStore.getState().completeExecution('# The answer', 'job-H');
+
+    useExecutionStore.getState().attachSurface('job-H', surface);
+
+    const update = sessionState().updateMessageInTargetSession.mock.calls.at(-1)[2];
+    expect(update).not.toHaveProperty('content');
+  });
+});
+
+describe('the final answer does not print twice', () => {
+  // A run posts each task's output as it completes, and the LAST task's output
+  // IS the run's result — so the same content arrived twice: once as the task
+  // summary (capped at 300 chars by summarizeTaskOutput) and again in full at
+  // completion.
+  const FULL =
+    '{ "query": "Lebanese News Collection", "results_found": 6, ' +
+    '"has_results": true, "top_result_title": "Parliament Approves Reforms" }';
+
+  beforeEach(() => {
+    sessionState().messages = [];
+    sessionState().updateMessageInTargetSession.mockClear();
+    sessionState().addMessageToTargetSession.mockClear();
+  });
+
+  it('folds the full text into the capped task message', () => {
+    sessionState().messages = [
+      { id: 'task-1', role: 'assistant', content: `${FULL.slice(0, 60)}…` },
+    ];
+    setCurrentSessionId('sess-D1');
+    mockedParse.mockReturnValue(null);
+    useExecutionStore.getState().startExecution('job-D1', 'sess-D1');
+
+    useExecutionStore.getState().completeExecution(FULL, 'job-D1');
+
+    expect(sessionState().updateMessageInTargetSession).toHaveBeenCalledWith(
+      'sess-D1',
+      'task-1',
+      { content: FULL },
+    );
+    // and NOT posted a second time
+    expect(sessionState().addMessageToTargetSession).not.toHaveBeenCalled();
+  });
+
+  it('folds it when the task message carries a "**Task** — " header', () => {
+    sessionState().messages = [
+      {
+        id: 'task-2',
+        role: 'assistant',
+        content: `**Create Presentation** — ${FULL.slice(0, 60)}…`,
+      },
+    ];
+    setCurrentSessionId('sess-D2');
+    mockedParse.mockReturnValue(null);
+    useExecutionStore.getState().startExecution('job-D2', 'sess-D2');
+
+    useExecutionStore.getState().completeExecution(FULL, 'job-D2');
+
+    expect(sessionState().addMessageToTargetSession).not.toHaveBeenCalled();
+  });
+
+  it('still posts when nothing above it matches', () => {
+    sessionState().messages = [
+      { id: 'other', role: 'assistant', content: 'A completely different answer' },
+    ];
+    setCurrentSessionId('sess-D3');
+    mockedParse.mockReturnValue(null);
+    useExecutionStore.getState().startExecution('job-D3', 'sess-D3');
+
+    useExecutionStore.getState().completeExecution(FULL, 'job-D3');
+
+    expect(sessionState().addMessageToTargetSession).toHaveBeenCalled();
+  });
+
+  it('does not rewrite a rich card that happens to share an opening', () => {
+    // A card carries its own meaning; only a plain task line is a candidate.
+    sessionState().messages = [
+      {
+        id: 'card',
+        role: 'assistant',
+        content: FULL.slice(0, 60),
+        resultType: 'a2ui',
+      },
+    ];
+    setCurrentSessionId('sess-D4');
+    mockedParse.mockReturnValue(null);
+    useExecutionStore.getState().startExecution('job-D4', 'sess-D4');
+
+    useExecutionStore.getState().completeExecution(FULL, 'job-D4');
+
+    expect(sessionState().updateMessageInTargetSession).not.toHaveBeenCalledWith(
+      'sess-D4',
+      'card',
+      expect.anything(),
+    );
+    expect(sessionState().addMessageToTargetSession).toHaveBeenCalled();
+  });
+
+  it('ignores a short line that shares a prefix by accident', () => {
+    sessionState().messages = [
+      { id: 'noise', role: 'assistant', content: '{ "query"…' },
+    ];
+    setCurrentSessionId('sess-D5');
+    mockedParse.mockReturnValue(null);
+    useExecutionStore.getState().startExecution('job-D5', 'sess-D5');
+
+    useExecutionStore.getState().completeExecution(FULL, 'job-D5');
+
+    expect(sessionState().addMessageToTargetSession).toHaveBeenCalled();
+  });
+});
+
+describe('a late surface does not reprint an answer already shown', () => {
+  // The second duplication: the run's text appeared immediately, then again a
+  // few seconds later beneath the mindmap. The completion had folded the text
+  // into the task message but registered NO message id, so attachSurface
+  // treated the run as having posted nothing and posted the answer again.
+  const FULL =
+    '{ "query": "Lebanese News Collection", "results_found": 6, ' +
+    '"has_results": true, "top_result_title": "Parliament Approves Reforms" }';
+  const surface = {
+    surfaceKind: 'mindmap',
+    root: 'r',
+    components: [],
+    dataModel: {},
+  } as never;
+
+  it('attaches to the folded message instead of posting again', () => {
+    sessionState().messages = [
+      { id: 'task-x', role: 'assistant', content: `${FULL.slice(0, 60)}…` },
+    ];
+    sessionState().addMessageToTargetSession.mockClear();
+    setCurrentSessionId('sess-L');
+    mockedParse.mockReturnValue(null);
+    useExecutionStore.getState().startExecution('job-L', 'sess-L');
+    useExecutionStore.getState().completeExecution(FULL, 'job-L');
+
+    useExecutionStore.getState().attachSurface('job-L', surface, FULL);
+
+    expect(sessionState().updateMessageInTargetSession).toHaveBeenLastCalledWith(
+      'sess-L',
+      'task-x',
+      { resultType: 'a2ui', resultData: surface },
+    );
+    // The answer is never posted as a new message — not once, not twice.
+    expect(sessionState().addMessageToTargetSession).not.toHaveBeenCalled();
   });
 });

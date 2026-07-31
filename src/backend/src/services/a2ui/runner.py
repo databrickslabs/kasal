@@ -551,7 +551,10 @@ def crew_intent_text(
     """
     parts: List[str] = []
     cfg = config or {}
-    for key in ("crew_name", "name", "description"):
+    # ``run_name`` is what a FLOW config carries — it has no crew_name/name and
+    # no `tasks` list, so without this a flow's signal was whatever happened to
+    # be in `inputs`, and the composer declined to build anything.
+    for key in ("crew_name", "name", "description", "run_name"):
         val = cfg.get(key)
         if isinstance(val, str) and val:
             parts.append(val)
@@ -561,16 +564,46 @@ def crew_intent_text(
                 val = task.get(key)
                 if isinstance(val, str) and val:
                     parts.append(val)
+    parts.extend(_flow_node_text(cfg))
     for val in (inputs or {}).values():
         if isinstance(val, str) and val:
             parts.append(val)
     return "  ".join(parts)
 
 
+def _flow_node_text(cfg: Dict[str, Any]) -> List[str]:
+    """What a FLOW says about itself: its crew nodes and their task text.
+
+    A flow's shape is nodes + edges, not a crew's tasks list, so the crew
+    extraction above finds nothing in one. The deliverable a flow is building is
+    named in its node labels and in the referenced crews\' task descriptions —
+    "Create Presentation", "Mindmap" — which is exactly the signal
+    ``wants_rich_surface`` needs.
+    """
+    parts: List[str] = []
+    for node in cfg.get("nodes") or []:
+        if not isinstance(node, dict):
+            continue
+        data = node.get("data")
+        if not isinstance(data, dict):
+            continue
+        for key in ("label", "crewName"):
+            val = data.get(key)
+            if isinstance(val, str) and val:
+                parts.append(val)
+        for task in data.get("allTasks") or []:
+            if isinstance(task, dict):
+                for key in ("name", "description", "expected_output"):
+                    val = task.get(key)
+                    if isinstance(val, str) and val:
+                        parts.append(val)
+    return parts
+
+
 def _crew_purpose(config: Optional[Dict[str, Any]]) -> str:
     """A short purpose string for the composer (steers surface choice)."""
     cfg = config or {}
-    for key in ("crew_name", "name", "description"):
+    for key in ("crew_name", "name", "description", "run_name"):
         val = cfg.get(key)
         if isinstance(val, str) and val:
             return val

@@ -363,6 +363,33 @@ def _dedupe_flow_agent_task_tools(agents: List[Any], task_list: List[Any]) -> No
         logger.debug(f"[FLOW] agent∩task tool de-dupe skipped: {e}")
 
 
+def crew_inputs_from_state(flow: Any) -> Dict[str, Any]:
+    """The flow's state, as inputs for a crew it is about to run.
+
+    The missing link between a flow receiving a value and that value MEANING
+    anything. A flow merges its inputs into state, but a crew interpolates
+    `{placeholders}` from the inputs passed to ITS kickoff — and both crew call
+    sites passed none. Observed on a real run: `topic="swiss news"` reached flow
+    state correctly, and the crew then executed a task that still read
+    "related to a specified {topic}" literally, searched for whatever its memory
+    suggested, and returned a raw tool payload.
+
+    ``id`` is dropped: it is the checkpoint handle, not something a task should
+    ever interpolate.
+
+    Best-effort — a flow with no state, or a state that is not a mapping, simply
+    passes nothing, exactly as before.
+    """
+    state = getattr(flow, "state", None)
+    if isinstance(state, dict):
+        return {k: v for k, v in state.items() if k != "id"}
+    if state is not None and hasattr(state, "__dict__"):
+        return {
+            k: v for k, v in vars(state).items() if k != "id" and not k.startswith("_")
+        }
+    return {}
+
+
 def attach_memory_seams(crew: Any, crew_label: str, request: str | None = None) -> None:
     """Wire runtime recall + per-task persistence onto an already-built crew.
 
@@ -757,8 +784,18 @@ class FlowMethodFactory:
                     f"⏱️ Calling crew.kickoff_async() with {CREW_KICKOFF_TIMEOUT_SECONDS/60:.0f} minute timeout..."
                 )
 
+                # Flow state IS the crew's inputs — this is what interpolates
+                # {placeholders} in the crew's tasks. Passing nothing is why a
+                # flow given `topic` ran a task that still said "{topic}".
+                crew_inputs = crew_inputs_from_state(self)
+                if crew_inputs:
+                    logger.info(
+                        f"Passing {sorted(crew_inputs)} from flow state into crew "
+                        f"'{crew_name}'"
+                    )
                 result = await asyncio.wait_for(
-                    crew.kickoff_async(), timeout=CREW_KICKOFF_TIMEOUT_SECONDS
+                    crew.kickoff_async(inputs=crew_inputs),
+                    timeout=CREW_KICKOFF_TIMEOUT_SECONDS,
                 )
 
                 elapsed_time = time.time() - start_time
@@ -1549,8 +1586,11 @@ class FlowMethodFactory:
                     f"⏱️ Calling listener crew.kickoff_async() with {CREW_KICKOFF_TIMEOUT_SECONDS/60:.0f} minute timeout..."
                 )
 
+                # The SECOND crew call site (listener crews). Same reason.
+                crew_inputs = crew_inputs_from_state(self)
                 result = await asyncio.wait_for(
-                    crew.kickoff_async(), timeout=CREW_KICKOFF_TIMEOUT_SECONDS
+                    crew.kickoff_async(inputs=crew_inputs),
+                    timeout=CREW_KICKOFF_TIMEOUT_SECONDS,
                 )
 
                 elapsed_time = time.time() - start_time

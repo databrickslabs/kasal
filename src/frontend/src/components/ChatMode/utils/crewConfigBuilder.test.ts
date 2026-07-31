@@ -854,11 +854,18 @@ describe('crewConfigBuilder', () => {
       expect(config.flow_id).toBe('flow-1');
       expect(config.model).toBe('flow-model');
       expect(config.execution_type).toBe('flow');
-      expect(config.flow_config).toEqual({
-        existing: 'value',
+      // flow_config is REBUILT from the nodes and edges, not passed through:
+      // a saved config is only as current as the last save, and a flow whose
+      // router was configured afterwards reached the backend with no routers —
+      // so only its starting crew ran, while the Flow Builder (which rebuilds)
+      // ran the whole graph. Same builder now, so the two cannot diverge.
+      expect(config.flow_config).toMatchObject({
+        existing: 'value', // anything the saved config carried is preserved
         nodes: config.nodes,
         edges: config.edges,
       });
+      expect(config.flow_config).toHaveProperty('startingPoints');
+      expect(config.flow_config).toHaveProperty('listeners');
     });
 
     it('applies defaults for missing node/edge fields and missing flow_config/id/model', () => {
@@ -887,7 +894,7 @@ describe('crewConfigBuilder', () => {
       expect(config.edges[0].data).toEqual({});
       expect(config.flow_id).toBeUndefined();
       expect(config.model).toBeUndefined();
-      expect(config.flow_config).toEqual({
+      expect(config.flow_config).toMatchObject({
         nodes: config.nodes,
         edges: config.edges,
       });

@@ -1,3 +1,5 @@
+import { buildFlowConfiguration } from '../../../utils/flowConfigBuilder';
+
 /**
  * Converts plan/flow nodes + edges into the CrewConfig format
  * expected by the Kasal backend POST /executions endpoint.
@@ -612,8 +614,25 @@ export function buildFlowConfig(flow: {
     nodes: mappedNodes,
     edges: mappedEdges,
     flow_id: flow.id,
+    // REBUILT from the flow's nodes and edges, not passed through as saved.
+    //
+    // The backend wires a flow from flow_config.listeners / routers /
+    // startingPoints. A SAVED config is only as current as the last save, so a
+    // flow whose router condition was added after it was last saved reached the
+    // backend with no routers at all — and only its starting crew ran. The Flow
+    // Builder never had this problem because it rebuilds (JobExecutionService
+    // → buildFlowConfiguration); running the same flow from chat quietly did
+    // something different, which is the kind of divergence nobody debugs.
+    //
+    // Same builder, so the two paths cannot drift again. Anything the saved
+    // config carries that the builder does not produce is preserved underneath.
     flow_config: {
       ...(flow.flow_config || {}),
+      ...buildFlowConfiguration(
+        nodes as unknown as Parameters<typeof buildFlowConfiguration>[0],
+        edges as unknown as Parameters<typeof buildFlowConfiguration>[1],
+        flow.name || 'Flow',
+      ),
       nodes: mappedNodes,
       edges: mappedEdges,
     },

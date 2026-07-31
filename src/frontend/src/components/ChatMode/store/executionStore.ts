@@ -216,7 +216,11 @@ interface ExecutionActions {
    * second announcement must do exactly ONE of those things — swap the text for
    * the surface. Anything else and a slow compose double-posts.
    */
-  attachSurface: (jobId: string | undefined, surface: Surface) => boolean;
+  attachSurface: (
+    jobId: string | undefined,
+    surface: Surface,
+    resultText?: string,
+  ) => boolean;
   failExecution: (error: string, jobId?: string) => void;
   /** The session that started a still-tracked job (parallel-session routing). */
   jobOwnerOf: (jobId: string) => string | null;
@@ -283,14 +287,66 @@ const streamBubbles = new Map<string, string>();
 // Deliberately NOT a reopening of the completion path — see attachSurface.
 const finalizedRunMessages = new Map<
   string,
-  { sessionId: string | null; messageId: string }
+  { sessionId: string | null; messageId: string | null }
 >();
 const _MAX_FINALIZED_TRACKED = 32;
+
+/**
+ * Fold the final answer into the intermediate message that already showed it.
+ *
+ * A run posts each task's output as it completes, and the LAST task's output IS
+ * the run's result — so the same content arrived twice: once as the task
+ * summary (capped at 300 chars by summarizeTaskOutput) and again in full at
+ * completion. Returns true when it superseded one, meaning the caller must not
+ * post again.
+ *
+ * Matched by PREFIX, not equality: the intermediate may be capped, and it may
+ * carry a "**Task name** — " header the final text does not. Bounded to the
+ * last few messages so an older answer that happens to share an opening cannot
+ * be rewritten.
+ *
+ * Returns the id of the message it folded into, so the caller can register it —
+ * a surface arriving later must attach to THAT message rather than posting the
+ * same answer a third time.
+ */
+function supersedeTruncatedTail(
+  sessionId: string | null,
+  fullText: string,
+): string | null {
+  const text = (fullText || '').trim();
+  if (!text) return null;
+  const sessionStore = useSessionStore.getState();
+  const messages = sessionStore.messages || [];
+
+  for (let i = messages.length - 1; i >= 0 && i >= messages.length - 4; i -= 1) {
+    const message = messages[i];
+    // Only a plain task-output line: a rich card carries its own meaning.
+    if (message.role !== 'assistant' || message.resultType) continue;
+
+    const body = (message.content || '')
+      .replace(/^\*\*[^*]*\*\*\s+—\s+/, '')
+      .replace(/…$/, '')
+      .trim();
+    // Short lines ("Calling tools.") share prefixes by accident.
+    if (body.length < 40) continue;
+    if (!text.startsWith(body)) continue;
+
+    if (sessionId) {
+      sessionStore.updateMessageInTargetSession(sessionId, message.id, {
+        content: text,
+      });
+    } else {
+      sessionStore.updateMessage(message.id, { content: text });
+    }
+    return message.id;
+  }
+  return null;
+}
 
 function rememberFinalizedMessage(
   jobId: string | undefined,
   sessionId: string | null,
-  messageId: string,
+  messageId: string | null,
 ): void {
   if (!jobId) return;
   finalizedRunMessages.set(jobId, { sessionId, messageId });
@@ -740,7 +796,11 @@ export const useExecutionStore = create<ExecutionStore>()(
     useSessionStore.getState().updateMessage(bubbleId, { isStreaming: false });
   },
 
-  attachSurface: (jobId: string | undefined, surface: Surface) => {
+  attachSurface: (
+    jobId: string | undefined,
+    surface: Surface,
+    resultText?: string,
+  ) => {
     if (!jobId || !surface) return false;
     const target = finalizedRunMessages.get(jobId);
     if (!target) return false;
@@ -756,6 +816,33 @@ export const useExecutionStore = create<ExecutionStore>()(
     // rendered) — the duplication that gate was added to fix. When composition
     // takes 25-45s the reader has been reading that text the whole time, and
     // blanking it mid-read looks like the answer was retracted.
+    // Nothing to update: the run finished with no readable text, so it posted no
+    // message at all. The surface posts one now — which is what lets the
+    // "Execution completed." notice be dropped without losing a deliverable
+    // that arrives after it.
+    //
+    // It carries the run's answer TEXT as well when one came with it. A flow's
+    // second announcement brings both — the composed surface and the answer it
+    // was composed from — and they are not the same thing: the surface is a
+    // mindmap, the text is the news it was drawn from. Posting the surface
+    // alone silently dropped half of what the run produced.
+    if (!target.messageId) {
+      const extra = { executionId: jobId, resultType: 'a2ui', resultData: surface };
+      const body = (resultText || '').trim();
+      if (target.sessionId) {
+        sessionStore.addMessageToTargetSession(
+          target.sessionId,
+          'assistant',
+          body,
+          extra,
+        );
+      } else {
+        sessionStore.addMessage('assistant', body, extra);
+      }
+      return true;
+    }
+
+    // There IS text, and it stays.
     const update = { resultType: 'a2ui', resultData: surface };
     if (target.sessionId) {
       sessionStore.updateMessageInTargetSession(
@@ -865,7 +952,19 @@ export const useExecutionStore = create<ExecutionStore>()(
         // their text. Formerly gated on `surface && preview`, which missed plain
         // markdown answers (parsePreviewContent is A2UI-only → null → text kept).
         const body = surface ? '' : resultText;
-        if (streamBubbleId && ownerSession) {
+        // The last task's output already printed this. Fold the full text into
+        // that message rather than printing it a second time.
+        //
+        // NOT an early return: everything below this block — the session
+        // snapshot, clearing the run's owner — still has to happen, or the
+        // "running" banner never goes away.
+        const supersededId = body ? supersedeTruncatedTail(ownerSession, body) : null;
+        if (supersededId) {
+          // Register the message we folded into. Registering null here made the
+          // late surface post the answer a SECOND time — the run's text showed
+          // immediately, then again a few seconds later beneath the mindmap.
+          rememberFinalizedMessage(jobId, ownerSession, supersededId);
+        } else if (streamBubbleId && ownerSession) {
           // Finalize the live bubble in place — no flicker, no duplicate.
           sessionStore.updateMessageInTargetSession(ownerSession, streamBubbleId, {
             content: body,
@@ -887,22 +986,28 @@ export const useExecutionStore = create<ExecutionStore>()(
         }
       }
     } else {
+      // NO terminal text, and NO message posted for it.
+      //
+      // A flow lands here routinely: its early announcement carries the last
+      // crew's raw output, which is often not readable text. "Execution
+      // completed." was a status line dressed as an answer — the run-activity
+      // row already says the run finished, so the notice added nothing and read
+      // as the reply.
+      //
+      // The run is still REGISTERED, with no message id. A surface composed
+      // afterwards (14s on a measured flow) then POSTS its own message rather
+      // than filling a placeholder — see attachSurface. That is what lets the
+      // notice go without the deliverable going with it.
       if (streamBubbleId && ownerSession) {
         // Streamed text exists but the terminal result is empty — keep the
-        // streamed answer instead of posting a generic completion notice.
+        // streamed answer rather than replacing it with nothing.
         sessionStore.updateMessageInTargetSession(ownerSession, streamBubbleId, {
           isStreaming: false,
           ...(runExtra ?? {}),
         });
-      } else if (ownerSession) {
-        sessionStore.addMessageToTargetSession(
-          ownerSession,
-          'assistant',
-          'Execution completed.',
-          runExtra,
-        );
+        rememberFinalizedMessage(jobId, ownerSession, streamBubbleId);
       } else {
-        sessionStore.addMessage('assistant', 'Execution completed.', runExtra);
+        rememberFinalizedMessage(jobId, ownerSession, null);
       }
     }
 
