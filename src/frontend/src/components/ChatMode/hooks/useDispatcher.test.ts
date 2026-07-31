@@ -785,7 +785,9 @@ describe('useDispatcher', () => {
         await p;
       });
 
-      expect(opts.onExecuteFlow).toHaveBeenCalledWith(flow);
+      // Second arg undefined: /run-style, not routed — no extracted inputs or
+      // schema to carry. Mirrors the execute_crew case above.
+      expect(opts.onExecuteFlow).toHaveBeenCalledWith(flow, undefined);
     });
 
     it('execute_flow with no flow does not schedule callback', async () => {

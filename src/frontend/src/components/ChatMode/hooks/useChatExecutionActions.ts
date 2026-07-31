@@ -23,6 +23,7 @@ import {
   detectVariablesFromNodes,
   detectVariablesFromGenerated,
 } from '../../../utils/variableDetector';
+import { deriveFlowInputs } from '../../../utils/flowInputs';
 import { getSessionPreview } from '../db/sessionApi';
 
 /**
@@ -45,13 +46,14 @@ import { getSessionPreview } from '../db/sessionApi';
 export function resolveMissingVariables(
   nodes: unknown[],
   routed?: RoutedRunFields,
+  detect: (nodes: unknown[]) => DetectedVariable[] = detectVariablesFromNodes,
 ): DetectedVariable[] {
   const bound = routed?.extractedInputs ?? {};
   const declared = routed?.inputSchema?.required;
 
   const required: DetectedVariable[] =
     declared === undefined
-      ? detectVariablesFromNodes(nodes)
+      ? detect(nodes)
       : declared.map((name) => ({ name, required: true }));
 
   return required.filter((v) => bound[v.name] === undefined);
@@ -102,8 +104,9 @@ export function useChatExecutionActions({
   // Input variables dialog state: a run parked until the user supplies the
   // variables the crew/flow declares. Nothing outside this hook reads it.
   const [pendingExecution, setPendingExecution] = useState<{
-    type: 'crew' | 'generated';
+    type: 'crew' | 'generated' | 'flow';
     plan?: PlanData;
+    flow?: FlowData;
     data?: GenerationCompleteData;
     spaceId?: string;
     originSession?: string | null;
@@ -425,8 +428,8 @@ export function useChatExecutionActions({
     [addMessage, doExecuteGenerated, selectedModel],
   );
 
-  const handleExecuteFlow = useCallback(
-    async (flow: FlowData) => {
+  const doExecuteFlow = useCallback(
+    async (flow: FlowData, inputs?: Record<string, string>) => {
       // Capture the session ID NOW, before the async createExecution call.
       const originSessionId = useSessionStore.getState().currentSessionId;
 
@@ -439,7 +442,7 @@ export function useChatExecutionActions({
           tasks: [],
         });
 
-        const flowConfig = buildFlowConfig(flow, selectedModel || undefined);
+        const flowConfig = buildFlowConfig(flow, selectedModel || undefined, inputs);
         const execution = await createExecution(flowConfig);
         const jobId = execution.job_id || execution.execution_id;
         if (jobId) {
@@ -459,6 +462,37 @@ export function useChatExecutionActions({
     [addMessage, handleStartExecutionStream, selectedModel],
   );
 
+  const handleExecuteFlow = useCallback(
+    async (flow: FlowData, routed?: RoutedRunFields) => {
+      // A flow got NO gate at all until now, unlike the crew path: it ran with
+      // whatever its state defaulted to, and a declared input was never asked
+      // for because nothing ever looked.
+      // Derived differently from a crew: a flow reads most of its inputs in
+      // router conditions on EDGES (`state.region == "DACH"`), which are not
+      // {placeholders} and which a placeholder scan cannot see.
+      const missing = resolveMissingVariables(flow.nodes || [], routed, (nodes) =>
+        deriveFlowInputs(nodes, flow.edges || []),
+      );
+
+      if (missing.length > 0) {
+        setPendingExecution({
+          type: 'flow',
+          flow,
+          boundInputs: routed?.extractedInputs,
+          request: routed?.request,
+          referencedAnswer: routed?.referencedAnswer,
+        });
+        addMessage('assistant', 'This flow needs input variables before it can run.', {
+          resultType: 'input_variables',
+          resultData: { variables: missing },
+        });
+        return;
+      }
+      doExecuteFlow(flow, routed?.extractedInputs);
+    },
+    [doExecuteFlow, addMessage],
+  );
+
   // --- Inline input-variables prompt (genie-style, in the chat flow) ---
   const handleVariablesSubmit = useCallback(
     (_messageId: string, inputs: Record<string, string>) => {
@@ -467,11 +501,15 @@ export function useChatExecutionActions({
 
       if (!pending) {
         // Prompt outlived its parked run (e.g. page reload) — ask for a re-run.
-        addMessage('assistant', 'This run prompt has expired — run the crew again to use these variables.');
+        addMessage('assistant', 'This run prompt has expired — start the run again to use these variables.');
         return;
       }
-      // pending is always a crew (carrying a plan) or a generated crew (carrying data).
-      if (pending.type === 'crew') {
+      if (pending.type === 'flow') {
+        doExecuteFlow(pending.flow as FlowData, {
+          ...(pending.boundInputs ?? {}),
+          ...inputs,
+        });
+      } else if (pending.type === 'crew') {
         // Anything the router bound comes FIRST, so a value the user typed into
         // the card wins on a key collision — they are looking at the field.
         doExecuteCrew(
@@ -484,7 +522,7 @@ export function useChatExecutionActions({
         doExecuteGenerated(pending.data as GenerationCompleteData, pending.spaceId, inputs, { originSession: pending.originSession });
       }
     },
-    [pendingExecution, doExecuteCrew, doExecuteGenerated, addMessage],
+    [pendingExecution, doExecuteCrew, doExecuteGenerated, doExecuteFlow, addMessage],
   );
 
   return {

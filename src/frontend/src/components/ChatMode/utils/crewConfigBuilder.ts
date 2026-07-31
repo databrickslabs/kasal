@@ -577,7 +577,7 @@ export function buildFlowConfig(flow: {
   nodes: unknown[];
   edges: unknown[];
   flow_config?: Record<string, unknown>;
-}, model?: string): FlowExecutionConfig {
+}, model?: string, inputs?: Record<string, string>): FlowExecutionConfig {
   const nodes = flow.nodes as FlowNode[];
   const edges = flow.edges as FlowEdge[];
 
@@ -600,7 +600,11 @@ export function buildFlowConfig(flow: {
   return {
     agents_yaml: {},
     tasks_yaml: {},
-    inputs: {},
+    // Hardcoded `{}` until now, which is why a flow could not be given a value
+    // by anything: the field existed, travelled the whole way, and was always
+    // empty. It is the first of five drops in series — see the backend's
+    // _kickoff_inputs and _merge_inputs for the rest.
+    inputs: inputs || {},
     reasoning: false,
     model: model || undefined,
     execution_type: 'flow',

@@ -978,3 +978,20 @@ describe('inputs the crew never references', () => {
     expect(first.description).toBe('Collect current news.');
   });
 });
+
+describe('a flow can be given inputs', () => {
+  // `inputs: {}` was hardcoded here — the first of five drops in series. The
+  // field existed and travelled the whole way to the engine, always empty, so
+  // nothing could give a flow a value even when it tried.
+  const flow = { id: 'f1', name: 'Risk Flow', nodes: [], edges: [] };
+
+  it('carries them into the config', () => {
+    expect(buildFlowConfig(flow, 'm', { region: 'DACH' }).inputs).toEqual({
+      region: 'DACH',
+    });
+  });
+
+  it('is still an empty object when there are none', () => {
+    expect(buildFlowConfig(flow, 'm').inputs).toEqual({});
+  });
+});

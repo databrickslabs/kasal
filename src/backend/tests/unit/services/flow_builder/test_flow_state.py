@@ -141,11 +141,25 @@ class TestFlowStateManagerEvaluateCondition:
         result = FlowStateManager.evaluate_condition(state, "state.get('score') > 5")
         assert result is False
 
-    def test_returns_false_on_eval_error(self):
-        """evaluate_condition returns False when eval raises an exception."""
-        state = {}
-        result = FlowStateManager.evaluate_condition(state, "undefined_variable > 5")
-        assert result is False
+    def test_an_unevaluable_condition_RAISES_rather_than_reading_as_false(self):
+        """A condition that cannot be evaluated is unanswered, not false.
+
+        This test asserted the opposite until the router leg: every exception
+        became ``False``, so a condition referencing a misspelled state key sent
+        the flow down the "no" branch and the run reported success. Combined with
+        inputs being dropped silently, one typo ran the wrong half of a flow with
+        nothing anywhere saying so.
+        """
+        from src.services.flow_builder.modules.flow_state import (
+            ConditionEvaluationError,
+        )
+
+        with pytest.raises(ConditionEvaluationError) as exc:
+            FlowStateManager.evaluate_condition({"score": 3}, "undefined_variable > 5")
+
+        # Names what was unknown, and what the state actually has.
+        assert "undefined_variable" in str(exc.value)
+        assert "score" in str(exc.value)
 
     def test_condition_with_builtin_len(self):
         """evaluate_condition can use len() builtin."""

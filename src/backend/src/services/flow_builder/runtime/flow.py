@@ -201,14 +201,42 @@ class Flow(Generic[T]):
     # ------------------------------ internals ------------------------------
 
     def _merge_inputs(self, inputs: dict[str, Any]) -> None:
+        """Put the run's inputs into flow state.
+
+        A key a TYPED state has no field for used to be skipped in silence.
+        Combined with ``evaluate_condition`` swallowing its own errors, one
+        misspelled input meant: the value vanished, the condition reading it
+        evaluated to False, the flow took the wrong branch, and nothing anywhere
+        said so. The run looked like a success.
+
+        So it raises. The caller supplied a value expecting it to matter, and a
+        flow that cannot receive it has not run correctly — failing at kickoff,
+        naming the key and what the state does hold, costs one clear error
+        instead of a plausible wrong answer.
+
+        A DICT state accepts anything by definition, so there is nothing to check
+        there; validation for that case belongs before kickoff, against the
+        derived schema.
+        """
         if not inputs:
             return
         if isinstance(self._state, dict):
             self._state.update(inputs)
-        else:
-            for key, value in inputs.items():
-                if hasattr(self._state, key):
-                    setattr(self._state, key, value)
+            return
+
+        unknown = [key for key in inputs if not hasattr(self._state, key)]
+        if unknown:
+            known = sorted(
+                name for name in vars(self._state) if not name.startswith("_")
+            )
+            raise ValueError(
+                f"Flow state has no field(s) {sorted(unknown)}. "
+                f"This state accepts: {known}. "
+                "An input the state cannot hold would be dropped silently and "
+                "the flow would branch as though it had never been supplied."
+            )
+        for key, value in inputs.items():
+            setattr(self._state, key, value)
 
     def _restore_state(self, restore_id: str) -> None:
         stored = self._persistence.load_state(restore_id)

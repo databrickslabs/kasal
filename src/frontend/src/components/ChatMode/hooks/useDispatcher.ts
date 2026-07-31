@@ -43,7 +43,7 @@ interface UseDispatcherOptions {
   onStartGenerationStream: (generationId: string, sessionId: string) => void;
   onStartExecutionStream: (jobId: string, sessionId?: string) => void;
   onExecuteCrew?: (plan: PlanData, routed?: RoutedRunFields) => void;
-  onExecuteFlow?: (flow: FlowData) => void;
+  onExecuteFlow?: (flow: FlowData, routed?: RoutedRunFields) => void;
   onExecuteGenerated?: (data: GenerationCompleteData, spaceId?: string) => void;
   /** Fired when a crew/flow is LOADED (not run) so the host can make the chat
    *  submit button run it. sessionId is the session the plan was loaded into. */
@@ -488,8 +488,19 @@ export function useDispatcher(options: UseDispatcherOptions) {
             const execResult = result.generation_result as ExecuteFlowResult;
             if (execResult.flow && options.onExecuteFlow) {
               const flow = execResult.flow;
+              // Same routed fields as the crew leg. Absent for /run flow and
+              // click-to-run, which keep the detect-everything fallback.
+              const routed: RoutedRunFields | undefined = execResult.capability
+                ? {
+                    extractedInputs: execResult.extracted_inputs,
+                    inputSchema: execResult.input_schema,
+                    capability: execResult.capability,
+                    request: execResult.request,
+                    referencedAnswer: execResult.referenced_answer,
+                  }
+                : undefined;
               setTimeout(() => {
-                options.onExecuteFlow!(flow);
+                options.onExecuteFlow!(flow, routed);
               }, 300);
             }
           }

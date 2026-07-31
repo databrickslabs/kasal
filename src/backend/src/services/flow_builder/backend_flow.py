@@ -319,6 +319,23 @@ class BackendFlow:
             f"Callbacks dict flow_id: {flow_id_for_callbacks} (type: {type(flow_id_for_callbacks).__name__ if flow_id_for_callbacks else 'None'})"
         )
 
+    def _kickoff_inputs(self) -> Dict[str, Any]:
+        """What this run passes into flow state.
+
+        The user's inputs AND, on a resume, the checkpoint id. Both, not either:
+        the two call sites below used to pass ``{"id": resume_uuid}`` when
+        resuming and nothing otherwise, so a resumed run silently dropped every
+        input and a normal run had no way to send one at all. ``id`` wins on a
+        collision — it addresses the checkpoint, and a flow whose own variable is
+        called ``id`` must not be able to redirect a restore.
+        """
+        inputs = self._config.get("inputs")
+        merged: Dict[str, Any] = dict(inputs) if isinstance(inputs, dict) else {}
+        resume_uuid = self._config.get("resume_from_flow_uuid")
+        if resume_uuid:
+            merged["id"] = resume_uuid
+        return merged
+
     async def kickoff_async(self) -> Dict[str, Any]:
         """
         Async version of kickoff for better performance.
@@ -440,16 +457,14 @@ class BackendFlow:
                     logger.info("Using CrewAI's native kickoff_async method")
                     logger.info("About to call kickoff_async() on flow instance")
 
-                    # CRITICAL: Pass restore_uuid as 'id' in inputs for checkpoint resume
-                    # CrewAI's @persist decorator loads state from persistence when 'id' is in inputs
-                    resume_from_flow_uuid = self._config.get("resume_from_flow_uuid")
-                    if resume_from_flow_uuid:
+                    # The run's inputs, plus the checkpoint id when resuming.
+                    # The engine loads persisted state when 'id' is present.
+                    kickoff_inputs = self._kickoff_inputs()
+                    if kickoff_inputs:
                         logger.info(
-                            f"Passing id={resume_from_flow_uuid} to kickoff_async for checkpoint resume"
+                            f"Passing {sorted(kickoff_inputs)} to kickoff_async"
                         )
-                        result = await engine_flow.kickoff_async(
-                            inputs={"id": resume_from_flow_uuid}
-                        )
+                        result = await engine_flow.kickoff_async(inputs=kickoff_inputs)
                     else:
                         result = await engine_flow.kickoff_async()
                     logger.info(f"kickoff_async() returned: {type(result)}")
@@ -793,18 +808,14 @@ class BackendFlow:
                 )
 
             try:
-                # CRITICAL: Pass resume_from_flow_uuid as 'id' in inputs for checkpoint resume
-                # CrewAI's @persist decorator loads state from persistence when 'id' is in inputs
-                resume_from_flow_uuid = self._config.get("resume_from_flow_uuid")
-                if resume_from_flow_uuid:
-                    logger.info(
-                        f"Passing id={resume_from_flow_uuid} to kickoff_async for checkpoint resume"
-                    )
-                    flow_result = await engine_flow.kickoff_async(
-                        inputs={"id": resume_from_flow_uuid}
-                    )
+                # THE SECOND call site. Both branches are live — which one runs
+                # depends on how the flow was loaded — so a fix applied to one
+                # ships and appears not to work.
+                kickoff_inputs = self._kickoff_inputs()
+                if kickoff_inputs:
+                    logger.info(f"Passing {sorted(kickoff_inputs)} to kickoff_async")
+                    flow_result = await engine_flow.kickoff_async(inputs=kickoff_inputs)
                 else:
-                    # Let CrewAI Flow handle the execution (start methods + listeners)
                     flow_result = await engine_flow.kickoff_async()
                 logger.info(
                     f"Flow kickoff_async completed, result type: {type(flow_result)}"

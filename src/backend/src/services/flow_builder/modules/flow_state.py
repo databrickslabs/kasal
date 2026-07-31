@@ -9,10 +9,21 @@ import logging
 from typing import Any, Dict, Optional
 
 from src.core.logger import LoggerManager
-from src.utils.safe_eval import safe_eval
+from src.utils.safe_eval import UnsafeExpressionError, safe_eval
 
 # Initialize logger - use flow logger for flow execution
 logger = LoggerManager.get_instance().flow
+
+
+class ConditionEvaluationError(RuntimeError):
+    """A flow condition could not be evaluated.
+
+    Deliberately NOT something the flow paths already swallow. The whole point is
+    that it reaches the run and fails it: a router handed an unanswerable
+    condition has no branch to take, and the old behaviour — treat it as False —
+    is what let a misspelled state key silently send a flow down the wrong path.
+    """
+
 
 # Bare names that user-authored flow condition expressions may call.
 _CONDITION_CALLS = frozenset({"str", "int", "float", "bool", "len"})
@@ -141,6 +152,21 @@ class FlowStateManager:
 
         Returns:
             Boolean result of condition evaluation, True if no condition provided
+
+        Raises:
+            ConditionEvaluationError: the condition could NOT be evaluated —
+                an unknown name, a disallowed call, a syntax error. Distinct from
+                a condition that evaluated to False, which returns False.
+
+        The two used to be the same answer. Every exception was caught, logged,
+        and turned into ``False``, so a router whose condition referenced a
+        misspelled state key took the "no" branch and reported success. Combined
+        with inputs being dropped silently, one typo produced a flow that ran the
+        wrong half of itself with nothing anywhere saying so.
+
+        A condition that cannot be evaluated is not false — it is unanswered, and
+        a router cannot make a decision from it. Failing the run says so once,
+        instead of producing a plausible wrong result every time.
         """
         if not condition:
             return True
@@ -165,11 +191,28 @@ class FlowStateManager:
             logger.info(f"Condition '{condition}' evaluated to: {result}")
             return bool(result)
 
-        except Exception as e:
+        except UnsafeExpressionError as exc:
+            # The expression itself is unusable: an unknown name (the misspelled
+            # state key), a call that is not permitted, a malformed expression.
+            # Nothing about the state answers it, so there is no branch to take.
+            logger.error("Condition %r cannot be evaluated: %s", condition, exc)
+            raise ConditionEvaluationError(
+                f"Flow condition {condition!r} could not be evaluated: {exc}. "
+                f"State keys available: {sorted(state) if isinstance(state, dict) else type(state).__name__}"
+            ) from exc
+        except Exception as exc:  # noqa: BLE001
+            # Anything else is also unanswered — a comparison against an
+            # incompatible type, an attribute that is not there. Same reasoning:
+            # do not dress an unanswered question up as a "no".
             logger.error(
-                f"Error evaluating condition '{condition}': {e}", exc_info=True
+                "Condition %r raised while evaluating: %s",
+                condition,
+                exc,
+                exc_info=True,
             )
-            return False
+            raise ConditionEvaluationError(
+                f"Flow condition {condition!r} raised while evaluating: {exc}"
+            ) from exc
 
     @staticmethod
     def get_state_value(state: Dict[str, Any], key: str, default: Any = None) -> Any:
