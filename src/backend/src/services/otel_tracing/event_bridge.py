@@ -962,19 +962,13 @@ class OTelEventBridge:
                         break
 
         # ── Memory type from source_type (BaseEvent field) ──
+        # There is no memory_type to derive any more. This used to map a
+        # source_type onto short_term / long_term / entity for the trace UI;
+        # that split was removed and every memory event now reports
+        # ``unified_memory``, so no branch could fire.
         source_type = getattr(event, "source_type", None)
         if source_type:
             span.set_attribute("kasal.extra.source_type", str(source_type))
-            # Derive memory_type from source_type for frontend display
-            st = str(source_type).lower()
-            if "short" in st:
-                span.set_attribute("kasal.extra.memory_type", "short_term")
-            elif "long" in st:
-                span.set_attribute("kasal.extra.memory_type", "long_term")
-            elif "entity" in st:
-                span.set_attribute("kasal.extra.memory_type", "entity")
-            elif "external" in st:
-                span.set_attribute("kasal.extra.memory_type", "external")
 
         # ── Memory query/save fields ──
         query = getattr(event, "query", None)

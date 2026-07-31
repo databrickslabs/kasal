@@ -13,7 +13,7 @@ The system falls back to DEFAULT when no active backend is configured.
 import pytest
 
 from src.schemas.memory_backend import (
-    CognitiveMemoryConfig,
+    MemoryTuningConfig,
     DatabricksMemoryConfig,
     LakebaseMemoryConfig,
     MemoryBackendConfig,
@@ -67,7 +67,7 @@ class TestMemoryBackendConfigSchema:
                 endpoint_name="ep",
                 memory_index="cat.sch.unified",
             ),
-            cognitive_config=CognitiveMemoryConfig(
+            cognitive_config=MemoryTuningConfig(
                 semantic_weight=0.5,
                 recency_weight=0.3,
                 importance_weight=0.2,

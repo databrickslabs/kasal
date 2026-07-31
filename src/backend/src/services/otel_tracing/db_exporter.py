@@ -241,14 +241,6 @@ def _extract_output(span: ReadableSpan) -> Any:
     if tool_desc:
         output["tool_description"] = str(tool_desc)[:300]
 
-    # Memory-specific fields from instrumentor
-    for prefix in ("long_term_memory.", "short_term_memory."):
-        for suffix in ("save_time_ms", "query_time_ms", "source_type", "agent_role"):
-            key = f"{prefix}{suffix}"
-            val = attrs.get(key)
-            if val is not None:
-                output[suffix] = val
-
     # Add extra_data from kasal bridge attributes
     extra: Dict[str, Any] = {}
     for key, val in attrs.items():
@@ -343,7 +335,7 @@ class KasalDBSpanExporter(SpanExporter):
         # across loops races and SILENTLY DROPS commits (observed: a task's
         # ``memory_write`` span "Wrote 1/1" yet never lands in the table). It also
         # drives the StaticPool reset errors/hangs at teardown. Serialising writes
-        # makes the single connection safe. The high span volume from cognitive
+        # makes the single connection safe. The high span volume from
         # memory is what exposed this.
         self._job_id = job_id
         self._group_context = group_context

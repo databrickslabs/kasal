@@ -371,12 +371,15 @@ class TestMemoryBackendBaseService:
         result = await service.get_memory_stats(group_id, crew_id)
 
         # Assert
+        assert result["configured"] is True
         assert result["backend_type"] == "databricks"
         assert result["backend_name"] == "Test Backend"
-        assert "short_term_count" in result
-        assert "long_term_count" in result
-        assert "entity_count" in result
-        assert "total_size_mb" in result
+        # The per-type counts are gone: they named the removed short-term /
+        # long-term / entity split and were hardcoded to zero, so a caller
+        # reading them was reading fabricated data.
+        assert "short_term_count" not in result
+        assert "long_term_count" not in result
+        assert "entity_count" not in result
 
     @pytest.mark.asyncio
     async def test_delete_all_and_create_disabled(self, service, mock_uow):

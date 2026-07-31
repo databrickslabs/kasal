@@ -56,7 +56,6 @@ def _regular_ctx():
 # the patch has to land on every module that imports it.
 _ADMIN_CHECK_SITES = (
     "src.api.memory_backend.configs_router.is_workspace_admin",
-    "src.api.memory_backend.vectorsearch_router.is_workspace_admin",
     "src.api.memory_backend.lakebase_router.is_workspace_admin",
 )
 

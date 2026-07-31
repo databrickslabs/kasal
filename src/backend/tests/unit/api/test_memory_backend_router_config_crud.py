@@ -12,7 +12,6 @@ from src.api.memory_backend import (
     dependencies,
     lakebase_router,
     records_router,
-    vectorsearch_router,
 )
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 
@@ -39,18 +38,6 @@ def test_get_memory_backend_service():
         MockSvc.return_value = MagicMock()
         dependencies.get_memory_backend_service(session=fake_session)
         MockSvc.assert_called_once_with(fake_session)
-
-
-# ─── get_workspace_url ────────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_get_workspace_url():
-    svc = AsyncMock()
-    svc.get_workspace_url = AsyncMock(return_value={"workspace_url": "https://db.com"})
-    ctx = AdminCtx()
-    result = await vectorsearch_router.get_workspace_url(service=svc, group_context=ctx)
-    assert result["workspace_url"] == "https://db.com"
 
 
 # ─── test_lakebase_connection ─────────────────────────────────────────────────
@@ -310,28 +297,6 @@ async def test_validate_memory_config_databricks_no_config():
     assert result["valid"] is False
 
 
-# ─── get_databricks_indexes ───────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_get_databricks_indexes():
-    svc = AsyncMock()
-    svc.get_available_indexes = AsyncMock(return_value={"indexes": ["idx1"]})
-    ctx = AdminCtx()
-    from src.schemas.memory_backend import DatabricksMemoryConfig
-
-    config = DatabricksMemoryConfig(
-        memory_index="catalog.schema.memory_index",
-        workspace_url="https://example.com",
-        endpoint_name="my-endpoint",
-        short_term_index="st_idx",
-    )
-    result = await vectorsearch_router.get_databricks_indexes(
-        config=config, request=None, service=svc, group_context=ctx
-    )
-    assert result is not None
-
-
 # ─── initialize_lakebase_tables ───────────────────────────────────────────────
 
 
@@ -420,38 +385,5 @@ async def test_save_lakebase_config_success():
     ctx = AdminCtx(is_admin=True)
     result = await lakebase_router.save_lakebase_config(
         request=MagicMock(), service=svc, group_context=ctx
-    )
-    assert result is not None
-
-
-# ─── one_click_databricks_setup ───────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_one_click_databricks_setup_forbidden():
-    svc = AsyncMock()
-    ctx = AdminCtx(is_admin=False)
-    with pytest.raises(ForbiddenError):
-        await vectorsearch_router.one_click_databricks_setup(
-            request=MagicMock(), req=None, service=svc, group_context=ctx
-        )
-
-
-@pytest.mark.asyncio
-async def test_one_click_databricks_setup_success():
-    svc = AsyncMock()
-    svc.one_click_databricks_setup = AsyncMock(
-        return_value={"success": True, "endpoints": [], "indexes": []}
-    )
-    ctx = AdminCtx(is_admin=True)
-    result = await vectorsearch_router.one_click_databricks_setup(
-        request={
-            "workspace_url": "https://example.com",
-            "catalog": "cat",
-            "schema": "sch",
-        },
-        req=None,
-        service=svc,
-        group_context=ctx,
     )
     assert result is not None

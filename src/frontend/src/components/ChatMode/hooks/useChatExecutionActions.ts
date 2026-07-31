@@ -288,7 +288,7 @@ export function useChatExecutionActions({
           // Databricks environments with no OpenAI key.
           ...(selectedModel ? { llm: selectedModel } : {}),
           // A refine is a single-shot edit, not a research crew. Disabling memory
-          // (the only agent → disables crew memory entirely) skips the cognitive
+          // (the only agent → disables crew memory entirely) skips the memory
           // memory search/save flow; no delegation keeps it to one LLM pass.
           memory: false,
           allow_delegation: false,

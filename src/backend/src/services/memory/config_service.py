@@ -130,9 +130,9 @@ class MemoryConfigService:
 
                 cognitive_config = None
                 if latest_backend.cognitive_config:
-                    from src.schemas.memory_backend import CognitiveMemoryConfig
+                    from src.schemas.memory_backend import MemoryTuningConfig
 
-                    cognitive_config = CognitiveMemoryConfig(
+                    cognitive_config = MemoryTuningConfig(
                         **latest_backend.cognitive_config
                     )
 
@@ -199,9 +199,9 @@ class MemoryConfigService:
 
                     cognitive_config = None
                     if backend.cognitive_config:
-                        from src.schemas.memory_backend import CognitiveMemoryConfig
+                        from src.schemas.memory_backend import MemoryTuningConfig
 
-                        cognitive_config = CognitiveMemoryConfig(
+                        cognitive_config = MemoryTuningConfig(
                             **backend.cognitive_config
                         )
 

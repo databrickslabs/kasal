@@ -1,4 +1,4 @@
-"""Deterministic on-disk location for LOCAL (DEFAULT) cognitive memory.
+"""Deterministic on-disk location for LOCAL (DEFAULT) memory.
 
 The DEFAULT backend is kasal's own SQLite store — ``memory.db`` under the group
 directory, written by services/memory/local_storage_backend.py (embeddings

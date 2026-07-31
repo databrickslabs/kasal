@@ -93,7 +93,7 @@ class TestCognitiveWeightPlumbing:
             },
         )
 
-        kwargs = MemoryBackendFactory._cognitive_scoring_kwargs(config)
+        kwargs = MemoryBackendFactory._scoring_kwargs(config)
 
         assert kwargs == {
             "semantic_weight": 0.8,
@@ -109,7 +109,7 @@ class TestCognitiveWeightPlumbing:
         )
 
         config = MemoryBackendConfig(backend_type="default")
-        assert MemoryBackendFactory._cognitive_scoring_kwargs(config) == {}
+        assert MemoryBackendFactory._scoring_kwargs(config) == {}
 
     def test_local_backend_ctor_overrides(self, tmp_path):
         store = LocalMemoryStorage(

@@ -273,7 +273,7 @@ export function useChatRunStream({ pendingActionsRef }: UseChatRunStreamArgs) {
     pendingActionsRef.current = null;
     const sessionStore = useSessionStore.getState();
     // Anchor the row to this run's execution id so the actions bar can offer a
-    // "Memory graph" link scoped to exactly this run's cognitive memory. Carry
+    // "Memory graph" link scoped to exactly this run's memory. Carry
     // the run's answer mode so the bar can hide crew-catalog actions for plain
     // 'chat' turns (there is no crew worth cataloging).
     const extra = {

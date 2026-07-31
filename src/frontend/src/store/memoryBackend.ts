@@ -6,7 +6,7 @@ import { create } from 'zustand';
 import {
   MemoryBackendConfig,
   MemoryBackendType,
-  CognitiveMemoryConfig,
+  MemoryTuningConfig,
   DatabricksMemoryConfig,
   LakebaseMemoryConfig,
   DEFAULT_MEMORY_BACKEND_CONFIG,
@@ -41,12 +41,10 @@ interface MemoryBackendState {
   updateConfig: (updates: Partial<MemoryBackendConfig>) => void;
   updateDatabricksConfig: (updates: Partial<MemoryBackendConfig['databricks_config']>) => void;
   updateLakebaseConfig: (updates: Partial<LakebaseMemoryConfig>) => void;
-  updateCognitiveConfig: (updates: Partial<CognitiveMemoryConfig>) => void;
+  updateCognitiveConfig: (updates: Partial<MemoryTuningConfig>) => void;
   
   // API actions
   validateConfig: () => Promise<boolean>;
-  testDatabricksConnection: () => Promise<TestConnectionResult>;
-  loadAvailableIndexes: () => Promise<void>;
   saveConfig: () => Promise<boolean>;
   loadConfig: () => Promise<void>;
   
@@ -103,7 +101,7 @@ export const useMemoryBackendStore = create<MemoryBackendState>((set, get) => ({
       cognitive_config: {
         ...(state.config.cognitive_config || {}),
         ...updates,
-      } as CognitiveMemoryConfig,
+      } as MemoryTuningConfig,
     },
     error: null,
   })),
@@ -132,68 +130,8 @@ export const useMemoryBackendStore = create<MemoryBackendState>((set, get) => ({
   },
 
   // Test Databricks connection
-  testDatabricksConnection: async () => {
-    const { config } = get();
-    
-    if (config.backend_type !== MemoryBackendType.DATABRICKS || !config.databricks_config) {
-      const result: TestConnectionResult = {
-        success: false,
-        message: 'Databricks configuration not set',
-      };
-      set({ connectionTestResult: result });
-      return result;
-    }
-    
-    set({ isTestingConnection: true, connectionTestResult: null, error: null });
-    
-    try {
-      const result = await MemoryBackendService.testDatabricksConnection(config.databricks_config);
-      set({ 
-        connectionTestResult: result,
-        isTestingConnection: false,
-      });
-      return result;
-    } catch (error: unknown) {
-      const result: TestConnectionResult = {
-        success: false,
-        message: (error instanceof Error ? error.message : String(error)) || 'Connection test failed',
-      };
-      set({ 
-        connectionTestResult: result,
-        isTestingConnection: false,
-        error: result.message,
-      });
-      return result;
-    }
-  },
 
   // Load available indexes
-  loadAvailableIndexes: async () => {
-    const { config } = get();
-    
-    if (config.backend_type !== MemoryBackendType.DATABRICKS || !config.databricks_config?.endpoint_name) {
-      return;
-    }
-    
-    set({ isLoadingIndexes: true, error: null });
-    
-    try {
-      const response = await MemoryBackendService.getAvailableDatabricksIndexes(
-        config.databricks_config.endpoint_name,
-        config.databricks_config
-      );
-      set({ 
-        availableIndexes: response.indexes,
-        isLoadingIndexes: false,
-      });
-    } catch (error: unknown) {
-      set({ 
-        error: (error instanceof Error ? error.message : String(error)) || 'Failed to load indexes',
-        availableIndexes: [],
-        isLoadingIndexes: false,
-      });
-    }
-  },
 
   // Save configuration
   saveConfig: async () => {
@@ -258,5 +196,5 @@ export const useMemoryBackendConfig = () => useMemoryBackendStore((state) => sta
 export const useMemoryBackendType = () => useMemoryBackendStore((state) => state.config.backend_type);
 export const useDatabricksConfig = () => useMemoryBackendStore((state) => state.config.databricks_config);
 export const useLakebaseConfig = () => useMemoryBackendStore((state) => state.config.lakebase_config);
-export const useCognitiveMemoryConfig = () =>
+export const useMemoryTuningConfig = () =>
   useMemoryBackendStore((state) => state.config.cognitive_config);

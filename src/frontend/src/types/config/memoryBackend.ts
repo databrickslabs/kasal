@@ -1,5 +1,5 @@
 /**
- * Memory backend configuration types for CrewAI 1.10+ unified cognitive memory.
+ * Memory backend configuration types.
  *
  * CrewAI's unified Memory class replaces the legacy short/long/entity split
  * with a single scoped memory store, so these types no longer carry per-tier
@@ -8,12 +8,14 @@
 
 export enum MemoryBackendType {
   DEFAULT = 'default', // Kasal unified Memory (local SQLite)
-  DATABRICKS = 'databricks', // Databricks Vector Search
+  // Legacy value kept so saved configurations still parse. Memory runs on
+  // Lakebase or the local store; a databricks config falls back to local.
+  DATABRICKS = 'databricks',
   LAKEBASE = 'lakebase', // Lakebase pgvector
 }
 
-/** Tuning knobs for CrewAI 1.10+ unified cognitive memory. */
-export interface CognitiveMemoryConfig {
+/** Recall-scoring knobs for a teamspace's memory. */
+export interface MemoryTuningConfig {
   // Composite score weights (should roughly sum to 1.0).
   semantic_weight?: number;
   recency_weight?: number;
@@ -42,7 +44,7 @@ export interface DatabricksMemoryConfig {
   // Memory endpoint (Direct Access for dynamic record-level writes).
   endpoint_name: string;
 
-  // Unified cognitive memory index — one index for every MemoryRecord.
+  // Memory index — one index for every MemoryRecord.
   memory_index: string;
 
   // Document search endpoint + index (unrelated to memory).
@@ -71,7 +73,7 @@ export interface DatabricksMemoryConfig {
 export interface LakebaseMemoryConfig {
   instance_name?: string;
   embedding_dimension?: number;
-  // Unified cognitive memory table — one table for every MemoryRecord.
+  // Memory table — one table for every MemoryRecord.
   memory_table?: string;
   tables_initialized?: boolean;
 }
@@ -83,8 +85,8 @@ export interface MemoryBackendConfig {
   databricks_config?: DatabricksMemoryConfig;
   lakebase_config?: LakebaseMemoryConfig;
 
-  // Tuning parameters for unified cognitive memory
-  cognitive_config?: CognitiveMemoryConfig;
+  // Recall-scoring parameters. The wire field name is fixed by the API.
+  cognitive_config?: MemoryTuningConfig;
 
   // Database persistence fields
   is_default?: boolean;
@@ -113,9 +115,9 @@ export const DEFAULT_LAKEBASE_CONFIG: LakebaseMemoryConfig = {
 };
 
 /** Upstream CrewAI defaults, mirrored here so the UI can show them as placeholders. */
-export const COGNITIVE_MEMORY_DEFAULTS: Required<
+export const MEMORY_TUNING_DEFAULTS: Required<
   Pick<
-    CognitiveMemoryConfig,
+    MemoryTuningConfig,
     | 'semantic_weight'
     | 'recency_weight'
     | 'importance_weight'
@@ -188,7 +190,7 @@ export const isKnowledgeCapableMemoryConfig = (config: unknown): boolean => {
 export const getBackendDisplayName = (type: MemoryBackendType): string => {
   const displayNames: Record<MemoryBackendType, string> = {
     [MemoryBackendType.DEFAULT]: 'Local (Kasal unified Memory / SQLite)',
-    [MemoryBackendType.DATABRICKS]: 'Databricks Vector Search',
+    [MemoryBackendType.DATABRICKS]: 'Legacy (falls back to local)',
     [MemoryBackendType.LAKEBASE]: 'Lakebase (pgvector)',
   };
   return displayNames[type] || type;
@@ -198,11 +200,11 @@ export const getBackendDisplayName = (type: MemoryBackendType): string => {
 export const getBackendDescription = (type: MemoryBackendType): string => {
   const descriptions: Record<MemoryBackendType, string> = {
     [MemoryBackendType.DEFAULT]:
-      'Kasal unified cognitive memory stored in a local SQLite database. No external infrastructure required.',
+      'Kasal memory stored in a local SQLite database. No external infrastructure required.',
     [MemoryBackendType.DATABRICKS]:
-      'Kasal unified cognitive memory backed by Databricks Vector Search for scalable, enterprise-grade storage with Unity Catalog governance.',
+      'Legacy configuration. Memory falls back to the local store; configure Lakebase for shared, persistent memory.',
     [MemoryBackendType.LAKEBASE]:
-      'Kasal unified cognitive memory backed by your configured Lakebase PostgreSQL instance with pgvector. Zero additional infrastructure required.',
+      'Kasal memory backed by your configured Lakebase PostgreSQL instance with pgvector. Zero additional infrastructure required.',
   };
   return descriptions[type] || '';
 };

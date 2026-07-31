@@ -59,8 +59,15 @@ _crewai_mock.utilities.paths.db_storage_path = MagicMock(
     return_value="/tmp/test_storage"
 )
 
+# Import eagerly, before any test replaces ``src.services.memory.engine`` in
+# sys.modules with a MagicMock. ``configure_crew_memory_components`` imports this
+# module LAZILY, and it does ``from src.services.memory.engine.memory import
+# StorageBackend`` — which raises "engine is not a package" against a mock. The
+# TestConfigureCrewMemoryComponents cases therefore only passed when some
+# earlier test in this file had already imported it, which made the class fail
+# whenever it was run on its own. Loading it here makes that explicit.
+import src.services.memory.engine_storage_adapter  # noqa: E402,F401
 from src.schemas.memory_backend import MemoryBackendType
-from src.services.memory.backend_factory import DatabricksIndexValidationError
 from src.services.memory.crew_memory import CrewMemoryService
 
 for _mod_name, _original in _originals.items():
@@ -481,47 +488,6 @@ class TestCreateMemoryBackends:
         call_kwargs = mock_factory.call_args[1]
         assert call_kwargs.get("job_id") == "my_job_id"
 
-    @pytest.mark.asyncio
-    async def test_raises_and_emits_trace_on_validation_error(self):
-        # Updated for app-modes: create_memory_backends delegates to create_unified_storage
-        service = CrewMemoryService({"execution_id": "job_1", "group_id": "grp"})
-        memory_backend_config = {
-            "backend_type": "databricks",
-            "databricks_config": {
-                "endpoint_name": "ep",
-                "memory_index": "cat.sch.unified",
-            },
-        }
-        validation_result = {
-            "valid": False,
-            "missing_indexes": ["cat.sch.unified"],
-            "provisioning_indexes": [],
-            "error_type": "missing_index",
-        }
-
-        with (
-            patch(
-                "src.services.memory.crew_memory.MemoryBackendFactory.create_unified_storage",
-                new_callable=AsyncMock,
-                side_effect=DatabricksIndexValidationError("err", validation_result),
-            ),
-            patch.object(
-                service, "_emit_index_validation_trace", new_callable=AsyncMock
-            ) as mock_emit,
-        ):
-            with pytest.raises(DatabricksIndexValidationError):
-                await service.create_memory_backends(
-                    memory_backend_config=memory_backend_config,
-                    crew_id="crew_1",
-                    embedder=None,
-                )
-            mock_emit.assert_called_once()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# configure_crew_memory_components
-# ─────────────────────────────────────────────────────────────────────────────
-
 
 class TestConfigureCrewMemoryComponents:
     """Tests for configure_crew_memory_components.
@@ -925,40 +891,6 @@ class TestRestoreStorageDirectory:
         service.restore_storage_directory()
 
         assert "CREWAI_STORAGE_DIR" not in os.environ
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# _emit_index_validation_trace - additional coverage for 'other' error type
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestEmitIndexValidationTraceOtherType:
-    """Test the else branch for unknown error_type in _emit_index_validation_trace."""
-
-    @pytest.mark.asyncio
-    async def test_handles_unknown_error_type(self):
-        service = CrewMemoryService({"execution_id": "job_99", "group_id": "grp"})
-
-        validation_result = {
-            "valid": False,
-            "missing_indexes": [],
-            "provisioning_indexes": [],
-            "error_type": "unknown_type",
-        }
-        error = DatabricksIndexValidationError("Unknown error", validation_result)
-
-        with patch("src.db.session.request_scoped_session") as mock_session:
-            mock_session_instance = AsyncMock()
-            mock_session.return_value.__aenter__.return_value = mock_session_instance
-            with patch("src.services.trace.ExecutionTraceService") as MockTraceService:
-                mock_trace_service = MagicMock()
-                mock_trace_service.create_trace = AsyncMock()
-                MockTraceService.return_value = mock_trace_service
-
-                await service._emit_index_validation_trace(error)
-
-                # Should still create a trace even for unknown error_type
-                mock_trace_service.create_trace.assert_called_once()
 
 
 class TestMemoryLlmOverride:

@@ -246,6 +246,34 @@ async def lifespan(app: FastAPI):
     _asyncio.create_task(_knowledge_ttl_loop())
     system_logger.info("[KnowledgeTTL] Daily knowledge retention sweep started")
 
+    # Memory maintenance. Consolidation runs at the end of every run, which
+    # makes its coverage a function of how often somebody runs something rather
+    # than of how big the store is — exactly backwards. This sweep visits the
+    # scopes that have gone longest without maintenance, so every workspace is
+    # eventually reached, and gives the expensive passes (the LLM merge,
+    # supersession, forgetting) somewhere to run that is not a user's teardown
+    # path. Kill-switch: KASAL_MEMORY_SWEEP=false.
+    async def _memory_sweep_loop():
+        import asyncio as _a
+
+        from src.services.memory.sweep import sweep_enabled, sweep_memory_maintenance
+
+        # Same shape as the knowledge sweep: stay off the critical path while
+        # the app takes its first requests, then tick steadily.
+        await _a.sleep(600)
+        while True:
+            if not sweep_enabled():
+                await _a.sleep(3600)
+                continue
+            try:
+                await sweep_memory_maintenance()
+            except Exception as _me:  # noqa: BLE001
+                system_logger.error(f"[MemorySweep] Sweep error: {_me}")
+            await _a.sleep(30 * 60)
+
+    _asyncio.create_task(_memory_sweep_loop())
+    system_logger.info("[MemorySweep] Periodic memory maintenance sweep started")
+
     # Workflow recipes: distil completed crew runs into reusable recipes.
     #
     # Mining is EVENT-DRIVEN — process_crew_executor triggers it the moment a

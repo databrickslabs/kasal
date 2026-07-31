@@ -515,8 +515,8 @@ class TestOtelAppTelemetry:
         with tempfile.TemporaryDirectory() as temp_dir:
             manager = LoggerManager.get_instance(temp_dir)
             domain_loggers = manager._get_all_domain_loggers()
-            # Should have all 15 domain loggers
-            assert len(domain_loggers) == 15
+            # Should have all 11 domain loggers
+            assert len(domain_loggers) == 11
             for lg in domain_loggers:
                 assert isinstance(lg, logging.Logger)
 

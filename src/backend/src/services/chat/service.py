@@ -3,7 +3,7 @@
 Dedicated engine-level service for the "chat" (light) answer mode — the
 single-agent counterpart to :class:`CrewPreparation` + ``run_crew_in_process``
 (crews) and :class:`KasalFlowService` (flows). It owns the single-agent build,
-cognitive-memory wiring, tool/agent-lifecycle tracing, ``Agent.kickoff_async``,
+memory wiring, tool/agent-lifecycle tracing, ``Agent.kickoff_async``,
 and terminal status. Runs IN-PROCESS for sub-second latency.
 
 The module-level ``run_light_agent`` entry point lives at the bottom of this
@@ -435,7 +435,7 @@ class LightAgentService:
                 # the answer flows through the shared A2UI composer like any other.
                 self._apply_genie_mcp_fixups(agent)
 
-                # ── Cognitive memory (recall + persist) — chat parity w/ crews ──
+                # ── Memory (recall + persist) — chat parity w/ crews ──
                 # Attach a unified Memory so kickoff_async auto-recalls relevant
                 # context and persists this turn. Best-effort: never breaks the run.
                 # _attach_memory RETURNS the Memory it built. It used to be read
@@ -1135,6 +1135,24 @@ class LightAgentService:
                         metadata={"execution_id": execution_id},
                     )
 
+                # ── Sleep-time maintenance — fire-and-forget, and throttled to
+                # at most one pass per scope per KASAL_MEMORY_MAINTENANCE_INTERVAL.
+                # The crew path runs this at teardown; chat never did, so a
+                # workspace that only used chat accumulated duplicate records
+                # forever and they crowded the 6-snippet recall budget. A turn is
+                # far too frequent to maintain on every one, hence the throttle.
+                if _agent_memory is not None:
+                    try:
+                        from src.services.memory.maintenance import (
+                            schedule_maintenance_after_writes,
+                        )
+
+                        schedule_maintenance_after_writes(_agent_memory)
+                    except Exception as maint_err:  # noqa: BLE001
+                        logger.debug(
+                            f"[light_agent] memory maintenance skipped: {maint_err}"
+                        )
+
                 # ── Context compaction — fire-and-forget. When the session's
                 # un-summarized history is long enough, fold old turns into the
                 # running per-session summary so the next turn's preamble stays
@@ -1727,7 +1745,7 @@ class LightAgentService:
         execution_id: str,
         log,
     ) -> Optional[Any]:
-        """Build this run's unified cognitive ``Memory`` and return it. The
+        """Build this run's unified ``Memory`` and return it. The
         engine Agent does not consult memory itself — recall/persist are done
         by the memory_hooks around kickoff — chat-mode parity with crews.
 

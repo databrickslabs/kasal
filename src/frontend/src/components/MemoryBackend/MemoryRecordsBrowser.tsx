@@ -1,5 +1,5 @@
 /**
- * Cognitive Memory Browser — explore what a crew remembers.
+ * Memory Browser — explore what a teamspace remembers.
  *
  * Design goals:
  *  - Derive provenance from the scope path (/crew/{id}/agent/{role}) instead
@@ -577,7 +577,7 @@ const CategoryBubbleMap: React.FC<CategoryBubbleMapProps> = ({
   if (!categories.length) {
     return (
       <Alert severity="info">
-        Run a crew with cognitive memory enabled to populate category insights.
+        Run a crew with memory enabled to populate category insights.
       </Alert>
     );
   }
@@ -1010,7 +1010,7 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
       <DialogTitle sx={{ pb: 1 }}>
         <Stack direction="row" alignItems="center" spacing={1.5}>
           <Typography variant="h6" component="div">
-            Cognitive Memory Browser
+            Memory Browser
           </Typography>
           <Chip size="small" label={backendChipLabel} color={backendChipColor} variant="outlined" />
           <Box sx={{ flexGrow: 1 }} />
@@ -1429,7 +1429,7 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
         <DialogTitle>Delete all memory records?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            This permanently removes every cognitive-memory record your crews
+            This permanently removes every memory record your crews
             have stored on the active backend ({backendChipLabel}). Running
             crews will start with empty recall until new records are saved.
           </DialogContentText>

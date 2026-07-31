@@ -1,7 +1,7 @@
 """
 Memory backend configuration schemas.
 
-Defines the Pydantic models for configuring Kasal's cognitive memory backends.
+Defines the Pydantic models for configuring Kasal's memory backends.
 CrewAI 1.10+ uses a single unified ``Memory`` class over one storage, so these
 schemas no longer split memory into short-term / long-term / entity tiers.
 """
@@ -26,8 +26,8 @@ class MemoryBackendType(str, Enum):
     LAKEBASE = "lakebase"  # Lakebase pgvector
 
 
-class CognitiveMemoryConfig(BaseModel):
-    """Tuning knobs for CrewAI 1.10+ unified cognitive memory.
+class MemoryTuningConfig(BaseModel):
+    """Recall-scoring knobs for a teamspace's memory.
 
     These map 1:1 to ``crewai.memory.Memory`` constructor parameters. Defaults
     mirror upstream. Any value left ``None`` is omitted so CrewAI's own
@@ -156,12 +156,11 @@ class DatabricksMemoryConfig(BaseModel):
         description="Name of the Vector Search endpoint for memory (Direct Access)",
     )
 
-    # Unified cognitive memory index — one index stores every MemoryRecord.
+    # Memory index — one index stores every MemoryRecord.
     memory_index: str = Field(
         ...,
         description=(
-            "Index for CrewAI unified cognitive memory "
-            "(catalog.schema.index). Must use UNIFIED_SCHEMA."
+            "Index for Kasal memory " "(catalog.schema.index). Must use UNIFIED_SCHEMA."
         ),
     )
 
@@ -228,10 +227,10 @@ class LakebaseMemoryConfig(BaseModel):
     )
     embedding_dimension: int = Field(1024, description="Dimension of embedding vectors")
 
-    # Unified cognitive memory table — one table stores every MemoryRecord.
+    # Memory table — one table stores every MemoryRecord.
     memory_table: str = Field(
         "crew_memory",
-        description="Table for CrewAI unified cognitive memory records.",
+        description="Table for CrewAI memory records.",
     )
 
     @field_validator("memory_table")
@@ -274,9 +273,9 @@ class MemoryBackendCreate(BaseModel):
     databricks_config: Optional[DatabricksMemoryConfig] = Field(None)
     lakebase_config: Optional[LakebaseMemoryConfig] = Field(None)
 
-    cognitive_config: Optional[CognitiveMemoryConfig] = Field(
+    cognitive_config: Optional[MemoryTuningConfig] = Field(
         None,
-        description="Optional tuning parameters for the unified cognitive memory.",
+        description="Optional tuning parameters for the memory.",
     )
 
     # Escape hatch for experimental backend-specific options that don't yet
@@ -294,7 +293,7 @@ class MemoryBackendUpdate(BaseModel):
     databricks_config: Optional[DatabricksMemoryConfig] = Field(None)
     lakebase_config: Optional[LakebaseMemoryConfig] = Field(None)
 
-    cognitive_config: Optional[CognitiveMemoryConfig] = Field(None)
+    cognitive_config: Optional[MemoryTuningConfig] = Field(None)
 
     custom_config: Optional[Dict[str, Any]] = Field(None)
     is_active: Optional[bool] = Field(None)
@@ -311,7 +310,7 @@ class MemoryBackendResponse(BaseModel):
 
     databricks_config: Optional[DatabricksMemoryConfig]
     lakebase_config: Optional[LakebaseMemoryConfig]
-    cognitive_config: Optional[CognitiveMemoryConfig]
+    cognitive_config: Optional[MemoryTuningConfig]
     custom_config: Optional[Dict[str, Any]]
 
     is_active: bool
@@ -338,9 +337,9 @@ class MemoryBackendConfig(BaseModel):
         description="Configuration for Lakebase backend (required if backend_type='lakebase')",
     )
 
-    cognitive_config: Optional[CognitiveMemoryConfig] = Field(
+    cognitive_config: Optional[MemoryTuningConfig] = Field(
         None,
-        description="Optional tuning parameters for the unified cognitive memory.",
+        description="Optional tuning parameters for the memory.",
     )
 
     custom_config: Optional[Dict[str, Any]] = Field(

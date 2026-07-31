@@ -37,7 +37,7 @@ async def save_default_config(
 ) -> Dict[str, Any]:
     """Save the local (DEFAULT / LanceDB) memory backend configuration.
 
-    Local memory has no connection settings, but it DOES carry cognitive tuning
+    Local memory has no connection settings, but it DOES carry memory tuning
     (recall weights, query-analysis threshold, exploration budget, memory LLM).
     Those only take effect when persisted on an ACTIVE config that crew
     execution loads via ``get_active_config`` — saving them to the browser's
@@ -51,7 +51,7 @@ async def save_default_config(
     group_id = group_context.primary_group_id
     cognitive_config = request.get("cognitive_config")
 
-    from src.schemas.memory_backend import CognitiveMemoryConfig
+    from src.schemas.memory_backend import MemoryTuningConfig
 
     # Create the new config FIRST (count stays > 0 so the "cannot delete the only
     # config" guard never trips), then clean up the OLD ones — same ordering as
@@ -60,7 +60,7 @@ async def save_default_config(
         name=f"Local (LanceDB) {datetime.now().strftime('%Y-%m-%d %H:%M')}",
         backend_type=MemoryBackendType.DEFAULT,
         cognitive_config=(
-            CognitiveMemoryConfig(**cognitive_config) if cognitive_config else None
+            MemoryTuningConfig(**cognitive_config) if cognitive_config else None
         ),
     )
     backend = await service.create_memory_backend(group_id, config)

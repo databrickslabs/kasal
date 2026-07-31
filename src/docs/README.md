@@ -50,6 +50,7 @@ Understand why Kasal is built the way it is.
 - [Why Kasal](./WHY_KASAL.md): the problems Kasal solves and who it's for on Databricks.
 - [Solution architecture](./ARCHITECTURE_GUIDE.md): platform layers, request lifecycle, and the security model.
 - [LLM architecture](./LLM_ARCHITECTURE.md): the four layers behind a model call — facade, configuration, endpoint policy, transport — and which one owns what.
+- [Memory](./MEMORY.md): what a memory record is, how it is written and recalled, the passes that keep the store true, and which tuning knobs actually do something.
 - [Workflow recipes](./workflow-recipes.md): why Kasal keeps the crews you have already run, and why it refuses to reuse them until a person says they were any good.
 - [PBI → UCMV pipeline architecture](./powerbi/ucmv-pipeline-architecture.md): end-to-end walkthrough of how a Power BI model becomes UC Metric Views — extraction, config generation, the M-query path, and the LLM-first DAX translation with skill files, with the code location of each stage.
 - [CrewAI engine refactor proposal](./crewai-engine-refactor-proposal.md): the restructure of `src/engines/kasal` into path, kernel, and infra packages, with the dead-code audit and migration log.

@@ -20,12 +20,30 @@ import threading
 from dataclasses import dataclass
 from typing import Any
 
+from src.services.memory.write_hygiene import screen_memory_write
+
 logger = logging.getLogger(__name__)
 
 # Injected block budget. ~4000 chars ≈ 1000 tokens — enough for 5-8 snippets.
 MEMORY_BLOCK_CHAR_CAP = 4000
 _SNIPPET_CHAR_CAP = 700
 _RECALL_LIMIT = 6
+
+# Slots reserved for durable facts (semantic/procedural) inside _RECALL_LIMIT.
+#
+# Without a reservation the block is whatever the blended score ranks highest,
+# and a burst of episodic records from a recent run can take all six slots —
+# evicting every durable fact about the user precisely when the run is most
+# active. Facts are also the cheaper thing to carry: there are far fewer of them
+# and they stay true, so a couple of guaranteed slots costs little and is what
+# makes the typing in M1 visible at the prompt.
+_RESERVED_DURABLE_SLOTS = 2
+
+# Oversample factor for the single recall query. The reservation is filled from
+# ONE query's results rather than a second round trip, because "one semantic
+# query per turn/task, no LLM calls" is this module's design rule (see above);
+# a wider candidate pool buys the reservation without breaking it.
+_RECALL_OVERSAMPLE = 3
 
 MEMORY_BLOCK_HEADER = (
     "Relevant memory from previous runs (background context — weigh it, "
@@ -178,6 +196,45 @@ def _with_pending(mem: Any, records: list, limit: int) -> list:
     return merged
 
 
+def _reserve_durable_slots(
+    records: list,
+    limit: int,
+    reserved: int = _RESERVED_DURABLE_SLOTS,
+) -> list:
+    """Trim an oversampled recall to ``limit``, keeping room for durable facts.
+
+    Takes the top ``limit - reserved`` records in score order, then backfills
+    from the highest-scoring durable (non-episodic) records that did not make
+    that cut, and finally tops up from whatever is left. Relevance order is
+    preserved within each group.
+
+    The reservation is a CEILING, not a quota: when there are no durable
+    records — which is every workspace until the classifier has seen some
+    traffic — this returns exactly the top ``limit`` and behaves as before.
+    """
+    if limit <= 0:
+        return []
+    if len(records) <= limit:
+        return list(records)
+
+    head = list(records[: max(limit - reserved, 0)])
+    seen = {id(record) for record in head}
+    tail = [record for record in records if id(record) not in seen]
+
+    durable = [
+        record
+        for record in tail
+        if getattr(record, "kind", None) not in (None, "episodic")
+    ]
+    selected = head + durable[:reserved]
+    if len(selected) < limit:
+        chosen = {id(record) for record in selected}
+        selected += [record for record in tail if id(record) not in chosen][
+            : limit - len(selected)
+        ]
+    return selected[:limit]
+
+
 def build_memory_preamble(
     memory: Any,
     query: str,
@@ -193,10 +250,11 @@ def build_memory_preamble(
     if mem is None or not (query or "").strip():
         return ""
     try:
-        records = mem.recall(query.strip()[:2000], limit=limit)
+        records = mem.recall(query.strip()[:2000], limit=limit * _RECALL_OVERSAMPLE)
     except Exception as exc:  # noqa: BLE001 — recall must never break the run
         logger.warning("Memory recall failed (%s) — continuing without memory", exc)
         records = []
+    records = _reserve_durable_slots(records, limit)
     records = _with_pending(mem, records, limit)
     if not records:
         return ""
@@ -236,11 +294,23 @@ def remember_async(
     writer pool keeps that wait entirely off the caller's critical path while
     still emitting the MemorySave* events (contextvars propagate via the
     engine's ``copy_context`` submit).
+
+    This is also the write BOUNDARY: it is the one place run-produced content
+    enters memory (chat turns and task outputs both arrive here), so it is where
+    content is screened for prompt injection before it can be replayed into a
+    later run. See ``write_hygiene``.
     """
     mem = _usable_memory(memory)
     text = " ".join((content or "").split())
     if mem is None or not text:
         return
+
+    verdict = screen_memory_write(text, source=source)
+    if not verdict.persist:
+        return  # quarantined — write_hygiene has already logged why
+    findings = verdict.as_metadata()
+    if findings:
+        metadata = {**(metadata or {}), **findings}
 
     def _write() -> None:
         try:

@@ -1,7 +1,15 @@
 """Memory data models (records, scope info).
 
-Generated from the kasal_engine datamodel — do not edit by hand.
-Edit the component/component_member rows and re-run generator/generate.py.
+Originally generated from the kasal_engine datamodel. That package is now
+first-party code in this repo and there is no generator here, so this module is
+maintained by hand.
+
+``MemoryRecord`` carries the TYPE of a memory and, for facts, its
+validity window. Both exist because episodic and semantic memories want
+opposite retrieval policies: "what happened in run 47" is time-anchored, high
+volume and should fade; "the user prefers Databricks SQL" is atemporal, low
+volume, and must stay current — and must be RETIRED when it stops being true
+rather than merely out-ranked by something newer.
 """
 
 import json
@@ -14,9 +22,19 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+# Memory kinds. Deliberately plain strings rather than an Enum: these cross
+# the JSONB/SQLite/pydantic boundary constantly, and a ``str, Enum`` renders as
+# "MemoryKind.EPISODIC" under f-strings on 3.11+ while ``.value`` on an already-
+# coerced value is the exact footgun the memory backends have been bitten by
+# before. A validator below keeps the field to these three.
+KIND_EPISODIC = "episodic"
+KIND_SEMANTIC = "semantic"
+KIND_PROCEDURAL = "procedural"
+MEMORY_KINDS = (KIND_EPISODIC, KIND_SEMANTIC, KIND_PROCEDURAL)
+
 
 class MemoryRecord(BaseModel):
-    """Engine replacement for crewai.memory.types.MemoryRecord"""
+    """One memory. Episodic by default; facts carry a validity window."""
 
     id: str = Field(
         default_factory=lambda: str(uuid4()),
@@ -69,6 +87,50 @@ class MemoryRecord(BaseModel):
             "or when include_private=True is passed."
         ),
     )
+    kind: str = Field(
+        default=KIND_EPISODIC,
+        description=(
+            "Memory type: 'episodic' (what happened, and when), 'semantic' "
+            "(what is currently true), or 'procedural' (how to do something). "
+            "Drives recall policy — episodic decays with age, semantic does not."
+        ),
+    )
+    valid_from: datetime | None = Field(
+        default=None,
+        description=(
+            "When this fact STARTED being true in the world. Semantic records "
+            "only; distinct from created_at, which is when the system recorded it."
+        ),
+    )
+    valid_to: datetime | None = Field(
+        default=None,
+        description=(
+            "When this fact STOPPED being true. None means currently valid. "
+            "Recall returns only currently-valid records; history is retained so "
+            "'what did we believe on date X' stays answerable."
+        ),
+    )
+    superseded_by: str | None = Field(
+        default=None,
+        description="Id of the record that replaced this one, when retired.",
+    )
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _known_kind(cls, value: Any) -> str:
+        """Unknown or missing kinds read as episodic.
+
+        Every record written before this field existed comes back without it,
+        and episodic is the safe reading: it decays and never claims to be a
+        current fact.
+        """
+        text = str(value or "").strip().lower()
+        return text if text in MEMORY_KINDS else KIND_EPISODIC
+
+    @property
+    def is_current(self) -> bool:
+        """True when this record has not been retired."""
+        return self.valid_to is None
 
 
 class ScopeInfo(BaseModel):

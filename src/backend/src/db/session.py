@@ -1210,6 +1210,28 @@ async def _ensure_prompt_optimization_runs_table(conn) -> None:
         logger.warning(f"Could not ensure prompt_optimization_runs table: {e}")
 
 
+async def _ensure_memory_maintenance_table(conn) -> None:
+    """Idempotently create memory_maintenance_watermarks.
+
+    Per-scope record of when memory maintenance last ran, which is what makes
+    the scheduled sweep's coverage depend on store size rather than on how often
+    someone happens to run a crew. Same reasoning as the tables above: a brand
+    new table needs no ALTER, so a checkfirst-create reaches already-deployed
+    installs identically on SQLite, PostgreSQL and Lakebase. A missing table
+    must never break anything — the sweep swallows its own errors — but without
+    it every tick would re-maintain the same scopes."""
+    try:
+        from src.models.memory_maintenance import MemoryMaintenanceWatermark
+
+        def _create_memory_maintenance_table(sync_conn):
+            MemoryMaintenanceWatermark.__table__.create(sync_conn, checkfirst=True)
+
+        await conn.run_sync(_create_memory_maintenance_table)
+        logger.info("Ensured memory_maintenance_watermarks table exists")
+    except Exception as e:
+        logger.warning(f"Could not ensure memory_maintenance_watermarks table: {e}")
+
+
 async def _ensure_databricks_config_columns(conn) -> None:
     """Idempotently add ai_gateway_enabled to databricksconfig.
 
@@ -1271,6 +1293,7 @@ async def run_schema_self_heal(conn) -> None:
     await _ensure_crew_feedback_table(conn)
     await _ensure_powerbi_extraction_table(conn)
     await _ensure_prompt_optimization_runs_table(conn)
+    await _ensure_memory_maintenance_table(conn)
     await _ensure_agent_columns(conn)
     await _ensure_crew_columns(conn)
     await _ensure_execution_history_columns(conn)

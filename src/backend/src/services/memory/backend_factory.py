@@ -1,10 +1,18 @@
 """Factory for building the unified-memory ``StorageBackend`` instance.
 
 Under the legacy per-memory-type architecture this module returned a dict with
-three wrappers (``short_term``/``long_term``/``entity``). CrewAI 1.10+ uses a
-single ``Memory`` class backed by one ``StorageBackend``, so this factory now
-returns a single instance (or ``None`` to signal that the local SQLite
+three wrappers (``short_term``/``long_term``/``entity``). The unified memory
+system uses a single ``Memory`` class backed by one ``StorageBackend``, so this
+factory returns a single instance (or ``None`` to signal that the local SQLite
 backend should be built by CrewMemoryService).
+
+**Memory runs on Lakebase.** Databricks Vector Search was a third memory
+backend and has been retired: a ``databricks`` memory config now degrades to the
+local store rather than building a VS-backed one. The Vector Search machinery
+itself is untouched and still very much in use — ``DatabricksVectorStorage``,
+``DatabricksVectorIndexRepository`` and the index schemas back the KNOWLEDGE and
+documentation indexes, and the ``databricks`` config row is what those services
+read their workspace/endpoint from. Only memory stopped using it.
 """
 
 from __future__ import annotations
@@ -15,21 +23,6 @@ from src.core.logger import LoggerManager
 from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
 
 logger = LoggerManager.get_instance().crew
-
-
-class DatabricksIndexValidationError(Exception):
-    """Raised when Databricks Vector Search indexes are missing or provisioning.
-
-    Carries ``validation_result`` so the crew-preparation layer can emit a
-    trace event visible in the UI.
-    """
-
-    def __init__(self, message: str, validation_result: Dict[str, Any]):
-        super().__init__(message)
-        self.validation_result = validation_result
-        self.error_type = validation_result.get("error_type", "unknown")
-        self.missing_indexes = validation_result.get("missing_indexes", [])
-        self.provisioning_indexes = validation_result.get("provisioning_indexes", [])
 
 
 class MemoryBackendFactory:
@@ -50,7 +43,7 @@ class MemoryBackendFactory:
         workspace_wide: bool = True,
         session_scope_id: Optional[str] = None,
     ) -> Optional[Any]:
-        """Return a ``StorageBackend`` instance, or ``None`` for CrewAI's default.
+        """Return a ``StorageBackend`` instance, or ``None`` for the local default.
 
         Args:
             config: Memory backend configuration loaded from the database.
@@ -70,23 +63,21 @@ class MemoryBackendFactory:
                 conversation across runs. Falls back to ``job_id``.
 
         Returns:
-            A ``StorageBackend`` instance, or ``None`` when the DEFAULT
-            configuration applies (CrewMemoryService builds the local SQLite
-            backend).
-
-        Raises:
-            DatabricksIndexValidationError: When the Databricks target index
-                does not exist or is still provisioning.
+            A ``StorageBackend`` instance, or ``None`` when the local default
+            applies (CrewMemoryService then builds the local SQLite backend).
         """
         if config.backend_type == MemoryBackendType.DATABRICKS:
-            return await MemoryBackendFactory._create_databricks_backend(
-                config=config,
-                crew_id=crew_id,
-                group_id=group_id,
-                embedder=embedder,
-                user_token=user_token,
-                job_id=job_id,
+            # Vector Search memory is retired. Degrade to the local store rather
+            # than raising: the ``databricks`` config row is still what the
+            # knowledge/documentation indexes read their workspace and endpoint
+            # from, so a tenant can legitimately have one and must keep running.
+            logger.warning(
+                "Databricks Vector Search memory is retired — falling back to the "
+                "local store for crew %s. Configure the Lakebase memory backend "
+                "for persistent, shared memory.",
+                crew_id,
             )
+            return None
         if config.backend_type == MemoryBackendType.LAKEBASE:
             return MemoryBackendFactory._create_lakebase_backend(
                 config=config,
@@ -105,69 +96,6 @@ class MemoryBackendFactory:
             return None
         logger.warning("Unsupported memory backend type: %s", config.backend_type)
         return None
-
-    # ------------------------------------------------------------------
-    # Databricks
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    async def _create_databricks_backend(
-        config: MemoryBackendConfig,
-        crew_id: str,
-        group_id: str,
-        embedder: Optional[Any],
-        user_token: Optional[str],
-        job_id: Optional[str],
-    ) -> Any:
-        if not config.databricks_config:
-            raise ValueError(
-                "Databricks configuration is required for Databricks backend"
-            )
-
-        databricks_cfg = config.databricks_config
-        index_name = databricks_cfg.memory_index
-        if not index_name:
-            raise ValueError(
-                "DatabricksMemoryConfig.memory_index is required for the unified "
-                "cognitive memory."
-            )
-
-        await MemoryBackendFactory._validate_databricks_index(
-            workspace_url=databricks_cfg.workspace_url,
-            endpoint_name=databricks_cfg.endpoint_name,
-            index_name=index_name,
-            user_token=user_token,
-            group_id=group_id,
-        )
-
-        from src.services.memory.databricks_storage_backend import (
-            DatabricksStorageBackend,
-        )
-
-        logger.info(
-            "Creating DatabricksStorageBackend (index=%s, crew_id=%s, group_id=%s)",
-            index_name,
-            crew_id,
-            group_id,
-        )
-        scoring = MemoryBackendFactory._cognitive_scoring_kwargs(config)
-        databricks_kwargs = (
-            {"relevance_threshold": scoring["relevance_threshold"]}
-            if "relevance_threshold" in scoring
-            else {}
-        )
-        return DatabricksStorageBackend(
-            index_name=index_name,
-            endpoint_name=databricks_cfg.endpoint_name,
-            workspace_url=databricks_cfg.workspace_url or "",
-            crew_id=crew_id,
-            group_id=group_id,
-            user_token=user_token,
-            session_id=job_id,
-            embedder=embedder,
-            embedding_dimension=databricks_cfg.embedding_dimension or 1024,
-            **databricks_kwargs,
-        )
 
     # ------------------------------------------------------------------
     # Lakebase
@@ -191,7 +119,7 @@ class MemoryBackendFactory:
         if not table_name:
             raise ValueError(
                 "LakebaseMemoryConfig.memory_table is required for the unified "
-                "cognitive memory."
+                "memory."
             )
 
         from src.services.memory.lakebase_storage_backend import (
@@ -216,18 +144,18 @@ class MemoryBackendFactory:
             embedding_dimension=lakebase_cfg.embedding_dimension or 1024,
             instance_name=getattr(lakebase_cfg, "instance_name", None),
             workspace_wide=workspace_wide,
-            **MemoryBackendFactory._cognitive_scoring_kwargs(config),
+            **MemoryBackendFactory._scoring_kwargs(config),
         )
 
     @staticmethod
-    def _cognitive_scoring_kwargs(config: MemoryBackendConfig) -> Dict[str, Any]:
-        """Map the UI's cognitive tuning knobs onto hybrid-scoring ctor params.
+    def _scoring_kwargs(config: MemoryBackendConfig) -> Dict[str, Any]:
+        """Map the UI's memory tuning knobs onto hybrid-scoring ctor params.
 
         Values left unset in the config fall through to the backend defaults
         (keyword_weight has no UI knob yet and always uses the default).
         """
-        cognitive = getattr(config, "cognitive_config", None)
-        if cognitive is None:
+        tuning = getattr(config, "cognitive_config", None)
+        if tuning is None:
             return {}
         kwargs: Dict[str, Any] = {}
         for field in (
@@ -237,97 +165,10 @@ class MemoryBackendFactory:
             "recency_half_life_days",
             "relevance_threshold",
         ):
-            value = getattr(cognitive, field, None)
+            value = getattr(tuning, field, None)
             if value is not None:
                 kwargs[field] = float(value)
         return kwargs
-
-    # ------------------------------------------------------------------
-    # Validation
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    async def _validate_databricks_index(
-        *,
-        workspace_url: Optional[str],
-        endpoint_name: str,
-        index_name: str,
-        user_token: Optional[str],
-        group_id: Optional[str],
-    ) -> None:
-        """Raise ``DatabricksIndexValidationError`` if the index is not ready."""
-        if not workspace_url or not endpoint_name or not index_name:
-            return
-
-        from src.repositories.databricks_vector_index_repository import (
-            DatabricksVectorIndexRepository,
-        )
-
-        repository = DatabricksVectorIndexRepository(workspace_url, group_id=group_id)
-        try:
-            response = await repository.describe_index(
-                index_name, endpoint_name, user_token
-            )
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.error("Failed to describe Databricks index %s: %s", index_name, exc)
-            validation_result = {
-                "error_type": "describe_failed",
-                "missing_indexes": [index_name],
-                "provisioning_indexes": [],
-                "error_message": str(exc),
-            }
-            raise DatabricksIndexValidationError(
-                f"Could not describe Databricks index '{index_name}': {exc}",
-                validation_result,
-            ) from exc
-
-        if not response.get("success"):
-            validation_result = {
-                "error_type": "missing_index",
-                "missing_indexes": [index_name],
-                "provisioning_indexes": [],
-                "error_message": response.get("message", "Index not found"),
-            }
-            raise DatabricksIndexValidationError(
-                f"Databricks index '{index_name}' not found", validation_result
-            )
-
-        description = response.get("description", {})
-        status = description.get("status", {})
-        state = (status.get("state") or "UNKNOWN").upper()
-        is_ready = status.get("ready") or state in {"ONLINE", "READY"}
-
-        if is_ready:
-            logger.info(
-                "Databricks unified memory index is READY: %s (state=%s)",
-                index_name,
-                state,
-            )
-            return
-
-        if state in {"PROVISIONING", "PENDING", "CREATING"}:
-            validation_result = {
-                "error_type": "provisioning_indexes",
-                "missing_indexes": [],
-                "provisioning_indexes": [index_name],
-                "error_message": (
-                    f"Databricks index '{index_name}' is still provisioning "
-                    f"(state={state}). Retry once the index reaches ONLINE."
-                ),
-            }
-            raise DatabricksIndexValidationError(
-                validation_result["error_message"], validation_result
-            )
-
-        validation_result = {
-            "error_type": "unexpected_state",
-            "missing_indexes": [index_name],
-            "provisioning_indexes": [],
-            "error_message": f"Databricks index '{index_name}' in unexpected state {state}",
-        }
-        raise DatabricksIndexValidationError(
-            validation_result["error_message"], validation_result
-        )
 
     # ------------------------------------------------------------------
     # Deprecated — legacy callers should migrate to ``create_unified_storage``

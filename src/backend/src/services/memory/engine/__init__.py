@@ -17,11 +17,19 @@ from .memory import (
     StorageBackend,
 )
 from .types import (
+    KIND_EPISODIC,
+    KIND_PROCEDURAL,
+    KIND_SEMANTIC,
+    MEMORY_KINDS,
     MemoryRecord,
     ScopeInfo,
 )
 
 __all__ = [
+    "KIND_EPISODIC",
+    "KIND_PROCEDURAL",
+    "KIND_SEMANTIC",
+    "MEMORY_KINDS",
     "ConsolidationAction",
     "ConsolidationPlan",
     "ExtractedMemories",

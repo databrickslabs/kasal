@@ -18,79 +18,46 @@ import {
   Radio,
   Collapse,
   IconButton,
-  Switch,
   Divider,
   Button,
   Chip,
   TextField,
-  Tooltip,
 } from '@mui/material';
 import {
-  CloudSync as CloudSyncIcon,
   Memory as MemoryIcon,
-  PowerSettingsNew as PowerOffIcon,
-  ExpandMore as ExpandMoreIcon,
-  ExpandLess as ExpandLessIcon,
   Storage as StorageIcon,
   CheckCircle as CheckCircleIcon,
   Error as ErrorIcon,
-  Add as AddIcon,
   Refresh as RefreshIcon,
-  AccountTree as AccountTreeIcon,
   Save as SaveIcon,
 } from '@mui/icons-material';
 import { AxiosError } from 'axios';
 import { apiClient } from '../../config/api/ApiConfig';
 import { useMemoryBackendStore } from '../../store/memoryBackend';
-import { CognitiveMemoryPanel } from './CognitiveMemoryPanel';
-import DatabricksVectorSearchService from '../../api/databricks/DatabricksVectorSearchService';
+import { MemoryTuningPanel } from './MemoryTuningPanel';
 import {
   MemoryBackendType,
   EndpointInfo,
   IndexInfo,
   SavedConfigInfo,
-  SetupResult,
   IndexInfoState,
-  ManualConfig,
   DatabricksMemoryConfig as DatabricksConfig,
   LakebaseMemoryConfig,
-  CognitiveMemoryConfig,
+  MemoryTuningConfig,
   DEFAULT_LAKEBASE_CONFIG,
 } from '../../types/config/memoryBackend';
 import { MemoryBackendService } from '../../api/memory/MemoryBackendService';
-import { EMBEDDING_MODELS } from './constants';
-import { 
-  validateVectorSearchIndexName
-} from './databricksVectorSearchUtils';
-import { SetupResultDialog } from './SetupResultDialog';
-import { IndexManagementTable } from './IndexManagementTable';
-import { ConfigurationDisplay } from './ConfigurationDisplay';
-import { ManualConfigurationForm } from './ManualConfigurationForm';
-import { AutomaticSetupForm } from './AutomaticSetupForm';
-import { EditConfigurationForm } from './EditConfigurationForm';
-import { EndpointsDisplay } from './EndpointsDisplay';
-import { IndexDocumentsDialog } from './IndexDocumentsDialog';
 import { MemoryRecordsBrowser } from './MemoryRecordsBrowser';
 
 export const MemoryConfiguration: React.FC = () => {
   const [mode, setMode] = useState<'disabled' | 'lakebase'>('disabled');
-  const [setupMode, setSetupMode] = useState<'auto' | 'manual'>('auto');
-  const [detectedWorkspaceUrl, setDetectedWorkspaceUrl] = useState<string | null>(null);
-  const [catalog, setCatalog] = useState('ml');
-  const [schema, setSchema] = useState('agents');
-  const [embeddingModel, setEmbeddingModel] = useState('databricks-gte-large-en');
-  const [isSettingUp, setIsSettingUp] = useState(false);
-  const [setupResult, setSetupResult] = useState<SetupResult | null>(null);
-  const [showResultDialog, setShowResultDialog] = useState(false);
+  const [, setDetectedWorkspaceUrl] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [savedConfig, setSavedConfig] = useState<SavedConfigInfo | null>(null);
-  const [endpointStatuses, setEndpointStatuses] = useState<Record<string, EndpointInfo>>({});
+  const [, setEndpointStatuses] = useState<Record<string, EndpointInfo>>({});
   const [verifiedResources, setVerifiedResources] = useState<{ endpoints: Record<string, EndpointInfo>, indexes: Record<string, IndexInfo> } | null>(null);
-  const [isEditingConfig, setIsEditingConfig] = useState(false);
-  const [editedConfig, setEditedConfig] = useState<SavedConfigInfo | null>(null);
-  const [indexInfoMap, setIndexInfoMap] = useState<Record<string, IndexInfoState>>({});
+  const [, setIndexInfoMap] = useState<Record<string, IndexInfoState>>({});
   const [hasCheckedInitialConfig, setHasCheckedInitialConfig] = useState(false);
-  const [advancedSettingsExpanded, setAdvancedSettingsExpanded] = useState(false);
 
   // Lakebase state
   const [lakebaseConfig, setLakebaseConfig] = useState<LakebaseMemoryConfig>(DEFAULT_LAKEBASE_CONFIG);
@@ -105,24 +72,6 @@ export const MemoryConfiguration: React.FC = () => {
   const [lakebaseTableStats, setLakebaseTableStats] = useState<Record<string, { table_name: string; exists: boolean; row_count: number }> | null>(null);
   const [memoryBrowserOpen, setMemoryBrowserOpen] = useState(false);
   
-  // Relationship-retrieval was tied to the old entity-memory subsystem. CrewAI
-  // 1.10+ unified cognitive memory replaces it with scope-aware recall, so
-  // there is no equivalent to wire up here.
-  const [manualConfig, setManualConfig] = useState<ManualConfig>({
-    workspace_url: '',
-    endpoint_name: '',
-    document_endpoint_name: '',
-    memory_index: '',
-    document_index: '',
-    embedding_model: 'databricks-gte-large-en', // Default to GTE Large
-  });
-  const [documentsDialogOpen, setDocumentsDialogOpen] = useState(false);
-  const [selectedIndexForDocs, setSelectedIndexForDocs] = useState<{
-    name: string;
-    type: 'memory' | 'document';
-    endpointName: string;
-  } | null>(null);
-
   const { updateConfig, config } = useMemoryBackendStore();
   
   
@@ -249,7 +198,7 @@ export const MemoryConfiguration: React.FC = () => {
             setHasCheckedInitialConfig(true);
             return;
           }
-        } catch (allConfigsError) {
+        } catch {
           console.log('No memory backend configurations found');
         }
         
@@ -273,7 +222,7 @@ export const MemoryConfiguration: React.FC = () => {
             setHasCheckedInitialConfig(true);
             return;
           }
-        } catch (allConfigsError) {
+        } catch {
           console.log('No memory backend configurations found');
           setMode('disabled');  // Default to disabled when no config exists
         }
@@ -285,12 +234,12 @@ export const MemoryConfiguration: React.FC = () => {
     }
   };
   
-  const processConfigResponse = (configData: { backend_type?: string; databricks_config?: DatabricksConfig; lakebase_config?: LakebaseMemoryConfig; cognitive_config?: CognitiveMemoryConfig; id?: string }) => {
+  const processConfigResponse = (configData: { backend_type?: string; databricks_config?: DatabricksConfig; lakebase_config?: LakebaseMemoryConfig; cognitive_config?: MemoryTuningConfig; id?: string }) => {
     console.log('processConfigResponse - Full configData:', configData);
     console.log('processConfigResponse - backend_type:', configData?.backend_type);
     console.log('processConfigResponse - databricks_config:', configData?.databricks_config);
 
-    // Hydrate cognitive tuning into the store so the tuning panel reflects the
+    // Hydrate the tuning values into the store so the panel reflects the
     // persisted values (recall speed knobs, exploration budget, memory LLM).
     if (configData?.cognitive_config) {
       updateConfig({ cognitive_config: configData.cognitive_config });
@@ -363,7 +312,7 @@ export const MemoryConfiguration: React.FC = () => {
       // Delete all configurations from the memory backend table and create disabled config
       try {
         // Use the new endpoint that deletes all configs and creates a disabled one
-        const result = await DatabricksVectorSearchService.switchToDisabledMode();
+        const result = await MemoryBackendService.switchToDisabledMode();
         console.log('Switched to disabled mode:', result);
 
         // Keep the new disabled (local) config's id so memory tuning can be
@@ -450,7 +399,7 @@ export const MemoryConfiguration: React.FC = () => {
   };
 
   // Persist the LOCAL (DEFAULT / SQLite) memory backend as an ACTIVE config so
-  // crew execution loads its cognitive tuning (memory LLM, recall thresholds)
+  // crew execution loads its tuning (memory LLM, recall thresholds)
   // via get_active_config. Local has no connection step, so this creates the
   // active config AND saves the tuning in one call — there's no pre-existing
   // backend_id to PUT against (the chicken-and-egg that left the old button
@@ -478,74 +427,6 @@ export const MemoryConfiguration: React.FC = () => {
     }
   };
 
-  const handleSetup = async () => {
-    // Use detected workspace URL
-    const finalWorkspaceUrl = detectedWorkspaceUrl;
-
-    if (!finalWorkspaceUrl) {
-      setError('No Databricks workspace detected. Please configure your Databricks workspace in the Databricks section first.');
-      return;
-    }
-
-    setIsSettingUp(true);
-    setError('');
-    setSetupResult(null);
-
-    try {
-      // Delete all existing configurations
-      try {
-        await DatabricksVectorSearchService.deleteAllConfigurations();
-        console.log('Deleted all existing configurations');
-      } catch (error) {
-        console.error('Failed to get/delete existing configurations:', error);
-        // Continue anyway - the one-click setup might still work
-      }
-      
-      // Clean up disabled configurations
-      await DatabricksVectorSearchService.cleanupDisabledConfigurations();
-      
-      // Perform one-click setup
-      const result = await DatabricksVectorSearchService.performOneClickSetup({
-        workspace_url: finalWorkspaceUrl,
-        catalog: catalog,
-        schema: schema,
-        embedding_dimension: EMBEDDING_MODELS.find(m => m.value === embeddingModel)?.dimension || 1024
-      });
-
-      setSetupResult(result);
-      setShowResultDialog(true);
-
-      if (result.success) {
-        // Save the configuration details
-        setSavedConfig({
-          workspace_url: finalWorkspaceUrl,
-          catalog: result.catalog || catalog,
-          schema: result.schema || schema,
-          endpoints: result.endpoints,
-          indexes: result.indexes
-        });
-        
-        // Update store with Databricks configuration
-        updateConfig({
-          backend_type: MemoryBackendType.DATABRICKS,
-        });
-        
-        // Reload the configuration from backend after successful setup
-        // This ensures the saved configuration is loaded properly with the new backend_id
-        setTimeout(() => {
-          loadExistingConfig();
-        }, 1500); // Increased delay to ensure backend has fully processed the new configuration
-      }
-    } catch (error) {
-      console.error('Setup failed:', error);
-      const errorMessage = error instanceof AxiosError
-        ? error.response?.data?.detail
-        : error instanceof Error ? error.message : 'Failed to complete setup';
-      setError(errorMessage || 'Failed to complete setup. Please check your configuration and try again.');
-    } finally {
-      setIsSettingUp(false);
-    }
-  };
 
 
   const updateBackendConfiguration = async (updatedConfig: SavedConfigInfo) => {
@@ -665,137 +546,11 @@ export const MemoryConfiguration: React.FC = () => {
 
 
   // Map UI index-type (``memory`` | ``document``) to the shape of
-  // ``savedConfig.indexes`` (``unified`` | ``document``). CrewAI 1.10+ uses
-  // "memory" externally; the saved config schema still calls it "unified".
-  const indexConfigKey = (
-    indexType: 'memory' | 'document',
-  ): 'unified' | 'document' => (indexType === 'memory' ? 'unified' : 'document');
 
-  const handleDeleteIndex = async (indexType: 'memory' | 'document') => {
-    const cfgKey = indexConfigKey(indexType);
-    if (!savedConfig?.indexes?.[cfgKey]) return;
 
-    const indexName = savedConfig.indexes[cfgKey]?.name;
-    if (!indexName) return;
 
-    // Check if index is already deleted
-    const indexInfo = indexInfoMap[indexName];
-    if (indexInfo?.status === 'NOT_FOUND' || indexInfo?.index_type === 'DELETED') {
-      setError(`Cannot delete index: ${indexType} index has already been deleted from Databricks.`);
-      return;
-    }
 
-    // Check which endpoint this index belongs to
-    const endpointType = indexType === 'document' ? 'document' : 'memory';
-    const endpointStatus = endpointStatuses[endpointType];
 
-    // Check if endpoint is ready for index deletion
-    if (endpointStatus && !endpointStatus.can_delete_indexes) {
-      setError(`Cannot delete index: Endpoint is ${endpointStatus.state}. Indexes can only be deleted when the endpoint is ONLINE.`);
-      return;
-    }
-
-    const confirmDelete = window.confirm(`Are you sure you want to delete the ${indexType} index?`);
-    if (!confirmDelete) return;
-
-    setIsSettingUp(true);
-    setError('');
-
-    try {
-      const response = await apiClient.delete('/memory-backend/databricks/index', {
-        data: {
-          workspace_url: savedConfig.workspace_url,
-          index_name: indexName,
-          endpoint_name: indexType === 'document' ? savedConfig.endpoints?.document?.name : savedConfig.endpoints?.memory?.name
-        }
-      });
-
-      if (response.data.success) {
-        // Update saved config to remove the deleted index
-        const updatedConfig = {
-          ...savedConfig,
-          indexes: {
-            ...savedConfig.indexes,
-            [cfgKey]: undefined
-          }
-        };
-        setSavedConfig(updatedConfig);
-        
-        // Update the backend configuration
-        await updateBackendConfiguration(updatedConfig);
-      } else {
-        setError(response.data.message || 'Failed to delete index');
-      }
-    } catch (error) {
-      console.error('Failed to delete index:', error);
-      setError('Failed to delete index. Please try again.');
-    } finally {
-      setIsSettingUp(false);
-    }
-  };
-
-  const handleStartEdit = () => {
-    setEditedConfig(JSON.parse(JSON.stringify(savedConfig))); // Deep copy
-    setIsEditingConfig(true);
-  };
-
-  const handleCancelEdit = () => {
-    setEditedConfig(null);
-    setIsEditingConfig(false);
-  };
-
-  const handleSaveEdit = async () => {
-    if (!editedConfig || !editedConfig.backend_id) return;
-    
-    setIsSettingUp(true);
-    setError('');
-    
-    try {
-      // Update the backend configuration
-      await updateBackendConfiguration(editedConfig);
-      
-      // Update local state
-      setSavedConfig(editedConfig);
-      setIsEditingConfig(false);
-      setEditedConfig(null);
-      
-      // Verify the new resources
-      setTimeout(() => {
-        verifyActualResources();
-      }, 500);
-    } catch (error) {
-      console.error('Failed to save configuration:', error);
-      setError('Failed to save configuration. Please try again.');
-    } finally {
-      setIsSettingUp(false);
-    }
-  };
-
-  const handleEditChange = (field: string, value: string | undefined) => {
-    if (!editedConfig) return;
-    
-    const parts = field.split('.');
-    const newConfig = { ...editedConfig };
-    
-    if (parts[0] === 'endpoints' && parts[1] && parts[2] === 'name') {
-      if (!newConfig.endpoints) newConfig.endpoints = {};
-      if (value) {
-        newConfig.endpoints[parts[1] as 'memory' | 'document'] = { name: value };
-      } else {
-        newConfig.endpoints[parts[1] as 'memory' | 'document'] = undefined;
-      }
-    } else if (parts[0] === 'indexes' && parts[1] && parts[2] === 'name') {
-      if (!newConfig.indexes) newConfig.indexes = {};
-      const key = parts[1] as 'unified' | 'document';
-      if (value) {
-        newConfig.indexes[key] = { name: value };
-      } else {
-        newConfig.indexes[key] = undefined;
-      }
-    }
-    
-    setEditedConfig(newConfig);
-  };
 
 
   const fetchIndexInfo = async (indexName: string, endpointName: string) => {
@@ -882,314 +637,13 @@ export const MemoryConfiguration: React.FC = () => {
     }
   }, [savedConfig?.indexes, savedConfig?.workspace_url]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleManualSave = async () => {
-    // Check all required fields
-    if (!manualConfig.workspace_url || 
-        !manualConfig.endpoint_name || 
-        !manualConfig.document_endpoint_name ||
-        !manualConfig.memory_index ||
-        !manualConfig.document_index) {
-      setError('All fields are required. Please provide workspace URL, both endpoints, and all four indexes.');
-      return;
-    }
-    
-    // Validate index name formats
-    const indexesToValidate = [
-      { name: 'Memory index', value: manualConfig.memory_index },
-      { name: 'Document index', value: manualConfig.document_index }
-    ];
-    
-    for (const index of indexesToValidate) {
-      if (!validateVectorSearchIndexName(index.value)) {
-        setError(`${index.name} must be in the format: catalog.schema.indexname (e.g., ml.agents.short_term_memory)`);
-        return;
-      }
-    }
-    
-    setIsSettingUp(true);
-    setError('');
-    
-    try {
-      // First, clean up any disabled configurations
-      try {
-        const cleanupResult = await apiClient.delete('/memory-backend/configs/disabled/cleanup');
-        console.log('Cleaned up disabled configurations:', cleanupResult.data);
-      } catch (cleanupError) {
-        // It's okay if cleanup fails, continue with setup
-        console.log('No disabled configurations to clean up');
-      }
-      
-      // Extract catalog and schema from the index name if possible
-      let catalogName = catalog;
-      let schemaName = schema;
-      
-      // Try to extract from memory_index (format: catalog.schema.table)
-      const indexParts = manualConfig.memory_index.split('.');
-      if (indexParts.length >= 3) {
-        catalogName = indexParts[0];
-        schemaName = indexParts[1];
-      }
-      
-      // Always check if we have an existing config first
-      let existingConfigId = savedConfig?.backend_id;
-      
-      // If we don't have a saved config, check if there's a default one
-      if (!existingConfigId) {
-        try {
-          const defaultResponse = await apiClient.get('/memory-backend/configs/default');
-          if (defaultResponse.data && defaultResponse.data.id) {
-            existingConfigId = defaultResponse.data.id;
-          }
-        } catch (error) {
-          // No default config exists, that's fine
-        }
-      }
-      
-      // Create or update configuration data
-      const configData = {
-        name: 'Databricks Vector Search Configuration', // Always update the name
-        description: 'Manually configured Databricks Vector Search',
-        backend_type: MemoryBackendType.DATABRICKS,
-        databricks_config: {
-          workspace_url: manualConfig.workspace_url,
-          endpoint_name: manualConfig.endpoint_name,
-          document_endpoint_name: manualConfig.document_endpoint_name,
-          memory_index: manualConfig.memory_index,
-          document_index: manualConfig.document_index,
-          auth_type: 'default',
-          embedding_dimension: EMBEDDING_MODELS.find(m => m.value === manualConfig.embedding_model)?.dimension || 1024,
-          catalog: catalogName,
-          schema: schemaName,
-        }
-      };
-      
-      let response;
-      if (existingConfigId) {
-        // Update existing configuration
-        response = await apiClient.put(`/memory-backend/configs/${existingConfigId}`, configData);
-      } else {
-        // Create new configuration
-        response = await apiClient.post('/memory-backend/configs', configData);
-        if (response.data) {
-          // Set as default
-          await apiClient.post(`/memory-backend/configs/${response.data.id}/set-default`);
-        }
-      }
 
-      // Dispatch event to notify other components about memory backend configuration change
-      window.dispatchEvent(new CustomEvent('memory-backend-updated', {
-        detail: { config: response.data }
-      }));
-      
-      if (response.data) {
-        // Update store
-        updateConfig({
-          backend_type: MemoryBackendType.DATABRICKS,
-        });
-        
-        // Reload configuration
-        await loadExistingConfig();
-        
-        // Clear manual config form
-        setManualConfig({
-          workspace_url: '',
-          endpoint_name: '',
-          document_endpoint_name: '',
-          memory_index: '',
-          document_index: '',
-          embedding_model: 'databricks-gte-large-en', // Reset to default
-        });
-      }
-    } catch (error) {
-      console.error('Failed to save manual configuration:', error);
-      setError('Failed to save configuration. Please try again.');
-    } finally {
-      setIsSettingUp(false);
-    }
-  };
-
-  const handleEmptyIndex = async (indexType: 'memory' | 'document') => {
-    const cfgKey = indexConfigKey(indexType);
-    if (!savedConfig?.indexes?.[cfgKey] || !savedConfig?.workspace_url || !savedConfig?.backend_id) return;
-
-    const indexName = savedConfig.indexes[cfgKey]?.name;
-    if (!indexName) return;
-
-    const confirmEmpty = window.confirm(`Are you sure you want to empty the ${indexType} index? This will delete all documents but keep the index structure.`);
-    if (!confirmEmpty) return;
-    
-    setIsSettingUp(true);
-    setError('');
-    
-    try {
-      // Get the backend configuration to find embedding dimension
-      const configResponse = await apiClient.get(`/memory-backend/configs/${savedConfig.backend_id}`);
-      const embeddingDimension = configResponse.data?.databricks_config?.embedding_dimension || 1024;
-      
-      const endpointName = indexType === 'document' 
-        ? savedConfig.endpoints?.document?.name 
-        : savedConfig.endpoints?.memory?.name;
-      
-      if (!endpointName) {
-        setError('Could not determine endpoint for this index');
-        return;
-      }
-      
-      const response = await apiClient.post('/memory-backend/databricks/empty-index', {
-        workspace_url: savedConfig.workspace_url,
-        index_name: indexName,
-        endpoint_name: endpointName,
-        index_type: indexType,
-        embedding_dimension: embeddingDimension
-      });
-      
-      if (response.data.success) {
-        // Refresh index info after a short delay since recreation may take a moment
-        setTimeout(() => {
-          fetchIndexInfo(indexName, endpointName);
-        }, 3000);
-        
-        // Show success message
-        const deletedCount = response.data.deleted_count || 0;
-        setError(''); // Clear any errors
-        
-        // Show appropriate message based on whether index existed
-        if (response.data.message && response.data.message.includes('created new index')) {
-          alert(`Index ${indexType.replace('_', ' ')} was not found, so a new one was created successfully.`);
-        } else {
-          alert(`Successfully emptied ${indexType.replace('_', ' ')} index. ${deletedCount} documents removed.\n\nNote: The index was deleted and recreated to clear all documents.`);
-        }
-      } else {
-        // For Direct Access indexes, show the detailed message
-        const errorMessage = response.data.message || 'Failed to empty index';
-        setError(errorMessage);
-        // Also show in alert for better visibility of multi-line messages
-        if (response.data.error?.includes('not supported')) {
-          alert(errorMessage);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to empty index:', error);
-      setError('Failed to empty index. Please try again.');
-    } finally {
-      setIsSettingUp(false);
-    }
-  };
 
   // NOTE: the "re-seed documentation" action is gone — it drove the
   // crewai-docs scraper (/documentation-embeddings/seed-all), removed with
   // the crewai->kasal engine migration.
 
-  const handleViewDocuments = (indexType: string, indexName: string) => {
-    // Determine the endpoint based on index type
-    const endpointName = indexType === 'document' 
-      ? savedConfig?.endpoints?.document?.name 
-      : savedConfig?.endpoints?.memory?.name;
-    
-    if (!endpointName) {
-      setError('Cannot view documents: endpoint not configured');
-      return;
-    }
-    
-    setSelectedIndexForDocs({
-      name: indexName,
-      type: indexType as 'memory' | 'document',
-      endpointName: endpointName
-    });
-    setDocumentsDialogOpen(true);
-  };
 
-  const handleDeleteEndpoint = async (endpointType: 'memory' | 'document') => {
-    if (!savedConfig?.endpoints?.[endpointType]) return;
-    
-    const endpointStatus = endpointStatuses[endpointType];
-    const isNotFound = endpointStatus?.state === 'NOT_FOUND';
-    
-    // Check if this is the last endpoint
-    const remainingEndpoints = Object.entries(savedConfig.endpoints || {})
-      .filter(([key, value]) => key !== endpointType && value !== undefined)
-      .length;
-    
-    const isLastEndpoint = remainingEndpoints === 0;
-    
-    const confirmMessage = isNotFound 
-      ? `The ${endpointType} endpoint no longer exists in Databricks. Remove it from configuration?`
-      : isLastEndpoint 
-        ? `This is the last endpoint. Deleting it will disable memory backend entirely. Continue?`
-        : `Are you sure you want to delete the ${endpointType} endpoint?`;
-    
-    const confirmDelete = window.confirm(confirmMessage);
-    if (!confirmDelete) return;
-    
-    setIsSettingUp(true);
-    setError('');
-    
-    try {
-      // If it's the last endpoint, delete all configs and switch to disabled mode
-      if (isLastEndpoint) {
-        // Use the new endpoint that deletes all configs and creates a disabled one
-        const result = await DatabricksVectorSearchService.switchToDisabledMode();
-        console.log('Switched to disabled mode:', result);
-        
-        // Update local state
-        setMode('disabled');
-        setSavedConfig(null);
-        
-        // Update store
-        updateConfig({
-          backend_type: MemoryBackendType.DEFAULT,
-        });
-        
-        return;
-      }
-      
-      // Otherwise, proceed with normal endpoint deletion
-      if (isNotFound) {
-        // Endpoint doesn't exist in Databricks, just remove from config
-        const updatedConfig = {
-          ...savedConfig,
-          endpoints: {
-            ...savedConfig.endpoints,
-            [endpointType]: undefined
-          }
-        };
-        setSavedConfig(updatedConfig);
-        
-        // Update backend configuration
-        await updateBackendConfiguration(updatedConfig);
-      } else {
-        // Endpoint exists, delete it from Databricks
-        const response = await apiClient.delete('/memory-backend/databricks/endpoint', {
-          data: {
-            workspace_url: savedConfig.workspace_url,
-            endpoint_name: savedConfig.endpoints[endpointType]?.name
-          }
-        });
-        
-        if (response.data.success) {
-          // Update saved config to remove the deleted endpoint
-          const updatedConfig = {
-            ...savedConfig,
-            endpoints: {
-              ...savedConfig.endpoints,
-              [endpointType]: undefined
-            }
-          };
-          setSavedConfig(updatedConfig);
-          
-          // Update the backend configuration
-          await updateBackendConfiguration(updatedConfig);
-        } else {
-          setError(response.data.message || 'Failed to delete endpoint');
-        }
-      }
-    } catch (error) {
-      console.error('Failed to delete endpoint:', error);
-      setError('Failed to delete endpoint. Please try again.');
-    } finally {
-      setIsSettingUp(false);
-    }
-  };
 
   // Show loading state while checking for existing configuration
   if (!hasCheckedInitialConfig) {
@@ -1257,6 +711,12 @@ export const MemoryConfiguration: React.FC = () => {
         }}
       >
 
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
+          {error}
+        </Alert>
+      )}
+
       <RadioGroup value={mode} onChange={handleModeChange} row sx={{ mb: 2 }}>
         <FormControlLabel
           value="lakebase"
@@ -1281,173 +741,6 @@ export const MemoryConfiguration: React.FC = () => {
         />
       </RadioGroup>
 
-      <Collapse in={false /* Databricks Vector Search removed */}>
-        <Box>
-          {(!savedConfig || !savedConfig.workspace_url) && (
-            <>
-              <Alert severity="info" sx={{ mb: 2 }}>
-                Choose how to configure Databricks Vector Search
-              </Alert>
-              
-              <RadioGroup value={setupMode} onChange={(e) => setSetupMode(e.target.value as 'auto' | 'manual')} row sx={{ mb: 2 }}>
-                <FormControlLabel
-                  value="auto"
-                  control={<Radio size="small" />}
-                  label={
-                    <Box>
-                      <Typography variant="body2" fontWeight="medium">Auto-create</Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        Automatically creates endpoints and indexes
-                      </Typography>
-                    </Box>
-                  }
-                  sx={{ mr: 4 }}
-                />
-                <FormControlLabel
-                  value="manual"
-                  control={<Radio size="small" />}
-                  label={
-                    <Box>
-                      <Typography variant="body2" fontWeight="medium">Manual setup</Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        Use existing endpoints and indexes
-                      </Typography>
-                    </Box>
-                  }
-                />
-              </RadioGroup>
-            </>
-          )}
-
-          {error && (
-            <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
-              {error}
-            </Alert>
-          )}
-
-          {/* Auto-create setup */}
-          {setupMode === 'auto' && (!savedConfig || !savedConfig.workspace_url) && (
-            <AutomaticSetupForm
-              detectedWorkspaceUrl={detectedWorkspaceUrl}
-              catalog={catalog}
-              schema={schema}
-              embeddingModel={embeddingModel}
-              isSettingUp={isSettingUp}
-              error={error}
-              onCatalogChange={setCatalog}
-              onSchemaChange={setSchema}
-              onEmbeddingModelChange={setEmbeddingModel}
-              onSetup={handleSetup}
-            />
-          )}
-
-          {/* Manual setup */}
-          {setupMode === 'manual' && (!savedConfig || !savedConfig.workspace_url) && (
-            <ManualConfigurationForm
-              manualConfig={manualConfig}
-              isSettingUp={isSettingUp}
-              error={error}
-              onConfigChange={setManualConfig}
-              onSave={handleManualSave}
-            />
-          )}
-          
-          {/* Display saved configuration */}
-          {(() => {
-            console.log('SavedConfig state:', savedConfig);
-            console.log('Has workspace_url:', !!savedConfig?.workspace_url);
-            console.log('Has endpoints:', !!savedConfig?.endpoints);
-            console.log('Has indexes:', !!savedConfig?.indexes);
-            console.log('Endpoints detail:', savedConfig?.endpoints);
-            console.log('Indexes detail:', savedConfig?.indexes);
-            console.log('Memory endpoint:', savedConfig?.endpoints?.memory);
-            console.log('Document endpoint:', savedConfig?.endpoints?.document);
-            console.log('Condition check:', !!(savedConfig?.endpoints && (savedConfig.endpoints.memory || savedConfig.endpoints.document) || 
-              savedConfig?.indexes && (savedConfig.indexes.unified || savedConfig.indexes.document)));
-            return null;
-          })()}
-          {savedConfig && savedConfig.workspace_url && (
-            <ConfigurationDisplay
-              savedConfig={savedConfig}
-              isEditingConfig={isEditingConfig}
-              isSettingUp={isSettingUp}
-              onStartEdit={handleStartEdit}
-              onSaveEdit={handleSaveEdit}
-              onCancelEdit={handleCancelEdit}
-              onRefresh={verifyActualResources}
-            >
-
-              {true && (
-                <Box sx={{ mt: 1.5 }}>
-                  {isEditingConfig ? (
-                    <EditConfigurationForm
-                      editedConfig={editedConfig}
-                      onEditChange={handleEditChange}
-                    />
-                  ) : (
-                    <>
-                      <EndpointsDisplay
-                        savedConfig={savedConfig}
-                        endpointStatuses={endpointStatuses}
-                        onDeleteEndpoint={handleDeleteEndpoint}
-                      />
-                      
-                      {/* Advanced Settings */}
-                      {/* Indexes Table */}
-                      <Box>
-                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-                          Indexes:
-                        </Typography>
-                        <Box>
-                        {/* Knowledge Base Table */}
-                        {savedConfig.indexes?.document && (
-                          <IndexManagementTable
-                            title="Knowledge Base"
-                            subtitle="The knowledge base holds document embeddings for knowledge search over uploaded files."
-                            savedConfig={savedConfig}
-                            endpointName={savedConfig.endpoints?.document?.name}
-                            endpointType="document"
-                            indexes={[
-                              { type: 'document', name: savedConfig.indexes.document?.name }
-                            ]}
-                            indexInfoMap={indexInfoMap}
-                            endpointStatuses={endpointStatuses}
-                            isSettingUp={isSettingUp}
-                            onEmpty={(indexType) => handleEmptyIndex(indexType as 'memory' | 'document')}
-                            onDelete={(indexType) => handleDeleteIndex(indexType as 'memory' | 'document')}
-                            onViewDocuments={handleViewDocuments}
-                          />
-                        )}
-
-                        {/* Unified Memory Index Table */}
-                        {savedConfig.indexes?.unified && (
-                          <IndexManagementTable
-                            title="Unified Cognitive Memory Index"
-                            subtitle="The Kasal engine stores every memory record (short-term, long-term, and entity alike) in a single index using UNIFIED_SCHEMA. Scope paths and category tags inside metadata replace the old per-tier splits."
-                            savedConfig={savedConfig}
-                            endpointName={savedConfig.endpoints?.memory?.name}
-                            endpointType="memory"
-                            indexes={[
-                              savedConfig.indexes.unified && { type: 'memory' as const, name: savedConfig.indexes.unified.name },
-                            ].filter((index): index is { type: 'memory', name: string } => Boolean(index))}
-                            indexInfoMap={indexInfoMap}
-                            endpointStatuses={endpointStatuses}
-                            isSettingUp={isSettingUp}
-                            onEmpty={(indexType) => handleEmptyIndex(indexType as 'memory' | 'document')}
-                            onDelete={(indexType) => handleDeleteIndex(indexType as 'memory' | 'document')}
-                            onViewDocuments={handleViewDocuments}
-                          />
-                        )}
-                        </Box>
-                      </Box>
-                    </>
-                  )}
-                </Box>
-              )}
-            </ConfigurationDisplay>
-          )}
-        </Box>
-      </Collapse>
 
       <Collapse in={mode === 'lakebase'}>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
@@ -1872,7 +1165,7 @@ export const MemoryConfiguration: React.FC = () => {
 
           {/* Recall-speed & memory-LLM tuning. Persisted with the Lakebase
               config via the Save Configuration / Initialize Tables buttons. */}
-          <CognitiveMemoryPanel />
+          <MemoryTuningPanel />
         </Box>
       </Collapse>
 
@@ -1891,17 +1184,17 @@ export const MemoryConfiguration: React.FC = () => {
             </Button>
           }
         >
-          Kasal unified cognitive memory is stored locally in SQLite under
+          Kasal memory is stored locally in SQLite under
           <code style={{ margin: '0 4px' }}>kasal_default_&lt;group&gt;/memory/</code>
           relative to the backend working directory — one store per teamspace, no
           external infrastructure required. Click &ldquo;Browse Memory&rdquo; to
           inspect the records your crews have persisted.
         </Alert>
 
-        {/* Cognitive tuning (recall weights, speed, memory LLM) applies to local
+        {/* Memory tuning (recall weights, memory LLM) applies to local
             memory too — but only once saved as an ACTIVE config, which is what the
             Save button below does (it creates/updates the local backend config). */}
-        <CognitiveMemoryPanel />
+        <MemoryTuningPanel />
 
         <Box
           sx={{
@@ -1945,30 +1238,8 @@ export const MemoryConfiguration: React.FC = () => {
       />
 
       {/* Result Dialog */}
-      <SetupResultDialog
-        open={showResultDialog}
-        onClose={() => setShowResultDialog(false)}
-        setupResult={setupResult}
-        workspaceUrl={detectedWorkspaceUrl || ''}
-        savedConfigWorkspaceUrl={savedConfig?.workspace_url}
-      />
+            
       
-      {/* Index Documents Dialog */}
-      {selectedIndexForDocs && (
-        <IndexDocumentsDialog
-          open={documentsDialogOpen}
-          onClose={() => {
-            setDocumentsDialogOpen(false);
-            setSelectedIndexForDocs(null);
-          }}
-          indexName={selectedIndexForDocs.name}
-          indexType={selectedIndexForDocs.type}
-          workspaceUrl={savedConfig?.workspace_url || ''}
-          endpointName={selectedIndexForDocs.endpointName}
-          backendId={savedConfig?.backend_id}
-        />
-      )}
-
       </Paper>
     </Box>
   );

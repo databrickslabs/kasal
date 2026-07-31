@@ -1,10 +1,10 @@
 /**
- * Force-directed concept graph for cognitive memory categories.
+ * Force-directed concept graph for memory categories.
  *
  * Built on `force-graph` (vasturiano) — canvas rendering, d3-force physics,
  * native pan/zoom/drag. We keep MUI overlays for the legend, zoom controls,
  * fullscreen toggle and the hover tooltip so the component blends with the
- * rest of the Cognitive Memory Browser.
+ * rest of the Memory Browser.
  *
  * Visual identity preserved from the previous SVG version:
  *  - Flat-fill nodes coloured by importance
@@ -462,7 +462,7 @@ export const ConceptForceGraph: React.FC<Props> = ({
           }}
         >
           <Typography variant="body2">
-            No concepts yet — run a crew with cognitive memory enabled.
+            No concepts yet — run a crew with memory enabled.
           </Typography>
         </Box>
       )}

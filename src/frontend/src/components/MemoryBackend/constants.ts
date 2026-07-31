@@ -27,7 +27,7 @@ export const EMBEDDING_MODELS = [
 // Comprehensive descriptions for each index type (CrewAI 1.10+ unified memory)
 export const INDEX_DESCRIPTIONS = {
   memory: {
-    brief: "Unified cognitive memory (all records)",
+    brief: "Memory (all records)",
     detailed: "CrewAI 1.10+ replaces the old short-term / long-term / entity split with a single unified memory class. Every record lives in this one index, tagged with a hierarchical scope path (e.g. /crew/research/findings) and category tags. Recall blends semantic similarity, recency, and LLM-inferred importance into a composite score; save-time consolidation automatically merges contradictions. Short-term-style session scoping is preserved via the session_id column."
   },
   document: {

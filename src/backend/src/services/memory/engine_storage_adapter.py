@@ -2,10 +2,10 @@
 
 ``Memory.recall`` speaks the engine ``StorageBackend`` protocol —
 ``search(query: str, limit, scope, score_threshold)`` — while the real
-backends (:class:`DatabricksStorageBackend`, :class:`LakebaseStorageBackend`,
-:class:`LocalMemoryStorage`) keep the crewAI-1.x protocol where the CALLER
-embeds the query first: ``search(query_embedding, scope_prefix, ...,
-min_score)``. This adapter absorbs that mismatch in one place:
+backends (:class:`LakebaseStorageBackend`, :class:`LocalMemoryStorage`) keep the
+crewAI-1.x protocol where the CALLER embeds the query first:
+``search(query_embedding, scope_prefix, ..., min_score)``. This adapter absorbs
+that mismatch in one place:
 
 * embeds the query (with a small LRU cache — repeated asks cost nothing),
 * maps kwarg names (``scope`` → ``scope_prefix``, ``score_threshold`` →

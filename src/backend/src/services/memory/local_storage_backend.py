@@ -25,7 +25,7 @@ from typing import Any
 
 import numpy as np
 
-from src.services.memory.engine import MemoryRecord, ScopeInfo
+from src.services.memory.engine import KIND_EPISODIC, MemoryRecord, ScopeInfo
 from src.services.memory.engine_storage_adapter import embed_text
 
 logger = logging.getLogger(__name__)
@@ -42,10 +42,30 @@ CREATE TABLE IF NOT EXISTS memories (
     private INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     last_accessed TEXT NOT NULL,
-    embedding BLOB
+    embedding BLOB,
+    kind TEXT NOT NULL DEFAULT 'episodic',
+    valid_from TEXT,
+    valid_to TEXT,
+    superseded_by TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories (scope);
 """
+# NOTE: no index on ``kind`` here. This script also runs against a table created
+# before that column existed, where CREATE TABLE IF NOT EXISTS is a no-op — so
+# indexing kind at this point fails with "no such column". It is created in
+# _migrate_columns, after the ALTER.
+
+# Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS,
+# and CREATE TABLE IF NOT EXISTS is a no-op on an existing table — so a dev store
+# created before these landed keeps the old shape and every insert fails on
+# "table memories has no column named kind". Applied one at a time, tolerating
+# the duplicate-column error, which is the idiomatic SQLite equivalent.
+_ADDED_COLUMNS = (
+    ("kind", "TEXT NOT NULL DEFAULT 'episodic'"),
+    ("valid_from", "TEXT"),
+    ("valid_to", "TEXT"),
+    ("superseded_by", "TEXT"),
+)
 
 
 def _now_iso() -> str:
@@ -79,7 +99,7 @@ class LocalMemoryStorage:
     ):
         self.db_path = Path(db_path)
         self.embedder = embedder
-        # Cognitive-config overrides; class constants are the defaults.
+        # Tuning overrides; class constants are the defaults.
         if semantic_weight is not None:
             self.SEMANTIC_WEIGHT = float(semantic_weight)
         if recency_weight is not None:
@@ -94,7 +114,19 @@ class LocalMemoryStorage:
         self._lock = threading.Lock()
         self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self._conn.executescript(_SCHEMA)
+        self._migrate_columns()
         self._conn.commit()
+
+    def _migrate_columns(self) -> None:
+        """Add any post-release column missing from an existing store."""
+        existing = {row[1] for row in self._conn.execute("PRAGMA table_info(memories)")}
+        for column, ddl in _ADDED_COLUMNS:
+            if column in existing:
+                continue
+            self._conn.execute(f"ALTER TABLE memories ADD COLUMN {column} {ddl}")
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_kind ON memories (kind)"
+        )
 
     # ------------------------------------------------------------------
     # embedding (same helper chain as the remote backends)
@@ -135,14 +167,19 @@ class LocalMemoryStorage:
                     ),
                     _now_iso(),
                     _to_blob(vector),
+                    record.kind,
+                    record.valid_from.isoformat() if record.valid_from else None,
+                    record.valid_to.isoformat() if record.valid_to else None,
+                    record.superseded_by,
                 )
             )
         with self._lock:
             self._conn.executemany(
                 "INSERT OR REPLACE INTO memories "
                 "(id, content, scope, categories, metadata, importance, source, "
-                " private, created_at, last_accessed, embedding) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " private, created_at, last_accessed, embedding, "
+                " kind, valid_from, valid_to, superseded_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
             self._conn.commit()
@@ -168,7 +205,12 @@ class LocalMemoryStorage:
         query_text: str | None = None,
     ) -> list[tuple[MemoryRecord, float]]:
         """Blended score = semantic + keyword-overlap + recency + importance
-        (same fused-scoring shape as the Lakebase backend, numpy-local)."""
+        (same fused-scoring shape as the Lakebase backend, numpy-local).
+
+        Mirrors the two ``kind``-driven policies exactly: superseded records are
+        excluded, and the recency decay applies to EPISODIC records only — a
+        current fact does not get less true with age.
+        """
         rows = self._fetch_rows(scope_prefix)
         if not rows:
             return []
@@ -184,6 +226,8 @@ class LocalMemoryStorage:
         half_life_seconds = self.RECENCY_HALF_LIFE_DAYS * 86400.0
         for row in rows:
             record = self._row_to_record(row)
+            if not record.is_current:
+                continue  # superseded — history, not context
             if categories and not set(categories) & set(record.categories):
                 continue
             if metadata_filter and any(
@@ -204,13 +248,18 @@ class LocalMemoryStorage:
             if query_tokens:
                 content_tokens = set(record.content.lower().split())
                 keyword = len(query_tokens & content_tokens) / len(query_tokens)
-            created = record.created_at
-            if created.tzinfo is None:
-                created = created.replace(tzinfo=timezone.utc)
-            age_seconds = max((now - created).total_seconds(), 0.0)
-            recency = float(
-                np.exp(-0.6931471805599453 * age_seconds / half_life_seconds)
-            )
+            if record.kind == KIND_EPISODIC:
+                created = record.created_at
+                if created.tzinfo is None:
+                    created = created.replace(tzinfo=timezone.utc)
+                age_seconds = max((now - created).total_seconds(), 0.0)
+                recency = float(
+                    np.exp(-0.6931471805599453 * age_seconds / half_life_seconds)
+                )
+            else:
+                # Semantic/procedural: no decay. A preference learned two months
+                # ago is exactly as true as one learned yesterday.
+                recency = 1.0
             score = (
                 self.SEMANTIC_WEIGHT * semantic
                 + self.KEYWORD_WEIGHT * keyword
@@ -351,6 +400,9 @@ class LocalMemoryStorage:
             except (TypeError, ValueError):
                 return datetime.now(timezone.utc)
 
+        def _parse_optional_dt(value: Any) -> datetime | None:
+            return None if value in (None, "") else _parse_dt(value)
+
         return MemoryRecord(
             id=row["id"],
             content=row["content"],
@@ -362,4 +414,10 @@ class LocalMemoryStorage:
             private=bool(row.get("private")),
             created_at=_parse_dt(row.get("created_at")),
             last_accessed=_parse_dt(row.get("last_accessed")),
+            # ``kind`` validates unknown/NULL to episodic, so a row written
+            # before the column existed reads correctly.
+            kind=row.get("kind"),
+            valid_from=_parse_optional_dt(row.get("valid_from")),
+            valid_to=_parse_optional_dt(row.get("valid_to")),
+            superseded_by=row.get("superseded_by"),
         )

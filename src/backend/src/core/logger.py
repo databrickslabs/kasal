@@ -87,10 +87,6 @@ class LoggerManager:
             self._api_logger = None
             self._access_logger = None
             self._guardrails_logger = None
-            self._databricks_vector_search_logger = None
-            self._databricks_short_term_logger = None
-            self._databricks_long_term_logger = None
-            self._databricks_entity_logger = None
             self._documentation_embedding_logger = None
             self._knowledge_source_logger = None
             self._database_logger = None
@@ -157,22 +153,6 @@ class LoggerManager:
                 "[GUARDRAILS] %(asctime)s - %(levelname)s - %(message)s",
                 datefmt="%Y-%m-%d %H:%M:%S",
             ),
-            "databricks_vector_search": logging.Formatter(
-                "[DATABRICKS_VECTOR_SEARCH] %(asctime)s - %(levelname)s - %(message)s",
-                datefmt="%Y-%m-%d %H:%M:%S",
-            ),
-            "databricks_short_term": logging.Formatter(
-                "[DATABRICKS_SHORT_TERM] %(asctime)s - %(levelname)s - %(message)s",
-                datefmt="%Y-%m-%d %H:%M:%S",
-            ),
-            "databricks_long_term": logging.Formatter(
-                "[DATABRICKS_LONG_TERM] %(asctime)s - %(levelname)s - %(message)s",
-                datefmt="%Y-%m-%d %H:%M:%S",
-            ),
-            "databricks_entity": logging.Formatter(
-                "[DATABRICKS_ENTITY] %(asctime)s - %(levelname)s - %(message)s",
-                datefmt="%Y-%m-%d %H:%M:%S",
-            ),
             "documentation_embedding": logging.Formatter(
                 "[DOC_EMBEDDING] %(asctime)s - %(levelname)s - %(message)s",
                 datefmt="%Y-%m-%d %H:%M:%S",
@@ -215,24 +195,6 @@ class LoggerManager:
         )
         self._guardrails_logger = self._setup_logger(
             "guardrails", formatters["guardrails"]
-        )
-        self._databricks_vector_search_logger = self._setup_logger(
-            "databricks_vector_search",
-            formatters["databricks_vector_search"],
-            suppress_stdout=True,
-        )
-        self._databricks_short_term_logger = self._setup_logger(
-            "databricks_short_term",
-            formatters["databricks_short_term"],
-            suppress_stdout=True,
-        )
-        self._databricks_long_term_logger = self._setup_logger(
-            "databricks_long_term",
-            formatters["databricks_long_term"],
-            suppress_stdout=True,
-        )
-        self._databricks_entity_logger = self._setup_logger(
-            "databricks_entity", formatters["databricks_entity"], suppress_stdout=True
         )
         self._documentation_embedding_logger = self._setup_logger(
             "documentation_embedding",
@@ -296,10 +258,6 @@ class LoggerManager:
             "_api_logger",
             "_access_logger",
             "_guardrails_logger",
-            "_databricks_vector_search_logger",
-            "_databricks_short_term_logger",
-            "_databricks_long_term_logger",
-            "_databricks_entity_logger",
             "_documentation_embedding_logger",
             "_knowledge_source_logger",
             "_database_logger",
@@ -778,34 +736,6 @@ class LoggerManager:
         if not self._guardrails_logger:
             self.initialize()
         return self._guardrails_logger
-
-    @property
-    def databricks_vector_search(self) -> logging.Logger:
-        """Get the Databricks Vector Search logger for memory operations."""
-        if not self._databricks_vector_search_logger:
-            self.initialize()
-        return self._databricks_vector_search_logger
-
-    @property
-    def databricks_short_term(self) -> logging.Logger:
-        """Get the Databricks short-term memory logger."""
-        if not self._databricks_short_term_logger:
-            self.initialize()
-        return self._databricks_short_term_logger
-
-    @property
-    def databricks_long_term(self) -> logging.Logger:
-        """Get the Databricks long-term memory logger."""
-        if not self._databricks_long_term_logger:
-            self.initialize()
-        return self._databricks_long_term_logger
-
-    @property
-    def databricks_entity(self) -> logging.Logger:
-        """Get the Databricks entity memory logger."""
-        if not self._databricks_entity_logger:
-            self.initialize()
-        return self._databricks_entity_logger
 
     @property
     def documentation_embedding(self) -> logging.Logger:

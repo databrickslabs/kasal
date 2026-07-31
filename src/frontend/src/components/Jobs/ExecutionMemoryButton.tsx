@@ -1,12 +1,12 @@
 /**
- * Per-run memory graph — the run list's door into the Cognitive Memory Browser.
+ * Per-run memory graph — the run list's door into the Memory Browser.
  *
  * Chat already offers this on a finished run's action bar; the run table is the
  * other place a run is looked back at, so the same graph belongs here, scoped to
  * the row's run. Clicking opens the browser pinned to that run's `job_id` and
  * straight on the graph view — the concepts that run wrote to memory.
  *
- * The whole column stays quiet when the workspace has no cognitive memory at
+ * The whole column stays quiet when the workspace has no memory at
  * all (no backend configured, or an empty store): a dead icon on every row is
  * worse than no column. Availability is probed ONCE per page load and shared by
  * every row, so a 50-row table costs one request, not fifty.

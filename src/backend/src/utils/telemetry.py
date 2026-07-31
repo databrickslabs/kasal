@@ -32,7 +32,6 @@ class KasalProduct:
     # Infrastructure integrations
     JOBS = "jobs"
     GENIE = "genie"
-    VECTORSEARCH = "vectorsearch"
     MCP = "mcp"
     LAKEBASE = "lakebase"
     MLFLOW = "mlflow"

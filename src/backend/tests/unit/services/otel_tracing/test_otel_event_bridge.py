@@ -1229,44 +1229,12 @@ class TestSetExtraAttributesAgent:
 
 
 class TestSetExtraAttributesMemoryType:
-    """Tests for source_type -> memory_type derivation in _set_extra_attributes."""
+    """source_type is recorded; no memory_type is derived from it any more.
 
-    def test_short_term_memory(self):
-        tracer, span = _make_tracer()
-        bridge = OTelEventBridge(tracer, "job-mem-short")
-
-        event = _make_event(source_type="ShortTermMemory")
-        bridge._set_extra_attributes(span, event)
-
-        span.set_attribute.assert_any_call("kasal.extra.source_type", "ShortTermMemory")
-        span.set_attribute.assert_any_call("kasal.extra.memory_type", "short_term")
-
-    def test_long_term_memory(self):
-        tracer, span = _make_tracer()
-        bridge = OTelEventBridge(tracer, "job-mem-long")
-
-        event = _make_event(source_type="LongTermMemory")
-        bridge._set_extra_attributes(span, event)
-
-        span.set_attribute.assert_any_call("kasal.extra.memory_type", "long_term")
-
-    def test_entity_memory(self):
-        tracer, span = _make_tracer()
-        bridge = OTelEventBridge(tracer, "job-mem-entity")
-
-        event = _make_event(source_type="EntityMemory")
-        bridge._set_extra_attributes(span, event)
-
-        span.set_attribute.assert_any_call("kasal.extra.memory_type", "entity")
-
-    def test_external_memory(self):
-        tracer, span = _make_tracer()
-        bridge = OTelEventBridge(tracer, "job-mem-ext")
-
-        event = _make_event(source_type="ExternalKnowledgeMemory")
-        bridge._set_extra_attributes(span, event)
-
-        span.set_attribute.assert_any_call("kasal.extra.memory_type", "external")
+    The short_term / long_term / entity derivation belonged to the removed
+    per-type memory split, and every memory event now reports
+    ``unified_memory``, so no branch could ever have fired.
+    """
 
     def test_unknown_source_type_no_memory_type(self):
         tracer, span = _make_tracer()
@@ -2541,7 +2509,6 @@ class TestSetExtraAttributesComprehensive:
             ("kasal.extra.agent_role", "Researcher"),
             ("kasal.extra.agent_id", "agent-uuid"),
             ("kasal.extra.source_type", "ShortTermMemory"),
-            ("kasal.extra.memory_type", "short_term"),
             ("kasal.extra.query_time_ms", 10.5),
             ("kasal.extra.save_time_ms", 5.2),
             ("kasal.extra.retrieval_time_ms", 8.3),

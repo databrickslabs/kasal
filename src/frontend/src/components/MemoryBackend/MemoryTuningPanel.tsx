@@ -1,5 +1,5 @@
 /**
- * Cognitive Memory Panel — tuning knobs for CrewAI 1.10+ unified memory.
+ * Memory Tuning Panel — the recall-scoring knobs for a teamspace's memory.
  *
  * Exposes composite-score weights (semantic / recency / importance),
  * consolidation threshold, recall-depth knobs and an optional memory-LLM
@@ -22,18 +22,18 @@ import {
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 
 import {
-  COGNITIVE_MEMORY_DEFAULTS,
-  CognitiveMemoryConfig,
+  MEMORY_TUNING_DEFAULTS,
+  MemoryTuningConfig,
 } from '../../types/config/memoryBackend';
 import { Models } from '../../types/config/models';
 import { ModelService } from '../../api/config/ModelService';
 import {
-  useCognitiveMemoryConfig,
+  useMemoryTuningConfig,
   useMemoryBackendStore,
 } from '../../store/memoryBackend';
 
 interface SliderSpec {
-  key: keyof CognitiveMemoryConfig;
+  key: keyof MemoryTuningConfig;
   label: string;
   min: number;
   max: number;
@@ -41,7 +41,7 @@ interface SliderSpec {
   help: string;
 }
 
-const COGNITIVE_SLIDERS: SliderSpec[] = [
+const TUNING_SLIDERS: SliderSpec[] = [
   {
     key: 'semantic_weight',
     label: 'Semantic weight',
@@ -87,8 +87,8 @@ const COGNITIVE_SLIDERS: SliderSpec[] = [
   },
 ];
 
-export const CognitiveMemoryPanel: React.FC = () => {
-  const cognitive: CognitiveMemoryConfig = useCognitiveMemoryConfig() || {};
+export const MemoryTuningPanel: React.FC = () => {
+  const tuning: MemoryTuningConfig = useMemoryTuningConfig() || {};
   const updateCognitiveConfig = useMemoryBackendStore(
     (state) => state.updateCognitiveConfig,
   );
@@ -113,7 +113,7 @@ export const CognitiveMemoryPanel: React.FC = () => {
   }, []);
 
   const modelKeys = Object.keys(models);
-  const selectedModel = cognitive.memory_llm_model;
+  const selectedModel = tuning.memory_llm_model;
   // Keep a previously-saved model selectable even if it was since disabled,
   // so the Select never shows an out-of-range value.
   const modelOptions =
@@ -121,10 +121,10 @@ export const CognitiveMemoryPanel: React.FC = () => {
       ? [selectedModel, ...modelKeys]
       : modelKeys;
 
-  const valueOrDefault = (key: keyof CognitiveMemoryConfig): number =>
-    (cognitive[key] as number | undefined) ??
-    (COGNITIVE_MEMORY_DEFAULTS[
-      key as keyof typeof COGNITIVE_MEMORY_DEFAULTS
+  const valueOrDefault = (key: keyof MemoryTuningConfig): number =>
+    (tuning[key] as number | undefined) ??
+    (MEMORY_TUNING_DEFAULTS[
+      key as keyof typeof MEMORY_TUNING_DEFAULTS
     ] as number);
 
   return (
@@ -135,7 +135,7 @@ export const CognitiveMemoryPanel: React.FC = () => {
     >
       <AccordionSummary expandIcon={<ExpandMoreIcon />}>
         <Box>
-          <Typography variant="subtitle1">Cognitive Memory Tuning</Typography>
+          <Typography variant="subtitle1">Memory Tuning</Typography>
           <Typography variant="caption" color="text.secondary">
             Advanced — composite-score weights, consolidation threshold, and recall
             speed (exploration budget, query-analysis threshold, memory LLM).
@@ -144,7 +144,7 @@ export const CognitiveMemoryPanel: React.FC = () => {
       </AccordionSummary>
       <AccordionDetails>
         <Grid container spacing={3}>
-          {COGNITIVE_SLIDERS.map((slider) => (
+          {TUNING_SLIDERS.map((slider) => (
             <Grid item xs={12} md={6} key={slider.key}>
               <Typography variant="body2" sx={{ mb: 1 }}>
                 {slider.label}: <strong>{valueOrDefault(slider.key)}</strong>
@@ -171,8 +171,8 @@ export const CognitiveMemoryPanel: React.FC = () => {
               type="number"
               label="Recency half-life (days)"
               value={
-                cognitive.recency_half_life_days ??
-                COGNITIVE_MEMORY_DEFAULTS.recency_half_life_days
+                tuning.recency_half_life_days ??
+                MEMORY_TUNING_DEFAULTS.recency_half_life_days
               }
               onChange={(e) =>
                 updateCognitiveConfig({
@@ -190,8 +190,8 @@ export const CognitiveMemoryPanel: React.FC = () => {
               type="number"
               label="Exploration budget"
               value={
-                cognitive.exploration_budget ??
-                COGNITIVE_MEMORY_DEFAULTS.exploration_budget
+                tuning.exploration_budget ??
+                MEMORY_TUNING_DEFAULTS.exploration_budget
               }
               onChange={(e) =>
                 updateCognitiveConfig({
@@ -209,8 +209,8 @@ export const CognitiveMemoryPanel: React.FC = () => {
               type="number"
               label="Query-analysis threshold (chars)"
               value={
-                cognitive.query_analysis_threshold ??
-                COGNITIVE_MEMORY_DEFAULTS.query_analysis_threshold
+                tuning.query_analysis_threshold ??
+                MEMORY_TUNING_DEFAULTS.query_analysis_threshold
               }
               onChange={(e) => {
                 const parsed = parseInt(e.target.value, 10);
@@ -233,7 +233,7 @@ export const CognitiveMemoryPanel: React.FC = () => {
               select
               fullWidth
               label="Memory LLM override (optional)"
-              value={cognitive.memory_llm_model || ''}
+              value={tuning.memory_llm_model || ''}
               onChange={(e) =>
                 updateCognitiveConfig({
                   memory_llm_model: e.target.value || undefined,
@@ -262,4 +262,4 @@ export const CognitiveMemoryPanel: React.FC = () => {
   );
 };
 
-export default CognitiveMemoryPanel;
+export default MemoryTuningPanel;

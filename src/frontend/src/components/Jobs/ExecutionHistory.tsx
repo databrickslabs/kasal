@@ -925,7 +925,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                         </Tooltip>
                       </TableCell>
                       <TableCell align="center" sx={{ display: isMobile ? 'none' : 'table-cell' }}>
-                        {/* Renders nothing when the workspace has no cognitive
+                        {/* Renders nothing when the workspace has no memory
                             memory store, so the column stays quiet instead of
                             showing a dead icon on every row. */}
                         <ExecutionMemoryButton jobId={run.job_id} />

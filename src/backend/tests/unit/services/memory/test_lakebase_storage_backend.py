@@ -15,10 +15,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.services.memory.engine import MemoryRecord
-from src.services.memory.lakebase_storage_backend import (
-    LakebaseStorageBackend,
-    _to_aware_utc,
-)
+from src.services.memory.lakebase_storage_backend import LakebaseStorageBackend
+from src.services.memory.pg_codec import to_aware_utc
 
 
 def _make_lakebase_ctx(mock_session):
@@ -45,7 +43,7 @@ class TestToAwareUtc:
 
     def test_naive_gets_utc_tzinfo_without_shifting_walltime(self):
         naive = datetime(2026, 6, 22, 16, 45, 0)  # CrewAI's datetime.utcnow() shape
-        aware = _to_aware_utc(naive)
+        aware = to_aware_utc(naive)
         assert aware.tzinfo is not None
         # Same wall-clock, now explicitly UTC — NOT reinterpreted as local time.
         assert aware == naive.replace(tzinfo=timezone.utc)
@@ -53,7 +51,7 @@ class TestToAwareUtc:
     def test_aware_non_utc_is_converted_to_utc(self):
         # 16:45 at +02:00 is 14:45 UTC — convert, preserving the instant.
         aware_cest = datetime(2026, 6, 22, 16, 45, tzinfo=timezone(timedelta(hours=2)))
-        result = _to_aware_utc(aware_cest)
+        result = to_aware_utc(aware_cest)
         assert result == datetime(2026, 6, 22, 14, 45, tzinfo=timezone.utc)
 
 
@@ -79,8 +77,15 @@ class TestSaveTimestampTz:
         ):
             await backend.asave([record])
 
-        session.execute.assert_called_once()
-        params = session.execute.call_args[0][1]
+        # Find the INSERT specifically rather than assuming it is the only
+        # statement — every operation is preceded by the schema self-heal check
+        # (see lakebase_schema), so a call-count assertion here would be
+        # asserting something other than what this test is about.
+        params = next(
+            call.args[1]
+            for call in session.execute.await_args_list
+            if "INSERT INTO" in str(call.args[0])
+        )
 
         # Bound values must carry tzinfo so asyncpg does not localize them.
         assert params["created_at"].tzinfo is not None

@@ -5,7 +5,6 @@ Updated for app-modes:
 - DatabricksMemoryConfig now requires memory_index (not short_term_index)
 - validate_memory_config checks for memory_index
 - get_lakebase_entity_data uses memory_table (not entity_table)
-- create_databricks_index uses memory_index
 """
 
 from types import SimpleNamespace
@@ -13,16 +12,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.api.memory_backend import vectorsearch_router as _vectorsearch
 from src.api.memory_backend.configs_router import validate_memory_config
 from src.api.memory_backend.lakebase_router import (
     get_lakebase_entity_data,
     get_lakebase_table_data,
-)
-from src.api.memory_backend.vectorsearch_router import (
-    create_databricks_index,
-    get_databricks_indexes,
-    get_workspace_url,
 )
 from src.schemas.memory_backend import (
     DatabricksMemoryConfig,
@@ -65,78 +58,6 @@ async def test_validate_memory_config_databricks_errors_and_valid():
     )
     out2 = await validate_memory_config(config=cfg2, service=svc, group_context=ctx)
     assert out2["valid"] is True
-
-
-@pytest.mark.asyncio
-async def test_get_workspace_url_and_indexes_and_connection():
-    ctx = Ctx()
-    svc = AsyncMock()
-
-    # workspace url
-    svc.get_workspace_url = AsyncMock(return_value={"workspace_url": "https://x"})
-    ws = await get_workspace_url(service=svc, group_context=ctx)
-    assert ws["workspace_url"] == "https://x"
-
-    # test connection
-    with patch(
-        "src.api.memory_backend.vectorsearch_router.extract_user_token_from_request",
-        return_value="tok",
-    ):
-        svc.test_databricks_connection = AsyncMock(return_value={"success": True})
-        cfg = DatabricksMemoryConfig(
-            endpoint_name="ep",
-            memory_index="catalog.schema.unified",
-            embedding_dimension=1024,
-        )
-        out = await _vectorsearch.test_databricks_connection(
-            config=cfg, request=None, group_context=ctx, service=svc
-        )
-        assert out["success"] is True
-
-        # indexes
-        svc.get_databricks_indexes = AsyncMock(return_value={"indexes": ["i1"]})
-        out2 = await get_databricks_indexes(
-            config=cfg, request=None, group_context=ctx, service=svc
-        )
-        assert out2["indexes"] == ["i1"]
-
-
-@pytest.mark.asyncio
-async def test_create_databricks_index_validations_and_success():
-    ctx = Ctx()
-    svc = AsyncMock()
-
-    # Missing required params (memory_index missing) -> 400
-    with pytest.raises(Exception):
-        await create_databricks_index(
-            request={"config": {"endpoint_name": "ep"}},  # missing memory_index
-            req=None,
-            group_context=ctx,
-            service=svc,
-        )
-
-    # Valid path with memory_index
-    req = {
-        "config": {
-            "endpoint_name": "ep",
-            "memory_index": "catalog.schema.unified",
-            "embedding_dimension": 1024,
-        },
-        "index_type": "short_term",  # router validates: short_term, long_term, entity, document
-        "catalog": "c",
-        "schema": "s",
-        "table_name": "t",
-        "primary_key": "id",
-    }
-    with patch(
-        "src.api.memory_backend.vectorsearch_router.extract_user_token_from_request",
-        return_value="tok",
-    ):
-        svc.create_databricks_index = AsyncMock(return_value={"success": True})
-        out = await create_databricks_index(
-            request=req, req=None, group_context=ctx, service=svc
-        )
-        assert out["success"] is True
 
 
 @pytest.mark.asyncio

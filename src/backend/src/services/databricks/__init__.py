@@ -5,7 +5,6 @@ One subpackage per surface, because they have nothing in common but the
 credentials:
 
 - ``workspace``     — the client, config resolution and connection checks
-- ``vector_search`` — Direct Access indexes: setup, verification, CRUD
 - ``lakebase``      — the managed Postgres the app can hot-swap onto
 - ``secrets``       — secret scopes
 - ``genie``         — Genie spaces

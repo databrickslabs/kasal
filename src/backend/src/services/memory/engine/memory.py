@@ -11,7 +11,7 @@ Engine-native fixes for kasal's memory patches:
   save thread — no event ``__init__`` patching.
 - **Save-time analysis**: one small LLM pass per record fills ``categories``,
   ``importance`` and extracted entities (``analyze_on_save``, needs ``llm``).
-  This is what the Cognitive Memory Browser's concept/graph views are built
+  This is what the Memory Browser's concept/graph views are built
   from — without it every record persists with an empty tag list and the graph
   is blank. It runs on the save thread, so it never touches a run's hot path,
   and any failure degrades to an unlabelled record rather than a failed save.
@@ -44,7 +44,7 @@ from src.core.events.types import (
 )
 
 from .analyze import MemoryAnalysis
-from .types import MemoryRecord, ScopeInfo
+from .types import KIND_EPISODIC, MemoryRecord, ScopeInfo
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,7 @@ _ANALYSIS_SYSTEM_PROMPT = (
     "You label memories for a concept graph. Reply with ONE JSON object and no "
     "other text:\n"
     '{"categories": ["kebab-case-topic", ...], "importance": 0.0-1.0, '
+    '"kind": "episodic|semantic|procedural", '
     '"extracted_metadata": {"entities": [], "dates": [], "topics": []}}\n'
     "Rules:\n"
     "- 2-5 categories. Each is a short lowercase kebab-case noun phrase naming "
@@ -69,6 +70,16 @@ _ANALYSIS_SYSTEM_PROMPT = (
     "label across memories; do not invent per-record identifiers.\n"
     "- importance: how useful this is to recall later (routine chatter ~0.3, "
     "durable facts/decisions ~0.8).\n"
+    "- kind:\n"
+    '  * "semantic" — states something that is CURRENTLY TRUE and would still '
+    "be true tomorrow: a preference, a decision, a configuration, a property of "
+    'a person/system/dataset. ("The user wants output as a table.")\n'
+    '  * "procedural" — states HOW to do something: a repeatable method, '
+    "sequence of steps, or rule of thumb.\n"
+    '  * "episodic" — a record of what HAPPENED: a request and its answer, a '
+    "task result, a tool call, an observation tied to one moment.\n"
+    '  Default to "episodic" when unsure. A transcript of an exchange is '
+    "episodic even when the answer inside it contains a fact.\n"
     "- entities: proper nouns actually named in the text. Invent nothing."
 )
 
@@ -316,6 +327,7 @@ class Memory(BaseModel):
         private: bool = False,
         agent_role: str | None = None,
         root_scope: str | None = None,
+        kind: str | None = None,
     ) -> MemoryRecord | None:
         records = self.remember_many(
             [content],
@@ -327,6 +339,7 @@ class Memory(BaseModel):
             private,
             agent_role,
             root_scope,
+            kind,
         )
         return records[0] if records else None
 
@@ -341,6 +354,7 @@ class Memory(BaseModel):
         private: bool = False,
         agent_role: str | None = None,
         root_scope: str | None = None,
+        kind: str | None = None,
     ) -> list[MemoryRecord]:
         if self.read_only:
             return []
@@ -356,6 +370,7 @@ class Memory(BaseModel):
             private,
             agent_role,
             effective_root,
+            kind,
         )
         return future.result()
 
@@ -400,6 +415,7 @@ class Memory(BaseModel):
         private: bool,
         agent_role: str | None,
         root_scope: str | None,
+        kind: str | None = None,
     ) -> list[MemoryRecord]:
         start = time.perf_counter()
         for content in contents:
@@ -423,9 +439,18 @@ class Memory(BaseModel):
         for content in contents:
             record_categories = list(categories or [])
             record_importance = importance
+            record_kind = kind
             record_metadata = dict(base_metadata)
             # Only analyze what the caller left unspecified — an explicit
             # categories list (consolidation, maintenance) is authoritative.
+            #
+            # A missing ``kind`` deliberately does NOT trigger analysis on its
+            # own. Consolidation passes categories and importance explicitly and
+            # must stay LLM-free per merged cluster; it sets the kind itself from
+            # the records it merged. Every ordinary writer (a chat turn, a task
+            # output) leaves categories/importance unset, so it analyses anyway
+            # and gets classified for free — and anything unclassified falls
+            # through to episodic, which is the conservative reading.
             if not record_categories or record_importance is None:
                 analysis = self._analyze_for_save(content)
                 if analysis is not None:
@@ -433,6 +458,8 @@ class Memory(BaseModel):
                         record_categories = _clean_categories(analysis.categories)
                     if record_importance is None:
                         record_importance = analysis.importance
+                    if record_kind is None:
+                        record_kind = analysis.kind
                     for key, values in (
                         ("entities", analysis.extracted_metadata.entities),
                         ("topics", analysis.extracted_metadata.topics),
@@ -440,6 +467,7 @@ class Memory(BaseModel):
                     ):
                         if values and key not in record_metadata:
                             record_metadata[key] = list(values)
+            record_kind = record_kind or KIND_EPISODIC
             records.append(
                 MemoryRecord(
                     content=content,
@@ -453,6 +481,17 @@ class Memory(BaseModel):
                     ),
                     source=source,
                     private=private,
+                    kind=record_kind,
+                    # A durable record's validity window opens now. Without
+                    # real-world date extraction, "when we learned it" is the
+                    # best available answer for "when it started being true";
+                    # created_at keeps the recording time separately, so a later
+                    # extractor can correct valid_from without losing either.
+                    valid_from=(
+                        datetime.now(timezone.utc)
+                        if record_kind != KIND_EPISODIC
+                        else None
+                    ),
                 )
             )
         try:
@@ -573,14 +612,31 @@ class Memory(BaseModel):
         categories: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
         importance: float | None = None,
+        kind: str | None = None,
+        valid_from: datetime | None = None,
+        valid_to: datetime | None = None,
+        superseded_by: str | None = None,
     ) -> MemoryRecord | None:
+        """Change named fields on one record. Unset arguments are left alone.
+
+        Filtering ``None`` here rather than at each backend is what makes a
+        partial update safe: ``InMemoryStorage`` dropped Nones but
+        ``EngineStorageAdapter`` assigned them straight onto the record, so
+        retiring a fact would also have blanked its ``content``.
+        """
+        changes = {
+            "content": content,
+            "scope": scope,
+            "categories": categories,
+            "metadata": metadata,
+            "importance": importance,
+            "kind": kind,
+            "valid_from": valid_from,
+            "valid_to": valid_to,
+            "superseded_by": superseded_by,
+        }
         return self.storage.update(
-            record_id,
-            content=content,
-            scope=scope,
-            categories=categories,
-            metadata=metadata,
-            importance=importance,
+            record_id, **{k: v for k, v in changes.items() if v is not None}
         )
 
     def reset(self, scope: str | None = None) -> None:

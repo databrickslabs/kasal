@@ -957,7 +957,7 @@ class CrewPreparation:
                     "Found 'Disabled Configuration' - ignoring database config and using default memory"
                 )
 
-            # 8. Configure unified cognitive memory (CrewAI 1.10+)
+            # 8. Configure memory (CrewAI 1.10+)
             memory_enabled = (
                 crew_kwargs.get("memory", True) and not should_disable_memory
             )

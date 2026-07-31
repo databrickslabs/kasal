@@ -242,57 +242,6 @@ class TestChunkWithContext:
         assert chunks == []
 
 
-class TestGetVectorStorage:
-    """Tests for _get_vector_storage."""
-
-    @pytest.fixture
-    def service(self):
-        return KnowledgeEmbeddingService(session=Mock(), group_id="grp-1")
-
-    @pytest.mark.asyncio
-    async def test_returns_none_when_no_backends(self, service):
-        mock_mbs = AsyncMock()
-        mock_mbs.get_memory_backends.return_value = []
-
-        with patch(
-            "src.services.knowledge.embedding_service.KnowledgeEmbeddingService._get_vector_storage"
-        ) as mock_gvs:
-            mock_gvs.return_value = None
-            result = await service._get_vector_storage()
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_returns_none_on_import_error(self, service):
-        with patch.dict(
-            "sys.modules", {"src.services.memory.databricks_vector_storage": None}
-        ):
-            result = await service._get_vector_storage()
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_returns_none_on_exception(self, service):
-        with patch(
-            "src.services.knowledge.embedding_service.KnowledgeEmbeddingService._get_vector_storage",
-            new_callable=AsyncMock,
-        ) as mock_gvs:
-            mock_gvs.side_effect = Exception("unexpected")
-            # Call the real method which will catch the exception
-        # Use the real method but mock memory backend
-        service._memory_backend_service = None
-        with patch(
-            (
-                "src.services.knowledge.embedding_service.MemoryBackendService"
-                if False
-                else "builtins.__import__"
-            ),
-            side_effect=ImportError,
-        ):
-            pass
-        result = await service._get_vector_storage()
-        assert result is None
-
-
 _LLM_GET_EMBEDDINGS = "src.services.llm.manager.LLMManager.get_embeddings"
 _DOC_EMBEDDING_REPO = "src.repositories.documentation_embedding_repository.DocumentationEmbeddingRepository"
 
@@ -505,33 +454,7 @@ class TestEmbedFile:
         assert result["status"] == "error"
         assert "top error" in result["error"]
 
-    @pytest.mark.asyncio
-    async def test_no_agent_ids_succeeds(self, service):
-        chunks = [
-            {
-                "content": "c",
-                "raw_content": "r",
-                "section": "Intro",
-                "document_summary": "s",
-            }
-        ]
-        with patch.object(
-            service, "_chunk_with_context", new_callable=AsyncMock, return_value=chunks
-        ):
-            with patch(
-                _LLM_GET_EMBEDDINGS, new_callable=AsyncMock, return_value=[[0.1] * 1024]
-            ):
-                with patch(_DOC_EMBEDDING_REPO, return_value=self._repo()):
-                    result = await service.embed_file(
-                        file_path="/data/file.txt",
-                        file_content="hello",
-                        execution_id="exec-1",
-                        agent_ids=None,
-                    )
-        assert result["status"] == "success"
 
-
-# --- Legacy Vector-Search storage builder (_get_vector_storage internals) ---
 from src.schemas.memory_backend import (  # noqa: E402
     DatabricksMemoryConfig,
     MemoryBackendType,
@@ -549,50 +472,3 @@ def _databricks_backend(db_config):
     b.cognitive_config = None
     b.custom_config = None
     return b
-
-
-class TestGetVectorStorageInternals:
-    """Exercise the real _get_vector_storage body (the path where a Databricks
-    backend exists), not just the mocked early-return."""
-
-    @pytest.fixture
-    def service(self):
-        return KnowledgeEmbeddingService(session=Mock(), group_id="grp-1")
-
-    @pytest.mark.asyncio
-    async def test_builds_storage_from_databricks_backend(self, service):
-        cfg = DatabricksMemoryConfig(
-            workspace_url="https://example.databricks.com",
-            endpoint_name="ep",
-            memory_index="cat.sch.mem",
-            document_index="cat.sch.doc",
-            embedding_dimension=1024,
-        )
-        service._memory_backend_service = AsyncMock()
-        service._memory_backend_service.get_memory_backends = AsyncMock(
-            return_value=[_databricks_backend(cfg)]
-        )
-        with patch(_DVS) as MockStore:
-            result = await service._get_vector_storage(user_token="tok")
-        assert result is MockStore.return_value
-
-    @pytest.mark.asyncio
-    async def test_returns_none_when_no_document_index(self, service):
-        cfg = DatabricksMemoryConfig(
-            workspace_url="https://example.databricks.com",
-            endpoint_name="ep",
-            memory_index="cat.sch.mem",
-        )
-        service._memory_backend_service = AsyncMock()
-        service._memory_backend_service.get_memory_backends = AsyncMock(
-            return_value=[_databricks_backend(cfg)]
-        )
-        assert await service._get_vector_storage() is None
-
-    @pytest.mark.asyncio
-    async def test_returns_none_when_databricks_config_missing(self, service):
-        service._memory_backend_service = AsyncMock()
-        service._memory_backend_service.get_memory_backends = AsyncMock(
-            return_value=[_databricks_backend(None)]
-        )
-        assert await service._get_vector_storage() is None

@@ -38,7 +38,7 @@ describe('DEFAULT_MEMORY_BACKEND_CONFIG', () => {
   });
 
   it('does not carry legacy per-tier enable flags', () => {
-    // CrewAI 1.10+ unified cognitive memory has no short/long/entity split.
+    // Memory is one pool per teamspace with no per-type split.
     const config = DEFAULT_MEMORY_BACKEND_CONFIG as Record<string, unknown>;
     expect(config.enable_short_term).toBeUndefined();
     expect(config.enable_long_term).toBeUndefined();
@@ -139,7 +139,7 @@ describe('isValidMemoryBackendConfig', () => {
       expect(isValidMemoryBackendConfig(DEFAULT_MEMORY_BACKEND_CONFIG)).toBe(true);
     });
 
-    it('returns true for default config with cognitive tuning fields', () => {
+    it('returns true for default config with memory tuning fields', () => {
       expect(
         isValidMemoryBackendConfig({
           backend_type: 'default',
@@ -275,7 +275,7 @@ describe('getBackendDisplayName', () => {
 
   it('returns correct display name for DATABRICKS type', () => {
     expect(getBackendDisplayName(MemoryBackendType.DATABRICKS)).toBe(
-      'Databricks Vector Search'
+      'Legacy (falls back to local)'
     );
   });
 
@@ -315,9 +315,9 @@ describe('getBackendDescription', () => {
     expect(description).toContain('SQLite');
   });
 
-  it('DATABRICKS description mentions Vector Search', () => {
+  it('DATABRICKS description says memory falls back to the local store', () => {
     const description = getBackendDescription(MemoryBackendType.DATABRICKS);
-    expect(description).toContain('Vector Search');
+    expect(description).toContain('falls back to the local store');
   });
 
   it('falls back to empty string for an unknown type', () => {

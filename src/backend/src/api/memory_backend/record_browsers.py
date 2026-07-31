@@ -1,4 +1,4 @@
-"""Backend-specific read/delete helpers for the unified cognitive memory browser.
+"""Backend-specific read/delete helpers for the memory browser.
 
 ``records_router`` picks one of three implementations per operation based on the
 group's active backend — Databricks Vector Search, Lakebase pgvector, or the
@@ -8,7 +8,6 @@ stays backend-agnostic.
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from src.schemas.memory_backend import DatabricksMemoryConfig
 from src.utils.memory_paths import local_memory_store_dir
 
 from .dependencies import logger
@@ -24,70 +23,6 @@ _BROWSE_FULL_SCAN_LIMIT = 50_000
 # ---------------------------------------------------------------------------
 # Browse
 # ---------------------------------------------------------------------------
-
-
-async def _browse_databricks_records(
-    databricks_cfg: DatabricksMemoryConfig,
-    *,
-    group_id: str,
-    scope: Optional[str],
-    limit: int,
-    offset: int,
-    user_token: Optional[str],
-) -> Tuple[List[Dict[str, Any]], int]:
-    """Read records from a Databricks Vector Search unified-memory index.
-
-    Returns ``(records, total)`` where ``total`` is the number of records the
-    group has in the index (used by the client for pagination). The total is a
-    group-level count; when a ``scope`` filter is applied it is an upper bound.
-    """
-    from src.repositories.databricks_vector_index_repository import (
-        DatabricksVectorIndexRepository,
-    )
-    from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
-
-    repo = DatabricksVectorIndexRepository(
-        databricks_cfg.workspace_url or "",
-        group_id=group_id,
-    )
-    columns = DatabricksIndexSchemas.get_search_columns("unified")
-    positions = DatabricksIndexSchemas.get_column_positions("unified")
-    zero_vector = [0.0] * (databricks_cfg.embedding_dimension or 1024)
-
-    filters: Dict[str, Any] = {"group_id": group_id}
-    response = await repo.similarity_search(
-        index_name=databricks_cfg.memory_index,
-        endpoint_name=databricks_cfg.endpoint_name,
-        query_vector=zero_vector,
-        columns=columns,
-        num_results=limit + offset,
-        filters=filters,
-        user_token=user_token,
-    )
-
-    data_array = (response or {}).get("result", {}).get("data_array") or []
-    records: List[Dict[str, Any]] = []
-    for row in data_array[offset:]:
-        record = _row_to_record_dict(row, columns, positions)
-        if scope and not (record.get("scope") or "").startswith(scope):
-            continue
-        records.append(record)
-        if len(records) >= limit:
-            break
-
-    total = offset + len(records)
-    try:
-        total = await repo.count_documents(
-            index_name=databricks_cfg.memory_index,
-            endpoint_name=databricks_cfg.endpoint_name,
-            filters=filters,
-            user_token=user_token,
-        )
-    except Exception as exc:  # pragma: no cover - best-effort count
-        logger.warning(
-            "Databricks memory count failed, using page-based total: %s", exc
-        )
-    return records, total
 
 
 async def _browse_lakebase_records(
@@ -352,66 +287,6 @@ def _safe_json_list(value: Any) -> List[Any]:
 # ---------------------------------------------------------------------------
 # Delete
 # ---------------------------------------------------------------------------
-
-
-async def _delete_databricks_records(
-    databricks_cfg: DatabricksMemoryConfig,
-    *,
-    group_id: str,
-    scope: Optional[str],
-    user_token: Optional[str],
-) -> int:
-    """Delete every Databricks unified-memory record that belongs to the group."""
-    from src.repositories.databricks_vector_index_repository import (
-        DatabricksVectorIndexRepository,
-    )
-    from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
-
-    repo = DatabricksVectorIndexRepository(
-        databricks_cfg.workspace_url or "",
-        group_id=group_id,
-    )
-    columns = DatabricksIndexSchemas.get_search_columns("unified")
-    positions = DatabricksIndexSchemas.get_column_positions("unified")
-    zero_vector = [0.0] * (databricks_cfg.embedding_dimension or 1024)
-
-    filters: Dict[str, Any] = {"group_id": group_id}
-    # Databricks similarity search has no hard upper bound we can push
-    # server-side, so we pull records in pages and gather ids client-side.
-    response = await repo.similarity_search(
-        index_name=databricks_cfg.memory_index,
-        endpoint_name=databricks_cfg.endpoint_name,
-        query_vector=zero_vector,
-        columns=columns,
-        num_results=10_000,  # effective cap enforced by Vector Search
-        filters=filters,
-        user_token=user_token,
-    )
-    data_array = (response or {}).get("result", {}).get("data_array") or []
-    id_idx = positions.get("id")
-    scope_idx = positions.get("scope")
-    ids: List[str] = []
-    for row in data_array:
-        if id_idx is None or id_idx >= len(row):
-            continue
-        if scope and scope_idx is not None and scope_idx < len(row):
-            row_scope = row[scope_idx] or ""
-            if not str(row_scope).startswith(scope):
-                continue
-        row_id = row[id_idx]
-        if row_id is not None:
-            ids.append(str(row_id))
-
-    if not ids:
-        return 0
-
-    await repo.delete_records(
-        index_name=databricks_cfg.memory_index,
-        endpoint_name=databricks_cfg.endpoint_name,
-        primary_keys=ids,
-        user_token=user_token,
-    )
-    return len(ids)
 
 
 async def _delete_lakebase_records(

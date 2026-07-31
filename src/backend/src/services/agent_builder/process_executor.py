@@ -1178,20 +1178,18 @@ def run_crew_in_process(
                                 "provider": crew_config.get("memory", {}).get(
                                     "provider", "None"
                                 ),
-                                "short_term": (
+                                # Was reported as "short_term"/"long_term",
+                                # which named a split that no longer exists —
+                                # and the long_term key it read has been absent
+                                # for as long, so it always logged "Disabled".
+                                # This value is, and always was, the embedder.
+                                "embedder": (
                                     crew_config.get("memory", {})
                                     .get("config", {})
                                     .get("embedder", {})
                                     .get("config", {})
                                     .get("model", "N/A")
                                     if crew_config.get("memory")
-                                    else "Disabled"
-                                ),
-                                "long_term": (
-                                    "Enabled"
-                                    if crew_config.get("memory", {})
-                                    .get("config", {})
-                                    .get("long_term", {})
                                     else "Disabled"
                                 ),
                             },
@@ -1243,10 +1241,7 @@ def run_crew_in_process(
                         )
                         if config_summary["memory_config"]["provider"] != "None":
                             async_logger.info(
-                                f"  - Short-term Memory: {config_summary['memory_config']['short_term']}"
-                            )
-                            async_logger.info(
-                                f"  - Long-term Memory: {config_summary['memory_config']['long_term']}"
+                                f"  - Embedder: {config_summary['memory_config']['embedder']}"
                             )
                         async_logger.info(
                             f"Inputs: {', '.join(config_summary['inputs_provided']) if config_summary['inputs_provided'] else 'None'}"

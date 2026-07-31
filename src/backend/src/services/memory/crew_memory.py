@@ -18,10 +18,7 @@ from typing import Any, Dict, Optional
 
 from src.core.logger import LoggerManager
 from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
-from src.services.memory.backend_factory import (
-    DatabricksIndexValidationError,
-    MemoryBackendFactory,
-)
+from src.services.memory.backend_factory import MemoryBackendFactory
 from src.utils.memory_paths import local_memory_root, local_memory_store_dir
 
 logger = LoggerManager.get_instance().crew
@@ -77,19 +74,19 @@ class CrewMemoryService:
                     active_config.backend_type,
                 )
 
-                # Convert to dict format for the factory. Cognitive tuning
+                # Convert to dict format for the factory. Memory tuning
                 # flows through ``cognitive_config`` when set.
                 memory_backend_config = {
                     "backend_type": active_config.backend_type.value,
                     "databricks_config": active_config.databricks_config,
                     "lakebase_config": active_config.lakebase_config,
                 }
-                cognitive_cfg = getattr(active_config, "cognitive_config", None)
-                if cognitive_cfg is not None:
+                tuning_cfg = getattr(active_config, "cognitive_config", None)
+                if tuning_cfg is not None:
                     memory_backend_config["cognitive_config"] = (
-                        cognitive_cfg.model_dump(exclude_none=True)
-                        if hasattr(cognitive_cfg, "model_dump")
-                        else cognitive_cfg
+                        tuning_cfg.model_dump(exclude_none=True)
+                        if hasattr(tuning_cfg, "model_dump")
+                        else tuning_cfg
                     )
                 custom_cfg = getattr(active_config, "custom_config", None)
                 if custom_cfg:
@@ -318,10 +315,6 @@ class CrewMemoryService:
             A ``StorageBackend`` instance, or ``None`` when the DEFAULT
             configuration applies — the caller then builds the local SQLite
             store (see ``_build_local_storage``).
-
-        Raises:
-            DatabricksIndexValidationError: If the Databricks index is missing
-                or still provisioning.
         """
         if "databricks_config" in memory_backend_config and isinstance(
             memory_backend_config["databricks_config"], dict
@@ -360,29 +353,41 @@ class CrewMemoryService:
         if not group_id and crew_id and "_crew_" in crew_id:
             group_id = crew_id.split("_crew_")[0]
 
-        # Semantic memory is ALWAYS workspace/group-scoped. Per-session
-        # conversational recall is owned by the chat-history preamble (the light
-        # agent reads prior turns directly), so the chat session id is NO LONGER a
-        # memory scope key — the old "session-only memory" mode is superseded and
-        # session_id never narrows recall. crew_id is only used for tracing.
+        # READ scope, driven by the chat "Workspace memory" switch:
+        #
+        #   ON  (the default, and what every non-chat execution gets)
+        #       → filter on group_id. Recall spans the workspace.
+        #   OFF → filter on group_id + session_id. Recall is confined to the
+        #       current conversation.
+        #
+        # This used to be hardcoded to workspace-wide, so the switch changed the
+        # log line and nothing else. crew_id is NEVER a read-scoping key either
+        # way — it is a hash of crew STRUCTURE that changes with every chat
+        # prompt, so scoping reads by it walls each run off from its own history.
+        workspace_scope = self.config.get("memory_workspace_scope")
+        workspace_wide = True if workspace_scope is None else bool(workspace_scope)
+        # The chat session id is the session partition key, because it is stable
+        # across the turns of one conversation; job_id (per run) is the fallback
+        # for non-chat executions, which run workspace-wide anyway.
+        session_scope_id = self.config.get("session_id")
         logger.info(
-            "Memory read scope: workspace (group=%s, crew_id=%s)", group_id, crew_id
+            "Memory read scope: %s (group=%s, session=%s, crew_id=%s)",
+            "workspace" if workspace_wide else "session",
+            group_id,
+            session_scope_id or job_id,
+            crew_id,
         )
 
-        try:
-            return await MemoryBackendFactory.create_unified_storage(
-                config=memory_config,
-                crew_id=crew_id,
-                group_id=group_id,
-                embedder=embedder,
-                user_token=self.user_token,
-                job_id=job_id,
-                workspace_wide=True,
-                session_scope_id=None,
-            )
-        except DatabricksIndexValidationError as e:
-            await self._emit_index_validation_trace(e)
-            raise
+        return await MemoryBackendFactory.create_unified_storage(
+            config=memory_config,
+            crew_id=crew_id,
+            group_id=group_id,
+            embedder=embedder,
+            user_token=self.user_token,
+            job_id=job_id,
+            workspace_wide=workspace_wide,
+            session_scope_id=session_scope_id,
+        )
 
     async def create_memory_backends(
         self, memory_backend_config: Dict[str, Any], crew_id: str, embedder: Any
@@ -396,114 +401,6 @@ class CrewMemoryService:
             memory_backend_config, crew_id, embedder
         )
         return {"unified": storage} if storage is not None else {}
-
-    async def _emit_index_validation_trace(
-        self, error: DatabricksIndexValidationError
-    ) -> None:
-        """
-        Emit a trace event for Databricks index validation errors.
-
-        This makes the error visible in the UI trace view.
-        """
-        try:
-            from datetime import datetime, timezone
-
-            from src.db.session import request_scoped_session
-            from src.services.trace import ExecutionTraceService
-
-            # Get job_id from config
-            job_id = self.config.get("execution_id") or self.config.get("job_id")
-            if not job_id:
-                logger.warning(
-                    "No job_id available for trace emission, skipping trace event"
-                )
-                return
-
-            # Build the trace content based on error type
-            if error.error_type == "missing_indexes":
-                title = "⚠️ DATABRICKS MEMORY ERROR: Indexes Not Found"
-                content_lines = [
-                    "The following Databricks Vector Search indexes are configured but do not exist:",
-                    "",
-                ]
-                for idx in error.missing_indexes:
-                    content_lines.append(f"  ✗ {idx}")
-                content_lines.extend(
-                    [
-                        "",
-                        "RECOMMENDATION:",
-                        "  1. Create the missing indexes in Databricks",
-                        "  2. OR disable Databricks memory backend in settings",
-                        "  3. OR switch to the default local memory backend (SQLite)",
-                    ]
-                )
-            elif error.error_type == "provisioning_indexes":
-                title = "⏳ DATABRICKS MEMORY ERROR: Indexes Still Provisioning"
-                content_lines = [
-                    "The following Databricks Vector Search indexes are still being provisioned:",
-                    "",
-                ]
-                for idx in error.provisioning_indexes:
-                    content_lines.append(f"  ⏳ {idx}")
-                content_lines.extend(
-                    [
-                        "",
-                        "Memory operations will FAIL until indexes are ready.",
-                        "",
-                        "RECOMMENDATION:",
-                        "  1. Wait for indexes to finish provisioning (check Databricks UI)",
-                        "  2. OR disable Databricks memory backend in settings temporarily",
-                        "  3. OR disable memory on all agents until indexes are ready",
-                    ]
-                )
-            else:
-                title = "⚠️ DATABRICKS MEMORY ERROR"
-                content_lines = [str(error)]
-
-            content = "\n".join(content_lines)
-
-            # Create trace data
-            trace_data = {
-                "job_id": job_id,
-                "event_source": "Memory Backend",
-                "event_context": "databricks_index_validation",
-                "event_type": "memory_backend_error",
-                "created_at": datetime.now(timezone.utc).replace(tzinfo=None),
-                "output": {
-                    "content": content,
-                    "extra_data": {
-                        "error_type": error.error_type,
-                        "validation_result": error.validation_result,
-                        "title": title,
-                        "severity": "error",
-                    },
-                },
-                "trace_metadata": {
-                    "error_type": error.error_type,
-                    "missing_indexes": error.missing_indexes,
-                    "provisioning_indexes": error.provisioning_indexes,
-                    "title": title,
-                    "severity": "error",
-                },
-            }
-
-            # Add group context if available
-            group_id = self.config.get("group_id")
-            if group_id:
-                trace_data["group_id"] = group_id
-
-            # Create the trace
-            async with request_scoped_session() as session:
-                trace_service = ExecutionTraceService(session)
-                await trace_service.create_trace(trace_data)
-                await session.commit()
-                logger.info(
-                    f"Emitted memory backend validation error trace for job {job_id}"
-                )
-
-        except Exception as trace_error:
-            # Don't fail the main operation if trace emission fails
-            logger.warning(f"Failed to emit index validation trace: {trace_error}")
 
     def configure_crew_memory_components(
         self,
@@ -620,7 +517,7 @@ class CrewMemoryService:
         litellm-backed callable derived from the crew's provider-dict embedder,
         else OpenAI small embeddings when only OPENAI_API_KEY is present
         (parity with the old crewAI default). Returns ``None`` when no
-        embedding route exists. Cognitive-config weights (when configured)
+        embedding route exists. Tuning weights (when configured)
         override the hybrid-scoring defaults.
         """
         try:
@@ -659,7 +556,7 @@ class CrewMemoryService:
             )
 
             scoring_kwargs = (
-                MemoryBackendFactory._cognitive_scoring_kwargs(memory_config)
+                MemoryBackendFactory._scoring_kwargs(memory_config)
                 if memory_config is not None
                 else {}
             )
@@ -704,7 +601,7 @@ class CrewMemoryService:
     ) -> Dict[str, Any]:
         """Assemble keyword arguments for the unified ``Memory`` class.
 
-        Sources the embedder, LLM (to avoid OpenAI fallback), and cognitive
+        Sources the embedder, LLM (to avoid OpenAI fallback), and
         scoring weights from ``memory_config.custom_config`` when present.
         """
         kwargs: Dict[str, Any] = {}
@@ -721,20 +618,20 @@ class CrewMemoryService:
         group_id = self.config.get("group_id") or "default"
         kwargs["root_scope"] = f"/{group_id}"
 
-        cognitive = getattr(memory_config, "cognitive_config", None)
-        cognitive_dict = (
-            cognitive.model_dump(exclude_none=True)
-            if cognitive is not None and hasattr(cognitive, "model_dump")
-            else (cognitive or {})
+        tuning = getattr(memory_config, "cognitive_config", None)
+        tuning_dict = (
+            tuning.model_dump(exclude_none=True)
+            if tuning is not None and hasattr(tuning, "model_dump")
+            else (tuning or {})
         )
 
         # ``memory_llm_model`` is a bare model key, NOT a Memory ctor param. Drop
-        # it from the cognitive kwargs and never pass it to Memory as a string:
+        # it from the tuning kwargs and never pass it to Memory as a string:
         # CrewAI would build an unconfigured ``LLM(model=<name>)`` with no provider
         # prefix or credentials, which litellm routes to OpenAI (401 on the
         # placeholder key). Use the pre-resolved, fully-configured instance from
         # ``resolve_memory_llm_override``; otherwise fall back to the crew's LLM.
-        cognitive_dict.pop("memory_llm_model", None)
+        tuning_dict.pop("memory_llm_model", None)
         if memory_llm_override is not None:
             kwargs["llm"] = memory_llm_override
         else:
@@ -756,8 +653,8 @@ class CrewMemoryService:
             "exploration_budget",
             "query_analysis_threshold",
         ):
-            if key in cognitive_dict and cognitive_dict[key] is not None:
-                kwargs[key] = cognitive_dict[key]
+            if key in tuning_dict and tuning_dict[key] is not None:
+                kwargs[key] = tuning_dict[key]
         return kwargs
 
     def _resolve_memory_llm(self, crew_kwargs: Dict[str, Any]) -> Optional[Any]:
@@ -792,8 +689,8 @@ class CrewMemoryService:
         Returns ``None`` when no override is set — callers then fall back to the
         crew's own configured LLM instance via ``_resolve_memory_llm``.
         """
-        cognitive = getattr(memory_config, "cognitive_config", None)
-        model_name = getattr(cognitive, "memory_llm_model", None) if cognitive else None
+        tuning = getattr(memory_config, "cognitive_config", None)
+        model_name = getattr(tuning, "memory_llm_model", None) if tuning else None
         if not model_name:
             return None
 
@@ -863,13 +760,11 @@ class CrewMemoryService:
                 except Exception:
                     pass
 
-            # Unified Memory on CrewAI 1.10+ is stored on ``crew._memory``.
-            # Legacy attrs are retained defensively in case a caller is
-            # passing a pre-1.10 crew instance.
+            # The unified Memory is stored on ``crew._memory``. There are no
+            # per-type memories to attach to any more: the short-term /
+            # long-term / entity split was removed, not merged, and the engine's
+            # Crew has never carried those attributes.
             set_trace_ctx(getattr(crew, "_memory", None))
-            set_trace_ctx(getattr(crew, "_short_term_memory", None))
-            set_trace_ctx(getattr(crew, "_long_term_memory", None))
-            set_trace_ctx(getattr(crew, "_entity_memory", None))
 
             # NOTE: Direct memory tracing removed - memory events are now captured
             # by the OTel event bridge with proper agent attribution.

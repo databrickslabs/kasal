@@ -1,23 +1,27 @@
-"""Lakebase pgvector implementation of CrewAI's unified ``StorageBackend`` protocol.
+"""Lakebase pgvector implementation of the unified ``StorageBackend`` protocol.
 
-Introduced with the CrewAI 1.10+ cognitive memory system. Replaces the legacy
-``crewai_lakebase_wrapper.py`` which implemented the old per-memory-type
-interfaces.
+The primary memory backend, and since Databricks Vector Search memory was
+retired, the only remote one.
 
-The existing ``kasal.memory_*`` tables predate the unified schema, so cognitive
-fields (``scope``, ``categories``, ``importance``, ``source``, ``private``) are
-stored inside the ``metadata`` JSONB column and queried with ``->>`` accessors.
-A future migration can promote them to first-class columns if query patterns
-demand it.
+The ``kasal.memory_*`` tables predate the unified schema, so most
+fields (``scope``, ``categories``, ``importance``, ``source``, ``private``) live
+inside the ``metadata`` JSONB column and are read with ``->>`` accessors.
+
+``kind`` and the validity window (``valid_from`` / ``valid_to`` /
+``superseded_by``) are REAL COLUMNS. They earned promotion out of JSONB by the
+rule this module's original note anticipated — query patterns demanded it. Every
+single recall filters on ``valid_to`` and branches its recency decay on
+``kind``, and a ``->>`` accessor in the hot scoring path cannot use an index.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import re
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 
@@ -25,7 +29,17 @@ from sqlalchemy import text
 
 from src.core.logger import LoggerManager
 from src.db.lakebase_session import get_lakebase_session
+from src.services.memory.bridge_loop import run_on_bridge_loop
 from src.services.memory.engine import MemoryRecord, ScopeInfo
+from src.services.memory.lakebase_schema import ensure_memory_columns, needs_check
+from src.services.memory.pg_codec import (
+    loads_or_empty,
+    parse_datetime,
+    to_aware_utc,
+    to_aware_utc_or_none,
+    to_naive_utc,
+    vector_to_pg,
+)
 
 # SECURITY: ``table_name`` (from the LakebaseMemoryConfig.memory_table config
 # field) is interpolated into raw SQL throughout this backend. Validate it as a
@@ -38,6 +52,15 @@ def _validate_table_name(name: str) -> str:
     if not name or not _SAFE_TABLE_NAME.match(str(name)):
         raise ValueError(f"Invalid memory table name: {name!r}")
     return name
+
+
+# Every row-returning query selects exactly this, in this order, because
+# ``_row_to_record`` unpacks positionally. One constant so a column added to the
+# search query cannot silently shift the parse of the others.
+_RECORD_COLUMNS = (
+    "id, content, metadata, created_at, updated_at, agent, "
+    "kind, valid_from, valid_to, superseded_by"
+)
 
 
 # CrewAI 1.10+ runs memory saves on a background thread pool; each save runs its
@@ -57,9 +80,25 @@ logger = LoggerManager.get_instance().crew
 class LakebaseStorageBackend:
     """Unified-memory storage backed by Lakebase (Postgres + pgvector).
 
-    Implements CrewAI's ``StorageBackend`` protocol. All reads and writes are
-    filtered by ``crew_id`` + ``group_id`` so one tenant cannot observe
-    another's memory. Short-term-style scoping uses ``session_id``.
+    Implements the unified ``StorageBackend`` protocol. There is one memory pool
+    per tenant, and ONE scoping rule for every operation that touches it —
+    ``_tenant_where``:
+
+    * ``group_id`` alone when ``workspace_wide`` (the default), so a run reads
+      and prunes everything in the workspace.
+    * ``session_id`` + ``group_id`` when the chat "Workspace memory" toggle is
+      off, confining both to the current conversation.
+
+    ``group_id`` is present either way; it is the tenant boundary, so one
+    workspace can never observe or alter another's memory.
+
+    **``crew_id`` filters nothing.** It is written onto each row as provenance —
+    useful for tracing which run produced a memory — and that is all. It is a
+    hash of crew STRUCTURE and changes every time that structure does, including
+    with each chat prompt, so any query scoped by it walls a run off from its own
+    history. The retired Databricks Vector Search backend scoped reads by it,
+    which made chat memory there close to unrecallable across turns; deletes were
+    scoped by it here, which made ``reset`` clear only part of a workspace.
     """
 
     def __init__(
@@ -101,8 +140,8 @@ class LakebaseStorageBackend:
         self.relevance_threshold = relevance_threshold
         # Default READ scope: True = workspace-wide (group_id), False = this
         # chat session only (session_id). Toggled per execution from the chat
-        # "Workspace memory" switch. crew_id is NOT a scoping key — it only tags
-        # rows for tracing. Deletes/consolidation stay crew-scoped.
+        # "Workspace memory" switch. crew_id is NOT a scoping key anywhere —
+        # it only tags rows for tracing.
         self.workspace_wide = workspace_wide
 
         logger.info(
@@ -167,13 +206,11 @@ class LakebaseStorageBackend:
 
     def get_record(self, record_id: str) -> MemoryRecord | None:
         async def _fetch() -> MemoryRecord | None:
-            async with get_lakebase_session(
-                instance_name=self.instance_name, group_id=self.group_id
-            ) as session:
+            async with self._session() as session:
                 # Workspace-wide read: fetch by id within the workspace,
                 # regardless of which crew wrote it.
                 sql = text(
-                    f"SELECT id, content, metadata, created_at, updated_at, agent "
+                    f"SELECT {_RECORD_COLUMNS} "
                     f"FROM {self.table_name} "
                     f"WHERE id = :id AND group_id = :group_id"
                 )
@@ -200,11 +237,9 @@ class LakebaseStorageBackend:
             if scope_prefix:
                 where.append("metadata->>'scope' LIKE :scope_prefix")
                 params["scope_prefix"] = f"{scope_prefix}%"
-            async with get_lakebase_session(
-                instance_name=self.instance_name, group_id=self.group_id
-            ) as session:
+            async with self._session() as session:
                 sql = text(
-                    f"SELECT id, content, metadata, created_at, updated_at, agent "
+                    f"SELECT {_RECORD_COLUMNS} "
                     f"FROM {self.table_name} "
                     f"WHERE {' AND '.join(where)} "
                     f"ORDER BY created_at DESC "
@@ -222,9 +257,7 @@ class LakebaseStorageBackend:
             where, params = self._tenant_where()
             where.append("metadata->>'scope' = :scope")
             params["scope"] = scope
-            async with get_lakebase_session(
-                instance_name=self.instance_name, group_id=self.group_id
-            ) as session:
+            async with self._session() as session:
                 sql = text(
                     f"SELECT metadata, created_at FROM {self.table_name} "
                     f"WHERE {' AND '.join(where)}"
@@ -238,7 +271,7 @@ class LakebaseStorageBackend:
                     md = (
                         metadata_val
                         if isinstance(metadata_val, dict)
-                        else _loads_or_empty(metadata_val)
+                        else loads_or_empty(metadata_val)
                     )
                     categories.update(md.get("categories") or [])
                     if oldest is None or created_at < oldest:
@@ -266,9 +299,7 @@ class LakebaseStorageBackend:
             if scope_prefix:
                 where.append("metadata->>'scope' LIKE :scope_prefix")
                 params["scope_prefix"] = f"{scope_prefix}%"
-            async with get_lakebase_session(
-                instance_name=self.instance_name, group_id=self.group_id
-            ) as session:
+            async with self._session() as session:
                 sql = text(
                     f"SELECT metadata FROM {self.table_name} WHERE {' AND '.join(where)}"
                 )
@@ -278,7 +309,7 @@ class LakebaseStorageBackend:
                     md = (
                         metadata_val
                         if isinstance(metadata_val, dict)
-                        else _loads_or_empty(metadata_val)
+                        else loads_or_empty(metadata_val)
                     )
                     for category in md.get("categories") or []:
                         counts[category] = counts.get(category, 0) + 1
@@ -292,9 +323,7 @@ class LakebaseStorageBackend:
             if scope_prefix:
                 where.append("metadata->>'scope' LIKE :scope_prefix")
                 params["scope_prefix"] = f"{scope_prefix}%"
-            async with get_lakebase_session(
-                instance_name=self.instance_name, group_id=self.group_id
-            ) as session:
+            async with self._session() as session:
                 sql = text(
                     f"SELECT COUNT(*) FROM {self.table_name} WHERE {' AND '.join(where)}"
                 )
@@ -313,14 +342,12 @@ class LakebaseStorageBackend:
     async def asave(self, records: list[MemoryRecord]) -> None:
         if not records:
             return
-        async with get_lakebase_session(
-            instance_name=self.instance_name, group_id=self.group_id
-        ) as session:
+        async with self._session() as session:
             for record in records:
                 embedding = record.embedding
                 if embedding is None:
                     embedding = self._embed_sync(record.content)
-                embedding_str = _vector_to_pg(list(embedding))
+                embedding_str = vector_to_pg(list(embedding))
                 metadata = dict(record.metadata or {})
                 metadata.update(
                     {
@@ -335,16 +362,25 @@ class LakebaseStorageBackend:
                 sql = text(f"""
                     INSERT INTO {self.table_name}
                         (id, crew_id, group_id, session_id, agent, content, metadata,
-                         score, embedding, created_at, updated_at)
+                         score, embedding, kind, valid_from, valid_to, superseded_by,
+                         created_at, updated_at)
                     VALUES
                         (:id, :crew_id, :group_id, :session_id, :agent, :content,
                          CAST(:metadata AS jsonb), :score, CAST(:embedding AS vector),
+                         :kind, :valid_from, :valid_to, :superseded_by,
                          :created_at, :updated_at)
                     ON CONFLICT (id) DO UPDATE SET
                         content = EXCLUDED.content,
                         metadata = EXCLUDED.metadata,
                         score = EXCLUDED.score,
                         embedding = EXCLUDED.embedding,
+                        kind = EXCLUDED.kind,
+                        valid_from = EXCLUDED.valid_from,
+                        -- Retiring a fact IS an update through this path
+                        -- (``update`` upserts the whole record), so these must
+                        -- be carried across or supersession would never persist.
+                        valid_to = EXCLUDED.valid_to,
+                        superseded_by = EXCLUDED.superseded_by,
                         updated_at = EXCLUDED.updated_at
                     """)
                 await session.execute(
@@ -359,17 +395,21 @@ class LakebaseStorageBackend:
                         "metadata": json.dumps(metadata),
                         "score": float(record.importance),
                         "embedding": embedding_str,
+                        "kind": record.kind,
+                        "valid_from": to_aware_utc_or_none(record.valid_from),
+                        "valid_to": to_aware_utc_or_none(record.valid_to),
+                        "superseded_by": record.superseded_by,
                         # MUST be offset-AWARE UTC. These bind to TIMESTAMPTZ
                         # columns, and asyncpg's encoder does obj.astimezone(utc)
                         # — which treats a NAIVE datetime as MACHINE-LOCAL time
                         # and silently shifts it by the host's UTC offset. CrewAI
                         # hands us naive datetime.utcnow() values, so without this
                         # coercion every created_at lands hours off true UTC and
-                        # the Cognitive Memory Browser's per-run time window (built
+                        # the Memory Browser's per-run time window (built
                         # from the run's correctly-stored completed_at) rejects all
                         # of a run's records.
-                        "created_at": _to_aware_utc(record.created_at),
-                        "updated_at": _to_aware_utc(record.last_accessed),
+                        "created_at": to_aware_utc(record.created_at),
+                        "updated_at": to_aware_utc(record.last_accessed),
                     },
                 )
 
@@ -390,8 +430,22 @@ class LakebaseStorageBackend:
         the outer query re-ranks that small set with the blended score
         (mem0-style fused scoring, native to Postgres — ts_rank_cd for
         keywords, exponential recency decay, stored importance).
+
+        Two policies the record's ``kind`` selects between:
+
+        * **Only currently-valid records are returned.** A fact that has been
+          superseded (``valid_to`` set) stays in the table — "what did we
+          believe on date X" remains answerable — but never re-enters a prompt.
+        * **Recency decay applies to EPISODIC records only.** A 30-day half-life
+          is about right for "what happened in run 47" and actively wrong for
+          "the user prefers Databricks SQL": a stable preference learned two
+          months ago is not less true than one learned yesterday. Semantic and
+          procedural records take the full recency term instead of a decayed
+          one, so age never pushes a current fact out of the recall budget.
         """
         where, params = self._tenant_where()
+        # Superseded records are history, not context.
+        where.append("(valid_to IS NULL OR valid_to > NOW())")
         if scope_prefix:
             where.append("metadata->>'scope' LIKE :scope_prefix")
             params["scope_prefix"] = f"{scope_prefix}%"
@@ -405,7 +459,7 @@ class LakebaseStorageBackend:
                 where.append(f"metadata->>'{key}' = :{placeholder}")
                 params[placeholder] = str(value)
 
-        params["query_embedding"] = _vector_to_pg(query_embedding)
+        params["query_embedding"] = vector_to_pg(query_embedding)
         params["limit"] = limit
         # Re-rank pool: enough candidates that keyword/recency can promote a
         # non-top-cosine hit, small enough that the outer pass is negligible.
@@ -426,25 +480,29 @@ class LakebaseStorageBackend:
                 "plainto_tsquery('simple', :query_text)), 1.0)"
             )
 
-        async with get_lakebase_session(
-            instance_name=self.instance_name, group_id=self.group_id
-        ) as session:
+        async with self._session() as session:
             sql = text(f"""
                 SELECT c.id, c.content, c.metadata, c.created_at, c.updated_at,
-                       c.agent,
+                       c.agent, c.kind, c.valid_from, c.valid_to, c.superseded_by,
                        (
                            :w_semantic * c.semantic
                            + {keyword_term}
-                           + :w_recency * EXP(
-                               -0.6931471805599453
-                               * GREATEST(EXTRACT(EPOCH FROM (NOW() - c.created_at)), 0)
-                               / (:half_life_days * 86400.0)
-                           )
+                           + :w_recency * CASE
+                               WHEN c.kind = 'episodic' THEN EXP(
+                                   -0.6931471805599453
+                                   * GREATEST(
+                                       EXTRACT(EPOCH FROM (NOW() - c.created_at)), 0
+                                     )
+                                   / (:half_life_days * 86400.0)
+                               )
+                               ELSE 1.0
+                           END
                            + :w_importance
                              * COALESCE((c.metadata->>'importance')::float, 0.5)
                        ) AS score
                 FROM (
                     SELECT id, content, metadata, created_at, updated_at, agent,
+                           kind, valid_from, valid_to, superseded_by,
                            1.0 - (embedding <=> CAST(:query_embedding AS vector))
                                AS semantic
                     FROM {self.table_name}
@@ -481,9 +539,17 @@ class LakebaseStorageBackend:
         older_than: datetime | None = None,
         metadata_filter: dict[str, Any] | None = None,
     ) -> int:
-        # Crew-scoped: a crew only deletes/consolidates memories it wrote, even
-        # though it can READ the whole workspace (or just its chat session).
-        where, params = self._crew_where()
+        # Deletes are scoped exactly like reads: the workspace, or one chat
+        # session. ``crew_id`` is NOT a filter here or anywhere else.
+        #
+        # It used to scope filter-shaped deletes, on the reasoning that one
+        # crew's pruning should not sweep away another's. That made crew a
+        # boundary for deletes and for nothing else, in a store that is one pool
+        # per workspace — and since ``crew_id`` is a hash of crew structure that
+        # changes with every chat prompt, it meant a chat turn's maintenance
+        # could only ever see that ONE turn's write, and ``reset`` cleared only
+        # what the current crew happened to have written.
+        where, params = self._tenant_where()
         if record_ids:
             where.append("id = ANY(:record_ids)")
             params["record_ids"] = list(record_ids)
@@ -502,9 +568,7 @@ class LakebaseStorageBackend:
                 where.append(f"metadata->>'{key}' = :{placeholder}")
                 params[placeholder] = str(value)
 
-        async with get_lakebase_session(
-            instance_name=self.instance_name, group_id=self.group_id
-        ) as session:
+        async with self._session() as session:
             sql = text(f"DELETE FROM {self.table_name} WHERE {' AND '.join(where)}")
             result = await session.execute(sql, params)
             return int(getattr(result, "rowcount", 0) or 0)
@@ -513,10 +577,39 @@ class LakebaseStorageBackend:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    @asynccontextmanager
+    async def _session(self) -> AsyncIterator[Any]:
+        """A Lakebase session with this table's schema guaranteed current.
+
+        EVERY database operation in this backend goes through here, which is the
+        point: the table's DDL is only ever run by an admin-only endpoint, so a
+        column added to it reaches new workspaces and no others. A workspace
+        whose table predates the column would fail every insert and every select
+        — silently, because memory swallows its own errors — until somebody
+        happened to re-initialize the table by hand.
+
+        The repair runs in a SEPARATE session, before the caller's. Sessions here
+        roll back on exception and Postgres DDL is transactional, so sharing one
+        would let a failure in the caller's own SQL quietly undo the repair while
+        the cache recorded it as done. Costs one extra connection on the first
+        memory operation in a process, and a set lookup for every one after.
+        """
+        if needs_check(self.table_name):
+            async with get_lakebase_session(
+                instance_name=self.instance_name, group_id=self.group_id
+            ) as schema_session:
+                await ensure_memory_columns(schema_session, self.table_name)
+        async with get_lakebase_session(
+            instance_name=self.instance_name, group_id=self.group_id
+        ) as session:
+            yield session
+
     def _tenant_where(
         self, workspace_wide: bool | None = None
     ) -> tuple[list[str], dict[str, Any]]:
-        """WHERE fragment + params scoping a READ to this tenant.
+        """WHERE fragment + params scoping an operation to this tenant.
+
+        Used by reads AND deletes — ``crew_id`` filters nothing anywhere.
 
         Uses ``self.workspace_wide`` (the per-execution default from the chat
         "Workspace memory" toggle): True = WORKSPACE-WIDE (group_id only) so any
@@ -539,26 +632,12 @@ class LakebaseStorageBackend:
             {"session_id": self.session_id or "", "group_id": self.group_id},
         )
 
-    def _crew_where(self) -> tuple[list[str], dict[str, Any]]:
-        """WHERE fragment + params scoping a WRITE/DELETE to this crew.
-
-        Deletes/consolidation are crew-scoped so a crew only prunes or merges
-        memories IT wrote — one crew's (or session's) consolidation must not
-        delete another's, even though reads can span the whole workspace.
-        """
-        return (
-            ["crew_id = :crew_id", "group_id = :group_id"],
-            {"crew_id": self.crew_id, "group_id": self.group_id},
-        )
-
     async def _list_child_scopes(self, parent: str) -> list[str]:
         where, params = self._tenant_where()
         prefix = parent if parent.endswith("/") else f"{parent}/"
         where.append("metadata->>'scope' LIKE :prefix")
         params["prefix"] = f"{prefix}%"
-        async with get_lakebase_session(
-            instance_name=self.instance_name, group_id=self.group_id
-        ) as session:
+        async with self._session() as session:
             sql = text(
                 f"SELECT DISTINCT metadata->>'scope' AS scope "
                 f"FROM {self.table_name} WHERE {' AND '.join(where)}"
@@ -577,13 +656,25 @@ class LakebaseStorageBackend:
     def _row_to_record(self, row: Any) -> MemoryRecord | None:
         if row is None:
             return None
-        id_val, content, metadata_val, created_at, updated_at, agent, *_ = (
-            list(row) + [None] * 6
+        (
+            id_val,
+            content,
+            metadata_val,
+            created_at,
+            updated_at,
+            agent,
+            kind,
+            valid_from,
+            valid_to,
+            superseded_by,
+            *_,
+        ) = (
+            list(row) + [None] * 10
         )
         metadata = (
             metadata_val
             if isinstance(metadata_val, dict)
-            else _loads_or_empty(metadata_val)
+            else loads_or_empty(metadata_val)
         )
         scope = metadata.pop("scope", "/") or "/"
         categories = metadata.pop("categories", []) or []
@@ -592,7 +683,7 @@ class LakebaseStorageBackend:
         private = bool(metadata.pop("private", False))
         last_accessed_raw = metadata.pop("last_accessed", None)
         last_accessed = (
-            _parse_datetime(last_accessed_raw)
+            parse_datetime(last_accessed_raw)
             if last_accessed_raw
             else (updated_at or created_at or datetime.utcnow())
         )
@@ -609,8 +700,14 @@ class LakebaseStorageBackend:
             source=source,
             private=private,
             metadata=metadata,
-            created_at=_to_naive_utc(created_at) if created_at else datetime.utcnow(),
-            last_accessed=_to_naive_utc(last_accessed),
+            created_at=to_naive_utc(created_at) if created_at else datetime.utcnow(),
+            last_accessed=to_naive_utc(last_accessed),
+            # ``kind`` validates unknown/NULL to episodic — which is the right
+            # reading of any row written before the column existed.
+            kind=kind,
+            valid_from=to_naive_utc(valid_from) if valid_from else None,
+            valid_to=to_naive_utc(valid_to) if valid_to else None,
+            superseded_by=superseded_by,
         )
 
     def _embed_sync(self, text_content: str) -> list[float]:
@@ -647,67 +744,4 @@ class LakebaseStorageBackend:
         each <10ms pgvector query. A stable loop keeps the engine cached;
         token freshness is handled lazily by get_session.
         """
-        if not asyncio.iscoroutine(coro):
-            return coro
-        from src.services.memory.databricks_storage_backend import _get_bridge_loop
-
-        return asyncio.run_coroutine_threadsafe(coro, _get_bridge_loop()).result()
-
-
-# ----------------------------------------------------------------------
-# Module helpers
-# ----------------------------------------------------------------------
-
-
-def _vector_to_pg(vector: list[float]) -> str:
-    return "[" + ",".join(str(float(v)) for v in vector) + "]"
-
-
-def _loads_or_empty(value: Any) -> dict[str, Any]:
-    if not value:
-        return {}
-    if isinstance(value, dict):
-        return dict(value)
-    try:
-        parsed = json.loads(value)
-        return parsed if isinstance(parsed, dict) else {}
-    except (TypeError, ValueError):
-        return {}
-
-
-def _to_naive_utc(dt: datetime) -> datetime:
-    """Coerce a datetime to offset-naive UTC.
-
-    CrewAI's recency math (``datetime.utcnow() - record.created_at``) is
-    offset-naive, so every datetime we hand back on a ``MemoryRecord`` must be
-    naive UTC — otherwise mixing with offset-aware values (e.g. Postgres
-    ``timestamptz``) raises ``can't subtract offset-naive and offset-aware``.
-    """
-    if dt.tzinfo is not None:
-        return dt.astimezone(timezone.utc).replace(tzinfo=None)
-    return dt
-
-
-def _to_aware_utc(dt: datetime) -> datetime:
-    """Coerce a datetime to offset-AWARE UTC for binding to TIMESTAMPTZ columns.
-
-    The inverse of :func:`_to_naive_utc`. asyncpg's timestamptz encoder runs
-    ``obj.astimezone(utc)``, and ``astimezone`` on a NAIVE datetime presumes the
-    host's LOCAL timezone — so a naive ``datetime.utcnow()`` gets shifted by the
-    machine's UTC offset before it is stored. Stamping UTC tzinfo up front makes
-    that encode a no-op and persists the true instant regardless of host tz.
-    """
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
-
-
-def _parse_datetime(value: Any) -> datetime:
-    if isinstance(value, datetime):
-        return _to_naive_utc(value)
-    if not value:
-        return datetime.utcnow()
-    try:
-        return _to_naive_utc(datetime.fromisoformat(str(value).replace("Z", "+00:00")))
-    except ValueError:
-        return datetime.utcnow()
+        return run_on_bridge_loop(coro)

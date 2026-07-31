@@ -274,27 +274,23 @@ class MemoryBackendBaseService:
             crew_id: Crew ID
 
         Returns:
-            Memory statistics
+            Which backend is configured for the group, or ``configured: False``
+            when none is.
+
+        The response used to carry ``short_term_count``, ``long_term_count`` and
+        ``entity_count``, all hardcoded to zero. They named the removed
+        per-type memory split and counted nothing, so a caller reading them was
+        reading fabricated data. Record counts belong to the backend that holds
+        the records — see the memory browser endpoints, which query it.
         """
-        # Get the group's default backend
         backend = await self.get_default_memory_backend(group_id)
         if not backend:
-            return {
-                "short_term_count": 0,
-                "long_term_count": 0,
-                "entity_count": 0,
-                "total_size_mb": 0.0,
-            }
+            return {"configured": False}
 
-        # In a real implementation, query the actual memory backend
-        # For now, return placeholder data
         return {
+            "configured": True,
             "backend_type": backend.backend_type.value,
             "backend_name": backend.name,
-            "short_term_count": 0,
-            "long_term_count": 0,
-            "entity_count": 0,
-            "total_size_mb": 0.0,
         }
 
     async def delete_all_and_create_disabled(self, group_id: str) -> Dict[str, Any]:

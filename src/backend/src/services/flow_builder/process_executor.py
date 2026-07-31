@@ -775,6 +775,23 @@ def run_flow_in_process(
                                 f"[FLOW_SUBPROCESS] {still_pending} memory write(s) "
                                 f"did not finish within the flush window"
                             )
+                        # Sleep-time maintenance, same as the crew path. A flow
+                        # crew's Memory is built inside the flow, so it is
+                        # reached through the registry rather than off a `crew`
+                        # handle — without this, flow-only workspaces never
+                        # consolidated and accumulated duplicates forever.
+                        from src.services.memory.maintenance import (
+                            run_registered_memory_maintenance,
+                        )
+
+                        stats = await asyncio.to_thread(
+                            run_registered_memory_maintenance
+                        )
+                        if stats.get("deleted"):
+                            async_logger.info(
+                                f"[FLOW_SUBPROCESS] Memory consolidation removed "
+                                f"{stats['deleted']} duplicate(s)"
+                            )
                     except Exception as mem_flush_err:
                         async_logger.warning(
                             f"[FLOW_SUBPROCESS] Memory write flush skipped: {mem_flush_err}"

@@ -1141,7 +1141,7 @@ describe('ChatWorkspace component', () => {
     ];
     expect(model).toBe('m1');
     expect(agents[0].llm).toBe('m1');
-    // A refine is a single-shot edit: memory off (skips the cognitive-memory
+    // A refine is a single-shot edit: memory off (skips the memory
     // search/save flow) and no delegation keeps it to one lightweight pass.
     expect(agents[0].memory).toBe(false);
     expect(agents[0].allow_delegation).toBe(false);

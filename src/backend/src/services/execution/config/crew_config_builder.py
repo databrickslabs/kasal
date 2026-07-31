@@ -243,11 +243,6 @@ class CrewConfigBuilder:
         logger.info("=" * 80)
 
         crew_kwargs["memory"] = False
-        # Legacy per-type kwargs (pre-1.10) are popped defensively in case
-        # anything upstream still sets them.
-        crew_kwargs.pop("short_term_memory", None)
-        crew_kwargs.pop("long_term_memory", None)
-        crew_kwargs.pop("entity_memory", None)
         crew_kwargs.pop("embedder", None)
 
         return crew_kwargs

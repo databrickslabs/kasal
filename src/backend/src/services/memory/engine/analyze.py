@@ -17,6 +17,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .types import KIND_EPISODIC, MEMORY_KINDS
+
 logger = logging.getLogger(__name__)
 
 
@@ -66,12 +68,24 @@ class MemoryAnalysis(BaseModel):
     suggested_scope: str = "/"
     categories: list[str] = Field(default_factory=list)
     importance: float = 0.5
+    kind: str = KIND_EPISODIC
     extracted_metadata: ExtractedMetadata = Field(default_factory=ExtractedMetadata)
 
     @field_validator("categories", mode="before")
     @classmethod
     def _tolerant_categories(cls, value: Any) -> list[str]:
         return _coerce_str_list(value)
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _tolerant_kind(cls, value: Any) -> str:
+        """Anything the model did not say clearly reads as episodic.
+
+        Episodic is the safe default in both directions: it decays, and it never
+        claims to be a currently-true fact that could supersede a real one.
+        """
+        text = str(value or "").strip().lower()
+        return text if text in MEMORY_KINDS else KIND_EPISODIC
 
     @field_validator("importance", mode="before")
     @classmethod

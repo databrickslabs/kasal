@@ -102,3 +102,22 @@ if not any(isinstance(f, _RagFinder) for f in sys.meta_path):
 for _key in list(sys.modules.keys()):
     if _key == "crewai.rag" or _key.startswith("crewai.rag."):
         del sys.modules[_key]
+
+
+# ── Lakebase schema self-heal cache ───────────────────────────────────────────
+#
+# ``lakebase_schema`` remembers which tables it has already checked, in a
+# PROCESS-global set — that is the point of it, since the check sits in front of
+# every memory read and write. In a test session that makes behaviour depend on
+# which test ran first, and this suite runs under pytest-randomly. Clear it
+# around every test so each one starts from "nothing has been checked yet".
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _reset_lakebase_schema_cache():
+    from src.services.memory.lakebase_schema import reset_schema_cache
+
+    reset_schema_cache()
+    yield
+    reset_schema_cache()

@@ -15,10 +15,8 @@ from src.utils.databricks_auth import extract_user_token_from_request
 
 from .dependencies import MemoryBackendServiceDep, logger
 from .record_browsers import (
-    _browse_databricks_records,
     _browse_default_records,
     _browse_lakebase_records,
-    _delete_databricks_records,
     _delete_default_records,
     _delete_lakebase_records,
 )
@@ -79,7 +77,7 @@ async def clear_crew_memory(
 
 
 # ---------------------------------------------------------------------------
-# Unified cognitive memory browser (CrewAI 1.10+)
+# Unified memory browser (CrewAI 1.10+)
 # ---------------------------------------------------------------------------
 
 
@@ -108,7 +106,7 @@ async def list_memory_records(
         description="Number of records to skip for pagination.",
     ),
 ) -> Dict[str, Any]:
-    """Browse records stored in the active unified cognitive memory backend.
+    """Browse records stored in the active memory backend.
 
     Backend-agnostic: routes to LanceDB (default), Databricks Vector Search,
     or Lakebase pgvector based on the user's active ``MemoryBackend``
@@ -134,26 +132,7 @@ async def list_memory_records(
     )
 
     total = 0
-    if backend_type == "databricks":
-        databricks_cfg = active.databricks_config if active else None
-        if not databricks_cfg or not databricks_cfg.memory_index:
-            return {
-                "backend": backend_type,
-                "records": [],
-                "count": 0,
-                "total": 0,
-                "offset": offset,
-                "limit": limit,
-            }
-        records, total = await _browse_databricks_records(
-            databricks_cfg,
-            group_id=group_id,
-            scope=scope,
-            limit=limit,
-            offset=offset,
-            user_token=user_token,
-        )
-    elif backend_type == "lakebase":
+    if backend_type == "lakebase":
         lakebase_cfg = active.lakebase_config if active else None
         if not lakebase_cfg or not lakebase_cfg.memory_table:
             return {
@@ -204,7 +183,7 @@ async def delete_memory_records(
         ),
     ),
 ) -> Dict[str, Any]:
-    """Delete cognitive-memory records from the active backend.
+    """Delete memory records from the active backend.
 
     The caller can only delete records for their own group — both the
     Databricks / Lakebase paths enforce ``group_id`` in the filter, and the
@@ -229,16 +208,7 @@ async def delete_memory_records(
     )
 
     deleted = 0
-    if backend_type == "databricks":
-        databricks_cfg = active.databricks_config if active else None
-        if databricks_cfg and databricks_cfg.memory_index:
-            deleted = await _delete_databricks_records(
-                databricks_cfg,
-                group_id=group_id,
-                scope=scope,
-                user_token=user_token,
-            )
-    elif backend_type == "lakebase":
+    if backend_type == "lakebase":
         lakebase_cfg = active.lakebase_config if active else None
         if lakebase_cfg and lakebase_cfg.memory_table:
             deleted = await _delete_lakebase_records(

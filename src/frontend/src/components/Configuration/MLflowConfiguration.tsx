@@ -30,7 +30,7 @@ import { useMLflowStore } from '../../store/mlflow';
  * seam from the other side — "Please save Databricks settings first to persist
  * MLflow" — which in a dev environment with nothing to save is a dead end.
  *
- * Memory is the precedent: it can use Databricks Vector Search or a local store,
+ * Memory is the precedent: it can use Lakebase or a local store,
  * and it has its own section rather than living inside the Databricks one.
  *
  * **The backend is shown, not chosen.** Which MLflow receives traces is derived

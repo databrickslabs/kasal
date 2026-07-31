@@ -179,11 +179,18 @@ class LakebaseMemoryService:
                 for memory_type, table_name in tables.items():
                     try:
                         qualified_table = f"kasal.{table_name}"
-                        # Unified memory schema. Cognitive fields (scope,
+                        # Unified memory schema. Most fields (scope,
                         # categories, importance, source, private) are kept
                         # inside the ``metadata`` JSONB column; session_id
                         # remains a top-level column for cheap run-scoped
                         # filtering.
+                        #
+                        # ``kind`` and the validity window are REAL COLUMNS,
+                        # not JSONB, because every recall filters and scores on
+                        # them: recall returns only currently-valid records, and
+                        # the recency term decays episodic records while leaving
+                        # semantic facts alone. A ``->>`` accessor in the hot
+                        # scoring path cannot use an index.
                         create_sql = text(f"""
                             CREATE TABLE IF NOT EXISTS {qualified_table} (
                                 id TEXT PRIMARY KEY,
@@ -195,11 +202,36 @@ class LakebaseMemoryService:
                                 metadata JSONB DEFAULT '{{}}'::jsonb,
                                 score FLOAT,
                                 embedding vector({embedding_dimension}),
+                                kind TEXT NOT NULL DEFAULT 'episodic',
+                                valid_from TIMESTAMPTZ,
+                                valid_to TIMESTAMPTZ,
+                                superseded_by TEXT,
                                 created_at TIMESTAMPTZ DEFAULT NOW(),
                                 updated_at TIMESTAMPTZ DEFAULT NOW()
                             )
                         """)
                         await session.execute(create_sql)
+
+                        # Bring an EXISTING table up to the current schema.
+                        # CREATE TABLE IF NOT EXISTS is a no-op on a table that
+                        # already exists, so every workspace provisioned before
+                        # these columns landed would otherwise keep the old
+                        # shape and fail on the first insert. ADD COLUMN IF NOT
+                        # EXISTS makes this idempotent; the DEFAULT backfills
+                        # existing rows as episodic, which is the correct
+                        # reading of a record written before kinds existed.
+                        for column_ddl in (
+                            "kind TEXT NOT NULL DEFAULT 'episodic'",
+                            "valid_from TIMESTAMPTZ",
+                            "valid_to TIMESTAMPTZ",
+                            "superseded_by TEXT",
+                        ):
+                            await session.execute(
+                                text(
+                                    f"ALTER TABLE {qualified_table} "
+                                    f"ADD COLUMN IF NOT EXISTS {column_ddl}"
+                                )
+                            )
 
                         # HNSW index on embedding column for cosine similarity.
                         await session.execute(text(f"""
@@ -227,6 +259,17 @@ class LakebaseMemoryService:
                             CREATE INDEX IF NOT EXISTS idx_{table_name}_metadata
                             ON {qualified_table}
                             USING gin (metadata)
+                        """))
+
+                        # Recall filters every query to currently-valid records
+                        # and reads ``kind`` in the scoring expression, so index
+                        # the pair. Partial on valid_to IS NULL: that is the
+                        # common case (nothing is superseded until it is), and
+                        # it keeps the index small as history accumulates.
+                        await session.execute(text(f"""
+                            CREATE INDEX IF NOT EXISTS idx_{table_name}_current
+                            ON {qualified_table} (group_id, kind)
+                            WHERE valid_to IS NULL
                         """))
 
                         results[memory_type] = {
@@ -398,8 +441,16 @@ class LakebaseMemoryService:
         Returns:
             Dict with success, documents list, and total count
         """
-        # Whitelist allowed table names to prevent SQL injection
+        # Whitelist allowed table names to prevent SQL injection.
+        #
+        # ``crew_memory`` is the unified table and the only one this app now
+        # creates. It was missing here — the allowlist still held only the three
+        # tables of the removed short-term/long-term/entity split, so this
+        # endpoint rejected the one table that exists and accepted three that do
+        # not. The legacy names stay so a saved config pointing at an old table
+        # keeps working, exactly as ``get_entity_data`` does.
         allowed_tables = {
+            "crew_memory",
             "crew_short_term_memory",
             "crew_long_term_memory",
             "crew_entity_memory",

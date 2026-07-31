@@ -64,56 +64,6 @@ export class MemoryBackendService {
   }
 
   /**
-   * Test connection to Databricks Vector Search
-   */
-  static async testDatabricksConnection(config: DatabricksMemoryConfig): Promise<TestConnectionResult> {
-    try {
-      const response = await apiClient.post<TestConnectionResult>(
-        '/memory-backend/databricks/test-connection',
-        config
-      );
-      return response.data;
-    } catch (error) {
-      console.error('Error testing Databricks connection:', error);
-      const errorMessage = error instanceof AxiosError
-        ? error.response?.data?.detail
-        : error instanceof Error ? error.message : 'Failed to test connection';
-      return {
-        success: false,
-        message: errorMessage || 'Failed to test connection',
-        details: {
-          error: errorMessage,
-        },
-      };
-    }
-  }
-
-  /**
-   * Get available Databricks indexes for a given endpoint
-   */
-  static async getAvailableDatabricksIndexes(
-    endpointName: string,
-    authConfig?: Partial<DatabricksMemoryConfig>
-  ): Promise<AvailableIndexesResponse> {
-    try {
-      const response = await apiClient.post<AvailableIndexesResponse>(
-        '/memory-backend/databricks/indexes',
-        {
-          endpoint_name: endpointName,
-          ...authConfig,
-        }
-      );
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching Databricks indexes:', error);
-      const errorMessage = error instanceof AxiosError
-        ? error.response?.data?.detail
-        : 'Failed to fetch indexes';
-      throw new Error(errorMessage || 'Failed to fetch indexes');
-    }
-  }
-
-  /**
    * Save memory backend configuration
    * Note: This might be saved as part of agent/crew configuration rather than separately
    */
@@ -138,7 +88,7 @@ export class MemoryBackendService {
 
   /**
    * Persist the local (DEFAULT / SQLite) memory backend as an ACTIVE config so
-   * crew execution loads its cognitive tuning via ``get_active_config``. Saving
+   * crew execution loads its memory tuning via ``get_active_config``. Saving
    * to localStorage alone never reaches the backend runtime, so the memory LLM /
    * recall thresholds were silently ignored for local memory. Mirrors the
    * Lakebase save flow on the backend.
@@ -235,155 +185,10 @@ export class MemoryBackendService {
   }
 
   /**
-   * Create a Databricks Vector Search index
+   * Switch the workspace to the disabled memory mode.
    */
-  static async createDatabricksIndex(
-    config: DatabricksMemoryConfig,
-    indexType: 'memory' | 'document',
-    catalog: string,
-    schema: string,
-    tableName: string,
-    primaryKey = 'id'
-  ): Promise<{
-    success: boolean;
-    message: string;
-    details?: {
-      index_name?: string;
-      index_type?: string;
-      auth_method?: string;
-      embedding_dimension?: number;
-      error?: string;
-    };
-  }> {
-    try {
-      const response = await apiClient.post<{
-        success: boolean;
-        message: string;
-        details?: {
-          index_name?: string;
-          index_type?: string;
-          auth_method?: string;
-          embedding_dimension?: number;
-          error?: string;
-        };
-      }>('/memory-backend/databricks/create-index', {
-        config,
-        index_type: indexType,
-        catalog,
-        schema,
-        table_name: tableName,
-        primary_key: primaryKey,
-      });
-      return response.data;
-    } catch (error) {
-      console.error('Error creating Databricks index:', error);
-      const errorMessage = error instanceof AxiosError
-        ? error.response?.data?.detail
-        : 'Failed to create index';
-      return {
-        success: false,
-        message: errorMessage || 'Failed to create index',
-        details: {
-          error: errorMessage,
-        },
-      };
-    }
-  }
-
-  /**
-   * One-click setup for Databricks Vector Search
-   */
-  static async oneClickDatabricksSetup(
-    workspaceUrl: string,
-    catalog = 'ml',
-    schema = 'agents'
-  ): Promise<{
-    success: boolean;
-    message: string;
-    endpoints?: {
-      memory?: {
-        name: string;
-        type: string;
-        status: string;
-      };
-      document?: {
-        name: string;
-        type: string;
-        status: string;
-        error?: string;
-      };
-    };
-    indexes?: {
-      short_term?: {
-        name: string;
-        status: string;
-      };
-      long_term?: {
-        name: string;
-        status: string;
-      };
-      entity?: {
-        name: string;
-        status: string;
-      };
-    };
-    config?: DatabricksMemoryConfig;
-    backend_id?: string;
-    error?: string;
-    warning?: string;
-  }> {
-    try {
-      const response = await apiClient.post<{
-        success: boolean;
-        message: string;
-        endpoints?: {
-          memory?: {
-            name: string;
-            type: string;
-            status: string;
-          };
-          document?: {
-            name: string;
-            type: string;
-            status: string;
-            error?: string;
-          };
-        };
-        indexes?: {
-          short_term?: {
-            name: string;
-            status: string;
-          };
-          long_term?: {
-            name: string;
-            status: string;
-          };
-          entity?: {
-            name: string;
-            status: string;
-          };
-        };
-        config?: DatabricksMemoryConfig;
-        backend_id?: string;
-        error?: string;
-        warning?: string;
-      }>('/memory-backend/databricks/one-click-setup', {
-        workspace_url: workspaceUrl,
-        catalog,
-        schema,
-      });
-      return response.data;
-    } catch (error) {
-      console.error('Error in one-click setup:', error);
-      const errorMessage = error instanceof AxiosError
-        ? error.response?.data?.detail
-        : 'Failed to complete setup';
-      return {
-        success: false,
-        message: errorMessage || 'Failed to complete setup',
-        error: errorMessage,
-      };
-    }
+  static async switchToDisabledMode(): Promise<{ id: string; backend_type: string }> {
+    return await apiClient.post('/memory-backend/configs/switch-to-disabled');
   }
 
   /**

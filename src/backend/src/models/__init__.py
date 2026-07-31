@@ -31,6 +31,7 @@ from src.models.hitl_approval import (
 )
 from src.models.initialization_status import InitializationStatus
 from src.models.log import LLMLog
+from src.models.memory_maintenance import MemoryMaintenanceWatermark
 from src.models.mlflow_config import MLflowConfig
 from src.models.model_config import ModelConfig
 from src.models.powerbi_context_config import (

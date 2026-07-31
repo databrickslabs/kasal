@@ -472,32 +472,6 @@ class TestExtractOutput:
         result = _extract_output(span)
         assert result["tool_description"] == "Short desc"
 
-    def test_memory_fields_long_term(self):
-        span = _make_readable_span(
-            attributes={
-                "long_term_memory.save_time_ms": 50,
-                "long_term_memory.query_time_ms": 30,
-                "long_term_memory.source_type": "vector",
-                "long_term_memory.agent_role": "Researcher",
-            }
-        )
-        result = _extract_output(span)
-        assert result["save_time_ms"] == 50
-        assert result["query_time_ms"] == 30
-        assert result["source_type"] == "vector"
-        assert result["agent_role"] == "Researcher"
-
-    def test_memory_fields_short_term(self):
-        span = _make_readable_span(
-            attributes={
-                "short_term_memory.save_time_ms": 10,
-                "short_term_memory.query_time_ms": 5,
-            }
-        )
-        result = _extract_output(span)
-        assert result["save_time_ms"] == 10
-        assert result["query_time_ms"] == 5
-
     def test_extra_data_fields(self):
         span = _make_readable_span(
             attributes={
@@ -528,12 +502,6 @@ class TestExtractOutput:
         )
         result = _extract_output(span)
         assert result == {"content": "fallback.name"}
-
-    def test_memory_field_value_zero_is_included(self):
-        """A value of 0 should still be included (val is not None)."""
-        span = _make_readable_span(attributes={"long_term_memory.save_time_ms": 0})
-        result = _extract_output(span)
-        assert result["save_time_ms"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -1525,17 +1493,6 @@ class TestExtractOutputEdgeCases:
         result = _extract_output(span)
         assert "content" not in result
         assert result["input"] == "just input"
-
-    def test_short_term_memory_fields(self):
-        span = _make_readable_span(
-            attributes={
-                "short_term_memory.source_type": "cache",
-                "short_term_memory.agent_role": "Analyst",
-            }
-        )
-        result = _extract_output(span)
-        assert result["source_type"] == "cache"
-        assert result["agent_role"] == "Analyst"
 
     def test_no_extra_data_when_no_kasal_extra(self):
         span = _make_readable_span(attributes={"kasal.output_content": "data"})

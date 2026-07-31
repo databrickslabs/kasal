@@ -31,8 +31,8 @@ class MemoryBackend(Base):
     """Memory backend configuration model.
 
     Stores one configuration per named memory backend. A single row defines
-    the unified cognitive memory for a given tenant: backend type, connection
-    details, cognitive tuning parameters, and activation flags.
+    the memory for a given tenant: backend type, connection
+    details, memory tuning parameters, and activation flags.
     """
 
     __tablename__ = "memory_backends"
@@ -55,7 +55,7 @@ class MemoryBackend(Base):
     databricks_config = Column(JSON, nullable=True)
     lakebase_config = Column(JSON, nullable=True)
 
-    # CrewAI 1.10+ unified cognitive memory tuning (weights, consolidation,
+    # CrewAI 1.10+ memory tuning (weights, consolidation,
     # recall depth). Stored as JSON so the shape can evolve without requiring
     # a migration per field.
     cognitive_config = Column(JSON, nullable=True)

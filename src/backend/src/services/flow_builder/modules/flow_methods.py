@@ -276,6 +276,18 @@ async def configure_flow_crew_memory(
             custom_embedder,
             memory_llm_override=memory_llm_override,
         )
+        # Register for end-of-run maintenance. A flow builds a Memory per crew
+        # here, deep inside the flow's wiring, and the subprocess teardown that
+        # drains the write pool has no reference to any of them — so without
+        # this a flow-only workspace would never consolidate its memory.
+        try:
+            from src.services.memory.maintenance import (
+                register_memory_for_maintenance,
+            )
+
+            register_memory_for_maintenance(crew_kwargs.get("memory"))
+        except Exception as reg_err:  # noqa: BLE001 — maintenance is best-effort
+            logger.debug(f"[FLOW MEMORY] Maintenance registration skipped: {reg_err}")
         logger.info(
             f"[FLOW MEMORY] Configured unified memory (backend={backend_type}, crew_id={crew_id})"
         )
@@ -409,7 +421,6 @@ def collect_task_agents(task_list: List[Any]) -> List[Any]:
         seen.add(id(agent))
         agents.append(agent)
     return agents
-
 
 
 def _emit_checkpoint_restored(crew_name: str, output: Any) -> None:
