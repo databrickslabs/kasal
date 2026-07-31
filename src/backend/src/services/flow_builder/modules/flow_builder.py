@@ -1324,6 +1324,57 @@ class FlowBuilder:
                             eval_context["state"] = {}
 
                         # Add result from args
+                        # Defined BEFORE `if args:`, deliberately.
+                        #
+                        # All three are also used by the state scan below, which runs whether
+                        # or not this router was called with args. A router listening to a
+                        # STARTING POINT receives none — so `if args:` was skipped, the helpers
+                        # were never defined, and the scan raised UnboundLocalError. The
+                        # handler swallowed it and abandoned the whole route evaluation, so a
+                        # route whose condition was true simply never ran. Observed on a real
+                        # flow as "cannot access local variable 'strip_code_fences'".
+                        def merge_parsed_json(parsed_data, source_label):
+                            if isinstance(parsed_data, dict):
+                                parsed_data = auto_convert_dict(parsed_data)
+                                eval_context["state"].update(parsed_data)
+                                eval_context.update(parsed_data)
+                                logger.info(
+                                    f"Parsed {source_label} JSON object and merged into state: {list(parsed_data.keys())}"
+                                )
+                            elif isinstance(parsed_data, list) and parsed_data:
+                                # For JSON arrays, extract keys from the first dict item
+                                first_item = parsed_data[0]
+                                if isinstance(first_item, dict):
+                                    first_item = auto_convert_dict(first_item)
+                                    eval_context["state"].update(first_item)
+                                    eval_context.update(first_item)
+                                    logger.info(
+                                        f"Parsed {source_label} JSON array (first item) and merged into state: {list(first_item.keys())}"
+                                    )
+                                # Also store the full array for advanced conditions
+                                eval_context["items"] = parsed_data
+                                eval_context["state"]["items"] = parsed_data
+                                logger.info(
+                                    f"Stored {source_label} JSON array with {len(parsed_data)} items in context['items']"
+                                )
+
+                        def strip_code_fences(s):
+                            """Strip markdown code fences (```json ... ```) from a string."""
+                            s = s.strip()
+                            if s.startswith("```"):
+                                first_newline = s.find("\n")
+                                if first_newline != -1:
+                                    s = s[first_newline + 1 :]
+                                if s.rstrip().endswith("```"):
+                                    s = s.rstrip()[:-3].rstrip()
+                            return s
+
+                        def looks_like_json(s):
+                            s = s.strip()
+                            return (s.startswith("{") and s.endswith("}")) or (
+                                s.startswith("[") and s.endswith("]")
+                            )
+
                         if args:
                             eval_context["result"] = args[0]
 
@@ -1331,47 +1382,6 @@ class FlowBuilder:
                             result_obj = args[0]
 
                             # Helper to merge parsed JSON into eval context and state
-                            def merge_parsed_json(parsed_data, source_label):
-                                if isinstance(parsed_data, dict):
-                                    parsed_data = auto_convert_dict(parsed_data)
-                                    eval_context["state"].update(parsed_data)
-                                    eval_context.update(parsed_data)
-                                    logger.info(
-                                        f"Parsed {source_label} JSON object and merged into state: {list(parsed_data.keys())}"
-                                    )
-                                elif isinstance(parsed_data, list) and parsed_data:
-                                    # For JSON arrays, extract keys from the first dict item
-                                    first_item = parsed_data[0]
-                                    if isinstance(first_item, dict):
-                                        first_item = auto_convert_dict(first_item)
-                                        eval_context["state"].update(first_item)
-                                        eval_context.update(first_item)
-                                        logger.info(
-                                            f"Parsed {source_label} JSON array (first item) and merged into state: {list(first_item.keys())}"
-                                        )
-                                    # Also store the full array for advanced conditions
-                                    eval_context["items"] = parsed_data
-                                    eval_context["state"]["items"] = parsed_data
-                                    logger.info(
-                                        f"Stored {source_label} JSON array with {len(parsed_data)} items in context['items']"
-                                    )
-
-                            def strip_code_fences(s):
-                                """Strip markdown code fences (```json ... ```) from a string."""
-                                s = s.strip()
-                                if s.startswith("```"):
-                                    first_newline = s.find("\n")
-                                    if first_newline != -1:
-                                        s = s[first_newline + 1 :]
-                                    if s.rstrip().endswith("```"):
-                                        s = s.rstrip()[:-3].rstrip()
-                                return s
-
-                            def looks_like_json(s):
-                                s = s.strip()
-                                return (s.startswith("{") and s.endswith("}")) or (
-                                    s.startswith("[") and s.endswith("]")
-                                )
 
                             # Prefer the declared structured output (output_pydantic /
                             # output_json) when present: a task with a declared schema yields a

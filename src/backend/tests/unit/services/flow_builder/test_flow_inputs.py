@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.services.flow_builder.backend_flow import BackendFlow
+from src.services.flow_builder.modules.flow_methods import crew_inputs_from_state
 from src.services.flow_builder.runtime.flow import Flow
 
 
@@ -87,3 +88,74 @@ class TestMergeInputs:
 
     def test_nothing_to_merge_is_not_an_error(self):
         self._flow(_TypedState())._merge_inputs({})
+
+
+class TestCrewInputsFromState:
+    """The link between a flow HAVING a value and that value meaning anything.
+
+    A flow merges its inputs into state; a crew interpolates `{placeholders}`
+    from the inputs passed to ITS kickoff. Both crew call sites passed none, so
+    on a real run `topic="swiss news"` reached flow state correctly and the crew
+    then executed a task that still read "related to a specified {topic}"
+    literally — searched for whatever its memory suggested, and returned a raw
+    tool payload instead of an answer.
+    """
+
+    @staticmethod
+    def _flow(state):
+        return SimpleNamespace(state=state)
+
+    def test_a_dict_state_becomes_crew_inputs(self):
+        assert crew_inputs_from_state(self._flow({"topic": "swiss news"})) == {
+            "topic": "swiss news"
+        }
+
+    def test_the_checkpoint_id_is_not_an_input(self):
+        # `id` is the checkpoint handle. A task must never interpolate it.
+        assert crew_inputs_from_state(self._flow({"topic": "x", "id": "abc"})) == {
+            "topic": "x"
+        }
+
+    def test_a_typed_state_works_too(self):
+        state = SimpleNamespace(topic="x", id="abc")
+        state._internal = "hidden"
+        assert crew_inputs_from_state(self._flow(state)) == {"topic": "x"}
+
+    def test_no_state_passes_nothing_rather_than_failing(self):
+        assert crew_inputs_from_state(SimpleNamespace()) == {}
+        assert crew_inputs_from_state(self._flow(None)) == {}
+        assert crew_inputs_from_state(self._flow("not a mapping")) == {}
+
+
+class TestRouterEvaluatesWithoutArgs:
+    """A router that listens to a STARTING POINT is called with no args.
+
+    Its condition helpers — strip_code_fences, looks_like_json,
+    merge_parsed_json — used to be defined inside `if args:`, while the state
+    scan that uses them runs unconditionally. So a starting-point router hit
+    UnboundLocalError before reading state at all; the handler swallowed it and
+    abandoned the whole evaluation. Observed on a real flow: the log said
+    "cannot access local variable 'strip_code_fences'" and a route whose
+    condition was TRUE never ran.
+    """
+
+    def test_the_helpers_are_defined_before_the_args_branch(self):
+        import inspect
+
+        from src.services.flow_builder.modules import flow_builder
+
+        source = inspect.getsource(flow_builder)
+        # Position, not behaviour: the failure was purely one of definition
+        # order, and only the order can prevent it recurring.
+        helpers = [
+            source.index("def merge_parsed_json"),
+            source.index("def strip_code_fences"),
+            source.index("def looks_like_json"),
+        ]
+        args_branch = source.index("if args:\n")
+
+        assert max(helpers) < args_branch, (
+            "A condition helper is defined inside `if args:` again. A router "
+            "listening to a starting point is called WITHOUT args, so it would "
+            "raise UnboundLocalError and silently skip every route."
+        )
