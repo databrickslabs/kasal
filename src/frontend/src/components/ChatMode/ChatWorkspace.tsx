@@ -392,6 +392,32 @@ const ChatWorkspace: React.FC = () => {
     setPendingRun,
   });
 
+  /**
+   * "Use existing" matched nothing — build one instead, at the answer mode the
+   * user already had selected.
+   *
+   * Deliberately a user action, not a fallback. Silently generating here would
+   * run a full crew nobody asked for; this flips the source back and re-sends
+   * the SAME prompt, so the only thing that changed is the one choice they just
+   * made.
+   */
+  const handleBuildInstead = useCallback(
+    (messageId: string) => {
+      const all = useSessionStore.getState().messages;
+      const index = all.findIndex((m) => m.id === messageId);
+      // The prompt that produced this answer is the nearest user message above
+      // it — reading `lastUserPrompt` instead would re-send whatever was typed
+      // most recently, which after a session switch is a different question.
+      const prompt = all
+        .slice(0, index === -1 ? all.length : index)
+        .reverse()
+        .find((m) => m.role === 'user')?.content;
+      useExecutionStore.getState().setPreferExisting(false);
+      if (prompt) void handleSend(prompt);
+    },
+    [handleSend],
+  );
+
 
   // Session list: new / switch / delete / rename. See hooks/useChatSessionActions.ts.
   const {
@@ -626,6 +652,7 @@ const ChatWorkspace: React.FC = () => {
               onSaveCrew={handleSaveCrew}
               onSaveAnswerToCatalog={handleSaveAnswerToCatalog}
               onSubmitVariables={handleVariablesSubmit}
+              onBuildInstead={handleBuildInstead}
               onStopExecution={handleStopExecution}
               isLoading={viewIsLoading}
               isExecuting={viewIsExecuting}

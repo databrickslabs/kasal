@@ -1685,6 +1685,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                                     entityType="crew"
                                     entityId={String(crew.id)}
                                     entityName={crew.name}
+                                    nodes={crew.nodes}
                                     published={publishedCrewIds.has(String(crew.id))}
                                     onChanged={(isPublished) =>
                                       setPublished('crew', String(crew.id), isPublished)
@@ -2041,6 +2042,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                                     entityType="flow"
                                     entityId={String(flow.id)}
                                     entityName={flow.name}
+                                    nodes={flow.nodes}
                                     published={publishedFlowIds.has(String(flow.id))}
                                     onChanged={(isPublished) =>
                                       setPublished('flow', String(flow.id), isPublished)

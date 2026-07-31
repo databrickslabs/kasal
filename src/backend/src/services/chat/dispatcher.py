@@ -12,7 +12,7 @@ import os
 import re
 import time
 from contextlib import nullcontext
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 try:
     import mlflow as _mlflow
@@ -51,8 +51,15 @@ from src.schemas.crew import (
 )
 from src.schemas.dispatcher import DispatcherRequest, DispatcherResponse, IntentType
 from src.schemas.task_generation import TaskGenerationRequest, TaskGenerationResponse
+
+# The templates these prompts come from live in the database and are optimizable
+# by GEPA; these constants are the rows' own source, used only when the row is
+# missing. Imported rather than copied — see the fallbacks below.
+from src.seeds.prompt_templates import DETECT_INTENT_TEMPLATE
 from src.services.catalog.crews import CrewService
 from src.services.catalog.templates import TemplateService
+from src.services.chat.capability_dispatch import route_and_dispatch
+from src.services.chat.slash_commands import detect_slash_command
 from src.services.databricks.workspace.service import DatabricksService
 from src.services.execution.logs.llm_log_service import LLMLogService
 from src.services.flow_builder.flow_service import FlowService
@@ -560,6 +567,113 @@ class DispatcherService:
             )
         return cls._concurrency_semaphore
 
+    async def _walk_model_chain(
+        self,
+        messages: list,
+        model: Optional[str],
+        last_resort_model: Optional[str] = None,
+        span_name: str = "intent_detection",
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[str], int]:
+        """Ask the model chain for JSON, returning the first usable object.
+
+        Walks the candidates preferred-first: skips a model whose circuit breaker
+        is open, and on error or empty/unparseable output moves to the next. Only
+        when no candidate yields a usable result does the caller drop to its own
+        fallback.
+
+        Extracted so intent classification and capability routing share ONE
+        implementation of it. They need the same retry, the same breaker
+        bookkeeping, the same semaphore and the same tracing, and the way those
+        stop being the same is a second copy of this loop.
+
+        Returns ``(parsed, served_model, attempted)``. ``attempted`` counts models
+        actually called — breaker-open skips do not count, which is what lets the
+        caller distinguish "every breaker was open" (no LLM ran at all) from "all
+        attempts failed".
+        """
+        from src.utils.telemetry import KasalProduct, get_user_agent_header
+
+        extra_headers = get_user_agent_header(KasalProduct.INTENT_DETECTION)
+
+        candidates = self._intent_model_candidates(model, last_resort_model)
+        attempted = 0
+
+        for candidate in candidates:
+            if self._check_circuit_breaker(candidate):
+                logger.info(f"Skipping intent model {candidate} (circuit breaker open)")
+                continue
+            attempted += 1
+            # Reset per attempt so a previous candidate's resolved name can
+            # never be attributed to this one.
+            served: Optional[str] = None
+            try:
+                # Acquire concurrency semaphore to limit parallel LLM calls
+                async with self._get_semaphore():
+                    # Generate completion with optional MLflow span for tracing
+                    if _HAS_MLFLOW and hasattr(_mlflow, "start_span"):
+                        with _mlflow.start_span(
+                            name=span_name, span_type="LLM"
+                        ) as intent_span:
+                            if hasattr(intent_span, "set_inputs"):
+                                intent_span.set_inputs(
+                                    {
+                                        "model": candidate,
+                                        "messages": messages,
+                                        "temperature": 0.3,
+                                    }
+                                )
+                            content, served = await self._call_llm_with_retry(
+                                messages=messages,
+                                model=candidate,
+                                extra_headers=extra_headers,
+                            )
+                            if hasattr(intent_span, "set_outputs"):
+                                intent_span.set_outputs(
+                                    {"response": content[:500] if content else ""}
+                                )
+                    else:
+                        content, served = await self._call_llm_with_retry(
+                            messages=messages,
+                            model=candidate,
+                            extra_headers=extra_headers,
+                        )
+            except Exception as e:
+                logger.warning(
+                    f"Intent model {candidate} failed: {e}. Trying next fallback."
+                )
+                self._record_failure(candidate)
+                continue
+
+            if not content or not content.strip():
+                logger.warning(
+                    f"Intent model {candidate} returned an empty response. "
+                    "Trying next fallback."
+                )
+                continue
+
+            try:
+                parsed = robust_json_parser(content)
+            except Exception as e:
+                logger.warning(
+                    f"Intent model {candidate} returned unparseable output: {e}. "
+                    "Trying next fallback."
+                )
+                continue
+            if not isinstance(parsed, dict):
+                logger.warning(
+                    f"Intent model {candidate} did not return a JSON object. "
+                    "Trying next fallback."
+                )
+                continue
+
+            # Usable result — record success and stop walking the chain.
+            self._record_success(candidate)
+            # `served` is the key that actually answered; it differs from the
+            # candidate whenever the model was substituted downstream.
+            return parsed, served or candidate, attempted
+
+        return None, None, attempted
+
     @classmethod
     def _intent_model_candidates(
         cls, preferred: Optional[str], last_resort: Optional[str] = None
@@ -595,128 +709,10 @@ class DispatcherService:
             self.session, group_context, label="Dispatcher"
         )
 
-    @staticmethod
-    def _detect_slash_command(message: str) -> Optional[Dict[str, Any]]:
-        """Detect and parse slash commands (e.g., /list, /load my-plan).
-
-        Returns a fully formed intent result dict if the message is a recognized
-        slash command, or None otherwise.
-        """
-        stripped = message.strip()
-        if not stripped.startswith("/"):
-            return None
-
-        parts = stripped.split(None, 1)  # split into command + rest
-        command = parts[0].lower()
-        args = parts[1].strip() if len(parts) > 1 else ""
-
-        COMMAND_MAP = {
-            "/list": "catalog_list",
-            "/plans": "catalog_list",
-            "/flows": "flow_list",
-            "/load": "catalog_load",
-            "/save": "catalog_save",
-            "/schedule": "catalog_schedule",
-            "/help": "catalog_help",
-            "/run": "execute_crew",
-            "/exec": "execute_crew",
-            "/delete": "catalog_delete",
-        }
-
-        intent = COMMAND_MAP.get(command)
-        if intent is None:
-            if stripped.startswith("/"):
-                # Unrecognized slash command -> show help with error
-                return {
-                    "intent": "catalog_help",
-                    "confidence": 1.0,
-                    "extracted_info": {
-                        "command": command,
-                        "args": args,
-                        "invalid_command": True,
-                    },
-                    "suggested_prompt": stripped,
-                    "source": "slash_command",
-                    "suggested_tools": [],
-                }
-            return None
-
-        # Check for flow qualifier in args (e.g. "/list flows", "/load flow my-flow")
-        qualifier_found = False
-        FLOW_INTENT_MAP = {
-            "catalog_list": "flow_list",
-            "catalog_load": "flow_load",
-            "catalog_save": "flow_save",
-            "execute_crew": "execute_flow",
-            "catalog_delete": "flow_delete",
-        }
-        if args.lower().startswith(("flow", "flows")) and intent in FLOW_INTENT_MAP:
-            intent = FLOW_INTENT_MAP[intent]
-            qualifier_found = True
-            # Strip "flow" or "flows" prefix from args
-            remaining = args.split(None, 1)
-            args = remaining[1].strip() if len(remaining) > 1 else ""
-
-        # Check for crew/crews qualifier (e.g. "/list crews", "/save crew My Crew")
-        CREW_QUALIFIABLE = {
-            "catalog_list",
-            "catalog_load",
-            "catalog_save",
-            "catalog_schedule",
-            "execute_crew",
-            "catalog_delete",
-        }
-        if (
-            not qualifier_found
-            and args.lower().startswith(("crew", "crews"))
-            and intent in CREW_QUALIFIABLE
-        ):
-            qualifier_found = True
-            remaining = args.split(None, 1)
-            args = remaining[1].strip() if len(remaining) > 1 else ""
-
-        # Commands that require a crew/flow qualifier (bare /list, /load etc. show usage help)
-        # /plans and /flows are aliases that already imply the qualifier, so they're excluded.
-        QUALIFIER_REQUIRED = {
-            "/list",
-            "/load",
-            "/save",
-            "/run",
-            "/exec",
-            "/schedule",
-            "/delete",
-        }
-        if not qualifier_found and command in QUALIFIER_REQUIRED:
-            COMMAND_USAGE = {
-                "/list": "Usage: `/list crews` or `/list flows`",
-                "/load": "Usage: `/load crew <name>` or `/load flow <name>`",
-                "/save": "Usage: `/save crew [name]` or `/save flow [name]`",
-                "/run": "Usage: `/run crew` or `/run flow`",
-                "/exec": "Usage: `/run crew` or `/run flow`",
-                "/schedule": "Usage: `/schedule crew`",
-                "/delete": "Usage: `/delete crew <name>` or `/delete flow <name>`",
-            }
-            return {
-                "intent": "catalog_help",
-                "confidence": 1.0,
-                "extracted_info": {
-                    "command": command,
-                    "args": args,
-                    "command_help": COMMAND_USAGE.get(command, ""),
-                },
-                "suggested_prompt": stripped,
-                "source": "slash_command",
-                "suggested_tools": [],
-            }
-
-        return {
-            "intent": intent,
-            "confidence": 1.0,
-            "extracted_info": {"command": command, "args": args},
-            "suggested_prompt": stripped,
-            "source": "slash_command",
-            "suggested_tools": [],
-        }
+    #: Slash-command parsing lives in ``slash_commands`` — it is a parser, not
+    #: dispatch logic, and it took up more of this file than the classifier does.
+    #: Still bound here because it is the name every caller and test uses.
+    _detect_slash_command = staticmethod(detect_slash_command)
 
     def _analyze_message_semantics(self, message: str) -> Dict[str, Any]:
         """
@@ -874,6 +870,7 @@ class DispatcherService:
         available_tools: Optional[List[Dict[str, str]]] = None,
         chat_mode: bool = False,
         last_resort_model: Optional[str] = None,
+        prefer_existing: bool = False,
     ) -> Dict[str, Any]:
         """
         Detect the intent from the user's message using LLM enhanced with semantic analysis.
@@ -885,6 +882,9 @@ class DispatcherService:
                 chain — used only if every faster candidate is unavailable (e.g.
                 the user's selected crew model, so intent never hard-fails on a
                 workspace where the fast intent models aren't enabled).
+            prefer_existing: True when the user picked "Use existing". Opens the
+                ChatMode fast path so the capability router can run — the ONLY
+                thing that does.
 
         Returns:
             Dictionary containing intent, confidence, and extracted information
@@ -894,6 +894,19 @@ class DispatcherService:
         if slash_result is not None:
             return slash_result
 
+        # "Use existing": the user asked to run something already published, so
+        # classification is settled — the only question left is WHICH capability,
+        # and dispatch() answers that with the route catalog in hand.
+        if prefer_existing:
+            return {
+                "intent": IntentType.CATALOG_ROUTE.value,
+                "confidence": 1.0,
+                "extracted_info": {},
+                "suggested_prompt": message,
+                "source": "prefer_existing",
+                "suggested_tools": [],
+            }
+
         # ChatMode fast-path: this surface ONLY builds crews. generate_agent /
         # generate_task already collapse to generate_crew here (see
         # _resolve_surface_intent), and catalog/execute are reached via slash
@@ -901,6 +914,9 @@ class DispatcherService:
         # LLM always lands on generate_crew anyway. Skip the classification
         # round-trip entirely and route straight there, saving a full fast-model
         # call on every chat message.
+        #
+        # Gated on prefer_existing above, not removed: chat / research / deep
+        # keep the per-message saving they have today.
         if chat_mode:
             return {
                 "intent": "generate_crew",
@@ -921,64 +937,13 @@ class DispatcherService:
         )
 
         if not system_prompt:
-            # Use a crew-first default prompt if template not found
-            system_prompt = """You are an intent detection system for a CrewAI workflow designer.
-
-CRITICAL DEFAULT RULE: The default intent is ALWAYS "generate_crew" with confidence 0.95.
-A crew can contain a single agent with a single task, making it the safest and most flexible choice.
-Only use a different intent when there is EXPLICIT evidence for it.
-
-The ONLY cases where you should NOT return generate_crew:
-
-1. **generate_agent**: User EXPLICITLY says "create an agent", "make me a bot", "build an assistant".
-   Must contain the word "agent", "bot", "assistant", or "chatbot" as the entity being created.
-
-2. **generate_task**: User EXPLICITLY says "create a task" or "add a task". The word "task" must appear.
-
-3. **execute_crew**: User says "execute", "run", "start", "launch", or "ec".
-
-4. **configure_crew**: User wants to change LLM model, max RPM, tools, or settings.
-
-5. **catalog/flow operations**: list, load, save, schedule, or delete plans/flows/crews.
-
-For ALL other messages return generate_crew with confidence 0.95.
-
-Return a JSON object with:
-{
-    "intent": "generate_task" | "generate_agent" | "generate_crew" | "execute_crew" | "configure_crew" | "catalog_list" | "catalog_load" | "catalog_save" | "catalog_schedule" | "unknown",
-    "confidence": 0.0-1.0,
-    "extracted_info": {
-        "action_words": ["detected", "action", "words"],
-        "entities": ["extracted", "entities"],
-        "goal": "what the user wants to accomplish",
-        "config_type": "llm|maxr|tools|general"
-    },
-    "suggested_prompt": "Enhanced version optimized for the specific service",
-    "suggested_tools": ["ToolName1", "ToolName2"]
-}
-
-Examples of generate_crew (the DEFAULT):
-- "get me the latest news from switzerland" -> generate_crew
-- "analyze market trends and create a report" -> generate_crew
-- "find the best flights and hotels" -> generate_crew
-- "gather news from cnn.com and create a dashboard" -> generate_crew
-- "Build a team of agents to handle customer support" -> generate_crew
-- "Create a plan for market analysis" -> generate_crew
-
-Examples of other intents (ONLY with explicit signals):
-- "Create an agent that can analyze data" -> generate_agent
-- "create a task to check server status" -> generate_task
-- "execute crew" -> execute_crew
-- "ec" -> execute_crew
-- "configure crew" -> configure_crew
-- "setup llm" -> configure_crew
-- "change model" -> configure_crew
-- "list my plans" -> catalog_list
-- "load the research plan" -> catalog_load
-- "save this plan" -> catalog_save
-- "schedule this crew" -> catalog_schedule
-
-"""
+            # No DB row — a fresh workspace, or a seed that has not run yet.
+            # Fall back to the SEED the row is created from, not to a copy: this
+            # used to be sixty lines of prose inlined here, which had already
+            # drifted from the seeded template it was supposed to mirror. A
+            # prompt with two sources has one that is quietly wrong, and it is
+            # always the one you are not reading.
+            system_prompt = DETECT_INTENT_TEMPLATE
 
         # Send the raw message to the LLM — let it do all the analysis
         enhanced_user_message = f"""Message: {message}
@@ -1025,94 +990,9 @@ Please analyze this message and provide your intent classification."""
                 cached["source"] = "cache+surface_override"
             return cached
 
-        from src.utils.telemetry import KasalProduct, get_user_agent_header
-
-        intent_extra_headers = get_user_agent_header(KasalProduct.INTENT_DETECTION)
-
-        # Walk the candidate chain: preferred model first, then the fast
-        # fallbacks. Skip a model whose circuit breaker is open; on error or
-        # empty/unparseable output, move to the next. Only when no candidate
-        # yields a usable result do we drop to the deterministic fallback.
-        candidates = self._intent_model_candidates(model, last_resort_model)
-        result: Optional[Dict[str, Any]] = None
-        used_model: Optional[str] = None
-        attempted = 0  # models actually called (breaker-open skips don't count)
-
-        for candidate in candidates:
-            if self._check_circuit_breaker(candidate):
-                logger.info(f"Skipping intent model {candidate} (circuit breaker open)")
-                continue
-            attempted += 1
-            # Reset per attempt so a previous candidate's resolved name can
-            # never be attributed to this one.
-            served: Optional[str] = None
-            try:
-                # Acquire concurrency semaphore to limit parallel LLM calls
-                async with self._get_semaphore():
-                    # Generate completion with optional MLflow span for tracing
-                    if _HAS_MLFLOW and hasattr(_mlflow, "start_span"):
-                        with _mlflow.start_span(
-                            name="intent_detection", span_type="LLM"
-                        ) as intent_span:
-                            if hasattr(intent_span, "set_inputs"):
-                                intent_span.set_inputs(
-                                    {
-                                        "model": candidate,
-                                        "messages": messages,
-                                        "temperature": 0.3,
-                                    }
-                                )
-                            content, served = await self._call_llm_with_retry(
-                                messages=messages,
-                                model=candidate,
-                                extra_headers=intent_extra_headers,
-                            )
-                            if hasattr(intent_span, "set_outputs"):
-                                intent_span.set_outputs(
-                                    {"response": content[:500] if content else ""}
-                                )
-                    else:
-                        content, served = await self._call_llm_with_retry(
-                            messages=messages,
-                            model=candidate,
-                            extra_headers=intent_extra_headers,
-                        )
-            except Exception as e:
-                logger.warning(
-                    f"Intent model {candidate} failed: {e}. Trying next fallback."
-                )
-                self._record_failure(candidate)
-                continue
-
-            if not content or not content.strip():
-                logger.warning(
-                    f"Intent model {candidate} returned an empty response. "
-                    "Trying next fallback."
-                )
-                continue
-
-            try:
-                parsed = robust_json_parser(content)
-            except Exception as e:
-                logger.warning(
-                    f"Intent model {candidate} returned unparseable output: {e}. "
-                    "Trying next fallback."
-                )
-                continue
-            if not isinstance(parsed, dict):
-                logger.warning(
-                    f"Intent model {candidate} did not return a JSON object. "
-                    "Trying next fallback."
-                )
-                continue
-
-            # Usable result — record success and stop walking the chain.
-            self._record_success(candidate)
-            result = parsed
-            # `served` is the key that actually answered; it differs from the
-            # candidate whenever the model was substituted downstream.
-            used_model = served or candidate
-            break
+        result, used_model, attempted = await self._walk_model_chain(
+            messages, model, last_resort_model
+        )
 
         if result is None:
             # No candidate produced a usable result. Distinguish "every circuit
@@ -1205,6 +1085,39 @@ Please analyze this message and provide your intent classification."""
 
         return result
 
+    async def _route_to_capability(
+        self,
+        message: str,
+        group_context: Optional[GroupContext],
+        model: Optional[str],
+        last_resort_model: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Run one prompt against the chat-published catalog and dispatch the winner.
+
+        A thin binding: the run itself lives in ``capability_dispatch`` so this
+        file does not carry it. What it hands over is the two collaborators the
+        route needs and cannot build for itself — the model chain (with its
+        retry, circuit breakers and tracing) and the llmlog writer.
+        """
+        return await route_and_dispatch(
+            session=self.session,
+            group_context=group_context,
+            message=message,
+            ask_models=lambda messages: self._walk_model_chain(
+                messages,
+                model or DEFAULT_DISPATCHER_MODEL,
+                last_resort_model,
+                span_name="capability_routing",
+            ),
+            log_llm=self._log_llm_interaction,
+            catalog_service=self.catalog_service,
+            flow_service=self.flow_service,
+            # The conversation this turn belongs to. Without it the router reads
+            # every message as though nothing came before it.
+            session_id=session_id,
+        )
+
     async def detect_intent_logged(
         self,
         message: str,
@@ -1213,6 +1126,7 @@ Please analyze this message and provide your intent classification."""
         available_tools: Optional[List[Dict[str, str]]] = None,
         chat_mode: bool = False,
         last_resort_model: Optional[str] = None,
+        prefer_existing: bool = False,
     ) -> Dict[str, Any]:
         """detect_intent + the same llmlog record dispatch() writes.
 
@@ -1228,10 +1142,17 @@ Please analyze this message and provide your intent classification."""
             available_tools,
             chat_mode=chat_mode,
             last_resort_model=last_resort_model,
+            prefer_existing=prefer_existing,
         )
-        # Skip when no LLM actually ran (ChatMode fast-path / slash command),
+        # Skip when no LLM actually ran (ChatMode fast-path / slash command /
+        # "Use existing", which settles the intent without asking anything),
         # otherwise every message records a phantom call against the model.
-        if result.get("source") in ("chat_mode_fast_path", "slash_command"):
+        # The capability router logs its OWN call, where one really happens.
+        if result.get("source") in (
+            "chat_mode_fast_path",
+            "slash_command",
+            "prefer_existing",
+        ):
             return result
 
         # Report the model that ANSWERED, not the first candidate we tried. The
@@ -1335,6 +1256,7 @@ Please analyze this message and provide your intent classification."""
                 available_tools,
                 chat_mode=request.chat_mode,
                 last_resort_model=request.model,
+                prefer_existing=request.prefer_existing,
             )
 
             # Create dispatcher response
@@ -1394,6 +1316,43 @@ Please analyze this message and provide your intent classification."""
                     logger.info(
                         f"Dropped non-enabled tools from request.tools: {dropped}"
                     )
+
+            # "Use existing" routes BEFORE the dispatch chain, because the
+            # answer can change which branch runs. A router that declines
+            # mid-conversation is saying "this turn is a question about what is
+            # already on screen" — which is answered, not run. Rewriting the
+            # intent here lets the ordinary chat path answer it, instead of this
+            # branch growing a second copy of the generation machinery.
+            routed_result = None
+            if dispatcher_response.intent == IntentType.CATALOG_ROUTE:
+                routed_result = await self._route_to_capability(
+                    request.message,
+                    group_context,
+                    model,
+                    last_resort_model=request.model,
+                    session_id=request.session_id,
+                )
+                if routed_result.get("answer_here"):
+                    logger.info(
+                        "[capability_router] declined mid-conversation; answering "
+                        "the turn instead of running a capability"
+                    )
+                    dispatcher_response.intent = IntentType.GENERATE_CREW
+                    # A light agent, whatever the answer-mode pill says. That
+                    # pill is greyed out in this mode and its stored value could
+                    # be 'deep' — building a full reasoning crew to answer
+                    # "what is this Aviation sector" would spend minutes on a
+                    # question the transcript already answers.
+                    request.chat_mode_type = "chat"
+                    # And no semantic recall for this turn. The answer is in the
+                    # transcript, which the light agent gets either way
+                    # (``_conversation_preamble`` is unconditional). Semantic
+                    # memory would query a shared, topic-polluted pool with a
+                    # short generic question — the exact shape that matches badly
+                    # — and is the only mechanism that could drag a different
+                    # subject into an answer about what is already on screen.
+                    request.disable_memory = True
+                    routed_result = None
 
             # Dispatch to appropriate service based on intent
             generation_result = None
@@ -1459,6 +1418,12 @@ Please analyze this message and provide your intent classification."""
                         "generation_id": generation_id,
                         "type": "streaming",
                     }
+
+                elif dispatcher_response.intent == IntentType.CATALOG_ROUTE:
+                    # Decided above, so the result could rewrite the intent.
+                    # Carries the SAME execute_* shape the slash-command path
+                    # produces, so everything downstream is unchanged.
+                    generation_result = routed_result
 
                 elif dispatcher_response.intent == IntentType.EXECUTE_CREW:
                     run_name = dispatcher_response.extracted_info.get(

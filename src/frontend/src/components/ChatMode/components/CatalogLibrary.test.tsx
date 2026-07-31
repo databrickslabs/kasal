@@ -27,7 +27,7 @@ const renderLib = (over?: {
   return { onLoadCrew, onLoadFlow };
 };
 
-const header = () => screen.getByText('Agents Catalog');
+const header = () => screen.getByText('Catalog');
 
 describe('CatalogLibrary', () => {
   it('renders nothing when both crews and flows are empty', () => {
@@ -35,7 +35,7 @@ describe('CatalogLibrary', () => {
       <CatalogLibrary crews={[]} flows={[]} onLoadCrew={vi.fn()} onLoadFlow={vi.fn()} />,
     );
     expect(container.firstChild).toBeNull();
-    expect(screen.queryByText('Agents Catalog')).not.toBeInTheDocument();
+    expect(screen.queryByText('Catalog')).not.toBeInTheDocument();
   });
 
   it('is collapsed by default — the header shows but item buttons are not visible', () => {
@@ -81,13 +81,13 @@ describe('CatalogLibrary', () => {
   it('does not render the search box when there are 6 or fewer entries', () => {
     renderLib({ crews: crews(4), flows: flows(2) }); // 6 total → no search
     fireEvent.click(header());
-    expect(screen.queryByPlaceholderText('Search agents catalog…')).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('Search catalog…')).not.toBeInTheDocument();
   });
 
   it('renders the search box when there are more than 6 entries and filters case-insensitively', () => {
     renderLib({ crews: crews(5), flows: flows(3) }); // 8 total → search shown
     fireEvent.click(header());
-    const search = screen.getByPlaceholderText('Search agents catalog…');
+    const search = screen.getByPlaceholderText('Search catalog…');
     expect(search).toBeInTheDocument();
 
     // Case-insensitive match: "flow 1" should match "Flow 1" only.
@@ -100,7 +100,7 @@ describe('CatalogLibrary', () => {
   it('shows "No matches" when the query matches nothing', () => {
     renderLib({ crews: crews(5), flows: flows(3) });
     fireEvent.click(header());
-    const search = screen.getByPlaceholderText('Search agents catalog…');
+    const search = screen.getByPlaceholderText('Search catalog…');
     fireEvent.change(search, { target: { value: 'zzz-nothing' } });
     expect(screen.getByText('No matches')).toBeInTheDocument();
     expect(screen.queryByText('Crew 0')).not.toBeInTheDocument();

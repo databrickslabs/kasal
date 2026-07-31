@@ -1,4 +1,8 @@
-"""Schemas for crew publication — the external-facing contract.
+"""Schemas for crew publication — the contract for every surface it feeds.
+
+Two of those surfaces are external (MCP, A2A) and one is internal (``chat``, the
+"Use existing" router). The record is the same either way; only ``protocols``
+says who may reach it.
 
 Validation lives here rather than in the service so a malformed publication is
 rejected at the edge, before anything reaches the repository.
@@ -10,9 +14,14 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-#: The surfaces a crew can be exposed over. Adding one here is the only place a
+#: The surfaces a crew can be published to. Adding one here is the only place a
 #: new protocol needs registering for publication purposes.
-ExternalProtocol = Literal["mcp", "a2a"]
+#:
+#: ``chat`` is INTERNAL — it makes a capability routable from a ChatMode prompt in
+#: "Use existing" mode and exposes nothing outside the workspace. That is why this
+#: is no longer called ``ExternalProtocol``: a literal named External listing an
+#: internal surface encodes a falsehood in the type system.
+PublicationProtocol = Literal["mcp", "a2a", "chat"]
 
 #: What kind of thing is being published. Crews and flows are equal citizens
 #: externally — a caller invokes a capability and does not care which execution
@@ -39,13 +48,21 @@ class CrewPublicationBase(BaseModel):
             "agent matches on, in either protocol."
         ),
     )
-    protocols: List[ExternalProtocol] = Field(
+    protocols: List[PublicationProtocol] = Field(
         default_factory=list,
-        description="Which external surfaces expose this crew.",
+        description=(
+            "Which surfaces may reach this crew. 'mcp' and 'a2a' expose it "
+            "outside the workspace; 'chat' only makes it routable from a "
+            "ChatMode prompt in 'Use existing' mode."
+        ),
     )
     input_schema: Optional[Dict[str, Any]] = Field(
         default=None,
-        description="JSON Schema for the crew's declared inputs.",
+        description=(
+            "JSON Schema for the crew's declared inputs, including which are "
+            "'required'. Authored at publish time — the placeholder syntax "
+            "carries no optionality, so nothing downstream can infer it."
+        ),
     )
 
     @field_validator("external_name")
@@ -62,8 +79,8 @@ class CrewPublicationBase(BaseModel):
     @field_validator("protocols")
     @classmethod
     def validate_protocols_unique(
-        cls, v: List[ExternalProtocol]
-    ) -> List[ExternalProtocol]:
+        cls, v: List[PublicationProtocol]
+    ) -> List[PublicationProtocol]:
         if len(set(v)) != len(v):
             raise ValueError(f"protocols must not repeat (got {v!r})")
         return v
@@ -78,7 +95,7 @@ class CrewPublicationUpdate(BaseModel):
 
     external_name: Optional[str] = None
     description: Optional[str] = Field(default=None, min_length=1, max_length=1024)
-    protocols: Optional[List[ExternalProtocol]] = None
+    protocols: Optional[List[PublicationProtocol]] = None
     input_schema: Optional[Dict[str, Any]] = None
 
     @field_validator("external_name")

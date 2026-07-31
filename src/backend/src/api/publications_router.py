@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, Query
 
 from src.core.dependencies import GroupContextDep, SessionDep
 from src.schemas.crew_publication import CrewPublicationResponse
-from src.services.external.publication import PublicationService
+from src.services.publications.publication import PublicationService
 
 router = APIRouter(
     prefix="/publications",
@@ -43,6 +43,14 @@ async def list_publications(
     entity_type: Annotated[
         str | None, Query(description='Filter to "crew" or "flow".')
     ] = None,
+    protocol: Annotated[
+        str | None,
+        Query(
+            description='Filter to one surface: "mcp", "a2a" or "chat". '
+            'ChatMode asks for "chat" to know whether "Use existing" has '
+            "anything to route to."
+        ),
+    ] = None,
 ):
     """Everything this workspace has published, with entity ids.
 
@@ -50,7 +58,7 @@ async def list_publications(
     with fifty crews should not make fifty round trips just to draw an icon.
     """
     rows = await service.repository.list_published_for_group(
-        group_ids=group_context.group_ids or []
+        group_ids=group_context.group_ids or [], protocol=protocol
     )
     if entity_type:
         rows = [r for r in rows if (r.entity_type or "crew") == entity_type]

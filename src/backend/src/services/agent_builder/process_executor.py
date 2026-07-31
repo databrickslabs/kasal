@@ -1328,10 +1328,16 @@ def run_crew_in_process(
                     from src.services.memory.hooks import (
                         make_memory_context_provider,
                         make_memory_output_sink,
+                        request_from_inputs,
                     )
 
                     crew_memory = getattr(crew, "memory", None)
-                    memory_provider = make_memory_context_provider(crew_memory)
+                    # The run's own request leads the recall query. Without it a
+                    # SAVED crew queries with its fixed task template on every
+                    # run and recalls its own history regardless of subject.
+                    memory_provider = make_memory_context_provider(
+                        crew_memory, request_from_inputs(inputs)
+                    )
                     if memory_provider is not None:
                         crew.context_providers.append(memory_provider)
                     memory_sink = make_memory_output_sink(crew_memory)

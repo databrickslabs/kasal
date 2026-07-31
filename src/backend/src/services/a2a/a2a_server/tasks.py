@@ -26,8 +26,8 @@ from src.services.external.invocation import (
     start_run,
 )
 from src.services.external.permissions import RUN_ROLES, require_role
-from src.services.external.publication import PublicationService
 from src.services.external.state import ExternalTaskState
+from src.services.publications.publication import PublicationService
 
 logger = logging.getLogger(__name__)
 

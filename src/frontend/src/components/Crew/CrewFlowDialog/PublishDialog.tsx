@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Box,
@@ -18,11 +18,47 @@ import {
 import PublicIcon from '@mui/icons-material/Public';
 
 import { PublicationService } from '../../../api/workflow/PublicationService';
+import { useAppStore as useChatAppStore } from '../../ChatMode/store/appStore';
 import {
-  ExternalProtocol,
+  PublicationProtocol,
   PublicationResponse,
   PublishableEntity,
 } from '../../../types/workflow/publication';
+import PublishInputSchema from './PublishInputSchema';
+import {
+  PublicationInputField,
+  buildInputSchema,
+  deriveCrewInputFields,
+  deriveFlowInputFields,
+  fieldsFromSchema,
+} from './publicationInputFields';
+
+/**
+ * What a brand-new publication is exposed over.
+ *
+ * All three: publishing is an explicit act, and the surfaces are individually
+ * untickable right there in the dialog. The alternative — defaulting to the
+ * external pair, as this did before `chat` existed — meant a crew the publisher
+ * wanted reachable from their own chat box arrived exposed to MCP and A2A and
+ * NOT to chat, which is the opposite of what they asked for on both counts.
+ */
+const DEFAULT_PROTOCOLS: PublicationProtocol[] = ['mcp', 'a2a', 'chat'];
+
+/**
+ * Reload the chat-mode catalog after a publication changes.
+ *
+ * That catalog is now filtered to what is published TO CHAT, so publishing is
+ * what puts something in the rail and enables the composer's "Use existing"
+ * control. Without this the change is only visible after a reload — the user
+ * publishes, goes to chat, and finds their crew missing.
+ *
+ * Same seam SaveCrew uses for the same reason (`components/Crew/SaveCrew.tsx`);
+ * everything downstream is subscribed to that store, so one call updates the
+ * rail and the pill together.
+ */
+const refreshChatCatalog = () => {
+  void useChatAppStore.getState().loadCatalog();
+};
 
 interface PublishDialogProps {
   open: boolean;
@@ -31,6 +67,13 @@ interface PublishDialogProps {
   entityId: string;
   /** The crew or flow name, used to seed the external name and description. */
   entityName: string;
+  /**
+   * The crew's or flow's nodes, used to derive the declared input fields.
+   * Omitted, the dialog still publishes — the publisher just adds fields by
+   * hand, and a capability with no schema makes every consumer treat all its
+   * placeholders as required.
+   */
+  nodes?: unknown[];
   /** Notifies the catalog so its Published chip updates without a refetch. */
   onChanged?: (published: boolean) => void;
 }
@@ -57,6 +100,7 @@ const PublishDialog: React.FC<PublishDialogProps> = ({
   entityType,
   entityId,
   entityName,
+  nodes,
   onChanged,
 }) => {
   const [loading, setLoading] = useState(false);
@@ -66,7 +110,21 @@ const PublishDialog: React.FC<PublishDialogProps> = ({
 
   const [externalName, setExternalName] = useState('');
   const [description, setDescription] = useState('');
-  const [protocols, setProtocols] = useState<ExternalProtocol[]>(['mcp', 'a2a']);
+  const [protocols, setProtocols] = useState<PublicationProtocol[]>(DEFAULT_PROTOCOLS);
+  const [inputFields, setInputFields] = useState<PublicationInputField[]>([]);
+
+  // The placeholders actually written into this crew's or flow's text. Derived
+  // from the nodes rather than from the saved schema, because the point is to
+  // compare the two: a declared field with no placeholder behind it is passed to
+  // every run and read by nothing.
+  const usedPlaceholders = useMemo(
+    () =>
+      (entityType === 'flow'
+        ? deriveFlowInputFields(nodes ?? [])
+        : deriveCrewInputFields(nodes ?? [])
+      ).map((f) => f.name),
+    [entityType, nodes],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -78,19 +136,28 @@ const PublishDialog: React.FC<PublishDialogProps> = ({
       // not silently rewrite a name external clients have already pinned.
       setExternalName(publication?.external_name ?? toExternalName(entityName));
       setDescription(publication?.description ?? '');
-      setProtocols(publication?.protocols ?? ['mcp', 'a2a']);
+      setProtocols(publication?.protocols ?? DEFAULT_PROTOCOLS);
+      // A publication saved before this editor existed has no schema at all, so
+      // fall through to deriving one rather than showing an empty list — the
+      // whole back catalogue is in that state.
+      setInputFields(
+        fieldsFromSchema(publication?.input_schema) ??
+          (entityType === 'flow'
+            ? deriveFlowInputFields(nodes ?? [])
+            : deriveCrewInputFields(nodes ?? [])),
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load publication');
     } finally {
       setLoading(false);
     }
-  }, [entityType, entityId, entityName]);
+  }, [entityType, entityId, entityName, nodes]);
 
   useEffect(() => {
     if (open) void load();
   }, [open, load]);
 
-  const toggleProtocol = (protocol: ExternalProtocol) => {
+  const toggleProtocol = (protocol: PublicationProtocol) => {
     setProtocols((current) =>
       current.includes(protocol)
         ? current.filter((p) => p !== protocol)
@@ -106,7 +173,9 @@ const PublishDialog: React.FC<PublishDialogProps> = ({
         external_name: externalName,
         description,
         protocols,
+        input_schema: buildInputSchema(inputFields),
       });
+      refreshChatCatalog();
       onChanged?.(true);
       onClose();
     } catch (e) {
@@ -123,6 +192,7 @@ const PublishDialog: React.FC<PublishDialogProps> = ({
     setError(null);
     try {
       await PublicationService.unpublish(entityType, entityId);
+      refreshChatCatalog();
       onChanged?.(false);
       onClose();
     } catch (e) {
@@ -153,7 +223,7 @@ const PublishDialog: React.FC<PublishDialogProps> = ({
       onKeyDown={(event) => event.stopPropagation()}>
       <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         <PublicIcon fontSize="small" />
-        Publish {entityType} externally
+        Publish {entityType}
         {existing && <Chip size="small" color="success" label="Published" />}
       </DialogTitle>
 
@@ -165,9 +235,9 @@ const PublishDialog: React.FC<PublishDialogProps> = ({
         ) : (
           <Stack spacing={2} sx={{ mt: 1 }}>
             <Typography variant="body2" color="text.secondary">
-              Publishing makes <strong>{entityName}</strong> callable by agents
-              outside this workspace — Claude Code, Cursor or any MCP/A2A client.
-              Nothing is exposed until you publish it.
+              Publishing makes <strong>{entityName}</strong> reachable by something
+              other than the canvas. Pick where below — publishing to chat alone
+              exposes nothing outside this workspace.
             </Typography>
 
             {error && <Alert severity="error">{error}</Alert>}
@@ -195,14 +265,33 @@ const PublishDialog: React.FC<PublishDialogProps> = ({
               minRows={3}
               size="small"
               helperText={
-                'What it does AND when to use it. This is the only thing a calling ' +
-                'agent matches on — a vague description means it is never chosen.'
+                'What it does AND when to use it. This is the only thing a caller ' +
+                'matches on — a vague description means it is never chosen. Chat ' +
+                'routing has the least context of any caller, so name the phrases ' +
+                'someone would actually type.'
               }
             />
 
             <Box>
               <Typography variant="subtitle2" gutterBottom>
-                Expose over
+                Reachable from
+              </Typography>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={protocols.includes('chat')}
+                    onChange={() => toggleProtocol('chat')}
+                  />
+                }
+                label="Chat — let this be picked in Use existing mode"
+              />
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                display="block"
+                sx={{ ml: 4, mt: -0.5, mb: 0.5 }}
+              >
+                Inside this workspace only. Nothing is exposed outside it.
               </Typography>
               <FormControlLabel
                 control={
@@ -224,10 +313,17 @@ const PublishDialog: React.FC<PublishDialogProps> = ({
               />
               {protocols.length === 0 && (
                 <Typography variant="caption" color="warning.main" display="block">
-                  With no protocol selected this is not exposed anywhere.
+                  With nothing selected this is not reachable from anywhere.
                 </Typography>
               )}
             </Box>
+
+            <PublishInputSchema
+              fields={inputFields}
+              onChange={setInputFields}
+              entityLabel={entityType}
+              usedPlaceholders={usedPlaceholders}
+            />
           </Stack>
         )}
       </DialogContent>

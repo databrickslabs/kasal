@@ -6,11 +6,11 @@ import {
 } from '../../types/workflow/publication';
 
 /**
- * Publishing crews and flows to external agents (MCP / A2A).
+ * Publishing crews and flows — to external agents (MCP / A2A) and to chat.
  *
- * One service for both, because the backend is one table: only the URL segment
- * differs. A separate CrewPublicationService and FlowPublicationService would be
- * two places to fix the day the payload changes.
+ * One service for both entity kinds, because the backend is one table: only the
+ * URL segment differs. A separate CrewPublicationService and
+ * FlowPublicationService would be two places to fix the day the payload changes.
  */
 export class PublicationService {
   private static basePath(entity: PublishableEntity, id: string): string {
@@ -68,7 +68,22 @@ export class PublicationService {
     return (response.data ?? []).map((p) => String(p.entity_id)).filter(Boolean);
   }
 
-  /** Withdraw from every external surface. */
+  /**
+   * The entity ids of everything published to chat — what "Use existing" can
+   * route to, and what the rail's Catalog section lists.
+   *
+   * Ids only. The router does its own group-scoped read server-side, so the
+   * client never needs the descriptions; asking for them would put every
+   * capability's prose on the wire to draw a list of names.
+   */
+  static async listChatPublished(): Promise<string[]> {
+    const response = await API.get<PublicationResponse[]>('/publications', {
+      params: { protocol: 'chat' },
+    });
+    return (response.data ?? []).map((p) => String(p.entity_id)).filter(Boolean);
+  }
+
+  /** Withdraw from every surface, internal and external. */
   static async unpublish(entity: PublishableEntity, id: string): Promise<void> {
     await API.delete(this.basePath(entity, id));
   }

@@ -22,7 +22,7 @@ from src.schemas.crew_publication import (
 )
 from src.services.catalog.crew_feedback import CrewFeedbackService
 from src.services.catalog.crews import CrewService
-from src.services.external.publication import PublicationService
+from src.services.publications.publication import PublicationService
 
 router = APIRouter(
     prefix="/crews",

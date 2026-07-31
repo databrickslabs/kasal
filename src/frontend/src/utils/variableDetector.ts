@@ -2,7 +2,17 @@
  * Detects {variable_name} placeholders in crew/plan data so the UI
  * can prompt the user for values before execution.
  *
- * Uses the same regex as the main Kasal frontend InputVariablesDialog.
+ * Uses the same regex as InputVariablesDialog.
+ *
+ * Shared rather than ChatMode-local: the publish dialog derives a capability's
+ * declared input fields from the same placeholders ChatMode later prompts for.
+ * Those two must agree, and the way they stop agreeing is a second copy of the
+ * regex.
+ *
+ * Note what it CANNOT tell you: a `{placeholder}` carries no optionality, so
+ * every variable comes back `required: true`. Deciding that a `quarter` is
+ * required and a `format` is not needs a human, which is what the publish
+ * dialog's input schema is for.
  */
 
 export interface DetectedVariable {

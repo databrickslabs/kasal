@@ -21,8 +21,8 @@ from src.schemas.execution_history import (
 from src.schemas.flow import FlowCreate, FlowResponse, FlowUpdate
 from src.services.execution.checkpointing.service import CheckpointService
 from src.services.execution.history import ExecutionHistoryService
-from src.services.external.publication import PublicationService
 from src.services.flow_builder.flow_service import FlowService
+from src.services.publications.publication import PublicationService
 
 router = APIRouter(
     prefix="/flows",

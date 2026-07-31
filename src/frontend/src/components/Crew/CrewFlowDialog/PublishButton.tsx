@@ -10,6 +10,8 @@ interface PublishButtonProps {
   entityType: PublishableEntity;
   entityId: string;
   entityName: string;
+  /** Its nodes, so the dialog can derive the input fields it declares. */
+  nodes?: unknown[];
   /** Whether it is currently published, so the icon can say so at a glance. */
   published?: boolean;
   onChanged?: (published: boolean) => void;
@@ -27,6 +29,7 @@ const PublishButton: React.FC<PublishButtonProps> = ({
   entityType,
   entityId,
   entityName,
+  nodes,
   published = false,
   onChanged,
 }) => {
@@ -45,8 +48,8 @@ const PublishButton: React.FC<PublishButtonProps> = ({
       <Tooltip
         title={
           isPublished
-            ? `Published — callable by external agents. Click to edit or unpublish.`
-            : `Publish this ${entityType} so external agents can call it`
+            ? `Published. Click to edit where it is reachable from, or unpublish.`
+            : `Publish this ${entityType} so chat or an external agent can run it`
         }
       >
         <IconButton
@@ -75,6 +78,7 @@ const PublishButton: React.FC<PublishButtonProps> = ({
           entityType={entityType}
           entityId={entityId}
           entityName={entityName}
+          nodes={nodes}
           onChanged={handleChanged}
         />
       )}

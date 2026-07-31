@@ -10,15 +10,19 @@ streaming translation, and nothing else.
                    └──────┬───────┘        └──────┬───────┘
                           └────────┬──────────────┘
                         ┌──────────▼───────────┐
-                        │  External Invocation │  publication · identity
-                        │  Layer               │  state · (invocation, HITL,
-                        │                      │   artifacts, limits to come)
+                        │  External Invocation │  identity · state · invocation
+                        │  Layer               │  artifacts · streaming · HITL
                         └──────────┬───────────┘
                         ┌──────────▼───────────┐
                         │ services/execution/  │  unchanged
                         └──────────────────────┘
 
-The reason for the shared core is not tidiness. Publication, identity, async
+The registry of what is published lives in ``services/publications/``, not here.
+It is protocol-neutral — ChatMode's "Use existing" router reads the same rows —
+and keeping it under ``external/`` invited wrapping an internal ``GroupContext``
+in an ``ExternalCaller`` just to fit the neighbouring API.
+
+The reason for the shared core is not tidiness. Identity, async
 handles, task state and HITL are the same problems in both protocols, and they
 are precisely the problems where a mistake leaks tenant data. Written twice,
 they drift the first time one is patched and the other is not — and a fix
@@ -37,7 +41,6 @@ from src.services.external.identity import (
     ExternalCaller,
     resolve_caller,
 )
-from src.services.external.publication import PublicationService
 from src.services.external.state import (
     TERMINAL_STATES,
     ExternalTaskState,
@@ -49,7 +52,6 @@ __all__ = [
     "ExternalAuthError",
     "ExternalCaller",
     "ExternalTaskState",
-    "PublicationService",
     "TERMINAL_STATES",
     "is_terminal",
     "resolve_caller",

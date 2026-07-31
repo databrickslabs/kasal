@@ -16,10 +16,72 @@ import { useSessionStore } from '../store/sessionStore';
 import { useExecutionStore } from '../store/executionStore';
 import { useAppStore } from '../store/appStore';
 import { PlanData, FlowData } from '../hooks/useDispatcher';
-import { GenerationCompleteData } from '../types/dispatcher';
+import { GenerationCompleteData, RoutedRunFields } from '../types/dispatcher';
 import { buildCrewConfig, buildFlowConfig, buildCrewConfigFromGenerated } from '../utils/crewConfigBuilder';
-import { detectVariablesFromNodes, detectVariablesFromGenerated } from '../utils/variableDetector';
+import {
+  DetectedVariable,
+  detectVariablesFromNodes,
+  detectVariablesFromGenerated,
+} from '../../../utils/variableDetector';
 import { getSessionPreview } from '../db/sessionApi';
+
+/**
+ * What the user still has to be asked for.
+ *
+ * Three sources, in priority order, and the order is the whole point:
+ *
+ * 1. `input_schema.required` when the publication has one — AUTHORITATIVE.
+ *    It is the only place a human said "quarter is required, format is not";
+ *    the `{placeholder}` syntax carries no optionality at all.
+ * 2. otherwise every detected placeholder, all treated as required. This is not
+ *    a defensive nicety: every publication that predates the schema editor has
+ *    `input_schema: null`, and re-publishing is the only thing that fills it, so
+ *    this is the live path for the whole back catalogue.
+ * 3. minus whatever the router already bound from the user's own sentence.
+ *
+ * An ABSENT `required` array is not an empty one — absent means nobody has said
+ * (fall back), empty means the publisher said nothing is required.
+ */
+export function resolveMissingVariables(
+  nodes: unknown[],
+  routed?: RoutedRunFields,
+): DetectedVariable[] {
+  const bound = routed?.extractedInputs ?? {};
+  const declared = routed?.inputSchema?.required;
+
+  const required: DetectedVariable[] =
+    declared === undefined
+      ? detectVariablesFromNodes(nodes)
+      : declared.map((name) => ({ name, required: true }));
+
+  return required.filter((v) => bound[v.name] === undefined);
+}
+
+/**
+ * The inputs a routed run actually sends.
+ *
+ * Three sources, and each is a different KIND of thing, which is why they are
+ * separate keys rather than merged into one blob:
+ *   - the crew's own declared variables, bound from the prompt;
+ *   - `user_request`, the sentence this run exists to answer (what memory
+ *     recall queries on);
+ *   - `referenced_answer`, the earlier answer this run works FROM, when the
+ *     request acts on one ("turn this into a deck").
+ *
+ * Absent keys stay absent — an unrouted run sends exactly what it sent before.
+ */
+export function buildRunInputs(
+  inputs?: Record<string, string>,
+  request?: string,
+  referencedAnswer?: string | null,
+): Record<string, string> | undefined {
+  if (!request && !referencedAnswer) return inputs;
+  return {
+    ...(inputs || {}),
+    ...(request ? { user_request: request } : {}),
+    ...(referencedAnswer ? { referenced_answer: referencedAnswer } : {}),
+  };
+}
 
 interface UseChatExecutionActionsArgs {
   /** From useChatRunStream — hands a started job to the SSE/polling pipeline. */
@@ -45,10 +107,25 @@ export function useChatExecutionActions({
     data?: GenerationCompleteData;
     spaceId?: string;
     originSession?: string | null;
+    /**
+     * Values the router already bound from the user's prompt. Held here so a
+     * routed run that stops to ask for ONE missing field does not lose the
+     * three it already had — the card only ever collects what was missing.
+     */
+    boundInputs?: Record<string, string>;
+    /** The prompt that selected this capability — see doExecuteCrew. */
+    request?: string;
+    /** The earlier answer this run works from — see doExecuteCrew. */
+    referencedAnswer?: string | null;
   } | null>(null);
 
   const doExecuteCrew = useCallback(
-    async (plan: PlanData, inputs?: Record<string, string>) => {
+    async (
+      plan: PlanData,
+      inputs?: Record<string, string>,
+      request?: string,
+      referencedAnswer?: string | null,
+    ) => {
       // Capture the session ID NOW, before the async createExecution call.
       // If the user switches sessions during the API call, currentSessionId
       // will have changed, but originSessionId preserves the correct owner.
@@ -75,7 +152,11 @@ export function useChatExecutionActions({
         const crewConfig = buildCrewConfig(
           plan,
           selectedModel || undefined,
-          inputs,
+          // The run's own request rides along as `user_request`. It is what
+          // memory recall queries on — a saved crew's task description is
+          // identical on every run, so without it recall matches the crew's
+          // own history rather than what was actually asked for.
+          buildRunInputs(inputs, request, referencedAnswer),
           useExecutionStore.getState().memoryEnabled,
           // Agent Bricks endpoints picked in the "+" menu — equip + configure the
           // tool on this loaded crew so it has the endpoint (else "not configured").
@@ -101,19 +182,33 @@ export function useChatExecutionActions({
   );
 
   const handleExecuteCrew = useCallback(
-    async (plan: PlanData) => {
-      const vars = detectVariablesFromNodes(plan.nodes || []);
-      if (vars.length > 0) {
-        setPendingExecution({ type: 'crew', plan });
+    async (plan: PlanData, routed?: RoutedRunFields) => {
+      const missing = resolveMissingVariables(plan.nodes || [], routed);
+
+      if (missing.length > 0) {
+        setPendingExecution({
+          type: 'crew',
+          plan,
+          // What the router already bound survives the detour through the card,
+          // so the user is never asked again for something they already said.
+          boundInputs: routed?.extractedInputs,
+          request: routed?.request,
+          referencedAnswer: routed?.referencedAnswer,
+        });
         addMessage('assistant', 'This crew needs input variables before it can run.', {
           resultType: 'input_variables',
-          resultData: { variables: vars },
+          resultData: { variables: missing },
         });
         return;
       }
-      doExecuteCrew(plan);
+      doExecuteCrew(
+        plan,
+        routed?.extractedInputs,
+        routed?.request,
+        routed?.referencedAnswer,
+      );
     },
-    [doExecuteCrew],
+    [doExecuteCrew, addMessage],
   );
 
   const doExecuteGenerated = useCallback(
@@ -377,7 +472,14 @@ export function useChatExecutionActions({
       }
       // pending is always a crew (carrying a plan) or a generated crew (carrying data).
       if (pending.type === 'crew') {
-        doExecuteCrew(pending.plan as PlanData, inputs);
+        // Anything the router bound comes FIRST, so a value the user typed into
+        // the card wins on a key collision — they are looking at the field.
+        doExecuteCrew(
+          pending.plan as PlanData,
+          { ...(pending.boundInputs ?? {}), ...inputs },
+          pending.request,
+          pending.referencedAnswer,
+        );
       } else {
         doExecuteGenerated(pending.data as GenerationCompleteData, pending.spaceId, inputs, { originSession: pending.originSession });
       }

@@ -10,6 +10,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
+from src.schemas.dispatcher import IntentType
 from src.utils.prompt_utils import robust_json_parser
 
 logger = logging.getLogger(__name__)
@@ -41,14 +42,15 @@ _CATEGORICAL_GRADES = {
 
 JUDGE_SPREAD_WARN = 0.3
 
-VALID_INTENTS = {
-    "generate_task",
-    "generate_agent",
-    "generate_crew",
-    "execute_crew",
-    "configure_crew",
-    "unknown",
-}
+#: Every member of ``IntentType``. A predicted intent outside this set scores 0.0
+#: (``template_runner`` gates on it), so a missing member does not degrade
+#: grading — it marks a CORRECT answer as malformed. This listed six of the
+#: seventeen intents for a while, which quietly zero-graded every right
+#: ``catalog_list`` / ``flow_load`` / ``execute_flow``.
+#:
+#: Derived from the enum rather than retyped, so adding an intent cannot leave it
+#: behind again.
+VALID_INTENTS = {intent.value for intent in IntentType}
 
 
 def _judge_value_to_grade(value: Any) -> Optional[float]:

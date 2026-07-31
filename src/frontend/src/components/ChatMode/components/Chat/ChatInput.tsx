@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { ModelConfigResponse } from '../../types/dispatcher';
 import {
   answerModeDisabledReason,
@@ -8,6 +8,9 @@ import {
   modelDisplayName as resolveModelDisplayName,
   modelLacksReasoning,
 } from '../../utils/answerModes';
+import { ANSWER_MODE_LOCKED_REASON } from '../../utils/sourceModes';
+import SourcePill from './SourcePill';
+import { useAnchoredFixedStyle } from '../../hooks/useAnchoredFixedStyle';
 import { forgetKnowledgeFile, uploadKnowledgeFile } from '../../api/knowledge';
 import { improveChatPrompt } from '../../api/prompt';
 import McpPicker from './McpPicker';
@@ -169,51 +172,6 @@ const prefersReducedMotion = () =>
   typeof window.matchMedia === 'function' &&
   window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-// Width of the composer pop-up menus (matches Tailwind `w-72` = 18rem).
-const MENU_WIDTH = 288;
-
-/**
- * Anchored fixed-position style for a composer pop-up menu.
- *
- * The pills sit inside the chat's `overflow-hidden` layout containers (the
- * <main> column + the chat scroll wrapper). An `absolute` menu that extends
- * past those bounds — which happens once the sidebar narrows <main> — gets
- * CLIPPED, so the menu appears to vanish "behind" the sidebar. `position: fixed`
- * is positioned against the viewport and is NOT clipped by an ancestor's
- * overflow, while keeping the menu a DOM child of the picker wrapper (so the
- * outside-click `contains()` checks and the #kasal-chat-root theme/Tailwind
- * scope both still apply). We compute the coords from the trigger: right-edge
- * aligned to it, opening up or down per `placement`, clamped to the viewport.
- */
-function useAnchoredFixedStyle(
-  open: boolean,
-  anchorRef: React.RefObject<HTMLElement>,
-  placement: 'up' | 'down',
-): React.CSSProperties {
-  const [style, setStyle] = useState<React.CSSProperties>({ position: 'fixed' });
-  useLayoutEffect(() => {
-    const el = anchorRef.current;
-    if (!open || !el) return;
-    const update = () => {
-      const r = el.getBoundingClientRect();
-      const left = Math.max(8, Math.min(r.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8));
-      setStyle(
-        placement === 'down'
-          ? { position: 'fixed', left, top: r.bottom + 8, width: MENU_WIDTH }
-          : { position: 'fixed', left, bottom: window.innerHeight - r.top + 8, width: MENU_WIDTH },
-      );
-    };
-    update();
-    window.addEventListener('resize', update);
-    window.addEventListener('scroll', update, true);
-    return () => {
-      window.removeEventListener('resize', update);
-      window.removeEventListener('scroll', update, true);
-    };
-  }, [open, placement, anchorRef]);
-  return style;
-}
-
 const ChatInput: React.FC<ChatInputProps> = ({
   onSend,
   disabled = false,
@@ -263,6 +221,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const chatModeType = useExecutionStore((s) => s.chatModeType);
   const setChatModeType = useExecutionStore((s) => s.setChatModeType);
   const activeMode = MODES.find((m) => m.id === chatModeType) ?? MODES[0];
+  // The SOURCE axis. Only read here to grey the answer-mode pill — the control
+  // itself owns its own state in SourcePill. chatModeType is deliberately left
+  // alone while this is on: the user gets their selection back on switching
+  // back, and it is what the "build one instead" offer runs at.
+  const preferExisting = useExecutionStore((s) => s.preferExisting);
   // Whether the SELECTED model can spend a reasoning budget. Drives the mode
   // hints and disables Deep Research, which on such a model is byte-for-byte
   // identical to Research (the engine drops the effort).
@@ -825,89 +788,119 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 menuPlacement — never off at the screen's side. Chat = single
                 light agent; Research = crew + balanced reasoning; Deep Research
                 = crew + maximum reasoning. Store-owned so it persists. */}
-            <div className="relative" ref={modePickerRef}>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowModePicker(!showModePicker);
-                  setShowModelPicker(false);
-                  setShowCommands(false);
-                }}
-                aria-label={`Answer mode: ${activeMode.label}`}
-                title={answerModeHint(activeMode.id, lacksReasoning)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
-                style={{ color: 'var(--text-secondary)', backgroundColor: 'transparent', border: 'none' }}
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-                </svg>
-                <span>{activeMode.short}</span>
-                <svg
-                  className={`w-3 h-3 transition-transform ${showModePicker ? 'rotate-180' : ''}`}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2.5}
+            {/* Source pill: build something new, or run something already
+                published to chat. A different axis from the answer mode beside
+                it, which is why it is a separate control and not a fourth chip. */}
+            <SourcePill
+              menuPlacement={menuPlacement}
+              menuAnimClass={menuAnimClass}
+              onPicked={() => inputRef.current?.focus()}
+            />
+
+            {/* Answer mode is HIDDEN, not greyed, while "Use existing" is
+                selected. A saved crew carries its own agents, tasks, process and
+                model, so the effort dial has nothing to act on — and a control
+                that is visible but permanently inert reads as broken rather than
+                as inapplicable. The dependency is still legible: the source pill
+                sitting where the mode pill was is the thing that changed. */}
+            {!preferExisting && (
+              <div className="relative" ref={modePickerRef}>
+                <button
+                  type="button"
+                  disabled={preferExisting}
+                  onClick={() => {
+                    if (preferExisting) return;
+                    setShowModePicker(!showModePicker);
+                    setShowModelPicker(false);
+                    setShowCommands(false);
+                  }}
+                  aria-label={`Answer mode: ${activeMode.label}`}
+                  // Greyed rather than hidden while "Use existing" is selected: a
+                  // saved crew carries its own agents, tasks, process and model,
+                  // so the effort dial has nothing to act on. Saying so makes the
+                  // dependency VISIBLE — the failure of the fourth-chip design was
+                  // that it made it silent, and the user found out later.
+                  title={
+                    preferExisting
+                      ? ANSWER_MODE_LOCKED_REASON
+                      : answerModeHint(activeMode.id, lacksReasoning)
+                  }
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                    preferExisting ? 'opacity-40 cursor-not-allowed' : 'hover:opacity-80'
+                  }`}
+                  style={{ color: 'var(--text-secondary)', backgroundColor: 'transparent', border: 'none' }}
                 >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                </svg>
-              </button>
-              {showModePicker && (
-                <div
-                  className={`kasal-popover ${menuAnimClass} w-72 rounded-xl overflow-hidden z-50`}
-                  style={{ ...modeMenuStyle, backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)' }}
-                >
-                  <div className="px-3 py-2">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-                      Answer mode
-                    </span>
-                  </div>
-                  <div className="px-1.5 pb-1.5">
-                    {MODES.map((m) => {
-                      const modeDisabled = isAnswerModeDisabled(m.id, lacksReasoning);
-                      return (
-                        <button
-                          key={m.id}
-                          disabled={modeDisabled}
-                          onClick={() => {
-                            if (modeDisabled) return;
-                            setChatModeType(m.id);
-                            setShowModePicker(false);
-                            inputRef.current?.focus();
-                          }}
-                          aria-label={`Answer mode: ${m.label}`}
-                          title={modeDisabled ? answerModeDisabledReason(reasoningModelName) : undefined}
-                          className={`w-full text-left !px-2.5 !py-2 my-0.5 rounded-lg flex items-center justify-between transition-colors ${
-                            modeDisabled
-                              ? 'opacity-50 cursor-not-allowed'
-                              : m.id === chatModeType
-                                ? 'bg-[var(--bg-active-chip)]'
-                                : 'hover:bg-[var(--bg-rail-hover)]'
-                          }`}
-                        >
-                          <div>
-                            <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{m.label}</div>
-                            <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                              {answerModeHint(m.id, lacksReasoning)}
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                  </svg>
+                  <span>{activeMode.short}</span>
+                  <svg
+                    className={`w-3 h-3 transition-transform ${showModePicker ? 'rotate-180' : ''}`}
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2.5}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                  </svg>
+                </button>
+                {showModePicker && (
+                  <div
+                    className={`kasal-popover ${menuAnimClass} w-72 rounded-xl overflow-hidden z-50`}
+                    style={{ ...modeMenuStyle, backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)' }}
+                  >
+                    <div className="px-3 py-2">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                        Answer mode
+                      </span>
+                    </div>
+                    <div className="px-1.5 pb-1.5">
+                      {MODES.map((m) => {
+                        const modeDisabled = isAnswerModeDisabled(m.id, lacksReasoning);
+                        return (
+                          <button
+                            key={m.id}
+                            disabled={modeDisabled}
+                            onClick={() => {
+                              if (modeDisabled) return;
+                              setChatModeType(m.id);
+                              setShowModePicker(false);
+                              inputRef.current?.focus();
+                            }}
+                            aria-label={`Answer mode: ${m.label}`}
+                            title={modeDisabled ? answerModeDisabledReason(reasoningModelName) : undefined}
+                            className={`w-full text-left !px-2.5 !py-2 my-0.5 rounded-lg flex items-center justify-between transition-colors ${
+                              modeDisabled
+                                ? 'opacity-50 cursor-not-allowed'
+                                : m.id === chatModeType
+                                  ? 'bg-[var(--bg-active-chip)]'
+                                  : 'hover:bg-[var(--bg-rail-hover)]'
+                            }`}
+                          >
+                            <div>
+                              <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{m.label}</div>
+                              <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                                {answerModeHint(m.id, lacksReasoning)}
+                              </div>
                             </div>
-                          </div>
-                          {m.id === chatModeType && !modeDisabled && (
-                            <svg className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--accent)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                            </svg>
-                          )}
-                        </button>
-                      );
-                    })}
-                    {lacksReasoning && (
-                      <div className="!px-2.5 !py-2 text-[11px] leading-snug" style={{ color: 'var(--text-muted)' }}>
-                        {answerModeDisabledReason(reasoningModelName)}
-                      </div>
-                    )}
+                            {m.id === chatModeType && !modeDisabled && (
+                              <svg className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--accent)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </button>
+                        );
+                      })}
+                      {lacksReasoning && (
+                        <div className="!px-2.5 !py-2 text-[11px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+                          {answerModeDisabledReason(reasoningModelName)}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
 
             {/* Memory toggle — a single button that flips between Workspace
                 memory (semantic memory on) and Session memory (chat-history only).

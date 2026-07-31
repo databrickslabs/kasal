@@ -363,7 +363,7 @@ def _dedupe_flow_agent_task_tools(agents: List[Any], task_list: List[Any]) -> No
         logger.debug(f"[FLOW] agent∩task tool de-dupe skipped: {e}")
 
 
-def attach_memory_seams(crew: Any, crew_label: str) -> None:
+def attach_memory_seams(crew: Any, crew_label: str, request: str | None = None) -> None:
     """Wire runtime recall + per-task persistence onto an already-built crew.
 
     MUST be called for every flow crew that has memory configured. The engine
@@ -382,7 +382,11 @@ def attach_memory_seams(crew: Any, crew_label: str) -> None:
         )
 
         crew_memory = getattr(crew, "memory", None)
-        memory_provider = make_memory_context_provider(crew_memory)
+        # ``request`` leads the recall query so a saved crew does not match its
+        # own history on template text alone. Always None here today: a flow
+        # cannot receive inputs at all yet (kickoff_async takes none), so there
+        # is nothing carrying the run's request. Wire it when that lands.
+        memory_provider = make_memory_context_provider(crew_memory, request)
         if memory_provider is not None:
             crew.context_providers.append(memory_provider)
         memory_sink = make_memory_output_sink(crew_memory)

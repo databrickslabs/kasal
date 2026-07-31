@@ -52,7 +52,7 @@ from src.services.external.permissions import (
     RUN_ROLES,
     require_role,
 )
-from src.services.external.publication import PublicationService
+from src.services.publications.publication import PublicationService
 
 logger = logging.getLogger(__name__)
 

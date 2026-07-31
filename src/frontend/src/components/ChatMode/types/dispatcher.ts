@@ -1,3 +1,5 @@
+import { PublicationInputSchema } from '../../../types/workflow/publication';
+
 export type IntentType =
   | 'generate_agent'
   | 'generate_task'
@@ -17,6 +19,13 @@ export type IntentType =
   | 'execute_flow'
   | 'catalog_delete'
   | 'flow_delete'
+  /**
+   * Route this prompt to an ALREADY PUBLISHED crew or flow instead of building
+   * one. Its generation_result is an ordinary `execute_crew` / `execute_flow`
+   * — deliberately, so everything downstream is unchanged — or a
+   * `catalog_no_match`.
+   */
+  | 'catalog_route'
   | 'unknown';
 
 export interface DispatcherRequest {
@@ -47,6 +56,17 @@ export interface DispatcherRequest {
   knowledge_file_paths?: string[];
   /** Answer mode: 'chat' = single light agent, 'research' = crew + medium reasoning effort, 'deep' = crew + high reasoning effort. */
   chat_mode_type?: 'chat' | 'research' | 'deep';
+  /**
+   * True when the user picked "Use existing": run something already published
+   * rather than building something new.
+   *
+   * Its own field, NOT a fourth `chat_mode_type`. They are different axes —
+   * `chat_mode_type` says what SHAPE to build, this says whether to build at
+   * all. The catalogue only stores crews, so reuse could never honour 'chat',
+   * and a fourth answer mode would be a value that silently invalidates its own
+   * neighbours.
+   */
+  prefer_existing?: boolean;
 }
 
 /** ChatMode run settings gathered from the execution store at dispatch time. */
@@ -59,6 +79,8 @@ export interface DispatchRunSettings {
   agentbricks_endpoints?: string[];
   knowledge_file_paths?: string[];
   chat_mode_type?: 'chat' | 'research' | 'deep';
+  /** @see DispatcherRequest.prefer_existing — the SOURCE axis, not the shape. */
+  prefer_existing?: boolean;
 }
 
 export interface DispatcherResponse {
@@ -209,14 +231,87 @@ export interface FlowDeleteResult {
   message: string;
 }
 
-export interface ExecuteCrewResult {
+/**
+ * What "Use existing" routing adds to an execute result.
+ *
+ * Both keys are about asking the user as little as possible: `extracted_inputs`
+ * is what the router could bind from the sentence they already typed, and
+ * `input_schema` is the authority on what is actually required. Without the
+ * schema the consumer falls back to treating every detected `{placeholder}` as
+ * required — correct, but it interrogates the user for cosmetic ones too.
+ */
+export interface RoutedResultFields {
+  /** Values bound from the prompt. Only ever things the user actually said. */
+  extracted_inputs?: Record<string, string>;
+  input_schema?: PublicationInputSchema | null;
+  /** The published capability's external name, for the log and the UI. */
+  capability?: string;
+  routed_from?: string;
+  /**
+   * The sentence that selected this capability, sent on to the run as
+   * `user_request`. Memory recall queries on it: a saved crew's task
+   * description is byte-identical on every run, so without it recall matches
+   * the crew's own history instead of this run's subject.
+   */
+  request?: string;
+  /**
+   * The earlier answer this run works FROM, when the router pointed at one.
+   * "Turn this into a deck" is useless if the deck crew starts from nothing —
+   * it re-does the gathering, and against a polluted memory pool it re-gathers
+   * the wrong subject.
+   */
+  referenced_answer?: string | null;
+}
+
+export interface ExecuteCrewResult extends RoutedResultFields {
   plan?: CatalogLoadResult['plan'];
   message: string;
 }
 
-export interface ExecuteFlowResult {
+export interface ExecuteFlowResult extends RoutedResultFields {
   flow?: FlowLoadResult['flow'];
   message: string;
+}
+
+/**
+ * "Use existing" found nothing to run.
+ *
+ * Deliberately NOT a silent fall-through to generation: the user asked to run
+ * something they already have, so building a crew instead would run work they
+ * did not ask for and bill a full crew run for it. `build_instead` is the
+ * one-click offer that keeps the choice theirs.
+ */
+/**
+ * What a routed run knows that a click-to-run does not, as the run handler
+ * receives it.
+ *
+ * Every field is optional and absent for `/run` and click-to-run: those paths
+ * have no router and no publication, so the handler keeps its
+ * detect-every-placeholder fallback for them.
+ */
+export interface RoutedRunFields {
+  extractedInputs?: Record<string, string>;
+  inputSchema?: PublicationInputSchema | null;
+  capability?: string;
+  /** @see RoutedResultFields.request */
+  request?: string;
+  /** @see RoutedResultFields.referenced_answer */
+  referencedAnswer?: string | null;
+}
+
+export interface CatalogNoMatchResult {
+  type: 'catalog_no_match';
+  /** 'nothing_published' | 'no_match' | 'unresolved' — they read differently. */
+  reason: string;
+  message: string;
+  build_instead: boolean;
+  /**
+   * The router declined mid-conversation, so this turn should be ANSWERED
+   * rather than left as a dead end — it is a question about what is already on
+   * screen, not a request for new work. The build offer stays beside the
+   * answer; declining to run a crew is not the same as having nothing to say.
+   */
+  answer_here?: boolean;
 }
 
 export interface ModelConfigResponse {

@@ -12,6 +12,7 @@ vi.mock('./sessionStore', () => {
     addMessage: vi.fn(),
     addMessageToTargetSession: vi.fn(),
     updateMessageInTargetSession: vi.fn(),
+    updateMessage: vi.fn(),
   };
   return {
     useSessionStore: {
@@ -1501,4 +1502,119 @@ describe('executionStore - switch-back run detection', () => {
     expect(useExecutionStore.getState().runStartedAt).toBeNull();
   });
 
+});
+
+describe('a surface that arrives after the run has finalized', () => {
+  // The crew subprocess announces a run TWICE by design: the plain answer the
+  // moment the crew has it, then a second one carrying the composed A2UI surface,
+  // which the parent can only build once the subprocess has exited. Measured on
+  // one run: crew_completed 20:21:31, the UI finalized at 20:21:34, and the
+  // surface finished composing at 20:22:24 — 50s later. Finalization is
+  // once-only (a double completion double-posts, to the wrong session), so the
+  // second announcement was dropped and a 50-component deck rendered as raw markdown.
+  const surface = {
+    surfaceKind: 'presentation',
+    root: 'r',
+    components: [],
+    dataModel: {},
+  } as never;
+
+  beforeEach(() => {
+    sessionState().addMessageToTargetSession.mockReturnValue('msg-1');
+  });
+
+  it('attaches the late surface to the finalized message', () => {
+    setCurrentSessionId('sess-U');
+    mockedParse.mockReturnValue(null);
+    useExecutionStore.getState().startExecution('job-U', 'sess-U');
+    // First announcement: plain text, no surface composed yet.
+    useExecutionStore.getState().completeExecution('# Deck\n## Slide 1', 'job-U');
+
+    const attached = useExecutionStore.getState().attachSurface('job-U', surface);
+
+    expect(attached).toBe(true);
+    expect(sessionState().updateMessageInTargetSession).toHaveBeenCalledWith(
+      'sess-U',
+      'msg-1',
+      // The answer text STAYS. The reader has been looking at it for the 25-45s
+      // composition took; blanking it mid-read reads as the answer being
+      // retracted. (The completion path DOES drop it when the surface arrives
+      // in time — there the text never rendered, so nothing is taken away.)
+      { resultType: 'a2ui', resultData: surface },
+    );
+  });
+
+  it('does not post a second message', () => {
+    setCurrentSessionId('sess-V');
+    mockedParse.mockReturnValue(null);
+    useExecutionStore.getState().startExecution('job-V', 'sess-V');
+    useExecutionStore.getState().completeExecution('# Deck', 'job-V');
+    sessionState().addMessageToTargetSession.mockClear();
+
+    useExecutionStore.getState().attachSurface('job-V', surface);
+
+    expect(sessionState().addMessageToTargetSession).not.toHaveBeenCalled();
+  });
+
+  it('accepts exactly one late surface per run', () => {
+    setCurrentSessionId('sess-W');
+    mockedParse.mockReturnValue(null);
+    useExecutionStore.getState().startExecution('job-W', 'sess-W');
+    useExecutionStore.getState().completeExecution('# Deck', 'job-W');
+
+    expect(useExecutionStore.getState().attachSurface('job-W', surface)).toBe(true);
+    // A third announcement (SSE + poller both re-delivering) must be inert.
+    expect(useExecutionStore.getState().attachSurface('job-W', surface)).toBe(false);
+  });
+
+  it('is a no-op for a run it never finalized', () => {
+    expect(useExecutionStore.getState().attachSurface('job-unknown', surface)).toBe(
+      false,
+    );
+    expect(useExecutionStore.getState().attachSurface(undefined, surface)).toBe(false);
+  });
+
+  it('a run that already had its surface has nothing left to wait for', () => {
+    // The light-agent path composes in-process, so its single announcement
+    // already carries the surface. Nothing is left waiting.
+    setCurrentSessionId('sess-X');
+    mockedParse.mockReturnValue(null);
+    useExecutionStore.getState().startExecution('job-X', 'sess-X');
+    useExecutionStore.getState().completeExecution('# Deck', 'job-X', surface);
+    sessionState().updateMessageInTargetSession.mockClear();
+
+    // It still resolves (the message exists), but re-applying the same surface
+    // changes nothing the user can see.
+    useExecutionStore.getState().attachSurface('job-X', surface);
+    expect(sessionState().updateMessageInTargetSession).toHaveBeenCalledWith(
+      'sess-X',
+      'msg-1',
+      { resultType: 'a2ui', resultData: surface },
+    );
+  });
+});
+
+describe('a late surface never blanks what the reader is looking at', () => {
+  // The completion path drops the text when the surface arrives WITH it, so the
+  // same deck is not printed twice. A late surface must not apply that rule
+  // retroactively: by then the answer has been on screen for the 25-45s that
+  // composition took, and clearing it reads as the answer being withdrawn.
+  it('leaves the message content alone', () => {
+    const surface = {
+      surfaceKind: 'presentation',
+      root: 'r',
+      components: [],
+      dataModel: {},
+    } as never;
+    sessionState().addMessageToTargetSession.mockReturnValue('msg-late');
+    setCurrentSessionId('sess-Y');
+    mockedParse.mockReturnValue(null);
+    useExecutionStore.getState().startExecution('job-Y', 'sess-Y');
+    useExecutionStore.getState().completeExecution('# The answer', 'job-Y');
+
+    useExecutionStore.getState().attachSurface('job-Y', surface);
+
+    const update = sessionState().updateMessageInTargetSession.mock.calls.at(-1)[2];
+    expect(update).not.toHaveProperty('content');
+  });
 });

@@ -415,7 +415,29 @@ def _task_event_context(task: Any):
         return contextlib.nullcontext()
 
 
-def make_memory_context_provider(memory: Any) -> Any:
+#: Input keys that carry the run's own request rather than a crew variable.
+#: ``user_request`` is what the chat paths already write (see
+#: ``generation/crew/chat_fast_path.py``); ``prompt`` is the older spelling.
+_REQUEST_INPUT_KEYS = ("user_request", "prompt")
+
+
+def request_from_inputs(inputs: Any) -> str | None:
+    """The sentence this run exists to answer, if the config carried one.
+
+    One reader for all three execution paths, so a run started from chat, the
+    agent builder or a flow resolves it identically — the alternative is three
+    slightly different `.get()` chains that drift.
+    """
+    if not isinstance(inputs, dict):
+        return None
+    for key in _REQUEST_INPUT_KEYS:
+        value = inputs.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+def make_memory_context_provider(memory: Any, request: str | None = None) -> Any:
     """Build a ``Crew.context_providers`` callable doing runtime recall.
 
     Runs when the engine assembles each task's context (after prior tasks
@@ -424,18 +446,41 @@ def make_memory_context_provider(memory: Any) -> Any:
     actually produced, not just their static description. Supersedes the
     build-time ``inject_task_memory`` for crew runs. Returns ``None`` when
     memory is not attached.
+
+    ``request`` — the sentence this run exists to answer — leads the query, and
+    it is what makes recall work for a SAVED crew.
+
+    Why it is needed: a task description is a template. A crew generated from a
+    prompt has a distinctive one, so querying with it discriminates fine. A crew
+    saved once and re-run every day has a description that is byte-identical on
+    every run, so the query is a constant, and every run matches its own history
+    at ~0.98 no matter what it is about. Measured on one such crew: the query and
+    the record stored by the previous run shared 41 of 47 tokens in the same
+    positions — the only difference was the interpolated topic, one token, which
+    cannot move a cosine similarity. The 0.35 relevance floor never fires, so a
+    crew asked for Lebanese news is handed its own Swiss run from last week and
+    obligingly searches for Swiss news.
+
+    The request fixes that for every saved crew, with or without declared
+    inputs, and without reducing the query to a keyword: the sentence carries
+    what the run is FOR, the description carries what the task DOES, and recall
+    needs both.
     """
     mem = _usable_memory(memory)
     if mem is None:
         return None
 
+    lead = " ".join((request or "").split())[:500]
+
     def _provider(task: Any = None, agent: Any = None, context: Any = None) -> str:
         description = str(getattr(task, "description", "") or "")
-        if not description:
+        if not description and not lead:
             return ""
-        query = description
+        # Request first: the query is truncated at 2000 chars downstream, and
+        # the part that identifies this run must not be what gets cut.
+        query = f"{lead}\n{description}" if lead else description
         if context:
-            query = f"{description}\n{str(context)[-500:]}"
+            query = f"{query}\n{str(context)[-500:]}"
         with _task_event_context(task):
             return build_memory_preamble(mem, query)
 

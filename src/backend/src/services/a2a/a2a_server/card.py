@@ -27,7 +27,7 @@ from src.schemas.a2a import (
     SecurityScheme,
 )
 from src.services.external.identity import ExternalCaller
-from src.services.external.publication import PublicationService
+from src.services.publications.publication import PublicationService
 
 logger = logging.getLogger(__name__)
 

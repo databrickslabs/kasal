@@ -62,6 +62,9 @@ const RUN_SETTINGS = {
   // Default answer mode is 'chat' (single light agent) — also skips the
   // crew-plan steering prefix (research/deep keep it).
   chat_mode_type: 'chat',
+  // Default SOURCE is "build new". A separate axis from the answer mode, so it
+  // travels as its own field rather than a fourth chat_mode_type.
+  prefer_existing: false,
 };
 
 beforeEach(() => {
@@ -736,7 +739,9 @@ describe('useDispatcher', () => {
         await p;
       });
 
-      expect(opts.onExecuteCrew).toHaveBeenCalledWith(plan);
+      // Second arg undefined: this is a /run-style execute, not a routed one,
+      // so there is no extracted-input or schema information to carry.
+      expect(opts.onExecuteCrew).toHaveBeenCalledWith(plan, undefined);
     });
 
     it('execute_crew with no plan does not schedule callback', async () => {

@@ -11,6 +11,9 @@ import {
   FlowLoadResult,
   ExecuteCrewResult,
   ExecuteFlowResult,
+  CatalogNoMatchResult,
+  IntentType,
+  RoutedRunFields,
 } from '../types/dispatcher';
 import { ChatMessage } from '../types/chat';
 import { generateId } from '../utils/markdown';
@@ -39,7 +42,7 @@ interface UseDispatcherOptions {
   ) => void;
   onStartGenerationStream: (generationId: string, sessionId: string) => void;
   onStartExecutionStream: (jobId: string, sessionId?: string) => void;
-  onExecuteCrew?: (plan: PlanData) => void;
+  onExecuteCrew?: (plan: PlanData, routed?: RoutedRunFields) => void;
   onExecuteFlow?: (flow: FlowData) => void;
   onExecuteGenerated?: (data: GenerationCompleteData, spaceId?: string) => void;
   /** Fired when a crew/flow is LOADED (not run) so the host can make the chat
@@ -54,8 +57,32 @@ interface UseDispatcherOptions {
   ensureSession: () => Promise<string>;
 }
 
-function getAssistantResponse(result: DispatchResult): string {
+/**
+ * The intent to ACT on, after "Use existing" routing has resolved.
+ *
+ * `catalog_route` is a routing decision, not an outcome: what comes back is an
+ * ordinary `execute_crew` / `execute_flow` — deliberately, so nothing
+ * downstream needed changing — or a `catalog_no_match`. Collapsing it here
+ * means every switch below stays a switch on what actually happened, instead of
+ * growing a parallel set of routed cases.
+ */
+function effectiveIntent(result: DispatchResult): IntentType | 'catalog_no_match' {
   const { dispatcher, generation_result } = result;
+  if (dispatcher.intent !== 'catalog_route') return dispatcher.intent;
+  const type = (generation_result as Record<string, unknown> | null)?.type;
+  if (type === 'execute_crew' || type === 'execute_flow') return type;
+  return 'catalog_no_match';
+}
+
+function getAssistantResponse(result: DispatchResult): string {
+  const { generation_result } = result;
+  const dispatcher = { ...result.dispatcher, intent: effectiveIntent(result) };
+
+  // A routed miss says its own piece — "nothing published matches this" — and
+  // the card beside it offers the build. Never a silent fall-through.
+  if (dispatcher.intent === 'catalog_no_match') {
+    return (generation_result as CatalogNoMatchResult | null)?.message ?? '';
+  }
 
   if (dispatcher.intent === 'unknown' || dispatcher.intent === 'conversation') {
     if (generation_result && typeof generation_result === 'object' && 'message' in (generation_result as Record<string, unknown>)) {
@@ -150,10 +177,13 @@ function getAssistantResponse(result: DispatchResult): string {
 function getResultType(
   result: DispatchResult
 ): string | undefined {
-  const { dispatcher, generation_result } = result;
+  const { generation_result } = result;
   if (!generation_result) return undefined;
+  const dispatcher = { ...result.dispatcher, intent: effectiveIntent(result) };
 
   switch (dispatcher.intent) {
+    case 'catalog_no_match':
+      return 'catalog_no_match';
     case 'generate_agent':
     case 'generate_task':
     case 'generate_crew':
@@ -310,8 +340,17 @@ export function useDispatcher(options: UseDispatcherOptions) {
       // Chat (light agent) mode answers the literal question with a single agent —
       // don't steer it into "create a crew plan with agents and tasks". Research /
       // Deep modes still build a crew, so they keep the prefix.
-      const chatModeType = useExecutionStore.getState().chatModeType;
-      if (chatModeType !== 'chat' && !isSlashCommand && !alreadyHasCrewHint) {
+      // "Use existing" never gets the prefix either, for a stronger reason: the
+      // router matches the sentence against published DESCRIPTIONS, and
+      // "create a crew plan with agents and tasks: …" describes nothing anyone
+      // published. It would poison every match.
+      const { chatModeType, preferExisting } = useExecutionStore.getState();
+      if (
+        chatModeType !== 'chat' &&
+        !preferExisting &&
+        !isSlashCommand &&
+        !alreadyHasCrewHint
+      ) {
         dispatchMessage = `create a crew plan with agents and tasks: ${message}`;
       }
       // Hidden steering text (e.g. attached-knowledge note): sent to the crew
@@ -344,6 +383,9 @@ export function useDispatcher(options: UseDispatcherOptions) {
           // chat = single light agent, research = crew + medium effort,
           // deep = crew + high effort.
           chat_mode_type: execState.chatModeType,
+          // Source axis: run something already published instead of building.
+          // Sent beside chat_mode_type, never folded into it.
+          prefer_existing: execState.preferExisting,
         }, message);
 
         const content = getAssistantResponse(result);
@@ -387,7 +429,9 @@ export function useDispatcher(options: UseDispatcherOptions) {
         }
 
         if (result.generation_result) {
-          const intent = result.dispatcher.intent;
+          // Routed results resolve to the execute_* they actually are, so the
+          // branches below are unchanged by "Use existing" existing.
+          const intent = effectiveIntent(result);
 
           if (
             intent === 'generate_crew' ||
@@ -410,8 +454,21 @@ export function useDispatcher(options: UseDispatcherOptions) {
             const execResult = result.generation_result as ExecuteCrewResult;
             if (execResult.plan && options.onExecuteCrew) {
               const plan = execResult.plan;
+              // Only a ROUTED run has these: what the router bound from the
+              // sentence, and what the publisher declared as required. `/run`
+              // and click-to-run pass nothing at all — which is why the handler
+              // keeps its detect-every-placeholder fallback.
+              const routed: RoutedRunFields | undefined = execResult.capability
+                ? {
+                    extractedInputs: execResult.extracted_inputs,
+                    inputSchema: execResult.input_schema,
+                    capability: execResult.capability,
+                    request: execResult.request,
+                    referencedAnswer: execResult.referenced_answer,
+                  }
+                : undefined;
               setTimeout(() => {
-                options.onExecuteCrew!(plan);
+                options.onExecuteCrew!(plan, routed);
               }, 300);
             }
           }

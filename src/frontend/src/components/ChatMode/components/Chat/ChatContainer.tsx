@@ -293,6 +293,8 @@ interface ChatContainerProps {
   /** Answer mode: distill a reusable crew from the conversation and save it. */
   onSaveAnswerToCatalog?: (sessionId?: string) => void | Promise<void>;
   onSubmitVariables?: (messageId: string, inputs: Record<string, string>) => void;
+  /** "Use existing" matched nothing — flip the source back and build one. */
+  onBuildInstead?: (messageId: string) => void;
   onStopExecution?: () => void;
   isLoading: boolean;
   isExecuting?: boolean;
@@ -342,6 +344,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   onSaveCrew,
   onSaveAnswerToCatalog,
   onSubmitVariables,
+  onBuildInstead,
   onStopExecution,
   isLoading,
   isExecuting,
@@ -616,6 +619,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
                       onSaveCrew={onSaveCrew}
                       onSaveAnswerToCatalog={onSaveAnswerToCatalog}
                       onSubmitVariables={onSubmitVariables}
+                      onBuildInstead={onBuildInstead}
                     />
                   );
                   return bubble;

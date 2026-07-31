@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { DetectedVariable } from '../../utils/variableDetector';
+import { DetectedVariable } from '../../../../utils/variableDetector';
 
 /**
  * Inline input-variables prompt, rendered IN the chat flow (same style as the

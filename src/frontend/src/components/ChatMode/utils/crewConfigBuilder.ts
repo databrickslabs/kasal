@@ -236,6 +236,9 @@ export function buildCrewConfig(plan: {
     }
   }
 
+  attachReferencedAnswer(tasks_yaml, inputs);
+  attachUnreferencedInputs(tasks_yaml, inputs);
+
   return {
     agents_yaml,
     tasks_yaml,
@@ -245,6 +248,97 @@ export function buildCrewConfig(plan: {
     execution_type: 'crew',
     schema_detection_enabled: true,
   };
+}
+
+/**
+ * Give the crew the earlier answer this run works FROM.
+ *
+ * "Turn this into a deck" names something — the summary already on screen — and
+ * a crew that starts from nothing will go and re-derive it. On a workspace whose
+ * memory pool is dominated by one topic, what it re-derives is that topic, which
+ * is how a request about one subject comes back about another.
+ *
+ * Its own labelled block rather than a line in the inputs list: this is a
+ * document, not a variable, and it reads as source material only if it is
+ * presented as source material.
+ */
+function attachReferencedAnswer(
+  tasks_yaml: Record<string, Record<string, unknown>>,
+  inputs?: Record<string, string>,
+): void {
+  const referenced = String(inputs?.referenced_answer ?? '').trim();
+  if (!referenced) return;
+  const taskKeys = Object.keys(tasks_yaml);
+  if (taskKeys.length === 0) return;
+
+  // The FIRST task: it is where the run enters, and later tasks receive its
+  // output as context.
+  const first = tasks_yaml[taskKeys[0]];
+  first.description =
+    `${String(first.description ?? '').trim()}\n\n` +
+    `Work from the following, which the user is referring to. It is the ` +
+    `material for this run — do not go and gather it again:\n\n${referenced}`;
+}
+
+/**
+ * Input keys that are run machinery, not values the crew author declared.
+ *
+ * They ride in `inputs` because that is the channel the backend reads, but they
+ * are not things the user typed and must never be echoed back into a task
+ * description as "Inputs for this run" — `user_request` in particular is already
+ * the prompt the run exists to answer.
+ */
+const MACHINERY_INPUTS = new Set([
+  'user_request',
+  'prompt',
+  'run_name',
+  // Handed to the crew by attachReferencedAnswer, as a labelled block rather
+  // than a one-line "input" — it is a document, often thousands of characters.
+  'referenced_answer',
+]);
+
+/**
+ * Make an input the crew never mentions reach the run anyway.
+ *
+ * Interpolation only replaces `{placeholders}` that are actually written into an
+ * agent's or task's text. So a capability published with a declared `topic`,
+ * whose tasks say only "collect current news", takes the value the user gave,
+ * substitutes it nowhere, and answers about whatever its memory last saw. The
+ * user supplied a value and it changed nothing — the invisible failure this
+ * whole feature is built to avoid.
+ *
+ * Rather than rewrite the saved crew — which would make `{topic}` leak literally
+ * into every canvas, MCP and scheduled run that does not supply one — the values
+ * are appended to the FIRST task's description for THIS RUN ONLY. The first
+ * task is where the run enters, and later tasks receive it as context.
+ *
+ * Only inputs with no placeholder anywhere are appended: one that IS referenced
+ * is already in the text, and repeating it reads as emphasis the author did not
+ * write.
+ */
+function attachUnreferencedInputs(
+  tasks_yaml: Record<string, Record<string, unknown>>,
+  inputs?: Record<string, string>,
+): void {
+  const entries = Object.entries(inputs || {}).filter(
+    ([name, value]) =>
+      !MACHINERY_INPUTS.has(name) && String(value ?? '').trim().length > 0,
+  );
+  if (entries.length === 0) return;
+
+  const taskKeys = Object.keys(tasks_yaml);
+  if (taskKeys.length === 0) return;
+
+  const allText = JSON.stringify(tasks_yaml);
+  const unreferenced = entries.filter(([name]) => !allText.includes(`{${name}}`));
+  if (unreferenced.length === 0) return;
+
+  const first = tasks_yaml[taskKeys[0]];
+  const lines = unreferenced.map(([name, value]) => `- ${name}: ${value}`).join('\n');
+  first.description =
+    `${String(first.description ?? '').trim()}\n\n` +
+    `Inputs for this run — use them, and prefer them over anything recalled ` +
+    `from memory:\n${lines}`;
 }
 
 /**

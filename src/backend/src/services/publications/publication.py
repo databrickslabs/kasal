@@ -1,17 +1,34 @@
-"""The publication registry: which crews are exposed, to whom, over what.
+"""The publication registry: which crews are reachable, by whom, over what.
 
 One record per crew, listing its protocols — see ``models/crew_publication.py``
 for why that is one record and not a flag per protocol.
 
-The service exists so both adapters read capabilities through the SAME call.
-``list_capabilities`` is what an MCP ``list_crews`` returns and what an A2A
-Agent Card's ``skills[]`` is built from; because it is one function they cannot
-advertise different capabilities, which is the invariant the whole design rests
-on.
+The service exists so every surface reads capabilities through the SAME call.
+``list_capabilities_for_group`` is what an MCP ``list_crews`` returns, what an
+A2A Agent Card's ``skills[]`` is built from, and what the ChatMode "Use existing"
+router picks over; because it is one function they cannot advertise different
+capabilities, which is the invariant the whole design rests on.
+
+The registry is protocol-NEUTRAL, which is why it no longer lives under
+``external/``: ``chat`` is an internal protocol reaching the same rows through
+the same group filter. See this package's ``__init__`` for why the move mattered.
+
+Two shapes of read, and the difference matters:
+
+* ``*_for_group`` take primitives and are the core. Internal callers — who
+  already hold a trusted ``GroupContext`` — use these.
+* ``list_capabilities`` / ``resolve_capability`` take an ``ExternalCaller`` and
+  delegate. The adapters keep the API they have.
+
+**Do not build an ``ExternalCaller`` for internal traffic.** ``identity.py`` opens
+with "An MCP client or an A2A agent is, by definition, outside the workspace" —
+its job is turning untrusted headers into a tenant. Wrapping a ``GroupContext``
+in one drags in the external role double-gating and stamps external-origin
+attribution on internal traffic, polluting the external audit trail.
 """
 
 import logging
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,8 +39,12 @@ from src.schemas.crew_publication import (
     CrewPublicationUpdate,
     PublishedCapability,
 )
-from src.services.external.identity import ExternalCaller
 from src.utils.user_context import GroupContext
+
+if TYPE_CHECKING:  # pragma: no cover
+    # Type-only: the two adapter-facing delegations below are typed for it, but
+    # the registry must not depend on the external trust boundary at runtime.
+    from src.services.external.identity import ExternalCaller
 
 logger = logging.getLogger(__name__)
 
@@ -35,19 +56,20 @@ class PublicationService:
         self.session = session
         self.repository = PublicationRepository(session)
 
-    async def list_capabilities(
-        self, caller: ExternalCaller, protocol: Optional[str] = None
+    async def list_capabilities_for_group(
+        self, group_ids: List[str], protocol: str
     ) -> List[PublishedCapability]:
-        """Capabilities this caller may see, as the adapters render them.
+        """Capabilities visible to ``group_ids`` on one protocol.
 
-        Protocol-neutral on purpose: the MCP tool list and the A2A ``skills[]``
-        are two renderings of this one list. Defaults ``protocol`` to the
-        caller's own, so an adapter cannot accidentally list capabilities that
-        are not published to its surface.
+        The core read. Protocol-neutral on purpose: the MCP tool list, the A2A
+        ``skills[]`` and the ChatMode route catalog are three renderings of this
+        one list.
+
+        An empty ``group_ids`` returns ``[]``, not everything — see the
+        repository, where that guarantee lives.
         """
         rows = await self.repository.list_published_for_group(
-            group_ids=caller.group_ids,
-            protocol=protocol if protocol is not None else caller.protocol,
+            group_ids=group_ids, protocol=protocol
         )
         return [
             PublishedCapability(
@@ -60,31 +82,58 @@ class PublicationService:
             for row in rows
         ]
 
-    async def resolve_capability(
-        self, caller: ExternalCaller, external_name: str
+    async def resolve_capability_for_group(
+        self, group_ids: List[str], protocol: str, external_name: str
     ) -> Optional[Publication]:
-        """The publication behind a name the caller used, or None.
+        """The publication behind a name, or None. The single authorisation choke point.
 
         Returns None both when the name does not exist and when it exists in
-        another tenant — the caller must not be able to tell those apart, or the
+        another tenant — a caller must not be able to tell those apart, or the
         surface becomes an oracle for other workspaces' capability names.
 
-        Also returns None when the capability is not published to the caller's
-        protocol: being on the A2A card must not make it invocable over MCP.
+        Also returns None when the capability is not published to ``protocol``:
+        being on the A2A card must not make it invocable over MCP, and being
+        chat-routable must not make it either.
+
+        Every surface resolves through here. Reaching past it to
+        ``find_by_external_name``, or resolving a name through the catalogue
+        instead, creates a second visibility semantic where an unpublished crew
+        quietly becomes invocable.
         """
         row = await self.repository.find_by_external_name(
-            external_name=external_name, group_ids=caller.group_ids
+            external_name=external_name, group_ids=group_ids
         )
         if row is None:
             return None
-        if caller.protocol not in (row.protocols or []):
+        if protocol not in (row.protocols or []):
             logger.info(
-                "[external] %s is not published over %s; refusing",
+                "[publication] %s is not published over %s; refusing",
                 external_name,
-                caller.protocol,
+                protocol,
             )
             return None
         return row
+
+    async def list_capabilities(
+        self, caller: "ExternalCaller", protocol: Optional[str] = None
+    ) -> List[PublishedCapability]:
+        """``list_capabilities_for_group`` for an external caller.
+
+        Defaults ``protocol`` to the caller's own, so an adapter cannot
+        accidentally list capabilities that are not published to its surface.
+        """
+        return await self.list_capabilities_for_group(
+            caller.group_ids,
+            protocol if protocol is not None else caller.protocol,
+        )
+
+    async def resolve_capability(
+        self, caller: "ExternalCaller", external_name: str
+    ) -> Optional[Publication]:
+        """``resolve_capability_for_group`` for an external caller."""
+        return await self.resolve_capability_for_group(
+            caller.group_ids, caller.protocol, external_name
+        )
 
     async def publish(
         self,

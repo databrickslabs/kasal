@@ -299,6 +299,17 @@ export function useChatRunStream({ pendingActionsRef }: UseChatRunStreamArgs) {
   }, [pendingActionsRef]);
 
   const completeExecutionOnce = useCallback((jobId: string | undefined, resultText: string, surface?: Surface | null) => {
+    // The crew subprocess announces a run TWICE on purpose: the plain answer
+    // the moment the crew has it, then a second one carrying the A2UI surface,
+    // which the parent can only compose after the subprocess exits (44s on one
+    // measured deck). The first announcement finalizes the run; without this
+    // the second is discarded as a duplicate and the deck arrives as raw
+    // markdown. So a LATE completion that brings a surface is not a duplicate —
+    // it is the half of the answer that was not ready yet.
+    if (surface && jobId && finishedJobsRef.current.has(jobId)) {
+      useExecutionStore.getState().attachSurface(jobId, surface);
+      return;
+    }
     finishOnce(jobId, () => {
       const store = useExecutionStore.getState();
       // Only thread the surface arg when a rich one was composed — a plain chat
@@ -381,8 +392,20 @@ export function useChatRunStream({ pendingActionsRef }: UseChatRunStreamArgs) {
     // null once a job has finalized, so this also drops late duplicates.
     const onJobCompleted = (e: Event) => {
       const { jobId, result } = (e as CustomEvent).detail || {};
-      if (!jobId || !useExecutionStore.getState().jobOwnerOf(jobId)) return;
-      completeExecutionOnce(jobId, extractResultText({ result }), extractA2uiSurface({ result }));
+      if (!jobId) return;
+      const surface = extractA2uiSurface({ result });
+      // jobOwnerOf returns null both for a job that has FINALIZED and for one
+      // this workspace never tracked. Only the first can still take a surface:
+      // the crew subprocess announces twice on purpose (plain text, then the
+      // composed surface), and that second announcement must still land.
+      //
+      // The distinction matters. Letting an UNTRACKED job through would run
+      // finishOnce — marking it finished — while completeExecution bails on the
+      // missing owner without posting anything, so the real completion that
+      // followed was then blocked as a duplicate and the answer vanished.
+      const isLateSurface = !!surface && finishedJobsRef.current.has(jobId);
+      if (!useExecutionStore.getState().jobOwnerOf(jobId) && !isLateSurface) return;
+      completeExecutionOnce(jobId, extractResultText({ result }), surface);
     };
     const onJobFailed = (e: Event) => {
       const { jobId, error } = (e as CustomEvent).detail || {};

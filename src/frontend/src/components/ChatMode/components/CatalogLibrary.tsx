@@ -11,9 +11,14 @@ interface CatalogLibraryProps {
 type LibraryEntry = CatalogItem & { kind: 'crew' | 'flow' };
 
 /**
- * A single collapsible "Catalog" section in the chat rail listing saved crews
- * and flows together — each tagged with its own icon — so business users can
- * browse and open their saved work with a click (replaces /list crews & flows).
+ * The collapsible "Catalog" section in the chat rail: the crews and flows
+ * PUBLISHED TO CHAT, each tagged with its own icon, so they can be browsed and
+ * opened with a click (replaces /list crews & flows).
+ *
+ * Published-only, not every saved crew. This rail sits beside a composer whose
+ * "Use existing" control routes to exactly this set, and a list that showed
+ * more than the router can reach would advertise things a prompt can never
+ * select. Publishing to chat is what puts something here.
  */
 const Chevron: React.FC<{ open: boolean }> = ({ open }) => (
   <svg
@@ -68,7 +73,7 @@ const CatalogLibrary: React.FC<CatalogLibraryProps> = ({ crews, flows, onLoadCre
       >
         <Chevron open={open} />
         <span className="text-[10px] font-semibold uppercase tracking-wider flex-1 text-left">
-          Agents Catalog
+          Catalog
         </span>
         <span className="text-[10px] tabular-nums" style={{ color: 'var(--text-muted)' }}>
           {entries.length}
@@ -80,7 +85,7 @@ const CatalogLibrary: React.FC<CatalogLibraryProps> = ({ crews, flows, onLoadCre
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search agents catalog…"
+              placeholder="Search catalog…"
               className="w-[calc(100%-1.5rem)] mx-3 mb-1 px-2 py-1 rounded-md text-[12px] outline-none"
               style={{
                 backgroundColor: 'var(--bg-input)',

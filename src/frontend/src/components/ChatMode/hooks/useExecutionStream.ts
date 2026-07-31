@@ -1,5 +1,16 @@
 import { useRef, useCallback, useEffect } from 'react';
 import { streamExecution, StreamEvent } from '../api/streaming';
+import { extractA2uiSurface } from '../utils/resultExtraction';
+
+/**
+ * How long to keep a finished run's stream open waiting for its A2UI surface.
+ *
+ * The crew subprocess announces COMPLETED as soon as the crew has its answer;
+ * the parent composes the surface afterwards and announces a second time.
+ * Measured
+ * gaps: 25s and 44s. 2 minutes leaves room without waiting on a run forever.
+ */
+const LATE_SURFACE_WAIT_MS = 120_000;
 
 interface UseExecutionStreamOptions {
   onTrace: (message: string, data?: Record<string, unknown>) => void;
@@ -14,6 +25,8 @@ interface UseExecutionStreamOptions {
 export function useExecutionStream(options: UseExecutionStreamOptions) {
   const closeRef = useRef<(() => void) | null>(null);
   const completedRef = useRef(false);
+  // Armed when a run finishes WITHOUT a surface — see awaitLateSurface.
+  const lateSurfaceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const optionsRef = useRef(options);
   useEffect(() => {
     optionsRef.current = options;
@@ -24,6 +37,10 @@ export function useExecutionStream(options: UseExecutionStreamOptions) {
       console.log('[useExecutionStream] startStream called for', jobId);
       if (closeRef.current) {
         closeRef.current();
+      }
+      if (lateSurfaceTimerRef.current) {
+        clearTimeout(lateSurfaceTimerRef.current);
+        lateSurfaceTimerRef.current = null;
       }
       completedRef.current = false;
 
@@ -48,7 +65,18 @@ export function useExecutionStream(options: UseExecutionStreamOptions) {
                 console.log('[useExecutionStream] COMPLETED — calling onComplete');
                 completedRef.current = true;
                 opts.onComplete(event.data);
-                stopStream();
+                // A crew run announces COMPLETED TWICE on purpose: the plain
+                // answer the moment the crew has it, then a second one carrying
+                // the composed A2UI surface, which the parent can only build
+                // after the subprocess exits (25-45s on measured decks).
+                //
+                // Closing on the first one left nothing for the second to
+                // arrive on — the poller stops on the same event — so the deck
+                // was composed, stored, and never seen: the chat kept the raw
+                // markdown. Hold the stream open until that surface lands, or
+                // until it is clearly not coming.
+                if (extractA2uiSurface(event.data)) stopStream();
+                else awaitLateSurface();
               } else if (statusLower === 'failed' || statusLower === 'stopped') {
                 console.log('[useExecutionStream] FAILED/STOPPED — calling onError');
                 completedRef.current = true;
@@ -110,15 +138,42 @@ export function useExecutionStream(options: UseExecutionStreamOptions) {
 
   const stopStream = useCallback(() => {
     console.log('[useExecutionStream] stopStream called');
+    if (lateSurfaceTimerRef.current) {
+      clearTimeout(lateSurfaceTimerRef.current);
+      lateSurfaceTimerRef.current = null;
+    }
     if (closeRef.current) {
       closeRef.current();
       closeRef.current = null;
     }
   }, []);
 
+  /**
+   * Keep the stream open a while longer, waiting for the composed surface.
+   *
+   * Bounded rather than open-ended: if composition fails or is skipped there is
+   * no second announcement at all, and an un-timed wait would leak one idle
+   * connection per run. The window is generous because composition is slow on a
+   * local model — 44s measured for a 50-component deck — and an idle SSE
+   * connection costs far less than a deck the user never sees.
+   */
+  const awaitLateSurface = useCallback(() => {
+    if (lateSurfaceTimerRef.current) clearTimeout(lateSurfaceTimerRef.current);
+    console.log('[useExecutionStream] holding stream open for the composed A2UI surface');
+    lateSurfaceTimerRef.current = setTimeout(() => {
+      lateSurfaceTimerRef.current = null;
+      console.log('[useExecutionStream] no A2UI surface arrived — closing');
+      stopStream();
+    }, LATE_SURFACE_WAIT_MS);
+  }, [stopStream]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      if (lateSurfaceTimerRef.current) {
+        clearTimeout(lateSurfaceTimerRef.current);
+        lateSurfaceTimerRef.current = null;
+      }
       if (closeRef.current) {
         closeRef.current();
         closeRef.current = null;

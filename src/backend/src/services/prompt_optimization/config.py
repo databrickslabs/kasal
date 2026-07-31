@@ -62,6 +62,22 @@ TEMPLATE_TASKS: Dict[str, Dict[str, Any]] = {
         "input_key": "message",
         "extract": None,
     },
+    "route_capability": {
+        # capability_dispatch logs the raw user message under this endpoint
+        "log_endpoint": "capability-route",
+        "input_key": "message",
+        "extract": None,
+        "required_keys": ("capability", "confidence", "inputs"),
+        "judge_system": (
+            "You judge a capability router. Given a user's message and the router's "
+            "JSON output, decide if it is correct. It is WRONG if it picked a "
+            "capability whose description does not cover the request, if it returned "
+            "null when one clearly did, or — most importantly — if it bound a value "
+            "the user never stated. A null input for something the user did not say "
+            "is CORRECT: the user is asked for it. Answer with EXACTLY one word: "
+            "CORRECT or WRONG."
+        ),
+    },
     "generate_agent": {
         "log_endpoint": "generate-agent",
         "input_key": "request",

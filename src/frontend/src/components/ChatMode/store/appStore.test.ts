@@ -7,6 +7,7 @@ const fetchEnabledTools = vi.fn();
 const fetchWorkspaces = vi.fn();
 const listSavedCrews = vi.fn();
 const listSavedFlows = vi.fn();
+const listChatPublished = vi.fn();
 
 vi.mock('../api/client', () => ({
   updateClient: (...args: unknown[]) => updateClient(...args),
@@ -24,6 +25,11 @@ vi.mock('../api/crews', () => ({
   listSavedCrews: (...args: unknown[]) => listSavedCrews(...args),
   listSavedFlows: (...args: unknown[]) => listSavedFlows(...args),
 }));
+vi.mock('../../../api/workflow/PublicationService', () => ({
+  PublicationService: {
+    listChatPublished: (...args: unknown[]) => listChatPublished(...args),
+  },
+}));
 
 const CONFIG_STORAGE_KEY = 'kasal-chat-config';
 const MODEL_STORAGE_KEY = 'kasal-chat-model';
@@ -32,6 +38,9 @@ const THEME_STORAGE_KEY = 'kasal-chat-theme';
 // Helper: import a fresh copy of the store module so module-level state
 // (loadConfig / getStoredTheme / selectedModel IIFE) is recomputed.
 async function freshStore() {
+  // Default: the publications read fails, which leaves the catalog unfiltered.
+  // Tests that care about the filter set their own resolution.
+  listChatPublished.mockRejectedValue(new Error('not mocked'));
   vi.resetModules();
   const mod = await import('./appStore');
   return mod.useAppStore;
@@ -578,5 +587,93 @@ describe('appStore', () => {
       store.getState().toggleSettings();
       expect(store.getState().settingsOpen).toBe(false);
     });
+  });
+});
+
+describe('the rail catalog lists only what chat can reach', () => {
+  // The rail sits beside a composer whose "Use existing" control routes to the
+  // chat-published set. Listing every saved crew would advertise things no
+  // prompt can select.
+  it('drops crews and flows that are not published to chat', async () => {
+    const store = await freshStore();
+    listSavedCrews.mockResolvedValue([
+      { id: 'c1', name: 'Published Crew' },
+      { id: 'c2', name: 'Private Crew' },
+    ]);
+    listSavedFlows.mockResolvedValue([
+      { id: 'f1', name: 'Published Flow' },
+      { id: 'f2', name: 'Private Flow' },
+    ]);
+    listChatPublished.mockResolvedValue(['c1', 'f1']);
+
+    await store.getState().loadCatalog();
+
+    expect(store.getState().savedCrews).toEqual([{ id: 'c1', name: 'Published Crew' }]);
+    expect(store.getState().savedFlows).toEqual([{ id: 'f1', name: 'Published Flow' }]);
+  });
+
+  it('shows nothing when nothing is published', async () => {
+    const store = await freshStore();
+    listSavedCrews.mockResolvedValue([{ id: 'c1', name: 'Private Crew' }]);
+    listSavedFlows.mockResolvedValue([]);
+    listChatPublished.mockResolvedValue([]);
+
+    await store.getState().loadCatalog();
+
+    expect(store.getState().savedCrews).toEqual([]);
+  });
+
+  it('leaves the list UNFILTERED when the publications read fails', async () => {
+    // Showing everything is a smaller lie than showing nothing: an empty rail
+    // reads as "you have no saved work", which is never true and which the user
+    // cannot act on.
+    const store = await freshStore();
+    const crews = [{ id: 'c1', name: 'Crew One' }];
+    listSavedCrews.mockResolvedValue(crews);
+    listSavedFlows.mockResolvedValue([]);
+    listChatPublished.mockRejectedValue(new Error('endpoint down'));
+
+    await store.getState().loadCatalog();
+
+    expect(store.getState().savedCrews).toEqual(crews);
+  });
+});
+
+describe('the catalog distinguishes "loading" from "nothing published"', () => {
+  // An empty savedCrews means BOTH until loadCatalog has run once, and only the
+  // second may disable the composer's "Use existing" control. Disabling on the
+  // first tells a user their published work does not exist, for as long as the
+  // fetch takes.
+  it('starts unloaded', async () => {
+    const store = await freshStore();
+    expect(store.getState().catalogLoaded).toBe(false);
+    expect(store.getState().savedCrews).toEqual([]);
+  });
+
+  it('is loaded once the catalog has been read, even when empty', async () => {
+    const store = await freshStore();
+    listSavedCrews.mockResolvedValue([]);
+    listSavedFlows.mockResolvedValue([]);
+    listChatPublished.mockResolvedValue([]);
+
+    await store.getState().loadCatalog();
+
+    expect(store.getState().catalogLoaded).toBe(true);
+  });
+
+  it('re-reading after a publish makes the new capability visible', async () => {
+    // What makes publishing show up in the rail — and enable "Use existing" —
+    // without a page reload: everything is subscribed to this one store.
+    const store = await freshStore();
+    listSavedCrews.mockResolvedValue([{ id: 'c1', name: 'Crew One' }]);
+    listSavedFlows.mockResolvedValue([]);
+
+    listChatPublished.mockResolvedValue([]);
+    await store.getState().loadCatalog();
+    expect(store.getState().savedCrews).toEqual([]);
+
+    listChatPublished.mockResolvedValue(['c1']);
+    await store.getState().loadCatalog();
+    expect(store.getState().savedCrews).toEqual([{ id: 'c1', name: 'Crew One' }]);
   });
 });

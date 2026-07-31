@@ -303,7 +303,7 @@ class TestItDoesNotPublish:
             p_cat,
             p_tools,
             patch(
-                "src.services.external.publication.PublicationService"
+                "src.services.publications.publication.PublicationService"
             ) as publications,
         ):
             result = await authoring.create_crew(_caller(), "x")

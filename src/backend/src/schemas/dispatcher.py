@@ -30,6 +30,11 @@ class IntentType(str, Enum):
     EXECUTE_FLOW = "execute_flow"
     CATALOG_DELETE = "catalog_delete"
     FLOW_DELETE = "flow_delete"
+    #: Route this prompt to an ALREADY PUBLISHED crew or flow instead of building
+    #: one. Reached only when the user asked for it (``prefer_existing``), never
+    #: on ordinary chat traffic. Resolves into an execute_crew / execute_flow
+    #: result, or into catalog_no_match — never silently into generation.
+    CATALOG_ROUTE = "catalog_route"
     UNKNOWN = "unknown"
 
 
@@ -102,6 +107,15 @@ class DispatcherRequest(BaseModel):
         "no crew, no extra thinking); 'research' = crew with a medium reasoning budget; "
         "'deep' = crew with a high reasoning budget. Defaults to 'chat' (the fast "
         "single-agent path).",
+    )
+    prefer_existing: bool = Field(
+        False,
+        description="True when the user picked 'Use existing' in ChatMode: route this "
+        "prompt to an already-published crew or flow rather than building one. Its own "
+        "field rather than a fourth chat_mode_type BECAUSE IT IS A DIFFERENT AXIS — "
+        "chat_mode_type says what SHAPE to build, this says whether to build at all. "
+        "The catalogue stores plans as crews, so reuse could never honour 'chat', and a "
+        "fourth answer mode would silently invalidate its own neighbours.",
     )
 
     model_config = ConfigDict(

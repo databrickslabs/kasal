@@ -14,6 +14,7 @@ from src.services.memory.engine import MemoryRecord
 from src.services.memory.hooks import (
     MEMORY_BLOCK_HEADER,
     make_memory_context_provider,
+    request_from_inputs,
 )
 
 
@@ -178,3 +179,103 @@ class TestMakeMemoryOutputSink:
         sink(task=SimpleNamespace(), output=SimpleNamespace(raw="  "))
         _time.sleep(0.05)
         memory.remember.assert_not_called()
+
+
+class TestRecallQueryCarriesTheRequest:
+    """A saved crew cannot discriminate on its task description alone.
+
+    The description is a TEMPLATE: byte-identical on every run of that crew. So
+    the recall query is a constant, every run matches its own history at ~0.98,
+    and the 0.35 relevance floor never fires. Measured on one real crew, the
+    query and the record written by the previous run shared 41 of 47 tokens in
+    the same positions — the only difference was the interpolated topic, one
+    token, which cannot move a cosine similarity. The crew was asked for
+    Lebanese news, handed its own Swiss run from the week before, and searched
+    for Swiss news.
+
+    The run's own request is what makes the query differ between runs.
+    """
+
+    def test_request_leads_the_query(self):
+        memory = MagicMock()
+        memory.recall.return_value = [MemoryRecord(content="learned before")]
+        provider = make_memory_context_provider(memory, "gather lebanese news")
+        task = SimpleNamespace(
+            id="t1",
+            description="Research and collect current news on a specified topic",
+            agent=SimpleNamespace(role="Reporter"),
+        )
+
+        provider(task=task, agent=task.agent, context=None)
+
+        query = memory.recall.call_args.args[0]
+        # First, because the query is truncated downstream and the part that
+        # identifies this run must not be what gets cut.
+        assert query.startswith("gather lebanese news")
+        # The description stays: the sentence says what the run is FOR, the
+        # description says what the task DOES, and recall needs both.
+        assert "Research and collect current news" in query
+
+    def test_two_runs_of_one_saved_crew_query_differently(self):
+        # The whole point. Same crew, same template, different subjects.
+        memory = MagicMock()
+        memory.recall.return_value = []
+        template = "Research and collect current news on a specified topic"
+        task = SimpleNamespace(id="t1", description=template, agent=None)
+
+        make_memory_context_provider(memory, "gather lebanese news")(task=task)
+        first = memory.recall.call_args.args[0]
+        make_memory_context_provider(memory, "gather swiss news")(task=task)
+        second = memory.recall.call_args.args[0]
+
+        assert first != second
+
+    def test_no_request_is_exactly_todays_behaviour(self):
+        # Every path that does not carry a request must be untouched.
+        memory = MagicMock()
+        memory.recall.return_value = []
+        task = SimpleNamespace(id="t1", description="Analyze churn", agent=None)
+
+        make_memory_context_provider(memory)(task=task, context=None)
+
+        assert memory.recall.call_args.args[0] == "Analyze churn"
+
+    def test_a_request_alone_still_recalls(self):
+        # A task with no description used to recall nothing. With a request
+        # there is something to search on, so it should.
+        memory = MagicMock()
+        memory.recall.return_value = [MemoryRecord(content="x")]
+        provider = make_memory_context_provider(memory, "gather lebanese news")
+
+        provider(task=SimpleNamespace(description="", id="t1", agent=None))
+
+        assert memory.recall.call_args.args[0].strip() == "gather lebanese news"
+
+    def test_request_is_whitespace_normalised_and_capped(self):
+        memory = MagicMock()
+        memory.recall.return_value = []
+        provider = make_memory_context_provider(memory, "a\n\n  b" + " x" * 1000)
+
+        provider(task=SimpleNamespace(description="d", id="t1", agent=None))
+
+        lead = memory.recall.call_args.args[0].split("\n")[0]
+        assert lead.startswith("a b x")
+        assert len(lead) <= 500
+
+
+class TestRequestFromInputs:
+    """One reader for all three execution paths, so they cannot drift."""
+
+    def test_reads_the_key_the_chat_paths_write(self):
+        assert request_from_inputs({"user_request": "gather news"}) == "gather news"
+
+    def test_falls_back_to_the_older_spelling(self):
+        assert request_from_inputs({"prompt": "gather news"}) == "gather news"
+
+    def test_a_declared_crew_variable_is_not_a_request(self):
+        assert request_from_inputs({"topic": "lebanese"}) is None
+
+    def test_blank_and_non_dict_inputs_are_no_request(self):
+        assert request_from_inputs({"user_request": "   "}) is None
+        assert request_from_inputs(None) is None
+        assert request_from_inputs("not a dict") is None

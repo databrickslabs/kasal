@@ -1,13 +1,13 @@
 /**
  * The optimizable-templates list must mirror the backend's TEMPLATE_TASKS
- * registry — the six wired templates, no duplicates, labels for the picker.
+ * registry — every wired template, no duplicates, labels for the picker.
  */
 
 import { describe, it, expect } from 'vitest';
 import { OPTIMIZABLE_TEMPLATES } from './optimizableTemplates';
 
 describe('OPTIMIZABLE_TEMPLATES', () => {
-  it('lists exactly the six wired templates', () => {
+  it('lists exactly the wired templates', () => {
     expect(OPTIMIZABLE_TEMPLATES.map((t) => t.name)).toEqual([
       'detect_intent',
       'generate_agent',
@@ -15,6 +15,7 @@ describe('OPTIMIZABLE_TEMPLATES', () => {
       'generate_crew',
       'generate_crew_plan',
       'generate_job_name',
+      'route_capability',
     ]);
   });
 

@@ -38,6 +38,11 @@ export async function dispatch(
     if (runSettings.knowledge_file_paths && runSettings.knowledge_file_paths.length > 0)
       request.knowledge_file_paths = runSettings.knowledge_file_paths;
     if (runSettings.chat_mode_type) request.chat_mode_type = runSettings.chat_mode_type;
+    // Sent whenever it is true. NOT folded into chat_mode_type — the source
+    // ("run something saved") and the shape ("build a crew with this much
+    // effort") are different questions, and the backend gates its ChatMode fast
+    // path on this field alone.
+    if (runSettings.prefer_existing) request.prefer_existing = true;
   }
 
   const response = await getClient().post<DispatchResult>(

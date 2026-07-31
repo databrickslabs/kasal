@@ -20,7 +20,7 @@ from src.models.crew_publication import CrewPublication
 from src.repositories.crew_publication_repository import CrewPublicationRepository
 from src.schemas.crew_publication import CrewPublicationCreate
 from src.services.external.identity import ExternalCaller
-from src.services.external.publication import PublicationService
+from src.services.publications.publication import PublicationService
 
 ACME = "acme_corp"
 GLOBEX = "globex_inc"

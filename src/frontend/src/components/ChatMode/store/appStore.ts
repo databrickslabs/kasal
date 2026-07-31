@@ -6,6 +6,7 @@ import { fetchEnabledModels } from '../api/models';
 import { fetchEnabledTools, ToolInfo } from '../api/tools';
 import { fetchWorkspaces, Workspace } from '../api/workspaces';
 import { listSavedCrews, listSavedFlows, CatalogItem } from '../api/crews';
+import { PublicationService } from '../../../api/workflow/PublicationService';
 
 const CONFIG_STORAGE_KEY = 'kasal-chat-config';
 const MODEL_STORAGE_KEY = 'kasal-chat-model';
@@ -79,6 +80,15 @@ interface AppState {
   /** Saved catalog shown in the rail library (replaces /list crews & /list flows) */
   savedCrews: CatalogItem[];
   savedFlows: CatalogItem[];
+  /**
+   * Whether loadCatalog has completed at least once.
+   *
+   * Needed because an empty `savedCrews` means two different things — "still
+   * loading" and "nothing published to chat" — and only the second may disable
+   * the composer's "Use existing" control. Disabling on the first would tell a
+   * user their published work does not exist, for as long as the fetch takes.
+   */
+  catalogLoaded: boolean;
   selectedModel: string;
   sidebarOpen: boolean;
   settingsOpen: boolean;
@@ -112,6 +122,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   workspaces: [],
   savedCrews: [],
   savedFlows: [],
+  catalogLoaded: false,
   selectedModel: (() => {
     try {
       return localStorage.getItem(MODEL_STORAGE_KEY) || '';
@@ -183,11 +194,26 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   loadCatalog: async () => {
-    const [crews, flows] = await Promise.all([
+    const [crews, flows, chatPublished] = await Promise.all([
       listSavedCrews().catch(() => [] as CatalogItem[]),
       listSavedFlows().catch(() => [] as CatalogItem[]),
+      // What the chat can actually reach. The rail sits beside a composer whose
+      // "Use existing" control routes to exactly this set; listing every saved
+      // crew would advertise things no prompt can select.
+      PublicationService.listChatPublished().catch(() => null),
     ]);
-    set({ savedCrews: crews, savedFlows: flows });
+    // A FAILED publications read leaves the list unfiltered rather than empty.
+    // Showing everything is a smaller lie than showing nothing — an empty rail
+    // reads as "you have no saved work", which is never true and not recoverable
+    // by the user.
+    const published = chatPublished === null ? null : new Set(chatPublished);
+    const visible = (items: CatalogItem[]) =>
+      published === null ? items : items.filter((i) => published.has(String(i.id)));
+    set({
+      savedCrews: visible(crews),
+      savedFlows: visible(flows),
+      catalogLoaded: true,
+    });
   },
 
   updateConfig: (field, value) => {

@@ -26,10 +26,11 @@ import HelpCard from '../Cards/HelpCard';
 import GenieSpaceSelector from '../Cards/GenieSpaceSelector';
 import { useSessionStore } from '../../store/sessionStore';
 import InputVariablesPrompt from '../Cards/InputVariablesPrompt';
+import NoMatchPrompt from '../Cards/NoMatchPrompt';
 import GenieSpacePrompt from '../Cards/GenieSpacePrompt';
 import CrewActionsBar from '../Cards/CrewActionsBar';
 import OpenOnCanvasButtons from '../Cards/OpenOnCanvasButtons';
-import { DetectedVariable } from '../../utils/variableDetector';
+import { DetectedVariable } from '../../../../utils/variableDetector';
 import { type Surface } from '../../../../shared/a2ui';
 import { useExecutionStore } from '../../store/executionStore';
 import A2uiSurface from './A2uiSurface';
@@ -47,6 +48,8 @@ interface ChatMessageProps {
   onSaveAnswerToCatalog?: (sessionId?: string) => void | Promise<void>;
   /** Run the parked execution with the user-provided {variable} inputs. */
   onSubmitVariables?: (messageId: string, inputs: Record<string, string>) => void;
+  /** "Use existing" matched nothing — switch the source back and build one. */
+  onBuildInstead?: (messageId: string) => void;
 }
 
 /** Resolve a tool identifier (ID or name) to its display name */
@@ -64,6 +67,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
   onSaveCrew,
   onSaveAnswerToCatalog,
   onSubmitVariables,
+  onBuildInstead,
 }) => {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
@@ -139,7 +143,15 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
       case 'execute_crew': {
         const execData = message.resultData as {
           plan?: CatalogLoadResult['plan'];
+          capability?: string;
         };
+        // A ROUTED run needs no card. The user asked a question in a sentence
+        // and the answer is on its way; a Process / Memory / Max RPM panel is
+        // configuration detail about a crew they never picked from a list. The
+        // message line above ("Running X") plus the live run activity is the
+        // whole story. `/run crew X` and click-to-run still get the card —
+        // there the crew IS what the user selected.
+        if (execData.capability) return null;
         if (execData.plan) {
           return (
             <CrewDetailCard
@@ -153,7 +165,10 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
       case 'execute_flow': {
         const execFlowData = message.resultData as {
           flow?: FlowLoadResult['flow'];
+          capability?: string;
         };
+        // Routed: no card, same reasoning as execute_crew above.
+        if (execFlowData.capability) return null;
         if (execFlowData.flow) {
           return (
             <FlowDetailCard
@@ -232,6 +247,26 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
             variables={varsData.variables}
             messageId={message.id}
             onSubmit={(inputs) => onSubmitVariables?.(message.id, inputs)}
+          />
+        );
+      }
+      case 'catalog_no_match': {
+        // Nothing published to chat matched. Nothing has run, and nothing will
+        // until the user says so.
+        const noMatch = message.resultData as {
+          message?: string;
+          reason?: string;
+          build_instead?: boolean;
+        };
+        return (
+          <NoMatchPrompt
+            message={noMatch.message || message.content}
+            reason={noMatch.reason || 'no_match'}
+            onBuildInstead={
+              noMatch.build_instead && onBuildInstead
+                ? () => onBuildInstead(message.id)
+                : undefined
+            }
           />
         );
       }

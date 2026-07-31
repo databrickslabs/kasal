@@ -23,6 +23,7 @@ class PromptOptimizationRequest(BaseModel):
         "generate_crew",
         "generate_crew_plan",
         "generate_job_name",
+        "route_capability",
     ] = Field(
         ...,
         description="The prompt template to optimize (must be wired in TEMPLATE_TASKS)",

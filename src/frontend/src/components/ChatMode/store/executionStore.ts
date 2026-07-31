@@ -93,6 +93,21 @@ interface ExecutionState {
    */
   chatModeType: 'chat' | 'research' | 'deep';
   /**
+   * The SOURCE the next prompt is answered from: build something new (false,
+   * the default) or run something already published to chat (true).
+   *
+   * A separate axis from ``chatModeType``, not a fourth value of it. The
+   * catalogue only stores crews, so reuse could never honour 'chat' — putting
+   * it in the answer-mode pill would create a value that silently invalidates
+   * its own neighbours, and a "reuse" mode that found no match would quietly
+   * become Research.
+   *
+   * ``chatModeType`` is deliberately NOT cleared while this is on: the user gets
+   * their selection back when they switch source, and it is what the "build one
+   * instead" offer runs at when nothing matches.
+   */
+  preferExisting: boolean;
+  /**
    * MCP servers (Kasal server NAMES) selected via the chat input's "+" picker.
    * At execution time these are injected into every generated agent's
    * tool_configs.MCP_SERVERS so the crew gets the servers' tools. Lives in the
@@ -153,6 +168,7 @@ interface ExecutionActions {
   setWorkspaceMemory: (value: boolean) => void;
   setMemoryEnabled: (value: boolean) => void;
   setChatModeType: (mode: 'chat' | 'research' | 'deep') => void;
+  setPreferExisting: (preferExisting: boolean) => void;
   toggleMcpServer: (name: string) => void;
   setSelectedMcpServers: (names: string[]) => void;
   toggleAgentBricksEndpoint: (name: string) => void;
@@ -184,6 +200,23 @@ interface ExecutionActions {
   // place instead of the single global slot. Omitting it keeps the legacy
   // single-run behavior (route by the current live owner).
   completeExecution: (resultText: string, jobId?: string, surface?: Surface) => void;
+  /**
+   * Attach a surface that arrived AFTER its run had already finalized.
+   * Returns true when it landed.
+   *
+   * The crew subprocess announces a run twice by design: the plain answer the
+   * moment the crew has it, then a second one carrying the composed A2UI surface,
+   * which the parent can only build after the subprocess exits. Composition
+   * took 44s on one measured run — long after the UI had finalized on the first
+   * announcement and dropped the second as a duplicate, which is why a
+   * presentation arrived as raw markdown.
+   *
+   * Deliberately NOT "make completeExecution idempotent". Completion posts a
+   * message, moves the preview, clears run state and fires the actions row; the
+   * second announcement must do exactly ONE of those things — swap the text for
+   * the surface. Anything else and a slow compose double-posts.
+   */
+  attachSurface: (jobId: string | undefined, surface: Surface) => boolean;
   failExecution: (error: string, jobId?: string) => void;
   /** The session that started a still-tracked job (parallel-session routing). */
   jobOwnerOf: (jobId: string) => string | null;
@@ -235,6 +268,40 @@ const jobOwners = new Map<string, string>();
 // jobId -> message id of the live token-streaming bubble (SSE `llm_chunk`).
 // Same lifecycle discipline as jobOwners: entries die when the job finalizes.
 const streamBubbles = new Map<string, string>();
+
+// jobId -> where this run's finished message landed, kept AFTER it finalizes.
+//
+// The crew subprocess announces a run twice on purpose: plain text the moment
+// the crew has its answer, then a second one carrying the A2UI surface, which the
+// parent can only compose once the subprocess has exited. Composition is not
+// fast — 44s for a 50-component deck on a local model — so the gap is real, and
+// everything else about finalization is deliberately once-only (a double
+// completion double-posts, to the wrong session).
+//
+// So that late surface needs somewhere to land. This is that: the one thing
+// that outlives finalization, holding just enough to find the message again.
+// Deliberately NOT a reopening of the completion path — see attachSurface.
+const finalizedRunMessages = new Map<
+  string,
+  { sessionId: string | null; messageId: string }
+>();
+const _MAX_FINALIZED_TRACKED = 32;
+
+function rememberFinalizedMessage(
+  jobId: string | undefined,
+  sessionId: string | null,
+  messageId: string,
+): void {
+  if (!jobId) return;
+  finalizedRunMessages.set(jobId, { sessionId, messageId });
+  // Bounded: this store lives for the whole session and a surface that never
+  // arrives must not accumulate.
+  while (finalizedRunMessages.size > _MAX_FINALIZED_TRACKED) {
+    const oldest = finalizedRunMessages.keys().next().value;
+    if (oldest === undefined) break;
+    finalizedRunMessages.delete(oldest);
+  }
+}
 // jobId -> how many bubbles this run has opened, so each task boundary can
 // start a new one with a distinct message id.
 const streamBubbleSeq = new Map<string, number>();
@@ -425,6 +492,7 @@ export const useExecutionStore = create<ExecutionStore>()(
   workspaceMemory: true,
   memoryEnabled: false,
   chatModeType: 'chat',
+  preferExisting: false,
   selectedMcpServers: [],
   selectedAgentBricksEndpoints: [],
   runStartedAt: null,
@@ -541,6 +609,7 @@ export const useExecutionStore = create<ExecutionStore>()(
   setWorkspaceMemory: (value) => set({ workspaceMemory: value }),
   setMemoryEnabled: (value) => set({ memoryEnabled: value }),
   setChatModeType: (mode) => set({ chatModeType: mode }),
+  setPreferExisting: (preferExisting) => set({ preferExisting }),
   toggleMcpServer: (name) =>
     set((s) => ({
       selectedMcpServers: s.selectedMcpServers.includes(name)
@@ -671,6 +740,35 @@ export const useExecutionStore = create<ExecutionStore>()(
     useSessionStore.getState().updateMessage(bubbleId, { isStreaming: false });
   },
 
+  attachSurface: (jobId: string | undefined, surface: Surface) => {
+    if (!jobId || !surface) return false;
+    const target = finalizedRunMessages.get(jobId);
+    if (!target) return false;
+    finalizedRunMessages.delete(jobId); // one late surface per run
+    const sessionStore = useSessionStore.getState();
+    // The answer text STAYS, which is the opposite of what the completion path
+    // does when the surface arrives in time (`body = surface ? '' : resultText`).
+    // Not an inconsistency — the rule is: never take away something the reader
+    // has already seen, and never add something they never saw.
+    //
+    // When composition is fast the text never rendered, so dropping it costs
+    // nothing and avoids printing the same deck twice (once as prose, once
+    // rendered) — the duplication that gate was added to fix. When composition
+    // takes 25-45s the reader has been reading that text the whole time, and
+    // blanking it mid-read looks like the answer was retracted.
+    const update = { resultType: 'a2ui', resultData: surface };
+    if (target.sessionId) {
+      sessionStore.updateMessageInTargetSession(
+        target.sessionId,
+        target.messageId,
+        update,
+      );
+    } else {
+      sessionStore.updateMessage(target.messageId, update);
+    }
+    return true;
+  },
+
   completeExecution: (resultText: string, jobId?: string, surface?: Surface) => {
     const state = get();
     // Route to the job's OWNER (parallel sessions), falling back to the single
@@ -774,15 +872,18 @@ export const useExecutionStore = create<ExecutionStore>()(
             isStreaming: false,
             ...(runExtra ?? {}),
           });
+          rememberFinalizedMessage(jobId, ownerSession, streamBubbleId);
         } else if (ownerSession) {
-          sessionStore.addMessageToTargetSession(
+          const id = sessionStore.addMessageToTargetSession(
             ownerSession,
             'assistant',
             body,
             runExtra,
           );
+          rememberFinalizedMessage(jobId, ownerSession, id);
         } else {
-          sessionStore.addMessage('assistant', body, runExtra);
+          const id = sessionStore.addMessage('assistant', body, runExtra);
+          rememberFinalizedMessage(jobId, null, id);
         }
       }
     } else {
@@ -1240,6 +1341,7 @@ export const useExecutionStore = create<ExecutionStore>()(
         workspaceMemory: s.workspaceMemory,
         memoryEnabled: s.memoryEnabled,
         chatModeType: s.chatModeType,
+        preferExisting: s.preferExisting,
       }),
     },
   ),

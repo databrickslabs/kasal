@@ -250,7 +250,7 @@ vi.mock('./components/Chat/ChatContainer', () => ({
   ),
 }));
 // Default: no detected variables (dialog stays closed). Overridable per test.
-vi.mock('./utils/variableDetector', () => ({
+vi.mock('../../utils/variableDetector', () => ({
   detectVariablesFromNodes: (...a: unknown[]) => h.detectVars(...a),
   detectVariablesFromGenerated: (...a: unknown[]) => h.detectVars(...a),
 }));
@@ -2430,8 +2430,8 @@ describe('ChatWorkspace component', () => {
     h.app.savedCrews = [{ id: 'c1', name: 'My Saved Crew' }];
     h.app.savedFlows = [];
     render(<ChatWorkspace />);
-    // open the collapsible "Agents Catalog" section
-    fireEvent.click(screen.getByText('Agents Catalog'));
+    // open the collapsible "Catalog" section
+    fireEvent.click(screen.getByText('Catalog'));
     await act(async () => { fireEvent.click(screen.getByTitle('Open crew “My Saved Crew”')); });
     // saves current state, spins up a new session, restores it, and sends /load
     expect(h.exec.saveSessionState).toHaveBeenCalledWith('s1');
@@ -2448,7 +2448,7 @@ describe('ChatWorkspace component', () => {
     h.app.savedCrews = [];
     h.app.savedFlows = [{ id: 'f1', name: 'My Saved Flow' }];
     render(<ChatWorkspace />);
-    fireEvent.click(screen.getByText('Agents Catalog'));
+    fireEvent.click(screen.getByText('Catalog'));
     await act(async () => { fireEvent.click(screen.getByTitle('Open flow “My Saved Flow”')); });
     expect(h.exec.saveSessionState).not.toHaveBeenCalled();
     expect(h.dispatcherSend).toHaveBeenCalledWith(

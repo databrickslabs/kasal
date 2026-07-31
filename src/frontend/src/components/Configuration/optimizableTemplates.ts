@@ -9,4 +9,8 @@ export const OPTIMIZABLE_TEMPLATES = [
   { name: 'generate_crew', label: 'generate_crew — full crew generation' },
   { name: 'generate_crew_plan', label: 'generate_crew_plan — crew plan outline' },
   { name: 'generate_job_name', label: 'generate_job_name — run naming' },
+  {
+    name: 'route_capability',
+    label: 'route_capability — matching a prompt to a published crew or flow',
+  },
 ];

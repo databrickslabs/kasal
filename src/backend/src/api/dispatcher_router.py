@@ -113,6 +113,11 @@ async def detect_intent_only(
         available_tools=available_tools,
         chat_mode=request.chat_mode,
         last_resort_model=request.model,
+        # Spelled out because this endpoint spells its arguments out, unlike
+        # POST /dispatch which hands the whole request over. Omitted, an
+        # intent-only call would classify as though the user never asked to
+        # reuse — silently, and only on this endpoint.
+        prefer_existing=request.prefer_existing,
     )
 
     # Create response

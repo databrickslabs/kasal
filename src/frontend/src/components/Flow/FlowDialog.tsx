@@ -262,6 +262,7 @@ const FlowDialog: React.FC<FlowSelectionDialogProps> = ({ open, onClose, onFlowS
                           entityType="flow"
                           entityId={String(flow.id)}
                           entityName={flow.name}
+                          nodes={flow.nodes}
                           published={publishedFlowIds.has(String(flow.id))}
                           onChanged={(isPublished) =>
                             setPublished('flow', String(flow.id), isPublished)

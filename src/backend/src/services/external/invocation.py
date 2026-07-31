@@ -175,7 +175,7 @@ async def ask(
     # than filling the gap. Group-scoped like every other capability read.
     capabilities = []
     try:
-        from src.services.external.publication import PublicationService
+        from src.services.publications.publication import PublicationService
 
         capabilities = await PublicationService(session).list_capabilities(caller)
     except Exception as exc:  # noqa: BLE001

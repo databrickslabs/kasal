@@ -305,6 +305,57 @@ Examples:
 - "change model" / "select tools" / "update max rpm" -> configure_crew
 """
 
+ROUTE_CAPABILITY_TEMPLATE = """You match ONE user request to ONE published capability, or to none.
+
+The capabilities available to you, and the inputs each one declares, are listed in the user message. Each has a description written by whoever published it. The conversation so far is listed above them when there is one.
+
+READ THE CONVERSATION FIRST
+The message you are given is a turn in a conversation, not an isolated instruction. Read it the way the person who typed it meant it:
+- A question ABOUT the answer that is already on screen is not a request for new work. "what is this Aviation sector", "why did it say that", "explain the third slide" — return null. Someone will answer from the conversation itself; running a capability would redo minutes of work to answer a question the text on screen already answers.
+- A request that CONTINUES the previous one usually does want a capability, and the conversation is what makes it readable. "now do the same for Germany" means the previous request again with a different region — route it, and take the inputs the user did not repeat from the earlier turns.
+- A request that acts ON the previous answer may want a DIFFERENT capability. "turn this into a presentation" is a presentation request whose subject is the answer above it. Route it to the capability that does that work, and say which answer it refers to with refers_to.
+
+HOW TO PICK
+- Choose the capability whose DESCRIPTION says it handles this request. The description is the only thing you match on — ignore how similar the name looks.
+- If none clearly handles it, return null. Returning null is a correct answer, and often the right one mid-conversation: the turn is answered in the chat instead, and the option to build something new is still offered.
+- confidence is how sure you are that this capability is the right one for THIS request, not how good the capability is.
+
+REFERRING TO AN EARLIER ANSWER
+- Set refers_to to the number of the [answer N] this request works FROM, so that answer can be handed to the run instead of being rediscovered. Only when the request genuinely acts on it — "turn this into a deck", "summarise that". A fresh request refers to nothing.
+- If you cannot point at a specific [answer N], leave refers_to null. Never guess a number.
+
+HOW TO EXTRACT
+- Extract only inputs the capability you picked declares. Never invent a field name; an undeclared field is discarded.
+- For each declared input return either null, or {"value": <the value>, "source_span": "<exact text from the user's message>"}.
+- source_span must be copied CHARACTER FOR CHARACTER out of the user's message. It is checked against the message, and a value whose span is not found there is thrown away.
+- If the user did not state a value, return null for it. DO NOT INFER IT. DO NOT SUPPLY A DEFAULT. DO NOT USE A COMMON, RECENT, OR PLAUSIBLE VALUE.
+
+WHY THAT LAST RULE MATTERS
+A null is expected and handled — the user is simply asked for the value. A guessed value is never noticed by anyone: no question is asked, the run completes cleanly, and the answer is confidently about the wrong quarter, the wrong region, or the wrong customer. Missing is safe; invented is not.
+
+RETURN ONLY JSON, no markdown and no commentary:
+{"capability": "<name>" | null,
+ "confidence": 0.0-1.0,
+ "inputs": {"<declared field>": {"value": ..., "source_span": "..."} | null},
+ "refers_to": <the N of an [answer N] this works from> | null,
+ "reason": "<one sentence: why this capability, or why none>"}
+
+EXAMPLES
+User message: "Kick off the Q3 risk review for DACH" with capability quarterly_risk_review declaring region (required), quarter (required)
+-> {"capability": "quarterly_risk_review", "confidence": 0.95, "inputs": {"region": {"value": "DACH", "source_span": "DACH"}, "quarter": {"value": "Q3", "source_span": "Q3"}}, "reason": "the request names the quarterly risk review and both of its inputs"}
+
+User message: "Kick off the risk review for DACH" (no quarter stated)
+-> {"capability": "quarterly_risk_review", "confidence": 0.9, "inputs": {"region": {"value": "DACH", "source_span": "DACH"}, "quarter": null}, "reason": "matches the risk review; the user did not say which quarter"}
+
+User message: "write me a poem about the sea"
+-> {"capability": null, "confidence": 0.0, "inputs": {}, "refers_to": null, "reason": "nothing published handles creative writing"}
+
+Conversation: the assistant has just returned [answer 3], a Swiss news deck. User message: "what is this Aviation sector"
+-> {"capability": null, "confidence": 0.0, "inputs": {}, "refers_to": null, "reason": "a question about the deck already on screen, not a request to gather news again"}
+
+Conversation: [answer 2] is a news summary. User message: "turn this into a presentation" with a capability build_deck published
+-> {"capability": "build_deck", "confidence": 0.9, "inputs": {}, "refers_to": 2, "reason": "acts on the summary in answer 2"}"""
+
 IMPROVE_PROMPT_TEMPLATE = """You are an expert prompt engineer. You improve the prompt fields of AI agent and task configurations so they produce better LLM results.
 
 You receive a JSON object with:
@@ -390,6 +441,15 @@ DEFAULT_TEMPLATES = [
         "name": "detect_intent",
         "description": "Template for detecting user intent in natural language messages",
         "template": DETECT_INTENT_TEMPLATE,
+        "is_active": True,
+    },
+    {
+        "name": "route_capability",
+        "description": (
+            "Template for matching a chat prompt to an already-published crew or "
+            "flow in 'Use existing' mode, and binding its inputs from the message"
+        ),
+        "template": ROUTE_CAPABILITY_TEMPLATE,
         "is_active": True,
     },
     {

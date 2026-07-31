@@ -86,7 +86,7 @@ describe('useExecutionStream', () => {
     });
   });
 
-  it('handles execution_update with completed status -> onComplete + stop', () => {
+  it('handles execution_update with completed status -> onComplete', () => {
     const captures = setupStreamCapture();
     const options = makeOptions();
     const { result } = renderHook(() => useExecutionStream(options));
@@ -101,8 +101,126 @@ describe('useExecutionStream', () => {
 
     expect(options.onStatusChange).toHaveBeenCalledWith('COMPLETED', data);
     expect(options.onComplete).toHaveBeenCalledWith(data);
-    // stopStream closes the connection
-    expect(captures[0].close).toHaveBeenCalledTimes(1);
+  });
+
+  describe('waiting for a surface composed after the answer', () => {
+    // A crew run announces COMPLETED twice on purpose: the plain answer the
+    // moment the crew has it, then a second one carrying the composed surface,
+    // which the parent can only build after the subprocess exits (25-45s
+    // measured). Closing on the first announcement left the second with nothing
+    // to arrive on — the poller stops on the same event — so a composed deck
+    // was stored and never seen; the chat kept the raw markdown.
+    const SURFACE = { surfaceKind: 'presentation', components: [], root: 'r' };
+
+    it('holds the connection open when the answer has no surface yet', () => {
+      const captures = setupStreamCapture();
+      const { result } = renderHook(() => useExecutionStream(makeOptions()));
+      act(() => result.current.startStream('job-1'));
+
+      act(() => {
+        captures[0].onEvent({
+          event: 'execution_update',
+          data: { status: 'COMPLETED', result: { answer: 42 } },
+        });
+      });
+
+      expect(captures[0].close).not.toHaveBeenCalled();
+    });
+
+    it('closes immediately when the answer already carries its surface', () => {
+      // The light-agent path composes in-process, so its single announcement is
+      // complete — there is no second announcement to wait for.
+      const captures = setupStreamCapture();
+      const { result } = renderHook(() => useExecutionStream(makeOptions()));
+      act(() => result.current.startStream('job-1'));
+
+      act(() => {
+        captures[0].onEvent({
+          event: 'execution_update',
+          data: { status: 'COMPLETED', result: { a2ui: SURFACE } },
+        });
+      });
+
+      expect(captures[0].close).toHaveBeenCalledTimes(1);
+    });
+
+    it('delivers the late surface and then closes', () => {
+      const captures = setupStreamCapture();
+      const options = makeOptions();
+      const { result } = renderHook(() => useExecutionStream(options));
+      act(() => result.current.startStream('job-1'));
+
+      act(() => {
+        captures[0].onEvent({
+          event: 'execution_update',
+          data: { status: 'COMPLETED', result: { answer: 42 } },
+        });
+      });
+      act(() => {
+        captures[0].onEvent({
+          event: 'execution_update',
+          data: { status: 'COMPLETED', result: { a2ui: SURFACE } },
+        });
+      });
+
+      // Both announcements reach the consumer; it routes the second to the
+      // attach-to-the-finished-message path.
+      expect(options.onComplete).toHaveBeenCalledTimes(2);
+      expect(captures[0].close).toHaveBeenCalledTimes(1);
+    });
+
+    it('gives up rather than holding a connection forever', () => {
+      // Composition can fail or be skipped, in which case no second
+      // announcement ever comes. An un-timed wait would leak one idle
+      // connection per run.
+      vi.useFakeTimers();
+      try {
+        const captures = setupStreamCapture();
+        const { result } = renderHook(() => useExecutionStream(makeOptions()));
+        act(() => result.current.startStream('job-1'));
+        act(() => {
+          captures[0].onEvent({
+            event: 'execution_update',
+            data: { status: 'COMPLETED', result: { answer: 42 } },
+          });
+        });
+        expect(captures[0].close).not.toHaveBeenCalled();
+
+        act(() => {
+          vi.advanceTimersByTime(120_000);
+        });
+
+        expect(captures[0].close).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('a new run cancels a previous run\'s wait', () => {
+      vi.useFakeTimers();
+      try {
+        const captures = setupStreamCapture();
+        const { result } = renderHook(() => useExecutionStream(makeOptions()));
+        act(() => result.current.startStream('job-1'));
+        act(() => {
+          captures[0].onEvent({
+            event: 'execution_update',
+            data: { status: 'COMPLETED', result: { answer: 42 } },
+          });
+        });
+        act(() => result.current.startStream('job-2'));
+
+        act(() => {
+          vi.advanceTimersByTime(120_000);
+        });
+
+        // job-1's connection closed once, when job-2 started — the stale timer
+        // must not also fire and close job-2's live stream.
+        expect(captures[1].close).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it('handles execution_update with failed status -> onError with error field', () => {

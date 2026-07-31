@@ -921,3 +921,60 @@ describe('crewConfigBuilder', () => {
     });
   });
 });
+
+describe('inputs the crew never references', () => {
+  const plan = {
+    name: 'Gather News',
+    nodes: [
+      { id: 'a1', type: 'agentNode', data: { role: 'Reporter', goal: 'g', backstory: 'b' } },
+      {
+        id: 't1',
+        type: 'taskNode',
+        data: { name: 'Gather', description: 'Collect current news.', expected_output: 'A summary' },
+      },
+      {
+        id: 't2',
+        type: 'taskNode',
+        data: { name: 'Write', description: 'Write it up.', expected_output: 'An article' },
+      },
+    ],
+    edges: [],
+  };
+
+  it('appends them to the FIRST task, so the value is not silently inert', () => {
+    // The exact failure this exists for: a published capability declares
+    // `topic`, no task mentions {topic}, and the run answers about whatever
+    // its memory last saw.
+    const config = buildCrewConfig(plan, 'm', { topic: 'lebanese' });
+    const first = Object.values(config.tasks_yaml)[0] as { description: string };
+    expect(first.description).toContain('Collect current news.');
+    expect(first.description).toContain('topic: lebanese');
+    expect(first.description).toMatch(/prefer them over anything recalled/i);
+  });
+
+  it('leaves a referenced input alone — the author already placed it', () => {
+    const referenced = {
+      ...plan,
+      nodes: [
+        plan.nodes[0],
+        { ...plan.nodes[1], data: { ...plan.nodes[1].data, description: 'Collect news on {topic}.' } },
+        plan.nodes[2],
+      ],
+    };
+    const config = buildCrewConfig(referenced, 'm', { topic: 'lebanese' });
+    const first = Object.values(config.tasks_yaml)[0] as { description: string };
+    expect(first.description).toBe('Collect news on {topic}.');
+  });
+
+  it('does not touch the description when there are no inputs', () => {
+    const config = buildCrewConfig(plan, 'm');
+    const first = Object.values(config.tasks_yaml)[0] as { description: string };
+    expect(first.description).toBe('Collect current news.');
+  });
+
+  it('ignores blank values rather than appending an empty line', () => {
+    const config = buildCrewConfig(plan, 'm', { topic: '   ' });
+    const first = Object.values(config.tasks_yaml)[0] as { description: string };
+    expect(first.description).toBe('Collect current news.');
+  });
+});

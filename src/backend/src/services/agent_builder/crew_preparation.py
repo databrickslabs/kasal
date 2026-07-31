@@ -1204,10 +1204,15 @@ class CrewPreparation:
             from src.services.memory.hooks import (
                 make_memory_context_provider,
                 make_memory_output_sink,
+                request_from_inputs,
             )
 
             crew_memory = getattr(self.crew, "memory", None)
-            memory_provider = make_memory_context_provider(crew_memory)
+            # The run's request leads the recall query — see the provider's
+            # docstring for why a saved crew cannot discriminate without it.
+            memory_provider = make_memory_context_provider(
+                crew_memory, request_from_inputs(self.config.get("inputs"))
+            )
             if memory_provider is not None:
                 self.crew.context_providers.append(memory_provider)
             memory_sink = make_memory_output_sink(crew_memory)

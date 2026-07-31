@@ -1826,6 +1826,9 @@ class TestEdgeCases:
             None,
             chat_mode=False,
             last_resort_model="m",
+            # Source axis, defaulted off: this request did not ask to reuse, so
+            # the ChatMode fast path stays closed and nothing routes.
+            prefer_existing=False,
         )
 
     def test_semantic_analysis_returns_all_expected_keys(self):
