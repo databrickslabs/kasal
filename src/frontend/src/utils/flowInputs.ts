@@ -17,7 +17,44 @@
  * needs, which is indistinguishable from asking for the wrong things.
  */
 
-import { DetectedVariable, detectVariablesFromNodes } from './variableDetector';
+import { DetectedVariable } from './variableDetector';
+
+const PLACEHOLDER = /\{([a-zA-Z_][a-zA-Z0-9_-]*)\}/g;
+
+/**
+ * Every `{placeholder}` anywhere in a flow's nodes, at any depth.
+ *
+ * A DEEP walk, unlike the crew path's `detectVariablesFromNodes`, and that is
+ * not a stylistic choice — it is the only thing that works here. A flow is made
+ * of `crewNode`s, so the crew scan skips every node on type alone; and even
+ * unfiltered it reads only top-level fields, while a flow node carries the
+ * referenced crew's task text nested under `allTasks[].description`. Measured on
+ * a real two-crew flow: the placeholder its starting crew needs sits exactly
+ * there, and the type-filtered scan returned nothing.
+ */
+export function placeholdersInFlowNodes(nodes: unknown[]): string[] {
+  const found = new Set<string>();
+  const walk = (value: unknown, depth: number): void => {
+    if (depth > 8) return;
+    if (typeof value === 'string') {
+      PLACEHOLDER.lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = PLACEHOLDER.exec(value)) !== null) found.add(match[1]);
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item) => walk(item, depth + 1));
+      return;
+    }
+    if (value && typeof value === 'object') {
+      Object.values(value as Record<string, unknown>).forEach((item) =>
+        walk(item, depth + 1),
+      );
+    }
+  };
+  walk(nodes, 0);
+  return Array.from(found);
+}
 
 /**
  * State reads inside a condition expression.
@@ -89,7 +126,7 @@ export function deriveFlowInputs(
   }
   // Union, not fallback: a flow can read `region` in a router and `{quarter}` in
   // a crew task, and it needs both.
-  for (const variable of detectVariablesFromNodes(nodes)) names.add(variable.name);
+  for (const name of placeholdersInFlowNodes(nodes)) names.add(name);
 
   return Array.from(names).map((name) => ({ name, required: true }));
 }

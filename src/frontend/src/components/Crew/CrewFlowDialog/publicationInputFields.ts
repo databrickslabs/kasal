@@ -7,6 +7,7 @@
  */
 import { PublicationInputSchema } from '../../../types/workflow/publication';
 import { detectVariablesFromNodes } from '../../../utils/variableDetector';
+import { placeholdersInFlowNodes } from '../../../utils/flowInputs';
 
 /** One declared input, as the publisher is editing it. */
 export interface PublicationInputField {
@@ -32,37 +33,18 @@ export function deriveCrewInputFields(nodes: unknown[]): PublicationInputField[]
 /**
  * The fields a flow declares.
  *
- * Deliberately weaker than the crew case: a flow's inputs are read by router
- * conditions and state operations rather than written as placeholders in an
- * agent's backstory, so a scan of node text finds only some of them. This walks
- * every node's data for `{placeholders}` and expects the publisher to add the
- * rest by hand.
+ * Shares ONE implementation with the run-time gate (`utils/flowInputs`). They
+ * disagreed before: this dialog walked a flow's nodes deeply and found the
+ * placeholder nested in `allTasks[].description`, while the gate used the crew
+ * scan and found nothing — so a flow could be published declaring `topic` and
+ * then run without ever being asked for it.
  */
 export function deriveFlowInputFields(nodes: unknown[]): PublicationInputField[] {
-  const found = new Set<string>();
-  const pattern = /\{([a-zA-Z_][a-zA-Z0-9_-]*)\}/g;
-
-  const walk = (value: unknown, depth: number): void => {
-    if (depth > 6) return;
-    if (typeof value === 'string') {
-      let match: RegExpExecArray | null;
-      pattern.lastIndex = 0;
-      while ((match = pattern.exec(value)) !== null) found.add(match[1]);
-      return;
-    }
-    if (Array.isArray(value)) {
-      value.forEach((item) => walk(item, depth + 1));
-      return;
-    }
-    if (value && typeof value === 'object') {
-      Object.values(value as Record<string, unknown>).forEach((item) =>
-        walk(item, depth + 1),
-      );
-    }
-  };
-
-  walk(nodes, 0);
-  return Array.from(found).map((name) => ({ name, required: true, description: '' }));
+  return placeholdersInFlowNodes(nodes).map((name) => ({
+    name,
+    required: true,
+    description: '',
+  }));
 }
 
 /** Read an existing publication's schema back into editable fields. */

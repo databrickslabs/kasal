@@ -67,3 +67,43 @@ describe('what a flow reads from its state', () => {
     expect(deriveFlowInputs([], [])).toEqual([]);
   });
 });
+
+describe('a real flow made of crewNodes', () => {
+  // The shape a saved flow actually has, taken from an exported two-crew flow.
+  // The placeholder its starting crew needs is NOT on the node — it is nested
+  // inside the referenced crew's task text under allTasks[].description, on a
+  // node whose type is 'crewNode'. The crew-path scan skips it twice over: once
+  // on the type filter, once because it reads only top-level fields.
+  const crewNode = {
+    id: 'crew-fc1239e9-1785535044228',
+    type: 'crewNode',
+    data: {
+      label: 'Gather News',
+      crewName: 'Gather News',
+      routerCondition: null,
+      stateType: null,
+      allTasks: [
+        {
+          id: '7ecdecd6',
+          name: 'Gather News by Topic',
+          description:
+            'Research and collect current news related to a specified {topic} ' +
+            'using specialized search capabilities.',
+        },
+      ],
+      selectedTasks: [],
+    },
+  };
+
+  it('finds the placeholder nested in the referenced crew task', () => {
+    expect(deriveFlowInputs([crewNode], []).map((v) => v.name)).toEqual(['topic']);
+  });
+
+  it('derives nothing surprising when the flow has no conditions', () => {
+    // logicType: 'ROUTER' on an edge without a condition is not an input.
+    const edge = { data: { logicType: 'ROUTER', checkpoint: true } };
+    expect(deriveFlowInputs([crewNode], [edge]).map((v) => v.name)).toEqual([
+      'topic',
+    ]);
+  });
+});
