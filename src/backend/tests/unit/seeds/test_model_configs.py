@@ -638,3 +638,54 @@ class TestDeepSeekModels:
 
         assert not model_supports_reasoning_effort("deepseek-v4-flash")
         assert not model_supports_reasoning_effort("deepseek-v4-pro")
+
+
+class TestEveryModelDeclaresAnOutputCeiling:
+    """A model with no ceiling can generate until something else stops it.
+
+    Observed on a real run: a model repeating itself produced 197,336 characters
+    before `max_tokens` cut it off — and the only thing that ended it WAS that
+    ceiling. A model without one has no such backstop; a runaway runs until the
+    request timeout, and the tokens are billed either way.
+
+    The transport's repetition guard now catches the specific degenerate case,
+    but it is a second line of defence, not a reason to ship a model with no
+    bound at all.
+    """
+
+    def test_no_model_is_missing_max_output_tokens(self):
+        missing = [
+            key
+            for key, config in MODEL_CONFIGS.items()
+            if not config.get("max_output_tokens")
+        ]
+
+        assert missing == [], (
+            f"These models declare no max_output_tokens: {missing}. "
+            "Add one — an unbounded model has no backstop against a runaway "
+            "generation."
+        )
+
+    def test_every_ceiling_is_a_positive_integer(self):
+        bad = {
+            key: config.get("max_output_tokens")
+            for key, config in MODEL_CONFIGS.items()
+            if not isinstance(config.get("max_output_tokens"), int)
+            or config["max_output_tokens"] <= 0
+        }
+
+        assert bad == {}, f"Non-positive or non-integer ceilings: {bad}"
+
+    def test_a_ceiling_never_exceeds_the_context_window(self):
+        # Output cannot exceed what the model can hold. A ceiling above the
+        # window is a configuration error that only shows up as a provider
+        # rejection mid-run.
+        over = {
+            key: (config["max_output_tokens"], config["context_window"])
+            for key, config in MODEL_CONFIGS.items()
+            if config.get("context_window")
+            and config.get("max_output_tokens")
+            and config["max_output_tokens"] > config["context_window"]
+        }
+
+        assert over == {}, f"max_output_tokens exceeds context_window for: {over}"

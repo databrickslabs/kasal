@@ -20,6 +20,7 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 
+from src.core.llm.output_cap import output_cap
 from src.core.logger import LoggerManager
 from src.services.execution.kernel.agent_security import inject_security_preamble
 from src.services.execution.kernel.agent_skills import inject_skills
@@ -246,6 +247,16 @@ async def build_agent_llm(
 
     # Reasoning = the model's native thinking budget, applied to the agent's own LLM.
     _apply_reasoning_effort(llm, spec, label=label)
+
+    # What this agent will actually run with, logged HERE so all three paths
+    # report it identically — chat, crew and flow all reach this function, and
+    # only the flow path used to print anything. `output_cap` reads whichever
+    # field carries the ceiling: GPT-5 models take max_completion_tokens, so
+    # reading max_tokens alone reported "not set" for a model capped at 128k.
+    logger.info(
+        f"[llm] agent {label or '<unnamed>'}: model={getattr(llm, 'model', 'unknown')} "
+        f"max_output={output_cap(llm)} stream={getattr(llm, 'stream', False)}"
+    )
 
     return llm
 
