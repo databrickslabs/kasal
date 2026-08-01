@@ -48,6 +48,7 @@ from .response_parsing import (
     reasoning_items,
     responses_token_usage,
 )
+from .repetition import RepetitionWatch, check_response, stop_on_loop
 from .rpm import throttle
 from .tool_rounds import run_chat_round, run_responses_round
 
@@ -615,6 +616,7 @@ class OpenAICompletion(BaseLLM):
                 self._track_token_usage_internal(usage)
                 function_calls = self._extract_function_calls_from_response(response)
                 content = response.choices[0].message.content
+            check_response(self.model, content)
             if function_calls and available_functions:
                 call_type = LLMCallType.TOOL_CALL
                 outcome = run_chat_round(
@@ -659,6 +661,11 @@ class OpenAICompletion(BaseLLM):
         calls_by_index: dict[int, dict[str, Any]] = {}
         usage: dict[str, Any] | None = None
         chunk_index = 0
+        # Watches the text as it arrives so a degenerate decode is cut off at a
+        # few KB instead of running to max_tokens. Streaming is where this is
+        # worth doing: the tokens after the loop starts are billed and waited
+        # for, and none of them will ever say anything new.
+        watch = RepetitionWatch()
         for part in response_stream:
             if getattr(part, "usage", None) is not None:
                 usage = self._extract_chat_token_usage(part)
@@ -676,6 +683,9 @@ class OpenAICompletion(BaseLLM):
                     ),
                 )
                 chunk_index += 1
+                unit = watch.feed(text)
+                if unit:
+                    stop_on_loop(self.model, "".join(chunks), unit, response_stream)
             for tc in getattr(delta, "tool_calls", None) or []:
                 slot = calls_by_index.setdefault(
                     tc.index, {"id": None, "name": "", "arguments": ""}

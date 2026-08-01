@@ -57,6 +57,25 @@ class ExecutionBudgetExceededError(RuntimeError):
         self.partial = partial
 
 
+class LLMRepetitionLoopError(ExecutionBudgetExceededError):
+    """The model stopped answering and started repeating itself.
+
+    A degenerate decode: one phrase emitted over and over until ``max_tokens``.
+    Nothing errors on its own — the call returns a very long string that reads
+    like an answer for its first sentence and is that sentence for the rest.
+
+    Subclasses the budget error deliberately. What has happened IS a budget
+    breach — the whole output allowance spent producing nothing — and every
+    caller that already degrades or fails on one does the right thing here with
+    no change: the run stops, ``partial`` is offered, and the standard path
+    emits LLMCallFailedEvent so it lands in traces instead of vanishing into a
+    result nobody reads to the end. The message says which kind it was.
+
+    ``partial`` is the text BEFORE the repetition, keeping one copy of the
+    repeated unit. Handing back the loop itself would defeat the point.
+    """
+
+
 class ToolExecutionBlockedError(Exception):
     """A pre-execution tool hook blocked this tool call.
 
