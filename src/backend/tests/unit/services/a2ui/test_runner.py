@@ -274,3 +274,58 @@ def test_compose_surface_keeps_text_only_presentation(monkeypatch):
     _stub_compose_surface(monkeypatch, deck)
     out = _run(R.compose_surface("slides", query="make a deck"))
     assert out is deck
+
+
+class TestStructuredResultReachesTheComposer:
+    """A crew that declares output_pydantic still produces a surface.
+
+    The composer reads TEXT. A declared structured output has no ``.raw``, so it
+    fell through to ``str()`` and arrived as a repr —
+    ``WebSearchResult(query='...', has_results=True)`` — which is neither the
+    prose the surface inference reads nor the JSON that
+    ``render_research_envelope`` converts. The most structured thing a run can
+    produce was the one shape that could not become a surface.
+    """
+
+    def test_a_pydantic_result_arrives_as_json(self):
+        from pydantic import BaseModel
+
+        from src.services.a2ui.runner import _result_text
+
+        class WebSearchResult(BaseModel):
+            query: str
+            has_results: bool
+
+        text = _result_text(WebSearchResult(query="lebanese news", has_results=True))
+
+        import json
+
+        assert json.loads(text) == {"query": "lebanese news", "has_results": True}
+        assert "WebSearchResult(" not in text  # not the repr
+
+    def test_a_crew_output_still_prefers_its_raw(self):
+        # A CrewOutput carries BOTH .raw (the JSON string) and .pydantic. The
+        # existing order must not change: .raw is what the crew actually said.
+        from src.services.a2ui.runner import _result_text
+
+        class CrewOutput:
+            raw = "# The answer"
+
+            def model_dump_json(self):  # noqa: D102 — must NOT be reached
+                return '{"unexpected": true}'
+
+        assert _result_text(CrewOutput()) == "# The answer"
+
+    def test_an_object_that_cannot_serialize_still_stringifies(self):
+        # Never lose the value: a broken dump falls back rather than raising,
+        # because formatting must not break a finished run.
+        from src.services.a2ui.runner import _result_text
+
+        class Awkward:
+            def model_dump_json(self):
+                raise RuntimeError("not serializable")
+
+            def __str__(self):
+                return "the fallback"
+
+        assert _result_text(Awkward()) == "the fallback"

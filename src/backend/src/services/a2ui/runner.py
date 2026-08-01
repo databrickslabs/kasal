@@ -535,6 +535,21 @@ def _result_text(result: Any) -> str:
             val = result.get(key)
             if isinstance(val, str) and val.strip():
                 return val
+
+    # A DECLARED structured output — a crew or task with output_pydantic. It has
+    # no `.raw`, so it used to fall through to ``str()`` and reach the composer
+    # as a repr: ``WebSearchResult(query='...', has_results=True)``. The composer
+    # reads text, and a repr is not the JSON that ``render_research_envelope``
+    # and the surface inference know how to work with — so a typed answer, the
+    # most structured thing a run can produce, was the one shape that could not
+    # become a surface.
+    dump = getattr(result, "model_dump_json", None)
+    if callable(dump):
+        try:
+            return dump()
+        except Exception as exc:  # noqa: BLE001 — formatting must not break a run
+            logger.debug(f"[a2ui] could not serialize structured result: {exc}")
+
     return str(result)
 
 
