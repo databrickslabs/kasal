@@ -28,6 +28,8 @@ from src.services.chat.capability_router import (
     CHAT_PROTOCOL,
     RouteDecision,
     build_route_messages,
+    continue_decision,
+    held_conversation,
     parse_route_response,
 )
 from src.services.chat.conversation_context import (
@@ -104,6 +106,7 @@ async def route_and_dispatch(
     catalog_service: Any,
     flow_service: Any,
     session_id: Optional[str] = None,
+    allow_continuation: bool = True,
 ) -> Dict[str, Any]:
     """The whole "Use existing" turn: read the catalog, pick, resolve, render.
 
@@ -158,19 +161,38 @@ async def route_and_dispatch(
         group_context=group_context,
     )
 
+    continued = False
     decision = parse_route_response(parsed, message, capabilities)
     if decision is None or not decision.is_confident:
-        logger.info(
-            "[capability_router] declining: capability=%s confidence=%s reason=%s",
-            getattr(decision, "capability", None),
-            getattr(decision, "confidence", None),
-            getattr(decision, "reason", ""),
-        )
-        # Mid-conversation, declining almost always means the turn is ABOUT what
-        # is already on screen — a question, not a request. Answer it. With no
-        # conversation behind it there is nothing to answer from, so the offer to
-        # build is all there is.
-        return no_match("no_match", answer_here=bool(turns))
+        # Before declining: is a capability mid-conversation here? A flow that
+        # holds a conversation expects the next turn ITSELF, and a follow-up to
+        # one is usually a fragment ("and Germany?", "shorter") that matches
+        # nothing in the catalogue on its own words. Declining would answer it
+        # in the chat and leave the flow never knowing the turn happened — its
+        # state would silently stop tracking the conversation the user is
+        # having.
+        held = held_conversation(turns, capabilities) if allow_continuation else None
+        if held is not None:
+            logger.info(
+                "[capability_router] continuing %s: it is mid-conversation and "
+                "the router declined (confidence=%s)",
+                held.name,
+                getattr(decision, "confidence", None),
+            )
+            decision = continue_decision(held, message)
+            continued = True
+        else:
+            logger.info(
+                "[capability_router] declining: capability=%s confidence=%s reason=%s",
+                getattr(decision, "capability", None),
+                getattr(decision, "confidence", None),
+                getattr(decision, "reason", ""),
+            )
+            # Mid-conversation, declining almost always means the turn is ABOUT
+            # what is already on screen — a question, not a request. Answer it.
+            # With no conversation behind it there is nothing to answer from, so
+            # the offer to build is all there is.
+            return no_match("no_match", answer_here=bool(turns))
 
     # ALWAYS through resolve_capability_for_group — the single authorisation
     # choke point, which returns None for "does not exist" and "another
@@ -217,6 +239,7 @@ async def route_and_dispatch(
         group_context,
         message,
         referenced.content if referenced else None,
+        continued,
     )
 
 
@@ -244,6 +267,7 @@ async def build_dispatch_result(
     group_context: GroupContext,
     message: str = "",
     referenced_answer: Optional[str] = None,
+    continued: bool = False,
 ) -> Dict[str, Any]:
     """Load the published entity and render it as an execute_* result."""
     if (publication.entity_type or "crew") == "flow":
@@ -255,9 +279,16 @@ async def build_dispatch_result(
             group_context,
             message,
             referenced_answer,
+            continued,
         )
     return await _build_crew_result(
-        decision, publication, capability, catalog_service, message, referenced_answer
+        decision,
+        publication,
+        capability,
+        catalog_service,
+        message,
+        referenced_answer,
+        continued,
     )
 
 
@@ -268,6 +299,7 @@ async def _build_crew_result(
     catalog_service: Any,
     message: str = "",
     referenced_answer: Optional[str] = None,
+    continued: bool = False,
 ) -> Dict[str, Any]:
     crew = await catalog_service.get(_entity_key(publication.entity_id))
     if crew is None:
@@ -295,7 +327,7 @@ async def _build_crew_result(
         # turn needs. See the execute_crew case in ChatMessage.
         "message": f"Running **{crew.name}**",
         **_routing_payload(
-            decision, publication, capability, message, referenced_answer
+            decision, publication, capability, message, referenced_answer, continued
         ),
     }
 
@@ -308,6 +340,7 @@ async def _build_flow_result(
     group_context: GroupContext,
     message: str = "",
     referenced_answer: Optional[str] = None,
+    continued: bool = False,
 ) -> Dict[str, Any]:
     # Unlike the crew leg, this RAISES rather than returning None for a flow that
     # has been deleted — a `flow is None` check would sail straight past it. The
@@ -348,7 +381,7 @@ async def _build_flow_result(
         },
         "message": f"Running **{flow.name}**",
         **_routing_payload(
-            decision, publication, capability, message, referenced_answer
+            decision, publication, capability, message, referenced_answer, continued
         ),
     }
 
@@ -359,6 +392,7 @@ def _routing_payload(
     capability: Optional[PublishedCapability],
     message: str = "",
     referenced_answer: Optional[str] = None,
+    continued: bool = False,
 ) -> Dict[str, Any]:
     """The keys that make this a ROUTED run rather than a picked-from-a-list one.
 
@@ -373,6 +407,12 @@ def _routing_payload(
         "input_schema": schema if schema is not None else publication.input_schema,
         "capability": publication.external_name,
         "routed_from": CHAT_PROTOCOL,
+        # Whether this capability holds a conversation, and whether THIS turn
+        # was routed to it because it was already holding one. The UI needs both:
+        # the first to know a follow-up will stay here, the second to say so on
+        # the turn it happened.
+        "conversational": bool(getattr(capability, "conversational", False)),
+        "continued": bool(continued),
         # The sentence that selected this capability, carried back so the run can
         # send it as `user_request`. It is what memory recall queries on: a saved
         # crew's task description is identical on every run, so without it recall

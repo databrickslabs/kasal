@@ -43,6 +43,11 @@ export async function dispatch(
     // effort") are different questions, and the backend gates its ChatMode fast
     // path on this field alone.
     if (runSettings.prefer_existing) request.prefer_existing = true;
+    // Only sent when FALSE: the backend default is true, and a field that is
+    // usually its own default is noise on every request. False is the user
+    // having just left a held conversation — the router must decide this turn
+    // on the message alone.
+    if (runSettings.allow_continuation === false) request.allow_continuation = false;
   }
 
   const response = await getClient().post<DispatchResult>(

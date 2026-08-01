@@ -25,6 +25,8 @@ import {
   PublishableEntity,
 } from '../../../types/workflow/publication';
 import PublishInputSchema from './PublishInputSchema';
+import PublishFlowOutcomes from './PublishFlowOutcomes';
+import { FlowService } from '../../../api/workflow/FlowService';
 import {
   PublicationInputField,
   buildInputSchema,
@@ -110,6 +112,10 @@ const PublishDialog: React.FC<PublishDialogProps> = ({
 
   const [externalName, setExternalName] = useState('');
   const [description, setDescription] = useState('');
+  // What each crew in this FLOW delivers. Kept on the flow, not on the
+  // publication: a conversational flow uses it to pick which crew a follow-up
+  // needs, published or not.
+  const [outcomes, setOutcomes] = useState<Record<string, string>>({});
   const [protocols, setProtocols] = useState<PublicationProtocol[]>(DEFAULT_PROTOCOLS);
   const [inputFields, setInputFields] = useState<PublicationInputField[]>([]);
 
@@ -126,12 +132,34 @@ const PublishDialog: React.FC<PublishDialogProps> = ({
     [entityType, nodes],
   );
 
+  // The crews on this flow's canvas, and which of them nothing else listens to.
+  // Read from the nodes rather than the saved config so the list matches what
+  // the author is looking at, including crews added since the last save.
+  const flowCrews = useMemo(() => {
+    if (entityType !== 'flow') return [];
+    const names = (nodes ?? [])
+      .filter((n) => (n as { type?: string }).type === 'crewNode')
+      .map((n) => {
+        const data = (n as { data?: Record<string, unknown> }).data || {};
+        return String(data.crewName || data.label || '');
+      })
+      .filter(Boolean);
+    return Array.from(new Set(names));
+  }, [entityType, nodes]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const publication = await PublicationService.get(entityType, entityId);
       setExisting(publication);
+      if (entityType === 'flow') {
+        const flow = await FlowService.getFlow(entityId);
+        const config = (flow?.flowConfig ?? flow?.flow_config ?? {}) as {
+          outcomes?: Record<string, string>;
+        };
+        setOutcomes(config.outcomes ?? {});
+      }
       // Seed from the existing publication when there is one, so editing does
       // not silently rewrite a name external clients have already pinned.
       setExternalName(publication?.external_name ?? toExternalName(entityName));
@@ -175,6 +203,11 @@ const PublishDialog: React.FC<PublishDialogProps> = ({
         protocols,
         input_schema: buildInputSchema(inputFields),
       });
+      // Saved to the FLOW, not the publication: the selection that uses these
+      // runs for any conversational flow, whether or not it is published.
+      if (entityType === 'flow') {
+        await FlowService.updateFlowOutcomes(entityId, outcomes);
+      }
       refreshChatCatalog();
       onChanged?.(true);
       onClose();
@@ -324,6 +357,14 @@ const PublishDialog: React.FC<PublishDialogProps> = ({
               entityLabel={entityType}
               usedPlaceholders={usedPlaceholders}
             />
+
+            {entityType === 'flow' && (
+              <PublishFlowOutcomes
+                crews={flowCrews}
+                outcomes={outcomes}
+                onChange={setOutcomes}
+              />
+            )}
           </Stack>
         )}
       </DialogContent>

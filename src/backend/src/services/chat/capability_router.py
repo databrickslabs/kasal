@@ -108,6 +108,57 @@ class RouteDecision:
         )
 
 
+#: Confidence attached to a turn that continues a capability already holding the
+#: conversation. Deliberately just over the threshold rather than 1.0: this is a
+#: structural inference — "the previous answer came from a capability that
+#: expects the next turn" — not a semantic match the model made, and a trials
+#: table should be able to tell the two apart.
+CONTINUATION_CONFIDENCE = ROUTE_CONFIDENCE_THRESHOLD
+
+
+def held_conversation(
+    turns: List[Any], capabilities: List[PublishedCapability]
+) -> Optional[PublishedCapability]:
+    """The capability currently holding this conversation, if any.
+
+    The most recent assistant turn decides it. An older one does not: once the
+    user has been answered by something else — or by the chat itself — the
+    conversation has moved, and dragging it back would be worse than declining.
+
+    Returns None unless that capability still exists, is still visible to this
+    group, and still declares itself conversational. All three are read fresh
+    from the catalogue, so unpublishing a flow or turning its conversation off
+    takes effect on the next turn rather than being remembered from history.
+    """
+    last_answer = next(
+        (turn for turn in reversed(turns) if getattr(turn, "role", "") == "assistant"),
+        None,
+    )
+    name = getattr(last_answer, "capability", None) if last_answer else None
+    if not name:
+        return None
+    for capability in capabilities:
+        if capability.name == name and getattr(capability, "conversational", False):
+            return capability
+    return None
+
+
+def continue_decision(capability: PublishedCapability, message: str) -> "RouteDecision":
+    """Route this turn to the capability already holding the conversation.
+
+    No inputs are extracted. The turn's text reaches the flow as its user
+    message — that is what a conversational flow reads — and inventing input
+    values from a fragment is exactly the guessing the extraction rules forbid.
+    A value the flow needs and does not have is asked for, as always.
+    """
+    return RouteDecision(
+        capability=capability.name,
+        confidence=CONTINUATION_CONFIDENCE,
+        inputs={},
+        reason="continues the conversation this capability is already holding",
+    )
+
+
 def declared_fields(capability: PublishedCapability) -> Tuple[List[str], List[str]]:
     """``(all field names, required field names)`` a capability declares.
 
@@ -149,6 +200,13 @@ def render_route_catalog(capabilities: List[PublishedCapability]) -> str:
         names, required = declared_fields(cap)
         lines.append(f"{index}. name: {cap.name}")
         lines.append(f"   description: {cap.description}")
+        if getattr(cap, "conversational", False):
+            # Says what the capability IS, not what to do about it — the rule
+            # for what to do lives in the prompt, where GEPA can tune it.
+            lines.append(
+                "   holds a conversation: follow-up turns continue this "
+                "capability's own state"
+            )
         if names:
             properties = (cap.input_schema or {}).get("properties") or {}
             rendered = []

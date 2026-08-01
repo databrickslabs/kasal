@@ -71,6 +71,12 @@ class Turn:
     preview: str
     #: The turn in full, for binding into a run. Never sent to the router.
     content: str
+    #: For an assistant turn produced by a routed run: which capability produced
+    #: it. Without this the router cannot tell that the answer on screen came
+    #: from a capability at all, so a follow-up is re-matched from scratch
+    #: against every description — and a conversational flow loses its
+    #: conversation to whatever the fragment happens to look like.
+    capability: Optional[str] = None
 
 
 async def recent_turns(
@@ -134,7 +140,15 @@ async def recent_turns(
             continue
         if role == "assistant" and _is_chat_furniture(content):
             continue
-        kept.append(Turn(index=0, role=role, preview="", content=content))
+        kept.append(
+            Turn(
+                index=0,
+                role=role,
+                preview="",
+                content=content,
+                capability=_capability_of(row) if role == "assistant" else None,
+            )
+        )
 
     kept = kept[-limit:]
     # Numbered AFTER the window is chosen, so an index the router quotes always
@@ -145,9 +159,32 @@ async def recent_turns(
             role=turn.role,
             preview=_cap(turn.content),
             content=turn.content,
+            capability=turn.capability,
         )
         for position, turn in enumerate(kept, start=1)
     ]
+
+
+#: ChatMode stores its per-message extras under this key inside
+#: `chat_history.generation_result`, so the column stays compatible with the
+#: sidebar chat. The capability that answered rides there too.
+_EXTRA_KEY = "__chatmode"
+
+
+def _capability_of(row: Any) -> Optional[str]:
+    """The capability that produced an assistant row, if a routed run did.
+
+    Best-effort: an older row, a hand-written one, or a clobbered envelope
+    simply has none, and the router falls back to deciding from the text.
+    """
+    payload = getattr(row, "generation_result", None)
+    if not isinstance(payload, dict):
+        return None
+    extras = payload.get(_EXTRA_KEY)
+    if not isinstance(extras, dict):
+        return None
+    name = extras.get("capability")
+    return str(name) if name else None
 
 
 def _cap(text: str) -> str:
@@ -169,7 +206,8 @@ def render_turns(turns: List[Turn]) -> str:
     lines = []
     for turn in turns:
         if turn.role == "assistant":
-            lines.append(f"[answer {turn.index}] Assistant: {turn.preview}")
+            source = f", from {turn.capability}" if turn.capability else ""
+            lines.append(f"[answer {turn.index}{source}] Assistant: {turn.preview}")
         else:
             lines.append(f"User: {turn.preview}")
     return "\n".join(lines)

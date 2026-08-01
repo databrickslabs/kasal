@@ -67,6 +67,8 @@ export interface DispatcherRequest {
    * neighbours.
    */
   prefer_existing?: boolean;
+  /** False for one turn after the user leaves a held conversation. */
+  allow_continuation?: boolean;
 }
 
 /** ChatMode run settings gathered from the execution store at dispatch time. */
@@ -81,6 +83,8 @@ export interface DispatchRunSettings {
   chat_mode_type?: 'chat' | 'research' | 'deep';
   /** @see DispatcherRequest.prefer_existing — the SOURCE axis, not the shape. */
   prefer_existing?: boolean;
+  /** False for one turn after the user leaves a held conversation. */
+  allow_continuation?: boolean;
 }
 
 export interface DispatcherResponse {
@@ -246,6 +250,10 @@ export interface RoutedResultFields {
   input_schema?: PublicationInputSchema | null;
   /** The published capability's external name, for the log and the UI. */
   capability?: string;
+  /** Whether this capability holds a conversation across turns. */
+  conversational?: boolean;
+  /** Whether THIS turn was routed to it because it was already holding one. */
+  continued?: boolean;
   routed_from?: string;
   /**
    * The sentence that selected this capability, sent on to the run as

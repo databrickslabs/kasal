@@ -117,6 +117,13 @@ class DispatcherRequest(BaseModel):
         "The catalogue stores plans as crews, so reuse could never honour 'chat', and a "
         "fourth answer mode would silently invalidate its own neighbours.",
     )
+    allow_continuation: bool = Field(
+        True,
+        description="Whether this turn may be routed to the capability already "
+        "holding the conversation. False when the user explicitly broke out of "
+        "one — stickiness without a way to refuse it is a trap, so the choice "
+        "has to be able to reach the router.",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={

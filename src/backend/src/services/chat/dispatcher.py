@@ -1092,6 +1092,7 @@ Please analyze this message and provide your intent classification."""
         model: Optional[str],
         last_resort_model: Optional[str] = None,
         session_id: Optional[str] = None,
+        allow_continuation: bool = True,
     ) -> Dict[str, Any]:
         """Run one prompt against the chat-published catalog and dispatch the winner.
 
@@ -1116,6 +1117,9 @@ Please analyze this message and provide your intent classification."""
             # The conversation this turn belongs to. Without it the router reads
             # every message as though nothing came before it.
             session_id=session_id,
+            # False when the user broke out of a held conversation. Stickiness
+            # the user cannot refuse is a trap, so the refusal has to reach here.
+            allow_continuation=allow_continuation,
         )
 
     async def detect_intent_logged(
@@ -1331,6 +1335,7 @@ Please analyze this message and provide your intent classification."""
                     model,
                     last_resort_model=request.model,
                     session_id=request.session_id,
+                    allow_continuation=getattr(request, "allow_continuation", True),
                 )
                 if routed_result.get("answer_here"):
                     logger.info(

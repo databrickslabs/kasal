@@ -409,9 +409,19 @@ class TestConversationChangesTheDecision:
     @staticmethod
     def _turns():
         return [
-            SimpleNamespace(index=1, role="user", preview="gather news", content="q"),
             SimpleNamespace(
-                index=2, role="assistant", preview="# News", content="the news summary"
+                index=1,
+                role="user",
+                preview="gather news",
+                content="q",
+                capability=None,
+            ),
+            SimpleNamespace(
+                index=2,
+                role="assistant",
+                preview="# News",
+                content="the news summary",
+                capability=None,
             ),
         ]
 

@@ -10,12 +10,15 @@ external isolation suite uses one — the property under test is "the query
 filters", and a mock passes just as happily with the WHERE clause missing.
 """
 
+import uuid
+
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from src.db.base import Base
 from src.models.crew_publication import CrewPublication
+from src.models.flow import Flow
 from src.schemas.crew_publication import CrewPublicationCreate
 from src.services.publications.publication import PublicationService
 
@@ -38,7 +41,10 @@ async def session():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
         await conn.run_sync(
-            Base.metadata.create_all, tables=[CrewPublication.__table__]
+            Base.metadata.create_all,
+            # Flows too: the catalogue now checks that a published flow still
+            # exists before offering it, so the table has to be there.
+            tables=[CrewPublication.__table__, Flow.__table__],
         )
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as s:
@@ -101,7 +107,10 @@ class TestProtocolIsolation:
     @pytest.mark.asyncio
     async def test_flows_are_chat_routable_on_equal_terms(self, session):
         service = PublicationService(session)
-        await _publish(service, "f1", "a_flow", ["chat"], entity_type="flow")
+        flow_id = uuid.uuid4()
+        session.add(Flow(id=flow_id, name="A Flow", nodes=[], edges=[], flow_config={}))
+        await session.commit()
+        await _publish(service, str(flow_id), "a_flow", ["chat"], entity_type="flow")
 
         [capability] = await service.list_capabilities_for_group([ACME], "chat")
         assert capability.entity_type == "flow"

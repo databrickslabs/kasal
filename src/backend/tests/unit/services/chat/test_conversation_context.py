@@ -136,8 +136,12 @@ class TestRendering:
     def test_only_answers_are_addressable(self):
         # A request refers to an earlier ANSWER, never to an earlier question.
         turns = [
-            SimpleNamespace(index=1, role="user", preview="gather news"),
-            SimpleNamespace(index=2, role="assistant", preview="# News"),
+            SimpleNamespace(
+                index=1, role="user", preview="gather news", capability=None
+            ),
+            SimpleNamespace(
+                index=2, role="assistant", preview="# News", capability=None
+            ),
         ]
         rendered = render_turns(turns)
         assert "[answer 2] Assistant: # News" in rendered
@@ -150,7 +154,14 @@ class TestRendering:
         with _history(with_long):
             pass
         preview = render_turns(
-            [SimpleNamespace(index=1, role="assistant", preview="x" * TURN_CHAR_CAP)]
+            [
+                SimpleNamespace(
+                    index=1,
+                    role="assistant",
+                    preview="x" * TURN_CHAR_CAP,
+                    capability=None,
+                )
+            ]
         )
         assert len(preview) < 5000
 
@@ -160,8 +171,12 @@ class TestRendering:
 
 class TestResolvingAReference:
     turns = [
-        SimpleNamespace(index=1, role="user", preview="", content="ask"),
-        SimpleNamespace(index=2, role="assistant", preview="", content="the answer"),
+        SimpleNamespace(
+            index=1, role="user", preview="", content="ask", capability=None
+        ),
+        SimpleNamespace(
+            index=2, role="assistant", preview="", content="the answer", capability=None
+        ),
     ]
 
     def test_resolves_an_answer_it_was_shown(self):

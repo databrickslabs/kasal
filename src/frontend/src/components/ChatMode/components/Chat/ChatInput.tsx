@@ -10,6 +10,7 @@ import {
 } from '../../utils/answerModes';
 import { ANSWER_MODE_LOCKED_REASON } from '../../utils/sourceModes';
 import SourcePill from './SourcePill';
+import HeldConversationPill from './HeldConversationPill';
 import { useAnchoredFixedStyle } from '../../hooks/useAnchoredFixedStyle';
 import { forgetKnowledgeFile, uploadKnowledgeFile } from '../../api/knowledge';
 import { improveChatPrompt } from '../../api/prompt';
@@ -226,6 +227,10 @@ const ChatInput: React.FC<ChatInputProps> = ({
   // alone while this is on: the user gets their selection back on switching
   // back, and it is what the "build one instead" offer runs at.
   const preferExisting = useExecutionStore((s) => s.preferExisting);
+  // A capability that holds a conversation keeps the next turn even when the
+  // message is a fragment. Shown, and leavable — stickiness the user cannot see
+  // or refuse is indistinguishable from a bug.
+  const heldConversation = useExecutionStore((s) => s.heldConversation);
   // Whether the SELECTED model can spend a reasoning budget. Drives the mode
   // hints and disables Deep Research, which on such a model is byte-for-byte
   // identical to Research (the engine drops the effort).
@@ -703,6 +708,21 @@ const ChatInput: React.FC<ChatInputProps> = ({
         )}
 
         {/* Top row — textarea */}
+        {heldConversation && (
+          <div className="px-5 pt-3">
+            <HeldConversationPill
+              capability={heldConversation}
+              onLeave={() => {
+                const store = useExecutionStore.getState();
+                store.setHeldConversation(null);
+                // The next turn goes to the router on its own words.
+                store.setSkipContinuation(true);
+                inputRef.current?.focus();
+              }}
+            />
+          </div>
+        )}
+
         <div className="flex items-start px-5 pt-4 pb-1">
           <textarea
             ref={inputRef}

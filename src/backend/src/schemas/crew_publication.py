@@ -138,6 +138,12 @@ class PublishedCapability(BaseModel):
     name: str
     description: str
     input_schema: Optional[Dict[str, Any]] = None
+    #: Whether this capability holds a CONVERSATION rather than answering once.
+    #: Only a flow can, and only one that declares `state.conversational`. The
+    #: chat router needs it to know that a follow-up belongs to the capability
+    #: that answered the previous turn instead of being re-matched from scratch;
+    #: the other adapters ignore it.
+    conversational: bool = False
 
     @property
     def crew_id(self) -> str:

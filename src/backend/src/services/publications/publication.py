@@ -28,7 +28,7 @@ attribution on internal traffic, polluting the external audit trail.
 """
 
 import logging
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Any, List, Optional, Set, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,6 +47,18 @@ if TYPE_CHECKING:  # pragma: no cover
     from src.services.external.identity import ExternalCaller
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_id(value: Any) -> str:
+    """A UUID in the one form both tables can be compared in.
+
+    ``flows.id`` is a UUID column, which SQLite stores as 32 hex characters with
+    no dashes, while ``publications.entity_id`` is a string column holding the
+    dashed form. Comparing them raw silently never matches — which is how a
+    conversational flow would have looked one-shot forever, with nothing
+    logged and nothing failing.
+    """
+    return str(value).replace("-", "").lower().strip()
 
 
 class PublicationService:
@@ -71,16 +83,75 @@ class PublicationService:
         rows = await self.repository.list_published_for_group(
             group_ids=group_ids, protocol=protocol
         )
-        return [
-            PublishedCapability(
-                entity_type=row.entity_type,
-                entity_id=row.entity_id,
-                name=row.external_name,
-                description=row.description,
-                input_schema=row.input_schema,
+        existing, conversational = await self._flow_facts(rows)
+
+        capabilities: List[PublishedCapability] = []
+        for row in rows:
+            key = _normalize_id(row.entity_id)
+            if (
+                row.entity_type == "flow"
+                and existing is not None
+                and key not in existing
+            ):
+                # The flow behind this publication is gone — deleted, or lost in
+                # a restore. Advertising it lets the router SPEND a turn picking
+                # something that cannot run: it resolves to nothing and the user
+                # gets "nothing matches" for a capability they can see listed.
+                # Dropped from the catalogue, not unpublished: the publication
+                # row stays visible in the publish dialog so it can be fixed or
+                # removed deliberately.
+                logger.warning(
+                    "[publications] %r points at a flow that no longer exists "
+                    "(%s); excluded from the catalogue",
+                    row.external_name,
+                    row.entity_id,
+                )
+                continue
+            capabilities.append(
+                PublishedCapability(
+                    entity_type=row.entity_type,
+                    entity_id=row.entity_id,
+                    name=row.external_name,
+                    description=row.description,
+                    input_schema=row.input_schema,
+                    conversational=key in conversational,
+                )
             )
-            for row in rows
-        ]
+        return capabilities
+
+    async def _flow_facts(self, rows: List[Any]) -> Tuple[Optional[Set[str]], Set[str]]:
+        """``(flows that exist, flows that hold a conversation)``, normalized.
+
+        One query for all of them, not one per row: this read renders the MCP
+        tool list and the A2A card as well as the chat catalogue, and a
+        per-capability lookup would make every one of those N+1.
+
+        The first element is None when the lookup FAILED, which is different
+        from "none of them exist" — a failed read must not empty the catalogue.
+        Callers skip the existence filter on None and keep every capability, the
+        behaviour before this check existed.
+        """
+        flow_ids = [str(row.entity_id) for row in rows if row.entity_type == "flow"]
+        if not flow_ids:
+            return set(), set()
+        try:
+            from src.repositories.flow_repository import FlowRepository
+
+            flows = await FlowRepository(self.session).find_by_ids(flow_ids)
+        except Exception as exc:  # noqa: BLE001 — a catalogue must still render
+            logger.debug("[publications] could not read flows: %s", exc)
+            return None, set()
+
+        existing: Set[str] = set()
+        conversational: Set[str] = set()
+        for flow in flows:
+            key = _normalize_id(flow.id)
+            existing.add(key)
+            config = getattr(flow, "flow_config", None) or {}
+            state = config.get("state") if isinstance(config, dict) else None
+            if isinstance(state, dict) and state.get("conversational"):
+                conversational.add(key)
+        return existing, conversational
 
     async def resolve_capability_for_group(
         self, group_ids: List[str], protocol: str, external_name: str

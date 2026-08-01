@@ -195,7 +195,7 @@ const ChatWorkspace: React.FC = () => {
   // The bookmark/feedback actions row for the latest generated crew, parked
   // until that crew's run finishes — feedback only makes sense once the
   // result is visible. Cleared on post; a refine run never sets it.
-  const pendingActionsRef = useRef<{ data: GenerationCompleteData; ownerSession: string | null; mode?: string; usedWorkspaceMemory?: boolean } | null>(null);
+  const pendingActionsRef = useRef<{ data: GenerationCompleteData; ownerSession: string | null; mode?: string; usedWorkspaceMemory?: boolean; capability?: string } | null>(null);
 
   // The run event stream (SSE wiring, trace -> messages, completion and
   // reconnect handling) lives in its own hook — the JSX never touched any of
@@ -311,6 +311,10 @@ const ChatWorkspace: React.FC = () => {
             // memoryEnabled === true means the run used Workspace memory (false =
             // session-only). Snapshot it now so a later toggle can't change it.
             usedWorkspaceMemory: useExecutionStore.getState().memoryEnabled,
+            // Which published capability answered, when this was a routed run.
+            // Persisted on the message so the BACKEND router can see, next
+            // turn, that a capability is mid-conversation.
+            capability: useExecutionStore.getState().routedCapability ?? undefined,
           };
           dispatcher.setLastGenerated(data);
           lastGeneratedRef.current = data; // /save target

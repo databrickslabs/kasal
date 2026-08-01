@@ -28,6 +28,15 @@ export interface ChatMessage {
    * __chatmode extras.
    */
   usedWorkspaceMemory?: boolean;
+  /**
+   * For an answer produced by a routed "Use existing" run: the published
+   * capability that produced it. Persisted in the __chatmode extras and read
+   * back by the BACKEND router on the following turn — it is how the router
+   * knows a capability is mid-conversation, and therefore that a fragment like
+   * "and Germany?" belongs to it rather than being re-matched against the whole
+   * catalogue.
+   */
+  capability?: string;
 }
 
 export interface ChatSession {
