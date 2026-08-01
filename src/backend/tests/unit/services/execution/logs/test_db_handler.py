@@ -48,13 +48,12 @@ class TestExecutionLogsDatabaseHandler:
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
         import queue
+
         q = queue.Queue()
 
         with patch("src.config.settings.settings") as mock_settings:
             mock_settings.DATABASE_URI = "sqlite:///test.db"
-            handler = ExecutionLogsDatabaseHandler(
-                execution_id="exec-002", log_queue=q
-            )
+            handler = ExecutionLogsDatabaseHandler(execution_id="exec-002", log_queue=q)
         assert handler.log_queue is q
 
     @patch("src.core.logger.get_logger")
@@ -97,9 +96,13 @@ class TestExecutionLogsDatabaseHandler:
         handler._write_to_db_sync = MagicMock()
 
         record = logging.LogRecord(
-            name="crew", level=logging.INFO,
-            pathname="", lineno=0,
-            msg="[DB_HANDLER] Internal message", args=(), exc_info=None
+            name="crew",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="[DB_HANDLER] Internal message",
+            args=(),
+            exc_info=None,
         )
         handler.emit(record)
         handler._write_to_db_sync.assert_not_called()
@@ -115,9 +118,13 @@ class TestExecutionLogsDatabaseHandler:
         handler._write_to_db_sync = MagicMock()
 
         record = logging.LogRecord(
-            name="test_logger", level=logging.INFO,
-            pathname="", lineno=0,
-            msg="real log message", args=(), exc_info=None
+            name="test_logger",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="real log message",
+            args=(),
+            exc_info=None,
         )
         handler.emit(record)
         handler._write_to_db_sync.assert_called_once()
@@ -134,9 +141,13 @@ class TestExecutionLogsDatabaseHandler:
         handler._write_to_db_sync = MagicMock(side_effect=Exception("db error"))
 
         record = logging.LogRecord(
-            name="test_logger", level=logging.INFO,
-            pathname="", lineno=0,
-            msg="will fail", args=(), exc_info=None
+            name="test_logger",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="will fail",
+            args=(),
+            exc_info=None,
         )
         # Should not raise
         handler.emit(record)
@@ -146,6 +157,7 @@ class TestExecutionLogsDatabaseHandler:
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
         import queue
+
         q = queue.Queue()
 
         with patch("src.config.settings.settings") as mock_settings:
@@ -162,6 +174,7 @@ class TestExecutionLogsDatabaseHandler:
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
         import queue
+
         q = MagicMock()
         q.put_nowait.side_effect = queue.Full("full")
 
@@ -174,7 +187,9 @@ class TestExecutionLogsDatabaseHandler:
         with patch.object(handler, "_db_url", "sqlite:///test.db"):
             with patch("sqlite3.connect") as mock_conn:
                 mock_cursor = MagicMock()
-                mock_conn.return_value.__enter__ = MagicMock(return_value=mock_conn.return_value)
+                mock_conn.return_value.__enter__ = MagicMock(
+                    return_value=mock_conn.return_value
+                )
                 mock_conn.return_value.cursor.return_value = mock_cursor
                 mock_conn.return_value.commit = MagicMock()
                 mock_conn.return_value.close = MagicMock()
@@ -193,6 +208,7 @@ class TestExecutionLogsDatabaseHandler:
             )
 
         import queue
+
         q = queue.Queue()
         handler.log_queue = q
         handler._write_to_db_sync("log with dict context")
@@ -215,6 +231,7 @@ class TestExecutionLogsDatabaseHandler:
             )
 
         import queue
+
         q = queue.Queue()
         handler.log_queue = q
         handler._write_to_db_sync("log with object context")
@@ -231,6 +248,7 @@ class TestExecutionLogsDatabaseHandler:
             handler = ExecutionLogsDatabaseHandler(execution_id="exec-no-ctx")
 
         import queue
+
         q = queue.Queue()
         handler.log_queue = q
         handler._write_to_db_sync("no context log")
@@ -284,14 +302,18 @@ class TestExecutionLogsDatabaseHandler:
         mock_engine.begin = MagicMock(return_value=begin_cm)
         mock_engine.dispose = AsyncMock()
 
-        with patch("sqlalchemy.ext.asyncio.create_async_engine", return_value=mock_engine):
-            await handler._write_to_db_async({
-                "execution_id": "exec-pg",
-                "content": "async content",
-                "timestamp": None,
-                "group_id": None,
-                "group_email": None,
-            })
+        with patch(
+            "sqlalchemy.ext.asyncio.create_async_engine", return_value=mock_engine
+        ):
+            await handler._write_to_db_async(
+                {
+                    "execution_id": "exec-pg",
+                    "content": "async content",
+                    "timestamp": None,
+                    "group_id": None,
+                    "group_email": None,
+                }
+            )
 
     @pytest.mark.asyncio
     @patch("src.core.logger.get_logger")
@@ -312,14 +334,18 @@ class TestExecutionLogsDatabaseHandler:
         mock_engine.begin = MagicMock(return_value=begin_cm)
         mock_engine.dispose = AsyncMock()
 
-        with patch("sqlalchemy.ext.asyncio.create_async_engine", return_value=mock_engine) as mock_create:
-            await handler._write_to_db_async({
-                "execution_id": "exec-pg8000",
-                "content": "pg8000 content",
-                "timestamp": None,
-                "group_id": None,
-                "group_email": None,
-            })
+        with patch(
+            "sqlalchemy.ext.asyncio.create_async_engine", return_value=mock_engine
+        ) as mock_create:
+            await handler._write_to_db_async(
+                {
+                    "execution_id": "exec-pg8000",
+                    "content": "pg8000 content",
+                    "timestamp": None,
+                    "group_id": None,
+                    "group_email": None,
+                }
+            )
             call_url = mock_create.call_args[0][0]
             assert "asyncpg" in call_url
 
@@ -334,15 +360,20 @@ class TestExecutionLogsDatabaseHandler:
             handler = ExecutionLogsDatabaseHandler(execution_id="exec-err")
         handler._db_url = "postgresql://localhost/db"
 
-        with patch("sqlalchemy.ext.asyncio.create_async_engine", side_effect=Exception("conn error")):
+        with patch(
+            "sqlalchemy.ext.asyncio.create_async_engine",
+            side_effect=Exception("conn error"),
+        ):
             with pytest.raises(Exception, match="Async database write failed"):
-                await handler._write_to_db_async({
-                    "execution_id": "exec-err",
-                    "content": "error content",
-                    "timestamp": None,
-                    "group_id": None,
-                    "group_email": None,
-                })
+                await handler._write_to_db_async(
+                    {
+                        "execution_id": "exec-err",
+                        "content": "error content",
+                        "timestamp": None,
+                        "group_id": None,
+                        "group_email": None,
+                    }
+                )
 
     @patch("src.core.logger.get_logger")
     def test_write_to_db_sync_postgresql_in_async_loop(self, mock_get_logger):
@@ -381,4 +412,3 @@ class TestExecutionLogsDatabaseHandler:
 # ---------------------------------------------------------------------------
 # configure_subprocess_logging
 # ---------------------------------------------------------------------------
-

@@ -23,9 +23,9 @@ from src.services.execution.logs.context import (
 from src.services.execution.logs.db_handler import ExecutionLogsDatabaseHandler
 
 __all__ = [
-    'ExecutionContextFormatter',
-    'set_execution_context',
-    'clear_execution_context',
-    'execution_logging_context',
-    'ExecutionLogsDatabaseHandler',
+    "ExecutionContextFormatter",
+    "set_execution_context",
+    "clear_execution_context",
+    "execution_logging_context",
+    "ExecutionLogsDatabaseHandler",
 ]

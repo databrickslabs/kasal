@@ -26,6 +26,7 @@ logger = LoggerManager.get_instance().system
 # Singleton instance of the logs writer task
 _logs_writer_task: Optional[asyncio.Task] = None
 
+
 class ExecutionLogsService:
     """
     Service for managing execution logs.
@@ -43,7 +44,13 @@ class ExecutionLogsService:
         self.session = session
         self.repository = ExecutionLogsRepository(session)
 
-    async def create_execution_log(self, execution_id: str, content: str, timestamp: datetime = None, group_context: GroupContext = None) -> bool:
+    async def create_execution_log(
+        self,
+        execution_id: str,
+        content: str,
+        timestamp: datetime = None,
+        group_context: GroupContext = None,
+    ) -> bool:
         """
         Create a new execution log entry via the repository layer.
 
@@ -57,7 +64,9 @@ class ExecutionLogsService:
             bool: True if log was created successfully, False otherwise
         """
         try:
-            logger.debug(f"[create_execution_log] Creating log for execution {execution_id}")
+            logger.debug(
+                f"[create_execution_log] Creating log for execution {execution_id}"
+            )
 
             # Use the repository to create the log with injected session
             log = await self.repository.create_log(
@@ -68,14 +77,20 @@ class ExecutionLogsService:
                 group_email=group_context.group_email if group_context else None,
             )
 
-            logger.debug(f"[create_execution_log] Successfully created log for execution {execution_id}")
+            logger.debug(
+                f"[create_execution_log] Successfully created log for execution {execution_id}"
+            )
             return True
         except Exception as e:
-            logger.error(f"[create_execution_log] Error creating log for execution {execution_id}: {e}")
+            logger.error(
+                f"[create_execution_log] Error creating log for execution {execution_id}: {e}"
+            )
             logger.error("[create_execution_log] Exception details:", exc_info=True)
             return False
 
-    async def get_execution_logs(self, execution_id: str, limit: int = 1000, offset: int = 0) -> List[ExecutionLogResponse]:
+    async def get_execution_logs(
+        self, execution_id: str, limit: int = 1000, offset: int = 0
+    ) -> List[ExecutionLogResponse]:
         """
         Fetch historical execution logs from the database.
 
@@ -88,20 +103,23 @@ class ExecutionLogsService:
             List of execution log responses
         """
         logs = await self.repository.get_logs_by_execution_id(
-            execution_id=execution_id,
-            limit=limit,
-            offset=offset
+            execution_id=execution_id, limit=limit, offset=offset
         )
 
         return [
             ExecutionLogResponse(
-                content=log.content,
-                timestamp=log.timestamp.isoformat()
+                content=log.content, timestamp=log.timestamp.isoformat()
             )
             for log in logs
         ]
 
-    async def get_execution_logs_by_group(self, execution_id: str, group_context: GroupContext, limit: int = 1000, offset: int = 0) -> List[ExecutionLogResponse]:
+    async def get_execution_logs_by_group(
+        self,
+        execution_id: str,
+        group_context: GroupContext,
+        limit: int = 1000,
+        offset: int = 0,
+    ) -> List[ExecutionLogResponse]:
         """
         Fetch historical execution logs from the database filtered by group.
 
@@ -120,18 +138,23 @@ class ExecutionLogsService:
         )
 
         # Get group IDs from context for filtering
-        group_ids = group_context.group_ids if group_context and group_context.primary_group_id else None
+        group_ids = (
+            group_context.group_ids
+            if group_context and group_context.primary_group_id
+            else None
+        )
 
         # Check if the execution exists and the user has access to it
         execution_history_repo = ExecutionHistoryRepository(self.session)
         execution = await execution_history_repo.get_execution_by_job_id(
-            execution_id,  # execution_id is actually the job_id
-            group_ids=group_ids
+            execution_id, group_ids=group_ids  # execution_id is actually the job_id
         )
 
         if not execution:
             # Either doesn't exist or user doesn't have access
-            logger.warning(f"Execution {execution_id} not found or access denied for group {group_context.primary_group_id if group_context else 'None'}")
+            logger.warning(
+                f"Execution {execution_id} not found or access denied for group {group_context.primary_group_id if group_context else 'None'}"
+            )
             return []  # Return empty list instead of raising error for consistency
 
         if not group_context.primary_group_id:
@@ -151,8 +174,7 @@ class ExecutionLogsService:
 
         return [
             ExecutionLogResponse(
-                content=log.content,
-                timestamp=log.timestamp.isoformat()
+                content=log.content, timestamp=log.timestamp.isoformat()
             )
             for log in logs
         ]
@@ -205,6 +227,7 @@ class ExecutionLogsService:
 
 # --- Logs Writer Functions ---
 
+
 async def logs_writer_loop(shutdown_event: asyncio.Event):
     """
     Background task that reads from the job output queue and writes logs to the database.
@@ -217,7 +240,9 @@ async def logs_writer_loop(shutdown_event: asyncio.Event):
 
         # Get job output queue
         queue = get_job_output_queue()
-        logger.debug(f"[logs_writer_loop] Queue retrieved. Initial approximate size: {queue.qsize()}")
+        logger.debug(
+            f"[logs_writer_loop] Queue retrieved. Initial approximate size: {queue.qsize()}"
+        )
 
         batch_count = 0
         total_log_count = 0
@@ -238,7 +263,9 @@ async def logs_writer_loop(shutdown_event: asyncio.Event):
                     try:
                         # Log queue status periodically
                         if _ == 0:
-                            logger.debug(f"[logs_writer_loop] Waiting for logs... Queue size: ~{queue.qsize()}")
+                            logger.debug(
+                                f"[logs_writer_loop] Waiting for logs... Queue size: ~{queue.qsize()}"
+                            )
 
                         # Never block: chatty producers refill the queue between
                         # cycles, and the empty-queue path sleeps asynchronously.
@@ -246,7 +273,9 @@ async def logs_writer_loop(shutdown_event: asyncio.Event):
 
                         # Check if this is the shutdown signal (None)
                         if log_data is None:
-                            logger.debug("[logs_writer_loop] Received shutdown signal (None) in queue.")
+                            logger.debug(
+                                "[logs_writer_loop] Received shutdown signal (None) in queue."
+                            )
                             continue
 
                         batch.append(log_data)
@@ -255,8 +284,12 @@ async def logs_writer_loop(shutdown_event: asyncio.Event):
                     except Empty:
                         # Queue is empty, break out of the batch collection loop
                         empty_count += 1
-                        if empty_count % 100 == 0:  # Log every 100 consecutive empty checks
-                            logger.debug(f"[logs_writer_loop] Queue empty for {empty_count} consecutive checks")
+                        if (
+                            empty_count % 100 == 0
+                        ):  # Log every 100 consecutive empty checks
+                            logger.debug(
+                                f"[logs_writer_loop] Queue empty for {empty_count} consecutive checks"
+                            )
                         break
 
                 # If we collected any logs, process them
@@ -265,12 +298,15 @@ async def logs_writer_loop(shutdown_event: asyncio.Event):
                     total_log_count += len(batch)
 
                     # Log batch processing
-                    logger.debug(f"[logs_writer_loop] Processing batch #{batch_count} with {len(batch)} logs. Total processed: {total_log_count}")
+                    logger.debug(
+                        f"[logs_writer_loop] Processing batch #{batch_count} with {len(batch)} logs. Total processed: {total_log_count}"
+                    )
 
                     # Process the entire batch inside ONE session to avoid
                     # per-log connection overhead (critical for Lakebase).
                     failures = 0
                     from src.db.database_router import get_smart_db_session
+
                     try:
                         async for session in get_smart_db_session():
                             repo = ExecutionLogsRepository(session)
@@ -278,7 +314,9 @@ async def logs_writer_loop(shutdown_event: asyncio.Event):
                                 try:
                                     job_id = log_data.get("job_id", "unknown")
                                     content = log_data.get("content", "")
-                                    timestamp = log_data.get("timestamp", datetime.now())
+                                    timestamp = log_data.get(
+                                        "timestamp", datetime.now()
+                                    )
                                     group_id = log_data.get("group_id")
                                     group_email = log_data.get("group_email")
 
@@ -290,36 +328,53 @@ async def logs_writer_loop(shutdown_event: asyncio.Event):
                                         group_email=group_email,
                                     )
                                 except Exception as e:
-                                    logger.error(f"[logs_writer_loop] Error adding log {idx+1}/{len(batch)}: {e}")
+                                    logger.error(
+                                        f"[logs_writer_loop] Error adding log {idx+1}/{len(batch)}: {e}"
+                                    )
                                     failures += 1
                             # Single commit for the whole batch
                             await session.commit()
                     except Exception as e:
-                        logger.error(f"[logs_writer_loop] Batch session error: {e}", exc_info=True)
+                        logger.error(
+                            f"[logs_writer_loop] Batch session error: {e}",
+                            exc_info=True,
+                        )
                         failures = len(batch)
 
                     if failures > 0:
-                        logger.warning(f"[logs_writer_loop] Batch #{batch_count} processed with {failures}/{len(batch)} failures.")
+                        logger.warning(
+                            f"[logs_writer_loop] Batch #{batch_count} processed with {failures}/{len(batch)} failures."
+                        )
                     else:
-                        logger.debug(f"[logs_writer_loop] Batch #{batch_count} processed successfully.")
+                        logger.debug(
+                            f"[logs_writer_loop] Batch #{batch_count} processed successfully."
+                        )
 
                 # If no logs were collected, sleep briefly to avoid CPU spinning
                 else:
                     await asyncio.sleep(0.5)
 
             except Exception as e:
-                logger.error(f"[logs_writer_loop] Batch processing error: {e}", exc_info=True)
+                logger.error(
+                    f"[logs_writer_loop] Batch processing error: {e}", exc_info=True
+                )
                 # Sleep to avoid rapid retry on persistent errors
                 await asyncio.sleep(1)
 
-        logger.info("[logs_writer_loop] Shutdown event received, exiting logs writer loop.")
+        logger.info(
+            "[logs_writer_loop] Shutdown event received, exiting logs writer loop."
+        )
 
     except asyncio.CancelledError:
         logger.warning("[logs_writer_loop] Logs writer task cancelled.")
     except Exception as e:
-        logger.critical(f"[logs_writer_loop] Unhandled exception in logs writer loop: {e}", exc_info=True)
+        logger.critical(
+            f"[logs_writer_loop] Unhandled exception in logs writer loop: {e}",
+            exc_info=True,
+        )
     finally:
         logger.info("[logs_writer_loop] Logs writer task stopped.")
+
 
 async def start_logs_writer(shutdown_event: asyncio.Event) -> asyncio.Task:
     """
@@ -342,6 +397,7 @@ async def start_logs_writer(shutdown_event: asyncio.Event) -> asyncio.Task:
 
     return _logs_writer_task
 
+
 async def stop_logs_writer(timeout: float = 5.0) -> bool:
     """
     Stop the logs writer task.
@@ -355,7 +411,9 @@ async def stop_logs_writer(timeout: float = 5.0) -> bool:
     global _logs_writer_task
 
     if _logs_writer_task is None or _logs_writer_task.done():
-        logger.debug("[stop_logs_writer] Logs writer task not running or already stopped.")
+        logger.debug(
+            "[stop_logs_writer] Logs writer task not running or already stopped."
+        )
         return True
 
     logger.info("[stop_logs_writer] Stopping logs writer task...")
@@ -363,10 +421,13 @@ async def stop_logs_writer(timeout: float = 5.0) -> bool:
         # Add None to logs queue to help unblock queue.get()
         try:
             from queue import Full
+
             logs_queue = get_job_output_queue()
             logs_queue.put_nowait(None)
         except Full:
-            logger.warning("[stop_logs_writer] Logs queue full, writer might take longer to stop.")
+            logger.warning(
+                "[stop_logs_writer] Logs queue full, writer might take longer to stop."
+            )
 
         # Wait for task to complete
         await asyncio.wait_for(_logs_writer_task, timeout=timeout)
@@ -374,7 +435,9 @@ async def stop_logs_writer(timeout: float = 5.0) -> bool:
         _logs_writer_task = None
         return True
     except asyncio.TimeoutError:
-        logger.warning("[stop_logs_writer] Logs writer task did not stop in time, cancelling.")
+        logger.warning(
+            "[stop_logs_writer] Logs writer task did not stop in time, cancelling."
+        )
         _logs_writer_task.cancel()
         try:
             await _logs_writer_task
@@ -383,5 +446,7 @@ async def stop_logs_writer(timeout: float = 5.0) -> bool:
         _logs_writer_task = None
         return True
     except Exception as e:
-        logger.error(f"[stop_logs_writer] Error stopping logs writer task: {e}", exc_info=True)
+        logger.error(
+            f"[stop_logs_writer] Error stopping logs writer task: {e}", exc_info=True
+        )
         return False

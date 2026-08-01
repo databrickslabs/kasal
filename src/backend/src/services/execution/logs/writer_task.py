@@ -6,6 +6,7 @@ it has never written a trace. Traces come off the OTel pipeline
 (BatchSpanProcessor -> KasalDBSpanExporter -> services/trace). This owns the
 LOGS writer and nothing else.
 """
+
 import asyncio
 import logging
 import threading
@@ -55,6 +56,7 @@ class LogWriterTask:
                 logger.info("[LogWriterTask] Starting logs writer task...")
                 cls._shutdown_event.clear()
                 from src.services.execution.logs.writer import start_logs_writer
+
                 cls._logs_writer_task = await start_logs_writer(cls._shutdown_event)
                 cls._writer_started = True
                 logger.info("[LogWriterTask] Logs writer task started.")
@@ -105,11 +107,16 @@ class LogWriterTask:
             if cls._logs_writer_task and not cls._logs_writer_task.done():
                 logger.info("[LogWriterTask] Stopping logs writer task...")
                 from src.services.execution.logs.writer import stop_logs_writer
+
                 success = await stop_logs_writer(timeout=5.0)
                 if success:
-                    logger.info("[LogWriterTask] Logs writer task stopped successfully.")
+                    logger.info(
+                        "[LogWriterTask] Logs writer task stopped successfully."
+                    )
                 else:
-                    logger.warning("[LogWriterTask] Failed to stop logs writer gracefully.")
+                    logger.warning(
+                        "[LogWriterTask] Failed to stop logs writer gracefully."
+                    )
                 cls._logs_writer_task = None
             else:
                 logger.debug("[LogWriterTask] Logs writer task not running.")

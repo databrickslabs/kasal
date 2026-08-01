@@ -29,6 +29,7 @@ from src.utils.user_context import GroupContext
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_log(content: str = "log content", ts: datetime = None):
     """Build a lightweight mock ExecutionLog row."""
     ts = ts or datetime(2024, 1, 15, 10, 30, 0)
@@ -49,7 +50,9 @@ def _make_group_context(
 
 
 # Patch target for the local import of ExecutionHistoryRepository
-_HIST_REPO_PATCH = "src.repositories.execution_history_repository.ExecutionHistoryRepository"
+_HIST_REPO_PATCH = (
+    "src.repositories.execution_history_repository.ExecutionHistoryRepository"
+)
 # Patch target for get_smart_db_session used by logs_writer_loop
 _SESSION_FACTORY_PATCH = "src.db.database_router.get_smart_db_session"
 # Patch target for asyncio.sleep inside the service module
@@ -78,13 +81,16 @@ class TestExecutionLogsServiceInit:
 # create_execution_log
 # -------------------------------------------------------------------
 
+
 class TestCreateExecutionLog:
     """Tests for ExecutionLogsService.create_execution_log."""
 
     @pytest.fixture(autouse=True)
     def _setup(self):
         self.mock_session = AsyncMock()
-        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
+        with patch(
+            "src.services.execution.logs.writer.ExecutionLogsRepository"
+        ) as repo_cls:
             self.mock_repo = repo_cls.return_value
             self.mock_repo.create_log = AsyncMock(return_value=SimpleNamespace(id=1))
             self.service = ExecutionLogsService(self.mock_session)
@@ -148,13 +154,16 @@ class TestCreateExecutionLog:
 # get_execution_logs
 # -------------------------------------------------------------------
 
+
 class TestGetExecutionLogs:
     """Tests for ExecutionLogsService.get_execution_logs."""
 
     @pytest.fixture(autouse=True)
     def _setup(self):
         self.mock_session = AsyncMock()
-        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
+        with patch(
+            "src.services.execution.logs.writer.ExecutionLogsRepository"
+        ) as repo_cls:
             self.mock_repo = repo_cls.return_value
             self.mock_repo.get_logs_by_execution_id = AsyncMock(return_value=[])
             self.service = ExecutionLogsService(self.mock_session)
@@ -200,13 +209,16 @@ class TestGetExecutionLogs:
 # get_execution_logs_by_group
 # -------------------------------------------------------------------
 
+
 class TestGetExecutionLogsByGroup:
     """Tests for ExecutionLogsService.get_execution_logs_by_group."""
 
     @pytest.fixture(autouse=True)
     def _setup(self):
         self.mock_session = AsyncMock()
-        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
+        with patch(
+            "src.services.execution.logs.writer.ExecutionLogsRepository"
+        ) as repo_cls:
             self.mock_repo = repo_cls.return_value
             self.mock_repo.get_logs_by_execution_id = AsyncMock(return_value=[])
             self.service = ExecutionLogsService(self.mock_session)
@@ -304,7 +316,9 @@ class TestGetExecutionLogsByGroup:
         gc = _make_group_context()
         execution_mock = SimpleNamespace(id=1, job_id="exec-1")
         ts = datetime(2024, 3, 15, 8, 30, 45)
-        self.mock_repo.get_logs_by_execution_id.return_value = [_make_log("ts test", ts)]
+        self.mock_repo.get_logs_by_execution_id.return_value = [
+            _make_log("ts test", ts)
+        ]
 
         with patch(_HIST_REPO_PATCH) as hist_cls:
             hist_cls.return_value.get_execution_by_job_id = AsyncMock(
@@ -319,13 +333,16 @@ class TestGetExecutionLogsByGroup:
 # count_logs
 # -------------------------------------------------------------------
 
+
 class TestCountLogs:
     """Tests for ExecutionLogsService.count_logs."""
 
     @pytest.fixture(autouse=True)
     def _setup(self):
         self.mock_session = AsyncMock()
-        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
+        with patch(
+            "src.services.execution.logs.writer.ExecutionLogsRepository"
+        ) as repo_cls:
             self.mock_repo = repo_cls.return_value
             self.mock_repo.count_by_execution_id = AsyncMock(return_value=42)
             self.service = ExecutionLogsService(self.mock_session)
@@ -342,13 +359,16 @@ class TestCountLogs:
 # delete_logs / delete_by_execution_id / delete_all_logs
 # -------------------------------------------------------------------
 
+
 class TestDeleteLogs:
     """Tests for deletion methods."""
 
     @pytest.fixture(autouse=True)
     def _setup(self):
         self.mock_session = AsyncMock()
-        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
+        with patch(
+            "src.services.execution.logs.writer.ExecutionLogsRepository"
+        ) as repo_cls:
             self.mock_repo = repo_cls.return_value
             self.mock_repo.delete_by_execution_id = AsyncMock(return_value=5)
             self.mock_repo.delete_all = AsyncMock(return_value=100)
@@ -823,7 +843,11 @@ class TestLogsWriterLoop:
         """An exception when processing a single log item should increment failures."""
         shutdown = asyncio.Event()
 
-        log_data = {"job_id": "job-inner-err", "content": "bad", "timestamp": datetime.now()}
+        log_data = {
+            "job_id": "job-inner-err",
+            "content": "bad",
+            "timestamp": datetime.now(),
+        }
 
         call_count = 0
 
@@ -1126,7 +1150,9 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_get_execution_logs_single_log(self):
         mock_session = AsyncMock()
-        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
+        with patch(
+            "src.services.execution.logs.writer.ExecutionLogsRepository"
+        ) as repo_cls:
             mock_repo = repo_cls.return_value
             mock_repo.get_logs_by_execution_id = AsyncMock(
                 return_value=[_make_log("only")]
@@ -1140,7 +1166,9 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_create_log_none_group_context(self):
         mock_session = AsyncMock()
-        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
+        with patch(
+            "src.services.execution.logs.writer.ExecutionLogsRepository"
+        ) as repo_cls:
             mock_repo = repo_cls.return_value
             mock_repo.create_log = AsyncMock(return_value=SimpleNamespace(id=1))
             service = ExecutionLogsService(mock_session)
@@ -1155,7 +1183,9 @@ class TestEdgeCases:
     async def test_delete_by_execution_id_calls_delete_logs(self):
         """Ensure delete_by_execution_id is truly an alias that calls delete_logs."""
         mock_session = AsyncMock()
-        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
+        with patch(
+            "src.services.execution.logs.writer.ExecutionLogsRepository"
+        ) as repo_cls:
             mock_repo = repo_cls.return_value
             mock_repo.delete_by_execution_id = AsyncMock(return_value=3)
             service = ExecutionLogsService(mock_session)
@@ -1170,7 +1200,9 @@ class TestEdgeCases:
     async def test_get_logs_by_group_with_group_context_no_group_ids(self):
         """GroupContext with group_ids=None and primary_group_id=None."""
         mock_session = AsyncMock()
-        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
+        with patch(
+            "src.services.execution.logs.writer.ExecutionLogsRepository"
+        ) as repo_cls:
             service = ExecutionLogsService(mock_session)
 
         gc = GroupContext(group_ids=None, group_email="a@b.com", email_domain="b.com")
@@ -1226,7 +1258,9 @@ class TestEdgeCases:
     async def test_count_logs_returns_zero(self):
         """count_logs should propagate zero count correctly."""
         mock_session = AsyncMock()
-        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
+        with patch(
+            "src.services.execution.logs.writer.ExecutionLogsRepository"
+        ) as repo_cls:
             mock_repo = repo_cls.return_value
             mock_repo.count_by_execution_id = AsyncMock(return_value=0)
             service = ExecutionLogsService(mock_session)
@@ -1238,7 +1272,9 @@ class TestEdgeCases:
     async def test_delete_all_logs_returns_zero_when_empty(self):
         """delete_all_logs should return 0 when there are no logs."""
         mock_session = AsyncMock()
-        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
+        with patch(
+            "src.services.execution.logs.writer.ExecutionLogsRepository"
+        ) as repo_cls:
             mock_repo = repo_cls.return_value
             mock_repo.delete_all = AsyncMock(return_value=0)
             service = ExecutionLogsService(mock_session)
@@ -1247,10 +1283,14 @@ class TestEdgeCases:
         assert result == 0
 
     @pytest.mark.asyncio
-    async def test_get_execution_logs_by_group_execution_exists_no_group_empty_ids(self):
+    async def test_get_execution_logs_by_group_execution_exists_no_group_empty_ids(
+        self,
+    ):
         """When execution exists but group_ids is empty list, access is denied."""
         mock_session = AsyncMock()
-        with patch("src.services.execution.logs.writer.ExecutionLogsRepository") as repo_cls:
+        with patch(
+            "src.services.execution.logs.writer.ExecutionLogsRepository"
+        ) as repo_cls:
             mock_repo = repo_cls.return_value
             mock_repo.get_logs_by_execution_id = AsyncMock(return_value=[])
             service = ExecutionLogsService(mock_session)
@@ -1274,7 +1314,11 @@ class TestEdgeCases:
         """When get_smart_db_session itself raises, the outer except (lines 290-292) is hit."""
         shutdown = asyncio.Event()
 
-        log_data = {"job_id": "job-sess", "content": "data", "timestamp": datetime.now()}
+        log_data = {
+            "job_id": "job-sess",
+            "content": "data",
+            "timestamp": datetime.now(),
+        }
         call_count = 0
 
         def queue_side_effect():

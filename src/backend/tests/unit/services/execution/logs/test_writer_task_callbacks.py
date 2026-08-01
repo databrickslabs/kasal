@@ -7,6 +7,7 @@ NOTE: The execution_callback module has been refactored to delegate trace creati
 to the event bus and the OTel pipeline.  The callbacks now
 only create execution logs via enqueue_log().
 """
+
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -21,8 +22,13 @@ class TestLogWriterTaskEventFiltering:
     def test_important_event_types_list(self):
         """Test that important event types are correctly defined."""
         important_event_types = [
-            "agent_execution", "tool_usage", "crew_started",
-            "crew_completed", "task_started", "task_completed", "llm_call"
+            "agent_execution",
+            "tool_usage",
+            "crew_started",
+            "crew_completed",
+            "task_started",
+            "task_completed",
+            "llm_call",
         ]
 
         assert "agent_execution" in important_event_types
@@ -36,14 +42,24 @@ class TestLogWriterTaskEventFiltering:
     def test_task_lifecycle_events_all_in_important_list(self):
         """Test that all task lifecycle events are important."""
         important_event_types = [
-            "agent_execution", "tool_usage", "tool_error",
-            "crew_started", "crew_completed",
-            "task_started", "task_completed", "task_failed",
-            "llm_call", "llm_guardrail",
-            "memory_write", "memory_retrieval",
-            "memory_write_started", "memory_retrieval_started",
-            "knowledge_retrieval", "knowledge_retrieval_started",
-            "agent_reasoning", "agent_reasoning_error"
+            "agent_execution",
+            "tool_usage",
+            "tool_error",
+            "crew_started",
+            "crew_completed",
+            "task_started",
+            "task_completed",
+            "task_failed",
+            "llm_call",
+            "llm_guardrail",
+            "memory_write",
+            "memory_retrieval",
+            "memory_write_started",
+            "memory_retrieval_started",
+            "knowledge_retrieval",
+            "knowledge_retrieval_started",
+            "agent_reasoning",
+            "agent_reasoning_error",
         ]
 
         assert "task_started" in important_event_types
@@ -74,7 +90,9 @@ class TestLogWriterTaskEventFiltering:
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
-            step_callback, _ = create_execution_callbacks("test_job_123", {"model": "test"}, None)
+            step_callback, _ = create_execution_callbacks(
+                "test_job_123", {"model": "test"}, None
+            )
 
             mock_step_output = MagicMock()
             mock_step_output.output = "Agent output"
@@ -243,7 +261,9 @@ class TestTaskCallback:
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
-            _, task_callback = create_execution_callbacks("test_job", {"model": "test"}, None)
+            _, task_callback = create_execution_callbacks(
+                "test_job", {"model": "test"}, None
+            )
 
             mock_task_output = MagicMock()
             mock_task_output.raw = "Task result"
@@ -270,7 +290,7 @@ class TestConfigSanitization:
             "api_keys": {"secret": "hidden"},
             "tokens": {"access_token": "secret"},
             "passwords": {"db_pass": "secret"},
-            "normal_field": "visible"
+            "normal_field": "visible",
         }
 
         with patch(
@@ -301,7 +321,6 @@ class TestConfigSanitization:
             log_crew_initialization("test_job", {}, None)
             mock_enqueue.assert_called_once()
             assert mock_enqueue.call_args[1]["execution_id"] == "test_job"
-
 
 
 # ---------------------------------------------------------------------------
@@ -556,7 +575,9 @@ class TestLogWriterTaskStopWriter:
         assert LogWriterTask._lock is None
 
     @pytest.mark.asyncio
-    async def test_stop_writer_loop_mismatch_cancel_exception(self, clean_trace_manager):
+    async def test_stop_writer_loop_mismatch_cancel_exception(
+        self, clean_trace_manager
+    ):
         """Test stop_writer with loop mismatch when cancel raises exception."""
         old_loop = MagicMock()
         mock_task = _make_task_mock(done=False)
@@ -576,7 +597,9 @@ class TestLogWriterTaskStopWriter:
         assert LogWriterTask._writer_loop is None
 
     @pytest.mark.asyncio
-    async def test_stop_writer_loop_mismatch_task_already_done(self, clean_trace_manager):
+    async def test_stop_writer_loop_mismatch_task_already_done(
+        self, clean_trace_manager
+    ):
         """Test loop mismatch path when task is already done (skips cancel)."""
         old_loop = MagicMock()
         mock_task = _make_task_mock(done=True)

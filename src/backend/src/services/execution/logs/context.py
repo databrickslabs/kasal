@@ -14,7 +14,7 @@ from typing import Optional
 
 # Context variable for execution context (works with async/await)
 _execution_context: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
-    'execution_id', default=None
+    "execution_id", default=None
 )
 
 
@@ -24,14 +24,15 @@ class ExecutionContextFormatter(logging.Formatter):
     Preserves the prefix from the original format string.
     """
 
-    def __init__(self, fmt=None, datefmt=None, style='%'):
+    def __init__(self, fmt=None, datefmt=None, style="%"):
         super().__init__(fmt, datefmt, style)
         # Extract prefix from original format (e.g., "[FLOW]" or "[CREW]")
-        self._original_fmt = fmt or '[CREW] %(asctime)s - %(levelname)s - %(message)s'
+        self._original_fmt = fmt or "[CREW] %(asctime)s - %(levelname)s - %(message)s"
         # Extract the prefix by finding the pattern [SOMETHING]
         import re
-        match = re.match(r'(\[[\w]+\])', self._original_fmt)
-        self._prefix = match.group(1) if match else '[CREW]'
+
+        match = re.match(r"(\[[\w]+\])", self._original_fmt)
+        self._prefix = match.group(1) if match else "[CREW]"
 
     def format(self, record):
         # Get execution ID from context variable (works with async/await)
@@ -45,9 +46,13 @@ class ExecutionContextFormatter(logging.Formatter):
 
         # Use the original format with execution ID, preserving the prefix
         if record.exec_id:
-            self._style._fmt = f'{self._prefix}%(exec_id)s %(asctime)s - %(levelname)s - %(message)s'
+            self._style._fmt = (
+                f"{self._prefix}%(exec_id)s %(asctime)s - %(levelname)s - %(message)s"
+            )
         else:
-            self._style._fmt = f'{self._prefix} %(asctime)s - %(levelname)s - %(message)s'
+            self._style._fmt = (
+                f"{self._prefix} %(asctime)s - %(levelname)s - %(message)s"
+            )
 
         return super().format(record)
 
@@ -82,4 +87,3 @@ def execution_logging_context(execution_id: str):
         yield
     finally:
         clear_execution_context()
-

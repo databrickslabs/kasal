@@ -29,9 +29,13 @@ class TestExecutionContextFormatter:
         set_execution_context("abcdef1234567890")
         try:
             record = logging.LogRecord(
-                name="crew", level=logging.INFO,
-                pathname="", lineno=0,
-                msg="test message", args=(), exc_info=None
+                name="crew",
+                level=logging.INFO,
+                pathname="",
+                lineno=0,
+                msg="test message",
+                args=(),
+                exc_info=None,
             )
             result = formatter.format(record)
             assert "abcdef12" in result
@@ -44,9 +48,13 @@ class TestExecutionContextFormatter:
         formatter = ExecutionContextFormatter(fmt=fmt)
         clear_execution_context()
         record = logging.LogRecord(
-            name="crew", level=logging.INFO,
-            pathname="", lineno=0,
-            msg="no exec id", args=(), exc_info=None
+            name="crew",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="no exec id",
+            args=(),
+            exc_info=None,
         )
         result = formatter.format(record)
         assert "no exec id" in result
@@ -70,6 +78,7 @@ class TestExecutionContextFormatter:
 # ---------------------------------------------------------------------------
 # set/clear execution context
 # ---------------------------------------------------------------------------
+
 
 class TestExecutionContext:
     """Tests for context variable helpers."""
@@ -97,4 +106,3 @@ class TestExecutionContext:
 # ---------------------------------------------------------------------------
 # suppress / restore stdout/stderr
 # ---------------------------------------------------------------------------
-
