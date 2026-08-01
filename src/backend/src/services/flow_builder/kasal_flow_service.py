@@ -197,6 +197,20 @@ class KasalFlowService:
                 "resume_from_flow_uuid": resume_from_flow_uuid,
                 "resume_from_execution_id": resume_from_execution_id,
                 "resume_from_crew_sequence": resume_from_crew_sequence,
+                # What makes a run a TURN rather than a fresh start: the
+                # conversation it belongs to, and the line that opened it. The
+                # flow derives its checkpoint lineage from the session, and
+                # chooses which crew the turn needs from the message.
+                #
+                # This dict is a WHITELIST — it rebuilds the config rather than
+                # forwarding it — and both fields were missing from it. They
+                # arrived here intact (the `config keys` line logged above lists
+                # them) and were dropped one hop before the flow could read
+                # them, so every turn restored no state, selected no outcome and
+                # re-ran the whole graph. Anything else a turn needs has to be
+                # added here too; nothing reaches the flow by default.
+                "session_id": config.get("session_id") if config else None,
+                "user_message": config.get("user_message") if config else None,
             }
 
             # Add group_context to config if provided

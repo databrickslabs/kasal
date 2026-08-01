@@ -51,6 +51,8 @@ Understand why Kasal is built the way it is.
 - [Solution architecture](./ARCHITECTURE_GUIDE.md): platform layers, request lifecycle, and the security model.
 - [LLM architecture](./LLM_ARCHITECTURE.md): the four layers behind a model call — facade, configuration, endpoint policy, transport — and which one owns what.
 - [Memory](./MEMORY.md): what a memory record is, how it is written and recalled, the passes that keep the store true, and which tuning knobs actually do something.
+- [Flows](./flows.md): what a flow is, how one is authored and compiled, and how state, routing, checkpoints and approval gates work end to end.
+- [Conversational flow state](./conversational-flow-state.md): channels, reducers, and the thread that lets a flow answer a follow-up question instead of starting over.
 - [Workflow recipes](./workflow-recipes.md): why Kasal keeps the crews you have already run, and why it refuses to reuse them until a person says they were any good.
 - [PBI → UCMV pipeline architecture](./powerbi/ucmv-pipeline-architecture.md): end-to-end walkthrough of how a Power BI model becomes UC Metric Views — extraction, config generation, the M-query path, and the LLM-first DAX translation with skill files, with the code location of each stage.
 - [CrewAI engine refactor proposal](./crewai-engine-refactor-proposal.md): the restructure of `src/engines/kasal` into path, kernel, and infra packages, with the dead-code audit and migration log.

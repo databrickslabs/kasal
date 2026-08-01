@@ -499,6 +499,9 @@ class ExecutionService:
                             "resume_from_flow_uuid",
                             "resume_from_execution_id",
                             "resume_from_crew_sequence",
+                            "session_id",
+                            "user_message",
+                            "approval_decision",
                         ]:
                             if hasattr(config, attr):
                                 execution_config[attr] = getattr(config, attr)
@@ -514,6 +517,14 @@ class ExecutionService:
                         "resume_from_flow_uuid",
                         "resume_from_execution_id",
                         "resume_from_crew_sequence",
+                        # The conversation this run belongs to. A flow derives
+                        # its checkpoint lineage from it, so turn 2 continues
+                        # turn 1 instead of starting a new one — and the user's
+                        # line is what that turn appends to the history.
+                        "session_id",
+                        "user_message",
+                        # A HITL decision on a resume run.
+                        "approval_decision",
                     ]:
                         if hasattr(config, attr):
                             execution_config[attr] = getattr(config, attr)

@@ -145,6 +145,14 @@ class CrewConfig(BaseModel):
         None,
         description="Chat session id — scopes session-only memory recall (stable across messages in a conversation)",
     )
+    user_message: Optional[str] = Field(
+        None,
+        description=(
+            "This turn's user line, for a conversational flow. Written into "
+            "the flow's `messages` channel at kickoff, where the append reducer "
+            "adds it to the history restored from the thread's checkpoint."
+        ),
+    )
     memory_workspace_scope: Optional[bool] = Field(
         None,
         description="Memory read scope: True/None = workspace-wide recall, False = restrict recall to this chat session",

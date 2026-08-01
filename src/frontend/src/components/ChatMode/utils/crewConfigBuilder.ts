@@ -67,6 +67,14 @@ export interface FlowExecutionConfig {
   edges: { id: string; source: string; target: string; sourceHandle?: string; targetHandle?: string; data?: Record<string, unknown> }[];
   flow_id?: string;
   flow_config?: Record<string, unknown>;
+  /**
+   * The conversation this run belongs to. The backend derives the flow's
+   * checkpoint lineage from it (with the flow id and group), so a second
+   * message in the same session continues the first run's state.
+   */
+  session_id?: string;
+  /** This turn's user line, when the flow holds a conversation. */
+  user_message?: string;
 }
 
 function normalizeTaskName(nodeId: string): string {
@@ -579,7 +587,12 @@ export function buildFlowConfig(flow: {
   nodes: unknown[];
   edges: unknown[];
   flow_config?: Record<string, unknown>;
-}, model?: string, inputs?: Record<string, string>): FlowExecutionConfig {
+}, model?: string, inputs?: Record<string, string>,
+   /** The conversation this run belongs to. The backend derives the flow's
+    *  checkpoint lineage from it, so a second message continues the first. */
+   sessionId?: string | null,
+   /** This turn's user line, for a conversational flow. */
+   userMessage?: string): FlowExecutionConfig {
   const nodes = flow.nodes as FlowNode[];
   const edges = flow.edges as FlowEdge[];
 
@@ -614,6 +627,8 @@ export function buildFlowConfig(flow: {
     nodes: mappedNodes,
     edges: mappedEdges,
     flow_id: flow.id,
+    session_id: sessionId || undefined,
+    user_message: userMessage || undefined,
     // REBUILT from the flow's nodes and edges, not passed through as saved.
     //
     // The backend wires a flow from flow_config.listeners / routers /
@@ -632,6 +647,12 @@ export function buildFlowConfig(flow: {
         nodes as unknown as Parameters<typeof buildFlowConfiguration>[0],
         edges as unknown as Parameters<typeof buildFlowConfiguration>[1],
         flow.name || 'Flow',
+        // The declared half of the state block. Channel NAMES are rederived
+        // from the canvas, but reducers and `conversational` are the author's
+        // and cannot be inferred — without this, rebuilding would drop them and
+        // a conversational flow would forget every turn but its newest.
+        (flow.flow_config as { state?: Parameters<typeof buildFlowConfiguration>[3] })
+          ?.state,
       ),
       nodes: mappedNodes,
       edges: mappedEdges,

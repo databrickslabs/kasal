@@ -75,7 +75,9 @@ const docSections: DocSection[] = [
   {
     label: 'Additional guides',
     items: [
+      { label: 'Flows: Authoring, Execution, and State', file: 'flows' },
       { label: 'Flow Routing and Output Schemas', file: 'flow-routing' },
+      { label: 'Conversational Flow State', file: 'conversational-flow-state' },
       { label: 'Workflow Recipes: Reusing Past Crews', file: 'workflow-recipes' },
       { label: 'Measuring Workflow-Recipe Effectiveness', file: 'workflow-recipe-measurement' },
       { label: 'MLflow Tracing: Setup and Requirements', file: 'mlflow-tracing-setup' },

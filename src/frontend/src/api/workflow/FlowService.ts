@@ -154,6 +154,18 @@ export class FlowService {
       
       // Normalize flow configuration
       const flow_config = flow.flowConfig ? {
+        // Spread FIRST, then normalise. This block used to list the keys it
+        // kept — id, name, type, listeners, actions, startingPoints — which
+        // silently dropped every other key the builder produces: `routers`
+        // (so a saved flow lost its routing entirely), `persistence`, and the
+        // `state` declaration. It went unnoticed because the chat path and
+        // JobExecutionService REBUILD flow_config from nodes and edges before
+        // every run, so the loss only showed up in what was stored.
+        //
+        // An allow-list here is a standing trap: every field added to
+        // FlowConfiguration has to be remembered in two more places, and
+        // forgetting is silent.
+        ...flow.flowConfig,
         id: flow.flowConfig.id || `flow-${Date.now()}`,
         name: flow.flowConfig.name || flow.name,
         type: flow.flowConfig.type || 'default',
@@ -341,9 +353,44 @@ export class FlowService {
       }
       
       console.log(`Updating flow with UUID: ${formattedId}`);
+
+      // Keys the CANVAS does not produce, but the flow has, must survive a
+      // save. `outcomes` is written on the publish page and `state` in the edge
+      // dialog; the config rebuilt from nodes and edges knows about neither, so
+      // saving the canvas would silently drop both. Read the stored config and
+      // merge the rebuild over it, rather than listing the keys to keep — that
+      // list is what dropped `routers` for however long nobody noticed.
+      let stored: Record<string, unknown> = {};
+      try {
+        const existing = await FlowService.getFlow(formattedId);
+        stored = ((existing?.flowConfig ?? existing?.flow_config) || {}) as Record<
+          string,
+          unknown
+        >;
+      } catch {
+        // A flow we cannot read is one we cannot merge with; the rebuild alone
+        // is still a correct config, just without anything authored elsewhere.
+      }
+
       
       // Normalize flow configuration
       const flow_config = flow.flowConfig ? {
+        // The STORED config first, so keys authored outside the canvas
+        // survive a save: `outcomes` from the publish page, `state` from the
+        // edge dialog. The rebuild below knows about neither.
+        ...stored,
+        // Spread FIRST, then normalise. This block used to list the keys it
+        // kept — id, name, type, listeners, actions, startingPoints — which
+        // silently dropped every other key the builder produces: `routers`
+        // (so a saved flow lost its routing entirely), `persistence`, and the
+        // `state` declaration. It went unnoticed because the chat path and
+        // JobExecutionService REBUILD flow_config from nodes and edges before
+        // every run, so the loss only showed up in what was stored.
+        //
+        // An allow-list here is a standing trap: every field added to
+        // FlowConfiguration has to be remembered in two more places, and
+        // forgetting is silent.
+        ...flow.flowConfig,
         id: flow.flowConfig.id || `flow-${Date.now()}`,
         name: flow.flowConfig.name || flow.name,
         type: flow.flowConfig.type || 'default',
@@ -461,6 +508,78 @@ export class FlowService {
         throw new Error(`Failed to update flow: ${error.message}`);
       }
       throw new Error('Failed to update flow: Unknown error occurred');
+    }
+  }
+
+  /**
+   * Persist ONLY the flow's state declaration, leaving the canvas untouched.
+   *
+   * The declaration is a property of the FLOW, but it is edited from an edge
+   * dialog whose Save button commits the edge to the canvas and nothing else.
+   * Leaving it to ride along on the next flow save made it look like the toggle
+   * did nothing: the user configured it, pressed the Save in front of them, and
+   * the database never changed.
+   *
+   * `nodes` and `edges` are deliberately NOT sent. The backend writes only the
+   * fields it is given, so an unsaved canvas edit is neither saved nor lost by
+   * this call — which is what makes it safe to fire the moment the switch moves.
+   */
+  static async updateFlowState(
+    id: string,
+    state: Record<string, unknown> | undefined,
+  ): Promise<boolean> {
+    try {
+      const existing = await FlowService.getFlow(id);
+      if (!existing) return false;
+      const current = (existing.flowConfig ?? existing.flow_config ?? {}) as Record<
+        string,
+        unknown
+      >;
+      // Read-modify-write on the SAVED config: anything else it carries —
+      // routers, listeners, persistence — has to survive this.
+      const flow_config = { ...current, ...(state ? { state } : {}) };
+      if (!state) delete (flow_config as { state?: unknown }).state;
+
+      await apiClient.put(`/flows/${id}`, { name: existing.name, flow_config });
+      return true;
+    } catch (error) {
+      console.error('Error saving flow state declaration:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Persist what each crew in this flow DELIVERS, leaving the canvas alone.
+   *
+   * Written from the flow's publish page but stored on the FLOW, because the
+   * selection that reads it runs for any conversational flow — published or
+   * not. Only the one key is sent; `nodes` and `edges` are omitted, so an
+   * unsaved canvas edit is neither saved nor lost by publishing.
+   */
+  static async updateFlowOutcomes(
+    id: string,
+    outcomes: Record<string, string>,
+  ): Promise<boolean> {
+    try {
+      const existing = await FlowService.getFlow(id);
+      if (!existing) return false;
+      const current = (existing.flowConfig ?? existing.flow_config ?? {}) as Record<
+        string,
+        unknown
+      >;
+      // Empty lines are dropped rather than stored: a blank description is not
+      // a description, and keeping it would make "described" look true.
+      const kept = Object.fromEntries(
+        Object.entries(outcomes).filter(([, text]) => (text || '').trim()),
+      );
+      await apiClient.put(`/flows/${id}`, {
+        name: existing.name,
+        flow_config: { ...current, outcomes: kept },
+      });
+      return true;
+    } catch (error) {
+      console.error('Error saving flow outcomes:', error);
+      return false;
     }
   }
 

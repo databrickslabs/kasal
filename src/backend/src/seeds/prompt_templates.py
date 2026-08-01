@@ -305,6 +305,47 @@ Examples:
 - "change model" / "select tools" / "update max rpm" -> configure_crew
 """
 
+SELECT_FLOW_OUTCOME_TEMPLATE = """You choose what one turn of a conversation is asking a workflow to PRODUCE.
+
+The workflow's outcomes are listed in the user message — each with a name and what it produces. The turn, what the person just asked, follows them.
+
+Choosing an outcome decides which work runs. Everything needed to produce that outcome runs; everything else does not. Work an earlier turn already did is reused rather than repeated, so choosing well is the difference between a turn that costs one crew and a turn that costs all of them.
+
+HOW TO CHOOSE
+- Pick the outcome whose OUTPUT is what the turn asks for. Match on what it produces, not on how similar its name looks to a word in the question.
+- Exactly one outcome. They are alternatives; the point of choosing is that the others do not run.
+- A follow-up still names its own subject. "now the same as a quiz" wants the quiz outcome, even though what to build it from came from an earlier turn.
+
+WHEN THE TURN NEEDS NO WORK AT ALL
+- Some turns ask ABOUT work already done: "which frameworks did you find?", "what did the second one say?", "summarise that". The material is already there; producing it again would spend minutes retelling it.
+- For those return "answer_from_state": true with a null outcome. Nothing runs and the answer is written from what the workflow already holds.
+- This is only for turns answerable from what has ALREADY been produced. "and for Germany?" is new work, not retrieval, however short it looks.
+
+WHEN NOT TO CHOOSE
+- If no outcome clearly produces what was asked for, and it is not answerable from what is already there, return null with "answer_from_state": false. The whole workflow then runs, which is slower and correct — far better than spending minutes producing the wrong artefact.
+- confidence is how sure you are that this outcome is what THIS turn wants — not how good the outcome is.
+
+RETURN ONLY JSON, no markdown and no commentary:
+{"outcome": "<outcome name>" | null,
+ "answer_from_state": true | false,
+ "confidence": 0.0-1.0,
+ "reason": "<one sentence: why this outcome, why none, or why nothing needs to run>"}
+
+EXAMPLES
+Outcomes: 1. outcome: quiz (produces: a quiz from the topic) 2. outcome: mindmap (produces: a mindmap of the topic)
+Turn: "can you turn that into a mindmap"
+-> {"outcome": "mindmap", "confidence": 0.95, "reason": "the turn asks for a mindmap, which is what that outcome produces"}
+
+Outcomes: 1. outcome: quiz (produces: a quiz) 2. outcome: mindmap (produces: a mindmap)
+Turn: "what did the second point mean?"
+-> {"outcome": null, "answer_from_state": true, "confidence": 0.9, "reason": "asks about what has already been produced; nothing needs to run"}
+
+Outcomes: 1. outcome: quiz (produces: a quiz) 2. outcome: mindmap (produces: a mindmap)
+Turn: "and for Germany?"
+-> {"outcome": null, "answer_from_state": false, "confidence": 0.0, "reason": "new work for a different subject, and no outcome clearly covers it"}
+"""
+
+
 ROUTE_CAPABILITY_TEMPLATE = """You match ONE user request to ONE published capability, or to none.
 
 The capabilities available to you, and the inputs each one declares, are listed in the user message. Each has a description written by whoever published it. The conversation so far is listed above them when there is one.
@@ -314,6 +355,12 @@ The message you are given is a turn in a conversation, not an isolated instructi
 - A question ABOUT the answer that is already on screen is not a request for new work. "what is this Aviation sector", "why did it say that", "explain the third slide" — return null. Someone will answer from the conversation itself; running a capability would redo minutes of work to answer a question the text on screen already answers.
 - A request that CONTINUES the previous one usually does want a capability, and the conversation is what makes it readable. "now do the same for Germany" means the previous request again with a different region — route it, and take the inputs the user did not repeat from the earlier turns.
 - A request that acts ON the previous answer may want a DIFFERENT capability. "turn this into a presentation" is a presentation request whose subject is the answer above it. Route it to the capability that does that work, and say which answer it refers to with refers_to.
+
+STAYING WITH A CAPABILITY THAT HOLDS A CONVERSATION
+Some capabilities are marked "holds a conversation". When the previous answer came from one of those — the conversation shows it as [answer N, from <name>] — that capability is mid-conversation and expects the next turn itself.
+- If this turn continues, refines, questions or builds on that answer, pick that same capability again, even when the message is a fragment ("and Germany?", "shorter", "why?"). Do not re-match it against the whole catalogue, and do not return null: null would answer in the chat and the capability would never learn the turn happened.
+- Return null or a different capability only when the user has clearly moved on to unrelated work. Naming a different subject is not moving on if the capability is about that subject.
+- This rule applies ONLY to capabilities marked as holding a conversation. For every other capability the rules above stand: a question about the answer on screen returns null.
 
 HOW TO PICK
 - Choose the capability whose DESCRIPTION says it handles this request. The description is the only thing you match on — ignore how similar the name looks.
@@ -346,6 +393,9 @@ User message: "Kick off the Q3 risk review for DACH" with capability quarterly_r
 
 User message: "Kick off the risk review for DACH" (no quarter stated)
 -> {"capability": "quarterly_risk_review", "confidence": 0.9, "inputs": {"region": {"value": "DACH", "source_span": "DACH"}, "quarter": null}, "reason": "matches the risk review; the user did not say which quarter"}
+
+Conversation: [answer 2, from swiss_news_flow] — a news briefing, from a capability that holds a conversation. User message: "and Germany?"
+-> {"capability": "swiss_news_flow", "confidence": 0.9, "inputs": {"region": {"value": "Germany", "source_span": "Germany"}}, "refers_to": null, "reason": "continues the conversation the news flow is already holding"}
 
 User message: "write me a poem about the sea"
 -> {"capability": null, "confidence": 0.0, "inputs": {}, "refers_to": null, "reason": "nothing published handles creative writing"}
@@ -441,6 +491,15 @@ DEFAULT_TEMPLATES = [
         "name": "detect_intent",
         "description": "Template for detecting user intent in natural language messages",
         "template": DETECT_INTENT_TEMPLATE,
+        "is_active": True,
+    },
+    {
+        "name": "select_flow_outcome",
+        "description": (
+            "Template for choosing which OUTCOME of a conversational flow the "
+            "current turn is asking for, so only the work that produces it runs"
+        ),
+        "template": SELECT_FLOW_OUTCOME_TEMPLATE,
         "is_active": True,
     },
     {

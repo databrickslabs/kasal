@@ -635,6 +635,16 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
         };
       }
 
+      // Record WHICH flow this canvas now holds. Without it the tab has no
+      // savedFlowId, so Save offers to create a new flow instead of updating
+      // the one just opened, and anything keyed on the flow id — the state
+      // declaration among them — has nothing to address.
+      const tabId = useTabManagerStore.getState().activeTabId;
+      if (tabId && selectedFlow.id) {
+        useTabManagerStore
+          .getState()
+          .updateTabFlowInfo(tabId, String(selectedFlow.id), selectedFlow.name);
+      }
       onFlowSelect(selectedFlow.nodes, selectedFlow.edges, flowConfig);
       onClose();
       

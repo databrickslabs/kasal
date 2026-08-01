@@ -26,9 +26,24 @@ class FlowState(Base):
     method_name = Column(String(255), nullable=False)
     # JSON-serialized flow state dict.
     state_json = Column(Text, nullable=False)
+    # Tenant scope. Nullable because rows written before this column existed
+    # cannot have it recovered — `flow_uuid` is a state id, not a key to
+    # anything carrying a group — and a confident wrong backfill would be worse
+    # than an honest NULL. Reads treat NULL as "unknown tenant, match by lineage
+    # id alone", which is what those rows already do.
+    # Not `index=True`: that would create a second, single-column index that the
+    # migration does not, so a create_all database and a migrated one would end
+    # up with different schemas from the same code. The composite index below
+    # already serves every group-scoped lookup by leftmost prefix.
+    group_id = Column(String(100), nullable=True)
     # Timezone-naive UTC to match the TIMESTAMP WITHOUT TIME ZONE column (asyncpg
     # rejects binding a tz-aware datetime to a naive Postgres/Lakebase column), and
     # to stay consistent with flow_execution / execution_history.
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
-    __table_args__ = (Index("ix_flow_states_uuid_created", "flow_uuid", "created_at"),)
+    __table_args__ = (
+        Index("ix_flow_states_uuid_created", "flow_uuid", "created_at"),
+        # Every tenant-scoped read asks the same question: this group's rows for
+        # this lineage.
+        Index("ix_flow_states_group_uuid", "group_id", "flow_uuid"),
+    )

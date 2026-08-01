@@ -8,6 +8,8 @@ import { ModelService } from '../config/ModelService';
 import { AgentService } from '../workflow/AgentService';
 import { Models } from '../../types/config/models';
 import { buildFlowConfiguration } from '../../utils/flowConfigBuilder';
+import { declaredStateForTab } from '../../store/flowState';
+import { useTabManagerStore } from '../../store/tabManager';
 
 interface NodeData {
   label?: string;
@@ -111,7 +113,16 @@ export class JobExecutionService {
 
           // Build flow configuration with listeners, actions, and starting points
           // This ensures flows execute correctly even when not saved
-          const builtFlowConfig = buildFlowConfiguration(nodes, edges, 'Dynamic Flow');
+          // The declaration travels with the run, not only with a save: a flow
+          // is routinely run from the canvas before it is saved, and running it
+          // as a one-shot when it was declared conversational would look like
+          // the declaration did nothing.
+          const builtFlowConfig = buildFlowConfiguration(
+            nodes,
+            edges,
+            'Dynamic Flow',
+            declaredStateForTab(useTabManagerStore.getState().activeTabId),
+          );
 
           console.log(`[JobExecutionService] Built flow config with:`, {
             listeners: builtFlowConfig.listeners.length,

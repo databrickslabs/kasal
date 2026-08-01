@@ -31,6 +31,7 @@ import { SchemaService } from '../../api/workflow/SchemaService';
 import { TaskService } from '../../api/workflow/TaskService';
 import { Schema } from '../../types/workflow/schema';
 
+import FlowStateSection from './FlowStateSection';
 export type FlowLogicType = 'AND' | 'OR' | 'ROUTER' | 'NONE';
 
 // State mapping: extract task output field and save to state variable
@@ -690,6 +691,16 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
                 />
               </Box>
             )}
+          </Box>
+
+          {/* Flow-level state, hosted here because it is only useful WITH the
+              checkpoint above: a conversation needs somewhere to live and
+              something to write it, and separating the two controls is how a
+              flow ends up with one of them. Writes straight to the flow's
+              declaration, so it is saved with the FLOW rather than with this
+              edge — Cancel below does not undo it. */}
+          <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+            <FlowStateSection />
           </Box>
 
           {/* Description */}

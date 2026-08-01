@@ -21,6 +21,14 @@ from pydantic import BaseModel
 from src.core.logger import LoggerManager
 from src.services.execution.kernel.execution_callback import create_execution_callbacks
 from src.services.execution.runtime import Crew, Process, Task
+from src.services.flow_builder.conversation.state_model import (
+    DictLikeState,
+    build_state_model,
+)
+from src.services.flow_builder.conversation.turn import (
+    ConversationState,
+    is_conversational,
+)
 from src.services.flow_builder.exceptions import FlowPausedForApprovalException
 from src.services.flow_builder.modules.agent_adapter import AgentConfig
 
@@ -176,6 +184,21 @@ def _crew_may_be_skipped(crew_name, crew_tasks, checkpoint_identities) -> bool:
     return True
 
 
+def _identity_of(crew_name: str, tasks: Any) -> Optional[str]:
+    """A crew's content hash, or None when it cannot be taken.
+
+    Best-effort: without it an outcome still triggers by name, and reuse simply
+    declines to replay anything for that crew — slower, never wrong.
+    """
+    try:
+        from src.services.flow_builder.checkpoint_identity import compute_crew_identity
+
+        return compute_crew_identity(crew_name, tasks or [])
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(f"[flow-outcome] could not hash crew {crew_name!r}: {exc}")
+        return None
+
+
 class FlowBuilder:
     """
     Helper class for building CrewAI flows.
@@ -264,10 +287,27 @@ class FlowBuilder:
             has_checkpoint_edge = any(
                 edge.get("data", {}).get("checkpoint", False) for edge in edges
             )
-            if has_checkpoint_edge:
+            # A conversational flow REQUIRES persistence — the conversation IS
+            # the checkpoint. Asking for a conversation and then also having to
+            # tick a per-edge checkpoint is two switches for one intent, and
+            # missing the second one produces a flow that declares it holds a
+            # conversation, writes nothing, and starts from scratch every turn
+            # with nothing anywhere saying why.
+            state_declaration = (flow_config.get("state") or {}) if flow_config else {}
+            wants_conversation = bool(
+                isinstance(state_declaration, dict)
+                and state_declaration.get("conversational")
+            )
+            if wants_conversation and not has_checkpoint_edge:
                 logger.info(
-                    "Found edge(s) with checkpoint=true, enabling flow persistence"
+                    "Flow holds a conversation, enabling persistence: its state "
+                    "has to survive between turns"
                 )
+            if has_checkpoint_edge or wants_conversation:
+                if has_checkpoint_edge:
+                    logger.info(
+                        "Found edge(s) with checkpoint=true, enabling flow persistence"
+                    )
                 # Ensure persistence config exists and is enabled
                 if "persistence" not in flow_config:
                     flow_config["persistence"] = {}
@@ -592,13 +632,49 @@ class FlowBuilder:
             CrewAIFlow: An instance of the dynamically created flow class
         """
         # Extract state and persistence configuration
-        state_config = flow_config.get("state", {}) if flow_config else {}
+        # `or {}` rather than a default: a stored config can carry an explicit
+        # `"state": null`, and `.get("state", {})` returns that null, so every
+        # read below would fail on NoneType.
+        state_config = (flow_config.get("state") or {}) if flow_config else {}
         persistence_config = flow_config.get("persistence", {}) if flow_config else {}
 
         state_enabled = state_config.get("enabled", False)
         state_type = state_config.get("type", "unstructured")
         state_model = state_config.get("model")
         state_initial_values = state_config.get("initialValues", {})
+
+        # A declared state schema becomes the flow's actual state class. Until
+        # now `state_model` was read here and passed nowhere, so `Flow`'s typed
+        # state support was unreachable and every flow ran on a bare dict — which
+        # accepts any key, so a misspelled input landed in state, the condition
+        # reading the correct name saw nothing, and the flow branched as though
+        # the value had never been given. `_merge_inputs` raises on an unknown
+        # field for a typed state; this is what lets that raise fire.
+        #
+        # Falls back to the dict when there is no usable schema, which is every
+        # flow authored so far.
+        # A conversational flow starts from ConversationState, which brings the
+        # turn contract (`messages` with an append reducer, `last_user_message`,
+        # `last_intent`, `session_ready`) that a multi-turn thread needs and no
+        # flow author should have to redeclare. Its own channels are added on
+        # top.
+        conversational = is_conversational(state_config)
+        state_base = ConversationState if conversational else DictLikeState
+        # `conversational` implies state: asking for a turn contract and then
+        # running on an untyped dict would give the flow nowhere to keep the
+        # conversation.
+        state_class = (
+            build_state_model(state_model, base=state_base)
+            if (state_enabled or conversational)
+            else None
+        )
+        if state_class is not None:
+            logger.info(
+                f"Typed flow state: {sorted(state_class.model_fields)} "
+                f"(declared type: {state_type})"
+            )
+        elif state_enabled and state_model:
+            logger.info("State schema present but not usable; running on a dict state")
 
         persistence_enabled = persistence_config.get("enabled", False)
         persistence_level = persistence_config.get("level", "none")
@@ -633,6 +709,24 @@ class FlowBuilder:
             return __init__
 
         class_methods["__init__"] = create_init_method()
+
+        # The flow carries its own config, so a generated method can ask what
+        # the GRAPH looks like — which crews are terminal, whether this flow
+        # holds a conversation. A closure cannot know that: it sees one crew.
+        class_methods["_kasal_flow_config"] = flow_config
+        # method name -> crew name. A goal is chosen by CREW name (that is what
+        # a person asks for); the runtime narrows by METHOD name (that is what
+        # it executes). This is the only place both are known.
+        class_methods["_kasal_method_crews"] = {}
+        # crew -> content hash, taken from the SAME runtime task objects the
+        # resume path hashes. An outcome then names a crew AND what that crew
+        # was, so a stored answer is replayed only while the crew is unchanged.
+        class_methods["_kasal_crew_identities"] = {}
+
+        # `Flow._build_initial_state` reads this off the class. Set it only when
+        # a schema compiled — leaving it None is what keeps the dict behaviour.
+        if state_class is not None:
+            class_methods["initial_state"] = state_class
 
         # Log persistence and resume configuration
         if persistence_enabled:
@@ -745,6 +839,10 @@ class FlowBuilder:
                 )
 
                 # Use FlowMethodFactory to create the starting point method with ALL tasks
+                class_methods["_kasal_method_crews"][method_name] = crew_name
+                class_methods["_kasal_crew_identities"][crew_name] = _identity_of(
+                    crew_name, crew_tasks
+                )
                 class_methods[method_name] = (
                     FlowMethodFactory.create_starting_point_crew_method(
                         method_name=method_name,
@@ -1106,6 +1204,10 @@ class FlowBuilder:
             else:
                 # Create ONE listener method for the entire crew
                 # Tasks within the crew will execute sequentially (task.context was set by process_listeners)
+                class_methods["_kasal_method_crews"][method_name] = crew_name
+                class_methods["_kasal_crew_identities"][crew_name] = _identity_of(
+                    crew_name, listener_tasks
+                )
                 class_methods[method_name] = FlowMethodFactory.create_listener_method(
                     method_name=method_name,
                     listener_tasks=listener_tasks,  # All tasks in this crew (with task.context for ordering)
@@ -1977,9 +2079,13 @@ class FlowBuilder:
                         KasalFlowPersistence,
                     )
 
-                    DynamicFlow = persist(persistence=KasalFlowPersistence())(
-                        DynamicFlow
-                    )
+                    # The group is stamped on every checkpoint row this run
+                    # writes. It was available here all along and simply never
+                    # passed, which is why `flow_states` was the one table in
+                    # the checkpoint path with no tenant column to filter on.
+                    DynamicFlow = persist(
+                        persistence=KasalFlowPersistence(group_id=group_id)
+                    )(DynamicFlow)
                     logger.info(
                         "✅ Applied @persist decorator (Kasal DB-backed flow state persistence)"
                     )

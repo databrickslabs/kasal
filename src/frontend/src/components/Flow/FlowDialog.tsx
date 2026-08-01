@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useTabManagerStore } from '../../store/tabManager';
 import { 
   Dialog, 
   DialogTitle, 
@@ -79,6 +80,15 @@ const FlowDialog: React.FC<FlowSelectionDialogProps> = ({ open, onClose, onFlowS
       // Fetch the flow using the string ID
       const selectedFlow = await FlowService.getFlow(flowId);
       if (selectedFlow) {
+        // Same as the catalog loader: record WHICH flow this canvas holds, or
+        // Save offers to create a new one and nothing keyed on the flow id can
+        // address it.
+        const tabId = useTabManagerStore.getState().activeTabId;
+        if (tabId && selectedFlow.id) {
+          useTabManagerStore
+            .getState()
+            .updateTabFlowInfo(tabId, String(selectedFlow.id), selectedFlow.name);
+        }
         onFlowSelect(selectedFlow.nodes, selectedFlow.edges, selectedFlow.flowConfig);
         onClose();
       }

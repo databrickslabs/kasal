@@ -9,6 +9,7 @@ import logging
 import uuid
 from typing import Any, Callable, Dict, List, Optional
 
+from src.core.llm.output_cap import output_cap
 from src.core.logger import LoggerManager
 from src.services.execution.runtime import Crew, Process, Task
 from src.services.flow_builder.runtime import and_, listen, or_, router, start
@@ -383,7 +384,21 @@ def crew_inputs_from_state(flow: Any) -> Dict[str, Any]:
     state = getattr(flow, "state", None)
     if isinstance(state, dict):
         return {k: v for k, v in state.items() if k != "id"}
-    if state is not None and hasattr(state, "__dict__"):
+    if state is None:
+        return {}
+
+    # A typed state dumps itself. `vars()` would work for the declared fields
+    # but miss everything written at runtime — pydantic keeps extras off
+    # `__dict__` — and those are exactly the values a downstream task
+    # interpolates: a state operation's output variable is written, never
+    # declared. `model_dump` includes them.
+    dump = getattr(state, "model_dump", None)
+    if callable(dump):
+        try:
+            return {k: v for k, v in dump().items() if k != "id"}
+        except Exception as exc:  # noqa: BLE001 — inputs must not fail a kickoff
+            logger.debug(f"could not dump flow state for crew inputs: {exc}")
+    if hasattr(state, "__dict__"):
         return {
             k: v for k, v in vars(state).items() if k != "id" and not k.startswith("_")
         }
@@ -480,6 +495,100 @@ def _emit_checkpoint_restored(crew_name: str, output: Any) -> None:
         )
 
 
+def _crew_identity(crew_name: Optional[str], task_list: Any) -> Optional[str]:
+    """The content hash of the crew about to run, or None if it cannot be taken.
+
+    The SAME identity the resume path uses, computed from the same runtime
+    objects — so "has this crew changed" cannot be answered two different ways
+    depending on which feature is asking.
+    """
+    try:
+        from src.services.flow_builder.checkpoint_identity import (
+            compute_crew_identity,
+        )
+
+        return compute_crew_identity(crew_name, task_list or [])
+    except Exception as exc:  # noqa: BLE001 — identity is a guard, not a gate
+        logger.debug(f"[flow-reuse] could not compute crew identity: {exc}")
+        return None
+
+
+def _reuse_check(flow: Any, crew_name: Optional[str], task_list: Any) -> Optional[Any]:
+    """A previous turn's answer for this crew, when reusing it is safe.
+
+    None means run. Every doubtful case returns None — see `flow_reuse`.
+    """
+    if not crew_name:
+        return None
+    try:
+        from src.services.flow_builder.conversation.reuse import (
+            emit_reused,
+            reusable_output,
+            reuse_enabled,
+            terminal_crew_names,
+        )
+
+        config = getattr(flow, "_kasal_flow_config", None) or {}
+        state_config = config.get("state") if isinstance(config, dict) else None
+        refresh = (
+            bool(config.get("refresh_outputs")) if isinstance(config, dict) else False
+        )
+        if not reuse_enabled(state_config, refresh):
+            return None
+
+        # Prefer the hash taken when the flow was compiled: it is the one the
+        # outcome registry carries, so "has this crew changed" is answered the
+        # same way wherever it is asked.
+        identity = (getattr(flow, "_kasal_crew_identities", {}) or {}).get(
+            crew_name
+        ) or _crew_identity(crew_name, task_list)
+        output = reusable_output(
+            getattr(flow, "state", None),
+            crew_name,
+            identity,
+            terminal_crew_names(config),
+            refresh,
+        )
+        if output is None:
+            return None
+        logger.info(
+            f"♻️  Reusing '{crew_name}' output from an earlier turn — not running it again"
+        )
+        emit_reused(crew_name, output)
+        return output
+    except Exception as exc:  # noqa: BLE001 — never block a run over reuse
+        logger.debug(f"[flow-reuse] check failed, running the crew: {exc}")
+        return None
+
+
+def _store_output_slug(flow: Any, crew_name: Optional[str], result: Any) -> None:
+    """Store a crew's output under an interpolatable name as well."""
+    try:
+        from src.services.flow_builder.conversation.reuse import output_slug
+
+        slug = output_slug(crew_name or "")
+        if slug and slug != crew_name:
+            flow.state[slug] = result
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(f"[flow-reuse] could not store output slug: {exc}")
+
+
+def _record_crew_identity(flow: Any, crew_name: Optional[str], task_list: Any) -> None:
+    """Stamp which crew produced the output just written into state."""
+    if not crew_name:
+        return
+    try:
+        from src.services.flow_builder.conversation.reuse import record_identity
+
+        record_identity(
+            getattr(flow, "state", None),
+            crew_name,
+            _crew_identity(crew_name, task_list),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(f"[flow-reuse] could not record identity: {exc}")
+
+
 class FlowMethodFactory:
     """
     Factory for creating dynamic flow methods (starting points, listeners, routers).
@@ -518,6 +627,16 @@ class FlowMethodFactory:
         @start()
         async def starting_point_crew_method(self):
             """Starting point method - executes crew with multiple sequential tasks."""
+            # Already answered on an earlier turn? A conversational flow
+            # restores its state before every turn, so the crews upstream of the
+            # one answering THIS question already have their results in memory.
+            # Running them again spends minutes reproducing what is sitting
+            # right there. `_reuse_check` decides — terminal crews, edited crews
+            # and refreshes all fall through and run.
+            reused = _reuse_check(self, crew_name, task_list)
+            if reused is not None:
+                return reused
+
             logger.info("=" * 80)
             logger.info(f"START CREW METHOD CALLED - Crew: {crew_name}")
             logger.info(f"Number of tasks: {len(task_list)}")
@@ -774,7 +893,11 @@ class FlowMethodFactory:
                     llm = first_agent.llm
                     llm_info = {
                         "model": getattr(llm, "model", "unknown"),
-                        "max_tokens": getattr(llm, "max_tokens", "not set"),
+                        # BOTH fields: a GPT-5 model carries its ceiling as
+                        # max_completion_tokens, so reading only max_tokens
+                        # reported "None" for a model capped at 128k — and read
+                        # that way, a configured limit looks like no limit.
+                        "max_output": output_cap(llm),
                         "timeout": getattr(llm, "timeout", "not set"),
                     }
                     logger.info(f"📊 LLM Configuration: {llm_info}")
@@ -843,6 +966,14 @@ class FlowMethodFactory:
                     if hasattr(self, "state"):
                         self.state[method_name] = serializable_result
                         self.state[crew_name] = serializable_result
+                        # Also under a name a task can interpolate: the display
+                        # name has spaces, so `{agentic ai frameworks}` is not a
+                        # placeholder and a later crew had no way to ASK for
+                        # what an earlier one produced.
+                        _store_output_slug(self, crew_name, serializable_result)
+                        # Stamp WHICH crew produced it: an edited crew must not
+                        # have its old answer replayed on a later turn.
+                        _record_crew_identity(self, crew_name, task_list)
                         logger.info(
                             f"📦 Stored crew output in state['{method_name}'] and state['{crew_name}'] for checkpoint support"
                         )
@@ -967,6 +1098,16 @@ class FlowMethodFactory:
         @decorator
         async def listener_method(self, *results):
             """Listener method - executes when listening to a specific event."""
+            # Already answered on an earlier turn? A conversational flow
+            # restores its state before every turn, so the crews upstream of the
+            # one answering THIS question already have their results in memory.
+            # Running them again spends minutes reproducing what is sitting
+            # right there. `_reuse_check` decides — terminal crews, edited crews
+            # and refreshes all fall through and run.
+            reused = _reuse_check(self, crew_name, listener_tasks)
+            if reused is not None:
+                return reused
+
             logger.info("=" * 80)
             condition_desc = (
                 f"{condition_type} conditional "
@@ -1291,7 +1432,7 @@ class FlowMethodFactory:
                     llm = first_agent.llm
                     llm_info = {
                         "model": getattr(llm, "model", "unknown"),
-                        "max_tokens": getattr(llm, "max_tokens", "not set"),
+                        "max_output": output_cap(llm),
                         "timeout": getattr(llm, "timeout", "not set"),
                     }
                     logger.info(f"📊 Listener LLM Configuration: {llm_info}")
@@ -1638,6 +1779,14 @@ class FlowMethodFactory:
                     if hasattr(self, "state"):
                         self.state[method_name] = serializable_result
                         self.state[crew_name] = serializable_result
+                        # Also under a name a task can interpolate: the display
+                        # name has spaces, so `{agentic ai frameworks}` is not a
+                        # placeholder and a later crew had no way to ASK for
+                        # what an earlier one produced.
+                        _store_output_slug(self, crew_name, serializable_result)
+                        # Stamp WHICH crew produced it: an edited crew must not
+                        # have its old answer replayed on a later turn.
+                        _record_crew_identity(self, crew_name, listener_tasks)
                         logger.info(
                             f"📦 Stored listener output in state['{method_name}'] and state['{crew_name}'] for checkpoint support"
                         )

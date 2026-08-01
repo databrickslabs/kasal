@@ -33,6 +33,10 @@ from src.schemas.hitl import (
     HITLApprovalStatusEnum,
     HITLRejectionActionEnum,
 )
+from src.services.flow_builder.conversation.interrupt import (
+    APPROVAL_CONFIG_KEY,
+    approval_payload,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -649,6 +653,10 @@ class HITLService:
                 "resume_from_execution_id": approval.execution_id,
                 "resume_from_crew_sequence": approval.crew_sequence
                 + 1,  # Skip completed crew, start from next
+                # What the approver decided, so the resumed flow can branch on
+                # it. Without this the gate could ask a question whose answer
+                # reached the database and went no further.
+                APPROVAL_CONFIG_KEY: approval_payload(approval),
             }
 
             logger.info(

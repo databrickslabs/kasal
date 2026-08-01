@@ -501,3 +501,67 @@ class TestRunFlowIntegration:
 
                 # Verify logging was called
                 assert mock_logger.info.called
+
+
+class TestTheTurnFieldsSurviveTheHandoff:
+    """What makes a run a TURN has to reach the flow.
+
+    `run_flow` does not forward the config it is given — it REBUILDS one from a
+    fixed list of keys. `session_id` and `user_message` were missing from that
+    list, so a conversational flow received neither: it could not derive its
+    checkpoint lineage (no session) and could not tell which crew the turn
+    needed (no question). Every turn restored nothing and re-ran the whole
+    graph, and nothing failed loudly enough to point here.
+
+    These tests pin the two fields to the handoff. A key added to the config
+    upstream and not to the whitelist is invisible in exactly the same way.
+    """
+
+    @pytest.fixture
+    def service(self):
+        return KasalFlowService(session=MagicMock())
+
+    @staticmethod
+    async def _config_passed_to_engine(service, config):
+        """The flow_config `run_flow` hands to the engine."""
+        engine = MagicMock()
+        engine.run_flow = AsyncMock(return_value="exec-123")
+
+        with patch("src.services.execution.engine_factory.EngineFactory") as factory:
+            factory.get_engine = AsyncMock(return_value=engine)
+            await service.run_flow(flow_id=uuid.uuid4(), job_id="job-1", config=config)
+
+        return engine.run_flow.call_args.kwargs["flow_config"]
+
+    @pytest.mark.asyncio
+    async def test_the_session_reaches_the_flow(self, service):
+        # The flow derives its checkpoint lineage from this, so turn 2 continues
+        # turn 1's state instead of starting over.
+        passed = await self._config_passed_to_engine(
+            service, {"nodes": [], "edges": [], "session_id": "session-abc"}
+        )
+
+        assert passed["session_id"] == "session-abc"
+
+    @pytest.mark.asyncio
+    async def test_the_users_line_reaches_the_flow(self, service):
+        # The turn's question is what the outcome is chosen against; without it
+        # there is nothing to match the crews' descriptions to.
+        passed = await self._config_passed_to_engine(
+            service, {"nodes": [], "edges": [], "user_message": "compare them"}
+        )
+
+        assert passed["user_message"] == "compare them"
+
+    @pytest.mark.asyncio
+    async def test_a_one_shot_run_carries_neither(self, service):
+        # A run started from the Flow Builder has no conversation. The keys are
+        # present and None rather than absent — the flow reads them with .get()
+        # either way, and a missing key would hide a drop like the one this
+        # class exists to catch.
+        passed = await self._config_passed_to_engine(
+            service, {"nodes": [], "edges": []}
+        )
+
+        assert passed["session_id"] is None
+        assert passed["user_message"] is None

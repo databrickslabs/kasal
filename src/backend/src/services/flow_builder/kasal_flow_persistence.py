@@ -72,8 +72,24 @@ class KasalFlowPersistence(FlowPersistence):
 
     persistence_type: str = "KasalFlowPersistence"
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(self, group_id: Optional[str] = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
+        # Stamped on every row this instance writes, and required on every row
+        # it reads. One persistence object belongs to one flow run, so the group
+        # is fixed for its lifetime and does not have to be threaded through the
+        # (synchronous, CrewAI-shaped) save/load signatures.
+        self._group_id = group_id
+        if not group_id:
+            # Not an error — a system or local run legitimately has no tenant —
+            # but it decides what this run can see: reads match only rows that
+            # also carry no group. Logged because a run that MEANT to be
+            # tenanted and lost its group would otherwise silently fail to find
+            # its own checkpoints, which looks like the checkpoint was never
+            # written.
+            logger.info(
+                "[KasalFlowPersistence] no group on this run; checkpoints are "
+                "written and read untenanted"
+            )
         # NOTE: we deliberately do NOT run CREATE TABLE here. The flow_states table
         # is created by create_all at app startup (the model is registered in
         # src/models/__init__.py). Running DDL on every flow build takes a SQLite
@@ -162,7 +178,9 @@ class KasalFlowPersistence(FlowPersistence):
 
             async with async_session_factory() as session:
                 repo = FlowStateRepository(session)
-                await repo.add_state(flow_uuid, method_name, state_json)
+                await repo.add_state(
+                    flow_uuid, method_name, state_json, group_id=self._group_id
+                )
                 await session.commit()
 
         self._execute_with_retry(_save)
@@ -179,7 +197,9 @@ class KasalFlowPersistence(FlowPersistence):
 
             async with async_session_factory() as session:
                 repo = FlowStateRepository(session)
-                return await repo.get_latest_state_json(flow_uuid)
+                return await repo.get_latest_state_json(
+                    flow_uuid, group_id=self._group_id
+                )
 
         state_json = self._execute_with_retry(_load)
         if not state_json:

@@ -116,6 +116,8 @@ export function useChatExecutionActions({
      * three it already had — the card only ever collects what was missing.
      */
     boundInputs?: Record<string, string>;
+    /** The routed capability, carried across the input-variables prompt. */
+    capability?: string;
     /** The prompt that selected this capability — see doExecuteCrew. */
     request?: string;
     /** The earlier answer this run works from — see doExecuteCrew. */
@@ -429,7 +431,12 @@ export function useChatExecutionActions({
   );
 
   const doExecuteFlow = useCallback(
-    async (flow: FlowData, inputs?: Record<string, string>) => {
+    async (
+      flow: FlowData,
+      inputs?: Record<string, string>,
+      userMessage?: string,
+      routedCapability?: string,
+    ) => {
       // Capture the session ID NOW, before the async createExecution call.
       const originSessionId = useSessionStore.getState().currentSessionId;
 
@@ -442,7 +449,19 @@ export function useChatExecutionActions({
           tasks: [],
         });
 
-        const flowConfig = buildFlowConfig(flow, selectedModel || undefined, inputs);
+        // The session and the user's line make this run a TURN: the backend
+        // derives the flow's checkpoint lineage from the session, so a second
+        // message continues the first run's state instead of starting over.
+        // Recorded for the answer message: the backend router reads it back
+        // next turn to know this capability is mid-conversation.
+        execStore.setRoutedCapability(routedCapability ?? null);
+        const flowConfig = buildFlowConfig(
+          flow,
+          selectedModel || undefined,
+          inputs,
+          originSessionId,
+          userMessage,
+        );
         const execution = await createExecution(flowConfig);
         const jobId = execution.job_id || execution.execution_id;
         if (jobId) {
@@ -479,6 +498,7 @@ export function useChatExecutionActions({
           type: 'flow',
           flow,
           boundInputs: routed?.extractedInputs,
+          capability: routed?.capability,
           request: routed?.request,
           referencedAnswer: routed?.referencedAnswer,
         });
@@ -488,7 +508,7 @@ export function useChatExecutionActions({
         });
         return;
       }
-      doExecuteFlow(flow, routed?.extractedInputs);
+      doExecuteFlow(flow, routed?.extractedInputs, routed?.request, routed?.capability);
     },
     [doExecuteFlow, addMessage],
   );
@@ -505,10 +525,12 @@ export function useChatExecutionActions({
         return;
       }
       if (pending.type === 'flow') {
-        doExecuteFlow(pending.flow as FlowData, {
-          ...(pending.boundInputs ?? {}),
-          ...inputs,
-        });
+        doExecuteFlow(
+          pending.flow as FlowData,
+          { ...(pending.boundInputs ?? {}), ...inputs },
+          pending.request,
+          pending.capability,
+        );
       } else if (pending.type === 'crew') {
         // Anything the router bound comes FIRST, so a value the user typed into
         // the card wins on a key collision — they are looking at the field.

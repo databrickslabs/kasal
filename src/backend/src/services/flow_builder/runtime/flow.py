@@ -124,6 +124,10 @@ class Flow(Generic[T]):
         self._scheduled: set[str] = set()
         self._and_progress: dict[str, set[str]] = {}
         self._last_output: Any = None
+        # Which methods this run is allowed to execute. Empty means "all of
+        # them", which is every run that has not asked for a goal — so the
+        # default behaviour is exactly what it was.
+        self._required: set[str] = set()
 
     def _build_initial_state(self) -> Any:
         initial = type(self).initial_state
@@ -163,11 +167,88 @@ class Flow(Generic[T]):
     def kickoff(self, inputs: dict[str, Any] | None = None) -> Any:
         return asyncio.run(self.kickoff_async(inputs))
 
+    def required_for(self, targets: set[str]) -> set[str]:
+        """The methods needed to produce ``targets``: the targets and their ancestors.
+
+        Walked from the listener triggers, which already describe every edge the
+        builder created. A trigger name that is not a method is a ROUTE name —
+        emitted by a router rather than defined as a method — so every router is
+        kept regardless: a router costs nothing to run and dropping one would
+        remove the branch its target sits behind.
+
+        An empty result means "do not narrow": a target nothing can reach is far
+        more likely to be a mistake in the selection than a flow with no path to
+        its own crew, and running everything is the safe reading.
+        """
+        known = set(self._listeners) | set(self._start_methods)
+        required: set[str] = set(self._routers)
+        stack = [t for t in targets if t in known]
+        if not stack:
+            return set()
+        while stack:
+            method = stack.pop()
+            if method in required:
+                continue
+            required.add(method)
+            trigger = self._listeners.get(method)
+            if not trigger:
+                continue
+            for name in trigger["methods"]:
+                if name in known:
+                    stack.append(name)
+        # A start method is how the graph begins; if none survived the walk the
+        # targets are unreachable and narrowing would run nothing at all.
+        if not required & set(self._start_methods):
+            return set()
+        return required
+
+    def narrow_to(self, targets: set[str]) -> bool:
+        """Run only what produces ``targets`` this turn. True when it narrowed."""
+        required = self.required_for(targets or set())
+        if not required:
+            return False
+        self._required = required
+        return True
+
+    def _may_run(self, name: str) -> bool:
+        return not self._required or name in self._required
+
+    def begin_turn(self) -> None:
+        """Reset what belongs to a RUN, keeping what belongs to the thread.
+
+        ``_completed`` exists so a listener fires once per run. It was only ever
+        cleared in ``__init__``, so a second ``kickoff`` on the same instance
+        re-ran the ``@start()`` methods and fired NO listeners — the run
+        completed, reported success, and executed part of the graph. That is the
+        failure this prevents.
+
+        State is untouched: the whole point of a turn is that it continues from
+        the last one.
+        """
+        self._completed.clear()
+        self._scheduled.clear()
+        self._and_progress.clear()
+        self._method_outputs.clear()
+        self._required.clear()
+
     async def kickoff_async(self, inputs: dict[str, Any] | None = None) -> Any:
+        # A second kickoff on this instance is a new TURN, not a resumption of
+        # the first one's bookkeeping.
+        if self._completed:
+            self.begin_turn()
+
         if inputs:
             restore_id = inputs.get("id")
-            if restore_id and self._persistence is not None:
-                self._restore_state(restore_id)
+            if restore_id:
+                # Adopt the id BEFORE restoring, and whether or not anything is
+                # stored. `_restore_state` returns early when the lineage is
+                # empty — which is every thread's first turn — so leaving
+                # adoption to it meant turn 1 saved under the random uuid4 it
+                # was constructed with, turn 2 restored nothing, and every turn
+                # started a fresh lineage.
+                self._adopt_state_id(restore_id)
+                if self._persistence is not None:
+                    self._restore_state(restore_id)
             self._merge_inputs({k: v for k, v in inputs.items() if k != "id"})
 
         if not self._start_methods:
@@ -184,7 +265,11 @@ class Flow(Generic[T]):
         event_bus.emit(self, FlowStartedEvent(flow_name=flow_name, inputs=inputs))
         try:
             await asyncio.gather(
-                *(self._execute_method(name, None) for name in self._start_methods)
+                *(
+                    self._execute_method(name, None)
+                    for name in self._start_methods
+                    if self._may_run(name)
+                )
             )
         except Exception as e:
             event_bus.emit(
@@ -199,6 +284,16 @@ class Flow(Generic[T]):
         return self._last_output
 
     # ------------------------------ internals ------------------------------
+
+    def _adopt_state_id(self, state_id: str) -> None:
+        """Make this run part of the given lineage."""
+        if isinstance(self._state, dict):
+            self._state["id"] = state_id
+            return
+        try:
+            self._state.id = state_id
+        except Exception:  # noqa: BLE001 — a state without `id` stays as it is
+            logger.warning("flow state has no writable id; cannot join thread")
 
     def _merge_inputs(self, inputs: dict[str, Any]) -> None:
         """Put the run's inputs into flow state.
@@ -222,6 +317,14 @@ class Flow(Generic[T]):
             return
         if isinstance(self._state, dict):
             self._state.update(inputs)
+            return
+
+        # A state with channels merges through their reducers, so a turn's new
+        # message APPENDS to the restored history instead of replacing it. It
+        # raises on an unknown channel for the same reason as below.
+        merge = getattr(self._state, "merge", None)
+        if callable(merge):
+            merge(inputs)
             return
 
         unknown = [key for key in inputs if not hasattr(self._state, key)]
@@ -248,8 +351,21 @@ class Flow(Generic[T]):
             self._state["id"] = restore_id
         else:
             for key, value in stored.items():
-                if hasattr(self._state, key):
+                # Deliberately NOT gated on `hasattr`. The channels most worth
+                # restoring are the ones an earlier turn CREATED — a crew's
+                # output stored under its own name, the identity bookkeeping
+                # beside it — and none of those exist on a freshly constructed
+                # state, so a hasattr gate skipped exactly them. It brought back
+                # the conversation (declared fields) and dropped the work, which
+                # reads as a working restore: the flow remembers what was said
+                # and re-runs every crew whose answer it already had.
+                try:
                     setattr(self._state, key, value)
+                except (ValueError, AttributeError) as exc:
+                    # A state model that forbids extras rejects a channel it
+                    # does not declare. Skip that one rather than abandon the
+                    # whole restore.
+                    logger.debug("could not restore channel %r: %s", key, exc)
             if hasattr(self._state, "id"):
                 self._state.id = restore_id
 
@@ -281,6 +397,10 @@ class Flow(Generic[T]):
         for listener, trigger in self._listeners.items():
             if listener in self._completed or listener in self._scheduled:
                 continue
+            if not self._may_run(listener):
+                # Outside this turn's required set — not needed to produce what
+                # was asked for, so it does not run at all.
+                continue
             if signal not in trigger["methods"]:
                 continue
             if trigger["type"] == _OR:
@@ -295,8 +415,20 @@ class Flow(Generic[T]):
             *(self._execute_method(listener, output) for listener in ready)
         )
 
+    def save_checkpoint(self, label: str = "turn_end") -> None:
+        """Write the current state to the attached persistence.
+
+        Public because a turn does not end at its last method: the caller
+        records the answer and bounds the history AFTER the graph finishes, and
+        those edits have to reach the checkpoint the next turn restores from.
+        """
+        self._save_state(label)
+
     def _save_state(self, method_name: str) -> None:
         if self._persistence is None:
+            # No persistence attached — nothing is being written, and nothing
+            # claims to be. Emitting here would put a checkpoint on the trace
+            # for a flow that has none.
             return
         flow_uuid = self.flow_uuid
         if not flow_uuid:
@@ -304,8 +436,42 @@ class Flow(Generic[T]):
         state_data = dict(self._state) if isinstance(self._state, dict) else self._state
         try:
             self._persistence.save_state(flow_uuid, method_name, state_data)
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 — reported, never fatal
             logger.exception("flow persistence save_state failed for %s", method_name)
+            self._emit_checkpoint_saved(method_name, flow_uuid, error=str(exc))
+            return
+        self._emit_checkpoint_saved(method_name, flow_uuid)
+
+    def _emit_checkpoint_saved(
+        self, method_name: str, flow_uuid: str, error: str | None = None
+    ) -> None:
+        """Put a checkpoint WRITE on the trace, succeeded or failed.
+
+        The restore side was already traced and the write side was not, so the
+        half a resume depends on was the invisible half: with nothing in
+        ``flow_states`` you could not tell a checkpoint that was never written
+        from one that was written and ignored, without querying the database.
+
+        A failed write especially: it does not fail the run, so without a row
+        here it is silent — and every later turn quietly starts from scratch,
+        which looks exactly like a flow that simply has no memory.
+
+        Fail-open. A trace row is never worth failing a run for.
+        """
+        try:
+            from src.core.events.types import FlowCheckpointSavedEvent
+
+            event_bus.emit(
+                self,
+                FlowCheckpointSavedEvent(
+                    flow_name=type(self).__name__,
+                    method_name=method_name,
+                    flow_uuid=flow_uuid,
+                    error=error,
+                ),
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("could not emit checkpoint-saved event", exc_info=True)
 
     def plot(self, filename: str = "flow_plot") -> str:
         """Write a plain-text outline of the flow graph; returns the path."""

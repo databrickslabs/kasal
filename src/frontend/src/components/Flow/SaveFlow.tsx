@@ -5,6 +5,7 @@ import axios from 'axios';
 import { Edge, Node } from 'reactflow';
 import { useTabManagerStore } from '../../store/tabManager';
 import { buildFlowConfiguration } from '../../utils/flowConfigBuilder';
+import { declaredStateForTab } from '../../store/flowState';
 
 interface SaveFlowProps {
   nodes: Node[];
@@ -90,7 +91,14 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
         );
 
         // Build flowConfig from nodes and edges
-        const flowConfig = buildFlowConfiguration(uniqueNodes, validEdges, tab.savedFlowName || tab.name);
+        // The declared half — reducers and the conversational flag — which the
+        // canvas cannot express and derivation therefore cannot recover.
+        const flowConfig = buildFlowConfiguration(
+          uniqueNodes,
+          validEdges,
+          tab.savedFlowName || tab.name,
+          declaredStateForTab(tabId),
+        );
 
         // Get crew_id - first try tab's savedCrewId, then try CrewNodes
         let crew_id = tab.savedCrewId || '';
@@ -285,7 +293,12 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
       }
 
       // Build flowConfig from nodes and edges
-      const flowConfig = buildFlowConfiguration(uniqueNodes, validEdges, name);
+      const flowConfig = buildFlowConfiguration(
+        uniqueNodes,
+        validEdges,
+        name,
+        declaredStateForTab(activeTabId),
+      );
 
       console.log('SaveFlow: Built flowConfig:', {
         listenersCount: flowConfig.listeners.length,

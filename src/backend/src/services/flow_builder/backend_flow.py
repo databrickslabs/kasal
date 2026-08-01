@@ -21,6 +21,16 @@ from src.core.llm.transport import LLM
 from src.core.logger import LoggerManager
 from src.repositories.flow_repository import FlowRepository
 from src.services.execution.runtime import Agent, Crew, Process, Task
+from src.services.flow_builder.conversation.interrupt import (
+    APPROVAL_CONFIG_KEY,
+    interrupt_inputs,
+)
+from src.services.flow_builder.conversation.thread import thread_state_uuid
+from src.services.flow_builder.conversation.turn import (
+    close_turn_async,
+    is_conversational,
+    turn_inputs,
+)
 from src.services.flow_builder.exceptions import FlowPausedForApprovalException
 
 # Import the refactored modules
@@ -31,6 +41,18 @@ from src.services.tools.tool_factory import ToolFactory
 
 # Initialize logger manager - use flow logger for flow execution
 logger = LoggerManager.get_instance().flow
+
+#: Keys the UI puts in a run's ``inputs`` that describe the RUN, not the flow's
+#: state. They travel in the same dict as the user's actual inputs, and on an
+#: untyped dict state they simply became stray keys nobody read.
+#:
+#: A TYPED state refuses a key it has no channel for — which is the behaviour
+#: that makes a misspelled input visible — so these have to be filtered at the
+#: boundary or every conversational flow fails its kickoff with
+#: ``Flow state has no channel(s) ['flow_id', 'run_name']``. They are metadata
+#: about the request, and a flow's state is not where a request's metadata
+#: belongs.
+RUN_METADATA_INPUTS = frozenset({"flow_id", "run_name", "execution_id", "job_id"})
 
 
 def _extract_flow_uuid(engine_flow) -> Optional[str]:
@@ -105,6 +127,8 @@ class BackendFlow:
                 raise ValueError(f"Invalid flow_id format: {flow_id}")
 
         self._flow_data = None
+        # Set when a turn was answered from state and no crew ran.
+        self._state_answer: Optional[str] = None
         # Don't store API keys directly, just other configuration
         self._config = {}
         # Repository container
@@ -319,22 +343,222 @@ class BackendFlow:
             f"Callbacks dict flow_id: {flow_id_for_callbacks} (type: {type(flow_id_for_callbacks).__name__ if flow_id_for_callbacks else 'None'})"
         )
 
+    def _state_config_source(self) -> Dict[str, Any]:
+        """The flow's whole config, from wherever this run carries it."""
+        for source in (getattr(self, "_flow_data", None) or {}, self._config or {}):
+            flow_config = source.get("flow_config")
+            if isinstance(flow_config, dict) and flow_config:
+                return flow_config
+        return {}
+
+    def _state_config(self) -> Dict[str, Any]:
+        """The flow's declared state block, from wherever this run carries it.
+
+        Both places, because both happen: a SAVED flow's config arrives on
+        ``_flow_data`` via ``load_flow``, while an unsaved one runs straight
+        from ``_config``. Reading only one of them would make a conversational
+        flow behave differently depending on whether it had been saved.
+        """
+        # `getattr` rather than direct access: this runs on the config path,
+        # which is reachable before `load_flow` has populated `_flow_data`.
+        for source in (getattr(self, "_flow_data", None) or {}, self._config or {}):
+            flow_config = source.get("flow_config")
+            if isinstance(flow_config, dict):
+                state = flow_config.get("state")
+                if isinstance(state, dict) and state:
+                    return state
+        return {}
+
+    def _thread_id(self) -> Optional[str]:
+        """The checkpoint lineage this run belongs to, if any.
+
+        An explicit resume wins: the caller named a lineage and must get that
+        one. Otherwise the lineage is DERIVED from the conversation and the
+        flow, so a second message in the same chat session continues the first
+        instead of starting over. No session means no thread, which is how every
+        flow runs today.
+        """
+        explicit = self._config.get("resume_from_flow_uuid")
+        if explicit:
+            return explicit
+        return thread_state_uuid(
+            self._config.get("session_id"),
+            self._config.get("flow_id"),
+            self._config.get("group_id"),
+        )
+
     def _kickoff_inputs(self) -> Dict[str, Any]:
         """What this run passes into flow state.
 
-        The user's inputs AND, on a resume, the checkpoint id. Both, not either:
-        the two call sites below used to pass ``{"id": resume_uuid}`` when
-        resuming and nothing otherwise, so a resumed run silently dropped every
-        input and a normal run had no way to send one at all. ``id`` wins on a
-        collision — it addresses the checkpoint, and a flow whose own variable is
-        called ``id`` must not be able to redirect a restore.
+        The user's inputs, the lineage id, and — for a conversational flow —
+        this turn's user line.
+
+        Inputs AND id, not either: the two call sites below used to pass
+        ``{"id": resume_uuid}`` when resuming and nothing otherwise, so a
+        resumed run silently dropped every input and a normal run had no way to
+        send one at all. ``id`` wins on a collision — it addresses the
+        checkpoint, and a flow whose own variable is called ``id`` must not be
+        able to redirect a restore.
+
+        The turn writes go through the same inputs path on purpose. That path
+        already merges through each channel's reducer, so the user line APPENDS
+        to the history restored a moment earlier; a separate write would have to
+        re-implement merging and would eventually disagree with it.
         """
         inputs = self._config.get("inputs")
-        merged: Dict[str, Any] = dict(inputs) if isinstance(inputs, dict) else {}
-        resume_uuid = self._config.get("resume_from_flow_uuid")
-        if resume_uuid:
-            merged["id"] = resume_uuid
+        merged: Dict[str, Any] = {
+            key: value
+            for key, value in (inputs or {}).items()
+            if key not in RUN_METADATA_INPUTS
+        }
+        state_config = self._state_config()
+
+        if is_conversational(state_config):
+            user_message = self._config.get("user_message") or merged.pop(
+                "user_message", None
+            )
+            merged.update(turn_inputs(user_message, intent=self._config.get("intent")))
+
+        # A human's decision from a HITL gate, when this run is the resume of one
+        # and the flow declared somewhere to put it. Same path as everything
+        # else, so it merges through its channel's reducer.
+        merged.update(
+            interrupt_inputs(state_config, self._config.get(APPROVAL_CONFIG_KEY))
+        )
+
+        thread_id = self._thread_id()
+        if thread_id:
+            merged["id"] = thread_id
         return merged
+
+    async def _plan_turn(self, engine_flow: Any) -> Optional[str]:
+        """Decide what this turn does. Returns an answer when nothing needs to run.
+
+        Three outcomes, and the third is the point: a turn asking ABOUT work
+        already done is answered from state and no crew executes. The material
+        is in memory, put there by crews already paid for, and re-running one to
+        retell it is both slower and worse — a fresh run gathers again and may
+        not find the same things.
+        """
+        await self._narrow_to_outcome(engine_flow)
+        return getattr(self, "_state_answer", None)
+
+    async def _narrow_to_outcome(self, engine_flow: Any) -> None:
+        """Run only what produces what THIS turn asked for.
+
+        A conversational flow is asked for different things on different turns.
+        Running the whole graph every time re-does work the conversation already
+        has — and produces artefacts nobody asked for. So the turn picks an OUTCOME
+        (what to produce) and the runtime narrows to the methods that produce it;
+        the reuse layer then covers the material upstream.
+
+        Distinct from a ROUTER, which is unchanged: a router decides which branch
+        the DATA implies, during execution. This decides what the TURN wants,
+        before it. Silent on every failure — no outcome, no model, an unreachable
+        target — and the flow runs exactly as it does today.
+        """
+        if not is_conversational(self._state_config()):
+            return
+        question = self._config.get("user_message")
+        if not question:
+            return
+        try:
+            from src.services.flow_builder.conversation.outcomes import (
+                build_registry,
+                select_outcome,
+                trigger_for,
+            )
+
+            flow_config = self._state_config_source()
+            state = getattr(engine_flow, "state", None)
+            choice = await select_outcome(
+                str(question),
+                flow_config,
+                self._config.get("group_context"),
+                self._config.get("model"),
+                # The conversation, so a fragment can be matched. "and for
+                # Germany?" names no outcome on its own and would otherwise
+                # decline into running the whole flow.
+                getattr(state, "messages", None),
+            )
+
+            # Nothing to run: the turn is about work already done.
+            if choice.answer_from_state:
+                from src.services.flow_builder.conversation.retrieval import (
+                    answer_from_state,
+                )
+
+                answer = await answer_from_state(
+                    str(question), state, self._config.get("model")
+                )
+                if answer:
+                    self._state_answer = answer
+                    logger.info(f"[flow-outcome] no crew needed: {choice.reason}")
+                    return
+                # Could not answer from what is there after all — run the flow
+                # rather than return nothing.
+                logger.info(
+                    "[flow-outcome] state could not answer the turn; running the flow"
+                )
+                return
+
+            outcome, confidence, reason = (
+                choice.outcome,
+                choice.confidence,
+                choice.reason,
+            )
+            if not outcome:
+                logger.info(f"[flow-outcome] running the whole flow: {reason}")
+                return
+
+            registry = build_registry(
+                getattr(engine_flow, "_kasal_method_crews", {}) or {},
+                getattr(engine_flow, "_kasal_crew_identities", {}) or {},
+            )
+            method = trigger_for(registry, outcome)
+            targets = {method} if method else set()
+            # Record WHAT this turn decided to produce. A choice that only
+            # appears in a log line cannot be read by a condition, cannot be
+            # shown in the trace, and cannot be checked by the next turn.
+            try:
+                engine_flow.state["last_outcome"] = outcome
+            except Exception:  # noqa: BLE001 — a state without the channel
+                pass
+
+            if engine_flow.narrow_to(targets):
+                logger.info(
+                    f"[flow-outcome] this turn produces '{outcome}' "
+                    f"(confidence {confidence:.2f}): {reason}"
+                )
+            else:
+                logger.info(
+                    f"[flow-outcome] '{outcome}' is not reachable in this graph; "
+                    "running the whole flow"
+                )
+        except Exception as exc:  # noqa: BLE001 — narrowing is an optimisation
+            logger.warning(f"[flow-outcome] narrowing skipped: {exc}")
+
+    async def _close_turn(self, engine_flow: Any, result: Any) -> None:
+        """End a conversational turn on the state the next one will restore.
+
+        A turn does not end at its last method: the answer has to be recorded
+        and the history bounded, and both happen AFTER the graph finishes — so
+        the checkpoint written during the run does not have them. Hence the
+        explicit save.
+
+        Silent for a non-conversational flow, which is every flow today.
+        """
+        if not is_conversational(self._state_config()):
+            return
+        state = getattr(engine_flow, "state", None)
+        if state is None or not hasattr(state, "merge"):
+            return
+        try:
+            await close_turn_async(state, result, self._config.get("model"))
+            engine_flow.save_checkpoint("turn_end")
+        except Exception as exc:  # noqa: BLE001 — a bookkeeping failure must
+            # not fail a turn the user already got an answer from.
+            logger.warning(f"[flow-thread] could not close turn: {exc}")
 
     async def kickoff_async(self) -> Dict[str, Any]:
         """
@@ -460,7 +684,11 @@ class BackendFlow:
                     # The run's inputs, plus the checkpoint id when resuming.
                     # The engine loads persisted state when 'id' is present.
                     kickoff_inputs = self._kickoff_inputs()
-                    if kickoff_inputs:
+                    state_answer = await self._plan_turn(engine_flow)
+                    if state_answer is not None:
+                        result = state_answer
+                        await self._close_turn(engine_flow, result)
+                    elif kickoff_inputs:
                         logger.info(
                             f"Passing {sorted(kickoff_inputs)} to kickoff_async"
                         )
@@ -468,6 +696,7 @@ class BackendFlow:
                     else:
                         result = await engine_flow.kickoff_async()
                     logger.info(f"kickoff_async() returned: {type(result)}")
+                    await self._close_turn(engine_flow, result)
 
                     # DIAGNOSTIC: Log method_outputs from CrewAI Flow
                     if hasattr(engine_flow, "_method_outputs"):
@@ -812,7 +1041,11 @@ class BackendFlow:
                 # depends on how the flow was loaded — so a fix applied to one
                 # ships and appears not to work.
                 kickoff_inputs = self._kickoff_inputs()
-                if kickoff_inputs:
+                state_answer = await self._plan_turn(engine_flow)
+                if state_answer is not None:
+                    flow_result = state_answer
+                    await self._close_turn(engine_flow, flow_result)
+                elif kickoff_inputs:
                     logger.info(f"Passing {sorted(kickoff_inputs)} to kickoff_async")
                     flow_result = await engine_flow.kickoff_async(inputs=kickoff_inputs)
                 else:
@@ -820,6 +1053,7 @@ class BackendFlow:
                 logger.info(
                     f"Flow kickoff_async completed, result type: {type(flow_result)}"
                 )
+                await self._close_turn(engine_flow, flow_result)
 
                 # DIAGNOSTIC: Log method_outputs from CrewAI Flow
                 if hasattr(engine_flow, "_method_outputs"):

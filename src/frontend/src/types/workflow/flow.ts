@@ -1,6 +1,7 @@
 import { Node, Edge } from 'reactflow';
 import { ConditionFormData } from '../../components/Flow/ConditionForm';
 import { CrewTask } from './crewPlan';
+import { FlowStateConfig } from '../../utils/flowStateSchema';
 
 export interface FlowResponse extends Flow {
   flow_config?: FlowConfiguration;
@@ -147,6 +148,9 @@ export interface FlowConfiguration {
   actions: Action[];
   startingPoints: StartingPoint[];
   routers?: Router[];  // Router configurations for conditional routing
+  // The flow's state declaration. Derived from the canvas by
+  // `deriveFlowStateConfig`; absent means the flow runs on an untyped dict.
+  state?: FlowStateConfig;
 }
 
 export interface CrewResponse {

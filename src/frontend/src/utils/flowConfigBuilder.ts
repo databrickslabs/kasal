@@ -1,5 +1,6 @@
 import { Edge, Node } from 'reactflow';
 import { FlowConfiguration, Listener, Action, StartingPoint, Router } from '../types/workflow/flow';
+import { deriveFlowStateConfig, FlowStateConfig } from './flowStateSchema';
 
 // Task type used in flow configuration
 interface FlowTask {
@@ -19,7 +20,18 @@ interface StateMapping {
  * Build FlowConfiguration from nodes and edges
  * This utility is used by both SaveFlow (when saving) and JobExecutionService (when executing without saving)
  */
-export const buildFlowConfiguration = (nodes: Node[], edges: Edge[], flowName: string): FlowConfiguration => {
+export const buildFlowConfiguration = (
+  nodes: Node[],
+  edges: Edge[],
+  flowName: string,
+  /**
+   * The flow's already-declared state block, when the caller has it. Names are
+   * derived from the canvas, but reducers and the conversational flag are the
+   * author's and cannot be inferred — passing them here is what keeps a rebuild
+   * from silently turning an appending channel back into an overwriting one.
+   */
+  declaredState?: Partial<FlowStateConfig>,
+): FlowConfiguration => {
   const listeners: Listener[] = [];
   const actions: Action[] = [];
   const startingPoints: StartingPoint[] = [];
@@ -264,6 +276,14 @@ export const buildFlowConfiguration = (nodes: Node[], edges: Edge[], flowName: s
     routers.push(router);
   });
 
+  // The flow's state declaration, derived from the same canvas as everything
+  // above. Without it the backend runs the flow on a bare dict, which accepts
+  // any key — so a misspelled input lands under the typo, the condition reading
+  // the correct name sees nothing, and the flow branches as though the value
+  // were never supplied. Undefined when the flow names no state, which keeps
+  // those flows on the dict exactly as before.
+  const state = deriveFlowStateConfig(nodes, edges, declaredState);
+
   return {
     id: `flow-${Date.now()}`,
     name: flowName,
@@ -271,6 +291,10 @@ export const buildFlowConfiguration = (nodes: Node[], edges: Edge[], flowName: s
     listeners,
     actions,
     startingPoints,
-    routers: routers.length > 0 ? routers : undefined
+    routers: routers.length > 0 ? routers : undefined,
+    // Spread rather than `state`, so a flow that declares nothing omits the key
+    // entirely. This config is spread OVER a saved one in the chat path, and an
+    // explicit `state: undefined` would blank whatever was stored there.
+    ...(state ? { state } : {})
   };
 };

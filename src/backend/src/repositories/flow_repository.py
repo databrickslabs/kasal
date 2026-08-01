@@ -88,6 +88,30 @@ class FlowRepository(BaseRepository[Flow]):
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
+    async def find_by_ids(self, flow_ids: List[Union[uuid.UUID, str]]) -> List[Flow]:
+        """Flows for a set of ids, in one query.
+
+        Exists so a caller holding several ids does not issue one read per id.
+        Ids that are not valid UUIDs are skipped rather than raising: the caller
+        is typically holding ids that came from another table, and one bad value
+        should narrow the result, not fail the request.
+        """
+        parsed: List[uuid.UUID] = []
+        for flow_id in flow_ids:
+            if isinstance(flow_id, uuid.UUID):
+                parsed.append(flow_id)
+                continue
+            try:
+                parsed.append(uuid.UUID(str(flow_id)))
+            except (ValueError, TypeError):
+                continue
+        if not parsed:
+            return []
+
+        query = select(self.model).where(self.model.id.in_(parsed))
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
     async def find_all(self) -> List[Flow]:
         """
         Find all flows.
