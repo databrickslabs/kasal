@@ -199,6 +199,15 @@ async def lifespan(app: FastAPI):
             system_logger.error(f"Error cleaning up stale jobs: {e}")
             # Don't raise - allow app to start even if cleanup fails
 
+    # Bound here, unconditionally, because the background tasks below are NOT
+    # all conditional. This import used to sit inside the `if db_initialized`
+    # block while the knowledge and memory sweeps called `_asyncio.create_task`
+    # outside it — so on any startup without an initialized database, lifespan
+    # raised UnboundLocalError and neither sweep ever started. `import asyncio`
+    # earlier in this function makes the plain name local too, so a module-level
+    # import is no escape.
+    import asyncio as _asyncio
+
     # Periodic zombie-job recovery: every 5 min, fix RUNNING jobs whose
     # status update silently failed after subprocess completion.
     if db_initialized:
@@ -214,8 +223,6 @@ async def lifespan(app: FastAPI):
                         system_logger.info(f"[ZombieCleanup] Recovered {n} job(s)")
                 except Exception as _ze:
                     system_logger.error(f"[ZombieCleanup] Error: {_ze}")
-
-        import asyncio as _asyncio
 
         _asyncio.create_task(_zombie_cleanup_loop())
         system_logger.info(
