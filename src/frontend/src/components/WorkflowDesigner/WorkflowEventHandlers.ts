@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { createEdge } from '../../utils/edgeUtils';
 import { FlowService } from '../../api/workflow/FlowService';
 import { createUniqueEdges } from './WorkflowUtils';
+import { useFlowStateStore, DeclaredFlowState } from '../../store/flowState';
 import { _generateCrewPositions, validateNodePositions } from '../../utils/flowWizardUtils';
 import { useTabManagerStore } from '../../store/tabManager';
 import { CanvasLayoutManager } from '../../utils/CanvasLayoutManager';
@@ -167,6 +168,22 @@ export const useFlowSelectHandler = (
 ) => {
   return useCallback((flowNodes: Node[], flowEdges: Edge[], flowConfig?: FlowConfiguration) => {
     console.log('WorkflowDesigner - Handling flow select (loading into FlowCanvas):', { flowNodes, flowEdges, flowConfig });
+
+    // Carry the flow's DECLARED state onto the tab. Channel names are rederived
+    // from the canvas on every save, but reducers and the conversational flag
+    // are the author's decisions — without this, opening a conversational flow
+    // and saving it would quietly demote it to a one-shot.
+    const activeTabId = useTabManagerStore.getState().activeTabId;
+    const declaredState = (flowConfig as { state?: DeclaredFlowState } | undefined)?.state;
+    if (activeTabId) {
+      if (declaredState) {
+        useFlowStateStore.getState().setDeclared(activeTabId, declaredState);
+      } else {
+        // A flow that declares nothing must not inherit the last flow opened
+        // in this tab.
+        useFlowStateStore.getState().clearDeclared(activeTabId);
+      }
+    }
 
     // Create copies of nodes and edges with new IDs to prevent duplicates
     const idMap = new Map<string, string>();

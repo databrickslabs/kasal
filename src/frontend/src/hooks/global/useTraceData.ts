@@ -118,9 +118,13 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
   const isCrewRestored = (t: Trace) =>
     t.event_type === 'crew_checkpoint_restored' ||
     t.event_type === 'task_checkpoint_restored';
+  // A checkpoint WRITE. Run-level for the same reason as a restore: it belongs
+  // to the flow's spine, not inside an agent's task, and the agent pass would
+  // otherwise drop it.
+  const isCheckpointSaved = (t: Trace) => t.event_type === 'flow_checkpoint_saved';
   const isRunLevel = (t: Trace) =>
     isFlowStart(t) || isFlowEnd(t) || isCrewStart(t) || isCrewEnd(t) ||
-    isCrewRestored(t);
+    isCrewRestored(t) || isCheckpointSaved(t);
 
   const flowStarts = sorted.filter(isFlowStart);
   const flowEnds = sorted.filter(isFlowEnd);

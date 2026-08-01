@@ -6,6 +6,7 @@
 import React from 'react';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import HistoryIcon from '@mui/icons-material/History';
+import SaveIcon from '@mui/icons-material/Save';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import PreviewIcon from '@mui/icons-material/Preview';
 import TerminalIcon from '@mui/icons-material/Terminal';
@@ -739,6 +740,11 @@ export const ICON_CONFIG: Record<string, IconConfig> = {
   // work must not read as work that just ran.
   crew_checkpoint_restored: { Component: HistoryIcon, color: 'info' },
   task_checkpoint_restored: { Component: HistoryIcon, color: 'info' },
+  // A checkpoint being WRITTEN. Muted on purpose — it is the bookkeeping a
+  // resume depends on, not work the user asked for — but present, because
+  // "nothing was written" and "it was written and ignored" were previously
+  // indistinguishable without querying the database.
+  flow_checkpoint_saved: { Component: SaveIcon, color: 'action' },
   flow_started: { Component: PlayCircleIcon, color: 'primary' },
   flow_created: { Component: PlayCircleIcon, color: 'primary' },
   flow_completed: { Component: CheckCircleIcon, color: 'success' },

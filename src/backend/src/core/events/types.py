@@ -132,6 +132,27 @@ class FlowStartedEvent(FlowBaseEvent):
     type: Literal["flow_started"] = "flow_started"
 
 
+class FlowCheckpointSavedEvent(FlowBaseEvent):
+    """A flow's state was persisted — or could not be.
+
+    The trace already showed a checkpoint being RESTORED
+    (:class:`CrewCheckpointRestoredEvent`) and never showed one being WRITTEN,
+    so the half that a resume depends on was the invisible half. When nothing
+    resumed, there was no way to tell "no checkpoint was written" from "the
+    checkpoint was written and ignored" without querying the database by hand.
+
+    Failures are emitted too, with ``error`` set. A checkpoint write that fails
+    is not a run failure — the run carries on and returns its answer — which is
+    exactly why it needs to be visible: silently, every later turn starts from
+    scratch and the flow looks like it simply has no memory.
+    """
+
+    method_name: str | None = None
+    flow_uuid: str | None = None
+    error: str | None = None
+    type: Literal["flow_checkpoint_saved"] = "flow_checkpoint_saved"
+
+
 class FlowFinishedEvent(FlowBaseEvent):
     """Emitted once when a Flow's kickoff finishes (success or failure).
 

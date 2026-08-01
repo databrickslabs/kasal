@@ -49,6 +49,12 @@ _EVENT_SPAN_MAP = {
     # A crew restored from a checkpoint rather than executed. Its own
     # event_type so the timeline can show it as restored instead of passing it
     # off as a run that happened.
+    # A flow's state being WRITTEN. The restore side was already on the trace;
+    # without this the write it depends on was invisible.
+    "FlowCheckpointSavedEvent": (
+        "kasal.flow.checkpoint_saved",
+        "flow_checkpoint_saved",
+    ),
     "CrewCheckpointRestoredEvent": (
         "kasal.crew.checkpoint_restored",
         "crew_checkpoint_restored",
@@ -330,6 +336,7 @@ _EVENT_CLASSES = [
     ("src.core.events", "CrewKickoffStartedEvent"),
     ("src.core.events", "CrewKickoffCompletedEvent"),
     ("src.core.events", "CrewCheckpointRestoredEvent"),
+    ("src.core.events", "FlowCheckpointSavedEvent"),
     # Agent execution
     ("src.core.events", "AgentExecutionStartedEvent"),
     ("src.core.events", "AgentExecutionCompletedEvent"),
