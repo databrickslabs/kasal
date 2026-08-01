@@ -166,7 +166,19 @@ export type TimelineItem =
    * happened that did not. Without it the timeline of a resumed run shows only
    * the part that re-ran and reads as a partial job.
    */
-  | { kind: 'crew-restored'; trace: Trace; crewName?: string };
+  | { kind: 'crew-restored'; trace: Trace; crewName?: string }
+  /**
+   * A checkpoint being WRITTEN — one completed unit (a task for a crew, a crew
+   * for a flow) or a flow's state.
+   *
+   * Its own kind for the same reason as `crew-restored`: it is bookkeeping
+   * about the run, not a step of it, so rendering it as a crew or folding it
+   * into an agent's task would both misreport what happened. It was previously
+   * classified as run-level — correctly excluded from the agent pass — and then
+   * never collected for rendering, so it fell between the two and appeared
+   * nowhere at all.
+   */
+  | { kind: 'checkpoint-saved'; trace: Trace; unit?: string; failed?: boolean };
 
 export interface ProcessedTraces {
   globalStart?: Date;

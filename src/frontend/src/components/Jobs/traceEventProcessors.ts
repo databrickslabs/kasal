@@ -745,6 +745,9 @@ export const ICON_CONFIG: Record<string, IconConfig> = {
   // "nothing was written" and "it was written and ignored" were previously
   // indistinguishable without querying the database.
   flow_checkpoint_saved: { Component: SaveIcon, color: 'action' },
+  // A completed unit written to the checkpoint — the CREW path's writes,
+  // which had no icon at all and so never appeared in a crew's timeline.
+  checkpoint_unit_saved: { Component: SaveIcon, color: 'action' },
   flow_started: { Component: PlayCircleIcon, color: 'primary' },
   flow_created: { Component: PlayCircleIcon, color: 'primary' },
   flow_completed: { Component: CheckCircleIcon, color: 'success' },

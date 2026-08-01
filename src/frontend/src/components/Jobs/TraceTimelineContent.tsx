@@ -27,6 +27,7 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import HistoryIcon from '@mui/icons-material/History';
+import SaveIcon from '@mui/icons-material/Save';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import StorageIcon from '@mui/icons-material/Storage';
@@ -448,6 +449,44 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
                     <Tooltip title="This crew was not re-run. Its output was reused from the checkpoint of the run this was resumed from.">
                       <Typography variant="caption" color="text.secondary">
                         (not re-run)
+                      </Typography>
+                    </Tooltip>
+                  </Box>
+                );
+              }
+              if (item.kind === 'checkpoint-saved') {
+                // The WRITE half of checkpointing. Deliberately muted — it is
+                // bookkeeping the run depends on, not work the user asked for —
+                // but present, because "no checkpoint was written" and "one was
+                // written and ignored" are the two cases you most need to tell
+                // apart when a resume does not pick up where it left off.
+                return (
+                  <Box
+                    key={`${item.kind}-${itemIdx}`}
+                    sx={{
+                      ml: crewIndent,
+                      mt: itemIdx > 0 ? 1 : 0,
+                      mb: 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1,
+                    }}
+                  >
+                    <SaveIcon
+                      color={item.failed ? 'error' : 'action'}
+                      fontSize="small"
+                    />
+                    <Typography variant="body2" color="text.secondary">
+                      {item.failed ? 'CHECKPOINT FAILED' : 'CHECKPOINT SAVED'}
+                    </Typography>
+                    {item.unit && (
+                      <Typography variant="body2" fontWeight="bold">{item.unit}</Typography>
+                    )}
+                    <Tooltip title={item.failed
+                      ? 'This checkpoint could not be written. The run continues, but it cannot be resumed from this point.'
+                      : 'State written so this run can be resumed from here.'}>
+                      <Typography variant="caption" color="text.secondary">
+                        {item.failed ? '(not resumable)' : '(resume point)'}
                       </Typography>
                     </Tooltip>
                   </Box>

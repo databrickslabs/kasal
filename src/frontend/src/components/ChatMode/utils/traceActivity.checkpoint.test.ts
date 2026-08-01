@@ -47,6 +47,31 @@ describe('buildTraceEntry — checkpoint bookkeeping', () => {
     expect(entry?.sublabel).toBe('agentic ai frameworks');
   });
 
+  it('renders a CREW unit checkpoint (crews write these too)', () => {
+    // The gap the flow event left: only the flow path announced its writes, so
+    // a crew run's timeline claimed no checkpointing happened at all.
+    const entry = buildTraceEntry('', {
+      event_type: 'checkpoint_unit_saved',
+      event_source: 'crew',
+      output: { extra_data: { kind: 'crew', unit_key: 'task-1' } },
+    });
+
+    expect(entry?.label).toBe('Checkpoint saved');
+    expect(entry?.sublabel).toBe('task-1');
+  });
+
+  it('says so when the checkpoint write FAILED', () => {
+    // A failed write does not fail the run, which is exactly why it must show:
+    // a run that can never be resumed otherwise looks like one that can.
+    const entry = buildTraceEntry('', {
+      event_type: 'checkpoint_unit_saved',
+      output: { extra_data: { kind: 'crew', unit_key: 'task-1', error: 'db down' } },
+    });
+
+    expect(entry?.label).toBe('Checkpoint failed');
+    expect(entry?.detail).toBe('db down');
+  });
+
   it('still drops genuinely empty traces', () => {
     expect(buildTraceEntry('', { event_type: 'something_else' })).toBeNull();
   });

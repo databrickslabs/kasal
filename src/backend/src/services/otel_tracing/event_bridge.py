@@ -55,6 +55,13 @@ _EVENT_SPAN_MAP = {
         "kasal.flow.checkpoint_saved",
         "flow_checkpoint_saved",
     ),
+    # One completed UNIT written to the run's checkpoint — a task for a crew, a
+    # crew for a flow. Emitted from the shared recorder, so a crew run finally
+    # shows its checkpoint writes; previously only the flow path showed any.
+    "CheckpointUnitSavedEvent": (
+        "kasal.checkpoint.unit_saved",
+        "checkpoint_unit_saved",
+    ),
     "CrewCheckpointRestoredEvent": (
         "kasal.crew.checkpoint_restored",
         "crew_checkpoint_restored",
@@ -337,6 +344,7 @@ _EVENT_CLASSES = [
     ("src.core.events", "CrewKickoffCompletedEvent"),
     ("src.core.events", "CrewCheckpointRestoredEvent"),
     ("src.core.events", "FlowCheckpointSavedEvent"),
+    ("src.core.events", "CheckpointUnitSavedEvent"),
     # Agent execution
     ("src.core.events", "AgentExecutionStartedEvent"),
     ("src.core.events", "AgentExecutionCompletedEvent"),

@@ -121,7 +121,8 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
   // A checkpoint WRITE. Run-level for the same reason as a restore: it belongs
   // to the flow's spine, not inside an agent's task, and the agent pass would
   // otherwise drop it.
-  const isCheckpointSaved = (t: Trace) => t.event_type === 'flow_checkpoint_saved';
+  const isCheckpointSaved = (t: Trace) =>
+    t.event_type === 'flow_checkpoint_saved' || t.event_type === 'checkpoint_unit_saved';
   const isRunLevel = (t: Trace) =>
     isFlowStart(t) || isFlowEnd(t) || isCrewStart(t) || isCrewEnd(t) ||
     isCrewRestored(t) || isCheckpointSaved(t);
@@ -136,6 +137,9 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
   const crewStarts = sorted.filter(isCrewStart);
   const crewEnds = sorted.filter(isCrewEnd);
   const crewRestored = sorted.filter(isCrewRestored);
+  // Collected, not just classified. `isRunLevel` already excluded these from
+  // the agent pass; without this they were excluded from everything.
+  const checkpointSaved = sorted.filter(isCheckpointSaved);
 
   // span_id -> parent_span_id, for walking the DAG up to an owning crew span.
   const spanToParent = new Map<string, string>();
@@ -525,6 +529,31 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
     });
   });
 
+  // Checkpoint writes close out the spine: they are bookkeeping ABOUT the run
+  // rather than steps of it, and each carries its own timestamp so the order it
+  // happened in stays legible.
+  const asRecord = (v: unknown): Record<string, unknown> =>
+    v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+  const checkpointItems: TimelineItem[] = checkpointSaved.map((trace) => {
+    // The JSON column arrives as a dict over SSE and as a STRING over the REST
+    // polling fallback; both have to yield the same item.
+    let raw: unknown = trace.output;
+    if (typeof raw === 'string') {
+      try { raw = JSON.parse(raw); } catch { raw = {}; }
+    }
+    const out = asRecord(raw);
+    const extra = asRecord(out.extra_data);
+    return {
+      kind: 'checkpoint-saved' as const,
+      trace,
+      unit:
+        (extra.unit_key as string | undefined) ||
+        (extra.method_name as string | undefined) ||
+        (extra.crew_name as string | undefined),
+      failed: Boolean(extra.error),
+    };
+  });
+
   crewSections.forEach(section => {
     if (section.start) {
       timelineItems.push({ kind: 'crew-start', trace: section.start, crewName: section.crewName });
@@ -536,6 +565,8 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
       timelineItems.push({ kind: 'crew-end', trace: section.end });
     }
   });
+
+  timelineItems.push(...checkpointItems);
 
   // Extract run configuration from crew_started/execution_started trace metadata
   let runConfig: RunConfig | undefined;

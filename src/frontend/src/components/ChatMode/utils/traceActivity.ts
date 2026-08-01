@@ -214,6 +214,21 @@ export function buildTraceEntry(
   // a resume does not pick up where it left off. A RESTORED crew matters more
   // still — it is a crew whose answer was reused instead of re-run, and the
   // timeline would otherwise imply it never happened.
+  if (eventType === 'checkpoint_unit_saved') {
+    // A completed UNIT written to the run's checkpoint — a task for a crew, a
+    // crew for a flow. Crews write these too; only the flow path used to show
+    // anything, so a crew run's timeline claimed no checkpointing happened.
+    const failed = typeof extra.error === 'string' && extra.error;
+    return {
+      kind: 'event',
+      label: failed ? 'Checkpoint failed' : 'Checkpoint saved',
+      sublabel: (extra.unit_key as string) || (extra.kind as string) || undefined,
+      detail: failed || undefined,
+      durationMs,
+      source: eventSource || undefined,
+      timestamp: now,
+    };
+  }
   if (eventType === 'flow_checkpoint_saved') {
     const where = (extra.method_name as string) || (extra.crew_name as string) || '';
     return {

@@ -26,6 +26,7 @@ SPAN_NAME_MAP: Dict[str, str] = {
     "CrewAI.crew.complete": "crew_completed",
     "kasal.crew.checkpoint_restored": "crew_checkpoint_restored",
     "kasal.flow.checkpoint_saved": "flow_checkpoint_saved",
+    "kasal.checkpoint.unit_saved": "checkpoint_unit_saved",
     # Task lifecycle
     "CrewAI.task.execute": "task_started",
     "CrewAI.task.complete": "task_completed",

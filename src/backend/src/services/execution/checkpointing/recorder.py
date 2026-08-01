@@ -97,6 +97,41 @@ class CheckpointRecorder:
                 f"[CHECKPOINT] Failed to persist unit {unit.get('key')} for "
                 f"{self._job_id} (non-fatal): {e}"
             )
+            self._announce(unit, error=str(e))
+            return
+        self._announce(unit)
+
+    def _announce(self, unit: Dict[str, Any], error: Optional[str] = None) -> None:
+        """Put the write on the trace. Never raises.
+
+        Emitted HERE rather than in each path's adapter because this is the one
+        place both of them write through — a crew checkpointing a task and a
+        flow checkpointing a crew are the same act on the same contract, and
+        announcing it twice in two shapes is how the two drift.
+
+        The write is otherwise invisible: it succeeds silently, and it FAILS
+        silently too, since a checkpoint failure deliberately does not fail the
+        run. A run that can never be resumed looked exactly like one that can.
+        """
+        try:
+            from src.core.events import event_bus
+            from src.core.events.types import CheckpointUnitSavedEvent
+
+            event_bus.emit(
+                self,
+                CheckpointUnitSavedEvent(
+                    kind=self.kind,
+                    unit_key=str(unit.get("key")) if unit.get("key") else None,
+                    unit_index=(
+                        unit.get("index")
+                        if isinstance(unit.get("index"), int)
+                        else None
+                    ),
+                    error=error,
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 — telemetry, never fatal
+            logger.debug(f"[CHECKPOINT] could not announce unit write: {exc}")
 
     def _clear(self) -> None:
         """Drop the checkpoint after a successful run. Never raises."""

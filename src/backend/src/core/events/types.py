@@ -153,6 +153,31 @@ class FlowCheckpointSavedEvent(FlowBaseEvent):
     type: Literal["flow_checkpoint_saved"] = "flow_checkpoint_saved"
 
 
+class CheckpointUnitSavedEvent(BaseEvent):
+    """One completed UNIT was written to the run's checkpoint.
+
+    Path-agnostic on purpose. The checkpoint contract is one contract for both
+    subprocess paths — a unit is a TASK for a crew and a CREW for a flow, and
+    that is the only difference — so it is emitted from the shared recorder and
+    carries ``kind`` rather than existing twice.
+
+    Distinct from :class:`FlowCheckpointSavedEvent`, which is the flow's STATE
+    being persisted. Two different mechanisms that both deserve the word
+    checkpoint: state is what a conversational turn restores, units are what a
+    resume replays.
+
+    Failures are emitted too, with ``error`` set. A checkpoint write that fails
+    does not fail the run — which is precisely why it has to be visible, or a
+    run that can never be resumed looks exactly like one that can.
+    """
+
+    kind: str = ""
+    unit_key: str | None = None
+    unit_index: int | None = None
+    error: str | None = None
+    type: Literal["checkpoint_unit_saved"] = "checkpoint_unit_saved"
+
+
 class FlowFinishedEvent(FlowBaseEvent):
     """Emitted once when a Flow's kickoff finishes (success or failure).
 
