@@ -35,7 +35,13 @@ The surface **is** the canonical rendering, so the raw text must NOT also show:
   any new deliverable component MUST be added to `_DATA_COMPONENTS` or its surface gets
   dropped back to plain text (this is the "Album rendered as markdown, not a carousel" bug).
 - Frontend drop — `components/ChatMode/store/executionStore.ts::completeExecution` posts an
-  empty message body when a surface exists (`const body = surface ? '' : resultText`).
+  empty message body when a surface exists **and the reader never saw the text**
+  (`const body = surface && !readerSawText ? '' : resultText`). The condition matters: a
+  composed surface can take tens of seconds, and Kasal chat streams the answer meanwhile
+  precisely so there is something to read. Blanking that at the end reads as the answer
+  being retracted — and when the surface is a dashboard carrying only headline numbers,
+  most of the answer goes with it. Same rule `attachSurface` states for a late surface:
+  never take away what the reader has already seen, never add what they never saw.
 - See the memories `chatmode-surface-canonical-drop-text` and
   `chatmode-a2ui-only-derive-from-content`.
 
@@ -90,7 +96,9 @@ Do ALL that apply. Frontend paths are under `src/frontend/src`; backend under
       `test_vendor_in_sync_with_frontend_source` fails until you do.
     - `catalog.json` and `compose.py` are copied **live** at export time — no vendoring.
     - Export parity (kept in sync with Kasal chat — preserve when editing the template):
-      the double-render dedup (`App.tsx` shows the surface XOR the text bubble), the prose
+      the double-render dedup (`App.tsx` shows the surface XOR the text bubble — the
+      exported app does NOT stream, so the reader never sees the text first and the plain
+      XOR stays correct there; this is the one place the two intentionally differ), the prose
       gate (`agent.py::_schedule_a2ui` drops prose-only dashboard/document surfaces via
       `_a2ui_has_data_component`), and palette-by-root-component (`App.tsx`
       `ROOT_COMPONENT_TO_DELIVERABLE` / `deliverableForSurface`).

@@ -85,6 +85,28 @@ interface ExecutionState {
    */
   memoryEnabled: boolean;
   /**
+   * The published capability the CURRENT run was routed to, if any. Recorded so
+   * the answer message can be persisted with it — the backend router reads it
+   * back next turn to know a capability is mid-conversation. Cleared at the
+   * start of every run, so a later un-routed run cannot inherit it.
+   */
+  routedCapability: string | null;
+  setRoutedCapability: (name: string | null) => void;
+  /**
+   * The capability currently holding this conversation — set when a routed run
+   * used one that holds conversations, cleared when the user leaves it or when
+   * something else answers. Drives the "Continuing X" pill.
+   */
+  heldConversation: string | null;
+  setHeldConversation: (name: string | null) => void;
+  /**
+   * True for exactly one turn after the user leaves a held conversation: the
+   * next dispatch tells the router not to continue, and the router decides on
+   * the message alone.
+   */
+  skipContinuation: boolean;
+  setSkipContinuation: (skip: boolean) => void;
+  /**
    * ChatMode answer mode chosen in the chat input's mode pill:
    *   'chat'     – a single light agent (Agent.kickoff_async), fast, no crew;
    *   'research' – a full crew with balanced model reasoning;
@@ -273,6 +295,26 @@ const jobOwners = new Map<string, string>();
 // Same lifecycle discipline as jobOwners: entries die when the job finalizes.
 const streamBubbles = new Map<string, string>();
 
+// jobId -> message id of the last TASK-OUTPUT line this run posted.
+//
+// That line is a preview: a long step output is posted capped, on the
+// understanding that completion replaces it with the full text. Finding it
+// again by scanning the message list and prefix-matching kept failing for
+// reasons that had nothing to do with the answer — trace pills crowding a fixed
+// window, and `addMessageToTargetSession` only appending to the in-memory array
+// when the owner session is the one on screen, so a backgrounded run's line is
+// persisted but invisible to any scan.
+//
+// The producer knows the id. Recording it here turns "find the message that
+// looks like this text" into "update this message", which cannot miss. The scan
+// remains as a fallback for lines posted before this was wired.
+const taskOutputMessages = new Map<string, string>();
+
+/** Register the message holding a run's latest task output (see above). */
+export function rememberTaskOutputMessage(jobId: string, messageId: string): void {
+  if (jobId && messageId) taskOutputMessages.set(jobId, messageId);
+}
+
 // jobId -> where this run's finished message landed, kept AFTER it finalizes.
 //
 // The crew subprocess announces a run twice on purpose: plain text the moment
@@ -318,10 +360,32 @@ function supersedeTruncatedTail(
   const sessionStore = useSessionStore.getState();
   const messages = sessionStore.messages || [];
 
-  for (let i = messages.length - 1; i >= 0 && i >= messages.length - 4; i -= 1) {
+  // Bounded by how many PLAIN messages are inspected, not by raw list position.
+  // Every trace — each tool pill, memory read, memory write, LLM call — is also
+  // an assistant message (`processTrace` posts them with resultType 'trace'), so
+  // a task that runs for half a minute puts dozens of them after its own output.
+  // A fixed "last 4 entries" window counted those, so the capped line fell out
+  // of range within seconds and the fold silently did nothing: the run posted
+  // its full answer as a NEW message and the 300-char stub stayed above it.
+  //
+  // The outer bound only stops an unbounded walk of a long conversation; the
+  // real limit is CANDIDATES, and the prefix match itself is specific enough
+  // (>=40 chars, and the full text must start with it) that widening the reach
+  // cannot rewrite an unrelated message.
+  const CANDIDATES = 6;
+  const REACH = 300;
+  let considered = 0;
+  for (
+    let i = messages.length - 1;
+    i >= 0 && i >= messages.length - REACH && considered < CANDIDATES;
+    i -= 1
+  ) {
     const message = messages[i];
     // Only a plain task-output line: a rich card carries its own meaning.
+    // Cards and traces do NOT count towards the budget — being outnumbered by
+    // activity is the normal case, not a reason to stop looking.
     if (message.role !== 'assistant' || message.resultType) continue;
+    considered += 1;
 
     const body = (message.content || '')
       .replace(/^\*\*[^*]*\*\*\s+—\s+/, '')
@@ -331,12 +395,15 @@ function supersedeTruncatedTail(
     if (body.length < 40) continue;
     if (!text.startsWith(body)) continue;
 
+    // `isStreaming: false` because the message matched is very often the LIVE
+    // bubble — its streamed text is a prefix of the final answer, which is
+    // exactly what this looks for. Folding into it without clearing the flag
+    // left the typing dots bouncing under a finished run.
+    const done = { content: text, isStreaming: false };
     if (sessionId) {
-      sessionStore.updateMessageInTargetSession(sessionId, message.id, {
-        content: text,
-      });
+      sessionStore.updateMessageInTargetSession(sessionId, message.id, done);
     } else {
-      sessionStore.updateMessage(message.id, { content: text });
+      sessionStore.updateMessage(message.id, done);
     }
     return message.id;
   }
@@ -547,6 +614,9 @@ export const useExecutionStore = create<ExecutionStore>()(
   executionOwnerSessionId: null,
   workspaceMemory: true,
   memoryEnabled: false,
+  routedCapability: null,
+  heldConversation: null,
+  skipContinuation: false,
   chatModeType: 'chat',
   preferExisting: false,
   selectedMcpServers: [],
@@ -664,6 +734,9 @@ export const useExecutionStore = create<ExecutionStore>()(
   toggleChatCollapsed: () => set((s) => ({ chatCollapsed: !s.chatCollapsed })),
   setWorkspaceMemory: (value) => set({ workspaceMemory: value }),
   setMemoryEnabled: (value) => set({ memoryEnabled: value }),
+  setRoutedCapability: (name) => set({ routedCapability: name }),
+  setHeldConversation: (name) => set({ heldConversation: name }),
+  setSkipContinuation: (skip) => set({ skipContinuation: skip }),
   setChatModeType: (mode) => set({ chatModeType: mode }),
   setPreferExisting: (preferExisting) => set({ preferExisting }),
   toggleMcpServer: (name) =>
@@ -872,6 +945,14 @@ export const useExecutionStore = create<ExecutionStore>()(
     // bubble is finalized in place below rather than left as a duplicate.
     // Drain the pacing buffer before finalizing: any text still queued belongs
     // in the bubble (or would otherwise vanish under the terminal result).
+    // Did this run put text in front of the reader? `streamBubbles` alone does
+    // not answer that — a bubble is closed at every task boundary, so a run can
+    // have shown several screens of text and hold no open bubble at the end.
+    // The per-job counter survives those closes. Read BEFORE the flush below,
+    // which clears it. Text still queued counts: the flush is about to paint it.
+    const readerSawText = Boolean(
+      jobId && ((streamBubbleSeq.get(jobId) ?? 0) > 0 || streamBuffers.get(jobId)),
+    );
     if (jobId) discardStreamPacing(jobId, true);
     const streamBubbleId = jobId ? streamBubbles.get(jobId) : undefined;
     if (jobId) streamBubbles.delete(jobId);
@@ -941,25 +1022,90 @@ export const useExecutionStore = create<ExecutionStore>()(
           });
         }
       } else {
-        // Route text message to the correct session. A composed surface IS the
+        // Route text message to the correct session. A composed surface is the
         // canonical rendering of the answer (a Genie table, a dashboard, a deck…),
-        // so drop the raw text whenever one exists — otherwise the SAME content
+        // so the raw text is dropped when one exists — otherwise the SAME content
         // prints twice: the full markdown answer in the bubble AND the rendered
         // surface below it (e.g. a 100-row restaurant list shown as prose above
-        // the interactive Table). This is safe because the backend only composes a
-        // surface for genuine data answers (a2ui_runner drops prose-only surfaces);
-        // pure-prose replies (greetings, clarifications) get no surface and keep
-        // their text. Formerly gated on `surface && preview`, which missed plain
-        // markdown answers (parsePreviewContent is A2UI-only → null → text kept).
-        const body = surface ? '' : resultText;
+        // the interactive Table).
+        //
+        // …but ONLY when the reader never saw that text. This is the rule
+        // `attachSurface` already states for the late-surface path: never take
+        // away something the reader has already seen, never add something they
+        // never saw. Completion assumed "the surface arrived in time, so nothing
+        // rendered" — false whenever tokens streamed. Composition takes tens of
+        // seconds, and the stream exists precisely so the answer is readable
+        // while it runs; blanking it at the end read as the answer being
+        // retracted, and for a dashboard that only carries headline numbers most
+        // of the answer went with it.
+        //
+        // Nothing streamed (fast compose, no bubble) → unchanged: the surface is
+        // the first and only rendering, and printing the prose too would be the
+        // duplication this gate exists to stop.
+        const body = surface && !readerSawText ? '' : resultText;
         // The last task's output already printed this. Fold the full text into
         // that message rather than printing it a second time.
         //
         // NOT an early return: everything below this block — the session
         // snapshot, clearing the run's owner — still has to happen, or the
         // "running" banner never goes away.
-        const supersededId = body ? supersedeTruncatedTail(ownerSession, body) : null;
+        // Attempted with `resultText`, NOT `body` — a truncated task line is on
+        // screen whichever way `body` went. Each task output is posted capped at
+        // 300 chars + "…" (summarizeTaskOutput) on the understanding that the
+        // full answer replaces it here. Gating this on `body` meant a run that
+        // composed a surface never even looked: `body` was '', the fold was
+        // skipped, and the ONLY thing left on screen was 300 characters ending
+        // mid-word. Leaving the reader with a capped answer is the one outcome
+        // that is simply wrong — worse than duplicating, worse than dropping.
+        // The registered id first — exact, and immune to the message not being
+        // in the on-screen array. The scan stays as a fallback.
+        const registeredId = jobId ? taskOutputMessages.get(jobId) : undefined;
+        if (jobId) taskOutputMessages.delete(jobId);
+
+        let supersededId: string | null = null;
+        if (resultText && registeredId) {
+          // `isStreaming: false` on EVERY supersede path, not just the bubble
+          // branch below. Superseding skips that branch, and it used to be the
+          // only place the typing indicator was cleared — so a folded message
+          // kept its three bouncing dots after the run had finished. The
+          // message the fold lands on is frequently the live bubble itself (its
+          // streamed text is a prefix of the final answer, so the scan matches
+          // it), which is why this is not a rare corner.
+          const done = { content: resultText, isStreaming: false };
+          if (ownerSession) {
+            sessionStore.updateMessageInTargetSession(ownerSession, registeredId, done);
+          } else {
+            sessionStore.updateMessage(registeredId, done);
+          }
+          supersededId = registeredId;
+        } else if (resultText) {
+          supersededId = supersedeTruncatedTail(ownerSession, resultText);
+        }
         if (supersededId) {
+          // A bubble left open by an earlier task is not the message carrying
+          // the answer, but it must still stop claiming to be typing.
+          if (streamBubbleId && streamBubbleId !== supersededId && ownerSession) {
+            sessionStore.updateMessageInTargetSession(ownerSession, streamBubbleId, {
+              isStreaming: false,
+            });
+          }
+          // The surface must ride along with the text we just folded into.
+          // Until the text survived a composed surface, `body` was always empty
+          // when one existed, so this branch could never be reached with a
+          // surface and never applied `runExtra`. It can now — a run whose
+          // bubble closed at a task boundary lands here — and without this the
+          // answer would keep its text and silently lose its surface.
+          if (runExtra) {
+            if (ownerSession) {
+              sessionStore.updateMessageInTargetSession(
+                ownerSession,
+                supersededId,
+                runExtra,
+              );
+            } else {
+              sessionStore.updateMessage(supersededId, runExtra);
+            }
+          }
           // Register the message we folded into. Registering null here made the
           // late surface post the answer a SECOND time — the run's text showed
           // immediately, then again a few seconds later beneath the mindmap.

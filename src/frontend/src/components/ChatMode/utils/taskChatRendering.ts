@@ -108,15 +108,40 @@ export function summarizeTaskOutput(
     if (prose.includes('createSurface') || prose.includes('updateComponents')) {
       return 'Generated an app. View it in the preview pane.';
     }
-    return prose.length > 400 ? `${prose.slice(0, 300).trim()}…` : prose;
+    return preview_(prose);
   }
 
   // Long plain-text outputs get collapsed too, otherwise they take over the chat.
-  if (trimmed.length > 400) {
-    return `${trimmed.slice(0, 300).trim()}…`;
-  }
+  return preview_(trimmed);
+}
 
-  return trimmed;
+/**
+ * A step's output longer than this is shown as a preview rather than in full.
+ *
+ * It used to be 400, cut to 300 characters — about two sentences, which reads
+ * as a truncated answer rather than a summary of a step. Two things have
+ * changed since that number was chosen:
+ *
+ * - A runaway generation can no longer reach here. The transport stops a model
+ *   that starts repeating itself (`core/llm/transport/repetition.py`), so the
+ *   197KB output this cap was really defending against is cut off at source.
+ * - The FINAL answer is no longer affected at all: completion folds the full
+ *   text into this message (`executionStore.supersedeTruncatedTail`), so what
+ *   the cap now trims is only an INTERMEDIATE step in a multi-crew flow.
+ *
+ * An intermediate step should be readable — that is the entire reason it is
+ * shown — so the budget is a few paragraphs rather than two sentences. It stays
+ * bounded because several verbose steps still should not bury the conversation.
+ */
+const PREVIEW_TRIGGER = 2400;
+
+/** How much of an over-long output to keep. */
+const PREVIEW_CHARS = 2000;
+
+/** Full text, or its opening with an ellipsis when it runs long. */
+function preview_(text: string): string {
+  if (text.length <= PREVIEW_TRIGGER) return text;
+  return `${text.slice(0, PREVIEW_CHARS).trim()}…`;
 }
 
 /**

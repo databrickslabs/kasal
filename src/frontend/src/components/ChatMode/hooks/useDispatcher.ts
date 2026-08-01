@@ -324,7 +324,16 @@ export function useDispatcher(options: UseDispatcherOptions) {
       );
 
       const assistantId = generateId();
-      options.addMessage('assistant', 'Thinking...', {
+      // NO text: `isStreaming` already renders the typing dots, and the run
+      // activity above it says "Thinking" / "Working…" in its header. The word
+      // used to be here so the row had content to persist — and it showed as a
+      // literal line beside the dots that meant the same thing.
+      //
+      // It also outlived the turn. This placeholder is normally rewritten when
+      // dispatch returns, but not every path gets that far, and an orphan kept
+      // the word "Thinking..." on screen under a finished answer forever. With
+      // no text, an orphan renders as nothing.
+      options.addMessage('assistant', '', {
         id: assistantId,
         isStreaming: true,
       });
@@ -344,7 +353,12 @@ export function useDispatcher(options: UseDispatcherOptions) {
       // router matches the sentence against published DESCRIPTIONS, and
       // "create a crew plan with agents and tasks: …" describes nothing anyone
       // published. It would poison every match.
-      const { chatModeType, preferExisting } = useExecutionStore.getState();
+      const { chatModeType, preferExisting, skipContinuation } =
+        useExecutionStore.getState();
+      // Consumed here, not on the next render: leaving a conversation suppresses
+      // continuation for the NEXT turn only. Leaving it set would silently
+      // disable stickiness for the rest of the session.
+      if (skipContinuation) useExecutionStore.getState().setSkipContinuation(false);
       if (
         chatModeType !== 'chat' &&
         !preferExisting &&
@@ -386,6 +400,10 @@ export function useDispatcher(options: UseDispatcherOptions) {
           // Source axis: run something already published instead of building.
           // Sent beside chat_mode_type, never folded into it.
           prefer_existing: execState.preferExisting,
+          // Present only when the user has just left a held conversation. The
+          // backend default is true, so carrying it on every request would put
+          // a field in the payload that never says anything.
+          ...(skipContinuation ? { allow_continuation: false } : {}),
         }, message);
 
         const content = getAssistantResponse(result);
@@ -452,6 +470,7 @@ export function useDispatcher(options: UseDispatcherOptions) {
 
           if (intent === 'execute_crew') {
             const execResult = result.generation_result as ExecuteCrewResult;
+            useExecutionStore.getState().setHeldConversation(null);
             if (execResult.plan && options.onExecuteCrew) {
               const plan = execResult.plan;
               // Only a ROUTED run has these: what the router bound from the
@@ -486,6 +505,17 @@ export function useDispatcher(options: UseDispatcherOptions) {
 
           if (intent === 'execute_flow') {
             const execResult = result.generation_result as ExecuteFlowResult;
+            // A conversational capability now holds this chat: follow-ups will
+            // stay with it, so say so. Anything else answering CLEARS it — the
+            // conversation has moved, and a pill claiming otherwise would be
+            // worse than none.
+            useExecutionStore
+              .getState()
+              .setHeldConversation(
+                execResult.conversational && execResult.capability
+                  ? execResult.capability
+                  : null,
+              );
             if (execResult.flow && options.onExecuteFlow) {
               const flow = execResult.flow;
               // Same routed fields as the crew leg. Absent for /run flow and

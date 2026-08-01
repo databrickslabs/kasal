@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { useExecutionStore } from './executionStore';
+import { rememberTaskOutputMessage, useExecutionStore } from './executionStore';
 import { useSessionStore } from './sessionStore';
 import { saveSessionPreview, getSessionPreview, clearSessionRunningJob } from '../db/sessionApi';
 import { parsePreviewContent } from '../components/Preview/PreviewPanel';
@@ -659,6 +659,242 @@ describe('executionStore - completeExecution', () => {
       '',
       { executionId: 'job-T', resultType: 'a2ui', resultData: surface },
     );
+  });
+
+  it('streamed text SURVIVES a composed surface: the reader was already reading it', () => {
+    // Regression: composition takes tens of seconds, and chat streams the answer
+    // meanwhile precisely so there is something to read. Completion assumed "a
+    // surface arrived, so nothing rendered" and blanked the bubble — the answer
+    // the user had been reading vanished, and for a dashboard carrying only
+    // headline numbers most of the content went with it.
+    const surface = { surfaceKind: 'dashboard', root: 'r', components: [], dataModel: {} } as never;
+    setCurrentSessionId('sess-O');
+    mockedParse.mockReturnValue(null);
+    useExecutionStore.getState().startExecution('job-ST', 'sess-O');
+    // The reader watched this arrive.
+    useExecutionStore.getState().appendStreamChunk('job-ST', '# Comparative Analysis');
+
+    useExecutionStore
+      .getState()
+      .completeExecution('# Comparative Analysis\n\nLangChain scores 4.25…', 'job-ST', surface);
+
+    // Finalized in place: the full answer AND the surface on one message.
+    expect(sessionState().updateMessageInTargetSession).toHaveBeenCalledWith(
+      'sess-O',
+      expect.stringContaining('stream-job-ST'),
+      expect.objectContaining({
+        content: '# Comparative Analysis\n\nLangChain scores 4.25…',
+        isStreaming: false,
+        resultType: 'a2ui',
+        resultData: surface,
+      }),
+    );
+  });
+
+  it('nothing streamed: the surface is still the only rendering', () => {
+    // The other half of the rule — never ADD something the reader never saw.
+    // A fast compose shows no text at any point, so printing the prose beside
+    // the surface would be the duplication the gate exists to stop.
+    const surface = { surfaceKind: 'dashboard', root: 'r', components: [], dataModel: {} } as never;
+    setCurrentSessionId('sess-O');
+    mockedParse.mockReturnValue(null);
+    useExecutionStore.getState().startExecution('job-NS', 'sess-O');
+
+    useExecutionStore.getState().completeExecution('| # | Restaurant |', 'job-NS', surface);
+
+    expect(sessionState().addMessageToTargetSession).toHaveBeenCalledWith(
+      'sess-O',
+      'assistant',
+      '',
+      { executionId: 'job-NS', resultType: 'a2ui', resultData: surface },
+    );
+  });
+
+  it('a truncated task line is upgraded to the full answer EVEN when a surface exists', () => {
+    // The reported bug. Every task output is posted capped at 300 chars + "…"
+    // (summarizeTaskOutput), on the understanding that completion replaces it
+    // with the full text. The fold was gated on `body`, which is '' whenever a
+    // surface exists — so a run that composed one never attempted it and the
+    // only thing left on screen was 300 characters ending mid-word ("4 = St…").
+    const answer =
+      '# Comparative Analysis: Core Features of Leading Agentic AI Frameworks\n\n' +
+      'x'.repeat(2000);
+    const truncated = `${answer.slice(0, 300).trim()}…`;
+    const surface = { surfaceKind: 'dashboard', root: 'r', components: [], dataModel: {} } as never;
+
+    setCurrentSessionId('sess-O');
+    mockedParse.mockReturnValue(null);
+    sessionState().messages = [{ id: 'task-msg-1', role: 'assistant', content: truncated }];
+    useExecutionStore.getState().startExecution('job-TR', 'sess-O');
+
+    useExecutionStore.getState().completeExecution(answer, 'job-TR', surface);
+
+    // The capped line becomes the whole answer…
+    expect(sessionState().updateMessageInTargetSession).toHaveBeenCalledWith(
+      'sess-O',
+      'task-msg-1',
+      expect.objectContaining({ content: answer, isStreaming: false }),
+    );
+    // …and the surface attaches to that same message rather than being lost.
+    expect(sessionState().updateMessageInTargetSession).toHaveBeenCalledWith(
+      'sess-O',
+      'task-msg-1',
+      { executionId: 'job-TR', resultType: 'a2ui', resultData: surface },
+    );
+    // No second copy of the answer posted underneath it.
+    expect(sessionState().addMessageToTargetSession).not.toHaveBeenCalled();
+  });
+
+  it('folds into the capped line even when trace activity was posted after it', () => {
+    // The reason the previous fix still showed the stub. Every trace — tool
+    // pill, memory read, memory write, LLM call — is an assistant message too.
+    // A run that works for half a minute puts dozens of them after its own task
+    // output, so a fixed "last 4 entries" window stopped reaching the capped
+    // line and the full answer was posted as a second message beneath it.
+    const answer = '# Catalog of Agentic AI Frameworks\n\n' + 'y'.repeat(2000);
+    const capped = `${answer.slice(0, 300).trim()}…`;
+
+    setCurrentSessionId('sess-O');
+    mockedParse.mockReturnValue(null);
+    sessionState().messages = [
+      { id: 'task-msg-1', role: 'assistant', content: capped },
+      // Activity that arrived while the task kept working.
+      { id: 't1', role: 'assistant', content: '', resultType: 'trace' },
+      { id: 't2', role: 'assistant', content: '', resultType: 'trace' },
+      { id: 't3', role: 'assistant', content: '', resultType: 'trace' },
+      { id: 't4', role: 'assistant', content: '', resultType: 'trace' },
+      { id: 't5', role: 'assistant', content: '', resultType: 'trace' },
+      { id: 't6', role: 'assistant', content: '', resultType: 'trace' },
+    ];
+    useExecutionStore.getState().startExecution('job-TW', 'sess-O');
+
+    useExecutionStore.getState().completeExecution(answer, 'job-TW');
+
+    expect(sessionState().updateMessageInTargetSession).toHaveBeenCalledWith(
+      'sess-O',
+      'task-msg-1',
+      expect.objectContaining({ content: answer, isStreaming: false }),
+    );
+    // Not posted a second time underneath the stub.
+    expect(sessionState().addMessageToTargetSession).not.toHaveBeenCalled();
+  });
+
+  it('replaces the registered task-output message, without scanning for it', () => {
+    // The scan kept missing for reasons unrelated to the answer: trace pills
+    // crowding its window, and a backgrounded session's messages never entering
+    // the in-memory array at all (addMessageToTargetSession only appends when
+    // that session is the one on screen). The producer knows the id, so
+    // completion updates THAT message.
+    const answer = '# Database of Successful Agentic AI Projects\n\n' + 'q'.repeat(3000);
+
+    setCurrentSessionId('sess-O');
+    mockedParse.mockReturnValue(null);
+    // Deliberately EMPTY: a scan would find nothing here.
+    sessionState().messages = [];
+    useExecutionStore.getState().startExecution('job-REG', 'sess-O');
+    rememberTaskOutputMessage('job-REG', 'task-msg-42');
+
+    useExecutionStore.getState().completeExecution(answer, 'job-REG');
+
+    expect(sessionState().updateMessageInTargetSession).toHaveBeenCalledWith(
+      'sess-O',
+      'task-msg-42',
+      expect.objectContaining({ content: answer, isStreaming: false }),
+    );
+    expect(sessionState().addMessageToTargetSession).not.toHaveBeenCalled();
+  });
+
+  it('carries the surface onto the registered message too', () => {
+    const answer = '# Report\n\n' + 'w'.repeat(3000);
+    const surface = { surfaceKind: 'dashboard', root: 'r', components: [], dataModel: {} } as never;
+
+    setCurrentSessionId('sess-O');
+    mockedParse.mockReturnValue(null);
+    sessionState().messages = [];
+    useExecutionStore.getState().startExecution('job-REG2', 'sess-O');
+    rememberTaskOutputMessage('job-REG2', 'task-msg-43');
+
+    useExecutionStore.getState().completeExecution(answer, 'job-REG2', surface);
+
+    expect(sessionState().updateMessageInTargetSession).toHaveBeenCalledWith(
+      'sess-O',
+      'task-msg-43',
+      { executionId: 'job-REG2', resultType: 'a2ui', resultData: surface },
+    );
+  });
+
+  it('a registration is consumed once, so a later run cannot reuse it', () => {
+    const answer = 'x'.repeat(3000);
+    setCurrentSessionId('sess-O');
+    mockedParse.mockReturnValue(null);
+    sessionState().messages = [];
+    rememberTaskOutputMessage('job-REG3', 'task-msg-44');
+
+    useExecutionStore.getState().startExecution('job-REG3', 'sess-O');
+    useExecutionStore.getState().completeExecution(answer, 'job-REG3');
+    vi.clearAllMocks();
+
+    // Same job id finalizing again must not rewrite a message it no longer owns.
+    useExecutionStore.getState().startExecution('job-REG3', 'sess-O');
+    useExecutionStore.getState().completeExecution('a different answer', 'job-REG3');
+
+    expect(sessionState().updateMessageInTargetSession).not.toHaveBeenCalledWith(
+      'sess-O',
+      'task-msg-44',
+      expect.anything(),
+    );
+  });
+
+  it('stops the typing indicator when the answer is folded into the live bubble', () => {
+    // The regression this pins: superseding skips the branch that cleared
+    // `isStreaming`, and the message the fold lands on is usually the live
+    // bubble itself — its streamed text IS a prefix of the final answer. The
+    // run finished and the three dots kept bouncing under it.
+    const answer = 'I do not have live web access in this conversation, so I cannot pull todays news.';
+
+    setCurrentSessionId('sess-O');
+    mockedParse.mockReturnValue(null);
+    useExecutionStore.getState().startExecution('job-DOT', 'sess-O');
+    // Tokens stream in; the bubble's content is a prefix of the final answer.
+    useExecutionStore.getState().appendStreamChunk('job-DOT', answer.slice(0, 60));
+    sessionState().messages = [
+      { id: 'stream-job-DOT-1', role: 'assistant', content: answer.slice(0, 60) },
+    ];
+
+    useExecutionStore.getState().completeExecution(answer, 'job-DOT');
+
+    const calls = sessionState().updateMessageInTargetSession.mock.calls;
+    const cleared = calls.some(
+      (c: unknown[]) => (c[2] as { isStreaming?: boolean })?.isStreaming === false,
+    );
+    expect(cleared).toBe(true);
+  });
+
+  it('clears a bubble left open by an earlier task when folding elsewhere', () => {
+    const answer = '# Report\n\n' + 'k'.repeat(3000);
+
+    setCurrentSessionId('sess-O');
+    mockedParse.mockReturnValue(null);
+    useExecutionStore.getState().startExecution('job-DOT2', 'sess-O');
+    useExecutionStore.getState().appendStreamChunk('job-DOT2', 'an earlier task wrote this');
+    sessionState().messages = [];
+    rememberTaskOutputMessage('job-DOT2', 'task-msg-99');
+
+    useExecutionStore.getState().completeExecution(answer, 'job-DOT2');
+
+    const calls = sessionState().updateMessageInTargetSession.mock.calls;
+    // The answer landed on the registered message…
+    expect(
+      calls.some((c: unknown[]) => c[1] === 'task-msg-99'),
+    ).toBe(true);
+    // …and the orphaned bubble stopped claiming to be typing.
+    expect(
+      calls.some(
+        (c: unknown[]) =>
+          String(c[1]).startsWith('stream-job-DOT2') &&
+          (c[2] as { isStreaming?: boolean })?.isStreaming === false,
+      ),
+    ).toBe(true);
   });
 
   it('viewing owner with preview but no active execution -> activeExecution stays null', () => {
@@ -1722,7 +1958,7 @@ describe('the final answer does not print twice', () => {
     expect(sessionState().updateMessageInTargetSession).toHaveBeenCalledWith(
       'sess-D1',
       'task-1',
-      { content: FULL },
+      expect.objectContaining({ content: FULL, isStreaming: false }),
     );
     // and NOT posted a second time
     expect(sessionState().addMessageToTargetSession).not.toHaveBeenCalled();

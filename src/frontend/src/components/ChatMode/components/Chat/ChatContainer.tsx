@@ -608,6 +608,38 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
                     return renderRunProgress(s);
                   }
                   const msg = item.msg;
+                  // Anchor the activity directly UNDER the question that started
+                  // the run, not wherever its first trace happened to land.
+                  //
+                  // Those are not the same position. Tokens open the answer
+                  // bubble on the model's first word, which is often before any
+                  // trace has arrived — so the activity anchored itself BELOW
+                  // the finished answer, reading as though the work happened
+                  // after the reply. Work first, then the answer.
+                  if (
+                    msg.role === 'user' &&
+                    !placedSegs.has(s) &&
+                    ((segTraces.get(s)?.length ?? 0) > 0 || (running && s === lastSeg))
+                  ) {
+                    placedSegs.add(s);
+                    return (
+                      <React.Fragment key={`seg-${s}`}>
+                        <ChatMessageComponent
+                          key={msg.id}
+                          message={msg}
+                          onCommand={handleCommand}
+                          onExecuteCrew={onExecuteCrew}
+                          onExecuteFlow={onExecuteFlow}
+                          onExecuteGenerated={onExecuteGenerated}
+                          onSaveCrew={onSaveCrew}
+                          onSaveAnswerToCatalog={onSaveAnswerToCatalog}
+                          onSubmitVariables={onSubmitVariables}
+                          onBuildInstead={onBuildInstead}
+                        />
+                        {renderRunProgress(s)}
+                      </React.Fragment>
+                    );
+                  }
                   const bubble = (
                     <ChatMessageComponent
                       key={msg.id}

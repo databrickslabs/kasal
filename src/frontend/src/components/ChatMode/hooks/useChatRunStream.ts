@@ -19,7 +19,7 @@ import React, { useCallback, useEffect, useRef } from 'react';
 import { ExecutionStatus } from '../types/execution';
 import { getExecutionStatus } from '../api/executions';
 import { useSessionStore } from '../store/sessionStore';
-import { useExecutionStore } from '../store/executionStore';
+import { rememberTaskOutputMessage, useExecutionStore } from '../store/executionStore';
 import { readActiveExecution, clearActiveExecution } from '../store/activeExecutionMarker';
 import { useExecutionStream } from './useExecutionStream';
 import { stopAllGenerationStreams } from '../utils/generationStreamManager';
@@ -38,6 +38,7 @@ interface UseChatRunStreamArgs {
     ownerSession: string | null;
     mode?: string;
     usedWorkspaceMemory?: boolean;
+    capability?: string;
   } | null>;
 }
 
@@ -79,7 +80,7 @@ export function useChatRunStream({ pendingActionsRef }: UseChatRunStreamArgs) {
   // Render a task's output: surface previewable content in the preview pane
   // (scoped to the owning session) and append a concise chat message. Shared by
   // the live SSE stream and the REST polling fallback.
-  const handleTaskOutput = useCallback((taskName: string, output: string, ownerSession: string | null) => {
+  const handleTaskOutput = useCallback((taskName: string, output: string, ownerSession: string | null, jobId?: string) => {
     const execState = useExecutionStore.getState();
     const sessionStore = useSessionStore.getState();
 
@@ -125,11 +126,16 @@ export function useChatRunStream({ pendingActionsRef }: UseChatRunStreamArgs) {
       // "**<80 chars of prompt>** — <the same prompt again>".
       const alreadyHeaded = headedTasksRef.current.has(taskName);
       const msg = alreadyHeaded ? chatBody : `**${cleanTaskLabel(taskName)}** — ${chatBody}`;
-      if (ownerSession) {
-        sessionStore.addMessageToTargetSession(ownerSession, 'assistant', msg);
-      } else {
-        sessionStore.addMessage('assistant', msg);
-      }
+      const messageId = ownerSession
+        ? sessionStore.addMessageToTargetSession(ownerSession, 'assistant', msg)
+        : sessionStore.addMessage('assistant', msg);
+      // This line is a PREVIEW when the output was long enough to cap. Register
+      // it so completion replaces THIS message with the full answer instead of
+      // hunting for it by prefix-matching the on-screen list — a scan that kept
+      // missing (trace pills crowding its window; a backgrounded session's
+      // messages never entering the in-memory array at all) and left the capped
+      // line sitting above a second, complete copy.
+      if (jobId && messageId) rememberTaskOutputMessage(jobId, messageId);
     }
 
     // NOTE: we intentionally do NOT auto-complete the execution on a timer.
@@ -244,7 +250,7 @@ export function useChatRunStream({ pendingActionsRef }: UseChatRunStreamArgs) {
       const taskName = (metadata?.task_name as string) || (data?.event_context as string) || 'Task';
       const rawOutput = data?.output ?? data?.result ?? message;
       const taskOutput = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput);
-      handleTaskOutput(taskName, taskOutput, ownerSession);
+      handleTaskOutput(taskName, taskOutput, ownerSession, jobId);
     }
   }, [handleTaskOutput]);
 
@@ -290,6 +296,7 @@ export function useChatRunStream({ pendingActionsRef }: UseChatRunStreamArgs) {
       // Per-run snapshot (captured at generation, not the live toggle) so the
       // "Memory graph" action only appears for runs that used workspace memory.
       usedWorkspaceMemory: pending.usedWorkspaceMemory,
+      capability: pending.capability,
     };
     if (pending.ownerSession) sessionStore.addMessageToTargetSession(pending.ownerSession, 'assistant', '', extra);
     else sessionStore.addMessage('assistant', '', extra);

@@ -319,6 +319,53 @@ describe('sessionApi - messages', () => {
     expect(mockPut).not.toHaveBeenCalled();
   });
 
+  it('creates a streaming placeholder row even though it has no text', async () => {
+    // The row must exist: dispatch rewrites it in place ("Running **X**"), and
+    // a PUT against a row that was never created is lost. It is stored EMPTY —
+    // giving it text is what put a literal "Thinking..." on screen beside the
+    // typing dots, and left it there for good when a turn never rewrote it.
+    mockPost.mockResolvedValue({ data: {} });
+
+    await api.addMessageToSession('s1', {
+      id: 'ph1', role: 'assistant', content: '', isStreaming: true, timestamp: new Date(),
+    });
+
+    expect(mockPost).toHaveBeenCalledWith(
+      '/chat-history/messages',
+      expect.objectContaining({ id: 'ph1', content: '' }),
+    );
+  });
+
+  it('still skips an empty message that is neither a card nor streaming', async () => {
+    mockPost.mockClear();
+
+    await api.addMessageToSession('s1', {
+      id: 'x1', role: 'assistant', content: '', timestamp: new Date(),
+    });
+
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it('persists a CLEARED content, not just a non-empty one', async () => {
+    // The dispatcher posts a "Thinking..." placeholder and blanks it once the
+    // answer arrives. A truthiness test skipped that write, so storage kept the
+    // placeholder text and a refresh restored a stale "Thinking..." line above
+    // the finished answer — permanently, since nothing ever wrote over it.
+    mockPut.mockResolvedValue({ data: {} });
+
+    await api.updateMessageInSession('s1', 'm1', { content: '' });
+
+    expect(mockPut).toHaveBeenCalledWith('/chat-history/messages/m1', { content: '' });
+  });
+
+  it('still skips a transient-only update with no content key at all', async () => {
+    mockPut.mockResolvedValue({ data: {} });
+
+    await api.updateMessageInSession('s1', 'm1', { isStreaming: false });
+
+    expect(mockPut).not.toHaveBeenCalled();
+  });
+
   it('updates intent and packed extras via PUT', async () => {
     mockPut.mockResolvedValue({ data: {} });
 

@@ -60,6 +60,10 @@ const h = vi.hoisted(() => {
       hasActiveExecution: vi.fn(() => false),
       setIsLoading: vi.fn(),
       setExecutionContext: vi.fn(),
+      // Records which published capability a routed run used, so the answer
+      // message can carry it and the router can see it next turn.
+      setRoutedCapability: vi.fn(),
+      routedCapability: null,
       setPreviewContent: vi.fn(),
       startExecution: vi.fn(),
       startGeneration: vi.fn(),
@@ -142,7 +146,12 @@ function storeHook(obj: Record<string, unknown>) {
 }
 
 vi.mock('./store/sessionStore', () => ({ useSessionStore: storeHook(h.session) }));
-vi.mock('./store/executionStore', () => ({ useExecutionStore: storeHook(h.exec) }));
+vi.mock('./store/executionStore', () => ({
+  useExecutionStore: storeHook(h.exec),
+  // The run registers the message holding its task output so completion can
+  // replace THAT message with the full answer (see executionStore).
+  rememberTaskOutputMessage: vi.fn(),
+}));
 vi.mock('./store/appStore', () => ({ useAppStore: storeHook(h.app) }));
 vi.mock('../../store/theme', () => ({ useThemeStore: storeHook(h.theme) }));
 
@@ -589,8 +598,11 @@ describe('summarizeTaskOutput', () => {
       'Generated an app. View it in the preview pane.',
     );
   });
-  it('truncates long plain text', () => {
-    const long = 'z'.repeat(500);
+  it('truncates plain text long enough to bury the conversation', () => {
+    // 500 characters used to trip this; a step output that short is now shown
+    // in full, because a step is posted so it can be read. See PREVIEW_TRIGGER
+    // in taskChatRendering.
+    const long = 'z'.repeat(20000);
     expect(summarizeTaskOutput(long, null)?.endsWith('…')).toBe(true);
   });
   it('returns normal short text unchanged', () => {

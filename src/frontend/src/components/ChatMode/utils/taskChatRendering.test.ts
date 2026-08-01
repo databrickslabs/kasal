@@ -91,9 +91,24 @@ describe('summarizeTaskOutput', () => {
     expect(summarizeTaskOutput('Calling tools.', null, TASK_DESCRIPTION)).toBeNull();
   });
 
-  it('still collapses a very long answer', () => {
-    const long = 'x'.repeat(900);
-    expect(summarizeTaskOutput(long, null, TASK_DESCRIPTION)?.endsWith('…')).toBe(true);
+  it('shows a few paragraphs of a step in full', () => {
+    // The cap used to fire at 400 characters and keep 300 — about two
+    // sentences, which reads as a truncated answer rather than a step summary.
+    // A step is shown so it can be READ, so ordinary prose has to survive.
+    const step = 'The framework provides X, Y and Z. '.repeat(25); // ~875 chars
+
+    expect(summarizeTaskOutput(step, null, TASK_DESCRIPTION)).toBe(step.trim());
+  });
+
+  it('still previews an output that would bury the conversation', () => {
+    const huge = 'x'.repeat(20000);
+
+    const out = summarizeTaskOutput(huge, null, TASK_DESCRIPTION);
+
+    expect(out?.endsWith('…')).toBe(true);
+    // Bounded, but not to two sentences.
+    expect(out!.length).toBeGreaterThan(1000);
+    expect(out!.length).toBeLessThan(huge.length);
   });
 
   it('keeps a genuine answer', () => {

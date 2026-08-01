@@ -59,6 +59,64 @@ const baseProps = {
   onModelChange: vi.fn(),
 };
 
+describe('ChatContainer — the run activity sits above its answer', () => {
+  const trace = (id: string) => ({
+    id,
+    role: 'assistant' as const,
+    content: '',
+    resultType: 'trace',
+    resultData: { kind: 'tool_result', label: 'Memory', sublabel: 'context retrieved' },
+  });
+
+  it('renders the activity between the question and the answer', () => {
+    // Tokens open the answer bubble on the model's first word, which is often
+    // before any trace arrives — so anchoring the activity at its first trace
+    // put it BELOW the finished answer, reading as though the work happened
+    // after the reply.
+    const messages = [
+      { id: 'u1', role: 'user' as const, content: 'gather latest swiss news from today.' },
+      { id: 'a1', role: 'assistant' as const, content: 'Here is what I found.' },
+      trace('t1'),
+    ];
+
+    const { container } = render(<ChatContainer {...baseProps} messages={messages} />);
+
+    const text = container.textContent || '';
+    const question = text.indexOf('gather latest swiss news');
+    const activity = text.indexOf('Run activity');
+    const answer = text.indexOf('Here is what I found');
+
+    expect(question).toBeGreaterThanOrEqual(0);
+    expect(activity).toBeGreaterThan(question);
+    expect(activity).toBeLessThan(answer);
+  });
+
+  it('renders it once, not once per trace', () => {
+    const messages = [
+      { id: 'u1', role: 'user' as const, content: 'a question' },
+      trace('t1'),
+      { id: 'a1', role: 'assistant' as const, content: 'an answer' },
+      trace('t2'),
+    ];
+
+    const { container } = render(<ChatContainer {...baseProps} messages={messages} />);
+
+    const occurrences = (container.textContent || '').split('Run activity').length - 1;
+    expect(occurrences).toBe(1);
+  });
+
+  it('does not render an activity block for a turn that had none', () => {
+    const messages = [
+      { id: 'u1', role: 'user' as const, content: 'hello' },
+      { id: 'a1', role: 'assistant' as const, content: 'hi there' },
+    ];
+
+    const { container } = render(<ChatContainer {...baseProps} messages={messages} />);
+
+    expect(container.textContent).not.toContain('Run activity');
+  });
+});
+
 describe('ChatContainer', () => {
   it('renders the empty state (greeting + input) when no messages and not executing', () => {
     render(<ChatContainer {...baseProps} messages={[]} />);

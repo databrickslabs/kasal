@@ -68,6 +68,14 @@ interface ChatModeExtras {
   attachments?: string[];
   executionId?: string;
   usedWorkspaceMemory?: boolean;
+  /**
+   * For an answer produced by a routed run: which published capability produced
+   * it. Read back by the BACKEND router on the next turn — without it the
+   * router cannot tell that the answer on screen came from a capability at all,
+   * so a follow-up is re-matched from scratch and a flow mid-conversation
+   * quietly loses the thread.
+   */
+  capability?: string;
 }
 
 /** True when a stored resultData is (or wraps) an A2UI surface — used to heal
@@ -104,6 +112,7 @@ const toMessage = (w: MessageWire): ChatMessage => {
     ...(extras.usedWorkspaceMemory !== undefined
       ? { usedWorkspaceMemory: extras.usedWorkspaceMemory }
       : {}),
+    ...(extras.capability ? { capability: extras.capability } : {}),
     isStreaming: false,
   };
 };
@@ -115,6 +124,7 @@ const packExtras = (msg: Partial<ChatMessage>): Record<string, unknown> | undefi
   if (msg.attachments !== undefined) extras.attachments = msg.attachments;
   if (msg.executionId !== undefined) extras.executionId = msg.executionId;
   if (msg.usedWorkspaceMemory !== undefined) extras.usedWorkspaceMemory = msg.usedWorkspaceMemory;
+  if (msg.capability !== undefined) extras.capability = msg.capability;
   return Object.keys(extras).length > 0 ? { [EXTRA_KEY]: extras } : undefined;
 };
 
@@ -208,13 +218,20 @@ export async function addMessageToSession(
   msg: ChatMessage,
 ): Promise<void> {
   const hasCard = Boolean(msg.resultType || msg.resultData !== undefined);
-  if (!msg.content && !hasCard) return; // nothing to persist
+  // A STREAMING placeholder has no text yet and must STILL be created: dispatch
+  // rewrites this exact row in place ("Running **X**"), and a PUT against a row
+  // that was never created is lost. Carrying the word "Thinking..." used to be
+  // what made it persistable; the row now exists with empty content instead, so
+  // nothing shows while it waits and nothing is left behind if it is orphaned.
+  if (!msg.content && !hasCard && !msg.isStreaming) return; // nothing to persist
   await chainMessageWrite(msg.id, async () => {
     await getClient().post(`${BASE}/messages`, {
       id: msg.id,
       session_id: sessionId,
       message_type: msg.role,
-      content: msg.content || CARD_PLACEHOLDER,
+      // CARD_PLACEHOLDER stands in for a CARD's missing text. A streaming
+      // placeholder genuinely has none yet and must not be given any.
+      content: msg.content || (hasCard ? CARD_PLACEHOLDER : ''),
       intent: msg.intent ?? null,
       generation_result: packExtras(msg) ?? null,
     });
@@ -227,7 +244,13 @@ export async function updateMessageInSession(
   updates: Partial<ChatMessage>,
 ): Promise<void> {
   const payload: Record<string, unknown> = {};
-  if (updates.content) payload.content = updates.content;
+  // `!== undefined`, not truthiness: CLEARING content is a real update. The
+  // dispatcher posts a "Thinking..." placeholder and blanks it once the answer
+  // arrives; with a truthy test that write was skipped, so the placeholder kept
+  // its text in storage and a page refresh restored a stale "Thinking..." line
+  // sitting above the finished answer forever. The same applies to a run whose
+  // answer is carried by an A2UI surface, which also blanks the text.
+  if (updates.content !== undefined) payload.content = updates.content;
   if (updates.intent) payload.intent = updates.intent;
   const extras = packExtras(updates);
   if (extras) payload.generation_result = extras;
