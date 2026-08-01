@@ -204,6 +204,39 @@ export function buildTraceEntry(
     };
   }
 
+  // Checkpoint bookkeeping. These carry no text content at all — everything is
+  // in `extra_data` — so without an explicit arm they reach the generic branch
+  // below, find an empty message, and are dropped. The Jobs timeline renders
+  // them; the chat activity silently did not.
+  //
+  // Worth showing for the same reason as in Jobs: "nothing was written" and "it
+  // was written and ignored" are the two cases you most need to tell apart when
+  // a resume does not pick up where it left off. A RESTORED crew matters more
+  // still — it is a crew whose answer was reused instead of re-run, and the
+  // timeline would otherwise imply it never happened.
+  if (eventType === 'flow_checkpoint_saved') {
+    const where = (extra.method_name as string) || (extra.crew_name as string) || '';
+    return {
+      kind: 'event',
+      label: 'Checkpoint saved',
+      sublabel: where || undefined,
+      durationMs,
+      source: eventSource || undefined,
+      timestamp: now,
+    };
+  }
+  if (eventType === 'crew_checkpoint_restored' || eventType === 'task_checkpoint_restored') {
+    const name = (extra.crew_name as string) || (metadata.crew_name as string) || eventSource;
+    return {
+      kind: 'event',
+      label: 'Restored from an earlier turn',
+      sublabel: name || undefined,
+      durationMs,
+      source: eventSource || undefined,
+      timestamp: now,
+    };
+  }
+
   // Strip raw JSON dumps and single-token fragments that have no useful label.
   const trimmed = message.trim();
   if (!trimmed) return null;
