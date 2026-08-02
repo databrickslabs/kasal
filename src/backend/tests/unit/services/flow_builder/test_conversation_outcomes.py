@@ -265,6 +265,69 @@ class TestNarrowing:
         assert set(ran) == {"gather", "features", "compare", "quiz"}
 
 
+class TestAGateOnAPathNobodyTakes:
+    """A turn that does not need the gated crew must not ask for approval.
+
+    A HITL gate is built as ``@listen(previous_method)`` — a plain listener, not
+    a router — so narrowing governs it like any other step. That is the property
+    worth pinning: asking a person to approve work that was never going to run
+    trains them to approve without reading, and the run then waits on a decision
+    it did not need.
+
+    The other direction matters just as much: a gate cannot be narrowed AWAY
+    from the crew it protects, or narrowing would become a way to bypass
+    approval entirely.
+    """
+
+    @staticmethod
+    def _flow_class(ran):
+        class _Gated(Flow):
+            @start()
+            def gather(self):
+                ran.append("gather")
+                return "material"
+
+            @listen("gather")
+            def hitl_gate(self, previous):
+                ran.append("gate")
+                return previous
+
+            @listen("hitl_gate")
+            def gated_crew(self, previous):
+                ran.append("gated_crew")
+                return "answer"
+
+        return _Gated
+
+    def test_a_turn_answered_by_the_start_crew_never_reaches_the_gate(self):
+        ran = []
+        flow = self._flow_class(ran)()
+        flow.narrow_to({"gather"})
+
+        asyncio.run(flow.kickoff_async())
+
+        assert ran == ["gather"]
+        assert "gate" not in ran
+
+    def test_asking_for_the_gated_crew_still_goes_through_the_gate(self):
+        ran = []
+        flow = self._flow_class(ran)()
+        flow.narrow_to({"gated_crew"})
+
+        asyncio.run(flow.kickoff_async())
+
+        assert ran == ["gather", "gate", "gated_crew"]
+
+    def test_with_no_narrowing_everything_including_the_gate_runs(self):
+        # A flow with nothing to narrow (one askable outcome) runs whole, which
+        # is why a two-crew flow still prompts for approval.
+        ran = []
+
+        asyncio.run(self._flow_class(ran)().kickoff_async())
+
+        assert ran == ["gather", "gate", "gated_crew"]
+
+
 class TestATurnThatNeedsNoWork:
     """The material is already in state; retelling it should cost nothing.
 
