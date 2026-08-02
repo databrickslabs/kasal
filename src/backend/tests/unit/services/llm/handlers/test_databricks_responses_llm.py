@@ -241,8 +241,6 @@ class TestInit:
         handler = DatabricksResponsesLLM(model="test")
         # The api kwarg is set via setdefault — verify internal state
         assert handler._last_output_items == []
-        assert handler._tool_call_count == 0
-        assert handler._min_required_tool_calls is None
 
     def test_preserves_explicit_kwargs(self):
         """Explicit kwargs should be preserved."""
@@ -257,10 +255,8 @@ class TestInit:
         assert handler.timeout == 999
 
     def test_initial_state(self, handler):
-        """Handler should start with empty output items and no tool calls."""
+        """Handler should start with empty output items."""
         assert handler._last_output_items == []
-        assert handler._tool_call_count == 0
-        assert handler._min_required_tool_calls is None
 
 
 # ---------------------------------------------------------------------------
@@ -361,28 +357,37 @@ class TestPrepareResponsesParams:
             if isinstance(item, dict) and "id" in item:
                 assert len(item["id"]) <= 64
 
-    def test_tool_choice_required_when_below_min(self, handler):
-        """When tool_call_count < min, tool_choice should be 'required'."""
-        handler._tool_call_count = 0
-        handler._min_required_tool_calls = None  # will be computed
-        messages = [{"role": "user", "content": "Do something"}]
-        tools = [{"name": "my_tool", "type": "function"}]
-        params = handler._prepare_responses_params(messages, tools=tools)
-        assert params["tool_choice"] == "required"
-
-    def test_tool_choice_auto_after_min_reached(self, handler):
-        """After min tool calls reached, tool_choice should be 'auto'."""
-        handler._tool_call_count = 10
-        handler._min_required_tool_calls = 2
-        messages = [{"role": "user", "content": "Do something"}]
-        tools = [{"name": "my_tool", "type": "function"}]
-        params = handler._prepare_responses_params(messages, tools=tools)
-        assert params["tool_choice"] == "auto"
-
     def test_no_tool_choice_without_tools(self, handler):
         """Without tools, tool_choice should not be set."""
         messages = [{"role": "user", "content": "Hello"}]
         params = handler._prepare_responses_params(messages)
+        assert "tool_choice" not in params
+
+    def test_no_tool_choice_with_tools_either(self, handler):
+        """The regression this handler was built around.
+
+        It used to pin ``tool_choice="required"`` until a counter passed
+        ``max(2, min(10, tool_count // 4 + 1))`` — a floor of TWO forced calls
+        before the model was allowed to just answer. A greeting with one tool
+        attached therefore called that tool, every time. Deciding for the model
+        is the caller's business, not the endpoint's.
+        """
+        messages = [{"role": "user", "content": "hello how are you"}]
+        tools = [{"name": "my_tool", "type": "function"}]
+
+        params = handler._prepare_responses_params(messages, tools=tools)
+
+        assert "tool_choice" not in params
+
+    def test_many_tools_do_not_reintroduce_a_floor(self, handler):
+        """The old minimum scaled UP with the tool count (40 tools → 10 forced
+        calls), so a big teamspace catalogue was the worst case rather than the
+        best. Tool count must not influence tool_choice at all now."""
+        messages = [{"role": "user", "content": "hello"}]
+        tools = [{"name": f"tool_{i}", "type": "function"} for i in range(40)]
+
+        params = handler._prepare_responses_params(messages, tools=tools)
+
         assert "tool_choice" not in params
 
     def test_non_dict_items_passthrough(self, handler):
@@ -545,7 +550,6 @@ class TestHandleResponses:
         assert isinstance(result, list)
         assert len(result) == 1
         assert result[0]["function"]["name"] == "search_tool"
-        assert handler._tool_call_count == 1
 
     def test_function_call_with_available_functions(self, handler, make_response):
         """Function calls with available_functions should execute them."""
@@ -778,11 +782,15 @@ class TestMultiTurnPhasePreservation:
         assert "commentary" in phases
         assert "final_answer" in phases
 
-    def test_tool_call_count_tracks_state(self, handler, make_response):
-        """_tool_call_count should increment when tools are called."""
-        assert handler._tool_call_count == 0
+    def test_tool_choice_stays_unset_across_turns(self, handler, make_response):
+        """Phase preservation is per-conversation state; tool policy is not.
 
-        # Simulate a response with function calls (no available_functions)
+        The handler used to carry a tool-call counter across turns and change
+        tool_choice as it climbed. Nothing about turn N should now change what
+        turn N+1 sends.
+        """
+        messages = [{"role": "user", "content": "test"}]
+        tools = [{"name": "tool1"}]
         response = make_response(
             [
                 {
@@ -790,32 +798,19 @@ class TestMultiTurnPhasePreservation:
                     "id": "fc-1",
                     "name": "search",
                     "arguments": "{}",
-                },
+                }
             ],
             output_text="",
         )
         handler.client.responses.create.return_value = response
+        handler._handle_responses({"model": "test", "input": []})
 
-        params = {"model": "test", "input": []}
-        handler._handle_responses(params)
+        first = handler._prepare_responses_params(messages, tools=tools)
+        handler._handle_responses({"model": "test", "input": []})
+        second = handler._prepare_responses_params(messages, tools=tools)
 
-        assert handler._tool_call_count == 1
-
-    def test_tool_choice_transitions(self, handler):
-        """tool_choice should transition from required -> auto after min tool calls."""
-        messages = [{"role": "user", "content": "test"}]
-        tools = [{"name": "tool1"}]
-
-        # First call: should be "required" (below min)
-        handler._tool_call_count = 0
-        handler._min_required_tool_calls = None  # will be computed
-        params1 = handler._prepare_responses_params(messages, tools=tools)
-        assert params1["tool_choice"] == "required"
-
-        # After enough tool calls: should be "auto"
-        handler._tool_call_count = handler._min_required_tool_calls
-        params2 = handler._prepare_responses_params(messages, tools=tools)
-        assert params2["tool_choice"] == "auto"
+        assert "tool_choice" not in first
+        assert "tool_choice" not in second
 
 
 # ---------------------------------------------------------------------------
@@ -883,51 +878,22 @@ class TestEdgeCases:
 
 
 # ---------------------------------------------------------------------------
-# TestMinRequiredToolCalls
+# TestParallelFunctionCalls
 # ---------------------------------------------------------------------------
 
 
-class TestMinRequiredToolCalls:
-    """Test the dynamic min_required_tool_calls computation."""
+class TestParallelFunctionCalls:
+    """Several function calls in one response.
 
-    def test_min_computed_from_few_tools(self, handler):
-        """With few tools, min should be floor of 2."""
-        messages = [{"role": "user", "content": "test"}]
-        tools = [
-            {"name": f"tool{i}"} for i in range(4)
-        ]  # 4 tools -> max(2, min(10, 4//4+1)) = max(2, 2) = 2
-        handler._prepare_responses_params(messages, tools=tools)
-        assert handler._min_required_tool_calls == 2
+    What remains of the old ``TestMinRequiredToolCalls``. That class tested a
+    forced-tool floor derived from the tool count —
+    ``max(2, min(10, tool_count // 4 + 1))`` — which is gone; the tool count no
+    longer influences anything the handler sends. Its one assertion about real
+    behaviour was that a response carrying several function calls yields all of
+    them, so that is what survives.
+    """
 
-    def test_min_computed_from_many_tools(self, handler):
-        """With 19 tools, min should be 5."""
-        messages = [{"role": "user", "content": "test"}]
-        tools = [{"name": f"tool{i}"} for i in range(19)]  # 19//4+1 = 5
-        handler._prepare_responses_params(messages, tools=tools)
-        assert handler._min_required_tool_calls == 5
-
-    def test_min_capped_at_10(self, handler):
-        """With 40+ tools, min should be capped at 10."""
-        messages = [{"role": "user", "content": "test"}]
-        tools = [
-            {"name": f"tool{i}"} for i in range(40)
-        ]  # 40//4+1 = 11 -> min(10,11) = 10
-        handler._prepare_responses_params(messages, tools=tools)
-        assert handler._min_required_tool_calls == 10
-
-    def test_min_not_recomputed(self, handler):
-        """Once computed, min should not change on subsequent calls."""
-        messages = [{"role": "user", "content": "test"}]
-        tools4 = [{"name": f"tool{i}"} for i in range(4)]
-        handler._prepare_responses_params(messages, tools=tools4)
-        first_min = handler._min_required_tool_calls
-
-        tools20 = [{"name": f"tool{i}"} for i in range(20)]
-        handler._prepare_responses_params(messages, tools=tools20)
-        assert handler._min_required_tool_calls == first_min  # Not recomputed
-
-    def test_multiple_function_calls_increment_count(self, handler, make_response):
-        """Multiple function calls in one response should increment by count."""
+    def test_every_call_in_one_response_is_returned(self, handler, make_response):
         response = make_response(
             output_items=[
                 {
@@ -946,9 +912,10 @@ class TestMinRequiredToolCalls:
             output_text="",
         )
         handler.client.responses.create.return_value = response
-        params = {"model": "test", "input": []}
-        handler._handle_responses(params)
-        assert handler._tool_call_count == 2
+
+        result = handler._handle_responses({"model": "test", "input": []})
+
+        assert [call["function"]["name"] for call in result] == ["tool_a", "tool_b"]
 
 
 # ---------------------------------------------------------------------------

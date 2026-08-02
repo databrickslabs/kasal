@@ -139,10 +139,14 @@ def _make_llm(model_name: str, temperature: float = 0.7):
         # OpenAICompletion(api="responses") does NOT complete the tool-execution
         # loop — it emits a tool call and stops (the raw tool-call is returned
         # instead of the answer). DatabricksResponsesLLM (vendored verbatim from
-        # Kasal's llm_manager) adds the two things that make tool-calling work:
-        #   • phase preservation — re-injects prior output items WITH their `phase`
-        #     field so codex doesn't early-stop after the first tool call;
-        #   • a forced tool loop (tool_choice="required" until enough tool calls).
+        # Kasal's LLM handlers) adds phase preservation — it re-injects prior
+        # output items WITH their `phase` field, so codex doesn't early-stop
+        # after the first tool call.
+        #
+        # It used to also force a tool loop (tool_choice="required" until a call
+        # counter was satisfied). That is gone: phase preservation addresses the
+        # same early-stopping symptom, and the forcing made short conversational
+        # turns call tools they did not need.
         from agent_server.databricks_responses_llm import DatabricksResponsesLLM
 
         # Responses API: AI Gateway on -> /ai-gateway/openai/v1 ; off -> /serving-endpoints.

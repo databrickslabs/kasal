@@ -14,8 +14,22 @@ from src.core.llm.transport import LLM
 class VLLMFunctionCallingLLM(LLM):
     """LLM subclass for self-hosted vLLM endpoints.
 
-    Post engine-migration this class exists for ONE behaviour, below: pinning
-    ``tool_choice="required"`` on the opening turn.
+    States ``tool_choice="auto"`` when tools are offered: the model is told it
+    MAY call them and decides for itself, every turn.
+
+    It used to pin ``tool_choice="required"`` on the opening turn instead, and
+    releasing that is why this file was rewritten rather than deleted. Forcing
+    cannot tell one kind of request from another — the endpoint sees the same
+    thing whether the turn is "gather swiss news from today" or "hello how are
+    you", so a greeting opened with a web search and then invented the query for
+    it. Measured against the live endpoint, 3 samples per cell: ``required``
+    called a tool 3/3 on a greeting; ``auto`` was 0/3 on a greeting and 3/3 on an
+    explicit search request.
+
+    No mainstream framework forces on the model's behalf either — CrewAI sets
+    exactly this value and stops (``providers/openai/completion.py``), LangGraph
+    never mentions ``tool_choice``, LangChain forwards only what the caller
+    asked for, and LiteLLM drops even a caller's value once a tool result exists.
 
     Four further overrides lived here and are gone — ``kasal_engine``'s
     ``BaseLLM``/``OpenAICompletion`` do natively what crewAI had to be fought for:
@@ -31,41 +45,47 @@ class VLLMFunctionCallingLLM(LLM):
         ``BaseLLM.__deepcopy__``). crewAI's hardcoded ``return LLM(...)`` — the
         only reason we re-stamped ``__class__`` — no longer exists.
 
-    The vLLM backend runs with ``--enable-auto-tool-choice --tool-call-parser``,
-    so native tool calls work. Opt out of the forced opening turn with
-    ``VLLM_FORCE_TOOL_FIRST_TURN=false``.
+    Known limitation, not worked around here
+    ----------------------------------------
+
+    Qwen3-Coder under-uses its tools under a large scaffolded prompt: it declines
+    ``auto`` and writes an answer from nothing rather than calling the tool it was
+    handed, while tool-calling correctly on short prompts. Forcing masked that,
+    at the cost of making every short turn call a tool too.
+
+    The fix is to choose WHICH TOOLS ARE ATTACHED from the request rather than
+    whether a call is compelled: attach none on a turn that wants none, and no
+    model can call anything; attach them when the turn wants one, and a reluctant
+    model has a far smaller decision to get wrong. Until that exists, prefer a
+    tool-following model for tool-heavy work.
+
+    Set ``VLLM_TOOL_CHOICE`` to override the value sent (e.g. ``required`` to
+    restore the old behaviour for one deployment, or ``none`` to suppress tool
+    use). Anything falsy or ``default`` sends nothing and lets the server decide.
     """
 
     def _prepare_completion_params(
         self, messages, tools=None, skip_file_processing=False
     ):
-        """Force a tool call on the FIRST turn so Qwen3-Coder cannot skip attached
-        tools and fabricate an answer.
+        """Declare the tool policy explicitly rather than inheriting a default.
 
-        Making native function-calling *available* is not enough: under CrewAI's
-        large ReAct-scaffolded prompt, Qwen3-Coder declines ``tool_choice="auto"``
-        and emits a fabricated "Final Answer" in a single turn without ever calling
-        the tool (verified against the live vLLM endpoint: short prompts tool-call
-        under ``auto``, the full crew prompt does not). We pin
-        ``tool_choice="required"`` only while no tool result is present in the
-        message history (i.e. the opening turn); once any tool has run we revert to
-        the model's default so it can produce the final answer instead of looping.
-        Opt out with ``VLLM_FORCE_TOOL_FIRST_TURN=false``.
+        ``auto`` is what an OpenAI-compatible server already applies when tools
+        are present, so this changes no behaviour by itself — it makes the policy
+        visible in the request, in the logs, and in one greppable place, instead
+        of being whatever the endpoint happened to default to. The vLLM backend
+        must still run with ``--enable-auto-tool-choice --tool-call-parser``, or
+        it ignores tools regardless of what is sent here.
+
+        Never overwrites a ``tool_choice`` already in ``params``: structured
+        output, guardrail calls and a caller naming one specific tool all pin it
+        themselves, and each of those outranks an endpoint-wide default.
         """
         params = super()._prepare_completion_params(
             messages, tools=tools, skip_file_processing=skip_file_processing
         )
-        # Force a tool call on the opening turn (see docstring) — opt out via env.
-        if os.getenv("VLLM_FORCE_TOOL_FIRST_TURN", "true").lower() == "true":
-            # Only act when tools are offered this turn and nothing else already
-            # pinned tool_choice (e.g. structured-output / guardrail calls).
-            if params.get("tools") and "tool_choice" not in params:
-                history = params.get("messages") or []
-                already_used_tool = any(
-                    isinstance(m, dict)
-                    and (m.get("role") == "tool" or m.get("tool_calls"))
-                    for m in history
-                )
-                if not already_used_tool:
-                    params["tool_choice"] = "required"
+        choice = os.getenv("VLLM_TOOL_CHOICE", "auto").strip().lower()
+        if not choice or choice == "default":
+            return params
+        if params.get("tools") and "tool_choice" not in params:
+            params["tool_choice"] = choice
         return params

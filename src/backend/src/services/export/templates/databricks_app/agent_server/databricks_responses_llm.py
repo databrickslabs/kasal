@@ -65,19 +65,6 @@ class DatabricksResponsesLLM(OpenAICompletion):
         # so the model sees its own prior output with phase metadata intact.
         self._last_output_items: list[dict[str, Any]] = []
 
-        # Track how many tool calls the model has made.  We keep
-        # tool_choice='required' until the model has made enough
-        # invocations, then switch to 'auto' so it can produce a
-        # final text answer.
-        #
-        # The minimum is computed dynamically from the number of
-        # available tools (see _prepare_responses_params) so the
-        # model explores a meaningful fraction before it is allowed
-        # to stop.  This prevents gpt-5.3-codex from making a
-        # single tool call and immediately jumping to final_answer.
-        self._tool_call_count: int = 0
-        self._min_required_tool_calls: int | None = None  # computed on first call
-
     # ------------------------------------------------------------------
     # Capability overrides
     # ------------------------------------------------------------------
@@ -191,46 +178,14 @@ class DatabricksResponsesLLM(OpenAICompletion):
             sanitised_input.append(item)
         params["input"] = sanitised_input
 
-        # Force tool_choice when tools are present.
-        # gpt-5.3-codex tends to skip tool calls and go straight to
-        # final_answer phase.  We keep "required" until the model has
-        # made enough tool calls to explore the available tools, then
-        # switch to "auto" so it can generate a final text answer.
-        #
-        # The minimum is derived from the tool count:
-        #   - At least 1 call per 4 tools (ensures broad exploration)
-        #   - Minimum floor of 2 (always try more than one tool)
-        #   - Capped at 10 to avoid excessive forced iterations
-        # Examples:  4 tools → min 2,  8 tools → min 2,
-        #           12 tools → min 3, 19 tools → min 5, 40 → min 10
-        if params.get("tools"):
-            tool_count = len(params["tools"])
-            if self._min_required_tool_calls is None:
-                self._min_required_tool_calls = max(2, min(10, tool_count // 4 + 1))
-                logger.info(
-                    "[DatabricksCodex] Computed min_required_tool_calls=%d "
-                    "from %d available tools",
-                    self._min_required_tool_calls,
-                    tool_count,
-                )
-
-            if self._tool_call_count >= self._min_required_tool_calls:
-                params["tool_choice"] = "auto"
-                logger.info(
-                    "[DatabricksCodex] Set tool_choice='auto' "
-                    "(tool_call_count=%d >= min=%d)",
-                    self._tool_call_count,
-                    self._min_required_tool_calls,
-                )
-            else:
-                params["tool_choice"] = "required"
-                logger.info(
-                    "[DatabricksCodex] Set tool_choice='required' "
-                    "(tool_call_count=%d < min=%d)",
-                    self._tool_call_count,
-                    self._min_required_tool_calls,
-                )
-
+        # tool_choice is deliberately NOT set here. This handler used to keep
+        # "required" until a tool-call counter passed
+        # max(2, min(10, tool_count // 4 + 1)) — a floor of two forced calls,
+        # scaling UP with the number of attached tools. The phase preservation
+        # above addresses the symptom that rule was written for (assistant output
+        # losing `phase` degrades into early text-only turns), and forcing on top
+        # of it made a greeting call tools twice before it could answer. See
+        # handlers/__init__.py for why no handler decides this.
         self._log_request_params(params)
         return params
 
@@ -376,16 +331,6 @@ class DatabricksResponsesLLM(OpenAICompletion):
 
             function_calls = self._extract_function_calls_from_response(response)
             if function_calls and not available_functions:
-                # Increment tool-call counter; once it reaches the
-                # minimum threshold, subsequent requests switch to
-                # tool_choice="auto".
-                self._tool_call_count += len(function_calls)
-                logger.info(
-                    "[DatabricksCodex] Tool call count now %d " "(+%d this turn)",
-                    self._tool_call_count,
-                    len(function_calls),
-                )
-
                 # Wrap in OpenAI Chat Completions format so CrewAI's
                 # _is_tool_call_list() recognises them (it checks for
                 # "function" key).  The Responses API returns {id, name,
