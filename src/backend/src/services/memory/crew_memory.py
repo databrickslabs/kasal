@@ -893,3 +893,100 @@ class CrewMemoryService:
             os.environ["CREWAI_STORAGE_DIR"] = self._original_storage_dir
         elif "CREWAI_STORAGE_DIR" in os.environ:
             del os.environ["CREWAI_STORAGE_DIR"]
+
+
+async def build_session_memory(
+    group_id: str,
+    session_id: Optional[str] = None,
+    user_token: Optional[str] = None,
+    model: Optional[str] = None,
+) -> Optional[Any]:
+    """The ``Memory`` a chat SESSION writes to, built from the same parts a run uses.
+
+    A conversation had nowhere durable to live. The light agent remembers its own
+    turns (``chat/service.py``), but a turn routed to a published crew or flow is
+    answered by that capability, so the light agent never runs and the exchange
+    was never remembered — only the crew's task output was. The conversation
+    itself survived solely as ``flow_states.messages``: checkpoint JSON reachable
+    by one derived thread id, never embedded. A new session meant a new thread,
+    and everything said before was unreachable.
+
+    So the write needs a Memory outside a run, which is what this builds. It
+    composes the same public ``CrewMemoryService`` steps ``_attach_memory`` uses —
+    backend config from the database, the embedder that backend needs, the
+    storage directory, the disabled-configuration check — so a session record
+    lands in exactly the store a crew's records land in, with the same tenant
+    scoping. Nothing here is a second memory system.
+
+    Deliberately minimal config: only ``group_id`` (the tenant boundary) and
+    ``session_id`` (recall scope). The agents/tasks a run passes feed the
+    deterministic crew-id hash and the embedder's agent scan, and a session is
+    not a crew — giving it invented ones would fork the storage directory away
+    from the crew's.
+
+    Returns ``None`` when memory is off, misconfigured, or unavailable. Never
+    raises: no conversation should fail to be recorded because memory is down,
+    and nothing here is on the answer's critical path.
+    """
+    try:
+        from src.schemas.memory_backend import MemoryBackendConfig
+        from src.services.execution.config.crew_config_builder import (
+            CrewConfigBuilder,
+        )
+        from src.services.execution.config.embedder_config_builder import (
+            EmbedderConfigBuilder,
+        )
+
+        mem_config: Dict[str, Any] = {
+            "group_id": group_id,
+            "session_id": session_id,
+            # Workspace scope, matching the chat default: a session's memory is
+            # worth recalling from the next session, which is the whole point.
+            "memory_workspace_scope": True,
+            "model": model,
+            "name": "chat",
+        }
+
+        memory_service = CrewMemoryService(mem_config, user_token)
+        config_builder = CrewConfigBuilder(mem_config)
+
+        crew_kwargs: Dict[str, Any] = {"agents": [], "memory": True}
+        embedder_builder = EmbedderConfigBuilder(mem_config, user_token)
+        crew_kwargs, custom_embedder, _ = await embedder_builder.configure_embedder(
+            crew_kwargs
+        )
+
+        backend_config = await memory_service.fetch_memory_backend_config() or {
+            "backend_type": "default"
+        }
+        if config_builder.check_memory_disabled_by_backend_config(backend_config):
+            return None
+
+        crew_id = memory_service.generate_crew_id()
+        memory_service.setup_storage_directory(crew_id, backend_config)
+
+        backend_type = backend_config.get("backend_type")
+        embedder_for_backend = (
+            custom_embedder
+            if backend_type in ("databricks", "lakebase")
+            else crew_kwargs.get("embedder")
+        )
+        unified_storage = await memory_service.create_unified_storage(
+            backend_config, crew_id, embedder_for_backend
+        )
+        memory_config = MemoryBackendConfig(**backend_config)
+        memory_service.configure_crew_memory_components(
+            crew_kwargs,
+            memory_config,
+            unified_storage,
+            crew_id,
+            custom_embedder,
+            memory_llm_override=await memory_service.resolve_memory_llm_override(
+                memory_config
+            ),
+        )
+        built = crew_kwargs.get("memory")
+        return built if built not in (None, True, False) else None
+    except Exception as exc:  # noqa: BLE001 — a conversation is still answered
+        logger.warning("Session memory unavailable (%s); the turn is not recorded", exc)
+        return None
