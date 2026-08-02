@@ -20,6 +20,7 @@ import {
   DialogActions,
   TextField,
   Alert,
+  InputAdornment,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -27,6 +28,8 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
 import BuildIcon from '@mui/icons-material/Build';
+import SearchIcon from '@mui/icons-material/Search';
+import ClearIcon from '@mui/icons-material/Clear';
 
 import { usePermissionStore } from '../../../store/permissions';
 import { GroupToolService, type GroupToolMapping } from '../../../api/groups/GroupToolService';
@@ -127,6 +130,7 @@ export default function ToolsConfiguration({ mode = 'auto' }: { mode?: 'system' 
   const [globalTools, setGlobalTools] = useState<Tool[]>([]);
   const [toolLookup, setToolLookup] = useState<Record<number, Tool>>({});
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+  const [search, setSearch] = useState('');
 
   const loadWorkspaceData = async () => {
     setLoading(true);
@@ -269,6 +273,30 @@ export default function ToolsConfiguration({ mode = 'auto' }: { mode?: 'system' 
     return { ready: isSet, keyName };
   };
 
+  // Search filters both columns of the teamspace panel on title + description
+  const searchTerm = search.trim().toLowerCase();
+
+  const matchesSearch = (title?: string, description?: string) =>
+    !searchTerm ||
+    (title ?? '').toLowerCase().includes(searchTerm) ||
+    (description ?? '').toLowerCase().includes(searchTerm);
+
+  const filteredAvailable = useMemo(
+    () => available.filter((t) => matchesSearch(t.title, t.description)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [available, searchTerm],
+  );
+
+  const filteredAdded = useMemo(
+    () =>
+      added.filter((m) => {
+        const t = toolLookup[m.tool_id];
+        return matchesSearch(t?.title ?? `Tool #${m.tool_id}`, t?.description);
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [added, toolLookup, searchTerm],
+  );
+
   const gotoLocalKeystore = (keyName?: string) => {
     try {
       window.dispatchEvent(new CustomEvent('kasal:navigate-config', { detail: { section: 'API Keys' } }));
@@ -339,11 +367,35 @@ export default function ToolsConfiguration({ mode = 'auto' }: { mode?: 'system' 
             <Typography variant="subtitle1">Teamspace Tools</Typography>
           </Stack>
 
+          <TextField
+            size="small"
+            fullWidth
+            placeholder="Search tools…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            sx={{ mb: 2 }}
+            inputProps={{ 'aria-label': 'search-teamspace-tools' }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" color="action" />
+                </InputAdornment>
+              ),
+              endAdornment: search ? (
+                <InputAdornment position="end">
+                  <IconButton size="small" aria-label="clear-search" onClick={() => setSearch('')}>
+                    <ClearIcon fontSize="small" />
+                  </IconButton>
+                </InputAdornment>
+              ) : undefined,
+            }}
+          />
+
           <Grid container spacing={2}>
             <Grid item xs={12} md={6}>
               <Typography variant="subtitle2" sx={{ mb: 1 }}>Available to Add</Typography>
               <Stack spacing={1}>
-                {available.map((t) => (
+                {filteredAvailable.map((t) => (
                   <Paper key={t.id} variant="outlined" sx={{ p: 1.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <Box>
                       <Typography variant="body2">{t.title}</Typography>
@@ -351,8 +403,12 @@ export default function ToolsConfiguration({ mode = 'auto' }: { mode?: 'system' 
                     <Button size="small" startIcon={<AddIcon />} onClick={() => void handleAdd(t.id)}>Add</Button>
                   </Paper>
                 ))}
-                {available.length === 0 && (
-                  <Typography variant="body2" color="text.secondary">All globally published tools are already added.</Typography>
+                {filteredAvailable.length === 0 && (
+                  <Typography variant="body2" color="text.secondary">
+                    {available.length === 0
+                      ? 'All globally published tools are already added.'
+                      : `No available tool matches “${search.trim()}”.`}
+                  </Typography>
                 )}
               </Stack>
             </Grid>
@@ -360,7 +416,7 @@ export default function ToolsConfiguration({ mode = 'auto' }: { mode?: 'system' 
             <Grid item xs={12} md={6}>
               <Typography variant="subtitle2" sx={{ mb: 1 }}>Added in this Teamspace</Typography>
               <Stack spacing={1}>
-                {added.map((m) => {
+                {filteredAdded.map((m) => {
                   const readiness = getReadiness(m);
                   return (
                     <Paper key={m.id} variant="outlined" sx={{ p: 1.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -383,8 +439,12 @@ export default function ToolsConfiguration({ mode = 'auto' }: { mode?: 'system' 
                     </Paper>
                   );
                 })}
-                {added.length === 0 && (
-                  <Typography variant="body2" color="text.secondary">No tools added to this teamspace yet.</Typography>
+                {filteredAdded.length === 0 && (
+                  <Typography variant="body2" color="text.secondary">
+                    {added.length === 0
+                      ? 'No tools added to this teamspace yet.'
+                      : `No added tool matches “${search.trim()}”.`}
+                  </Typography>
                 )}
               </Stack>
             </Grid>
