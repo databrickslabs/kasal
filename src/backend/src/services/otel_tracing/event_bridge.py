@@ -1167,6 +1167,40 @@ class OTelEventBridge:
                     except (TypeError, ValueError):
                         pass
 
+        # ── Why the model stopped ──
+        # The transport reports `finish_reason` on LLMCallCompletedEvent and
+        # deliberately judges nothing (see
+        # `tests/unit/core/llm/transport/test_finish_reason.py`: no repetition
+        # detector, no truncation exception — neither is what any other
+        # framework does). Reporting it is THIS layer's job, and until now
+        # nobody did it: the field reached the event and stopped there, so
+        # "length" — the endpoint stating the output allowance ran out
+        # mid-generation — was visible nowhere. Execution 74be1413 stored an
+        # answer cut off mid-URL and was marked COMPLETED.
+        #
+        # Persisted as a span attribute (the exporter captures every
+        # kasal.extra.* key) so the trace can show a truncated answer as
+        # truncated, and logged at WARNING because a fragment silently becoming
+        # the answer is the failure mode worth a line in the run's own log.
+        # Still not raised: a truncated answer is sometimes exactly what the
+        # caller wanted, and that decision is not this layer's to make.
+        finish_reason = getattr(event, "finish_reason", None)
+        if finish_reason:
+            span.set_attribute("kasal.extra.finish_reason", str(finish_reason))
+            if str(finish_reason) == "length":
+                completion_tokens = (
+                    usage.get("completion_tokens") if isinstance(usage, dict) else None
+                )
+                logger.warning(
+                    "[llm] answer TRUNCATED — the model hit its output limit "
+                    "(finish_reason=length, completion_tokens=%s, model=%s). "
+                    "What was stored is a fragment, not a finished answer. "
+                    "Raise max_output_tokens for this model, or damp the output "
+                    "with frequency_penalty if it is repeating.",
+                    completion_tokens,
+                    getattr(event, "model", None),
+                )
+
         # ── Agent execution fields ──
         task_prompt = getattr(event, "task_prompt", None)
         if task_prompt:

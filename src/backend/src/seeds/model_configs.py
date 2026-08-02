@@ -253,6 +253,27 @@ DEFAULT_MODELS = {
         # always gets to act first. A ~3B-active MoE producing a 20k-token prompt
         # AND an 8k answer was not a real working point anyway.
         "max_output_tokens": 4096,
+        # A damper on degenerate repetition, declared here rather than in
+        # `params.DEFAULTS` — which stays empty, because a count-proportional
+        # penalty cannot tell a runaway list from a markdown table that
+        # legitimately repeats its separator row.
+        #
+        # The failure it answers (execution 74be1413): an agent whose task
+        # demanded "8-12 news articles with headlines, dates, authors and links"
+        # was configured with NO search tool. With no data and a hard instruction
+        # to produce, the model continued the surface pattern instead —
+        # 254 URLs of which 98 were unique, generated until it hit
+        # max_output_tokens and was truncated mid-token. A user forgetting to
+        # attach a tool is ordinary, so the model this happens on carries the
+        # damper rather than every task having to be written defensively.
+        #
+        # 0.3 is the measured value from the study in `services/llm/params.py`
+        # (N=5/condition, live endpoint): a repeating 25-item list went from
+        # 17.7% duplicate lines and 5/5 truncations to 0% and 0/5. That same
+        # study is why this is NOT global — at 0.3 a 12-row markdown table grew
+        # from 681 to 9,679 characters. If this model starts producing bloated
+        # tables, this value is the first thing to lower.
+        "params": {"frequency_penalty": 0.3},
     },
     # --- Kimi (Moonshot AI — OpenAI-compatible API at https://api.moonshot.ai/v1,
     # override with KIMI_ENDPOINT; key = KIMI_API_KEY in the API Keys service) ---

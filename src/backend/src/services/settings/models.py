@@ -421,6 +421,25 @@ class ModelConfigService:
                         "max_output_tokens": model_config.max_output_tokens,
                         "extended_thinking": model_config.extended_thinking,
                         "enabled": model_config.enabled,
+                        # The declared sampling surface. `ModelConfig.params` /
+                        # `.unsupported_params` exist, the resolver
+                        # (`services/llm/params.py`) exists, and
+                        # `configure_kasal_llm` reads both off THIS dict — which
+                        # never carried them, so the entire feature was
+                        # unreachable: every row's declaration resolved to an
+                        # empty bag and every endpoint's refusal list to nothing.
+                        # Silent in both directions, because "no params" is
+                        # indistinguishable from "params not plumbed".
+                        # `getattr`, matching `_as_config` and the
+                        # `extended_thinking` line above: a row here is not
+                        # always a full ORM object (the seed-backed and cached
+                        # shapes are plainer), and a missing column must read as
+                        # "declared nothing", never raise on the way to a model
+                        # that would otherwise have worked.
+                        "params": getattr(model_config, "params", None),
+                        "unsupported_params": getattr(
+                            model_config, "unsupported_params", None
+                        ),
                     }
                 else:
                     # Fall back to utility function with normalized key (best-effort; may be None without a sync DB session)
@@ -510,6 +529,13 @@ class ModelConfigService:
             "max_output_tokens": m.max_output_tokens,
             "extended_thinking": getattr(m, "extended_thinking", False),
             "enabled": m.enabled,
+            # See get_model_config: these two columns are the declared sampling
+            # surface, and a dict that omits them silently disarms it. This
+            # builder serves the SUBSTITUTION path, which is how a Databricks
+            # model on a workspace-less deployment becomes the local vLLM one —
+            # exactly the model whose row carries a frequency_penalty.
+            "params": getattr(m, "params", None),
+            "unsupported_params": getattr(m, "unsupported_params", None),
         }
 
     async def _fallback_candidate_usable(self, provider: str) -> bool:

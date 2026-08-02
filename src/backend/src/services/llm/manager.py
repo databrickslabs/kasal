@@ -692,6 +692,29 @@ class LLMManager:
         provider = model_config_dict["provider"]
         model_name_value = model_config_dict["name"]
 
+        # The catalogue's own temperature, used when the caller states none.
+        #
+        # `ModelConfig.temperature` has been a seeded column on every model for
+        # as long as the catalogue has existed and NOTHING read it: the two
+        # blocks below both key off the `temperature` ARGUMENT, so a caller
+        # passing None sent no temperature at all and the endpoint's default
+        # (1.0 for an OpenAI-compatible server) silently won. `build_agent_llm`
+        # passes None whenever an agent spec omits `temperature` — the common
+        # case — so on crew and flow runs the column was dead data. The symptom
+        # is invisible by construction: the run works, at a sampling setting
+        # nobody chose, and the "Setting temperature ..." line below is simply
+        # absent from the log.
+        #
+        # An explicit argument still wins; this only fills the gap. Both
+        # `rejects_temperature` guards below still apply, so a model whose
+        # endpoint 400s on the parameter is unaffected by what its row says.
+        if temperature is None and model_config_dict.get("temperature") is not None:
+            temperature = model_config_dict["temperature"]
+            logger.info(
+                f"Using catalogue temperature {temperature} for model "
+                f"{model_name_value} (no override supplied)"
+            )
+
         # Name the model that will ACTUALLY serve. get_model_config may have
         # substituted one (a Databricks model on a deployment with no workspace
         # resolves to a local/hosted stand-in), and logging the REQUESTED name
