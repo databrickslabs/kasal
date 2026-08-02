@@ -816,6 +816,61 @@ class TestCrewServiceDeleteByGroup:
         mock_repository.delete_by_group.assert_called_once_with(crew_id, ["group-123"])
 
     @pytest.mark.asyncio
+    async def test_deleting_a_crew_withdraws_its_publication(
+        self, crew_service, mock_repository, sample_group_context
+    ):
+        """A publication outlives the crew it names unless this removes it, and
+        the registry is what the MCP tool list, the A2A card and the chat route
+        catalogue all read — one workspace was advertising nine MCP tools for
+        crews that had been deleted."""
+        crew_id = uuid4()
+        mock_repository.delete_by_group.return_value = True
+
+        with patch(
+            "src.services.publications.cleanup.withdraw_entities",
+            new=AsyncMock(return_value=1),
+        ) as withdraw:
+            await crew_service.delete_by_group(crew_id, sample_group_context)
+
+        assert withdraw.await_args.args[1] == "crew"
+        assert withdraw.await_args.args[2] == [crew_id]
+        assert withdraw.await_args.args[3] == ["group-123"]
+
+    @pytest.mark.asyncio
+    async def test_a_crew_that_was_not_deleted_is_not_unpublished(
+        self, crew_service, mock_repository, sample_group_context
+    ):
+        """Deleting someone else's crew returns False and must not reach into
+        the registry: the publication belongs to a crew that still exists."""
+        mock_repository.delete_by_group.return_value = False
+
+        with patch(
+            "src.services.publications.cleanup.withdraw_entities",
+            new=AsyncMock(return_value=0),
+        ) as withdraw:
+            result = await crew_service.delete_by_group(uuid4(), sample_group_context)
+
+        assert result is False
+        withdraw.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_failed_unpublish_does_not_fail_the_deletion(
+        self, crew_service, mock_repository, sample_group_context
+    ):
+        """The crew IS gone by the time this runs; reporting a deletion that
+        happened as a failure would be worse than a stale registry row, which
+        the catalogue drops on read anyway."""
+        mock_repository.delete_by_group.return_value = True
+
+        with patch(
+            "src.services.publications.cleanup.withdraw_entities",
+            new=AsyncMock(side_effect=RuntimeError("registry down")),
+        ):
+            result = await crew_service.delete_by_group(uuid4(), sample_group_context)
+
+        assert result is True
+
+    @pytest.mark.asyncio
     async def test_delete_by_group_empty_context(self, crew_service):
         """Test delete by group with empty group context."""
         crew_id = uuid4()

@@ -104,6 +104,80 @@ async def test_force_delete_flow_with_group_check_uuid_object(session_factory):
 
 
 @pytest.mark.asyncio
+async def test_deleting_a_flow_withdraws_its_publication(session_factory):
+    """A publication outlives the flow it names unless the delete removes it.
+
+    The registry is what MCP's tool list, the A2A card and the chat route
+    catalogue all read, so a surviving row leaves every surface advertising a
+    capability that resolves to nothing.
+    """
+    from src.models.crew_publication import CrewPublication
+
+    flow_id = uuid.uuid4()
+    async with session_factory() as s:
+        s.add(Flow(id=flow_id, name="published", group_id="g1"))
+        s.add(
+            CrewPublication(
+                entity_type="flow",
+                entity_id=str(flow_id),
+                external_name="swiss_news",
+                description="Swiss news, daily.",
+                protocols=["mcp", "chat"],
+                group_id="g1",
+            )
+        )
+        await s.commit()
+
+    async with session_factory() as s:
+        svc = FlowService(session=s)
+        assert (
+            await svc.force_delete_flow_with_executions_with_group_check(
+                flow_id, _Ctx(group_ids=["g1"])
+            )
+            is True
+        )
+        await s.commit()
+
+    async with session_factory() as s:
+        remaining = (
+            await s.execute(text("SELECT COUNT(*) FROM publications"))
+        ).scalar()
+        assert remaining == 0
+
+
+@pytest.mark.asyncio
+async def test_the_ungrouped_force_delete_also_withdraws(session_factory):
+    """``delete_all_flows_for_group`` loops through the UNGROUPED variant, so a
+    cleanup living only on the group-checked twin never runs for a bulk delete."""
+    from src.models.crew_publication import CrewPublication
+
+    flow_id = uuid.uuid4()
+    async with session_factory() as s:
+        s.add(Flow(id=flow_id, name="published", group_id="g1"))
+        s.add(
+            CrewPublication(
+                entity_type="flow",
+                entity_id=str(flow_id),
+                external_name="swiss_news",
+                description="Swiss news, daily.",
+                protocols=["mcp"],
+                group_id="g1",
+            )
+        )
+        await s.commit()
+
+    async with session_factory() as s:
+        assert await FlowService(session=s).force_delete_flow_with_executions(flow_id)
+        await s.commit()
+
+    async with session_factory() as s:
+        remaining = (
+            await s.execute(text("SELECT COUNT(*) FROM publications"))
+        ).scalar()
+        assert remaining == 0
+
+
+@pytest.mark.asyncio
 async def test_force_delete_accepts_string_flow_id(session_factory):
     """A string flow_id is coerced and matched against the stored hex form."""
     flow_id = uuid.uuid4()

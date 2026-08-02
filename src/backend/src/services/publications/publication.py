@@ -28,10 +28,13 @@ attribution on internal traffic, polluting the external audit trail.
 """
 
 import logging
-from typing import TYPE_CHECKING, Any, List, Optional, Set, Tuple
+import uuid
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.exceptions import ConflictError
 from src.models.crew_publication import Publication
 from src.repositories.crew_publication_repository import PublicationRepository
 from src.schemas.crew_publication import (
@@ -47,6 +50,79 @@ if TYPE_CHECKING:  # pragma: no cover
     from src.services.external.identity import ExternalCaller
 
 logger = logging.getLogger(__name__)
+
+
+def _teamspace_suffix(group_id: Any) -> str:
+    """A group id, as it can appear inside a tool name.
+
+    MCP tool names and A2A skill ids are addressed by external clients, so they
+    are restricted to characters those clients and their agents handle without
+    quoting: ``bi-specialist`` becomes ``bi_specialist``.
+    """
+    cleaned = "".join(
+        char if char.isalnum() else "_" for char in str(group_id or "")
+    ).strip("_")
+    return cleaned.lower() or "other"
+
+
+def _publication_order(row: Any) -> tuple:
+    """Stable ordering for deciding which publication keeps an unqualified name.
+
+    Oldest first, id as the tiebreak. Deterministic on purpose: the name a
+    client pins must not depend on row order coming back from the database, or a
+    tool would change identity between two reads that saw the same data.
+    """
+    created = getattr(row, "created_at", None)
+    return (created is None, created or datetime.min, getattr(row, "id", 0) or 0)
+
+
+def display_names(rows: List[Any]) -> Dict[int, str]:
+    """``row id -> the name this publication is addressed by``.
+
+    A caller identified only by email sees every teamspace they belong to, and
+    the name uniqueness constraint is per TEAMSPACE — so two teamspaces can each
+    publish ``quiz`` and the merged list has two tools with one name. A client
+    cannot tell them apart, and resolution would pick whichever row the database
+    returned first.
+
+    So the first publication (oldest) keeps the plain name and the rest carry
+    their teamspace: ``quiz`` and ``quiz__bi_specialist``. Both stay callable,
+    which is the point — dropping the loser would make one teamspace's
+    capability silently unreachable.
+
+    ONE function, used by the listing and by resolution, because the two
+    disagreeing is precisely how a caller ends up running the other teamspace's
+    crew.
+    """
+    by_name: Dict[str, List[Any]] = {}
+    for row in rows:
+        by_name.setdefault(str(row.external_name), []).append(row)
+
+    names: Dict[int, str] = {}
+    for name, group in by_name.items():
+        if len(group) == 1:
+            names[group[0].id] = name
+            continue
+        for index, row in enumerate(sorted(group, key=_publication_order)):
+            names[row.id] = (
+                name if index == 0 else f"{name}__{_teamspace_suffix(row.group_id)}"
+            )
+    return names
+
+
+def _checkable(value: Any) -> bool:
+    """Whether this entity id can be looked up at all.
+
+    Both repositories resolve ids as UUIDs, so an id that is not one can never
+    be FOUND — and treating "not found" as "does not exist" would silently drop
+    a capability on a question that was never answerable. Anything non-UUID is
+    kept and left to fail loudly at invocation, which is what it did before.
+    """
+    try:
+        uuid.UUID(str(value))
+    except (ValueError, TypeError, AttributeError):
+        return False
+    return True
 
 
 def _normalize_id(value: Any) -> str:
@@ -80,38 +156,19 @@ class PublicationService:
         An empty ``group_ids`` returns ``[]``, not everything — see the
         repository, where that guarantee lives.
         """
-        rows = await self.repository.list_published_for_group(
-            group_ids=group_ids, protocol=protocol
-        )
-        existing, conversational = await self._flow_facts(rows)
+        rows = await self._live_rows(group_ids, protocol)
+        _, conversational = await self._entity_facts(rows)
+        names = display_names(rows)
 
         capabilities: List[PublishedCapability] = []
         for row in rows:
             key = _normalize_id(row.entity_id)
-            if (
-                row.entity_type == "flow"
-                and existing is not None
-                and key not in existing
-            ):
-                # The flow behind this publication is gone — deleted, or lost in
-                # a restore. Advertising it lets the router SPEND a turn picking
-                # something that cannot run: it resolves to nothing and the user
-                # gets "nothing matches" for a capability they can see listed.
-                # Dropped from the catalogue, not unpublished: the publication
-                # row stays visible in the publish dialog so it can be fixed or
-                # removed deliberately.
-                logger.warning(
-                    "[publications] %r points at a flow that no longer exists "
-                    "(%s); excluded from the catalogue",
-                    row.external_name,
-                    row.entity_id,
-                )
-                continue
             capabilities.append(
                 PublishedCapability(
                     entity_type=row.entity_type,
                     entity_id=row.entity_id,
-                    name=row.external_name,
+                    name=names.get(row.id, row.external_name),
+                    teamspace=row.group_id,
                     description=row.description,
                     input_schema=row.input_schema,
                     conversational=key in conversational,
@@ -119,38 +176,118 @@ class PublicationService:
             )
         return capabilities
 
-    async def _flow_facts(self, rows: List[Any]) -> Tuple[Optional[Set[str]], Set[str]]:
-        """``(flows that exist, flows that hold a conversation)``, normalized.
+    async def _entity_exists(self, row: Any) -> bool:
+        """Whether the crew or flow behind one publication is still there.
 
-        One query for all of them, not one per row: this read renders the MCP
-        tool list and the A2A card as well as the chat catalogue, and a
+        Reuses the catalogue's own lookup so "does it exist" is answered one
+        way. True whenever the question cannot be answered — a failed read or a
+        non-UUID id — because refusing on a lookup that did not work would take
+        a live capability offline.
+        """
+        existing, _ = await self._entity_facts([row])
+        live = existing.get(row.entity_type)
+        if live is None or not _checkable(row.entity_id):
+            return True
+        return _normalize_id(row.entity_id) in live
+
+    async def _live_rows(self, group_ids: List[str], protocol: str) -> List[Any]:
+        """Publications for these groups, minus the ones whose entity is gone.
+
+        The single row set both the catalogue and resolution work from. They
+        used to filter separately, and a name dropped from the list stayed
+        resolvable — an MCP client's cached tool then ran a crew that no longer
+        existed and failed deep in the engine instead of answering "unknown".
+        """
+        rows = await self.repository.list_published_for_group(
+            group_ids=group_ids, protocol=protocol
+        )
+        existing, _ = await self._entity_facts(rows)
+
+        live: List[Any] = []
+        for row in rows:
+            known = existing.get(row.entity_type)
+            if (
+                known is not None
+                and _checkable(row.entity_id)
+                and _normalize_id(row.entity_id) not in known
+            ):
+                # The crew or flow behind this publication is gone — deleted, or
+                # lost in a restore. Advertising it hands every surface a name
+                # that cannot run: the chat router SPENDS a turn picking it and
+                # the user is told nothing matches, and an MCP client is offered
+                # a tool whose only possible answer is "no longer exists".
+                # Dropped from the catalogue, not unpublished: the publication
+                # row stays visible in the publish dialog so it can be fixed or
+                # removed deliberately.
+                logger.warning(
+                    "[publications] %r points at a %s that no longer exists "
+                    "(%s); excluded from the catalogue",
+                    row.external_name,
+                    row.entity_type,
+                    row.entity_id,
+                )
+                continue
+            live.append(row)
+        return live
+
+    async def _entity_facts(
+        self, rows: List[Any]
+    ) -> Tuple[Dict[str, Optional[Set[str]]], Set[str]]:
+        """``({entity_type: the ones that exist}, flows that hold a conversation)``.
+
+        Both kinds are checked, and that symmetry is the point. Only flows were
+        looked up here, so deleting a CREW left its publication advertising a
+        tool whose only possible answer is "no longer exists" — one workspace
+        was offering nine of them over MCP. Nothing removes a publication when
+        its entity is deleted, so the catalogue is the place that has to know.
+
+        One query per kind, not one per row: this read renders the MCP tool
+        list and the A2A card as well as the chat catalogue, and a
         per-capability lookup would make every one of those N+1.
 
-        The first element is None when the lookup FAILED, which is different
-        from "none of them exist" — a failed read must not empty the catalogue.
-        Callers skip the existence filter on None and keep every capability, the
-        behaviour before this check existed.
+        A value is None when that lookup FAILED, which is different from "none
+        of them exist" — a failed read must not empty the catalogue, so the
+        caller skips the filter for that kind and keeps every capability. An
+        entity type with no entry (a future kind) is likewise not filtered.
         """
+        existing: Dict[str, Optional[Set[str]]] = {}
+
+        crew_ids = [str(row.entity_id) for row in rows if row.entity_type == "crew"]
+        if crew_ids:
+            try:
+                from src.repositories.crew_repository import CrewRepository
+
+                crews = await CrewRepository(self.session).find_by_ids(crew_ids)
+                existing["crew"] = {_normalize_id(crew.id) for crew in crews}
+            except Exception as exc:  # noqa: BLE001 — a catalogue must render
+                logger.debug("[publications] could not read crews: %s", exc)
+                existing["crew"] = None
+        else:
+            existing["crew"] = set()
+
+        conversational: Set[str] = set()
         flow_ids = [str(row.entity_id) for row in rows if row.entity_type == "flow"]
         if not flow_ids:
-            return set(), set()
+            existing["flow"] = set()
+            return existing, conversational
         try:
             from src.repositories.flow_repository import FlowRepository
 
             flows = await FlowRepository(self.session).find_by_ids(flow_ids)
         except Exception as exc:  # noqa: BLE001 — a catalogue must still render
             logger.debug("[publications] could not read flows: %s", exc)
-            return None, set()
+            existing["flow"] = None
+            return existing, conversational
 
-        existing: Set[str] = set()
-        conversational: Set[str] = set()
+        live: Set[str] = set()
         for flow in flows:
             key = _normalize_id(flow.id)
-            existing.add(key)
+            live.add(key)
             config = getattr(flow, "flow_config", None) or {}
             state = config.get("state") if isinstance(config, dict) else None
             if isinstance(state, dict) and state.get("conversational"):
                 conversational.add(key)
+        existing["flow"] = live
         return existing, conversational
 
     async def resolve_capability_for_group(
@@ -166,19 +303,37 @@ class PublicationService:
         being on the A2A card must not make it invocable over MCP, and being
         chat-routable must not make it either.
 
+        And None when the crew or flow behind it no longer exists. That has to
+        match what the catalogue shows or the two disagree, and the disagreement
+        is reachable: an MCP client caches the tool list from when it connected,
+        so a name dropped from the catalogue is still callable from that cache.
+        Resolving it produced a run that failed deep in the engine with
+        "Published crew <uuid> no longer exists"; refusing here makes it the same
+        plain "unknown" every other unavailable name gets.
+
+        The name resolved is the name the caller was SHOWN, which for a caller in
+        several teamspaces may carry the teamspace (``quiz__bi_specialist``).
+        Resolution walks the same ``display_names`` mapping the listing does, so
+        a qualified name lands on exactly the publication that was advertised
+        under it — never on the other teamspace's crew of the same name.
+
         Every surface resolves through here. Reaching past it to
         ``find_by_external_name``, or resolving a name through the catalogue
         instead, creates a second visibility semantic where an unpublished crew
         quietly becomes invocable.
         """
-        row = await self.repository.find_by_external_name(
-            external_name=external_name, group_ids=group_ids
-        )
+        rows = await self._live_rows(group_ids, protocol)
+        names = display_names(rows)
+        by_display = {names.get(row.id, row.external_name): row for row in rows}
+
+        row = by_display.get(external_name)
         if row is None:
-            return None
-        if protocol not in (row.protocols or []):
+            # Either genuinely unknown, or published to another protocol. The
+            # distinction is worth a log line and nothing more: telling the
+            # caller which it was makes the surface an oracle for names it may
+            # not see.
             logger.info(
-                "[publication] %s is not published over %s; refusing",
+                "[publication] %r is not a capability this caller may run over %s",
                 external_name,
                 protocol,
             )
@@ -206,6 +361,61 @@ class PublicationService:
             caller.group_ids, caller.protocol, external_name
         )
 
+    async def _claim_name(
+        self,
+        external_name: str,
+        entity_type: str,
+        entity_id: str,
+        group_context: GroupContext,
+    ) -> None:
+        """Make ``external_name`` available to this entity, or refuse.
+
+        ``(external_name, group_id)`` is unique, so publishing under a name
+        another entity holds hits the constraint. That surfaced as a raw
+        ``IntegrityError`` in the log and a 404 "Crew is not published" in the
+        UI — an error about a collision reported as if the publish had simply
+        not happened, with nothing saying which name was taken.
+
+        A DANGLING holder is taken over rather than refused. A publication whose
+        crew or flow was deleted is not a live claim on anything: it is invisible
+        in the catalogue and refuses to resolve, so leaving it squatting the name
+        would make a deleted flow permanently block a crew from using its name,
+        with no way to find out why.
+
+        A live holder is a real conflict and raises, because the alternative is
+        silently retargeting a name external callers already use.
+        """
+        holder = await self.repository.find_by_external_name(
+            external_name=external_name, group_ids=group_context.group_ids or []
+        )
+        if holder is None:
+            return
+        if holder.entity_type == entity_type and str(holder.entity_id) == str(
+            entity_id
+        ):
+            return
+
+        if await self._entity_exists(holder):
+            raise ConflictError(
+                f"The name {external_name!r} is already published to another "
+                f"{holder.entity_type} in this workspace. Choose a different name, "
+                "or unpublish that one first."
+            )
+
+        logger.warning(
+            "[publications] %r was held by a %s that no longer exists (%s); "
+            "reclaiming the name",
+            external_name,
+            holder.entity_type,
+            holder.entity_id,
+        )
+        await self.repository.delete_by_entity(
+            entity_type=holder.entity_type,
+            entity_id=holder.entity_id,
+            group_ids=group_context.group_ids or [],
+        )
+        await self.session.flush()
+
     async def publish(
         self,
         entity_id: str,
@@ -213,11 +423,11 @@ class PublicationService:
         group_context: GroupContext,
         entity_type: str = "crew",
     ) -> Publication:
-        """Publish a crew, or update its publication if it already has one.
+        """Publish a crew or flow, or update its publication if it already has one.
 
-        Idempotent by crew: publishing twice adjusts the existing record rather
-        than creating a second one, which the unique constraint would reject
-        anyway.
+        Idempotent by entity: publishing twice adjusts the existing record
+        rather than creating a second one, which the unique constraint would
+        reject anyway.
         """
         group_id = group_context.primary_group_id
         if not group_id:
@@ -229,12 +439,20 @@ class PublicationService:
             group_ids=group_context.group_ids or [],
         )
         if existing is not None:
+            await self._claim_name(
+                data.external_name, entity_type, entity_id, group_context
+            )
             existing.external_name = data.external_name
             existing.description = data.description
             existing.protocols = list(data.protocols)
             existing.input_schema = data.input_schema
             await self.session.flush()
+            await self._announce(group_context)
             return existing
+
+        await self._claim_name(
+            data.external_name, entity_type, entity_id, group_context
+        )
 
         row = Publication(
             entity_type=entity_type,
@@ -256,7 +474,20 @@ class PublicationService:
             data.protocols,
             group_id,
         )
+        await self._announce(group_context)
         return row
+
+    async def _announce(self, group_context: GroupContext) -> None:
+        """Tell the surfaces the published set moved.
+
+        An MCP client's tool list is a snapshot from when it connected, so
+        without this a capability published now is invisible to it until it
+        reconnects — which is the whole reason a generic "list them at runtime"
+        tool used to be necessary.
+        """
+        from src.services.publications import signals
+
+        await signals.catalogue_changed(list(group_context.group_ids or []) or None)
 
     async def update(
         self,
@@ -275,6 +506,11 @@ class PublicationService:
             return None
 
         if data.external_name is not None:
+            # A rename can collide exactly as a publish can, and hits the same
+            # constraint.
+            await self._claim_name(
+                data.external_name, entity_type, entity_id, group_context
+            )
             row.external_name = data.external_name
         if data.description is not None:
             row.description = data.description
@@ -284,6 +520,7 @@ class PublicationService:
             row.input_schema = data.input_schema
 
         await self.session.flush()
+        await self._announce(group_context)
         return row
 
     async def unpublish(
@@ -300,4 +537,5 @@ class PublicationService:
         )
         if removed:
             logger.info("[external] unpublished %s %s", entity_type, entity_id)
+            await self._announce(group_context)
         return removed > 0

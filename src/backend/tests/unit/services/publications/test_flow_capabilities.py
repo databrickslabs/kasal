@@ -123,12 +123,14 @@ class TestDanglingCapabilities:
         assert names == ["swiss_news"]
 
     @pytest.mark.asyncio
-    async def test_a_crew_publication_is_never_dropped_by_this_check(self, session):
-        # The check reads flows. A crew must not be excluded because it was not
-        # found in a table it was never in.
+    async def test_a_crew_publication_survives_a_failed_crew_lookup(self, session):
+        # Crews are existence-checked too (see test_crew_capabilities.py), but a
+        # lookup that FAILS is not the same as "it does not exist" — here the
+        # crews table is absent from the fixture entirely. A read error must
+        # leave the catalogue alone rather than empty it.
         service = PublicationService(session)
         await service.publish(
-            entity_id="crew-1",
+            entity_id=str(uuid.uuid4()),
             data=CrewPublicationCreate(
                 external_name="risk_review",
                 description="Runs the review.",

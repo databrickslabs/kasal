@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Union
 from uuid import UUID
 
 from sqlalchemy import delete, select
@@ -72,6 +72,31 @@ class CrewRepository(BaseRepository[Crew]):
         query = select(self.model).where(*conditions)
         result = await self.session.execute(query)
         return result.scalars().first()
+
+    async def find_by_ids(self, crew_ids: List[Union[UUID, str]]) -> List[Crew]:
+        """Crews for a set of ids, in one query.
+
+        Mirrors ``FlowRepository.find_by_ids``, and exists for the same caller:
+        the publication catalogue holds ids from another table and must not
+        issue one read per published capability. Ids that are not valid UUIDs
+        are skipped rather than raising — a bad value should narrow the result,
+        not fail the read that renders every external surface.
+        """
+        parsed: List[UUID] = []
+        for crew_id in crew_ids:
+            if isinstance(crew_id, UUID):
+                parsed.append(crew_id)
+                continue
+            try:
+                parsed.append(UUID(str(crew_id)))
+            except (ValueError, TypeError):
+                continue
+        if not parsed:
+            return []
+
+        query = select(self.model).where(self.model.id.in_(parsed))
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
 
     async def find_by_group(self, group_ids: List[str]) -> List[Crew]:
         """

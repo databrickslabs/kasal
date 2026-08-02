@@ -220,7 +220,10 @@ class CrewService:
         Returns:
             True if crew was deleted, False if not found
         """
-        return await self.repository.delete(id)
+        deleted = await self.repository.delete(id)
+        if deleted:
+            await self._withdraw_publications(entity_ids=[id])
+        return deleted
 
     async def delete_all(self) -> None:
         """
@@ -230,6 +233,37 @@ class CrewService:
             None
         """
         await self.repository.delete_all()
+        await self._withdraw_publications()
+
+    async def _withdraw_publications(
+        self,
+        entity_ids: Optional[List[UUID]] = None,
+        group_ids: Optional[List[str]] = None,
+    ) -> None:
+        """Take deleted crews off every external surface.
+
+        A publication outlives the crew it names unless this removes it, and the
+        registry is what the MCP tool list, the A2A card and the chat route
+        catalogue all read — one workspace was advertising nine MCP tools for
+        crews that no longer existed. A dangling row also holds its external
+        name, so the deleted crew's name could never be reused.
+
+        Best-effort: the crews ARE gone by the time this runs, and reporting a
+        deletion that happened as a failure would be the worse trade. The
+        catalogue also drops dangling rows on read, so a miss here costs a stale
+        row in the publish dialog, not a phantom capability.
+        """
+        from src.services.publications import cleanup
+
+        try:
+            if entity_ids is None:
+                await cleanup.withdraw_all(self.session, "crew", group_ids)
+            else:
+                await cleanup.withdraw_entities(
+                    self.session, "crew", entity_ids, group_ids
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not unpublish deleted crew(s): %s", exc)
 
     # Group-aware methods
     async def create_with_group(
@@ -422,7 +456,12 @@ class CrewService:
         if not primary_group_id:
             return False
 
-        return await self.repository.delete_by_group(id, [primary_group_id])
+        deleted = await self.repository.delete_by_group(id, [primary_group_id])
+        if deleted:
+            await self._withdraw_publications(
+                entity_ids=[id], group_ids=[primary_group_id]
+            )
+        return deleted
 
     async def delete_all_by_group(self, group_context: GroupContext) -> None:
         """
@@ -436,3 +475,4 @@ class CrewService:
             return
 
         await self.repository.delete_all_by_group([primary_group_id])
+        await self._withdraw_publications(group_ids=[primary_group_id])

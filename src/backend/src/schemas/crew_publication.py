@@ -137,6 +137,11 @@ class PublishedCapability(BaseModel):
     entity_id: str
     name: str
     description: str
+    #: Which teamspace published it. A caller identified only by email sees every
+    #: teamspace they belong to, so "which one does this tool belong to" is a
+    #: question the surfaces have to be able to answer — and it is what
+    #: disambiguates two teamspaces publishing the same name.
+    teamspace: Optional[str] = None
     input_schema: Optional[Dict[str, Any]] = None
     #: Whether this capability holds a CONVERSATION rather than answering once.
     #: Only a flow can, and only one that declares `state.conversational`. The

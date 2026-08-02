@@ -463,6 +463,11 @@ class FlowService:
                     f"Deleted {deleted_count} flow executions for flow {flow_id}"
                 )
 
+            # Off every external surface before the row goes. This variant is
+            # what `delete_all_flows_for_group` loops through, so the cleanup has
+            # to live here too and not only on the group-checked twin.
+            await self._withdraw_publication(flow_id)
+
             # Delete the flow itself
             flow_delete_query = text(
                 "DELETE FROM flows WHERE id = :flow_id"
@@ -481,6 +486,28 @@ class FlowService:
             raise KasalError(
                 detail=f"Error force deleting flow with executions: {str(e)}"
             )
+
+    async def _withdraw_publication(
+        self, flow_id: uuid.UUID, group_context=None
+    ) -> None:
+        """Unpublish a flow that is about to be deleted.
+
+        A publication outlives the flow it names unless this removes it, and the
+        registry is what the MCP tool list, the A2A card and the chat route
+        catalogue all read. A dangling row also HOLDS its external name, so a
+        deleted flow could permanently block a crew from publishing under it.
+
+        Best-effort: the catalogue drops dangling rows on read anyway, so
+        failing the deletion over one would trade a stale row in the publish
+        dialog for a flow the user cannot remove.
+        """
+        from src.services.publications import cleanup
+
+        group_ids = getattr(group_context, "group_ids", None) or None
+        try:
+            await cleanup.withdraw_entity(self.session, "flow", flow_id, group_ids)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Could not unpublish deleted flow {flow_id}: {exc}")
 
     async def force_delete_flow_with_executions_with_group_check(
         self, flow_id: uuid.UUID, group_context
@@ -559,6 +586,13 @@ class FlowService:
                 WHERE flow_id = :flow_id AND execution_type = 'flow'
             """).bindparams(flow_id_param)
             await self.session.execute(execution_delete_query, {"flow_id": flow_id})
+
+            # Take it off every external surface before the row goes. A
+            # publication outlives the flow it names unless something removes
+            # it, and the registry is what MCP's tool list, the A2A card and the
+            # chat route catalogue all read — one workspace was left advertising
+            # eight flows that no longer existed.
+            await self._withdraw_publication(flow_id, group_context)
 
             # Delete the flow itself
             flow_delete_query = text(
@@ -709,6 +743,7 @@ class FlowService:
                 detail=f"Cannot delete flow with {execution_count} execution records. Use force delete instead."
             )
 
+        await self._withdraw_publication(flow_id)
         await repository.delete(flow_id)
         logger.info(f"Successfully deleted flow {flow_id}")
         return True
@@ -720,6 +755,12 @@ class FlowService:
         """
         repository = FlowRepository(self.session)
         await repository.delete_all()
+        try:
+            from src.services.publications import cleanup
+
+            await cleanup.withdraw_all(self.session, "flow")
+        except Exception as exc:  # noqa: BLE001 — the flows are already gone
+            logger.warning(f"Could not unpublish deleted flows: {exc}")
         logger.info("Deleted all flows")
 
     async def validate_flow_data(self, flow_in: FlowCreate) -> Dict[str, Any]:

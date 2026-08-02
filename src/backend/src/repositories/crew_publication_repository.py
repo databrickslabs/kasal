@@ -96,6 +96,38 @@ class PublicationRepository(BaseRepository[Publication]):
         result = await self.session.execute(query)
         return result.rowcount or 0
 
+    async def delete_publications(
+        self,
+        entity_type: str,
+        entity_ids: Optional[List[str]] = None,
+        group_ids: Optional[List[str]] = None,
+    ) -> int:
+        """Remove publications for a kind of entity. Returns rows removed.
+
+        The write that keeps the registry from outliving what it names, called
+        from every crew and flow delete path. ``None`` on either filter means
+        "do not narrow by it" — which is why this is a DELETE and not a read:
+        the no-filter rule at the top of this class exists because an unfiltered
+        READ leaks other tenants' capability names, and a delete cannot. Its
+        callers are the unscoped ``delete_all`` paths, which are already
+        removing every crew or flow in the database; leaving their publications
+        behind is what created the dangling rows this exists to prevent.
+
+        A group-scoped caller still passes ``group_ids``, and should.
+        """
+        conditions = [self.model.entity_type == entity_type]
+        if entity_ids is not None:
+            if not entity_ids:
+                return 0
+            conditions.append(self.model.entity_id.in_(entity_ids))
+        if group_ids is not None:
+            if not group_ids:
+                return 0
+            conditions.append(self.model.group_id.in_(group_ids))
+
+        result = await self.session.execute(delete(self.model).where(*conditions))
+        return result.rowcount or 0
+
 
 #: Named CrewPublicationRepository while only crews were publishable.
 CrewPublicationRepository = PublicationRepository
