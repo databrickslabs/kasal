@@ -743,7 +743,19 @@ class LLMManager:
                 provider, group_id=group_id
             )
             api_base = os.getenv("DEEPSEEK_ENDPOINT", "https://api.deepseek.com")
-            prefixed_model = f"deepseek/{model_name_value}"
+            # No prefix. DeepSeek's endpoint is OpenAI-compatible and is reached
+            # by api_base, so the model field must carry the bare name — this
+            # branch sent "deepseek/deepseek-v4-flash" and the API rejected every
+            # call with a 400: "The supported API model names are deepseek-v4-pro
+            # or deepseek-v4-flash, but you passed deepseek/deepseek-v4-flash."
+            #
+            # The prefix was for litellm's router, which is not on this path.
+            # It survived because LLM._split_provider_prefix only strips a prefix
+            # it recognises AND only when that prefix is "openai" — "deepseek" is
+            # in neither set, so the name travelled to the wire intact. Nothing
+            # failed loudly at build time; every DeepSeek model simply looked
+            # like it no longer existed.
+            prefixed_model = model_name_value
         elif provider == ModelProvider.OPENAI:
             api_key = await ApiKeysService.get_provider_api_key(
                 provider, group_id=group_id
@@ -939,12 +951,19 @@ class LLMManager:
             # Self-hosted vLLM server — OpenAI-compatible endpoint
             api_base = os.getenv("VLLM_BASE_URL", "http://localhost:8081/v1")
             api_key = os.getenv("VLLM_API_KEY", "vllm")
-            prefixed_model = f"openai/{model_name_value}"
-            # A litellm.register_model call used to sit here (and in the Kimi
-            # branch) to claim supports_function_calling=True for a model litellm
-            # has no registry entry for. The engine asks its own BaseLLM, which
-            # returns True unconditionally and never consults litellm's registry,
-            # so registering had no effect on whether tools are sent. Removed.
+            # No prefix, exactly like the OpenAI branch above. This used to build
+            # "openai/<model>" so litellm would route it, and the register_model
+            # call that went with it is already gone (the transport asks its own
+            # BaseLLM, which reports every model tool-capable and never consults
+            # litellm's registry). What the prefix still did was mislabel the
+            # model: LLM._split_provider_prefix sees a known "openai/" prefix,
+            # sets provider="openai", and strips it back off — so a self-hosted
+            # Qwen reported itself as an OpenAI model in every log and repr, and
+            # the wire value was identical either way. Dropping it leaves
+            # provider unset, which is what every other OpenAI-protocol endpoint
+            # here does; the one consumer (instructor._extract_provider) already
+            # defaults to "openai" for the protocol.
+            prefixed_model = model_name_value
         elif provider == ModelProvider.KIMI:
             # Kimi (Moonshot AI) — OpenAI-compatible endpoint. litellm 1.74.x has no
             # native "moonshot" provider, so route via the openai/ prefix with an
@@ -1029,10 +1048,12 @@ class LLMManager:
             )
         # NOTE for Kimi: `tool_choice` must likewise never be forced — K2.7 cannot
         # disable thinking, and a forced tool_choice 400s ("tool_choice 'specified'
-        # is incompatible with thinking enabled"). Nothing sets tool_choice for a
-        # Kimi model today (only VLLMFunctionCallingLLM and the Databricks codex
-        # handler do, neither of which serves Kimi), so there is nothing to strip
-        # here — but any future forced-tool path must exclude Kimi.
+        # is incompatible with thinking enabled"). Nothing FORCES tool_choice for
+        # any model now — the two handlers that did (vLLM's opening turn, the
+        # codex counter) are gone. The one handler that still names a value sends
+        # "auto", it serves self-hosted vLLM only, and Kimi has its own branch
+        # returning a plain LLM, so nothing reaches Kimi to strip. Any future
+        # forced-tool path must still exclude it.
 
         # Add API key and base URL if available
         if api_key:
@@ -1070,14 +1091,15 @@ class LLMManager:
                 unsupported=model_config_dict.get("unsupported_params"),
             )
         )
-
         logger.info(f"Creating LLM with model: {prefixed_model}")
 
-        # Self-hosted vLLM: a subclass that pins tool_choice on the opening turn and
-        # clamps max_tokens to the window (see VLLMFunctionCallingLLM). Native
-        # function-calling itself needs no help from us — the engine reports every
-        # model as tool-capable. VLLM_SUPPORTS_TOOLS=false opts out of the forced
-        # opening turn (e.g. an mlx_lm.server without a tool parser).
+        # Self-hosted vLLM: a subclass that states tool_choice explicitly rather
+        # than inheriting the endpoint's default (see handlers/vllm.py). It used
+        # to pin "required" on the opening turn; it now sends "auto", overridable
+        # per deployment with VLLM_TOOL_CHOICE. Native function calling needs no
+        # help from us — the transport reports every model as tool-capable — and
+        # the max_tokens clamp that also lived there is now
+        # OpenAICompletion._clamp_output_budget, protecting every provider.
         if (
             provider == ModelProvider.VLLM
             and os.getenv("VLLM_SUPPORTS_TOOLS", "true").lower() == "true"

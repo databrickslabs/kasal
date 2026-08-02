@@ -427,6 +427,17 @@ class TestConfigureCrewaiLlm:
 
     @pytest.mark.asyncio
     async def test_deepseek_provider(self):
+        """The model name goes out BARE.
+
+        This asserted ``deepseek/deepseek-chat`` and so locked in a total
+        outage: DeepSeek answered every single call with a 400 — "The supported
+        API model names are deepseek-v4-pro or deepseek-v4-flash, but you passed
+        deepseek/deepseek-v4-flash." The prefix was for litellm's router, which
+        is not on this path, and ``LLM._split_provider_prefix`` strips a prefix
+        only when it recognises it AND only when it is "openai", so "deepseek/"
+        travelled to the wire intact. Nothing failed at build time; the models
+        just looked like they had been discontinued.
+        """
         config = _make_model_config("deepseek-chat", "deepseek")
         p_session, p_service = _patch_session_and_config(config)
         with (
@@ -444,7 +455,7 @@ class TestConfigureCrewaiLlm:
             )
             MockLLM.assert_called_once()
             call_kwargs = MockLLM.call_args[1]
-            assert call_kwargs["model"] == "deepseek/deepseek-chat"
+            assert call_kwargs["model"] == "deepseek-chat"
             assert call_kwargs["api_key"] == "ds-key"
             assert call_kwargs["temperature"] == 0.5
 
