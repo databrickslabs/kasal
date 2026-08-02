@@ -34,7 +34,6 @@ from .budget import (
 from .constants import CONTEXT_WINDOW_USAGE_RATIO, LLM_CONTEXT_WINDOW_SIZES
 from .exceptions import (
     LLMContextLengthExceededError,
-    LLMOutputTruncatedError,
     is_context_length_exceeded,
 )
 
@@ -53,41 +52,6 @@ from .rpm import throttle
 from .tool_rounds import run_chat_round, run_responses_round
 
 logger = logging.getLogger(__name__)
-
-
-def _check_truncation(model: str, finish_reason: Any, content: str | None) -> None:
-    """Fail a call the model never finished.
-
-    ``finish_reason == "length"`` is the protocol's own statement that the output
-    allowance ran out mid-generation. Every OpenAI-compatible endpoint returns
-    it, which is why this is the whole mechanism: no heuristic, no inspection of
-    the text, nothing that can be right for one model and wrong for another.
-
-    It was ignored entirely, and that is what let bad output pass as an answer —
-    a degenerate decode ends here too, since a model repeating itself keeps
-    going until the ceiling. Raising turns "8KB of nothing, stored as the
-    result" into a named failure with the partial text attached, on the path
-    that already emits LLMCallFailedEvent.
-
-    Everything else — ``stop``, ``tool_calls``, ``content_filter`` — is a normal
-    end and passes through untouched.
-    """
-    if finish_reason != "length":
-        return
-    written = content or ""
-    logger.warning(
-        "[llm] %s hit its output limit after %d characters; the response is "
-        "truncated, not finished",
-        model,
-        len(written),
-    )
-    raise LLMOutputTruncatedError(
-        f"{model} ran out of output tokens before finishing (finish_reason="
-        f"'length'), after {len(written)} characters. The response is a fragment, "
-        "not an answer: raise the model's max_output_tokens, or bound what the "
-        "task asks for.",
-        partial=written,
-    )
 
 
 #: Characters per token assumed when estimating a prompt's size.
@@ -238,7 +202,13 @@ class OpenAICompletion(BaseLLM):
         if self.supports_stop_words():
             text = self._apply_stop_words(text)
         self._emit_call_completed_event(
-            text, call_type, usage, conversation, from_task, from_agent
+            text,
+            call_type,
+            usage,
+            conversation,
+            from_task,
+            from_agent,
+            finish_reason=self._finish_reason,
         )
         # `response_model` was accepted and ignored here, so structured-output
         # callers got a JSON *string* and their
@@ -292,6 +262,13 @@ class OpenAICompletion(BaseLLM):
         # LLM subclasses pass it through; the engine has no file-input
         # processing path, so it is accepted and inert.
         params: dict[str, Any] = {"model": self.model, "messages": messages}
+        # The escape hatch goes in FIRST so the declared fields below override
+        # it. A typed, validated field must not be silently displaced by a loose
+        # dict — and it is the order CrewAI's native provider uses
+        # (providers/openai/completion.py: update(additional_params), then
+        # per-field `if is not None`). Merging it last, as this did, meant the
+        # only way to set a parameter also became the only way to break one.
+        params.update(self.additional_params)
         for key, value in (
             ("temperature", self.temperature),
             ("top_p", self.top_p),
@@ -319,9 +296,8 @@ class OpenAICompletion(BaseLLM):
             }
         elif self.response_format is not None:
             params["response_format"] = self.response_format
-        params.update(self.additional_params)
-        # Last, so it sees the final message list and any max_tokens the caller
-        # supplied through additional_params.
+        # Last, so it sees the final message list and any max_tokens supplied
+        # through additional_params.
         self._clamp_output_budget(params)
         return params
 
@@ -652,10 +628,8 @@ class OpenAICompletion(BaseLLM):
                 self._track_token_usage_internal(usage)
                 function_calls = self._extract_function_calls_from_response(response)
                 content = response.choices[0].message.content
-                _check_truncation(
-                    self.model,
-                    getattr(response.choices[0], "finish_reason", None),
-                    content,
+                self._finish_reason = getattr(
+                    response.choices[0], "finish_reason", None
                 )
             if function_calls and available_functions:
                 call_type = LLMCallType.TOOL_CALL
@@ -739,7 +713,7 @@ class OpenAICompletion(BaseLLM):
 
         if usage:
             self._track_token_usage_internal(usage)
-        _check_truncation(self.model, finish_reason, "".join(chunks))
+        self._finish_reason = finish_reason
         function_calls = [
             {
                 "id": slot["id"] or f"call_{index}",
@@ -817,6 +791,8 @@ class OpenAICompletion(BaseLLM):
         response_model: type[BaseModel] | None = None,
     ) -> dict[str, Any]:
         params: dict[str, Any] = {"model": self.model, "input": messages}
+        # First, for the same reason as the chat path: declared fields win.
+        params.update(self.additional_params)
         if self.instructions is not None:
             params["instructions"] = self.instructions
         if self.store is not None:
@@ -852,7 +828,6 @@ class OpenAICompletion(BaseLLM):
                 )
                 for t in tools
             ]
-        params.update(self.additional_params)
         return params
 
     def _call_responses_api(

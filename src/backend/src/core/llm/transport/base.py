@@ -21,7 +21,7 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from src.core.events.bus import event_bus
 from src.core.events.types import (
@@ -52,6 +52,42 @@ class BaseLLM(BaseModel):
     is_litellm: bool = False
     additional_params: dict[str, Any] = Field(default_factory=dict)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _collect_unknown_params(cls, data: Any) -> Any:
+        """A constructor kwarg this class does not declare is a REQUEST param.
+
+        ``extra="allow"`` accepted such a kwarg and stored it on the object,
+        where nothing ever read it again — the request body is built from the
+        declared fields plus ``additional_params``, and an extra was in neither.
+        So every one of them was silently dropped on the way to the wire.
+
+        That is not hypothetical. ``LLMManager.configure_kasal_llm`` sets
+        ``extra_headers`` with the Kasal User-Agent that ``backend/CLAUDE.md``
+        requires on every Databricks call for partner usage tracking; it was
+        stored, never sent, and nothing failed. Anything else the app wants to
+        set — a sampling parameter from model config, ``extra_body`` for a
+        vLLM-only knob — would have hit exactly the same wall.
+
+        Collecting into ``additional_params`` is what CrewAI does
+        (``BaseLLM._validate_init_fields``): one escape hatch, merged into the
+        payload, rather than an attribute that looks set and does nothing.
+        Declared fields still win — ``_prepare_completion_params`` applies them
+        after the merge — so this can only ADD parameters, never override one
+        the class models properly.
+        """
+        if not isinstance(data, dict):
+            return data
+        unknown = {key: data[key] for key in list(data) if key not in cls.model_fields}
+        if not unknown:
+            return data
+        merged = dict(data.get("additional_params") or {})
+        merged.update(unknown)
+        for key in unknown:
+            data.pop(key, None)
+        data["additional_params"] = merged
+        return data
+
     _usage: dict[str, int] = PrivateAttr(
         default_factory=lambda: {
             "total_tokens": 0,
@@ -62,6 +98,9 @@ class BaseLLM(BaseModel):
         }
     )
     _usage_lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
+    #: Why the model stopped on the most recent call ("stop", "length",
+    #: "tool_calls", …), carried from the response to the completed event.
+    _finish_reason: str | None = PrivateAttr(default=None)
 
     def call(
         self,
@@ -267,7 +306,23 @@ class BaseLLM(BaseModel):
         messages: list[dict[str, Any]] | None = None,
         from_task: Any = None,
         from_agent: Any = None,
+        finish_reason: str | None = None,
     ) -> None:
+        """Announce a finished call, INCLUDING why the model stopped.
+
+        ``finish_reason`` has been a field on this event since it was vendored
+        and was never populated, so ``"length"`` — the endpoint stating that the
+        output allowance ran out mid-generation — reached nothing. A truncated
+        fragment was stored as the answer with no record anywhere that it was
+        one.
+
+        Reported, not raised. That is what every framework does with it: CrewAI
+        extracts it and puts it on this same event
+        (``events/types/llm_events.py``) and never compares it to a value;
+        LangChain returns it in ``response_metadata``. A transport that decided
+        for the caller which finish reasons are failures would be a policy
+        Kasal invented and nobody else has.
+        """
         event_bus.emit(
             self,
             LLMCallCompletedEvent(
@@ -278,6 +333,7 @@ class BaseLLM(BaseModel):
                 messages=messages,
                 from_task=from_task,
                 from_agent=from_agent,
+                finish_reason=finish_reason,
             ),
         )
 

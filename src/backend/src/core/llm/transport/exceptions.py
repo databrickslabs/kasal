@@ -57,27 +57,6 @@ class ExecutionBudgetExceededError(RuntimeError):
         self.partial = partial
 
 
-class LLMOutputTruncatedError(ExecutionBudgetExceededError):
-    """The model was cut off at ``max_tokens`` instead of finishing.
-
-    ``finish_reason == "length"`` — the one signal every OpenAI-compatible
-    endpoint returns for this, and the one Kasal ignored. A truncated response is
-    not an answer: it is whatever the model had written when the allowance ran
-    out, and it reads like an answer for its first paragraph. Every degenerate
-    decode ends here too, because a model that has stopped saying anything new
-    keeps saying it until the ceiling.
-
-    Subclasses the budget error deliberately. What has happened IS a budget
-    breach — the whole output allowance spent without reaching an end — and every
-    caller that already degrades or fails on one does the right thing with no
-    change: the run stops, ``partial`` is offered, and the standard path emits
-    LLMCallFailedEvent so it lands in traces instead of vanishing into a result
-    nobody reads to the end.
-
-    ``partial`` is what the model did write, so a caller can salvage it.
-    """
-
-
 class ToolExecutionBlockedError(Exception):
     """A pre-execution tool hook blocked this tool call.
 

@@ -122,9 +122,11 @@ export function summarizeTaskOutput(
  * as a truncated answer rather than a summary of a step. Two things have
  * changed since that number was chosen:
  *
- * - A runaway generation can no longer reach here. The transport stops a model
- *   that starts repeating itself (`core/llm/transport/repetition.py`), so the
- *   197KB output this cap was really defending against is cut off at source.
+ * - A runaway generation is bounded before it reaches here: every model config
+ *   declares `max_output_tokens`, so the 197KB output this cap was really
+ *   defending against cannot be produced in the first place. (A transport-side
+ *   repetition detector briefly did this job and was removed — no LLM client
+ *   ships one, and it could not see the drifting case anyway.)
  * - The FINAL answer is no longer affected at all: completion folds the full
  *   text into this message (`executionStore.supersedeTruncatedTail`), so what
  *   the cap now trims is only an INTERMEDIATE step in a multi-crew flow.

@@ -648,9 +648,11 @@ class TestEveryModelDeclaresAnOutputCeiling:
     ceiling. A model without one has no such backstop; a runaway runs until the
     request timeout, and the tokens are billed either way.
 
-    The transport's repetition guard now catches the specific degenerate case,
-    but it is a second line of defence, not a reason to ship a model with no
-    bound at all.
+    This ceiling is now the ONLY thing bounding a runaway. A transport-side
+    repetition detector briefly stood in front of it and was removed: no mature
+    LLM client ships one, and it could only see exact verbatim loops — the
+    observed failure drifted (`SOC 394`, `SOC 395`, …) and went straight
+    through. So a model shipped without a ceiling has no backstop at all.
     """
 
     def test_no_model_is_missing_max_output_tokens(self):
