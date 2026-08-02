@@ -14,7 +14,7 @@ What a Kasal flow is, how one is authored, how it is compiled and executed, and 
 - [Checkpoints and resume](#checkpoints-and-resume)
 - [Human approval gates](#human-approval-gates)
 - [Conversations across turns](#conversations-across-turns)
-- [Turn selection (proposed)](#turn-selection-proposed)
+- [What a turn asks for](#what-a-turn-asks-for)
 - [Results and the chat surface](#results-and-the-chat-surface)
 - [Running a flow from chat](#running-a-flow-from-chat)
 - [Debugging a flow](#debugging-a-flow)
@@ -128,7 +128,8 @@ POST /executions  (execution_type: "flow")
                   └─ mp.get_context("spawn").Process(...)     ← a NEW OS process
                       └─ BackendFlow.kickoff_async            backend_flow.py
                           └─ FlowBuilder._create_dynamic_flow  builds the class
-                              └─ Flow.kickoff_async            runtime/flow.py
+                              └─ BackendFlow._plan_turn        what this turn produces
+                                  └─ Flow.kickoff_async        runtime/flow.py
 ```
 
 **Every flow run is a spawned subprocess.** This is the single most important
@@ -204,6 +205,14 @@ roots.
 **AND vs OR.** `_fire_listeners` tracks partial progress per listener in
 `_and_progress`; an `AND` listener runs only once every named predecessor has
 signalled.
+
+**Narrowing.** `narrow_to(targets)` limits a run to `_required` — the targets
+plus their ancestors, walked from the listener triggers by `required_for`, with
+every router kept regardless (a trigger name that is not a method is a ROUTE
+name, and dropping a router would remove the branch its target sits behind).
+Nothing outside the set fires. An empty `_required` means "run everything",
+which is every run that did not ask for an outcome, so the default behaviour is
+unchanged. See [What a turn asks for](#what-a-turn-asks-for).
 
 ## Flow state
 
@@ -310,10 +319,11 @@ holding `flow_uuid`, `method_name`, `state_json`, `group_id` and `created_at`.
 The newest row for a `flow_uuid` is the current checkpoint, and every read is
 scoped to the running group.
 
-**The history is readable.** `get_history` returns a lineage as a timeline and
-`get_state_at` returns one checkpoint by row id, which is what a **fork** reads:
-forking copies a checkpoint into a NEW lineage rather than rewinding the old
-one, so the conversation that actually happened stays intact and answerable.
+**The history is readable.** `get_history` (`repositories/flow_state_repository.py`)
+returns a lineage as a timeline — oldest first, bounded, and group-scoped like
+every other read here. There is no fork: reading one checkpoint by row id and
+copying it into a new lineage was designed and not built, so a thread can be
+inspected but not branched.
 
 **Both halves are on the trace.** A restored crew emits
 ``crew_checkpoint_restored``; a checkpoint WRITE emits ``flow_checkpoint_saved``,
@@ -379,91 +389,97 @@ Set it in the Flow Builder: **Flow state and conversation** in the right
 sidebar. The mechanism is documented in full in
 [Conversational flow state](./conversational-flow-state.md).
 
-## Turn selection (proposed)
+## What a turn asks for
 
-Routing and selection are two different decisions that both get called
-"routing", and keeping them apart is what makes a conversational flow
-affordable.
+A conversational flow is asked for different things on different turns. Running
+the whole graph every time re-does work the conversation already has and
+produces artefacts nobody asked for, so a turn first decides what it must
+PRODUCE. That decision is called an **outcome**, and it is not routing:
 
-| | Condition router | Turn selection |
+| | Condition router | Outcome |
 |---|---|---|
 | Question | "Given what the flow computed, which branch is valid?" | "Given what the person asked, what must this turn produce?" |
 | When | DURING execution, at a node | BEFORE execution, at kickoff |
-| Reads | state values — `has_results`, `region` | the turn's text, and what each goal produces |
+| Reads | state values — `has_results`, `region` | the turn's text, and what each outcome delivers |
 | Fails as | wrong branch on unexpected data | wrong artefact for the question |
-| Exists | today | proposed |
 
 A condition router is part of the flow's LOGIC — it would exist even if flows
-never held a conversation. Turn selection is part of its ENTRY, and exists only
-because a conversation asks the same graph for different things on different
-turns.
+never held a conversation. An outcome is part of its ENTRY.
 
 **Selection does not belong inside a router.** A flow with no router would get
 no selection at all — a linear pipeline has no decision point to hook into — a
 router that HAS conditions could never select, and selection is about the whole
 graph while a router sees only its own children.
 
-### Goals and material
+The code is `services/flow_builder/conversation/outcomes.py`, driven from
+`BackendFlow._plan_turn`. It only ever runs for a flow whose state declares
+`conversational: true` and a turn that carries a user message.
 
-A **goal** is a crew that produces something a person would ask for: the
-terminal crews by default, plus any the author marks. It carries a description
-of what it produces, and that description is what selection matches against —
-the same contract a published capability has with the chat router. Everything
-else is **material**: work that exists to feed a goal.
+### Outcomes and material
 
-A turn then becomes a build request:
+An **outcome** is a crew that produces something a person would ask for. By
+default those are the **terminal crews** (`terminal_crews` — the ones nothing
+else listens to); when the author has written what crews deliver on the flow's
+publish page, those descriptions define the askable set instead. Everything else
+is **material**: work that exists to feed an outcome.
 
-```text
-turn: "now turn that into a mindmap"
-  target      = mindmap crew                   (selection)
-  required    = mindmap + its ancestors        (the graph)
-    gather    ✓ already in state  -> reuse
-    features  ✓ already in state  -> reuse
-    mindmap   ✗ not yet           -> run
-  cost        = one classification + one crew
-```
+Descriptions come from `flow_config.outcomes` — written per FLOW, in
+**Flow Builder → publish → what each step delivers** (`PublishFlowOutcomes.tsx`)
+— falling back to the crew's task `expected_output`. Per-flow rather than
+per-crew on purpose: the same crew delivers something narrower as a step here
+than it does published on its own, and reading these from each crew's
+publication would mean a flow could only describe itself if every step were
+separately published.
 
-### How a turn would execute
+### How a turn executes
 
-`kickoff_async` runs every `@start()` and lets listeners cascade — push-based.
-Target-driven execution is the same machinery with a filter:
+1. **Select.** `select_outcome` asks the model, over the DB-backed
+   `select_flow_outcome` prompt, with the last few messages for context so a
+   fragment ("and for Germany?") can still match. Below
+   `OUTCOME_CONFIDENCE_THRESHOLD` (0.6), or on any failure — no template, no
+   model, an unparseable answer, an outcome the flow does not have — it declines
+   and the whole flow runs, exactly as it does for a one-shot.
+2. **Narrow.** `Flow.narrow_to(targets)` computes `required = targets ∪
+   ancestors(targets)` from the listener triggers (`required_for`), keeping every
+   router regardless — a trigger that is not a method is a ROUTE name, and
+   dropping a router would remove the branch its target sits behind. A target
+   nothing can reach yields an empty set, which means "do not narrow".
+3. **Run.** A method outside `required` never fires; `_fire_listeners` skips it.
+   Routers route normally inside the set.
+4. **Reuse.** Inside `required`, a crew whose output is already in state is not
+   re-run (`conversation/reuse.py`). Terminal crews always run — reusing the one
+   answering this turn would return the previous turn's answer — and reuse is
+   keyed on the same content hash the resume path uses, so an edited crew
+   re-runs. `refresh_outputs` on the run config overrides all of it.
+5. **Record.** The chosen outcome is written to the `last_outcome` channel, so a
+   condition can read it and the trace can show it.
 
-1. **Select** the goal(s). No confident selection means no filter, and the flow
-   runs exactly as it does today.
-2. **Resolve** `required = targets ∪ ancestors(targets)` from the listener map
-   the builder already has.
-3. **Run** as now, with two rules: a method outside `required` never fires, and
-   a method inside it whose output is already in state — with a matching content
-   hash — returns that output instead of running.
-4. **Routers still route** normally inside the required set.
+A reused crew emits `crew_checkpoint_restored` rather than a fresh run, so the
+timeline shows the whole flow without claiming work that did not happen.
+
+### Answering without running anything
+
+Some turns ask ABOUT what an earlier turn produced — "which frameworks did you
+find?". The material is already in state, and re-running a crew to retell it is
+slower and worse. So selection has a third answer: `answer_from_state`
+(`conversation/retrieval.py`) writes the reply from the material the flow already
+holds, in ONE call with no tools and no crew, and the run ends without executing
+any part of the graph. Bookkeeping channels (the conversation, the identity
+hashes) are excluded from what the model sees; if it cannot answer, the flow runs
+as it otherwise would.
 
 ### Rules where the two meet
 
-These decide whether it can be trusted:
-
 - **Selection chooses targets; routers choose paths.** Neither overrides the
   other.
-- **If a router routes away from the selected goal, the goal is unreachable this
-  turn and the turn says so.** It must not quietly return whatever the router
-  did pick — that is a confident answer to a question nobody asked.
-- **The selected goal always runs.** Reuse applies to material; reusing the
-  target returns the previous turn's answer.
+- **The selected outcome always runs.** Reuse applies to material.
 - **A declined selection degrades to today's behaviour**, not to nothing: a
   model outage runs the whole flow, which is slow and correct.
 - **Reuse is content-hashed**, so editing a crew mid-conversation is never
   silently ignored.
-
-Naming, since "router" is already taken: the condition node stays a **router**;
-this is a **turn goal**.
-
-### Open decisions
-
-1. Terminal crews as goals by default, or only crews explicitly marked?
-2. One goal per turn, or several — "compare them and make a quiz" is two.
-3. On an unreachable goal: say so and stop, or run what the router chose and
-   explain?
-4. Does a goal need its own description, or is the crew's task text enough?
-5. How does someone force a full run?
+- **A HITL gate is a plain listener**, so narrowing governs it like any other
+  step: a gate on a branch the turn does not need never fires, and a gate
+  protecting a crew the turn DOES need cannot be narrowed away from it.
 
 ## Results and the chat surface
 
