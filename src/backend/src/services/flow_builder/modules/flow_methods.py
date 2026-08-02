@@ -522,10 +522,10 @@ def _reuse_check(flow: Any, crew_name: Optional[str], task_list: Any) -> Optiona
         return None
     try:
         from src.services.flow_builder.conversation.reuse import (
+            crews_that_answer,
             emit_reused,
             reusable_output,
             reuse_enabled,
-            terminal_crew_names,
         )
 
         config = getattr(flow, "_kasal_flow_config", None) or {}
@@ -542,11 +542,15 @@ def _reuse_check(flow: Any, crew_name: Optional[str], task_list: Any) -> Optiona
         identity = (getattr(flow, "_kasal_crew_identities", {}) or {}).get(
             crew_name
         ) or _crew_identity(crew_name, task_list)
+        state = getattr(flow, "state", None)
         output = reusable_output(
-            getattr(flow, "state", None),
+            state,
             crew_name,
             identity,
-            terminal_crew_names(config),
+            # Terminal crews AND the one this turn selected. Passing only the
+            # terminal set let narrowing choose a crew and reuse skip it, so the
+            # turn ran nothing and the chat got no answer.
+            crews_that_answer(config, flow),
             refresh,
         )
         if output is None:

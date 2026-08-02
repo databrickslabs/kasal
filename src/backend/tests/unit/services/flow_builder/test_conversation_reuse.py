@@ -11,11 +11,13 @@ turn 1's answer to turn 2's question, which is the failure the whole feature
 exists to avoid.
 """
 
+from types import SimpleNamespace
 from src.services.flow_builder.conversation.reuse import (
     IDENTITY_CHANNEL,
     record_identity,
     reusable_output,
     reuse_enabled,
+    crews_that_answer,
     terminal_crew_names,
 )
 
@@ -290,3 +292,100 @@ class TestRestoringATurnBringsBackTheWork:
         )
 
         assert reusable_output(state, "gather", "hash-2", set()) is None
+
+
+class TestTheSelectedOutcomeAlwaysRuns:
+    """The turn's target must never be reused, terminal or not.
+
+    Observed: a conversational flow answered turn 1 and then answered NOTHING,
+    for every turn after, while each trace showed a completed run. From the log:
+
+        [flow-outcome] this turn produces 'Agentic AI Frameworks' (confidence 0.95)
+        ♻️  Reusing 'Agentic AI Frameworks' output from an earlier turn — not running it again
+
+    Selection chose the right crew and reuse skipped it, so nothing executed —
+    one LLM call in the whole run, and that was the surface composer. The chat
+    received two activity cards and no answer; the result in the database was
+    turn 1's, carried forward.
+
+    Cause: that crew fed four listeners, so `terminal_crews` called it MATERIAL,
+    and material is reusable. Both features were satisfied by their own rule and
+    the turn ran nothing. A caller may legitimately ask for an intermediate
+    artefact, which is exactly what had happened.
+    """
+
+    def _state(self, **stored):
+        state = dict(stored)
+        state[IDENTITY_CHANNEL] = {name: "hash-1" for name in stored}
+        return state
+
+    def _flow(self, outcome=None, stale_state_outcome="Agentic AI Frameworks"):
+        """A flow carrying this turn's selection, over a STALE state channel.
+
+        The staleness is the point: `_plan_turn` writes `last_outcome` before
+        kickoff, and kickoff restores the checkpoint over the state — so the
+        channel holds the PREVIOUS turn's outcome for the whole of this turn.
+        Reading the selection from there protected the wrong crew.
+        """
+        return SimpleNamespace(
+            _kasal_selected_outcome=outcome,
+            state={"last_outcome": stale_state_outcome},
+        )
+
+    def test_the_selected_crew_is_not_reused_even_when_upstream(self):
+        state = self._state(gather="turn 1's list")
+
+        assert (
+            reusable_output(
+                state,
+                "gather",
+                "hash-1",
+                crews_that_answer(FLOW_CONFIG, self._flow(outcome="gather")),
+            )
+            is None
+        )
+
+    def test_material_the_turn_did_not_select_is_still_reused(self):
+        """The feature keeps working — this is a narrowing of reuse, not a
+        removal of it.
+
+        Note the flow's STATE still says 'Agentic AI Frameworks' (the previous
+        turn's outcome, restored from the checkpoint). Reading that instead of
+        the flow's own selection is what re-ran this crew for real: the turn
+        asked for websites and the upstream research ran again, Perplexity call
+        and all."""
+        state = self._state(gather="turn 1's list")
+
+        assert (
+            reusable_output(
+                state,
+                "gather",
+                "hash-1",
+                crews_that_answer(FLOW_CONFIG, self._flow(outcome="compare")),
+            )
+            == "turn 1's list"
+        )
+
+    def test_terminal_crews_stay_protected_with_no_selection(self):
+        """A turn that declined to narrow keeps the original guarantee."""
+        assert crews_that_answer(FLOW_CONFIG, self._flow(outcome=None)) == {"compare"}
+
+    def test_the_selection_is_added_to_the_terminal_set(self):
+        assert crews_that_answer(FLOW_CONFIG, self._flow(outcome="gather")) == {
+            "compare",
+            "gather",
+        }
+
+    def test_a_stale_state_channel_is_never_consulted(self):
+        """The regression this file now guards: state['last_outcome'] holds the
+        PREVIOUS turn's value, and trusting it protected the wrong crew."""
+        flow = self._flow(outcome="compare", stale_state_outcome="gather")
+
+        assert crews_that_answer(FLOW_CONFIG, flow) == {"compare"}
+
+    def test_an_empty_selection_changes_nothing(self):
+        assert crews_that_answer(FLOW_CONFIG, self._flow(outcome="")) == {"compare"}
+
+    def test_a_flow_without_the_attribute_is_not_an_error(self):
+        """A non-conversational flow never narrows and carries no selection."""
+        assert crews_that_answer(FLOW_CONFIG, SimpleNamespace()) == {"compare"}

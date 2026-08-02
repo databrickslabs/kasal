@@ -129,6 +129,8 @@ class BackendFlow:
         self._flow_data = None
         # Set when a turn was answered from state and no crew ran.
         self._state_answer: Optional[str] = None
+        #: The outcome this turn selected, if narrowing chose one.
+        self._turn_outcome: Optional[str] = None
         # Don't store API keys directly, just other configuration
         self._config = {}
         # Repository container
@@ -517,13 +519,20 @@ class BackendFlow:
             )
             method = trigger_for(registry, outcome)
             targets = {method} if method else set()
-            # Record WHAT this turn decided to produce. A choice that only
-            # appears in a log line cannot be read by a condition, cannot be
-            # shown in the trace, and cannot be checked by the next turn.
-            try:
-                engine_flow.state["last_outcome"] = outcome
-            except Exception:  # noqa: BLE001 — a state without the channel
-                pass
+            # On the flow OBJECT, not in state. `_plan_turn` runs before
+            # `kickoff_async`, and kickoff restores the checkpoint over the
+            # state — `_restore_state` writes back every stored channel, which
+            # is what makes a crew's output survive and also means anything
+            # written here is replaced by the PREVIOUS turn's value. Reuse asks
+            # which crew this turn selected; reading it from state gave it the
+            # last turn's answer, so it protected the wrong crew and re-ran the
+            # material it should have reused.
+            setattr(engine_flow, "_kasal_selected_outcome", outcome)
+            # And into state through the INPUTS, which kickoff merges AFTER the
+            # restore — so the `last_outcome` channel a condition or the next
+            # turn reads is finally this turn's choice rather than the last
+            # one's. It has been wrong since the channel was added.
+            self._turn_outcome = outcome
 
             if engine_flow.narrow_to(targets):
                 logger.info(
@@ -685,6 +694,11 @@ class BackendFlow:
                     # The engine loads persisted state when 'id' is present.
                     kickoff_inputs = self._kickoff_inputs()
                     state_answer = await self._plan_turn(engine_flow)
+                    # Planning decides the outcome; the inputs path is what puts
+                    # it into state, because that merge happens after the
+                    # checkpoint restore (see _narrow_to_outcome).
+                    if getattr(self, "_turn_outcome", None):
+                        kickoff_inputs["last_outcome"] = self._turn_outcome
                     if state_answer is not None:
                         result = state_answer
                         await self._close_turn(engine_flow, result)

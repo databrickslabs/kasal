@@ -14,10 +14,17 @@ because nothing tells it not to.
 What decides
 ============
 
-**The terminal crews always run.** A crew with nothing listening to it is the
-one producing this turn's answer, and reusing it would return turn 1's answer to
-turn 2's question — the failure this whole feature exists to avoid. Everything
-upstream is material, and material is reusable.
+**The crews that ANSWER always run.** Those are the terminal crews — nothing
+listens to them, so their output is the turn's answer — and the crew this turn
+SELECTED, which may be an intermediate one when the caller asked for an
+intermediate artefact. Reusing either returns turn 1's answer to turn 2's
+question, the failure this whole feature exists to avoid. Everything else is
+material, and material is reusable.
+
+Only the terminal half was enforced at first, and the gap was not theoretical:
+a flow whose selected crew fed four listeners counted as material, so narrowing
+chose it and reuse skipped it, and the turn ran nothing. See
+``crews_that_answer``.
 
 **An edited crew always runs.** Reuse is keyed on a content hash of the crew —
 its tasks, its agents' roles and goals, and the model — the same identity the
@@ -61,6 +68,52 @@ def terminal_crew_names(flow_config: Optional[Dict[str, Any]]) -> Set[str]:
     from src.services.flow_builder.conversation.outcomes import terminal_crews
 
     return terminal_crews(flow_config)
+
+
+def selected_outcome(flow: Any) -> Optional[str]:
+    """Which outcome THIS turn asked for, read from the FLOW, not from state.
+
+    ``_narrow_to_outcome`` runs before ``kickoff_async``, and kickoff restores
+    the checkpoint over the state — ``_restore_state`` writes back every stored
+    channel, which is what makes a crew's output survive and also means the
+    ``last_outcome`` channel is the PREVIOUS turn's value for the whole of this
+    one. Reading the selection from there answered a different question than the
+    one being asked: on a turn that selected the website crew it returned the
+    frameworks crew, so reuse protected the wrong one and re-ran material it
+    already had.
+    """
+    text = str(getattr(flow, "_kasal_selected_outcome", "") or "").strip()
+    return text or None
+
+
+def crews_that_answer(flow_config: Optional[Dict[str, Any]], flow: Any) -> Set[str]:
+    """Crews whose output IS this turn's answer, so they must always run.
+
+    Terminal crews, PLUS the outcome this turn selected — and the second half is
+    the one that was missing.
+
+    Observed: a conversational flow answered turn 1 and then answered nothing at
+    all, for every turn after, while the trace showed a completed run. Selection
+    picked the right crew every time ("this turn produces 'Agentic AI
+    Frameworks', confidence 0.95") and reuse then skipped it ("Reusing … not
+    running it again"), so the run executed nothing — one LLM call, and that was
+    the surface composer. The answer in the database was turn 1's, carried
+    forward, and the chat received only activity cards.
+
+    The cause is that the two features were built against different definitions
+    of "the crew that answers". Reuse protected only crews nothing listens to;
+    that crew fed four listeners, so it counted as MATERIAL and material is
+    reusable. But narrowing had just chosen it as the thing to produce — and a
+    turn may legitimately ask for an intermediate artefact, which is exactly
+    what happened. Both rules were satisfied and nothing ran.
+
+    So the question is asked once, here, with the turn's choice included. Reuse
+    stays what it is for — not paying twice for the material upstream of the
+    answer — and can no longer swallow the answer itself.
+    """
+    protected = terminal_crew_names(flow_config)
+    selected = selected_outcome(flow)
+    return protected | {selected} if selected else protected
 
 
 def record_identity(state: Any, crew_name: str, identity: Optional[str]) -> None:
