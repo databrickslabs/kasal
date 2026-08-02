@@ -23,9 +23,9 @@ vi.mock('../../store/sessionStore', () => ({
     selector({ updateMessage }),
 }));
 
-import ToolApprovalCard, { ToolApprovalData } from './ToolApprovalCard';
+import ApprovalCard, { ApprovalData } from './ApprovalCard';
 
-const TOOL_CALL: ToolApprovalData = {
+const TOOL_CALL: ApprovalData = {
   approval_id: 7,
   kind: 'tool_call',
   tool_name: 'SerperDevTool',
@@ -33,7 +33,7 @@ const TOOL_CALL: ToolApprovalData = {
   tool_args: { q: 'kasal' },
 };
 
-const TASK_REVIEW: ToolApprovalData = {
+const TASK_REVIEW: ApprovalData = {
   approval_id: 9,
   kind: 'task_review',
   task_name: 'Write summary',
@@ -46,9 +46,41 @@ beforeEach(() => {
   mockRejectGate.mockResolvedValue({});
 });
 
-describe('ToolApprovalCard', () => {
+describe('ApprovalCard', () => {
+  it('a FLOW gate does not claim an agent wants to run a tool', () => {
+    // The card is shared with tool approval on purpose — same decision, same
+    // endpoint — but a flow paused between two steps is not an agent reaching
+    // for a tool, and the tool wording is what the reader actually saw:
+    // "✋ The agent wants to run a tool".
+    render(
+      <ApprovalCard
+        data={{ approval_id: 1, kind: 'flow_gate', step_name: 'agentic ai features' }}
+        messageId="m-flow"
+      />,
+    );
+
+    expect(screen.getByText(/waiting to continue to/i)).toBeInTheDocument();
+    expect(screen.getByText('agentic ai features')).toBeInTheDocument();
+    expect(screen.queryByText(/wants to run/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('a tool')).not.toBeInTheDocument();
+  });
+
+  it('a flow gate with no step name still reads sensibly', () => {
+    render(
+      <ApprovalCard data={{ approval_id: 2, kind: 'flow_gate' }} messageId="m-flow2" />,
+    );
+
+    expect(screen.getByText('the next step')).toBeInTheDocument();
+  });
+
+  it('an ordinary tool call is unchanged', () => {
+    render(<ApprovalCard data={TOOL_CALL} messageId="m-tool" />);
+
+    expect(screen.getByText(/wants to run/i)).toBeInTheDocument();
+  });
+
   it('approves without any feedback row', async () => {
-    render(<ToolApprovalCard data={TOOL_CALL} messageId="m1" />);
+    render(<ApprovalCard data={TOOL_CALL} messageId="m1" />);
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
 
     await waitFor(() => expect(mockApproveGate).toHaveBeenCalledWith(7, {}));
@@ -59,7 +91,7 @@ describe('ToolApprovalCard', () => {
   });
 
   it('Deny (tool_call) opens an inline optional-reason input; typed reason is sent', async () => {
-    render(<ToolApprovalCard data={TOOL_CALL} messageId="m1" />);
+    render(<ApprovalCard data={TOOL_CALL} messageId="m1" />);
     fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
 
     // Action links are replaced by the feedback row on the same line.
@@ -77,20 +109,20 @@ describe('ToolApprovalCard', () => {
   });
 
   it('empty tool_call reason falls back to the generic reason and persists no echo', async () => {
-    render(<ToolApprovalCard data={TOOL_CALL} messageId="m1" />);
+    render(<ApprovalCard data={TOOL_CALL} messageId="m1" />);
     fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() =>
       expect(mockRejectGate).toHaveBeenCalledWith(7, { reason: 'Denied from chat' }),
     );
-    const persisted = updateMessage.mock.calls[0][1].resultData as ToolApprovalData;
+    const persisted = updateMessage.mock.calls[0][1].resultData as ApprovalData;
     expect(persisted.decided).toBe('denied');
     expect(persisted.decided_reason).toBeUndefined();
   });
 
   it('Request changes (task_review): Enter submits the typed feedback as the retry reason', async () => {
-    render(<ToolApprovalCard data={TASK_REVIEW} messageId="m2" />);
+    render(<ApprovalCard data={TASK_REVIEW} messageId="m2" />);
     fireEvent.click(screen.getByRole('button', { name: 'Request changes' }));
 
     const input = screen.getByPlaceholderText('What should change?');
@@ -109,7 +141,7 @@ describe('ToolApprovalCard', () => {
   });
 
   it('Escape cancels back to the Approve/Request changes state without submitting', () => {
-    render(<ToolApprovalCard data={TASK_REVIEW} messageId="m2" />);
+    render(<ApprovalCard data={TASK_REVIEW} messageId="m2" />);
     fireEvent.click(screen.getByRole('button', { name: 'Request changes' }));
 
     const input = screen.getByPlaceholderText('What should change?');
@@ -125,7 +157,7 @@ describe('ToolApprovalCard', () => {
   it('decided task_review line echoes the first ~60 chars of the feedback', () => {
     const long = 'x'.repeat(80);
     render(
-      <ToolApprovalCard
+      <ApprovalCard
         data={{ ...TASK_REVIEW, decided: 'denied', decided_reason: long }}
         messageId="m2"
       />,
@@ -138,14 +170,14 @@ describe('ToolApprovalCard', () => {
 
   it('decided task_review without stored feedback keeps the generic retry note', () => {
     render(
-      <ToolApprovalCard data={{ ...TASK_REVIEW, decided: 'denied' }} messageId="m2" />,
+      <ApprovalCard data={{ ...TASK_REVIEW, decided: 'denied' }} messageId="m2" />,
     );
     expect(screen.getByText('— changes requested, the task retries')).toBeInTheDocument();
   });
 
   it('shows the error on the line when the reject call fails', async () => {
     mockRejectGate.mockRejectedValue(new Error('gate expired'));
-    render(<ToolApprovalCard data={TOOL_CALL} messageId="m1" />);
+    render(<ApprovalCard data={TOOL_CALL} messageId="m1" />);
     fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 

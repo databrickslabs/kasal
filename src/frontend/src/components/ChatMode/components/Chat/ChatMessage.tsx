@@ -17,7 +17,7 @@ import { TraceDetail, findInlineTraceRenderer } from './traces';
 import MessageContent from './MessageContent';
 import AgentCard from '../Cards/AgentCard';
 import TaskCard from '../Cards/TaskCard';
-import ToolApprovalCard, { ToolApprovalData } from '../Cards/ToolApprovalCard';
+import ApprovalCard, { ApprovalData } from '../Cards/ApprovalCard';
 import CrewListCard from '../Cards/CrewListCard';
 import FlowListCard from '../Cards/FlowListCard';
 import CrewDetailCard from '../Cards/CrewDetailCard';
@@ -71,6 +71,8 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
 }) => {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
+  // Whether a capped step preview is showing its uncapped text.
+  const [expanded, setExpanded] = useState(false);
   // When THIS message's surface is open in the side pane, its inline copy hides
   // (it shows a compact "opened in panel" note instead) so it isn't visible twice.
   // ONE boolean selector scoped to this message: subscribing every bubble to the
@@ -86,8 +88,8 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
     switch (message.resultType) {
       case 'hitl_approval':
         return (
-          <ToolApprovalCard
-            data={message.resultData as ToolApprovalData}
+          <ApprovalCard
+            data={message.resultData as ApprovalData}
             messageId={message.id}
           />
         );
@@ -423,7 +425,21 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
 
         {message.content && (
           <div className="text-[15px] leading-[1.7]" style={{ color: 'var(--text-primary)' }}>
-            <MessageContent content={message.content} />
+            <MessageContent content={expanded && message.fullContent ? message.fullContent : message.content} />
+            {message.fullContent && (
+              // A step's output is posted as a preview so several verbose crews
+              // cannot bury the conversation — but only ONE message per run is
+              // ever expanded (the final answer), so an intermediate crew's work
+              // was unreadable with no way to open it.
+              <button
+                type="button"
+                onClick={() => setExpanded((v) => !v)}
+                className="mt-1 text-[13px] underline underline-offset-2"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                {expanded ? 'Show less' : 'Show the full output'}
+              </button>
+            )}
           </div>
         )}
 

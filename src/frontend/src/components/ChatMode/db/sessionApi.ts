@@ -76,6 +76,8 @@ interface ChatModeExtras {
    * quietly loses the thread.
    */
   capability?: string;
+  /** Uncapped text behind a capped step preview (see ChatMessage.fullContent). */
+  fullContent?: string;
 }
 
 /** True when a stored resultData is (or wraps) an A2UI surface — used to heal
@@ -113,6 +115,7 @@ const toMessage = (w: MessageWire): ChatMessage => {
       ? { usedWorkspaceMemory: extras.usedWorkspaceMemory }
       : {}),
     ...(extras.capability ? { capability: extras.capability } : {}),
+    ...(extras.fullContent ? { fullContent: extras.fullContent } : {}),
     isStreaming: false,
   };
 };
@@ -125,6 +128,7 @@ const packExtras = (msg: Partial<ChatMessage>): Record<string, unknown> | undefi
   if (msg.executionId !== undefined) extras.executionId = msg.executionId;
   if (msg.usedWorkspaceMemory !== undefined) extras.usedWorkspaceMemory = msg.usedWorkspaceMemory;
   if (msg.capability !== undefined) extras.capability = msg.capability;
+  if (msg.fullContent !== undefined) extras.fullContent = msg.fullContent;
   return Object.keys(extras).length > 0 ? { [EXTRA_KEY]: extras } : undefined;
 };
 

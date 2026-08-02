@@ -1089,6 +1089,13 @@ class FlowBuilder:
 
                 # Build gate config from edge HITL data
                 gate_config = {
+                    # WHAT is being gated. Without these the approval card
+                    # falls back to its tool wording and asks the reader to
+                    # approve "a tool" for what is actually a flow step — the
+                    # card is shared with tool approval on purpose, so the gate
+                    # has to say which kind it is.
+                    "kind": "flow_gate",
+                    "step_name": crew_name,
                     "message": hitl_config.get(
                         "message", "Please review and approve to continue"
                     ),
@@ -1246,6 +1253,10 @@ class FlowBuilder:
 
                 # Build gate config from node data
                 gate_config = {
+                    "kind": "flow_gate",
+                    "step_name": (
+                        node_data.get("label") or node_data.get("name") or ""
+                    ),
                     "message": node_data.get("message", "Approval required to proceed"),
                     "timeout_seconds": node_data.get(
                         "timeout_seconds", 86400

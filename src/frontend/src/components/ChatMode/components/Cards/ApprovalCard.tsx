@@ -3,7 +3,15 @@ import { HITLService } from '../../../../api/execution/HITLService';
 import { useSessionStore } from '../../store/sessionStore';
 
 /**
- * Inline tool-approval card for ChatMode — the chat shell never shows modal
+ * Inline APPROVAL card for ChatMode — one card for every kind of gate.
+ *
+ * Named for the decision, not for one of the things that can ask for it. It
+ * was `ToolApprovalCard`, and it now also serves task reviews and FLOW gates —
+ * a flow paused between two crews is not an agent reaching for a tool, and a
+ * reader told "the agent wants to run a tool" for a flow gate is being
+ * misinformed by the component's own history.
+ *
+ * The chat shell never shows modal
  * dialogs, so an agent pausing on an approval-flagged tool renders this card
  * in the conversation instead. Approve lets the paused tool run; Deny tells
  * the agent "no" (the run continues without the tool). Denying / requesting
@@ -13,10 +21,12 @@ import { useSessionStore } from '../../store/sessionStore';
  * history shows what was decided.
  */
 
-export interface ToolApprovalData {
+export interface ApprovalData {
   approval_id: string | number;
   job_id?: string;
-  kind?: string; // "tool_call" (default) | "task_review"
+  kind?: string; // "tool_call" (default) | "task_review" | "flow_gate"
+  /** flow_gate: the step the flow is waiting to continue INTO. */
+  step_name?: string;
   tool_name?: string;
   task_name?: string;
   agent_role?: string;
@@ -28,8 +38,8 @@ export interface ToolApprovalData {
   decided_reason?: string;
 }
 
-interface ToolApprovalCardProps {
-  data: ToolApprovalData;
+interface ApprovalCardProps {
+  data: ApprovalData;
   messageId: string;
 }
 
@@ -37,7 +47,7 @@ interface ToolApprovalCardProps {
 const echoOf = (reason: string): string =>
   reason.length > 60 ? `${reason.slice(0, 60).trimEnd()}…` : reason;
 
-const ToolApprovalCard: React.FC<ToolApprovalCardProps> = ({ data, messageId }) => {
+const ApprovalCard: React.FC<ApprovalCardProps> = ({ data, messageId }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Denying opens an inline feedback row (task_review feedback becomes the
@@ -47,6 +57,10 @@ const ToolApprovalCard: React.FC<ToolApprovalCardProps> = ({ data, messageId }) 
   const updateMessage = useSessionStore((s) => s.updateMessage);
   const decided = data.decided;
   const isTaskReview = data.kind === 'task_review';
+  // A flow paused at a gate between two steps. Same card, same decision,
+  // same endpoint — only the wording differs, because "the agent wants to
+  // run a tool" describes nothing that is happening here.
+  const isFlowGate = data.kind === 'flow_gate';
 
   const persistDecision = (decision: 'approved' | 'denied', reason?: string) => {
     updateMessage(messageId, {
@@ -110,12 +124,17 @@ const ToolApprovalCard: React.FC<ToolApprovalCardProps> = ({ data, messageId }) 
     <div className="my-1.5 px-1 text-[13px] leading-[1.7]" style={{ color: 'var(--text-muted)' }}>
       <div className="flex items-center gap-1.5 whitespace-nowrap overflow-hidden">
         <span className="shrink-0">
-          ✋ {isTaskReview
-            ? 'Review the output of'
-            : `${data.agent_role || 'The agent'} wants to run`}
+          ✋ {isFlowGate
+            ? 'The flow is waiting to continue to'
+            : isTaskReview
+              ? 'Review the output of'
+              : `${data.agent_role || 'The agent'} wants to run`}
         </span>
         <span className="font-medium shrink-0" style={{ color: 'var(--text-primary)' }}>
-          {(isTaskReview ? data.task_name : data.tool_name) || (isTaskReview ? 'the task' : 'a tool')}
+          {isFlowGate
+            ? data.step_name || 'the next step'
+            : (isTaskReview ? data.task_name : data.tool_name)
+              || (isTaskReview ? 'the task' : 'a tool')}
         </span>
         {detail && (
           <span
@@ -216,4 +235,4 @@ const ToolApprovalCard: React.FC<ToolApprovalCardProps> = ({ data, messageId }) 
   );
 };
 
-export default ToolApprovalCard;
+export default ApprovalCard;

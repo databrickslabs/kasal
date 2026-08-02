@@ -10,6 +10,16 @@ export interface ChatMessage {
   resultType?: string;
   resultData?: unknown;
   isStreaming?: boolean;
+  /**
+   * The UNCAPPED text when `content` is a preview of a longer step output.
+   *
+   * A run posts each crew's output capped, and exactly ONE message per run is
+   * ever expanded — the final answer, swapped in at completion. Every
+   * intermediate crew therefore kept its preview permanently, so a two-crew
+   * flow left the first crew's work unreadable with no way to open it. Carried
+   * here so the reader can.
+   */
+  fullContent?: string;
   /** Names of knowledge files attached to a user message (shown as chips). */
   attachments?: string[];
   /**

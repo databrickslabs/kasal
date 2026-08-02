@@ -126,9 +126,16 @@ export function useChatRunStream({ pendingActionsRef }: UseChatRunStreamArgs) {
       // "**<80 chars of prompt>** — <the same prompt again>".
       const alreadyHeaded = headedTasksRef.current.has(taskName);
       const msg = alreadyHeaded ? chatBody : `**${cleanTaskLabel(taskName)}** — ${chatBody}`;
+      // Carry the uncapped text when this line is a PREVIEW. Only one message
+      // per run is ever expanded — the final answer, swapped in at completion —
+      // so every intermediate crew kept its preview permanently and its work
+      // could not be read at all. `chatBody` is what summarizeTaskOutput kept;
+      // when they differ, this line is a preview of something longer.
+      const capped = chatBody !== displayContent.trim();
+      const extra = capped ? { fullContent: displayContent } : undefined;
       const messageId = ownerSession
-        ? sessionStore.addMessageToTargetSession(ownerSession, 'assistant', msg)
-        : sessionStore.addMessage('assistant', msg);
+        ? sessionStore.addMessageToTargetSession(ownerSession, 'assistant', msg, extra)
+        : sessionStore.addMessage('assistant', msg, extra);
       // This line is a PREVIEW when the output was long enough to cap. Register
       // it so completion replaces THIS message with the full answer instead of
       // hunting for it by prefix-matching the on-screen list — a scan that kept
