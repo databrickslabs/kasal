@@ -202,8 +202,25 @@ class TestRecencyPolicySplit:
         assert fact > episode
 
 
+class _Mem:
+    """Only ``root_scope`` is read by the selection; no in-flight overlay."""
+
+    root_scope = None
+
+
 class TestRecallReservesDurableSlots:
-    """A burst of episodic records must not evict every fact from the block."""
+    """A burst of episodic records must not evict every fact from the block.
+
+    The reservation now lives inside ``_select_records``, the ONE selection over
+    the oversampled pool — it used to be a separate trim that ran before a
+    second one, and non-redundancy applied after a trim can only shrink the
+    block rather than promote the next distinct memory.
+    """
+
+    def _select(self, records, limit=6):
+        from src.services.memory.hooks import _select_records
+
+        return _select_records(_Mem(), records, limit)
 
     def _records(self, episodic, semantic):
         return [
@@ -215,9 +232,7 @@ class TestRecallReservesDurableSlots:
         ]
 
     def test_facts_ranked_last_still_reach_the_block(self):
-        from src.services.memory.hooks import _reserve_durable_slots
-
-        selected = _reserve_durable_slots(self._records(12, 3), limit=6)
+        selected = self._select(self._records(12, 3))
 
         assert len(selected) == 6
         assert sum(1 for r in selected if r.kind == KIND_SEMANTIC) == 2
@@ -225,22 +240,16 @@ class TestRecallReservesDurableSlots:
         assert [r.content for r in selected[:4]] == [f"episode {i}" for i in range(4)]
 
     def test_no_facts_means_plain_top_n(self):
-        from src.services.memory.hooks import _reserve_durable_slots
-
-        selected = _reserve_durable_slots(self._records(12, 0), limit=6)
+        selected = self._select(self._records(12, 0))
         assert [r.content for r in selected] == [f"episode {i}" for i in range(6)]
 
     def test_short_result_set_is_untouched(self):
-        from src.services.memory.hooks import _reserve_durable_slots
-
         records = self._records(2, 1)
-        assert _reserve_durable_slots(records, limit=6) == records
+        assert self._select(records) == records
 
     def test_reservation_is_a_ceiling_not_a_quota(self):
         """One fact available means one fact reserved — the rest stay episodic."""
-        from src.services.memory.hooks import _reserve_durable_slots
-
-        selected = _reserve_durable_slots(self._records(12, 1), limit=6)
+        selected = self._select(self._records(12, 1))
         assert sum(1 for r in selected if r.kind == KIND_SEMANTIC) == 1
         assert len(selected) == 6
 

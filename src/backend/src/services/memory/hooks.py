@@ -170,69 +170,116 @@ def _normalized(value: Any) -> str:
     return " ".join(str(getattr(value, "content", "") or "").split())
 
 
-def _with_pending(mem: Any, records: list, limit: int) -> list:
-    """Prepend in-flight records to what storage returned, then cap.
+#: Overlap above which two recalled records are ONE recollection.
+#:
+#: Jaccard over token SETS, so word order is ignored — which is exactly the
+#: difference between the two records that produced the incident (the same list
+#: with two entries swapped, invisible to the exact-hash consolidation). Two
+#: genuinely different task outputs in one domain score well under 0.5.
+_READ_REDUNDANCY = 0.8
 
-    Pending goes FIRST because it is the newest thing the crew produced and the
-    whole reason this exists: without it the next task sees nothing. It is not
-    scored against the query — the buffer holds at most the last task or two, and
-    dropping the one record we are here to surface because a similarity threshold
-    disliked it would reintroduce the bug. Storage results stay in relevance
-    order behind it, and the caller's char cap does the final trimming.
-    """
-    pending = pending_memory_for(getattr(mem, "root_scope", None))
-    if not pending:
-        return records
-    merged: list = []
-    seen: set[str] = set()
-    for record in list(pending) + list(records):
-        text = _normalized(record)
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        merged.append(record)
-        if len(merged) >= limit:
-            break
-    return merged
+#: Stricter, because a skipped WRITE cannot be undone while a suppressed snippet
+#: costs one prompt. Graphiti uses the same 0.9 for its LLM-free fuzzy tier.
+_WRITE_REDUNDANCY = 0.9
+
+#: Below this many distinct tokens, only exact equality counts. Short strings
+#: overlap by accident — "deadline is Friday" and "deadline is Monday" share two
+#: tokens of three and are opposite facts. Graphiti gates its shingle comparison
+#: the same way, for the same reason.
+_MIN_TOKENS = 8
 
 
-def _reserve_durable_slots(
-    records: list,
-    limit: int,
-    reserved: int = _RESERVED_DURABLE_SLOTS,
-) -> list:
-    """Trim an oversampled recall to ``limit``, keeping room for durable facts.
+def _tokens(text: str) -> frozenset:
+    return frozenset(text.lower().split())
 
-    Takes the top ``limit - reserved`` records in score order, then backfills
-    from the highest-scoring durable (non-episodic) records that did not make
-    that cut, and finally tops up from whatever is left. Relevance order is
-    preserved within each group.
 
-    The reservation is a CEILING, not a quota: when there are no durable
-    records — which is every workspace until the classifier has seen some
-    traffic — this returns exactly the top ``limit`` and behaves as before.
+def says_the_same(left: str, right: str, threshold: float) -> bool:
+    """Whether two normalized texts are one recollection said twice."""
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    a, b = _tokens(left), _tokens(right)
+    if min(len(a), len(b)) < _MIN_TOKENS:
+        return False
+    union = len(a | b)
+    return bool(union) and len(a & b) / union >= threshold
+
+
+def _select_records(mem: Any, records: list, limit: int) -> list:
+    """Choose the block's records: newest first, durable represented, no echoes.
+
+    ONE selection over the oversampled pool rather than a chain of trims. It
+    used to be two — ``_reserve_durable_slots`` then ``_with_pending`` — and
+    non-redundancy applied after a trim can only SHRINK the block, whereas
+    inside the selection it promotes the next distinct memory from the surplus
+    that ``_RECALL_OVERSAMPLE`` already buys.
+
+    It also closes a hole: ``_with_pending`` was the only place read-side
+    content was compared, and it returned early when nothing was in flight — so
+    on an ordinary turn six storage records reached the prompt completely
+    uncompared.
+
+    Order of preference:
+
+    1. **Pending (in-flight) records first.** They are the newest thing the crew
+       produced and the reason the overlay exists; without them the next task
+       sees nothing. They are never dropped for a similarity reason — but they
+       now WIN against a storage copy of themselves instead of appearing beside
+       it.
+    2. **Storage records in relevance order**, each admitted only if it says
+       something the selection does not already carry.
+    3. **Durable facts** (semantic/procedural) backfilled into the reserved
+       slots, so a burst of episodic records from a recent run cannot evict
+       every lasting fact about the user.
     """
     if limit <= 0:
         return []
-    if len(records) <= limit:
-        return list(records)
 
-    head = list(records[: max(limit - reserved, 0)])
-    seen = {id(record) for record in head}
-    tail = [record for record in records if id(record) not in seen]
+    pending = pending_memory_for(getattr(mem, "root_scope", None))
+    chosen: list = []
+    texts: list[str] = []
 
+    def admit(record: Any, *, unconditional: bool = False) -> bool:
+        text = _normalized(record)
+        if not text:
+            return False
+        if not unconditional and any(
+            says_the_same(text, seen, _READ_REDUNDANCY) for seen in texts
+        ):
+            return False
+        chosen.append(record)
+        texts.append(text)
+        return True
+
+    for record in pending:
+        if len(chosen) >= limit:
+            break
+        admit(record, unconditional=True)
+
+    storage = [r for r in records if r not in pending]
+    room = max(limit - _RESERVED_DURABLE_SLOTS, len(chosen))
+    remaining: list = []
+    for record in storage:
+        if len(chosen) < room:
+            if not admit(record):
+                continue
+        else:
+            remaining.append(record)
+
+    # Reserved slots go to durable facts first, then to whatever is left.
     durable = [
-        record
-        for record in tail
-        if getattr(record, "kind", None) not in (None, "episodic")
+        r for r in remaining if getattr(r, "kind", None) not in (None, "episodic")
     ]
-    selected = head + durable[:reserved]
-    if len(selected) < limit:
-        chosen = {id(record) for record in selected}
-        selected += [record for record in tail if id(record) not in chosen][
-            : limit - len(selected)
-        ]
-    return selected[:limit]
+    for group in (durable, remaining):
+        for record in group:
+            if len(chosen) >= limit:
+                break
+            if record in chosen:
+                continue
+            admit(record)
+
+    return chosen[:limit]
 
 
 def build_memory_preamble(
@@ -254,8 +301,7 @@ def build_memory_preamble(
     except Exception as exc:  # noqa: BLE001 — recall must never break the run
         logger.warning("Memory recall failed (%s) — continuing without memory", exc)
         records = []
-    records = _reserve_durable_slots(records, limit)
-    records = _with_pending(mem, records, limit)
+    records = _select_records(mem, records, limit)
     if not records:
         return ""
 
@@ -266,8 +312,18 @@ def build_memory_preamble(
         if not content:
             continue
         snippet = content[:_SNIPPET_CHAR_CAP]
+        # Provenance is PRINTED, not embedded. It used to be written into the
+        # record's own text, which made every task's record score ~0.98 against
+        # its own description at recall. Reading it from metadata keeps the block
+        # exactly as legible while leaving the embedding to carry only the
+        # knowledge. Pending entries have no metadata and render as before.
         source = getattr(record, "source", None)
-        line = f"- [{source}] {snippet}" if source else f"- {snippet}"
+        metadata = getattr(record, "metadata", None) or {}
+        label = source or ""
+        task_name = metadata.get("task_name") if isinstance(metadata, dict) else None
+        if label and task_name:
+            label = f"{label} · {task_name}"
+        line = f"- [{label}] {snippet}" if label else f"- {snippet}"
         if used + len(line) + 1 > char_cap:
             break
         lines.append(line)
@@ -275,6 +331,57 @@ def build_memory_preamble(
     if len(lines) == 1:
         return ""
     return "\n".join(lines)
+
+
+def _already_remembered(mem: Any, text: str, own: Any = None) -> bool:
+    """Whether this scope already holds what we are about to write.
+
+    Every reference system reads before it writes, and Kasal was the one that
+    did not: LangMem hands ``store.asearch(namespace, query, limit=5)`` hits to
+    its extractor as ``existing``; Mem0 searches five neighbours per candidate
+    fact and lets an LLM emit ADD/UPDATE/DELETE/NOOP; Graphiti fetches candidate
+    nodes and settles most of them with an LLM-FREE MinHash/Jaccard tier at 0.9
+    before any model is consulted. Kasal's write path never touched
+    ``storage.search``, so two runs of one task produced two records saying the
+    same thing, and the exact-hash consolidation could not see them because they
+    differed by two swapped list entries.
+
+    This is Graphiti's cheap tier and nothing more: the five nearest records in
+    the same scope, compared by token-set Jaccard. No LLM call — the module's
+    design rule is no model on these paths — and no embedding beyond the one the
+    recall itself needs.
+
+    **NOOP, never overwrite.** A skipped write is recoverable in effect: what it
+    would have said is already stored. Rewriting or deleting a neighbour is not,
+    and Kasal already has the honest mechanism for supersession
+    (``supersession.py``: ``valid_to``/``superseded_by``), which keeps the
+    replaced copy auditable.
+
+    **Fails open.** Any error writes as before — deduplication must never be the
+    reason a memory is lost.
+    """
+    try:
+        for record in mem.recall(text[:2000], limit=5) or []:
+            if says_the_same(_normalized(record), text, _WRITE_REDUNDANCY):
+                logger.info(
+                    "[memory] already remembered in this scope; skipping the write"
+                )
+                return True
+        # The in-flight overlay too: the writer pool has two workers, so two
+        # tasks finishing together can both miss storage and both insert. Mem0
+        # guards the same race with its per-batch `seen_hashes`.
+        for entry in pending_memory_for(getattr(mem, "root_scope", None)):
+            # Not this write's own overlay entry: remember_async adds it BEFORE
+            # submitting, so without this the gate matches the record against
+            # itself and no write ever happens.
+            if entry is own:
+                continue
+            if says_the_same(_normalized(entry), text, _WRITE_REDUNDANCY):
+                logger.info("[memory] an identical write is already in flight")
+                return True
+    except Exception as exc:  # noqa: BLE001 — never lose a memory over this
+        logger.debug("[memory] duplicate check unavailable (%s); writing", exc)
+    return False
 
 
 def remember_async(
@@ -314,6 +421,8 @@ def remember_async(
 
     def _write() -> None:
         try:
+            if _already_remembered(mem, text, own=pending):
+                return
             mem.remember(
                 text[:4000],
                 categories=categories,
@@ -502,10 +611,33 @@ def _persist_task_output(mem: Any, task: Any, output: Any) -> None:
     with _task_event_context(task):
         remember_async(
             mem,
-            f"[crew task: {task_name}] {description}\nResult: {raw[:1400]}",
+            # The ANSWER, alone. This used to be
+            # f"[crew task: {name}] {description}\nResult: {raw}" — the retrieval
+            # KEY stored inside the retrieved document. Recall queries with
+            # `task.description`, and on a saved crew that description is
+            # byte-identical every run, so the stored vector contained the query
+            # as a literal substring: cosine ~0.98, the 0.35 relevance floor
+            # never fires, and every previous run of a task was retrieved into
+            # its own next prompt BY CONSTRUCTION. A model shown its own prior
+            # answer to the same question repeats it (Xu et al., >90%).
+            #
+            # It also broke maintenance: the invariant prefix is why the
+            # exact-hash consolidation could not see two near-identical results,
+            # and why merge_similar_memories — which truncates at 300 chars —
+            # was comparing two identical prefixes and never reaching the answers.
+            #
+            # No reference system fuses request and answer: Mem0 persists the
+            # extracted fact and keeps raw turns in a separate table; Graphiti
+            # embeds the one-sentence fact and keeps the episode in its own
+            # scope. Provenance belongs in metadata, where it can filter and
+            # label but cannot score.
+            " ".join(raw.split())[:1400],
             source="crew_task",
             agent_role=getattr(output, "agent", None),
-            metadata={"task_name": str(task_name)},
+            metadata={
+                "task_name": str(task_name),
+                "task_description": description,
+            },
         )
 
 

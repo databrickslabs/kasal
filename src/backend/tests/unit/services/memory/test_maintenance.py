@@ -38,17 +38,27 @@ class TestConsolidateEndToEnd:
 
         assert consolidate_memory(memory)["deleted"] == 1
 
-    def test_runs_after_async_writes_flush(self, tmp_path):
+    def test_the_duplicate_write_never_lands(self, tmp_path):
+        """The write path reads before it writes, so consolidation has nothing
+        to clean up here.
+
+        This used to assert the opposite — two records stored, one deleted by a
+        later consolidation pass. That pass is throttled to one run per scope
+        per 900 seconds, so between passes BOTH copies were live and both were
+        recalled into the same prompt, which is the whole mechanism behind the
+        repetition incident. Every reference system reads before writing
+        (LangMem's `store.asearch(..., limit=5)`, Mem0's five neighbours per
+        fact, Graphiti's MinHash tier); Kasal now does too.
+        """
         backend = LocalMemoryStorage(tmp_path / "m.db", embedder=_embedder)
         memory = Memory(storage=EngineStorageAdapter(backend), root_scope="/g1")
         remember_async(memory, "same content", source="crew_task")
+        assert flush_memory_writes(timeout=10.0) == 0
         remember_async(memory, "same content", source="crew_task")
         assert flush_memory_writes(timeout=10.0) == 0
 
-        stats = consolidate_memory(memory)
-
-        assert stats["deleted"] == 1
         assert backend.count("/g1") == 1
+        assert consolidate_memory(memory)["deleted"] == 0
 
 
 class TestConsolidateGuards:

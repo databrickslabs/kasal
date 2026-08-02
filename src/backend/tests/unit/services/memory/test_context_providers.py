@@ -166,8 +166,13 @@ class TestMakeMemoryOutputSink:
         sink(task=task, output=SimpleNamespace(raw="42 facts", agent="Researcher"))
 
         assert done.wait(timeout=5), "sink never persisted"
+        # Answer only; the task name and description ride in metadata, where
+        # they can filter and label but cannot score at recall.
         content = memory.remember.call_args.args[0]
-        assert "research" in content and "42 facts" in content
+        assert content == "42 facts"
+        metadata = memory.remember.call_args.kwargs["metadata"]
+        assert metadata["task_name"] == "research"
+        assert metadata["task_description"] == "Find facts"
 
     def test_sink_skips_empty_output(self):
         import time as _time

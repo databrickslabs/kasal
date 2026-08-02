@@ -184,8 +184,16 @@ class TestTaskOutputPersistence:
             assert done.wait(timeout=5), "task output never persisted"
         finally:
             unregister()
+        # The record is the ANSWER, alone. It used to be
+        # "[crew task: X] {description}\nResult: {answer}" — the retrieval key
+        # inside the retrieved document, so a task matched its own prior answers
+        # at ~0.98 and was handed them back every run.
         content = memory.remember.call_args.args[0]
-        assert "research" in content and "42 facts found" in content
+        assert content == "42 facts found"
+        assert "research" not in content.lower()
+        metadata = memory.remember.call_args.kwargs["metadata"]
+        assert metadata["task_name"] == "research"
+        assert metadata["task_description"] == "Find facts"
         assert memory.remember.call_args.kwargs["agent_role"] == "Researcher"
 
     def test_foreign_task_is_ignored(self):
