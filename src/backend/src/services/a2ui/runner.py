@@ -569,7 +569,9 @@ def crew_intent_text(
     # ``run_name`` is what a FLOW config carries — it has no crew_name/name and
     # no `tasks` list, so without this a flow's signal was whatever happened to
     # be in `inputs`, and the composer declined to build anything.
-    for key in ("crew_name", "name", "description", "run_name"):
+    # ``user_message`` first: infer_deliverable is first-keyword-wins, and what
+    # the person asked for outranks what the flow calls itself.
+    for key in ("user_message", "crew_name", "name", "description", "run_name"):
         val = cfg.get(key)
         if isinstance(val, str) and val:
             parts.append(val)
