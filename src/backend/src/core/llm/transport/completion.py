@@ -34,6 +34,7 @@ from .budget import (
 from .constants import CONTEXT_WINDOW_USAGE_RATIO, LLM_CONTEXT_WINDOW_SIZES
 from .exceptions import (
     LLMContextLengthExceededError,
+    LLMOutputTruncatedError,
     is_context_length_exceeded,
 )
 
@@ -48,11 +49,46 @@ from .response_parsing import (
     reasoning_items,
     responses_token_usage,
 )
-from .repetition import RepetitionWatch, check_response, stop_on_loop
 from .rpm import throttle
 from .tool_rounds import run_chat_round, run_responses_round
 
 logger = logging.getLogger(__name__)
+
+
+def _check_truncation(model: str, finish_reason: Any, content: str | None) -> None:
+    """Fail a call the model never finished.
+
+    ``finish_reason == "length"`` is the protocol's own statement that the output
+    allowance ran out mid-generation. Every OpenAI-compatible endpoint returns
+    it, which is why this is the whole mechanism: no heuristic, no inspection of
+    the text, nothing that can be right for one model and wrong for another.
+
+    It was ignored entirely, and that is what let bad output pass as an answer —
+    a degenerate decode ends here too, since a model repeating itself keeps
+    going until the ceiling. Raising turns "8KB of nothing, stored as the
+    result" into a named failure with the partial text attached, on the path
+    that already emits LLMCallFailedEvent.
+
+    Everything else — ``stop``, ``tool_calls``, ``content_filter`` — is a normal
+    end and passes through untouched.
+    """
+    if finish_reason != "length":
+        return
+    written = content or ""
+    logger.warning(
+        "[llm] %s hit its output limit after %d characters; the response is "
+        "truncated, not finished",
+        model,
+        len(written),
+    )
+    raise LLMOutputTruncatedError(
+        f"{model} ran out of output tokens before finishing (finish_reason="
+        f"'length'), after {len(written)} characters. The response is a fragment, "
+        "not an answer: raise the model's max_output_tokens, or bound what the "
+        "task asks for.",
+        partial=written,
+    )
+
 
 #: Characters per token assumed when estimating a prompt's size.
 #:
@@ -616,7 +652,11 @@ class OpenAICompletion(BaseLLM):
                 self._track_token_usage_internal(usage)
                 function_calls = self._extract_function_calls_from_response(response)
                 content = response.choices[0].message.content
-            check_response(self.model, content)
+                _check_truncation(
+                    self.model,
+                    getattr(response.choices[0], "finish_reason", None),
+                    content,
+                )
             if function_calls and available_functions:
                 call_type = LLMCallType.TOOL_CALL
                 outcome = run_chat_round(
@@ -661,17 +701,18 @@ class OpenAICompletion(BaseLLM):
         calls_by_index: dict[int, dict[str, Any]] = {}
         usage: dict[str, Any] | None = None
         chunk_index = 0
-        # Watches the text as it arrives so a degenerate decode is cut off at a
-        # few KB instead of running to max_tokens. Streaming is where this is
-        # worth doing: the tokens after the loop starts are billed and waited
-        # for, and none of them will ever say anything new.
-        watch = RepetitionWatch()
+        finish_reason: str | None = None
         for part in response_stream:
             if getattr(part, "usage", None) is not None:
                 usage = self._extract_chat_token_usage(part)
             choices = getattr(part, "choices", None)
             if not choices:
                 continue
+            # The last chunk carries why generation stopped. "length" means the
+            # allowance ran out mid-sentence — the model never finished, and the
+            # accumulated text is not an answer.
+            if getattr(choices[0], "finish_reason", None):
+                finish_reason = choices[0].finish_reason
             delta = choices[0].delta
             text = getattr(delta, "content", None)
             if text:
@@ -683,9 +724,6 @@ class OpenAICompletion(BaseLLM):
                     ),
                 )
                 chunk_index += 1
-                unit = watch.feed(text)
-                if unit:
-                    stop_on_loop(self.model, "".join(chunks), unit, response_stream)
             for tc in getattr(delta, "tool_calls", None) or []:
                 slot = calls_by_index.setdefault(
                     tc.index, {"id": None, "name": "", "arguments": ""}
@@ -701,6 +739,7 @@ class OpenAICompletion(BaseLLM):
 
         if usage:
             self._track_token_usage_internal(usage)
+        _check_truncation(self.model, finish_reason, "".join(chunks))
         function_calls = [
             {
                 "id": slot["id"] or f"call_{index}",
