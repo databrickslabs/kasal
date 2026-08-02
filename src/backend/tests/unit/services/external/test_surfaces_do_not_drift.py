@@ -55,19 +55,48 @@ _CAPABILITIES = [
 ]
 
 
+async def _mcp_capabilities(capabilities):
+    """The per-capability tools an MCP client would see, in card-comparable shape.
+
+    The generic ``list_crews`` used to provide this; it was retired once the
+    tool list became refreshable, so the comparison reads the tool list itself.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from src.services.mcp.mcp_server.server import list_tools
+    from src.services.mcp.mcp_server.tools import TOOL_DEFINITIONS
+
+    fixed = {t["name"] for t in TOOL_DEFINITIONS}
+    with patch("src.services.mcp.mcp_server.tools.PublicationService") as svc:
+        svc.return_value.list_capabilities = AsyncMock(return_value=capabilities)
+        tools = await list_tools(_caller("mcp"))
+
+    by_name = {c.name: c for c in capabilities}
+    return [
+        {
+            "name": t["name"],
+            # The tool description appends a usage hint; the capability's own
+            # description is what the card carries, so compare that.
+            "description": by_name[t["name"]].description,
+            "input_schema": by_name[t["name"]].input_schema,
+        }
+        for t in tools
+        if t["name"] not in fixed
+    ]
+
+
 class TestOneCapabilityList:
     @pytest.mark.asyncio
     async def test_mcp_tools_and_a2a_skills_show_the_same_capabilities(self):
         """Two projections of one query. If these ever differ, a second
-        capability source has been introduced somewhere."""
-        from src.services.a2a.a2a_server.card import build_card
-        from src.services.mcp.mcp_server.tools import list_crews
+        capability source has been introduced somewhere.
 
-        with patch("src.services.mcp.mcp_server.tools.PublicationService") as mcp_svc:
-            mcp_svc.return_value.list_capabilities = AsyncMock(
-                return_value=_CAPABILITIES
-            )
-            mcp_result = await list_crews(_caller("mcp"))
+        Read off the TOOL LIST now that the generic `list_crews` is retired —
+        the tool list is what an MCP client actually sees, so comparing it to
+        the card is the stronger form of the same invariant."""
+        from src.services.a2a.a2a_server.card import build_card
+
+        mcp_result = await _mcp_capabilities(_CAPABILITIES)
 
         with patch("src.services.a2a.a2a_server.card.PublicationService") as a2a_svc:
             a2a_svc.return_value.list_capabilities = AsyncMock(
@@ -75,11 +104,11 @@ class TestOneCapabilityList:
             )
             card = await build_card(_caller("a2a"), base_url="https://x")
 
-        mcp_names = [c["name"] for c in mcp_result["crews"]]
+        mcp_names = [c["name"] for c in mcp_result]
         a2a_names = [s.id for s in card.skills]
         assert mcp_names == a2a_names
 
-        mcp_descriptions = [c["description"] for c in mcp_result["crews"]]
+        mcp_descriptions = [c["description"] for c in mcp_result]
         a2a_descriptions = [s.description for s in card.skills]
         assert mcp_descriptions == a2a_descriptions
 
@@ -88,13 +117,8 @@ class TestOneCapabilityList:
         """MCP tool inputSchema and A2A skill inputSchema are one field. Two
         copies would drift and one would quietly become wrong."""
         from src.services.a2a.a2a_server.card import build_card
-        from src.services.mcp.mcp_server.tools import list_crews
 
-        with patch("src.services.mcp.mcp_server.tools.PublicationService") as mcp_svc:
-            mcp_svc.return_value.list_capabilities = AsyncMock(
-                return_value=_CAPABILITIES
-            )
-            mcp_result = await list_crews(_caller("mcp"))
+        mcp_result = await _mcp_capabilities(_CAPABILITIES)
 
         with patch("src.services.a2a.a2a_server.card.PublicationService") as a2a_svc:
             a2a_svc.return_value.list_capabilities = AsyncMock(
@@ -102,7 +126,7 @@ class TestOneCapabilityList:
             )
             card = await build_card(_caller("a2a"), base_url="https://x")
 
-        assert [c["input_schema"] for c in mcp_result["crews"]] == [
+        assert [c["input_schema"] for c in mcp_result] == [
             s.inputSchema for s in card.skills
         ]
 
@@ -110,11 +134,11 @@ class TestOneCapabilityList:
     async def test_both_read_through_the_same_service_method(self):
         """Not merely 'they agree today' — they call the same function."""
         from src.services.a2a.a2a_server.card import build_card
-        from src.services.mcp.mcp_server.tools import list_crews
+        from src.services.mcp.mcp_server.server import list_tools
 
         with patch("src.services.mcp.mcp_server.tools.PublicationService") as mcp_svc:
             mcp_svc.return_value.list_capabilities = AsyncMock(return_value=[])
-            await list_crews(_caller("mcp"))
+            await list_tools(_caller("mcp"))
             assert mcp_svc.return_value.list_capabilities.await_count == 1
 
         with patch("src.services.a2a.a2a_server.card.PublicationService") as a2a_svc:
@@ -154,20 +178,24 @@ class TestLayerTwoMatchesSkills:
 
     @pytest.mark.asyncio
     async def test_a_crew_shadowing_a_built_in_tool_is_skipped_not_silent(self):
-        """A crew published as `start_crew` would shadow a control tool. It is
+        """A crew published as `ask_kasal` would shadow a control tool. It is
         dropped with a warning rather than either silently winning (breaking
-        every caller's start_crew) or silently losing."""
+        every caller's ask_kasal) or silently losing.
+
+        With the generic runner retired there is no way to reach it by name any
+        more, so the publication has to be RENAMED — which is why the skip is
+        logged rather than silent."""
         from src.services.mcp.mcp_server.server import list_tools
 
         clash = PublishedCapability(
-            entity_id="c9", name="start_crew", description="A crew named like a tool."
+            entity_id="c9", name="ask_kasal", description="A crew named like a tool."
         )
         with patch("src.services.mcp.mcp_server.tools.PublicationService") as mcp_svc:
             mcp_svc.return_value.list_capabilities = AsyncMock(return_value=[clash])
             tools = await list_tools(_caller("mcp"))
 
-        # Exactly one start_crew — the built-in.
-        assert [t["name"] for t in tools].count("start_crew") == 1
+        # Exactly one ask_kasal — the built-in.
+        assert [t["name"] for t in tools].count("ask_kasal") == 1
 
 
 class TestOneStateVocabulary:

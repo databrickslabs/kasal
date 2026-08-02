@@ -13,16 +13,33 @@ The tool set:
 
 * ``ask_kasal``       — blocking, over the chat path. Fits an ordinary tool-call
   timeout because the chat path is in-process and sub-second.
-* ``list_crews``      — the capability list, group-scoped.
-* ``start_crew``      — returns a run id immediately; never waits.
+* ``create_crew``     — authoring, for admins and editors.
 * ``get_run_status``  — the canonical state, plus the prompt when a run is
   waiting for a human.
 * ``get_run_result``  — the finished output.
 * ``cancel_run``      — stop it.
 * ``respond_to_run``  — answer a run that paused for approval.
 
+plus **one tool per published capability**, which is how a run is started.
+
 Deliberately absent: a BLOCKING ``run_crew``. Crew runs take minutes; such a
 tool would pass testing against a small crew and time out in production.
+
+Also absent, and this one was here until the transport caught up:
+``list_crews`` and ``start_crew``. They named the published set at runtime and
+ran something out of it — a second way to do what calling the capability's own
+tool already does, and one that costs an extra round trip and an extra decision
+for the calling agent. Their real job was working around a tool list that could
+not refresh: a client fetched it once at ``initialize`` and had no way to learn
+that something had been published since. Now that the server declares
+``tools.listChanged`` and pushes ``notifications/tools/list_changed`` down the
+GET stream (see ``sessions.py``), the list a client holds is current, and the
+pair had nothing left to do that calling the tool does not do better.
+
+The one thing lost with them: a capability published under a built-in tool's
+name is skipped from the list to avoid shadowing, and there is no longer a
+generic runner to reach it by name. It has to be renamed. That is a fair trade
+for a surface with one obvious way to run something — and the skip is logged.
 
 ``respond_to_run`` is the tool that would not exist if MCP had been designed
 alone. MCP has no notion of a call that pauses for a human; A2A does, and
@@ -67,7 +84,12 @@ class UnknownToolError(Exception):
 
 
 class UnknownCapabilityError(Exception):
-    """The caller named a crew that is not published to it."""
+    """The caller named a capability that is not published to it.
+
+    Raised by the REST surface in ``mcp_server_router.py``. The JSON-RPC
+    transport answers the same case as :class:`UnknownToolError`, because there
+    a capability IS a tool.
+    """
 
 
 class UnknownRunError(Exception):
@@ -99,14 +121,6 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
             },
             "required": ["question"],
         },
-    },
-    {
-        "name": "list_crews",
-        "description": (
-            "List the crews this workspace has published for external use, with "
-            "a description of what each one does and when to use it."
-        ),
-        "inputSchema": {"type": "object", "properties": {}},
     },
     {
         "name": "create_crew",
@@ -160,27 +174,6 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                 },
             },
             "required": ["prompt"],
-        },
-    },
-    {
-        "name": "start_crew",
-        "description": (
-            "Start a published crew. Returns a run id immediately — crews take "
-            "minutes, so poll get_run_status rather than waiting."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "The crew name from list_crews.",
-                },
-                "inputs": {
-                    "type": "object",
-                    "description": "Inputs for the crew, matching its input schema.",
-                },
-            },
-            "required": ["name"],
         },
     },
     {
@@ -251,51 +244,6 @@ async def ask_kasal(
     """Blocking question over the chat path. Any workspace member may ask."""
     require_role(caller, RUN_ROLES)
     result = await ask(caller=caller, question=question, model=model, session=session)
-    return result.as_dict()
-
-
-async def list_crews(caller: ExternalCaller, session: Any = None) -> Dict[str, Any]:
-    """The capabilities this caller may see.
-
-    Reads through ``PublicationService``, the SAME call the A2A card's
-    ``skills[]`` is built from — the two surfaces cannot advertise different
-    capabilities because there is only one list.
-    """
-    require_role(caller, RUN_ROLES)
-    service = PublicationService(session)
-    capabilities = await service.list_capabilities(caller)
-    return {
-        "crews": [
-            {
-                "name": c.name,
-                "description": c.description,
-                "input_schema": c.input_schema,
-            }
-            for c in capabilities
-        ]
-    }
-
-
-#: Dispatch table. A tool that is not here is not callable, which keeps the
-#: advertised list and the executable set from drifting apart.
-async def start_crew(
-    caller: ExternalCaller,
-    name: str,
-    inputs: Optional[Dict[str, Any]] = None,
-    session: Any = None,
-) -> Dict[str, Any]:
-    """Start a published crew, returning a handle."""
-    require_role(caller, RUN_ROLES)
-    service = PublicationService(session)
-    publication = await service.resolve_capability(caller, name)
-    if publication is None:
-        # The single place a caller is authorised for a crew. None covers both
-        # "no such capability" and "another tenant's" deliberately.
-        raise UnknownCapabilityError(f"No published crew named {name!r}")
-
-    result = await start_run(
-        caller=caller, publication=publication, inputs=inputs, session=session
-    )
     return result.as_dict()
 
 
@@ -397,11 +345,11 @@ async def create_crew(
     )
 
 
+#: Dispatch table. A tool that is not here is not callable, which keeps the
+#: advertised list and the executable set from drifting apart.
 TOOL_HANDLERS = {
     "ask_kasal": ask_kasal,
     "create_crew": create_crew,
-    "list_crews": list_crews,
-    "start_crew": start_crew,
     "get_run_status": get_run_status,
     "get_run_result": get_run_result,
     "cancel_run": cancel_run,
@@ -410,13 +358,17 @@ TOOL_HANDLERS = {
 
 
 # ---------------------------------------------------------------------------
-# Layer 2 — one tool per published crew.
+# One tool per published capability — how a run is started.
 #
-# The generic start_crew works, but a calling agent selects on DESCRIPTIONS. A
-# tool called `analyse_powerbi_model` that says when to use it gets chosen; a
-# generic `start_crew` requires the agent to be told out of band which crew
-# names exist. Same rows, better discovery — and exactly symmetric with the A2A
-# card's skills[], which has projected per-crew capabilities from the start.
+# A calling agent selects on DESCRIPTIONS. A tool called `analyse_powerbi_model`
+# that says when to use it gets chosen; a generic runner requires the agent to
+# be told out of band which names exist, and costs a discovery call before every
+# run. Same rows, better discovery — and exactly symmetric with the A2A card's
+# skills[], which has projected per-capability entries from the start.
+#
+# This used to be "Layer 2", sitting beside a generic list/start pair. The pair
+# is gone: see the module docstring for why the refreshable tool list is what
+# made it redundant.
 # ---------------------------------------------------------------------------
 
 #: Names the fixed tools already occupy. A crew published under one of these
@@ -425,10 +377,38 @@ TOOL_HANDLERS = {
 _RESERVED_NAMES = frozenset(t["name"] for t in TOOL_DEFINITIONS)
 
 
+def _capability_hint(capability: Any) -> str:
+    """What a calling agent needs to know about the thing behind the tool.
+
+    A flow is not a crew with more steps: it can pause at an approval gate, and
+    a conversational one carries a thread across calls, so a follow-up belongs
+    in the same capability instead of a fresh run. Saying "crew" for all of them
+    told a client the opposite of both.
+    """
+    if getattr(capability, "entity_type", "crew") != "flow":
+        return (
+            "Starts a crew and returns a run id immediately — crews take "
+            "minutes, so poll get_run_status."
+        )
+    if getattr(capability, "conversational", False):
+        return (
+            "Starts a flow that holds a CONVERSATION and returns a run id "
+            "immediately — poll get_run_status. Send follow-ups to this same "
+            "tool with the same session_id: it continues the thread rather than "
+            "starting over."
+        )
+    return (
+        "Starts a flow — several crews with routing between them — and returns "
+        "a run id immediately; poll get_run_status. A flow may pause for human "
+        "approval, in which case the status is input_required and respond_to_run "
+        "answers it."
+    )
+
+
 async def build_crew_tool_definitions(
     caller: ExternalCaller, session: Any = None
 ) -> List[Dict[str, Any]]:
-    """One tool definition per crew this caller may see."""
+    """One tool definition per capability this caller may see: crews and flows."""
     service = PublicationService(session)
     capabilities = await service.list_capabilities(caller)
 
@@ -436,17 +416,21 @@ async def build_crew_tool_definitions(
     for capability in capabilities:
         if capability.name in _RESERVED_NAMES:
             logger.warning(
-                "[mcp-server] published crew %r shadows a built-in tool; skipping",
+                "[mcp-server] published capability %r shadows a built-in tool; skipping",
                 capability.name,
             )
             continue
+        teamspace = getattr(capability, "teamspace", None)
         definitions.append(
             {
                 "name": capability.name,
                 "description": (
-                    f"{capability.description}\n\n"
-                    "Starts a crew and returns a run id immediately — crews take "
-                    "minutes, so poll get_run_status."
+                    f"{capability.description}\n\n{_capability_hint(capability)}"
+                    # Which teamspace it belongs to. A caller identified by email
+                    # alone sees every teamspace they are a member of, so a tool
+                    # with no teamspace on it leaves the reader unable to tell
+                    # whose data a run will touch.
+                    + (f"\nTeamspace: {teamspace}." if teamspace else "")
                 ),
                 "inputSchema": capability.input_schema
                 or {
@@ -457,7 +441,7 @@ async def build_crew_tool_definitions(
                     "properties": {
                         "request": {
                             "type": "string",
-                            "description": "What you want this crew to do.",
+                            "description": "What you want this capability to do.",
                         }
                     },
                 },
@@ -472,7 +456,12 @@ async def call_crew_tool(
     arguments: Dict[str, Any],
     session: Any = None,
 ) -> Dict[str, Any]:
-    """Invoke a Layer-2 tool — i.e. start the crew published under ``name``."""
+    """Invoke a Layer-2 tool — start the crew OR flow published under ``name``.
+
+    Which of the two it is is decided by ``start_run`` from the publication's
+    entity type, so nothing here has to know: an external caller invokes a
+    capability and has no reason to care which engine path runs it.
+    """
     require_role(caller, RUN_ROLES)
     service = PublicationService(session)
     publication = await service.resolve_capability(caller, name)
@@ -484,8 +473,9 @@ async def call_crew_tool(
         raise UnknownToolError(f"Unknown tool: {name}")
 
     logger.info(
-        "[mcp-server] %s called published crew %s (groups=%s)",
+        "[mcp-server] %s called published %s %s (groups=%s)",
         caller.origin,
+        getattr(publication, "entity_type", "crew"),
         name,
         caller.group_ids,
     )

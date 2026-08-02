@@ -36,6 +36,7 @@ from src.services.external.identity import (
 )
 from src.services.external.permissions import ExternalPermissionError
 from src.services.mcp.mcp_server import server as mcp_server
+from src.services.mcp.mcp_server import sessions
 
 router = APIRouter(tags=["mcp-server"])
 
@@ -77,10 +78,35 @@ async def _resolve(
     )
 
 
+def _whoami(caller: ExternalCaller, pinned: Optional[str] = None) -> str:
+    """Who the server thinks is calling, and which teamspaces that covers.
+
+    Returned in the ``initialize`` instructions so a misconfigured client is
+    obvious in the client itself. Without it, the only symptom of the wrong
+    identity is a tool list that looks empty or unfamiliar, and the only way to
+    diagnose it is the server log.
+
+    Identity is the whole configuration: the forwarded email decides which
+    teamspaces the caller is a member of, and the tool list is exactly those
+    teamspaces' publications. ``X-Group-Id`` remains available to PIN one, but
+    nothing needs it — which is why it is reported only when it was sent.
+    """
+    groups = caller.group_ids
+    if not groups:
+        return f"authenticated as {caller.identifier}, in no teamspace"
+    if pinned:
+        return f"authenticated as {caller.identifier}, pinned to teamspace {pinned}"
+    return (
+        f"authenticated as {caller.identifier}; the tools below are the "
+        f"capabilities published in your teamspace(s): {', '.join(groups)}"
+    )
+
+
 async def _handle(
     message: Dict[str, Any],
     caller: ExternalCaller,
     session: Any,
+    pinned_group: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Dispatch one JSON-RPC message. None means "notification, no reply"."""
     method = message.get("method")
@@ -108,12 +134,30 @@ async def _handle(
                 # Only tools. Kasal exposes no prompts or resources over MCP, and
                 # advertising a capability that answers empty wastes a round trip
                 # on every client that believes it.
-                "capabilities": {"tools": {"listChanged": False}},
+                #
+                # listChanged is TRUE, and it is backed: the tool list changes
+                # whenever a capability is published or withdrawn, and the GET
+                # stream below carries `notifications/tools/list_changed` to the
+                # sessions it concerns. It was false for as long as there was no
+                # channel to push down — promising a notification that never
+                # arrives is worse than admitting there is none.
+                "capabilities": {"tools": {"listChanged": True}},
                 "serverInfo": SERVER_INFO,
                 "instructions": (
-                    "Kasal runs multi-agent crews. Tools named after a crew start "
-                    "that crew and return a run id — crews take minutes, so poll "
-                    "get_run_status. ask_kasal answers a question immediately."
+                    "Kasal runs multi-agent crews and flows. Each published "
+                    "capability is its own tool: call it to start a run, which "
+                    "returns a run id — runs take minutes, so poll "
+                    "get_run_status. A flow may pause for a human, which shows "
+                    "as input_required and is answered with respond_to_run. "
+                    "ask_kasal answers a question immediately, without a run. "
+                    "The tool list changes as capabilities are published; open "
+                    "the GET stream to be told when.\n\n"
+                    # Which teamspaces this connection covers, stated up front.
+                    # The forwarded identity is the whole configuration, and the
+                    # symptom of getting it wrong is a tool list that is simply
+                    # someone else's — indistinguishable, from the client, from a
+                    # teamspace with nothing published.
+                    f"This connection is {_whoami(caller, pinned_group)}."
                 ),
             },
         )
@@ -183,12 +227,17 @@ async def mcp_endpoint(
     ] = None,
     x_group_id: Annotated[Optional[str], Header(alias="X-Group-Id")] = None,
     accept: Annotated[Optional[str], Header()] = None,
+    mcp_session_id: Annotated[Optional[str], Header(alias="Mcp-Session-Id")] = None,
 ):
     """The MCP Streamable HTTP endpoint.
 
     Accepts a single JSON-RPC message or a batch. Answers with JSON, or with SSE
     when the client asked for ``text/event-stream`` — both are permitted by the
     transport, and clients differ in which they prefer.
+
+    An ``initialize`` also opens a SESSION and returns its id in
+    ``Mcp-Session-Id``. The client hands that back on the GET stream, which is
+    how a ``tools/list_changed`` notification finds it.
     """
     try:
         body = await request.json()
@@ -215,11 +264,14 @@ async def mcp_endpoint(
 
     messages = body if isinstance(body, list) else [body]
     responses = []
+    initialized = False
     for message in messages:
         if not isinstance(message, dict):
             responses.append(_error(None, _INVALID_REQUEST, "Expected an object"))
             continue
-        reply = await _handle(message, caller, session)
+        if message.get("method") == "initialize":
+            initialized = True
+        reply = await _handle(message, caller, session, pinned_group=x_group_id)
         if reply is not None:
             responses.append(reply)
 
@@ -228,6 +280,17 @@ async def mcp_endpoint(
         return JSONResponse(None, status_code=202)
 
     payload = responses if isinstance(body, list) else responses[0]
+
+    headers: Dict[str, str] = {}
+    if initialized:
+        # The session exists so a later notification has somewhere to go. Bound
+        # to the caller's groups, so a publish in one workspace does not make
+        # every other workspace's client refetch.
+        headers["Mcp-Session-Id"] = (
+            sessions.adopt_session(mcp_session_id, caller.group_ids)
+            if mcp_session_id
+            else sessions.open_session(caller.group_ids)
+        )
 
     if accept and "text/event-stream" in accept and "application/json" not in accept:
         # The client asked ONLY for SSE, so give it SSE. When it accepts both —
@@ -239,22 +302,88 @@ async def mcp_endpoint(
         return StreamingResponse(
             _sse(),
             media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                **headers,
+            },
         )
 
-    return JSONResponse(payload)
+    return JSONResponse(payload, headers=headers or None)
 
 
 @router.get("/mcp")
-async def mcp_endpoint_get():
-    """The transport allows a GET to open a server-initiated SSE stream.
+async def mcp_endpoint_get(
+    x_forwarded_email: Annotated[
+        Optional[str], Header(alias="X-Forwarded-Email")
+    ] = None,
+    x_forwarded_access_token: Annotated[
+        Optional[str], Header(alias="X-Forwarded-Access-Token")
+    ] = None,
+    x_auth_request_email: Annotated[
+        Optional[str], Header(alias="X-Auth-Request-Email")
+    ] = None,
+    x_auth_request_access_token: Annotated[
+        Optional[str], Header(alias="X-Auth-Request-Access-Token")
+    ] = None,
+    x_group_id: Annotated[Optional[str], Header(alias="X-Group-Id")] = None,
+    accept: Annotated[Optional[str], Header()] = None,
+    mcp_session_id: Annotated[Optional[str], Header(alias="Mcp-Session-Id")] = None,
+):
+    """The server-initiated SSE stream.
 
-    Kasal has nothing to push on an idle session — no server-initiated requests,
-    no resource subscriptions — so this answers 405 rather than holding a
-    connection open forever that will never carry a message. Clients treat that
-    as "no server-initiated stream" and proceed.
+    Kasal has exactly one thing to say on it — ``tools/list_changed`` — and that
+    one thing is what makes a long-lived client usable: its tool list is a
+    snapshot from ``initialize``, and every capability published afterwards is
+    invisible to it until something says otherwise. This used to answer 405,
+    which is why the generic ``list_crews``/``start_crew`` pair had to exist.
+
+    A client that asked for JSON rather than an event stream still gets the 405:
+    it is not asking to hold a stream open.
     """
-    return JSONResponse(
-        _error(None, _METHOD_NOT_FOUND, "This server does not offer a GET stream."),
-        status_code=405,
+    if not accept or "text/event-stream" not in accept:
+        return JSONResponse(
+            _error(None, _METHOD_NOT_FOUND, "This endpoint streams; ask for SSE."),
+            status_code=405,
+        )
+
+    try:
+        caller = await _resolve(
+            email=x_auth_request_email or x_forwarded_email,
+            token=x_auth_request_access_token or x_forwarded_access_token,
+            group_id=x_group_id,
+        )
+    except ExternalAuthError as exc:
+        return JSONResponse(_error(None, _INVALID_REQUEST, exc.detail), status_code=401)
+
+    session_id = (
+        sessions.adopt_session(mcp_session_id, caller.group_ids)
+        if mcp_session_id
+        else sessions.open_session(caller.group_ids)
     )
+    logger.info("[mcp] session %s opened a notification stream", session_id)
+
+    return StreamingResponse(
+        sessions.stream(session_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Mcp-Session-Id": session_id,
+        },
+    )
+
+
+@router.delete("/mcp")
+async def mcp_endpoint_delete(
+    mcp_session_id: Annotated[Optional[str], Header(alias="Mcp-Session-Id")] = None,
+):
+    """Session termination, as the transport defines it.
+
+    Nothing is authorised by a session id — the caller is resolved from headers
+    on every request — so this only forgets a queue. Answering 200 for an
+    unknown id keeps a client's shutdown path simple.
+    """
+    if mcp_session_id:
+        sessions.close_session(mcp_session_id)
+    return JSONResponse({"ok": True})

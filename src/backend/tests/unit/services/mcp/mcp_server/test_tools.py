@@ -46,12 +46,13 @@ class TestAdvertisedSurface:
         """Crew runs take minutes. A BLOCKING run_crew passes testing against a
         small crew and times out in production, so it must never exist.
 
-        start_crew is the sanctioned shape: it returns a handle and does not
-        wait. The distinction is the whole point, so it is pinned rather than
-        left to reviewer memory."""
+        A capability's own tool is the sanctioned shape: it returns a handle and
+        does not wait, and `get_run_status` is how the caller follows it. The
+        distinction is the whole point, so it is pinned rather than left to
+        reviewer memory."""
         names = {t["name"] for t in TOOL_DEFINITIONS}
         assert "run_crew" not in names
-        assert "start_crew" in names
+        assert {"get_run_status", "get_run_result"} <= names
 
     def test_every_tool_declares_an_input_schema(self):
         for tool in TOOL_DEFINITIONS:
@@ -62,6 +63,74 @@ class TestAdvertisedSurface:
         one means the tool is never selected."""
         for tool in TOOL_DEFINITIONS:
             assert len(tool["description"]) > 40, tool["name"]
+
+
+class TestPerCapabilityTools:
+    """Layer 2: one tool per published capability — crews AND flows.
+
+    A calling agent selects on the description, so the description has to be
+    true of the thing behind it. Calling every capability a "crew" told a client
+    the opposite of what a flow does: that it will not pause for a human, and
+    that a follow-up needs a fresh run.
+    """
+
+    @staticmethod
+    def _capabilities(*caps):
+        return patch(
+            "src.services.mcp.mcp_server.tools.PublicationService",
+            **{"return_value.list_capabilities": AsyncMock(return_value=list(caps))},
+        )
+
+    @staticmethod
+    def _cap(**kwargs):
+        from src.schemas.crew_publication import PublishedCapability
+
+        return PublishedCapability(
+            **{
+                "entity_id": "e1",
+                "name": "thing",
+                "description": "Does the thing.",
+                **kwargs,
+            }
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_published_flow_becomes_a_tool(self):
+        cap = self._cap(entity_type="flow", name="swiss_news")
+        with self._capabilities(cap):
+            tools = await mcp_server.list_tools(_caller())
+
+        assert "swiss_news" in {t["name"] for t in tools}
+
+    @pytest.mark.asyncio
+    async def test_a_flow_is_described_as_a_flow(self):
+        cap = self._cap(entity_type="flow", name="swiss_news")
+        with self._capabilities(cap):
+            tools = await mcp_server.list_tools(_caller())
+
+        description = next(t for t in tools if t["name"] == "swiss_news")["description"]
+        assert "flow" in description
+        assert "Starts a crew" not in description
+
+    @pytest.mark.asyncio
+    async def test_a_conversational_flow_says_follow_ups_continue_it(self):
+        cap = self._cap(entity_type="flow", name="swiss_news", conversational=True)
+        with self._capabilities(cap):
+            tools = await mcp_server.list_tools(_caller())
+
+        description = next(t for t in tools if t["name"] == "swiss_news")["description"]
+        assert "session_id" in description
+
+    @pytest.mark.asyncio
+    async def test_a_crew_is_still_described_as_a_crew(self):
+        cap = self._cap(name="acme_report")
+        with self._capabilities(cap):
+            tools = await mcp_server.list_tools(_caller())
+
+        description = next(t for t in tools if t["name"] == "acme_report")[
+            "description"
+        ]
+        assert "Starts a crew" in description
 
 
 class TestDispatch:
@@ -135,44 +204,44 @@ class TestDispatch:
         assert seen["caller"].group_ids == ["globex_inc"]
 
 
-class TestListCrews:
-    @pytest.mark.asyncio
-    async def test_lists_through_the_shared_publication_service(self):
-        """Not its own query. The A2A card's skills[] reads the same call, which
-        is what stops the two surfaces advertising different capabilities."""
-        from src.schemas.crew_publication import PublishedCapability
+class TestRetiredTools:
+    """`list_crews` and `start_crew` are gone, and must not come back by habit.
 
-        fake = [
-            PublishedCapability(
-                entity_id="c1", name="acme_report", description="Quarterly report."
-            )
-        ]
-        with patch(
-            "src.services.mcp.mcp_server.tools.PublicationService"
-        ) as service_cls:
-            service_cls.return_value.list_capabilities = AsyncMock(return_value=fake)
-            result = await mcp_server.call_tool(_caller(), "list_crews", {})
+    They named the published set at runtime and ran something out of it — a
+    second way to do what calling the capability's own tool does, costing an
+    extra round trip and an extra decision for the calling agent. Their real job
+    was working around a tool list that could not refresh; the server now
+    declares `tools.listChanged` and pushes the notification, so the list a
+    client holds is current and the pair had nothing left to do.
+    """
 
-        assert result["crews"] == [
-            {
-                "name": "acme_report",
-                "description": "Quarterly report.",
-                "input_schema": None,
-            }
-        ]
-        service_cls.return_value.list_capabilities.assert_awaited_once()
+    def test_neither_is_advertised(self):
+        names = {t["name"] for t in TOOL_DEFINITIONS}
+        assert "list_crews" not in names
+        assert "start_crew" not in names
+
+    def test_neither_is_dispatchable(self):
+        assert "list_crews" not in TOOL_HANDLERS
+        assert "start_crew" not in TOOL_HANDLERS
 
     @pytest.mark.asyncio
-    async def test_the_caller_is_what_scopes_the_listing(self):
+    async def test_calling_one_is_an_unknown_tool(self):
+        """It falls through to capability dispatch and misses, which is the same
+        answer a typo gets — not a special deprecation path."""
         with patch(
             "src.services.mcp.mcp_server.tools.PublicationService"
-        ) as service_cls:
-            service_cls.return_value.list_capabilities = AsyncMock(return_value=[])
-            caller = _caller(["acme_corp"])
-            await mcp_server.call_tool(caller, "list_crews", {})
+        ) as publications:
+            publications.return_value.resolve_capability = AsyncMock(return_value=None)
+            with pytest.raises(mcp_server.UnknownToolError):
+                await mcp_server.call_tool(_caller(), "start_crew", {})
 
-        passed = service_cls.return_value.list_capabilities.await_args.args[0]
-        assert passed is caller
+    def test_the_names_are_free_for_a_capability_to_use(self):
+        """The reserved set is derived from the advertised tools, so retiring
+        them releases the names rather than leaving a phantom reservation."""
+        from src.services.mcp.mcp_server.tools import _RESERVED_NAMES
+
+        assert "list_crews" not in _RESERVED_NAMES
+        assert "start_crew" not in _RESERVED_NAMES
 
 
 class TestAskKasal:

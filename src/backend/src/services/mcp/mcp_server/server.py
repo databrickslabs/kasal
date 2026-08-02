@@ -37,18 +37,21 @@ PROTOCOL_VERSION = "1.0"
 async def list_tools(
     caller: ExternalCaller, session: Any = None
 ) -> List[Dict[str, Any]]:
-    """The tools this caller may use: the fixed set, plus one per published crew.
+    """The tools this caller may use: the control set, plus one per capability.
 
-    The per-crew tools are Layer-2, and they are the reason discovery works at
-    all. With only the generic set a calling agent sees ``start_crew`` and has to
-    be told out of band which crews exist; with Layer-2 it sees
-    ``analyse_powerbi_model`` and a description of when to use it, which is what
-    an agent actually selects on.
+    The per-capability tools are how a run is started, and they are the reason
+    discovery works at all: an agent sees ``analyse_powerbi_model`` and a
+    description of when to use it, which is what it actually selects on.
 
     Caller-dependent because the list is group-scoped, and a projection of
     ``PublicationService.list_capabilities`` — the SAME query the A2A card's
     skills[] reads, which is what stops the two surfaces advertising different
     capabilities.
+
+    It is also NOT fixed for the life of a connection: publishing a capability
+    changes what this returns, and ``sessions.py`` pushes
+    ``notifications/tools/list_changed`` so a connected client refetches instead
+    of holding a snapshot from ``initialize``.
     """
     from src.services.mcp.mcp_server.tools import build_crew_tool_definitions
 
