@@ -628,6 +628,15 @@ async def seed_async():
                         existing_model.extended_thinking = model_data.get(
                             "extended_thinking", False
                         )
+                        # Sampling parameters and endpoint refusals. Seeded like
+                        # every other field, so a corrected value ships with a
+                        # release rather than needing a hand-edited row — and a
+                        # model that declares neither keeps sending exactly what
+                        # it sent before these columns existed.
+                        existing_model.params = model_data.get("params")
+                        existing_model.unsupported_params = model_data.get(
+                            "unsupported_params"
+                        )
                         # Preserve the operator's enable/disable choice across reseeds.
                         # Forcing enabled=(provider=="databricks") here disabled any
                         # self-hosted vllm/ollama model on EVERY restart (they aren't
@@ -648,6 +657,8 @@ async def seed_async():
                             extended_thinking=model_data.get(
                                 "extended_thinking", False
                             ),
+                            params=model_data.get("params"),
+                            unsupported_params=model_data.get("unsupported_params"),
                             enabled=(
                                 model_data.get("provider") == "databricks"
                             ),  # Enable only Databricks-provider models by default

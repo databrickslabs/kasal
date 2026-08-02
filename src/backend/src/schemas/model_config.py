@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -20,6 +20,24 @@ class ModelConfigBase(BaseModel):
     )
     max_output_tokens: Optional[int] = Field(
         None, description="Maximum output tokens allowed"
+    )
+    params: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            "Sampling parameters sent with every request to this model. "
+            "OpenAI-standard names go top level (top_p, frequency_penalty, "
+            "presence_penalty, stop); a provider-only knob goes under "
+            "extra_body (e.g. {'extra_body': {'repetition_penalty': 1.05}}), "
+            "because the OpenAI SDK strips unknown top-level kwargs."
+        ),
+    )
+    unsupported_params: Optional[List[str]] = Field(
+        None,
+        description=(
+            "Parameter names this endpoint rejects, e.g. ['temperature']. "
+            "Filtered out before the request is built — there is no drop_params "
+            "safety net on this path, so sending one is a 400."
+        ),
     )
     extended_thinking: Optional[bool] = Field(
         False, description="Whether extended thinking is enabled"

@@ -97,6 +97,12 @@ class TestModelConfigModel:
             "temperature",
             "context_window",
             "max_output_tokens",
+            # Declared sampling parameters, and the names this endpoint refuses.
+            # Before these, the catalogue could express exactly two knobs, so the
+            # transport's top_p / frequency_penalty / presence_penalty / stop
+            # fields were forwarded on every request and set by nothing.
+            "params",
+            "unsupported_params",
             "extended_thinking",
             "enabled",
             "group_id",
@@ -118,6 +124,12 @@ class TestModelConfigModel:
             "temperature",
             "context_window",
             "max_output_tokens",
+            # Declared sampling parameters, and the names this endpoint refuses.
+            # Before these, the catalogue could express exactly two knobs, so the
+            # transport's top_p / frequency_penalty / presence_penalty / stop
+            # fields were forwarded on every request and set by nothing.
+            "params",
+            "unsupported_params",
             "extended_thinking",
             "enabled",
             "group_id",
@@ -150,6 +162,12 @@ class TestModelConfig:
             "temperature",
             "context_window",
             "max_output_tokens",
+            # Declared sampling parameters, and the names this endpoint refuses.
+            # Before these, the catalogue could express exactly two knobs, so the
+            # transport's top_p / frequency_penalty / presence_penalty / stop
+            # fields were forwarded on every request and set by nothing.
+            "params",
+            "unsupported_params",
             "extended_thinking",
             "enabled",
             "group_id",

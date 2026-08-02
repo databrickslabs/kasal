@@ -65,6 +65,7 @@ async def _run_llm_blocking(func, /, *args, **kwargs):
 # which the engine bypasses (it speaks to endpoints with the OpenAI SDK).
 from src.services.llm.handlers.databricks_retry_llm import DatabricksRetryLLM
 from src.services.llm.handlers.vllm import VLLMFunctionCallingLLM
+from src.services.llm.params import resolve as resolve_llm_params
 from src.services.settings.api_keys import ApiKeysService
 from src.services.settings.models import ModelConfigService
 from src.utils.databricks_url_utils import DatabricksURLUtils
@@ -899,6 +900,14 @@ class LLMManager:
             # Provides retry logic for empty responses, rate limits, and message sanitization.
             # Databricks-specific message sanitization (empty content, Llama format,
             # Gemini system-prompt merge and $ref resolution) happens inside call().
+            # Declared sampling parameters, filtered by what this endpoint
+            # accepts. One resolve() for every provider — see services/llm/params.
+            llm_params.update(
+                resolve_llm_params(
+                    model_config_dict.get("params"),
+                    unsupported=model_config_dict.get("unsupported_params"),
+                )
+            )
             logger.info(
                 f"Using DatabricksRetryLLM wrapper for Databricks model: {model_name_value}"
             )
@@ -1028,6 +1037,16 @@ class LLMManager:
                 logger.info(
                     f"Setting max_tokens to {model_config_dict['max_output_tokens']} for model {prefixed_model}"
                 )
+
+        # Declared sampling parameters, filtered by what this endpoint accepts.
+        # Unset stays unset: a model with no `params` sends exactly what it sent
+        # before this existed.
+        llm_params.update(
+            resolve_llm_params(
+                model_config_dict.get("params"),
+                unsupported=model_config_dict.get("unsupported_params"),
+            )
+        )
 
         logger.info(f"Creating LLM with model: {prefixed_model}")
 

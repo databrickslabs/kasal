@@ -1091,6 +1091,42 @@ async def _ensure_ui_config_columns(conn) -> None:
         logger.warning(f"Could not ensure ui_config columns: {e}")
 
 
+async def _ensure_modelconfig_columns(conn) -> None:
+    """Idempotently add modelconfig.params + unsupported_params.
+
+    ``create_all`` never ALTERs an existing table and Alembic does not run at
+    startup here, so without this every database provisioned before these
+    columns existed would raise on the first SELECT of the model catalogue —
+    which is every LLM call. Nullable JSON with no default, safe every startup.
+
+    JSON rather than TEXT: SQLAlchemy's JSON type reads a TEXT column fine on
+    SQLite (it stores JSON as text anyway), and on PostgreSQL the native type is
+    what the ORM expects to decode.
+    """
+    is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")
+    columns = [("params", "JSON"), ("unsupported_params", "JSON")]
+    try:
+        if is_sqlite:
+            res = await conn.exec_driver_sql("PRAGMA table_info(modelconfig)")
+            existing = {row[1] for row in res.fetchall()}
+            if not existing:
+                return  # table not created yet (create_all handles fresh DBs)
+            for name, ddl_type in columns:
+                if name not in existing:
+                    await conn.exec_driver_sql(
+                        f"ALTER TABLE modelconfig ADD COLUMN {name} {ddl_type}"
+                    )
+                    logger.info(f"Added modelconfig.{name} column (SQLite self-heal)")
+        else:
+            for name, ddl_type in columns:
+                await conn.exec_driver_sql(
+                    f"ALTER TABLE modelconfig ADD COLUMN IF NOT EXISTS {name} {ddl_type}"
+                )
+            logger.info("Ensured modelconfig params/unsupported_params columns")
+    except Exception as e:
+        logger.warning(f"Could not ensure modelconfig columns: {e}")
+
+
 async def _ensure_hot_polling_indexes(conn) -> None:
     """Idempotently add the indexes the run-polling queries filter/sort on.
 
@@ -1298,6 +1334,7 @@ async def run_schema_self_heal(conn) -> None:
     await _ensure_crew_columns(conn)
     await _ensure_execution_history_columns(conn)
     await _ensure_ui_config_columns(conn)
+    await _ensure_modelconfig_columns(conn)
     await _ensure_hot_polling_indexes(conn)
     await _heal_personal_group_names(conn)
     await _heal_engine_config_names(conn)
