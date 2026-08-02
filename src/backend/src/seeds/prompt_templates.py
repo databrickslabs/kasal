@@ -313,6 +313,7 @@ Choosing an outcome decides which work runs. Everything needed to produce that o
 
 HOW TO CHOOSE
 - Pick the outcome whose OUTPUT is what the turn asks for. Match on what it produces, not on how similar its name looks to a word in the question.
+- Ignore how the answer should be PRESENTED. "as a presentation", "as a deck", "as a mindmap", "as a report" say how to display the result, not what to produce — strip that phrasing and match on the subject that remains. No outcome needs to name a presentation for one to be requested.
 - Exactly one outcome. They are alternatives; the point of choosing is that the others do not run.
 - A follow-up still names its own subject. "now the same as a quiz" wants the quiz outcome, even though what to build it from came from an earlier turn.
 
@@ -364,6 +365,7 @@ Some capabilities are marked "holds a conversation". When the previous answer ca
 
 HOW TO PICK
 - Choose the capability whose DESCRIPTION says it handles this request. The description is the only thing you match on — ignore how similar the name looks.
+- Match what it PRODUCES, not the verb it shares. A capability described as producing one kind of thing on any topic ("news on a topic", "a quiz on a topic") handles only requests for THAT kind. Do not let its topic slot swallow a request for something else: "gather X features" asks for features, not for news about X. When another capability names the subject itself, prefer it.
 - If none clearly handles it, return null. Returning null is a correct answer, and often the right one mid-conversation: the turn is answered in the chat instead, and the option to build something new is still offered.
 - confidence is how sure you are that this capability is the right one for THIS request, not how good the capability is.
 
