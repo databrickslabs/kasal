@@ -720,11 +720,37 @@ def run_flow_in_process(
                             ExecutionStatusService,
                         )
 
-                        await ExecutionStatusService.update_status(
-                            job_id=execution_id,
-                            status=ExecutionStatus.COMPLETED.value,
-                            message="Flow execution completed",
+                        # WITH the answer, not just the status: an
+                        # announcement that carries only the status leaves the
+                        # answer to a later write that may never happen, and the
+                        # UI finalises on the first one either way. See
+                        # flow_builder/completion_payload for both failures this
+                        # caused.
+                        from src.services.flow_builder.completion_payload import (
+                            answer_from_result,
+                            is_paused_for_approval,
                         )
+
+                        # A flow that stopped at a HITL gate has NOT finished.
+                        # It returns success=True and status="COMPLETED"
+                        # alongside paused_for_approval, so announcing on the
+                        # status alone marked a waiting run as done — and once
+                        # the announcement carried a payload, the approval
+                        # bookkeeping (approval_id, gate_node_id) was shown to
+                        # the reader as their answer. The parent already reads
+                        # the pause markers this way.
+                        if is_paused_for_approval(result):
+                            async_logger.info(
+                                f"[FLOW_SUBPROCESS] {execution_id} paused for "
+                                f"approval — not announcing completion"
+                            )
+                        else:
+                            await ExecutionStatusService.update_status(
+                                job_id=execution_id,
+                                status=ExecutionStatus.COMPLETED.value,
+                                message="Flow execution completed",
+                                result=answer_from_result(result),
+                            )
                         async_logger.info(
                             f"[FLOW_SUBPROCESS] Announced COMPLETED for "
                             f"{execution_id} ahead of teardown"
