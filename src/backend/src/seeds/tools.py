@@ -213,7 +213,11 @@ tools_data = [
         "database",
     ),
     (
-        96,
+        # id 1: the Gmail tool (below) already owns 96; reusing it made a fresh
+        # Lakebase seed fail with a tools_pkey duplicate (both rows INSERT), so
+        # Remote Agent gets its own free id. The factory maps by tool NAME, not
+        # id, so this renumber is safe and no other code references the id.
+        1,
         "Remote Agent",
         "Delegate a task to a remote agent over the A2A protocol and wait for its answer. Remote agents are attached per workspace (Configuration > Remote Agents); this tool exposes every enabled one, or a named subset, with each remote's advertised skills listed in its description. Use it to hand work to a specialist agent that lives outside Kasal — a partner team's agent, another Kasal workspace, or any A2A-compliant service. If the remote asks a clarifying question, it comes back with a task_id you can answer by calling the tool again.",
         "ai",
@@ -240,7 +244,7 @@ def get_tool_configs():
             "result_as_answer": False,
         },  # SerperDevTool
         "26": {"result_as_answer": False},  # ScrapeWebsiteTool
-        "96": {"result_as_answer": False},  # Remote Agent (A2A)
+        "1": {"result_as_answer": False},  # Remote Agent (A2A)
         "31": {
             "model": "sonar",  # Options: sonar, sonar-pro, sonar-deep-research, sonar-reasoning, sonar-reasoning-pro, r1-1776
             "max_tokens": 2000,  # Max output tokens (default: 2000, documented limit: 4000)
