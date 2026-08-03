@@ -273,3 +273,30 @@ describe('evaluation answers', () => {
     expect(value).toBe(3);
   });
 });
+
+describe('background run failures', () => {
+  it('surfaces a failed run error without expanding the row by hand', async () => {
+    // A background run fails asynchronously (e.g. a UC permission error); its
+    // error must be visible, not hidden behind the row's expand chevron.
+    service.listRuns.mockResolvedValue([
+      {
+        run_id: 'failrun',
+        template_name: 'crew:Gather apartments',
+        kind: 'crew',
+        crew_id: CREW_ID,
+        status: 'failed',
+        dataset_size: 1,
+        applied: false,
+        error: 'PERMISSION_DENIED: Permission denied to update prompt in schema kasal.',
+        created_at: '2026-07-24T08:00:00+00:00',
+      },
+    ]);
+    renderDialog();
+    // The error text renders (top banner + the auto-expanded row's Alert).
+    await waitFor(() =>
+      expect(
+        screen.getAllByText(/Permission denied to update prompt in schema kasal/).length,
+      ).toBeGreaterThan(0),
+    );
+  });
+});

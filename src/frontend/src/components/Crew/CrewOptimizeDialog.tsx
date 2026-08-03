@@ -131,6 +131,10 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
   const [expandedRun, setExpandedRun] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<number | null>(null);
+  // Run ids whose failure we've already surfaced, so a background run that ends
+  // in 'failed' is hoisted to the banner + auto-expanded exactly ONCE — not
+  // re-raised on every poll (which would fight the user dismissing it).
+  const surfacedFailuresRef = useRef<Set<string>>(new Set());
 
   // Evaluation answers (local MLflow traces) gradable in-app.
   const [evals, setEvals] = useState<CrewEval[]>([]);
@@ -160,7 +164,20 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
     if (!crewId) return;
     try {
       const all = await PromptOptimizationService.listRuns();
-      setRuns(all.filter((r) => r.kind === 'crew' && r.crew_id === crewId));
+      const mine = all.filter((r) => r.kind === 'crew' && r.crew_id === crewId);
+      setRuns(mine);
+      // A background run fails asynchronously (e.g. a Unity Catalog permission
+      // error), so its error only lives on the run row. Surface it the way a
+      // synchronous start failure would: hoist it to the top banner and expand
+      // the row so the detail is visible without a click — once per run.
+      const failed = mine.find(
+        (r) => r.status === 'failed' && r.error && !surfacedFailuresRef.current.has(r.run_id),
+      );
+      if (failed) {
+        surfacedFailuresRef.current.add(failed.run_id);
+        setError(failed.error || 'Optimization run failed');
+        setExpandedRun(failed.run_id);
+      }
     } catch {
       /* transient */
     }
