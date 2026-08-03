@@ -28,6 +28,13 @@ class LLM(OpenAICompletion):
                 if prefix in _KNOWN_PREFIXES:
                     data = dict(data)
                     data["provider"] = prefix
-                    if prefix == "openai":
+                    # Databricks serving endpoints (like OpenAI) take the BARE
+                    # endpoint name in the request body — the model field is sent
+                    # verbatim over the OpenAI SDK, and litellm (which used to
+                    # consume this prefix) is no longer on the path. Leaving
+                    # "databricks/" in the name makes Databricks look up an
+                    # endpoint literally called "databricks/<model>" → 404
+                    # ENDPOINT_NOT_FOUND on /serving-endpoints (400 on the gateway).
+                    if prefix in ("openai", "databricks"):
                         data["model"] = model.partition("/")[2]
         return data
