@@ -1,10 +1,32 @@
 /**
- * Unit tests for the SSE transport gate — dev-only by default, runtime
- * overridable via localStorage for testing SSE on a real Databricks Apps
- * deploy (no rebuild), plus a build-time VITE_FORCE_SSE escape hatch.
+ * Unit tests for the SSE transport gate — ON everywhere by default (the backend
+ * heartbeat keeps proxy streams alive), runtime overridable via localStorage to
+ * force SSE OFF on a proxy that still refuses it (no rebuild), plus a build-time
+ * VITE_FORCE_SSE escape hatch.
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import { resolveSseEnabled, SSE_OVERRIDE_STORAGE_KEY } from './sseTransport';
+
+// jsdom won't let us redefine location.hostname in place, but the gate only
+// reads `window.location.hostname` (and window.location truthiness). Swapping in
+// a URL object — which exposes .hostname — cleanly simulates a deployed origin.
+const DEPLOY_URL = 'https://kasalengine1-123456.aws.databricksapps.com';
+
+function withHostname(url: string, run: () => void): void {
+  const original = window.location;
+  Object.defineProperty(window, 'location', {
+    configurable: true,
+    value: new URL(url),
+  });
+  try {
+    run();
+  } finally {
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: original,
+    });
+  }
+}
 
 describe('resolveSseEnabled', () => {
   afterEach(() => {
@@ -15,6 +37,22 @@ describe('resolveSseEnabled', () => {
   it('defaults to enabled on localhost (jsdom)', () => {
     expect(window.location.hostname).toBe('localhost');
     expect(resolveSseEnabled()).toBe(true);
+  });
+
+  it('defaults to enabled on a deployed (non-localhost) hostname', () => {
+    withHostname(DEPLOY_URL, () => {
+      expect(window.location.hostname).toBe(
+        'kasalengine1-123456.aws.databricksapps.com',
+      );
+      expect(resolveSseEnabled()).toBe(true);
+    });
+  });
+
+  it('localStorage "false" force-disables SSE on a deployed hostname', () => {
+    window.localStorage.setItem(SSE_OVERRIDE_STORAGE_KEY, 'false');
+    withHostname(DEPLOY_URL, () => {
+      expect(resolveSseEnabled()).toBe(false);
+    });
   });
 
   it('localStorage "false" force-disables SSE even on localhost', () => {

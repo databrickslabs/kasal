@@ -1,15 +1,16 @@
 /**
  * Whether to use SSE (EventSource) for live updates.
  *
- * DEFAULT: SSE is enabled only on localhost (local dev). On Databricks Apps —
- * our default, recommended deployment — the HTTP/2 proxy was observed dropping
- * or refusing long-lived SSE streams (ERR_HTTP2_PROTOCOL_ERROR /
- * ERR_CONNECTION_REFUSED), so off-localhost we fall back to REST polling
- * (useTracePolling + the HITL pending-approval poll).
+ * DEFAULT: SSE is enabled everywhere, including Databricks Apps (our default,
+ * recommended deployment). It used to default OFF off-localhost because the
+ * HTTP/2 proxy was observed dropping long-lived SSE streams
+ * (ERR_HTTP2_PROTOCOL_ERROR / ERR_CONNECTION_REFUSED). The backend now emits
+ * keep-alive comment frames every SSE_HEARTBEAT_SECONDS, which keeps the proxy
+ * from dropping idle streams, so the default flipped ON. If a specific proxy
+ * still refuses SSE, force it off with the override below and we fall back to
+ * REST polling (useTracePolling + the HITL pending-approval poll).
  *
- * OVERRIDES (for testing SSE on a real deploy — the backend now emits
- * keep-alive comment frames every SSE_HEARTBEAT_SECONDS, which may keep the
- * proxy from dropping idle streams):
+ * OVERRIDES:
  *
  *   1. Runtime, no rebuild needed (preferred): in the browser console run
  *          localStorage.setItem('kasal.sse.enabled', 'true')
@@ -65,13 +66,15 @@ export function resolveSseEnabled(): boolean {
     // import.meta.env absent in some non-Vite contexts — ignore.
   }
 
-  // 3. Default: dev-only by hostname.
+  // 3. Default: SSE ON everywhere. The backend now emits keep-alive comment
+  //    frames every SSE_HEARTBEAT_SECONDS, which keeps the Databricks Apps
+  //    HTTP/2 proxy from dropping idle long-lived streams — the reason this
+  //    used to default OFF off-localhost. If a proxy still refuses SSE, force
+  //    it off at runtime with localStorage['kasal.sse.enabled']='false' (no
+  //    rebuild) and we fall back to REST polling.
   const h = window.location.hostname;
-  const local = h === 'localhost' || h === '127.0.0.1' || h === '0.0.0.0' || h === '';
-  resolvedReason = local
-    ? `hostname '${h || '(empty)'}' is local`
-    : `hostname '${h}' is not local (Databricks Apps drops long-lived SSE)`;
-  return local;
+  resolvedReason = `default ON for hostname '${h || '(empty)'}' (backend SSE heartbeat keeps proxy streams alive)`;
+  return true;
 }
 
 export const SSE_ENABLED: boolean = resolveSseEnabled();
