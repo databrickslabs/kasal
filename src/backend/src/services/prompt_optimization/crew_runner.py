@@ -46,7 +46,6 @@ from src.services.prompt_optimization.gepa.judge_model import (  # noqa: E402
     _resolve_judge_model,
     _stored_judge_model_to_key,
 )
-from src.services.prompt_optimization.gepa.obo import register_prompt_obo
 from src.services.prompt_optimization.gepa.reflection import (
     _GEPA_REFLECTION_STATE,
     _install_gepa_reflection_bridge,
@@ -121,16 +120,10 @@ class CrewRunnerMixin:
             # Fail fast on a dead reflection model — before ANY crew execution.
             _preflight_reflection(loop, reflection_model, group_context, user_token)
 
-            # Register the baseline prompt AS THE USER (OBO) when a user token is
-            # available. The registry is UC-governed on Databricks; the app SP
-            # often lacks CREATE MODEL on the target schema while the signed-in
-            # user does, so authenticating as the SP 403s ("Permission denied to
-            # update prompt in schema ..."). A missing token falls back to SP.
-            prompt_version = register_prompt_obo(
-                registry_uri=registry_uri,
-                prompt_name=prompt_name,
+            prompt_version = client.register_prompt(
+                name=prompt_name,
                 template=baseline_doc,
-                user_token=user_token,
+                commit_message="crew baseline registered by Kasal prompt optimization",
             )
             prompt_uri = prompt_version.uri
             logger.info(f"Crew optimization stage=optimize prompt_uri={prompt_uri}")
