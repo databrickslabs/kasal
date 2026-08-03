@@ -31,6 +31,7 @@ Reach a specific goal, assuming you already know the basics.
 - [Crew export and deployment](./crew-export-deployment.md): export CrewAI crews to Python projects, Databricks notebooks, or deployable Databricks Apps, and ship them to Model Serving.
 - [Lakebase setup for Kasal](./lakebase-deployment.md): configure managed Lakebase PostgreSQL so crews, agents, tasks, and run history survive Databricks Apps restarts.
 - [MLflow tracing setup](./mlflow-tracing-setup.md): export every crew and flow execution to MLflow Tracing for observability.
+- [Prompt optimization (GEPA) setup](./prompt-optimization-setup.md): the Unity Catalog grant the app service principal needs to register prompts before an optimization run.
 - [Measuring workflow-recipe effectiveness](./workflow-recipe-measurement.md): run a controlled holdout to find out whether reusing past crews actually improves generated ones.
 - [Developer guide](./DEVELOPER_GUIDE.md): day-to-day workflows for building, extending, and debugging Kasal.
 

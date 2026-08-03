@@ -81,6 +81,7 @@ const docSections: DocSection[] = [
       { label: 'Workflow Recipes: Reusing Past Crews', file: 'workflow-recipes' },
       { label: 'Measuring Workflow-Recipe Effectiveness', file: 'workflow-recipe-measurement' },
       { label: 'MLflow Tracing: Setup and Requirements', file: 'mlflow-tracing-setup' },
+      { label: 'Prompt Optimization (GEPA): Setup', file: 'prompt-optimization-setup' },
       { label: 'Lakebase Setup (Persistence)', file: 'lakebase-deployment' },
       { label: 'Security: Compliance', file: 'README_SECURITY_COMPLIANCE' },
       { label: 'Security: Test Guide', file: 'README_SECURITY_GUARDRAILS_TESTGUIDE' },
