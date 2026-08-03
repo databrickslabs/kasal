@@ -135,7 +135,57 @@ class MLflowService:
             )
         if experiment_name is not None:
             await self.repo.set_experiment_name(experiment_name, group_id=self.group_id)
+            # Create the experiment on Databricks now, so an admin can attach it
+            # to the app as an MLflow resource (which is what grants the app SP
+            # MLflow access). Kasal otherwise creates it lazily on the first
+            # traced run — too late to attach up front. Best-effort: a failure
+            # here must not block saving the name, but it is surfaced so the UI
+            # can tell the user the experiment could not be created.
+            await self._ensure_experiment_created()
         return await self.get_settings()
+
+    async def _ensure_experiment_created(self) -> None:
+        """Create the configured experiment on Databricks (create-if-missing).
+
+        No-op when Databricks is not configured (local/OSS backends create the
+        experiment lazily and need no pre-attachment). Reuses the SPN/PAT auth
+        from :meth:`_setup_mlflow_auth`; the blocking create runs in a thread.
+        """
+        import asyncio
+
+        from src.services.mlflow import local
+
+        workspace_url = await self._configured_workspace_url()
+        if not workspace_url:
+            return  # local/OSS backend — nothing to pre-create
+
+        auth = await self._setup_mlflow_auth()
+        if not auth:
+            logger.warning(
+                "[MLflowService] Could not authenticate to create the experiment; "
+                "it will be created on the first traced run instead."
+            )
+            return
+
+        experiment_name = await self.repo.get_experiment_name(group_id=self.group_id)
+        teamspace = await self._teamspace_name()
+        exp_path = f"/Shared/{local.local_experiment_name(experiment_name, teamspace)}"
+        try:
+            from src.services.mlflow.experiment_setup import (
+                create_databricks_experiment,
+            )
+
+            result = await asyncio.to_thread(
+                create_databricks_experiment, auth, exp_path
+            )
+            logger.info(
+                f"[MLflowService] Ensured experiment {exp_path} "
+                f"(id={result.get('experiment_id')})"
+            )
+        except Exception as exc:  # noqa: BLE001 — saving the name must still succeed
+            logger.warning(
+                f"[MLflowService] Could not create experiment {exp_path}: {exc}"
+            )
 
     async def _trace_id_for(self, job_id: Optional[str]) -> Optional[str]:
         """The MLflow trace id recorded for a job, if any."""
@@ -311,16 +361,12 @@ class MLflowService:
             return None
 
     async def get_experiment_info(self) -> Dict[str, Any]:
-        """
-        Get MLflow experiment info for crew execution traces.
-
-        Returns:
-            Dict with experiment_id and experiment_name
-
-        Raises:
-            RuntimeError: If authentication fails or experiment cannot be resolved
-        """
+        """{experiment_id, experiment_name} for crew traces; raises on auth or
+        resolution failure."""
         import asyncio
+        import os
+
+        from src.services.mlflow.experiment_setup import create_databricks_experiment
 
         # Setup authentication first
         auth = await self._setup_mlflow_auth()
@@ -329,58 +375,15 @@ class MLflowService:
                 "Failed to configure MLflow authentication. Please configure Databricks credentials."
             )
 
-        # Run blocking MLflow operations in thread to keep async
-        # Pass auth context to thread to avoid race conditions
-        def _resolve_experiment(auth_context) -> Dict[str, Any]:
-            import mlflow
-            from databricks.sdk.core import Config
-
-            # Create Databricks config for MLflow
-            # MLflow will use this config internally without environment variables
-            cfg = Config(host=auth_context.workspace_url, token=auth_context.token)
-
-            # Set tracking URI with databricks:// scheme
-            # MLflow will use the SDK's default credential provider
-            mlflow.set_tracking_uri("databricks")
-
-            # Temporarily set credentials for this thread only
-            # This is unavoidable with MLflow's current design
-            import os
-
-            old_host = os.environ.get("DATABRICKS_HOST")
-            old_token = os.environ.get("DATABRICKS_TOKEN")
-
-            try:
-                os.environ["DATABRICKS_HOST"] = auth_context.workspace_url
-                os.environ["DATABRICKS_TOKEN"] = auth_context.token
-
-                # Our standard experiment for crew execution traces
-                exp_name = os.getenv(
-                    "MLFLOW_CREW_TRACES_EXPERIMENT",
-                    "/Shared/kasal-crew-execution-traces",
-                )
-
-                # set_experiment returns an Experiment object (creates if missing)
-                exp = mlflow.set_experiment(exp_name)
-
-                return {
-                    "experiment_id": str(getattr(exp, "experiment_id", "")),
-                    "experiment_name": exp_name,
-                }
-            finally:
-                # Restore original environment
-                if old_host is not None:
-                    os.environ["DATABRICKS_HOST"] = old_host
-                elif "DATABRICKS_HOST" in os.environ:
-                    del os.environ["DATABRICKS_HOST"]
-
-                if old_token is not None:
-                    os.environ["DATABRICKS_TOKEN"] = old_token
-                elif "DATABRICKS_TOKEN" in os.environ:
-                    del os.environ["DATABRICKS_TOKEN"]
-
+        exp_name = os.getenv(
+            "MLFLOW_CREW_TRACES_EXPERIMENT", "/Shared/kasal-crew-execution-traces"
+        )
         try:
-            result = await asyncio.to_thread(_resolve_experiment, auth)
+            # create-if-missing, in a thread (MLflow calls block); same auth
+            # env-swap the settings-save path uses.
+            result = await asyncio.to_thread(
+                create_databricks_experiment, auth, exp_name
+            )
 
             if not result.get("experiment_id"):
                 raise RuntimeError("Failed to resolve MLflow experiment ID")

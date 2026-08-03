@@ -67,6 +67,7 @@ const MLflowConfiguration: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const [experimentDraft, setExperimentDraft] = useState('');
   // Publish the flag so the crew catalog, flow catalog and Prompts tab react
   // to a toggle immediately instead of on their next remount.
@@ -94,11 +95,23 @@ const MLflowConfiguration: React.FC = () => {
   const patch = useCallback(async (body: Partial<MLflowSettings>) => {
     setSaving(true);
     setError(null);
+    setSavedMsg(null);
     try {
       const resp = await apiClient.patch<MLflowSettings>('/mlflow/settings', body);
       setSettings(resp.data);
       setExperimentDraft(resp.data.experiment_name || '');
       publishEnabled(resp.data.enabled);
+      // Saving the experiment name also creates the experiment on Databricks
+      // (backend). Tell the admin to attach it to the app as an MLflow resource
+      // — that is what grants the app's service principal MLflow access.
+      const exp = resp.data.backend?.experiment;
+      if ('experiment_name' in body && resp.data.backend?.kind === 'databricks' && exp) {
+        setSavedMsg(
+          `Experiment "${exp}" is ready. In the Databricks App settings, add it as ` +
+            `an MLflow experiment resource (Permission: Can Edit) so the app can ` +
+            `write traces and register prompts, then redeploy the app.`,
+        );
+      }
     } catch {
       setError('Could not save MLflow settings.');
     } finally {
@@ -243,6 +256,12 @@ const MLflowConfiguration: React.FC = () => {
           Save
         </Button>
       </Box>
+
+      {savedMsg && (
+        <Alert severity="success" sx={{ mt: 1.5 }} onClose={() => setSavedMsg(null)}>
+          {savedMsg}
+        </Alert>
+      )}
 
       <Divider sx={{ my: 2 }} />
 

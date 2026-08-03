@@ -420,3 +420,61 @@ class TestMLflowServiceExperimentInfo:
             RuntimeError, match="Failed to configure MLflow authentication"
         ):
             await service.get_experiment_info()
+
+
+class TestEnsureExperimentCreated:
+    """Saving the experiment name creates it on Databricks, so an admin can
+    attach it as the app's MLflow resource (which grants the SP MLflow access)."""
+
+    @pytest.mark.asyncio
+    async def test_noop_when_no_databricks_backend(self):
+        """Local/OSS backends create the experiment lazily — nothing to do here."""
+        session = AsyncMock(spec=AsyncSession)
+        service = MLflowService(session=session, group_id="grp")
+        service._configured_workspace_url = AsyncMock(return_value=None)
+        service._setup_mlflow_auth = AsyncMock()
+
+        await service._ensure_experiment_created()
+
+        service._setup_mlflow_auth.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_creates_experiment_at_shared_path(self):
+        """With Databricks configured, create /Shared/<resolved-name>."""
+        session = AsyncMock(spec=AsyncSession)
+        service = MLflowService(session=session, group_id="grp")
+        service._configured_workspace_url = AsyncMock(
+            return_value="https://ws.example.com"
+        )
+        service._setup_mlflow_auth = AsyncMock(return_value=MagicMock())
+        service.repo.get_experiment_name = AsyncMock(return_value="my-exp")
+        service._teamspace_name = AsyncMock(return_value="Acme")
+
+        with patch(
+            "src.services.mlflow.experiment_setup.create_databricks_experiment",
+            return_value={"experiment_id": "123", "experiment_name": "x"},
+        ) as create:
+            await service._ensure_experiment_created()
+
+        # Explicit configured name wins; created under /Shared/.
+        _auth, path = create.call_args.args
+        assert path == "/Shared/my-exp"
+
+    @pytest.mark.asyncio
+    async def test_create_failure_does_not_raise(self):
+        """A create failure must not block saving the name."""
+        session = AsyncMock(spec=AsyncSession)
+        service = MLflowService(session=session, group_id="grp")
+        service._configured_workspace_url = AsyncMock(
+            return_value="https://ws.example.com"
+        )
+        service._setup_mlflow_auth = AsyncMock(return_value=MagicMock())
+        service.repo.get_experiment_name = AsyncMock(return_value=None)
+        service._teamspace_name = AsyncMock(return_value="Acme")
+
+        with patch(
+            "src.services.mlflow.experiment_setup.create_databricks_experiment",
+            side_effect=Exception("PERMISSION_DENIED"),
+        ):
+            # Must not raise.
+            await service._ensure_experiment_created()
