@@ -518,8 +518,16 @@ class LakebaseSchemaService(BaseService):
         with engine.begin() as conn:
             conn.execute(text("SET search_path TO kasal"))
             for name in table_names:
+                # Each CREATE runs in its OWN savepoint. Without this, one failed
+                # statement poisons the shared transaction and every LATER table in
+                # the batch dies with "in failed transaction block" — so a single
+                # bad table (e.g. billing_periods) cascades into the rest of the
+                # schema never being created, which then surfaces downstream as the
+                # seeder's "relation prompttemplate does not exist". The savepoint
+                # confines a failure to just its own table.
                 try:
-                    table_map[name].create(conn, checkfirst=True)
+                    with conn.begin_nested():
+                        table_map[name].create(conn, checkfirst=True)
                     results.append((name, True, None))
                 except Exception as e:
                     results.append((name, False, str(e)))

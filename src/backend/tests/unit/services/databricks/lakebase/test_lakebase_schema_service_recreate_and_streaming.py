@@ -470,6 +470,55 @@ class TestCreateTablesSyncDetailed:
                 # Should not raise
                 service.create_tables_sync(engine)
 
+    def test_batch_savepoint_isolates_one_failing_table(self, service):
+        """A failing CREATE must not poison the rest of the batch.
+
+        Regression: the batch shared one transaction, so a table that raised
+        left the transaction aborted and EVERY later table failed with "in
+        failed transaction block" — cascading a single bad table into the
+        schema never being created (surfacing downstream as
+        "relation prompttemplate does not exist"). Each CREATE now runs in its
+        own savepoint (conn.begin_nested), so the failure is confined to its
+        own table and the tables after it still succeed.
+        """
+
+        # Savepoint context manager: entering opens it, exiting propagates the
+        # exception (return False) so the per-table try/except records failure.
+        def _make_savepoint():
+            sp = MagicMock()
+            sp.__enter__ = MagicMock(return_value=None)
+            sp.__exit__ = MagicMock(return_value=False)
+            return sp
+
+        conn = MagicMock()
+        conn.begin_nested = MagicMock(side_effect=lambda: _make_savepoint())
+        engine = _sync_engine(conn)
+
+        ok1, bad, ok2 = MagicMock(), MagicMock(), MagicMock()
+        ok1.name, bad.name, ok2.name = (
+            "billing_alerts",
+            "billing_periods",
+            "prompttemplate",
+        )
+        ok1.create = MagicMock()
+        bad.create = MagicMock(side_effect=Exception("in failed transaction block"))
+        ok2.create = MagicMock()
+        table_map = {t.name: t for t in (ok1, bad, ok2)}
+
+        results = service._create_tables_batch_sync(
+            engine, ["billing_alerts", "billing_periods", "prompttemplate"], table_map
+        )
+
+        by_name = {name: (success, err) for name, success, err in results}
+        assert by_name["billing_alerts"][0] is True
+        assert by_name["billing_periods"][0] is False  # the genuinely failing one
+        # The table AFTER the failure must still have been attempted and created,
+        # not skipped by a poisoned transaction.
+        assert by_name["prompttemplate"][0] is True
+        ok2.create.assert_called_once()
+        # One savepoint per table (3), so a failure rolls back only its own.
+        assert conn.begin_nested.call_count == 3
+
     def test_overall_error_propagates(self, service):
         """Error in _get_dependency_waves propagates."""
         with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
