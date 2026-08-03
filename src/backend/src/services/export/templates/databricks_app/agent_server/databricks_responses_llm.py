@@ -88,6 +88,43 @@ class DatabricksResponsesLLM(OpenAICompletion):
         return False
 
     # ------------------------------------------------------------------
+    # Entry point
+    # ------------------------------------------------------------------
+
+    def call(
+        self,
+        messages: str | list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        callbacks: list[Any] | None = None,
+        available_functions: dict[str, Any] | None = None,
+        from_task: Any = None,
+        from_agent: Any = None,
+        response_model: Any | None = None,
+    ) -> Any:
+        """Drive the Responses API through this handler's own ``_handle_responses``.
+
+        The base ``OpenAICompletion.call`` builds the response first and passes a
+        ``Response`` into ``_handle_responses``; ours instead takes the request
+        PARAMS — it owns response creation (with caching), phase capture, tool
+        execution and event emission. Bridge the two here so the codex path uses
+        its own handler. Without this override the base passes a ``Response``
+        where ``_handle_responses`` expects params, and ``create(**response)``
+        raises "argument after ** must be a mapping, not Response".
+        """
+        conversation = self._normalize_messages(messages)
+        self._emit_call_started_event(conversation, tools, from_task, from_agent)
+        params = self._prepare_responses_params(
+            conversation, tools, response_model=response_model
+        )
+        return self._handle_responses(
+            params,
+            available_functions=available_functions,
+            from_task=from_task,
+            from_agent=from_agent,
+            response_model=response_model,
+        )
+
+    # ------------------------------------------------------------------
     # Phase-aware param preparation
     # ------------------------------------------------------------------
 
