@@ -97,8 +97,8 @@ class RunRegistryMixin:
         A `--reload` (or any restart) kills the asyncio task but leaves the row
         at 'running'. Left alone, that run polls forever and the UI's "run in
         progress" lock never clears, so no new run can be started. Only rows
-        with a STALE heartbeat and no in-process entry are touched, which is
-        why a legitimately long crew run (hours) is never mistaken for one.
+        with a STALE heartbeat and no LIVE task are touched, which is why a
+        legitimately long crew run (hours) is never mistaken for one.
         """
         try:
             stale = await self.run_repository.find_stale_active(
@@ -108,20 +108,38 @@ class RunRegistryMixin:
             logger.debug(f"Could not scan for orphaned runs: {stale_err}")
             return
         for row in stale:
-            if row.id in _RUNS:
-                continue  # alive in this process, heartbeat merely lagging
+            cached = _RUNS.get(row.id)
+            if cached is not None:
+                task = cached.get("task")
+                # Skip only if the cached entry is genuinely still live: either
+                # its task is running, or it carries no task handle at all (a
+                # long run with a merely-lagging heartbeat — the conservative
+                # default, so hours-long crews are never mistaken for orphans).
+                # A cached entry whose task is DONE but whose row is still
+                # pending/running is proof the coroutine died before writing a
+                # terminal status; the old `row.id in _RUNS` skip treated it as
+                # alive forever, wedging the UI's "run in progress" lock until a
+                # manual DB delete. Settle exactly that case.
+                if task is None or not task.done():
+                    continue
+                # Keep the cache in step with the DB write below: `_public`
+                # overlays a cached entry's status onto the row on read, so a
+                # settled row would still surface as 'running' if we left the
+                # stale cache entry saying so.
+                cached["status"] = "failed"
             logger.info(
-                f"Prompt optimization {row.id} was orphaned by a backend "
-                f"restart (last heartbeat {row.updated_at}); marking failed"
+                f"Prompt optimization {row.id} orphaned (last heartbeat "
+                f"{row.updated_at}, no live task); marking failed"
             )
             await run_state._persist_run_changes(
                 row.id,
                 {
                     "status": "failed",
                     "error": (
-                        "The backend restarted while this run was in flight, so "
-                        "it was abandoned. Its MLflow record (if any) survives; "
-                        "start a new run to get a proposal."
+                        "This run was abandoned before it could finish (the "
+                        "backend restarted, or the run died in flight). Its "
+                        "MLflow record (if any) survives; start a new run to get "
+                        "a proposal."
                     ),
                 },
             )

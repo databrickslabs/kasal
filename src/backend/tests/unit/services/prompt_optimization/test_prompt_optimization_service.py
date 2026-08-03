@@ -1171,6 +1171,36 @@ class TestRunRegistryBehaviors:
         assert runs[0]["status"] == "running"
         assert repo.rows["slow"].status == "running"
 
+    @pytest.mark.asyncio
+    async def test_cached_run_with_finished_task_is_settled(self):
+        """A run whose task DIED before writing a terminal status is still in
+        _RUNS, but its task is done — it must be settled, not treated as alive
+        forever (the bug that wedged the UI's 'run in progress' lock until a
+        manual DB delete)."""
+        svc = PromptOptimizationService(MagicMock())
+        repo, persist = _attach_run_repo(svc)
+        await repo.create(
+            {
+                "id": "dead_task",
+                "status": "running",
+                "group_id": "grp1",
+                "updated_at": datetime.utcnow()
+                - timedelta(seconds=svc_module.RUN_STALE_SECONDS + 60),
+            }
+        )
+        done_task = asyncio.get_event_loop().create_future()
+        done_task.set_result(None)  # a finished task
+        svc_module._RUNS["dead_task"] = {
+            "run_id": "dead_task",
+            "status": "running",
+            "group_id": "grp1",
+            "task": done_task,
+        }
+        with persist:
+            runs = await svc.list_runs(_group("grp1"))
+        assert runs[0]["status"] == "failed"
+        assert repo.rows["dead_task"].status == "failed"
+
     def test_prune_keeps_active_runs(self):
         from datetime import timezone
 
