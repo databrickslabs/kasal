@@ -516,7 +516,12 @@ class LakebaseSchemaService(BaseService):
         """
         results = []
         with engine.begin() as conn:
-            conn.execute(text("SET search_path TO kasal"))
+            # Include public: `CREATE EXTENSION vector` installs the pgvector
+            # `vector` type into public, so a search_path of `kasal` alone can't
+            # resolve the unqualified `vector(1024)` column type and CREATE TABLE
+            # fails with 'type "vector" does not exist' even when the extension
+            # IS enabled. The async paths already use `kasal, public`.
+            conn.execute(text("SET search_path TO kasal, public"))
             for name in table_names:
                 # Each CREATE runs in its OWN savepoint. Without this, one failed
                 # statement poisons the shared transaction and every LATER table in
@@ -638,7 +643,10 @@ class LakebaseSchemaService(BaseService):
         )
         """
         with engine.begin() as conn:
-            conn.execute(text("SET search_path TO kasal"))
+            # Include public so the pgvector `vector` type (installed in public by
+            # CREATE EXTENSION) resolves when adding the embedding column below —
+            # see the note in _create_tables_batch_sync.
+            conn.execute(text("SET search_path TO kasal, public"))
             conn.execute(text(create_sql))
             self._ensure_doc_embeddings_columns_sync(conn)
 
@@ -792,7 +800,10 @@ class LakebaseSchemaService(BaseService):
         """
         try:
             safe_schema = _validate_identifier(schema, "schema name")
-            connection.execute(text(f"SET search_path TO {safe_schema}"))
+            # Match set_search_path_async: include public so the pgvector `vector`
+            # type (installed in public by CREATE EXTENSION) resolves for callers
+            # that create/alter vector columns on this connection.
+            connection.execute(text(f"SET search_path TO {safe_schema}, public"))
             logger.debug(f"Set search path to {schema}")
         except Exception as e:
             logger.error(f"Error setting search path: {e}")

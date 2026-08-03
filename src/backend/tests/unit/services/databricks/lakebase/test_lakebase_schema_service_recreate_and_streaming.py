@@ -519,6 +519,38 @@ class TestCreateTablesSyncDetailed:
         # One savepoint per table (3), so a failure rolls back only its own.
         assert conn.begin_nested.call_count == 3
 
+    def test_batch_search_path_includes_public_for_pgvector(self, service):
+        """search_path must include public so the pgvector `vector` type resolves.
+
+        Regression: the sync batch set `search_path TO kasal` only, so the
+        `vector(1024)` column type (installed by CREATE EXTENSION into public)
+        could not be found and CREATE TABLE workflow_recipes failed with
+        'type "vector" does not exist' even with the extension enabled.
+        """
+
+        def _make_savepoint():
+            sp = MagicMock()
+            sp.__enter__ = MagicMock(return_value=None)
+            sp.__exit__ = MagicMock(return_value=False)
+            return sp
+
+        conn = MagicMock()
+        conn.begin_nested = MagicMock(side_effect=lambda: _make_savepoint())
+        engine = _sync_engine(conn)
+
+        t = MagicMock()
+        t.name = "workflow_recipes"
+        t.create = MagicMock()
+
+        service._create_tables_batch_sync(
+            engine, ["workflow_recipes"], {"workflow_recipes": t}
+        )
+
+        search_path_sql = str(conn.execute.call_args_list[0].args[0])
+        assert (
+            "public" in search_path_sql
+        ), f"search_path must include public for pgvector; got: {search_path_sql}"
+
     def test_overall_error_propagates(self, service):
         """Error in _get_dependency_waves propagates."""
         with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
