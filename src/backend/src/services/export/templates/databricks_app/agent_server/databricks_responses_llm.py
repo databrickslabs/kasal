@@ -403,11 +403,9 @@ class DatabricksResponsesLLM(OpenAICompletion):
                             function_args = {}
 
                     result = self._handle_tool_execution(
-                        function_name=function_name,
-                        function_args=function_args,
-                        available_functions=available_functions,
-                        from_task=from_task,
-                        from_agent=from_agent,
+                        function_name,
+                        function_args,
+                        available_functions,
                     )
                     if result is not None:
                         return result

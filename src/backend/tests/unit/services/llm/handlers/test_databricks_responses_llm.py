@@ -83,11 +83,11 @@ class _FakeOpenAICompletion:
     def _validate_structured_output(self, content, response_model):
         return content
 
-    def _handle_tool_execution(
-        self, function_name, function_args, available_functions, from_task, from_agent
-    ):
-        if function_name in (available_functions or {}):
-            return f"result_{function_name}"
+    def _handle_tool_execution(self, name, arguments, available_functions):
+        # Mirrors the real base signature (core/llm/transport/base.py):
+        # (name, arguments, available_functions) — no from_task/from_agent.
+        if name in (available_functions or {}):
+            return f"result_{name}"
         return None
 
     def _emit_call_completed_event(self, **kwargs):
