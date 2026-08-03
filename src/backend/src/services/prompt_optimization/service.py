@@ -44,6 +44,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from src.core.exceptions import BadRequestError
+from src.db.session import background_task_context
 from src.repositories.log_repository import LLMLogRepository
 from src.repositories.model_config_repository import ModelConfigRepository
 from src.repositories.prompt_optimization_run_repository import (
@@ -267,7 +268,12 @@ class PromptOptimizationService(
                 registry_uri=registry_uri,
                 prompt_name=prompt_name,
                 group_context=group_context,
-            )
+            ),
+            # Spawn without the request's DB session: this task outlives the
+            # request, whose session FastAPI closes at response end. group_context
+            # / user token are re-established inside the run. See
+            # db.session.background_task_context.
+            context=background_task_context(),
         )
         return {"run_id": run_id, "status": "pending", "dataset_size": len(examples)}
 
@@ -668,7 +674,10 @@ class PromptOptimizationService(
                 crew_id=str(crew.id),
                 cancel_run_id=run_id,
                 group_context=group_context,
-            )
+            ),
+            # Spawn without the request's DB session (closed at response end);
+            # see db.session.background_task_context.
+            context=background_task_context(),
         )
         return {"run_id": run_id, "status": "pending", "dataset_size": 1}
 

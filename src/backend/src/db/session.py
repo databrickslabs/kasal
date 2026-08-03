@@ -5,7 +5,7 @@ import re
 import sys
 import time
 from contextlib import asynccontextmanager
-from contextvars import ContextVar
+from contextvars import Context, ContextVar, copy_context
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
@@ -524,6 +524,26 @@ def detach_request_session() -> None:
     context, never the originating request.
     """
     _request_session.set(None)
+
+
+def background_task_context() -> Context:
+    """A copy of the current context with the request-scoped DB session cleared.
+
+    Pass to ``asyncio.create_task(coro, context=background_task_context())`` when
+    spawning a job that OUTLIVES the request that started it. The task keeps the
+    request's other contextvars (group id, OBO token) but never inherits
+    ``_request_session`` — the session FastAPI closes at response end — so every
+    ``request_scoped_session()`` inside it opens a fresh standalone session.
+
+    This is the spawn-side complement to :func:`detach_request_session` (which
+    clears the var from INSIDE an already-running task): declaring the clean
+    context at the ``create_task`` boundary means the task can never observe the
+    dead session at all, so there is no "detach first or crash" ordering to
+    forget. The db layer owns ``_request_session``, so it owns this helper too.
+    """
+    ctx = copy_context()
+    ctx.run(_request_session.set, None)
+    return ctx
 
 
 # Create separate session factories for pooled and nullpool engines
