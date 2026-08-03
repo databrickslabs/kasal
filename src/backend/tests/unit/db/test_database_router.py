@@ -488,6 +488,45 @@ class TestGetSmartDbSessionRegularPath:
             mock_request_session.reset.assert_called_once_with(mock_token)
 
     @pytest.mark.asyncio
+    async def test_commit_no_active_connection_is_swallowed(self):
+        """A 'no active connection' commit error (engine disposed by a backend
+        switch) must NOT propagate — the request should end cleanly instead of
+        surfacing a raw 500 to a concurrent poller."""
+        mock_session = AsyncMock()
+        mock_session.commit.side_effect = Exception(
+            "(sqlite3.OperationalError) no active connection"
+        )
+
+        mock_factory = MagicMock(return_value=_make_async_ctx(mock_session))
+
+        mock_token = MagicMock(spec=Token)
+        mock_request_session = MagicMock()
+        mock_request_session.set.return_value = mock_token
+
+        with (
+            patch(
+                "src.db.database_router.is_lakebase_enabled",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch("src.db.database_router.async_session_factory", mock_factory),
+            patch("src.db.database_router._request_session", mock_request_session),
+        ):
+            from src.db.database_router import get_smart_db_session
+
+            gen = get_smart_db_session()
+            await gen.__anext__()
+
+            # Generator finishes cleanly despite the disposed-connection commit
+            with pytest.raises(StopAsyncIteration):
+                await gen.__anext__()
+
+            # Nothing to roll back on a disposed connection
+            mock_session.rollback.assert_not_awaited()
+            mock_session.close.assert_awaited_once()
+            mock_request_session.reset.assert_called_once_with(mock_token)
+
+    @pytest.mark.asyncio
     async def test_request_session_context_var_is_set_and_reset(self):
         """The _request_session context var is set before yield and reset after."""
         mock_session = AsyncMock()

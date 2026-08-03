@@ -267,11 +267,24 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
             yield session
             await session.commit()
         except Exception as e:
-            logger.error(
-                f"[DB ROUTER] Rolling back session {id(session)} due to exception: {e}"
-            )
-            await session.rollback()
-            raise
+            # A Lakebase migrate/enable disposes the shared SQLite/PG engine
+            # mid-flight (dispose_engines(), to switch backends). That closes the
+            # connection underneath any CONCURRENT request still holding this
+            # session, so this commit then raises "no active connection". Nothing
+            # remains to commit or roll back on a disposed connection, so treat
+            # that specific teardown race as non-fatal instead of surfacing a raw
+            # 500 to the (usually polling) client.
+            if "no active connection" in str(e).lower():
+                logger.warning(
+                    f"[DB ROUTER] Session {id(session)} connection disposed "
+                    f"(backend switch in progress); ignoring: {e}"
+                )
+            else:
+                logger.error(
+                    f"[DB ROUTER] Rolling back session {id(session)} due to exception: {e}"
+                )
+                await session.rollback()
+                raise
         finally:
             try:
                 _request_session.reset(token)
