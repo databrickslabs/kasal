@@ -190,13 +190,39 @@ class MLflowService:
         # Create the SAME experiment the tracer/judges/GEPA use (incl. the -uc
         # suffix on Databricks) so the admin attaches the one traces land in.
         exp_path = await self.configured_crew_traces_experiment()
+        # Pull the UC catalog/schema/warehouse so the experiment is created WITH
+        # UC trace storage — otherwise UC-only charts stay locked and MLflow
+        # permanently refuses to add UC storage to this experiment later.
+        uc_catalog = uc_schema = warehouse_id = None
+        try:
+            from src.services.databricks.workspace.service import DatabricksService
+
+            db_config = await DatabricksService(
+                self.session, group_id=self.group_id
+            ).get_databricks_config()
+            if db_config:
+                uc_catalog = getattr(db_config, "catalog", None)
+                # schema field is `db_schema` (aliased "schema"); reading "schema"
+                # returns BaseModel.schema (a method) -> MLflow error.
+                uc_schema = getattr(db_config, "db_schema", None)
+                warehouse_id = getattr(db_config, "warehouse_id", None)
+        except Exception as cfg_err:  # noqa: BLE001 — plain experiment is the fallback
+            logger.debug(
+                f"[MLflowService] Could not read UC config for experiment: {cfg_err}"
+            )
         try:
             from src.services.mlflow.experiment_setup import (
                 create_databricks_experiment,
             )
 
             result = await asyncio.to_thread(
-                create_databricks_experiment, auth, exp_path
+                lambda: create_databricks_experiment(
+                    auth,
+                    exp_path,
+                    uc_catalog=uc_catalog,
+                    uc_schema=uc_schema,
+                    warehouse_id=warehouse_id,
+                )
             )
             logger.info(
                 f"[MLflowService] Ensured experiment {exp_path} "
