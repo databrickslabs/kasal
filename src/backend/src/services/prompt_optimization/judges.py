@@ -126,6 +126,17 @@ class JudgeOperationsMixin:
         encoded in the name — no schema change, survives restarts)."""
         return f"crew_{str(crew_id).replace('-', '')[:12]}__"
 
+    @staticmethod
+    def _judge_model_uri(backend: Any, model_key: str) -> str:
+        """Wrap a Kasal model key in the provider URI make_judge().register()
+        accepts for this backend. Databricks REQUIRES 'databricks:/'; a local
+        server accepts 'openai:/'. Either scheme is stripped back to the key on
+        invocation (see _stored_judge_model_to_key), so this is inert at runtime."""
+        scheme = (
+            "databricks" if getattr(backend, "kind", "") == "databricks" else "openai"
+        )
+        return f"{scheme}:/{model_key}"
+
     async def list_judges(
         self, group_context: Optional[GroupContext] = None
     ) -> List[Dict[str, Any]]:
@@ -200,9 +211,11 @@ class JudgeOperationsMixin:
         if "{{ outputs }}" not in text and "{{outputs}}" not in text:
             text += "\n\nThe answer to evaluate:\n{{ outputs }}"
         # The judge is INVOKED through LLMManager with the plain Kasal model
-        # key; the 'openai:/' wrapper exists only to satisfy make_judge's URI
-        # shape and is stripped back on invocation. No provider resolution.
-        model_uri = f"openai:/{model or DEFAULT_TARGET_MODEL}"
+        # key; the URI wrapper only satisfies make_judge's shape and is stripped
+        # back on invocation. On Databricks, make_judge().register() REQUIRES a
+        # 'databricks:/' provider ("judge model must use Databricks as a model
+        # provider"); a local server accepts 'openai:/'.
+        model_uri = self._judge_model_uri(backend, model or DEFAULT_TARGET_MODEL)
         scoped_name = (
             f"{self._crew_judge_prefix(crew_id)}{safe_name}" if crew_id else None
         )
@@ -284,9 +297,12 @@ class JudgeOperationsMixin:
         new_text = (instructions or "").strip()
         if not new_text and not model:
             raise ValueError("Nothing to update: provide instructions and/or a model")
-        # Plain Kasal model key, wrapped only for make_judge's URI shape —
+        # Plain Kasal model key, wrapped in the provider URI this backend's
+        # make_judge().register() accepts (databricks:/ on Databricks) —
         # invocation goes through LLMManager (see _stored_judge_model_to_key).
-        model_uri: Optional[str] = f"openai:/{model}" if model else None
+        model_uri: Optional[str] = (
+            self._judge_model_uri(backend, model) if model else None
+        )
 
         def _update() -> Dict[str, Any]:
             with mlflow_session(backend):

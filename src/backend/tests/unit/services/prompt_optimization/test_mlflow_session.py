@@ -93,6 +93,63 @@ class TestMlflowSession:
                 fake_mlflow.set_experiment.assert_called_with("kasal")
 
 
+class TestSpSingleAuth:
+    """The app SP must be presented as a SINGLE auth method (SP token, OAuth
+    env vars removed) so the SDK doesn't error 'oauth and pat'."""
+
+    def test_noop_without_oauth_creds(self, monkeypatch):
+        from src.services.prompt_optimization.gepa import sp_auth
+
+        monkeypatch.delenv("DATABRICKS_CLIENT_ID", raising=False)
+        monkeypatch.setenv("DATABRICKS_TOKEN", "pat")
+        with sp_auth.sp_single_auth() as active:
+            assert active is False
+            assert os.environ["DATABRICKS_TOKEN"] == "pat"  # untouched
+
+    def test_swaps_to_sp_token_and_removes_oauth(self, monkeypatch):
+        from src.services.prompt_optimization.gepa import sp_auth
+
+        monkeypatch.setenv("DATABRICKS_HOST", "https://ws.example.com")
+        monkeypatch.setenv("DATABRICKS_CLIENT_ID", "cid")
+        monkeypatch.setenv("DATABRICKS_CLIENT_SECRET", "csec")
+        monkeypatch.setenv("DATABRICKS_TOKEN", "stale-pat")
+        monkeypatch.setattr(sp_auth, "_derive_sp_bearer", lambda *a: "sp-bearer")
+        with sp_auth.sp_single_auth() as active:
+            assert active is True
+            assert os.environ["DATABRICKS_TOKEN"] == "sp-bearer"
+            assert "DATABRICKS_CLIENT_ID" not in os.environ
+            assert "DATABRICKS_CLIENT_SECRET" not in os.environ
+        # restored
+        assert os.environ["DATABRICKS_CLIENT_ID"] == "cid"
+        assert os.environ["DATABRICKS_TOKEN"] == "stale-pat"
+
+    def test_noop_when_bearer_cannot_be_derived(self, monkeypatch):
+        from src.services.prompt_optimization.gepa import sp_auth
+
+        monkeypatch.setenv("DATABRICKS_HOST", "https://ws.example.com")
+        monkeypatch.setenv("DATABRICKS_CLIENT_ID", "cid")
+        monkeypatch.setenv("DATABRICKS_CLIENT_SECRET", "csec")
+        monkeypatch.setattr(sp_auth, "_derive_sp_bearer", lambda *a: None)
+        with sp_auth.sp_single_auth() as active:
+            assert active is False
+
+
+class TestJudgeModelUri:
+    """make_judge().register() needs databricks:/ on Databricks, openai:/ local."""
+
+    def test_databricks_prefix(self):
+        from src.services.prompt_optimization.judges import JudgeOperationsMixin
+
+        b = ms.MLflowBackend(kind="databricks", experiment="/Shared/x")
+        assert JudgeOperationsMixin._judge_model_uri(b, "m") == "databricks:/m"
+
+    def test_local_prefix(self):
+        from src.services.prompt_optimization.judges import JudgeOperationsMixin
+
+        b = ms.MLflowBackend(kind="local", experiment="kasal", uri="http://x")
+        assert JudgeOperationsMixin._judge_model_uri(b, "m") == "openai:/m"
+
+
 class TestGrantHint:
     def test_permission_denied_detection(self):
         assert is_permission_denied(Exception("PERMISSION_DENIED: nope"))
