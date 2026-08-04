@@ -121,13 +121,26 @@ class CrewRunnerMixin:
             _preflight_reflection(loop, reflection_model, group_context, user_token)
 
             try:
-                prompt_version = client.register_prompt(
-                    name=prompt_name,
-                    template=baseline_doc,
-                    commit_message=(
-                        "crew baseline registered by Kasal prompt optimization"
-                    ),
+                # On Databricks Apps the env carries BOTH the app SP's OAuth
+                # creds and a PAT (DATABRICKS_TOKEN, exported by the LLM auth
+                # path). The Databricks SDK refuses "oauth and pat" and MLflow
+                # falls back to legacy auth, so the registry call is not made as
+                # the granted SP → a misleading PERMISSION_DENIED. Present OAuth
+                # only for this call, and rebuild the client INSIDE that window
+                # so it picks up the single-method env.
+                from src.services.prompt_optimization.gepa.sp_auth import (
+                    sp_single_auth,
                 )
+
+                with sp_single_auth():
+                    reg_client = mlflow.MlflowClient(registry_uri=registry_uri)
+                    prompt_version = reg_client.register_prompt(
+                        name=prompt_name,
+                        template=baseline_doc,
+                        commit_message=(
+                            "crew baseline registered by Kasal prompt optimization"
+                        ),
+                    )
             except Exception as reg_err:
                 # A UC permission denial here is almost always the app SP missing
                 # MANAGE on the schema (ALL PRIVILEGES excludes it). Re-raise with

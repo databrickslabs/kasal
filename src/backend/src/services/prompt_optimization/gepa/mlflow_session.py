@@ -108,12 +108,28 @@ def mlflow_session(backend: MLflowBackend) -> Iterator[None]:
     import mlflow
 
     prev_uri = mlflow.get_tracking_uri()
-    old_host = os.environ.get("DATABRICKS_HOST")
-    old_token = os.environ.get("DATABRICKS_TOKEN")
+    # On databricks, authenticate with the SP-derived bearer token as the SINGLE
+    # method: set DATABRICKS_TOKEN and REMOVE the OAuth env vars for the call.
+    # With both a token and DATABRICKS_CLIENT_ID/SECRET present, the Databricks
+    # SDK errors "more than one authorization method configured: oauth and pat"
+    # and MLflow falls back to legacy auth — so the call is not made as the SP
+    # that holds the UC grant. (backend.auth.token is the SP's own bearer,
+    # derived from its OAuth creds in _setup_mlflow_auth.) All restored after.
+    swap_keys = (
+        "DATABRICKS_HOST",
+        "DATABRICKS_TOKEN",
+        "DATABRICKS_API_KEY",
+        "DATABRICKS_CLIENT_ID",
+        "DATABRICKS_CLIENT_SECRET",
+    )
+    saved = {k: os.environ.get(k) for k in swap_keys}
     try:
         if backend.kind == "databricks":
             os.environ["DATABRICKS_HOST"] = backend.auth.workspace_url
             os.environ["DATABRICKS_TOKEN"] = backend.auth.token
+            os.environ.pop("DATABRICKS_API_KEY", None)
+            os.environ.pop("DATABRICKS_CLIENT_ID", None)
+            os.environ.pop("DATABRICKS_CLIENT_SECRET", None)
             mlflow.set_tracking_uri("databricks")
         else:
             mlflow.set_tracking_uri(backend.uri)
@@ -127,11 +143,8 @@ def mlflow_session(backend: MLflowBackend) -> Iterator[None]:
     finally:
         mlflow.set_tracking_uri(prev_uri)
         if backend.kind == "databricks":
-            if old_host is not None:
-                os.environ["DATABRICKS_HOST"] = old_host
-            elif "DATABRICKS_HOST" in os.environ:
-                del os.environ["DATABRICKS_HOST"]
-            if old_token is not None:
-                os.environ["DATABRICKS_TOKEN"] = old_token
-            elif "DATABRICKS_TOKEN" in os.environ:
-                del os.environ["DATABRICKS_TOKEN"]
+            for key, value in saved.items():
+                if value is not None:
+                    os.environ[key] = value
+                elif key in os.environ:
+                    del os.environ[key]
