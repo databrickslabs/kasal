@@ -19,26 +19,27 @@ from typing import Any, Dict, List, Optional
 from src.core.exceptions import BadRequestError
 from src.repositories.log_repository import LLMLogRepository
 from src.repositories.model_config_repository import ModelConfigRepository
-from src.services.prompt_optimization.config import (
-    DEFAULT_TARGET_MODEL,
-    _pin_local_experiment,
+from src.services.prompt_optimization.config import DEFAULT_TARGET_MODEL
+from src.services.prompt_optimization.gepa.mlflow_session import (
+    mlflow_session,
+    resolve_mlflow_backend,
 )
 from src.utils.user_context import GroupContext
 
 
 class JudgeOperationsMixin:
-    async def list_crew_evals(self, crew_id: str) -> List[Dict[str, Any]]:
+    async def list_crew_evals(
+        self, crew_id: str, group_context: Optional[GroupContext] = None
+    ) -> List[Dict[str, Any]]:
         """List this crew's optimization-evaluation traces (for in-app grading)."""
-        local_uri = self._local_mlflow_uri()
-        if not local_uri:
+        backend = await resolve_mlflow_backend(self.session, group_context)
+        if not backend:
             return []
 
         def _list() -> List[Dict[str, Any]]:
             import mlflow
 
-            prev = mlflow.get_tracking_uri()
-            mlflow.set_tracking_uri(local_uri)
-            try:
+            with mlflow_session(backend):
                 # Generous window: eval traces accumulate across runs, and a
                 # too-small page silently hides previously GRADED answers
                 # (observed live — graded traces fell out of a 25-trace page).
@@ -74,8 +75,6 @@ class JudgeOperationsMixin:
                         }
                     )
                 return out
-            finally:
-                mlflow.set_tracking_uri(prev)
 
         return await asyncio.to_thread(_list)
 
@@ -85,6 +84,7 @@ class JudgeOperationsMixin:
         value: Optional[float] = None,
         comment: Optional[str] = None,
         expectation: Optional[str] = None,
+        group_context: Optional[GroupContext] = None,
     ) -> bool:
         """Attach human assessments to an eval trace — a grade (Feedback:
         judgment of what WAS produced) and/or an expectation (ground truth of
@@ -92,19 +92,17 @@ class JudgeOperationsMixin:
         rubric on the next optimization run."""
         if value is None and not (expectation or "").strip():
             raise ValueError("Provide a grade, an expectation, or both")
-        local_uri = self._local_mlflow_uri()
-        if not local_uri:
+        backend = await resolve_mlflow_backend(self.session, group_context)
+        if not backend:
             raise ValueError(
-                "In-app eval feedback requires the local MLflow server "
-                "(MCP_SERVER_ENABLED=true + MLFLOW_TRACKING_URI)."
+                "In-app eval feedback requires MLflow: a Databricks workspace "
+                "(deployed) or a local MLflow server (dev)."
             )
 
         def _log() -> bool:
             import mlflow
 
-            prev = mlflow.get_tracking_uri()
-            mlflow.set_tracking_uri(local_uri)
-            try:
+            with mlflow_session(backend):
                 if value is not None:
                     mlflow.log_feedback(
                         trace_id=trace_id,
@@ -119,8 +117,6 @@ class JudgeOperationsMixin:
                         value=expectation.strip(),
                     )
                 return True
-            finally:
-                mlflow.set_tracking_uri(prev)
 
         return await asyncio.to_thread(_log)
 
@@ -130,24 +126,21 @@ class JudgeOperationsMixin:
         encoded in the name — no schema change, survives restarts)."""
         return f"crew_{str(crew_id).replace('-', '')[:12]}__"
 
-    async def list_judges(self) -> List[Dict[str, Any]]:
-        """List LLM judges registered on the local MLflow experiment.
+    async def list_judges(
+        self, group_context: Optional[GroupContext] = None
+    ) -> List[Dict[str, Any]]:
+        """List LLM judges registered on the active MLflow experiment.
 
         Names starting with a crew prefix ('crew_<id>__') are ASSIGNED to that
         crew; others are shared library judges. `name` is the display name,
         `full_name` the registry name.
         """
-        local_uri = self._local_mlflow_uri()
-        if not local_uri:
+        backend = await resolve_mlflow_backend(self.session, group_context)
+        if not backend:
             return []
 
         def _list() -> List[Dict[str, Any]]:
-            import mlflow
-
-            prev = mlflow.get_tracking_uri()
-            mlflow.set_tracking_uri(local_uri)
-            try:
-                _pin_local_experiment()
+            with mlflow_session(backend):
                 from mlflow.genai.scorers import list_scorers
 
                 out = []
@@ -174,8 +167,6 @@ class JudgeOperationsMixin:
                         }
                     )
                 return out
-            finally:
-                mlflow.set_tracking_uri(prev)
 
         return await asyncio.to_thread(_list)
 
@@ -193,11 +184,12 @@ class JudgeOperationsMixin:
         via the {{ outputs }} template variable (added automatically when
         missing). `model` is a Kasal model key, resolved to a judge model URI.
         """
-        local_uri = self._local_mlflow_uri()
-        if not local_uri:
+        backend = await resolve_mlflow_backend(self.session, group_context)
+        if not backend:
             raise ValueError(
-                "Judge creation requires the local MLflow server "
-                "(MCP_SERVER_ENABLED=true + MLFLOW_TRACKING_URI)."
+                "Judge creation requires MLflow: a Databricks workspace "
+                "(deployed) or a local MLflow server "
+                "(MCP_SERVER_ENABLED=true + MLFLOW_TRACKING_URI, for dev)."
             )
         safe_name = "".join(c if c.isalnum() or c == "_" else "_" for c in name.strip())
         if not safe_name:
@@ -216,12 +208,7 @@ class JudgeOperationsMixin:
         )
 
         def _create() -> Dict[str, Any]:
-            import mlflow
-
-            prev = mlflow.get_tracking_uri()
-            mlflow.set_tracking_uri(local_uri)
-            try:
-                _pin_local_experiment()
+            with mlflow_session(backend):
                 from mlflow.genai.judges import make_judge
 
                 # ALWAYS register the shared library original; when created
@@ -244,8 +231,6 @@ class JudgeOperationsMixin:
                     "full_name": scoped_name or safe_name,
                     "model": model_uri,
                 }
-            finally:
-                mlflow.set_tracking_uri(prev)
 
         return await asyncio.to_thread(_create)
 
@@ -254,17 +239,12 @@ class JudgeOperationsMixin:
     ) -> Dict[str, Any]:
         """Assign a shared library judge to a crew by registering a crew-scoped
         copy (same instructions/model) under the crew's name prefix."""
-        local_uri = self._local_mlflow_uri()
-        if not local_uri:
-            raise ValueError("Judge assignment requires the local MLflow server.")
+        backend = await resolve_mlflow_backend(self.session, group_context)
+        if not backend:
+            raise ValueError("Judge assignment requires MLflow (Databricks or local).")
 
         def _assign() -> Dict[str, Any]:
-            import mlflow
-
-            prev = mlflow.get_tracking_uri()
-            mlflow.set_tracking_uri(local_uri)
-            try:
-                _pin_local_experiment()
+            with mlflow_session(backend):
                 from mlflow.genai.judges import make_judge
                 from mlflow.genai.scorers import get_scorer
 
@@ -278,8 +258,6 @@ class JudgeOperationsMixin:
                 )
                 judge.register()
                 return {"name": name, "full_name": scoped_name, "crew_id": crew_id}
-            finally:
-                mlflow.set_tracking_uri(prev)
 
         return await asyncio.to_thread(_assign)
 
@@ -300,9 +278,9 @@ class JudgeOperationsMixin:
         their current values. Editing a library judge does NOT touch copies
         already assigned to crews — those are snapshots taken at assign time.
         """
-        local_uri = self._local_mlflow_uri()
-        if not local_uri:
-            raise ValueError("Judge update requires the local MLflow server.")
+        backend = await resolve_mlflow_backend(self.session, group_context)
+        if not backend:
+            raise ValueError("Judge update requires MLflow (Databricks or local).")
         new_text = (instructions or "").strip()
         if not new_text and not model:
             raise ValueError("Nothing to update: provide instructions and/or a model")
@@ -311,12 +289,7 @@ class JudgeOperationsMixin:
         model_uri: Optional[str] = f"openai:/{model}" if model else None
 
         def _update() -> Dict[str, Any]:
-            import mlflow
-
-            prev = mlflow.get_tracking_uri()
-            mlflow.set_tracking_uri(local_uri)
-            try:
-                _pin_local_experiment()
+            with mlflow_session(backend):
                 from mlflow.genai.judges import make_judge
                 from mlflow.genai.scorers import get_scorer
 
@@ -335,29 +308,22 @@ class JudgeOperationsMixin:
                 )
                 judge.register()
                 return {"name": name, "model": final_model}
-            finally:
-                mlflow.set_tracking_uri(prev)
 
         return await asyncio.to_thread(_update)
 
-    async def delete_judge(self, name: str) -> bool:
+    async def delete_judge(
+        self, name: str, group_context: Optional[GroupContext] = None
+    ) -> bool:
         """Delete a registered judge by name."""
-        local_uri = self._local_mlflow_uri()
-        if not local_uri:
-            raise ValueError("Judge deletion requires the local MLflow server.")
+        backend = await resolve_mlflow_backend(self.session, group_context)
+        if not backend:
+            raise ValueError("Judge deletion requires MLflow (Databricks or local).")
 
         def _delete() -> bool:
-            import mlflow
-
-            prev = mlflow.get_tracking_uri()
-            mlflow.set_tracking_uri(local_uri)
-            try:
-                _pin_local_experiment()
+            with mlflow_session(backend):
                 from mlflow.genai.scorers import delete_scorer
 
                 delete_scorer(name=name, version="all")
                 return True
-            finally:
-                mlflow.set_tracking_uri(prev)
 
         return await asyncio.to_thread(_delete)

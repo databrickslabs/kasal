@@ -112,7 +112,7 @@ async def list_crew_evals(
     """List a crew's optimization-evaluation answers (local MLflow traces) so
     they can be graded in-app. Empty when local MLflow mode is not enabled."""
     service = PromptOptimizationService(session)
-    return {"evals": await service.list_crew_evals(crew_id)}
+    return {"evals": await service.list_crew_evals(crew_id, group_context)}
 
 
 @router.post("/crew-evals/{trace_id}/feedback")
@@ -134,7 +134,11 @@ async def add_eval_feedback(
             raise BadRequestError("Feedback 'value' must be a number 0-10")
     try:
         ok = await service.add_eval_feedback(
-            trace_id, value, body.get("comment"), body.get("expectation")
+            trace_id,
+            value,
+            body.get("comment"),
+            body.get("expectation"),
+            group_context,
         )
     except ValueError as e:
         raise BadRequestError(str(e))
@@ -145,7 +149,7 @@ async def add_eval_feedback(
 async def list_judges(group_context: GroupContextDep, session: SessionDep):
     """List registered LLM judges (local MLflow scorer registry)."""
     service = PromptOptimizationService(session)
-    return {"judges": await service.list_judges()}
+    return {"judges": await service.list_judges(group_context)}
 
 
 @router.post("/judges")
@@ -212,7 +216,7 @@ async def delete_judge(name: str, group_context: GroupContextDep, session: Sessi
     """Delete a registered LLM judge by name."""
     service = PromptOptimizationService(session)
     try:
-        ok = await service.delete_judge(name)
+        ok = await service.delete_judge(name, group_context)
     except ValueError as e:
         raise BadRequestError(str(e))
     return {"ok": ok}

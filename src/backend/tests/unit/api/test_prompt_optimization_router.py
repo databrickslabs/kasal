@@ -158,22 +158,24 @@ class TestEvalEndpoints:
     @pytest.mark.asyncio
     async def test_list_crew_evals(self, service):
         service.list_crew_evals = AsyncMock(return_value=[{"trace_id": "t1"}])
-        result = await list_crew_evals("crew1", _group(), MagicMock())
+        group = _group()
+        result = await list_crew_evals("crew1", group, MagicMock())
         assert result == {"evals": [{"trace_id": "t1"}]}
-        service.list_crew_evals.assert_awaited_once_with("crew1")
+        service.list_crew_evals.assert_awaited_once_with("crew1", group)
 
     @pytest.mark.asyncio
     async def test_add_eval_feedback_coerces_numeric_value(self, service):
         service.add_eval_feedback = AsyncMock(return_value=True)
+        group = _group()
         result = await add_eval_feedback(
             "t1",
             {"value": "7", "comment": "good", "expectation": "german side"},
-            _group(),
+            group,
             MagicMock(),
         )
         assert result == {"ok": True}
         service.add_eval_feedback.assert_awaited_once_with(
-            "t1", 7.0, "good", "german side"
+            "t1", 7.0, "good", "german side", group
         )
 
     @pytest.mark.asyncio
