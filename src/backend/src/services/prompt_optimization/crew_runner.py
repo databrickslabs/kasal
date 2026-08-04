@@ -848,7 +848,36 @@ class CrewRunnerMixin:
             # creds the crew's own LLM auth may still fall back to. No-op locally.
             from src.services.mlflow.sp_auth import pat_auth_env
 
-            with pat_auth_env():
+            # optimize_prompts re-enables tracing per eval and calls
+            # mlflow.get_trace(request_id, silent=True) to read each trace back.
+            # On a Databricks App that read blocks/retries against trace storage
+            # the app often can't reach, and MLflow runs the evals in its OWN
+            # ThreadPoolExecutor with future.result() and NO timeout — so a single
+            # blocked get_trace hangs the whole optimize call and the run sits at
+            # 'running' forever (observed: 1/N executions, then stuck). OUR scorers
+            # (output_format/output_correct) take only inputs/outputs, never the
+            # trace, so short-circuit get_trace to return None immediately for the
+            # duration. Restored after. silent=True already means callers tolerate
+            # a missing trace, so this only removes a blocking round trip.
+            from contextlib import contextmanager
+
+            @contextmanager
+            def _suppressed_trace_reads():
+                original = getattr(mlflow, "get_trace", None)
+                if original is None:
+                    yield
+                    return
+
+                def _noop_get_trace(*_a, **_k):
+                    return None
+
+                mlflow.get_trace = _noop_get_trace
+                try:
+                    yield
+                finally:
+                    mlflow.get_trace = original
+
+            with pat_auth_env(), _suppressed_trace_reads():
                 result = optimize_prompts(
                     predict_fn=predict_fn,
                     train_data=[
