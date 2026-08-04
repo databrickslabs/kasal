@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel
 
@@ -39,7 +39,14 @@ class MLflowSettings(BaseModel):
     enabled: bool
     evaluation_enabled: bool
     experiment_name: Optional[str] = None
+    #: The backend a run WILL use — still derived, never chosen (Databricks when
+    #: a workspace is configured, else a local server, else none).
     backend: MLflowBackend
+    #: Every backend candidate the environment offers, so the UI can show
+    #: Databricks / Local / None side by side with per-backend reachability. The
+    #: ``kind`` matching ``backend.kind`` is the active one. Purely informational:
+    #: which one a run uses is still ``backend``, not a selection made here.
+    available: List[MLflowBackend] = []
 
 
 class MLflowSettingsUpdate(BaseModel):

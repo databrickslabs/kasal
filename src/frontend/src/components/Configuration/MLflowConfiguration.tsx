@@ -36,9 +36,12 @@ import { useMLflowStore } from '../../store/mlflow';
  * **The backend is shown, not chosen.** Which MLflow receives traces is derived
  * from what is actually configured (Databricks when a workspace is set, else a
  * local server). A dropdown here could only ever let someone select a backend
- * that is not there. Reachability is surfaced for the same reason a date-
- * awareness log line was added elsewhere in this codebase: a setting that looks
- * applied and silently does nothing is the most expensive kind.
+ * that is not there. Every candidate backend the environment offers is listed
+ * (Databricks / Local / None) with its own reachability, and the ACTIVE one is
+ * marked — so it is clear both what is available and which one a run will use.
+ * Reachability is surfaced for the same reason a date-awareness log line was
+ * added elsewhere in this codebase: a setting that looks applied and silently
+ * does nothing is the most expensive kind.
  */
 
 interface MLflowBackend {
@@ -53,7 +56,11 @@ interface MLflowSettings {
   enabled: boolean;
   evaluation_enabled: boolean;
   experiment_name?: string | null;
+  // The backend a run WILL use (derived, not chosen).
   backend: MLflowBackend;
+  // Every backend the environment offers, so Databricks / Local / None can be
+  // shown side by side. The one whose kind === backend.kind is active.
+  available?: MLflowBackend[];
 }
 
 const BACKEND_LABEL: Record<MLflowBackend['kind'], string> = {
@@ -182,42 +189,65 @@ const MLflowConfiguration: React.FC = () => {
 
       <Divider sx={{ my: 2 }} />
 
-      {/* Derived, never chosen — see the component docstring. */}
-      <Typography variant="subtitle2" sx={{ mb: 1 }}>
-        Backend
-      </Typography>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 1 }}>
-        <Chip
-          size="small"
-          color={BACKEND_CHIP_COLOR[backend.kind]}
-          variant={backend.kind === 'none' ? 'outlined' : 'filled'}
-          label={BACKEND_LABEL[backend.kind]}
-        />
-        {backend.uri && (
-          <Typography variant="body2" color="text.secondary">
-            {backend.uri}
-          </Typography>
-        )}
-        {backend.reachable === true && (
-          <Chip size="small" color="success" variant="outlined" label="reachable" />
-        )}
-        {backend.reachable === false && (
-          <Chip size="small" color="warning" variant="outlined" label="not reachable" />
-        )}
-        {backend.url && (
-          <Link
-            href={backend.url}
-            target="_blank"
-            rel="noopener"
-            sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, fontSize: '0.8rem' }}
-          >
-            Open MLflow <LaunchIcon sx={{ fontSize: 14 }} />
-          </Link>
-        )}
+      {/* Derived, never chosen — see the component docstring. All candidate
+          backends are listed so Databricks / Local / None read side by side;
+          the ACTIVE one (the row whose kind === backend.kind) is marked. */}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+        <Typography variant="subtitle2">Backend</Typography>
         <Button size="small" startIcon={<RefreshIcon />} onClick={() => void load()}>
           Recheck
         </Button>
       </Box>
+      {(settings.available && settings.available.length > 0
+        ? settings.available
+        : [backend]
+      ).map((b) => {
+        const isActive = b.kind === backend.kind;
+        return (
+          <Box
+            key={b.kind}
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1,
+              flexWrap: 'wrap',
+              mb: 0.75,
+              opacity: isActive ? 1 : 0.6,
+            }}
+          >
+            <Chip
+              size="small"
+              color={BACKEND_CHIP_COLOR[b.kind]}
+              variant={isActive && b.kind !== 'none' ? 'filled' : 'outlined'}
+              label={BACKEND_LABEL[b.kind]}
+            />
+            {isActive && (
+              <Chip size="small" color="info" variant="outlined" label="active" />
+            )}
+            {b.uri && (
+              <Typography variant="body2" color="text.secondary">
+                {b.uri}
+              </Typography>
+            )}
+            {b.reachable === true && (
+              <Chip size="small" color="success" variant="outlined" label="reachable" />
+            )}
+            {b.reachable === false && (
+              <Chip size="small" color="warning" variant="outlined" label="not reachable" />
+            )}
+            {b.url && (
+              <Link
+                href={b.url}
+                target="_blank"
+                rel="noopener"
+                sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, fontSize: '0.8rem' }}
+              >
+                Open MLflow <LaunchIcon sx={{ fontSize: 14 }} />
+              </Link>
+            )}
+          </Box>
+        );
+      })}
 
       {backend.kind === 'local' && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>

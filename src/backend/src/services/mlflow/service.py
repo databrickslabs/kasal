@@ -87,10 +87,14 @@ class MLflowService:
         experiment_name = await self.repo.get_experiment_name(group_id=self.group_id)
         teamspace = await self._teamspace_name()
 
+        experiment = local.local_experiment_name(experiment_name, teamspace)
+
+        # Build BOTH candidate descriptors independently so the UI can show
+        # Databricks / Local / None side by side. Which one a run uses is
+        # unchanged (see `backend` below) — this list is purely informational.
         workspace_url = await self._configured_workspace_url()
-        if workspace_url:
-            experiment = local.local_experiment_name(experiment_name, teamspace)
-            backend = {
+        databricks_backend = (
+            {
                 "kind": "databricks",
                 "uri": workspace_url,
                 # Reachability for Databricks is an auth question, not a socket
@@ -99,25 +103,37 @@ class MLflowService:
                 "experiment": f"/Shared/{experiment}",
                 "url": f"{workspace_url}/ml/experiments",
             }
-        else:
-            uri = local.local_tracking_uri()
-            if uri:
-                experiment = local.local_experiment_name(experiment_name, teamspace)
-                backend = {
-                    "kind": "local",
-                    "uri": uri,
-                    "reachable": local.is_reachable(uri),
-                    "experiment": experiment,
-                    "url": f"{uri}/#/experiments",
-                }
-            else:
-                backend = {"kind": "none", "uri": None, "reachable": None}
+            if workspace_url
+            else None
+        )
+        local_uri = local.local_tracking_uri()
+        local_backend = (
+            {
+                "kind": "local",
+                "uri": local_uri,
+                "reachable": local.is_reachable(local_uri),
+                "experiment": experiment,
+                "url": f"{local_uri}/#/experiments",
+            }
+            if local_uri
+            else None
+        )
+        available = [b for b in (databricks_backend, local_backend) if b]
+
+        # The ACTIVE backend — resolution unchanged: Databricks wins when a
+        # workspace is configured, else a local server, else none.
+        backend = databricks_backend or local_backend or {
+            "kind": "none",
+            "uri": None,
+            "reachable": None,
+        }
 
         return {
             "enabled": enabled,
             "evaluation_enabled": evaluation_enabled,
             "experiment_name": experiment_name,
             "backend": backend,
+            "available": available,
         }
 
     async def update_settings(
