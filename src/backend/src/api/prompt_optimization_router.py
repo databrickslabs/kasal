@@ -260,6 +260,14 @@ async def cancel_run(run_id: str, group_context: GroupContextDep, session: Sessi
         raise NotFoundError(str(e))
 
 
+@router.delete("/runs/{run_id}")
+async def delete_run(run_id: str, group_context: GroupContextDep, session: SessionDep):
+    """Delete a run's record so it stops blocking new runs (e.g. a pending run
+    orphaned by a restart). Cancels an in-process task first if still active."""
+    service = PromptOptimizationService(session)
+    return await service.delete_run(run_id, group_context)
+
+
 @router.post("/runs/{run_id}/apply", response_model=PromptOptimizationApplyResponse)
 async def apply_run(run_id: str, group_context: GroupContextDep, session: SessionDep):
     """

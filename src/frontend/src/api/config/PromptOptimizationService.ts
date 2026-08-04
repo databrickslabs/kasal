@@ -219,6 +219,15 @@ export class PromptOptimizationService {
     return Boolean(response.data?.cancelling);
   }
 
+  /** Delete a run's record so it stops blocking new runs (cancels an active
+   *  task first). */
+  static async deleteRun(runId: string): Promise<boolean> {
+    const response = await apiClient.delete<{ deleted: boolean }>(
+      `/prompt-optimization/runs/${runId}`,
+    );
+    return Boolean(response.data?.deleted);
+  }
+
   static async applyRun(runId: string): Promise<boolean> {
     const response = await apiClient.post<{ applied: boolean }>(
       `/prompt-optimization/runs/${runId}/apply`,

@@ -127,6 +127,13 @@ class _FakeRunRepo:
         row.updated_at = datetime.utcnow()
         return True
 
+    async def delete(self, run_id, group_id):
+        row = self.rows.get(run_id)
+        if row is None or row.group_id != group_id:
+            return False
+        del self.rows[run_id]
+        return True
+
     async def find_stale_active(self, group_id, stale_after_seconds):
         cutoff = datetime.utcnow() - timedelta(seconds=stale_after_seconds)
         return [
@@ -1113,6 +1120,32 @@ class TestRunRegistryBehaviors:
                 await svc.cancel_run("r1", _group("grp1"))
             with pytest.raises(ValueError, match="not found"):
                 await svc.cancel_run("missing", _group("grp1"))
+
+    @pytest.mark.asyncio
+    async def test_delete_run_removes_row_and_cache_group_scoped(self):
+        svc = PromptOptimizationService(MagicMock())
+        repo, persist = _attach_run_repo(svc)
+        await repo.create({"id": "r1", "status": "pending", "group_id": "grp1"})
+        svc_module._RUNS["r1"] = {
+            "run_id": "r1",
+            "status": "pending",
+            "group_id": "grp1",
+        }
+        with persist:
+            # Wrong group cannot delete it.
+            other = await svc.delete_run("r1", _group("other"))
+            assert other["deleted"] is False
+            assert "r1" in repo.rows
+
+            # Owning group deletes the row and evicts the cache entry.
+            result = await svc.delete_run("r1", _group("grp1"))
+            assert result["deleted"] is True
+            assert "r1" not in repo.rows
+            assert "r1" not in svc_module._RUNS
+
+            # Deleting a missing run is idempotent, not an error.
+            again = await svc.delete_run("r1", _group("grp1"))
+            assert again["deleted"] is False
 
     @pytest.mark.asyncio
     async def test_cancel_settles_a_run_orphaned_by_a_restart(self):

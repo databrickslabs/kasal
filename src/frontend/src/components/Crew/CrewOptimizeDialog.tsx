@@ -260,6 +260,7 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
   };
 
   const [cancelling, setCancelling] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const handleCancel = async (runId: string) => {
     setCancelling(runId);
     try {
@@ -270,6 +271,22 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
       setError('Failed to request stop');
     } finally {
       setCancelling(null);
+    }
+  };
+
+  const handleDelete = async (runId: string) => {
+    setDeleting(runId);
+    try {
+      await PromptOptimizationService.deleteRun(runId);
+      // A deleted run no longer counts as active, so its failure banner (if any)
+      // should not keep re-surfacing.
+      surfacedFailuresRef.current.delete(runId);
+      toast.success('Run deleted');
+      await refreshRuns();
+    } catch {
+      setError('Failed to delete the run');
+    } finally {
+      setDeleting(null);
     }
   };
 
@@ -785,6 +802,15 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
                     {cancelling === run.run_id ? 'Stopping…' : 'Stop'}
                   </Button>
                 )}
+                <Button
+                  size="small"
+                  color="error"
+                  variant="text"
+                  disabled={deleting === run.run_id}
+                  onClick={() => handleDelete(run.run_id)}
+                >
+                  {deleting === run.run_id ? 'Deleting…' : 'Delete'}
+                </Button>
                 {run.judge_model && run.model && run.judge_model === run.model && (
                   <Tooltip title="This run was graded by the same model the crew ran on. A model judging its own deliverables prefers them, so treat the score gain as unverified.">
                     <Chip

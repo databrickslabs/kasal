@@ -6,6 +6,7 @@ on every read — a run carries a proposal for someone's templates or crew.
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import delete as sql_delete
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -79,6 +80,22 @@ class PromptOptimizationRunRepository:
             update(PromptOptimizationRun)
             .where(PromptOptimizationRun.id == run_id)
             .values(**changes)
+        )
+        return bool(getattr(result, "rowcount", 0) or 0)
+
+    async def delete(self, run_id: str, group_id: Optional[str]) -> bool:
+        """Delete a run row, group-scoped. Returns False when nothing matched
+        (wrong group, or already gone). Group scoping mirrors get_by_group so a
+        caller can never delete another tenant's run."""
+        result = await self.session.execute(
+            sql_delete(PromptOptimizationRun).where(
+                PromptOptimizationRun.id == run_id,
+                (
+                    PromptOptimizationRun.group_id.is_(None)
+                    if group_id is None
+                    else PromptOptimizationRun.group_id == group_id
+                ),
+            )
         )
         return bool(getattr(result, "rowcount", 0) or 0)
 

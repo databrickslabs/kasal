@@ -194,6 +194,27 @@ class RunRegistryMixin:
         )
         return {"run_id": run_id, "cancelling": True}
 
+    async def delete_run(
+        self, run_id: str, group_context: Optional[GroupContext] = None
+    ) -> Dict[str, Any]:
+        """Delete a run's durable record so it stops blocking new runs.
+
+        Group-scoped. If the run is still active in THIS process, request
+        cancellation first so the worker stops touching a row we're removing,
+        then drop it from the in-memory cache and delete the row. A run that no
+        longer exists is treated as already-deleted (idempotent)."""
+        group_id = group_context.primary_group_id if group_context else None
+        row = await self.run_repository.get_by_group(run_id, group_id)
+        if row is None:
+            return {"run_id": run_id, "deleted": False}
+        cached = _RUNS.get(run_id)
+        if cached is not None and self._visible(cached, group_context):
+            cached["cancel_requested"] = True
+            _RUNS.pop(run_id, None)
+        deleted = await self.run_repository.delete(run_id, group_id)
+        logger.info(f"Prompt optimization {run_id}: deleted (was {row.status})")
+        return {"run_id": run_id, "deleted": bool(deleted)}
+
     async def apply_run(
         self, run_id: str, group_context: Optional[GroupContext] = None
     ) -> Dict[str, Any]:
