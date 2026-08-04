@@ -96,6 +96,13 @@ class MLflowService:
         # (see `backend` below); this list is purely informational.
         workspace_url = await self._configured_workspace_url()
         databricks_available = bool(workspace_url)
+        # Show the SAME experiment traces/judges/GEPA use — the -uc name on
+        # Databricks — so what the admin attaches matches where traces land.
+        databricks_experiment = (
+            await self.configured_crew_traces_experiment()
+            if databricks_available
+            else None
+        )
         databricks_backend = {
             "kind": "databricks",
             "available": databricks_available,
@@ -103,7 +110,7 @@ class MLflowService:
             # Reachability for Databricks is an auth question, not a socket one,
             # so it is deliberately not answered here.
             "reachable": None,
-            "experiment": f"/Shared/{experiment}" if databricks_available else None,
+            "experiment": databricks_experiment,
             "url": f"{workspace_url}/ml/experiments" if databricks_available else None,
         }
         local_uri = local.local_tracking_uri()
@@ -168,8 +175,6 @@ class MLflowService:
         """
         import asyncio
 
-        from src.services.mlflow import local
-
         workspace_url = await self._configured_workspace_url()
         if not workspace_url:
             return  # local/OSS backend — nothing to pre-create
@@ -182,9 +187,9 @@ class MLflowService:
             )
             return
 
-        experiment_name = await self.repo.get_experiment_name(group_id=self.group_id)
-        teamspace = await self._teamspace_name()
-        exp_path = f"/Shared/{local.local_experiment_name(experiment_name, teamspace)}"
+        # Create the SAME experiment the tracer/judges/GEPA use (incl. the -uc
+        # suffix on Databricks) so the admin attaches the one traces land in.
+        exp_path = await self.configured_crew_traces_experiment()
         try:
             from src.services.mlflow.experiment_setup import (
                 create_databricks_experiment,
@@ -203,20 +208,33 @@ class MLflowService:
             )
 
     async def configured_crew_traces_experiment(self) -> str:
-        """The experiment crew traces, judges, and GEPA runs all pin.
+        """The experiment crew traces, judges, GEPA runs, and eval all pin.
 
-        THE source of truth is the name saved in the MLflow configuration
-        (Configuration.tsx), resolved exactly as :meth:`get_settings` reports it
-        and :meth:`_ensure_experiment_created` creates it — so the experiment the
-        GEPA/judge path targets is the same one an admin attached to the app as
-        an MLflow resource. Falls back to the per-teamspace default when nothing
-        is configured. NOT the old hardcoded ``/Shared/kasal-crew-execution-traces``.
+        THE single source of truth. The name comes from the MLflow configuration
+        (Configuration.tsx) resolved via ``local.local_experiment_name``, and —
+        crucially on Databricks — carries the SAME ``-uc`` suffix the OTel tracer
+        applies (``otel_tracing.mlflow_setup.uc_experiment_name``). Without that
+        suffix, crew-execution traces land in ``<base>-uc`` while judges/GEPA
+        watched ``<base>``: two experiments for one teamspace (the exact bug this
+        unifies). A UC trace destination permanently refuses to link to an
+        experiment that already holds non-UC traces, which is why the tracer uses
+        the dedicated ``-uc`` name and everyone else must match it.
+
+        Falls back to the per-teamspace default when nothing is configured. NOT
+        the old hardcoded ``/Shared/kasal-crew-execution-traces``.
         """
         from src.services.mlflow import local
 
         experiment_name = await self.repo.get_experiment_name(group_id=self.group_id)
         teamspace = await self._teamspace_name()
-        return f"/Shared/{local.local_experiment_name(experiment_name, teamspace)}"
+        base = f"/Shared/{local.local_experiment_name(experiment_name, teamspace)}"
+        # On Databricks the tracer writes to the dedicated -uc experiment; match
+        # it so judges/GEPA/eval see the same traces. Local/OSS uses base as-is.
+        if await self._configured_workspace_url():
+            from src.services.otel_tracing.mlflow_setup import uc_experiment_name
+
+            return uc_experiment_name(base)
+        return base
 
     async def _trace_id_for(self, job_id: Optional[str]) -> Optional[str]:
         """The MLflow trace id recorded for a job, if any."""

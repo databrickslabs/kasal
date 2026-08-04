@@ -440,7 +440,9 @@ class TestEnsureExperimentCreated:
 
     @pytest.mark.asyncio
     async def test_creates_experiment_at_shared_path(self):
-        """With Databricks configured, create /Shared/<resolved-name>."""
+        """With Databricks configured, create /Shared/<resolved-name>-uc — the
+        SAME dedicated UC experiment the tracer/judges/GEPA use, so the admin
+        attaches the one traces actually land in."""
         session = AsyncMock(spec=AsyncSession)
         service = MLflowService(session=session, group_id="grp")
         service._configured_workspace_url = AsyncMock(
@@ -456,9 +458,10 @@ class TestEnsureExperimentCreated:
         ) as create:
             await service._ensure_experiment_created()
 
-        # Explicit configured name wins; created under /Shared/.
+        # Explicit configured name wins; created under /Shared/ with the -uc
+        # suffix (Databricks backend) so it matches where traces are written.
         _auth, path = create.call_args.args
-        assert path == "/Shared/my-exp"
+        assert path == "/Shared/my-exp-uc"
 
     @pytest.mark.asyncio
     async def test_create_failure_does_not_raise(self):

@@ -314,8 +314,14 @@ async def configure_parent_mlflow_tracing(
                 return False
 
             # Resolve experiment + UC config in the async context (avoids nesting an
-            # event loop inside the to_thread setup).
-            exp_name = "/Shared/kasal-crew-execution-traces"
+            # event loop inside the to_thread setup). Default to the per-teamspace
+            # name (same as every other path) — NOT the legacy hardcoded
+            # kasal-crew-execution-traces, which produced a third experiment. The
+            # -uc suffix is applied once at the set_experiment call above.
+            from src.services.mlflow import local as _local
+
+            teamspace = await svc._teamspace_name()
+            exp_name = f"/Shared/{_local.local_experiment_name(None, teamspace)}"
             uc_catalog = uc_schema = warehouse_id = None
             try:
                 from src.services.databricks.workspace.service import DatabricksService
