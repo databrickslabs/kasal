@@ -122,11 +122,15 @@ const MLflowConfiguration: React.FC = () => {
       setSettings(resp.data);
       setExperimentDraft(resp.data.experiment_name || '');
       publishEnabled(resp.data.enabled);
-      // Saving the experiment name also creates the experiment on Databricks
-      // (backend). Tell the admin to attach it to the app as an MLflow resource
-      // — that is what grants the app's service principal MLflow access.
+      // Saving the experiment name OR enabling tracing creates the experiment on
+      // Databricks (backend). Tell the admin to attach it to the app as an MLflow
+      // resource — that is what grants the app's service principal MLflow access.
+      // Shown on enable too (not just rename): re-enabling recreates it, and the
+      // admin needs the same attach-then-redeploy prompt without renaming.
       const exp = resp.data.backend?.experiment;
-      if ('experiment_name' in body && resp.data.backend?.kind === 'databricks' && exp) {
+      const created =
+        'experiment_name' in body || body.enabled === true;
+      if (created && resp.data.backend?.kind === 'databricks' && exp) {
         setSavedMsg(
           `Experiment "${exp}" is ready. In the Databricks App settings, add it as ` +
             `an MLflow experiment resource (Permission: Can Edit) so the app can ` +
