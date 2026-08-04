@@ -26,9 +26,18 @@ The prompt is registered under a three-level Unity Catalog name:
 
 `<catalog>` and `<schema>` are the **catalog** and **schema** configured in the
 Kasal **Configuration → Databricks** settings (the same ones used for the rest of
-the workspace integration). A prompt is a registered-model-class UC entity, so
-creating it needs the **`CREATE MODEL`** privilege on the schema — not just read
-access.
+the workspace integration). A prompt is stored as a Unity Catalog **function**,
+so per the MLflow Prompt Registry docs the writer needs, on the schema:
+**`CREATE FUNCTION`**, **`EXECUTE`**, and **`MANAGE`**.
+
+> **The `MANAGE` trap (this is the one that bites).** `GRANT ALL PRIVILEGES`
+> **does NOT include `MANAGE`** — Unity Catalog excludes it deliberately to
+> prevent privilege escalation. So a service principal with `ALL PRIVILEGES` on
+> the schema **still gets `PERMISSION_DENIED`** on `register_prompt`, and
+> `SHOW GRANTS` shows only the single `ALL PRIVILEGES` line, hiding the gap.
+> `MANAGE` must be granted **explicitly** (or come via ownership). This is the
+> usual cause of "Permission denied to update prompt in schema …" on a workspace
+> where an admin user can register prompts fine (admins bypass the check).
 
 ## Who needs the grant
 
@@ -40,7 +49,8 @@ the app's display name.
 
 > The registry write authenticates as the **app SP**, never on-behalf-of the
 > signed-in user. Granting yourself access is not enough — the SP is what must
-> hold the privileges.
+> hold the privileges. (Prompt Registry is a Beta feature; a workspace admin may
+> also need to enable it on the **Previews** page.)
 
 ## The grant (run once, as a catalog admin)
 
@@ -51,41 +61,41 @@ Kasal Databricks config and `<app-sp-application-id>` the app's client id:
 -- Traverse into the catalog (schema-level grants do NOT imply this)
 GRANT USE CATALOG ON CATALOG <catalog> TO `<app-sp-application-id>`;
 
--- Use the schema and create the prompt (a registered-model entity)
-GRANT USE SCHEMA, CREATE MODEL ON SCHEMA <catalog>.<schema>
+-- The prompt registry needs all three on the schema. MANAGE is separate from
+-- ALL PRIVILEGES and MUST be granted explicitly.
+GRANT USE SCHEMA, CREATE FUNCTION, EXECUTE, MANAGE ON SCHEMA <catalog>.<schema>
   TO `<app-sp-application-id>`;
 ```
 
-`USE CATALOG` on the **parent** is the step most often missed: `ALL PRIVILEGES`
-on the *schema* does not include it, and without it UC cannot reach the schema at
-all — so the SP is denied even with full schema rights.
-
-If the schema is governed such that individual grants still resolve to a denial,
-make the SP the schema **owner**, which bypasses the per-privilege lookup:
+Simplest guaranteed unblock — make the SP the schema **owner** (ownership
+implies `MANAGE`, so this bypasses the per-privilege lookup entirely):
 
 ```sql
 ALTER SCHEMA <catalog>.<schema> OWNER TO `<app-sp-application-id>`;
 ```
 
-The schema must already exist — Kasal does not create it.
+The schema must already exist. Kasal creates it (and the MLflow experiment) when
+you save the MLflow settings — see [MLflow tracing setup](./mlflow-tracing-setup.md).
 
 ## Verifying the grant
 
 ```sql
-SHOW GRANTS `<app-sp-application-id>` ON CATALOG <catalog>;      -- expect USE CATALOG
-SHOW GRANTS `<app-sp-application-id>` ON SCHEMA <catalog>.<schema>;  -- expect USE SCHEMA + CREATE MODEL (or ALL PRIVILEGES)
+SHOW GRANTS `<app-sp-application-id>` ON CATALOG <catalog>;         -- expect USE CATALOG
+SHOW GRANTS `<app-sp-application-id>` ON SCHEMA <catalog>.<schema>; -- expect MANAGE listed EXPLICITLY (not just ALL PRIVILEGES)
 ```
 
-After granting, start a new optimization run. UC grants take effect for new
-authorization checks without redeploying Kasal.
+If the row shows only `ALL PRIVILEGES` and not a separate `MANAGE`, that is the
+bug — run the `MANAGE` grant above. After granting, start a new optimization
+run; UC grants take effect for new authorization checks without redeploying Kasal.
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `PERMISSION_DENIED: Permission denied to update prompt in schema <schema>` | The app SP lacks a required UC privilege | Run the grants above against the **app SP application id** |
-| Denied even though the SP has `ALL PRIVILEGES` on the schema | Missing `USE CATALOG` on the parent catalog | `GRANT USE CATALOG ON CATALOG <catalog> TO \`<app-sp-application-id>\`` |
-| Still denied after granting everything | Grant targeted the wrong principal (user / display name), or the wrong catalog's schema | Confirm with `SHOW GRANTS` that the rows are on the **applicationId** and the catalog Kasal is configured with |
+| `PERMISSION_DENIED: Permission denied to update prompt in schema <schema>`, and the SP shows `ALL PRIVILEGES` | **Missing `MANAGE`** — `ALL PRIVILEGES` excludes it | `GRANT MANAGE ON SCHEMA <catalog>.<schema> TO \`<app-sp-application-id>\`` (or make the SP the schema owner) |
+| Denied and the SP has no catalog grant | Missing `USE CATALOG` on the parent catalog | `GRANT USE CATALOG ON CATALOG <catalog> TO \`<app-sp-application-id>\`` |
+| An admin **user** can register prompts but the deployed app cannot | The user is a workspace/metastore admin (bypasses the check); the SP is not and lacks `MANAGE` | Grant the SP `MANAGE` explicitly — do not rely on the user's success as proof the SP is configured |
+| Still denied after granting `MANAGE` | Grant targeted the wrong principal (user / display name / wrong catalog), or Prompt Registry preview is off | Confirm `SHOW GRANTS` rows are on the SP **applicationId** and the configured catalog; enable Prompt Registry on the **Previews** page |
 
 ## Related
 

@@ -120,11 +120,28 @@ class CrewRunnerMixin:
             # Fail fast on a dead reflection model — before ANY crew execution.
             _preflight_reflection(loop, reflection_model, group_context, user_token)
 
-            prompt_version = client.register_prompt(
-                name=prompt_name,
-                template=baseline_doc,
-                commit_message="crew baseline registered by Kasal prompt optimization",
-            )
+            try:
+                prompt_version = client.register_prompt(
+                    name=prompt_name,
+                    template=baseline_doc,
+                    commit_message=(
+                        "crew baseline registered by Kasal prompt optimization"
+                    ),
+                )
+            except Exception as reg_err:
+                # A UC permission denial here is almost always the app SP missing
+                # MANAGE on the schema (ALL PRIVILEGES excludes it). Re-raise with
+                # the exact GRANT so the run's error tells the user how to fix it.
+                from src.services.prompt_optimization.gepa.registry_errors import (
+                    is_permission_denied,
+                    prompt_registry_grant_hint,
+                )
+
+                if is_permission_denied(reg_err):
+                    raise ValueError(
+                        prompt_registry_grant_hint(prompt_name)
+                    ) from reg_err
+                raise
             prompt_uri = prompt_version.uri
             logger.info(f"Crew optimization stage=optimize prompt_uri={prompt_uri}")
 
@@ -135,12 +152,23 @@ class CrewRunnerMixin:
             # the run must land on the SAME experiment or judges/evals become
             # invisible to each other (observed: scorers registered on 'kasal',
             # run searching the default experiment).
-            if local_mode:
-                exp_name = saved_exp_env.get("MLFLOW_EXPERIMENT_NAME") or "kasal"
-                try:
-                    mlflow.set_experiment(exp_name)
-                except Exception as exp_err:
-                    logger.warning(f"Could not pin experiment '{exp_name}': {exp_err}")
+            # Pin on BOTH backends — scorers/judges are per-experiment, so the
+            # scorer lookup below must run against the same experiment they were
+            # registered on. Local uses the launch experiment name; Databricks
+            # uses the shared crew-traces path (where judges are registered by
+            # JudgeOperationsMixin, and where this run's traces already land).
+            exp_name = (
+                saved_exp_env.get("MLFLOW_EXPERIMENT_NAME") or "kasal"
+                if local_mode
+                else os.getenv(
+                    "MLFLOW_CREW_TRACES_EXPERIMENT",
+                    "/Shared/kasal-crew-execution-traces",
+                )
+            )
+            try:
+                mlflow.set_experiment(exp_name)
+            except Exception as exp_err:
+                logger.warning(f"Could not pin experiment '{exp_name}': {exp_err}")
 
             # HUMAN JUDGMENT via MLflow Assessments: every evaluation logs its
             # deliverable as a trace (tagged kasal_crew_id); Feedback and
@@ -265,12 +293,14 @@ class CrewRunnerMixin:
                     f"{len(human_requirements)} distilled human requirements"
                 )
 
-            # CUSTOM JUDGES: LLM judges registered on the local MLflow
-            # experiment ("Create LLM judge" in the MLflow UI) participate in
+            # CUSTOM JUDGES: LLM judges registered on the active MLflow
+            # experiment (created in Kasal's Optimize dialog) participate in
             # scoring alongside the built-in judge — users author evaluation
-            # criteria there and optimization honors them automatically.
+            # criteria there and optimization honors them automatically. Works
+            # on both backends: local server (dev) and Databricks managed MLflow,
+            # where the run has already authenticated + pinned the experiment.
             registered_scorers: List[Any] = []
-            if local_mode:
+            if crew_id:
                 try:
                     from mlflow.genai.scorers import list_scorers
 
