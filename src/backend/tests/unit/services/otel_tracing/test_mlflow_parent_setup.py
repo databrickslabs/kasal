@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.services.otel_tracing.mlflow_parent_setup import (
+from src.services.mlflow.mlflow_parent_setup import (
     _setup_sync,
     configure_parent_mlflow_tracing,
     invalidate_parent_mlflow_cache,
@@ -269,7 +269,7 @@ class TestParentSetupMemoization:
                 "src.services.databricks.workspace.service.DatabricksService",
                 MagicMock(return_value=dbx),
             ),
-            patch("src.services.otel_tracing.mlflow_parent_setup._setup_sync", setup),
+            patch("src.services.mlflow.mlflow_parent_setup._setup_sync", setup),
         ):
             assert (
                 await configure_parent_mlflow_tracing(MagicMock(), self._ctx("g1"))
@@ -298,7 +298,7 @@ class TestParentSetupMemoization:
                 "src.services.databricks.workspace.service.DatabricksService",
                 MagicMock(return_value=dbx),
             ),
-            patch("src.services.otel_tracing.mlflow_parent_setup._setup_sync", setup),
+            patch("src.services.mlflow.mlflow_parent_setup._setup_sync", setup),
         ):
             assert (
                 await configure_parent_mlflow_tracing(MagicMock(), self._ctx("g1"))
@@ -342,7 +342,7 @@ class TestParentSetupMemoization:
                 "src.services.databricks.workspace.service.DatabricksService",
                 MagicMock(return_value=dbx),
             ),
-            patch("src.services.otel_tracing.mlflow_parent_setup._setup_sync", setup),
+            patch("src.services.mlflow.mlflow_parent_setup._setup_sync", setup),
         ):
             assert (
                 await configure_parent_mlflow_tracing(MagicMock(), self._ctx("g1"))
@@ -366,7 +366,7 @@ class TestParentSetupMemoization:
                 "src.services.databricks.workspace.service.DatabricksService",
                 MagicMock(return_value=dbx),
             ),
-            patch("src.services.otel_tracing.mlflow_parent_setup._setup_sync", setup),
+            patch("src.services.mlflow.mlflow_parent_setup._setup_sync", setup),
         ):
             assert (
                 await configure_parent_mlflow_tracing(MagicMock(), self._ctx("g1"))
@@ -429,7 +429,7 @@ class TestConfigureParentMlflowTracing:
                 MagicMock(return_value=dbx),
             ),
             patch(
-                "src.services.otel_tracing.mlflow_parent_setup._setup_sync",
+                "src.services.mlflow.mlflow_parent_setup._setup_sync",
                 side_effect=_fake_setup,
             ),
         ):

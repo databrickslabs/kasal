@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 
 import pytest
 
-from src.services.otel_tracing.mlflow_setup import (
+from src.services.mlflow.mlflow_setup import (
     KASAL_TRACE_TABLE_PREFIX,
     MlflowSetupResult,
     _build_uc_trace_location,
@@ -350,7 +350,7 @@ class TestConfigureMlflowInSubprocess:
 
         with patch.dict("sys.modules", {"mlflow": mock_mlflow}):
             with patch(
-                "src.services.otel_tracing.mlflow_setup.configure_mlflow_in_subprocess"
+                "src.services.mlflow.mlflow_setup.configure_mlflow_in_subprocess"
             ) as mock_fn:
                 mock_fn.return_value = MlflowSetupResult(
                     enabled=True, tracing_ready=False, error="SPN extraction failed"
@@ -392,7 +392,7 @@ class TestConfigureMlflowInSubprocess:
 class TestLogMlflowState:
     def test_noop_when_mlflow_unavailable(self):
         with patch(
-            "src.services.otel_tracing.mlflow_setup._try_import_mlflow",
+            "src.services.mlflow.mlflow_setup._try_import_mlflow",
             return_value=None,
         ):
             log_mlflow_state("pre-exec")  # Should not raise
@@ -406,7 +406,7 @@ class TestLogMlflowState:
         mock_logger = Mock()
 
         with patch(
-            "src.services.otel_tracing.mlflow_setup._try_import_mlflow",
+            "src.services.mlflow.mlflow_setup._try_import_mlflow",
             return_value=mock_mlflow,
         ):
             log_mlflow_state("pre-exec", async_logger=mock_logger)
@@ -423,7 +423,7 @@ class TestLogMlflowState:
         mock_logger = Mock()
 
         with patch(
-            "src.services.otel_tracing.mlflow_setup._try_import_mlflow",
+            "src.services.mlflow.mlflow_setup._try_import_mlflow",
             return_value=mock_mlflow,
         ):
             log_mlflow_state("check", async_logger=mock_logger)
@@ -439,7 +439,7 @@ class TestLogMlflowState:
         mock_logger = Mock()
 
         with patch(
-            "src.services.otel_tracing.mlflow_setup._try_import_mlflow",
+            "src.services.mlflow.mlflow_setup._try_import_mlflow",
             return_value=mock_mlflow,
         ):
             log_mlflow_state("check", async_logger=mock_logger)
@@ -453,7 +453,7 @@ class TestLogMlflowState:
         mock_logger = Mock()
 
         with patch(
-            "src.services.otel_tracing.mlflow_setup._try_import_mlflow",
+            "src.services.mlflow.mlflow_setup._try_import_mlflow",
             return_value=mock_mlflow,
         ):
             log_mlflow_state("check", async_logger=mock_logger)  # Should not raise
@@ -468,7 +468,7 @@ class TestCaptureTraceAndUpdateExecution:
     @pytest.mark.asyncio
     async def test_returns_trace_id_on_success(self):
         with patch(
-            "src.services.otel_tracing.mlflow_setup.capture_trace_and_update_execution",
+            "src.services.mlflow.mlflow_setup.capture_trace_and_update_execution",
             new_callable=AsyncMock,
         ) as mock_fn:
             mock_fn.return_value = "trace-123"
@@ -482,7 +482,7 @@ class TestCaptureTraceAndUpdateExecution:
     @pytest.mark.asyncio
     async def test_returns_none_when_no_trace(self):
         with patch(
-            "src.services.otel_tracing.mlflow_setup.capture_trace_and_update_execution",
+            "src.services.mlflow.mlflow_setup.capture_trace_and_update_execution",
             new_callable=AsyncMock,
         ) as mock_fn:
             mock_fn.return_value = None
@@ -501,7 +501,7 @@ class TestCaptureTraceAndUpdateExecution:
 
         with patch(
             (
-                "src.services.otel_tracing.mlflow_setup.get_last_active_trace_id"
+                "src.services.mlflow.mlflow_setup.get_last_active_trace_id"
                 if False
                 else "src.services.mlflow.tracing.get_last_active_trace_id"
             ),
@@ -511,7 +511,7 @@ class TestCaptureTraceAndUpdateExecution:
 
         # Directly test by patching internal imports
         with patch(
-            "src.services.otel_tracing.mlflow_setup.capture_trace_and_update_execution",
+            "src.services.mlflow.mlflow_setup.capture_trace_and_update_execution",
             new_callable=AsyncMock,
         ) as mock_fn:
             mock_fn.side_effect = RuntimeError("unexpected")
@@ -534,7 +534,7 @@ class TestCaptureTraceAndUpdateExecution:
 class TestDisableAutologsForSafety:
     def test_noop_when_mlflow_unavailable(self):
         with patch(
-            "src.services.otel_tracing.mlflow_setup._try_import_mlflow",
+            "src.services.mlflow.mlflow_setup._try_import_mlflow",
             return_value=None,
         ):
             disable_autologs_for_safety()  # Should not raise
@@ -544,7 +544,7 @@ class TestDisableAutologsForSafety:
         mock_logger = Mock()
 
         with patch(
-            "src.services.otel_tracing.mlflow_setup._try_import_mlflow",
+            "src.services.mlflow.mlflow_setup._try_import_mlflow",
             return_value=mock_mlflow,
         ):
             disable_autologs_for_safety(async_logger=mock_logger)
@@ -557,7 +557,7 @@ class TestDisableAutologsForSafety:
         mock_logger = Mock()
 
         with patch(
-            "src.services.otel_tracing.mlflow_setup._try_import_mlflow",
+            "src.services.mlflow.mlflow_setup._try_import_mlflow",
             return_value=mock_mlflow,
         ):
             disable_autologs_for_safety(async_logger=mock_logger)  # Should not raise
@@ -883,7 +883,7 @@ class TestPostExecutionMlflowCleanup:
         mlflow_result = MlflowSetupResult(enabled=True, tracing_ready=True)
 
         with patch(
-            "src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup",
+            "src.services.mlflow.mlflow_setup.post_execution_mlflow_cleanup",
             new_callable=AsyncMock,
         ) as mock_fn:
             await mock_fn(mlflow_result, "exec-1")
@@ -975,7 +975,7 @@ class TestConfigureMlflowFullSPNPath:
         ):
             with (
                 patch(
-                    "src.services.otel_tracing.mlflow_setup.configure_mlflow_in_subprocess"
+                    "src.services.mlflow.mlflow_setup.configure_mlflow_in_subprocess"
                 ) as mock_configure,
             ):
                 # Directly call the real function but mock its internal imports
@@ -1140,7 +1140,7 @@ class TestConfigureMlflowFullSPNPath:
                 # UC trace location active (real builder needs MLflow >=3.11's
                 # UnityCatalog import, which the mocked mlflow breaks here).
                 patch(
-                    "src.services.otel_tracing.mlflow_setup._build_uc_trace_location",
+                    "src.services.mlflow.mlflow_setup._build_uc_trace_location",
                     return_value=MagicMock(),
                 ),
             ):
@@ -1228,7 +1228,7 @@ class TestConfigureMlflowFullSPNPath:
                 ),
                 patch("src.services.mlflow.integration.enable_autologs", MagicMock()),
                 patch(
-                    "src.services.otel_tracing.mlflow_setup._build_uc_trace_location",
+                    "src.services.mlflow.mlflow_setup._build_uc_trace_location",
                     return_value=MagicMock(),
                 ),
             ):
@@ -1303,7 +1303,7 @@ class TestConfigureMlflowFullSPNPath:
                 ),
                 patch(
                     (
-                        "src.services.otel_tracing.mlflow_setup.enable_autologs"
+                        "src.services.mlflow.mlflow_setup.enable_autologs"
                         if False
                         else "src.services.mlflow.integration.enable_autologs"
                     ),
@@ -1629,7 +1629,7 @@ class TestLogMlflowStateAdditional:
 
         with (
             patch(
-                "src.services.otel_tracing.mlflow_setup._try_import_mlflow",
+                "src.services.mlflow.mlflow_setup._try_import_mlflow",
                 return_value=mock_mlflow,
             ),
             patch.dict(sys.modules, {"crewai": mock_crewai, "litellm": mock_litellm}),
@@ -1650,7 +1650,7 @@ class TestLogMlflowStateAdditional:
         mock_logger = MagicMock()
 
         with patch(
-            "src.services.otel_tracing.mlflow_setup._try_import_mlflow",
+            "src.services.mlflow.mlflow_setup._try_import_mlflow",
             return_value=mock_mlflow,
         ):
             log_mlflow_state("check", async_logger=mock_logger)
@@ -1747,11 +1747,11 @@ class TestPostExecutionCleanupReal:
         with (
             patch("src.services.mlflow.tracing.flush_async_logging", mock_flush),
             patch(
-                "src.services.otel_tracing.mlflow_setup.log_mlflow_state",
+                "src.services.mlflow.mlflow_setup.log_mlflow_state",
                 mock_log_state,
             ),
             patch(
-                "src.services.otel_tracing.mlflow_setup.capture_trace_and_update_execution",
+                "src.services.mlflow.mlflow_setup.capture_trace_and_update_execution",
                 mock_capture,
             ),
             patch(
@@ -1782,10 +1782,10 @@ class TestPostExecutionCleanupReal:
                 AsyncMock(side_effect=RuntimeError("flush error")),
             ),
             patch(
-                "src.services.otel_tracing.mlflow_setup.log_mlflow_state", MagicMock()
+                "src.services.mlflow.mlflow_setup.log_mlflow_state", MagicMock()
             ),
             patch(
-                "src.services.otel_tracing.mlflow_setup.capture_trace_and_update_execution",
+                "src.services.mlflow.mlflow_setup.capture_trace_and_update_execution",
                 AsyncMock(return_value=None),
             ),
             patch(
@@ -1809,10 +1809,10 @@ class TestPostExecutionCleanupReal:
         with (
             patch("src.services.mlflow.tracing.flush_async_logging", AsyncMock()),
             patch(
-                "src.services.otel_tracing.mlflow_setup.log_mlflow_state", MagicMock()
+                "src.services.mlflow.mlflow_setup.log_mlflow_state", MagicMock()
             ),
             patch(
-                "src.services.otel_tracing.mlflow_setup.capture_trace_and_update_execution",
+                "src.services.mlflow.mlflow_setup.capture_trace_and_update_execution",
                 AsyncMock(return_value=None),
             ),
             patch(

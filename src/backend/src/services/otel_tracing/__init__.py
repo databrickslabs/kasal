@@ -10,7 +10,7 @@ KasalDBSpanExporter.
 
 from src.services.otel_tracing.event_bridge import OTelEventBridge
 from src.services.otel_tracing.mlflow_exporter import KasalMLflowSpanExporter
-from src.services.otel_tracing.mlflow_setup import (
+from src.services.mlflow.mlflow_setup import (
     MlflowSetupResult,
     configure_mlflow_in_subprocess,
     execute_with_mlflow_trace,
