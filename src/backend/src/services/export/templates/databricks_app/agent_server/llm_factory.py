@@ -50,7 +50,10 @@ def _model_rejects_temperature(model_name: str) -> bool:
     m = str(model_name).lower()
     if "gpt-5" in m or "gpt5" in m:
         return True
-    if "claude-opus-4-7" in m or "claude-opus-4-8" in m:
+    # Opus 4.7 and NEWER. The enumerated form silently missed opus-5 the day it
+    # shipped — every run on it died with "Model global.anthropic.claude-opus-5
+    # does not support the temperature parameter."
+    if "claude-opus-4-7" in m or "claude-opus-4-8" in m or "claude-opus-5" in m:
         return True
     if "claude-fable" in m:
         return True

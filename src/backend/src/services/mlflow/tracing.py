@@ -56,12 +56,28 @@ def start_root_trace(trace_name: str, inputs: Optional[Dict[str, Any]] = None):
         tracing_mod = getattr(mlflow, "tracing", None)
         start_trace_fn = getattr(tracing_mod, "start_trace", None)
 
+    # Each fallback below wraps its `yield` in `except Exception` so a missing or
+    # broken trace API degrades to the next option. But contextlib THROWS a body
+    # exception back in AT the yield, so a bare `except Exception` also catches
+    # the CALLER's error, mistakes it for "this API failed", and falls through to
+    # the next fallback — which yields a SECOND time. A generator that yields
+    # again after throw() is exactly what raises "generator didn't stop after
+    # throw()", which then REPLACES the real error. Observed live: a crew died on
+    # a 400 ("model does not support the temperature parameter") and the UI
+    # reported only the generator RuntimeError.
+    #
+    # `entered` tracks whether we have handed control to the body. Once we have,
+    # the body owns any exception and it must propagate untouched.
+    entered = False
     if callable(start_trace_fn):
         try:
             with start_trace_fn(name=trace_name, inputs=inputs) as rt:  # type: ignore[misc]
+                entered = True
                 yield rt
                 return
         except Exception as e:
+            if entered:
+                raise
             logger.info(f"[mlflow_tracing] start_trace failed, trying start_span: {e}")
 
     # In MLflow 3.x, start_span without parent creates a root trace
@@ -79,9 +95,12 @@ def start_root_trace(trace_name: str, inputs: Optional[Dict[str, Any]] = None):
                         logger.debug(
                             f"[mlflow_tracing] Could not set span inputs: {input_e}"
                         )
+                entered = True
                 yield span
                 return
         except Exception as e:
+            if entered:
+                raise
             logger.info(
                 f"[mlflow_tracing] start_span failed, continuing without root: {e}"
             )

@@ -172,6 +172,63 @@ class TestStartRootTrace:
             with start_root_trace("trace", inputs=None) as span:
                 assert span is None
 
+    def test_body_exception_propagates_unchanged_from_start_trace(self):
+        """REGRESSION: a body error must not be mistaken for an API failure.
+
+        contextlib throws a body exception back in AT the yield. The fallback
+        ladder's `except Exception` used to catch it, log "start_trace failed",
+        and fall through to start_span — yielding a SECOND time, which raises
+        "generator didn't stop after throw()" and REPLACES the real error.
+        Observed live: a crew failed on a 400 (model does not support the
+        temperature parameter) and the UI showed only the generator RuntimeError.
+        """
+        from src.services.mlflow.tracing import start_root_trace
+
+        mock_mlflow = MagicMock()
+        mock_mlflow.start_trace.return_value = nullcontext("root-span")
+
+        boom = ValueError("400: model does not support the temperature parameter")
+        with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
+            with pytest.raises(ValueError) as exc:
+                with start_root_trace("trace"):
+                    raise boom
+
+        # The caller's own exception, not RuntimeError("generator didn't stop...")
+        assert exc.value is boom
+        # And we never fell through to the next fallback.
+        mock_mlflow.start_span.assert_not_called()
+
+    def test_body_exception_propagates_unchanged_from_start_span(self):
+        """Same guard on the start_span fallback (reached when start_trace is absent)."""
+        from src.services.mlflow.tracing import start_root_trace
+
+        mock_mlflow = MagicMock()
+        # No usable start_trace → the ladder advances to start_span.
+        mock_mlflow.start_trace = None
+        mock_mlflow.tracing.start_trace = None
+        mock_mlflow.start_span.return_value = nullcontext(MagicMock())
+
+        boom = RuntimeError("body blew up inside the span")
+        with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
+            with pytest.raises(RuntimeError) as exc:
+                with start_root_trace("trace"):
+                    raise boom
+
+        assert exc.value is boom
+
+    def test_api_failure_still_falls_back_after_the_guard(self):
+        """The guard must not break real degradation: a start_trace that fails to
+        ENTER still falls through to start_span."""
+        from src.services.mlflow.tracing import start_root_trace
+
+        mock_mlflow = MagicMock()
+        mock_mlflow.start_trace.side_effect = Exception("api gone")
+        mock_mlflow.start_span.return_value = nullcontext("span-from-fallback")
+
+        with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
+            with start_root_trace("trace") as span:
+                assert span == "span-from-fallback"
+
 
 # ---------------------------------------------------------------------------
 # get_last_active_trace_id

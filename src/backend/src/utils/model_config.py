@@ -118,7 +118,11 @@ def model_rejects_temperature(model_name: Optional[str]) -> bool:
     m = model_name.lower()
     if "gpt-5" in m or "gpt5" in m:
         return True
-    if "claude-opus-4-7" in m or "claude-opus-4-8" in m:
+    # Opus 4.7 and NEWER. Matched by prefix rather than an exact list: the
+    # enumerated form ("4-7" or "4-8") silently missed opus-5 the day it shipped,
+    # and every run on it died with "Model global.anthropic.claude-opus-5 does
+    # not support the temperature parameter."
+    if "claude-opus-4-7" in m or "claude-opus-4-8" in m or "claude-opus-5" in m:
         return True
     if "claude-fable" in m:
         # Fable 5 has the same request surface as Opus 4.7/4.8 — sampling

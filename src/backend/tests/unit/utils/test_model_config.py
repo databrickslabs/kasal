@@ -10,8 +10,51 @@ from sqlalchemy.orm import Session
 from src.utils.model_config import (
     get_max_rpm_for_model,
     get_model_config,
+    model_rejects_temperature,
     model_supports_reasoning_effort,
 )
+
+
+class TestModelRejectsTemperature:
+    """Endpoints that 400 on `temperature`. There is no drop_params safety net —
+    a param set here IS sent, so a miss is a hard request failure, not a warning.
+    """
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            # REGRESSION: the guard enumerated 4-7/4-8 and so missed opus-5 the
+            # day it shipped. Every crew run on it failed with "Model
+            # global.anthropic.claude-opus-5 does not support the temperature
+            # parameter." Both the Kasal key and the served name must match.
+            "databricks-claude-opus-5",
+            "global.anthropic.claude-opus-5",
+            "us.anthropic.claude-opus-5",
+            "databricks-claude-opus-4-7",
+            "databricks-claude-opus-4-8",
+            "databricks-claude-fable-5",
+            "gpt-5",
+            "databricks-gpt-5-1",
+        ],
+    )
+    def test_rejecting_models(self, model):
+        assert model_rejects_temperature(model) is True
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            # Sonnet/Haiku accept temperature — dropping it would silently change
+            # sampling for the DEFAULT_ENGINE_MODEL family.
+            "databricks-claude-sonnet-4-6",
+            "databricks-claude-sonnet-5",
+            "databricks-claude-haiku-4-5",
+            "databricks-llama-4-maverick",
+            None,
+            "",
+        ],
+    )
+    def test_accepting_models(self, model):
+        assert model_rejects_temperature(model) is False
 
 
 class TestModelSupportsReasoningEffort:
