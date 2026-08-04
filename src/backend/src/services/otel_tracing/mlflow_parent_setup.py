@@ -314,14 +314,16 @@ async def configure_parent_mlflow_tracing(
                 return False
 
             # Resolve experiment + UC config in the async context (avoids nesting an
-            # event loop inside the to_thread setup). Default to the per-teamspace
-            # name (same as every other path) — NOT the legacy hardcoded
-            # kasal-crew-execution-traces, which produced a third experiment. The
-            # -uc suffix is applied once at the set_experiment call above.
-            from src.services.mlflow import local as _local
-
-            teamspace = await svc._teamspace_name()
-            exp_name = f"/Shared/{_local.local_experiment_name(None, teamspace)}"
+            # event loop inside the to_thread setup). Use the SINGLE authority
+            # (MLflowService.configured_crew_traces_experiment) so the tracer
+            # writes to the SAME experiment GEPA/judges/eval/config resolve — it
+            # reads mlflowconfig.experiment_name (the field Configuration.tsx
+            # saves) and applies the -uc suffix. The legacy
+            # databricksconfig.mlflow_experiment_name is deliberately NOT read
+            # here: reading it produced a SECOND experiment
+            # (kasal-crew-execution-traces-uc) that disagreed with the configured
+            # per-teamspace name, so traces landed where nothing else looked.
+            exp_name = await svc.configured_crew_traces_experiment()
             uc_catalog = uc_schema = warehouse_id = None
             try:
                 from src.services.databricks.workspace.service import DatabricksService
@@ -330,9 +332,6 @@ async def configure_parent_mlflow_tracing(
                     session, group_id=group_id
                 ).get_databricks_config()
                 if db_config:
-                    if getattr(db_config, "mlflow_experiment_name", None):
-                        name = db_config.mlflow_experiment_name
-                        exp_name = name if name.startswith("/") else f"/Shared/{name}"
                     uc_catalog = getattr(db_config, "catalog", None)
                     # schema field is `db_schema` (aliased "schema"); reading
                     # "schema" returns BaseModel.schema (a method) -> MLflow error.

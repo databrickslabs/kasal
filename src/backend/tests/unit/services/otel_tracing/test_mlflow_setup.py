@@ -1197,9 +1197,14 @@ class TestConfigureMlflowFullSPNPath:
         uc_cfg.catalog = "example_catalog"
         uc_cfg.db_schema = "kasal"
         uc_cfg.warehouse_id = "wh-1"
-        uc_cfg.mlflow_experiment_name = "kasal-crew-execution-traces"
         mock_service_instance = MagicMock()
         mock_service_instance.get_databricks_config = AsyncMock(return_value=uc_cfg)
+        # Experiment name from mlflowconfig.experiment_name; the -uc suffix is
+        # applied in the UC-storage branch, giving the dedicated experiment.
+        mock_repo = MagicMock()
+        mock_repo.get_experiment_name = AsyncMock(
+            return_value="kasal-crew-execution-traces"
+        )
 
         with patch.dict(
             sys.modules,
@@ -1216,6 +1221,10 @@ class TestConfigureMlflowFullSPNPath:
                 patch(
                     "src.services.databricks.workspace.service.DatabricksService",
                     MagicMock(return_value=mock_service_instance),
+                ),
+                patch(
+                    "src.repositories.mlflow_repository.MLflowRepository",
+                    MagicMock(return_value=mock_repo),
                 ),
                 patch("src.services.mlflow.integration.enable_autologs", MagicMock()),
                 patch(
@@ -1556,11 +1565,15 @@ class TestConfigureMlflowFullSPNPath:
         mock_session_ctx.__aenter__ = AsyncMock(return_value=MagicMock())
         mock_session_ctx.__aexit__ = AsyncMock(return_value=None)
 
-        # Config with custom experiment name (no leading slash)
+        # The experiment name now comes from mlflowconfig.experiment_name via
+        # MLflowRepository.get_experiment_name (+ /Shared/ prefix), NOT
+        # cfg.mlflow_experiment_name. The -uc suffix is applied later in the
+        # UC-storage branch.
         fresh_cfg = MagicMock()
-        fresh_cfg.mlflow_experiment_name = "my-custom-exp"
         mock_service_instance = MagicMock()
         mock_service_instance.get_databricks_config = AsyncMock(return_value=fresh_cfg)
+        mock_repo = MagicMock()
+        mock_repo.get_experiment_name = AsyncMock(return_value="my-custom-exp")
 
         with patch.dict(
             sys.modules,
@@ -1578,6 +1591,10 @@ class TestConfigureMlflowFullSPNPath:
                     "src.services.databricks.workspace.service.DatabricksService",
                     MagicMock(return_value=mock_service_instance),
                 ),
+                patch(
+                    "src.repositories.mlflow_repository.MLflowRepository",
+                    MagicMock(return_value=mock_repo),
+                ),
             ):
                 result = await configure_mlflow_in_subprocess(
                     db_config=_make_db_config(True),
@@ -1588,7 +1605,7 @@ class TestConfigureMlflowFullSPNPath:
 
         assert result.enabled is True
         if result.tracing_ready:
-            assert "/Shared/my-custom-exp" == result.experiment_name
+            assert "/Shared/my-custom-exp" in result.experiment_name
 
 
 class TestLogMlflowStateAdditional:

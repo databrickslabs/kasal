@@ -157,12 +157,16 @@ class MLflowService:
             )
         if experiment_name is not None:
             await self.repo.set_experiment_name(experiment_name, group_id=self.group_id)
-            # Create the experiment on Databricks now, so an admin can attach it
-            # to the app as an MLflow resource (which is what grants the app SP
-            # MLflow access). Kasal otherwise creates it lazily on the first
-            # traced run — too late to attach up front. Best-effort: a failure
-            # here must not block saving the name, but it is surfaced so the UI
-            # can tell the user the experiment could not be created.
+
+        # Create the experiment on Databricks now, so an admin can attach it to
+        # the app as an MLflow resource (which is what grants the app SP MLflow
+        # access). Kasal otherwise creates it lazily on the first traced run —
+        # too late to attach up front. Run this both when the NAME is saved AND
+        # when tracing is toggled ON: re-enabling must (re)create the experiment
+        # so the admin has something to attach without having to rename it (a
+        # rename was the only trigger before — the catch-22 the user hit).
+        # Best-effort: a failure must not block saving, but it is surfaced.
+        if experiment_name is not None or enabled is True:
             await self._ensure_experiment_created()
         return await self.get_settings()
 

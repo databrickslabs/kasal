@@ -513,22 +513,32 @@ async def configure_mlflow_in_subprocess(
                     session=session,
                     group_id=group_id,
                 )
+                # Resolve the experiment name from mlflowconfig.experiment_name
+                # (the field Configuration.tsx saves) via the SAME primitives
+                # MLflowService.configured_crew_traces_experiment uses — read
+                # directly here rather than importing MLflowService, which pulls a
+                # heavy `import mlflow` into this subprocess path (tests mock
+                # sys.modules['mlflow'], which then breaks the import). Reading the
+                # legacy databricksconfig.mlflow_experiment_name here is what
+                # produced a SECOND experiment (kasal-crew-execution-traces-uc)
+                # disagreeing with the configured per-teamspace name.
+                from src.repositories.mlflow_repository import MLflowRepository
+                from src.services.mlflow import local as _local_ns
+
+                configured = await MLflowRepository(session).get_experiment_name(
+                    group_id=group_id
+                )
                 if teamspace_name is None:
-                    # Not resolved earlier (the legacy flag short-circuited the
-                    # lookup); do it on the session already open here rather
-                    # than paying a second round trip.
                     teamspace_name = await _teamspace_name(session, group_id)
-                    experiment_name = f"/Shared/{_local_slug(teamspace_name)}"
+                experiment_name = (
+                    "/Shared/"
+                    + _local_ns.local_experiment_name(configured, teamspace_name)
+                )
+                alog.info(
+                    f"[SUBPROCESS] Using MLflow experiment from config: {experiment_name}"
+                )
                 fresh_config = await databricks_service.get_databricks_config()
                 if fresh_config:
-                    if fresh_config.mlflow_experiment_name:
-                        exp_name = fresh_config.mlflow_experiment_name
-                        if not exp_name.startswith("/"):
-                            exp_name = f"/Shared/{exp_name}"
-                        experiment_name = exp_name
-                        alog.info(
-                            f"[SUBPROCESS] Using MLflow experiment name from config: {experiment_name}"
-                        )
                     # Reuse the workspace's configured catalog/schema/warehouse for
                     # in-network UC trace storage (MLflow >= 3.11).
                     # NOTE: the schema field is `db_schema` (Pydantic aliases it to

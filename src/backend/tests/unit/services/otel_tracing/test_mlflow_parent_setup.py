@@ -247,6 +247,12 @@ class TestParentSetupMemoization:
     def _enabled_stack(self, setup_result=True):
         svc = MagicMock()
         svc.is_enabled = AsyncMock(return_value=True)
+        # The tracer now resolves the experiment name via this authority (reads
+        # mlflowconfig.experiment_name + applies -uc), not the legacy
+        # databricksconfig.mlflow_experiment_name field.
+        svc.configured_crew_traces_experiment = AsyncMock(
+            return_value="/Shared/kasal-team-traces-uc"
+        )
         dbx = MagicMock()
         dbx.get_databricks_config = AsyncMock(return_value=None)
         setup = MagicMock(return_value=setup_result)
@@ -390,8 +396,12 @@ class TestConfigureParentMlflowTracing:
     async def test_passes_resolved_config_to_setup(self):
         svc = MagicMock()
         svc.is_enabled = AsyncMock(return_value=True)
+        # Experiment name comes from the single authority now (which applies -uc),
+        # NOT cfg.mlflow_experiment_name.
+        svc.configured_crew_traces_experiment = AsyncMock(
+            return_value="/Shared/kasal-team-traces-uc"
+        )
         cfg = MagicMock()
-        cfg.mlflow_experiment_name = "kasal-crew-execution-traces"
         cfg.catalog = "example_catalog"
         cfg.db_schema = "kasal"
         cfg.warehouse_id = "wh-1"
@@ -428,9 +438,9 @@ class TestConfigureParentMlflowTracing:
             )
 
         assert ok is True
-        # Experiment name normalized with /Shared/ prefix; -uc suffix is applied
-        # inside _setup_sync (so the base is forwarded here).
-        assert captured["exp_name"] == "/Shared/kasal-crew-execution-traces"
+        # Experiment name comes from the authority (already -uc); _setup_sync's
+        # uc_experiment_name() is idempotent so it stays unchanged.
+        assert captured["exp_name"] == "/Shared/kasal-team-traces-uc"
         assert captured["uc_catalog"] == "example_catalog"
         assert captured["uc_schema"] == "kasal"
         assert captured["warehouse_id"] == "wh-1"
