@@ -107,44 +107,39 @@ def mlflow_session(backend: MLflowBackend) -> Iterator[None]:
     """
     import mlflow
 
+    from src.services.mlflow.sp_auth import single_auth_env
+
     prev_uri = mlflow.get_tracking_uri()
     # On databricks, authenticate with the SP-derived bearer token as the SINGLE
-    # method: set DATABRICKS_TOKEN and REMOVE the OAuth env vars for the call.
-    # With both a token and DATABRICKS_CLIENT_ID/SECRET present, the Databricks
-    # SDK errors "more than one authorization method configured: oauth and pat"
-    # and MLflow falls back to legacy auth — so the call is not made as the SP
-    # that holds the UC grant. (backend.auth.token is the SP's own bearer,
-    # derived from its OAuth creds in _setup_mlflow_auth.) All restored after.
-    swap_keys = (
-        "DATABRICKS_HOST",
-        "DATABRICKS_TOKEN",
-        "DATABRICKS_API_KEY",
-        "DATABRICKS_CLIENT_ID",
-        "DATABRICKS_CLIENT_SECRET",
-    )
-    saved = {k: os.environ.get(k) for k in swap_keys}
-    try:
-        if backend.kind == "databricks":
-            os.environ["DATABRICKS_HOST"] = backend.auth.workspace_url
-            os.environ["DATABRICKS_TOKEN"] = backend.auth.token
-            os.environ.pop("DATABRICKS_API_KEY", None)
-            os.environ.pop("DATABRICKS_CLIENT_ID", None)
-            os.environ.pop("DATABRICKS_CLIENT_SECRET", None)
+    # method (set DATABRICKS_TOKEN, remove the OAuth env vars) — otherwise the SDK
+    # errors "more than one authorization method configured: oauth and pat" and
+    # MLflow falls back to legacy auth, so the call is NOT made as the SP that
+    # holds the UC grant. backend.auth.token is the SP's own bearer, derived in
+    # _setup_mlflow_auth. The shared single_auth_env owns the env save/restore.
+    if backend.kind == "databricks":
+        with single_auth_env(
+            host=backend.auth.workspace_url, token=backend.auth.token
+        ):
             mlflow.set_tracking_uri("databricks")
-        else:
-            mlflow.set_tracking_uri(backend.uri)
+            try:
+                mlflow.set_experiment(backend.experiment)
+            except Exception as exp_err:  # noqa: BLE001
+                logger.warning(
+                    f"[judges] Could not pin experiment '{backend.experiment}': {exp_err}"
+                )
+            try:
+                yield
+            finally:
+                mlflow.set_tracking_uri(prev_uri)
+    else:
         try:
-            mlflow.set_experiment(backend.experiment)
-        except Exception as exp_err:  # noqa: BLE001
-            logger.warning(
-                f"[judges] Could not pin experiment '{backend.experiment}': {exp_err}"
-            )
-        yield
-    finally:
-        mlflow.set_tracking_uri(prev_uri)
-        if backend.kind == "databricks":
-            for key, value in saved.items():
-                if value is not None:
-                    os.environ[key] = value
-                elif key in os.environ:
-                    del os.environ[key]
+            mlflow.set_tracking_uri(backend.uri)
+            try:
+                mlflow.set_experiment(backend.experiment)
+            except Exception as exp_err:  # noqa: BLE001
+                logger.warning(
+                    f"[judges] Could not pin experiment '{backend.experiment}': {exp_err}"
+                )
+            yield
+        finally:
+            mlflow.set_tracking_uri(prev_uri)

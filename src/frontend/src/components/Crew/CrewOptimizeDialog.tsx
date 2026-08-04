@@ -65,6 +65,18 @@ const ELLIPSIS_SELECT_SX = {
   },
 } as const;
 
+/** The first meaningful line of a (often multi-line traceback) error, for the
+ *  top banner — the expanded run row still shows the full text. Keeps the two
+ *  surfaces from both dumping the entire traceback. */
+const errorSummary = (err: string): string => {
+  const first = err
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => l.length > 0);
+  const line = first || err.trim();
+  return line.length > 300 ? `${line.slice(0, 300)}…` : line;
+};
+
 const statusColor = (
   status: PromptOptimizationRun['status'],
 ): 'default' | 'info' | 'success' | 'error' | 'warning' => {
@@ -481,7 +493,16 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
         </Typography>
         {error && (
           <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
-            {error}
+            {errorSummary(error)}
+            {error.includes('\n') && (
+              <Typography
+                variant="caption"
+                component="div"
+                sx={{ mt: 0.5, opacity: 0.8 }}
+              >
+                Expand the failed run below for the full details.
+              </Typography>
+            )}
           </Alert>
         )}
 

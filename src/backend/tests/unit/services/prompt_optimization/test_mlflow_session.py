@@ -40,11 +40,16 @@ class TestResolveBackend:
             return_value="https://ws.example.com"
         )
         fake_svc._setup_mlflow_auth = AsyncMock(return_value=MagicMock())
+        # The backend now pins the CONFIGURED experiment (source of truth),
+        # resolved via this method rather than a hardcoded default.
+        fake_svc.configured_crew_traces_experiment = AsyncMock(
+            return_value="/Shared/kasal-team-traces"
+        )
         with patch("src.services.mlflow.service.MLflowService", return_value=fake_svc):
             backend = await ms.resolve_mlflow_backend(MagicMock(), group)
         assert backend is not None
         assert backend.kind == "databricks"
-        assert backend.experiment.startswith("/Shared/")
+        assert backend.experiment == "/Shared/kasal-team-traces"
 
     @pytest.mark.asyncio
     async def test_databricks_none_when_auth_unavailable(self, monkeypatch):
@@ -107,13 +112,16 @@ class TestSpSingleAuth:
             assert os.environ["DATABRICKS_TOKEN"] == "pat"  # untouched
 
     def test_swaps_to_sp_token_and_removes_oauth(self, monkeypatch):
-        from src.services.prompt_optimization.gepa import sp_auth
+        # sp_single_auth now lives in mlflow.sp_auth (prompt_optimization.gepa.sp_auth
+        # is a back-compat shim). Patch derive_sp_bearer where the code calls it —
+        # the canonical module — or the real WorkspaceClient runs and hangs on I/O.
+        from src.services.mlflow import sp_auth
 
         monkeypatch.setenv("DATABRICKS_HOST", "https://ws.example.com")
         monkeypatch.setenv("DATABRICKS_CLIENT_ID", "cid")
         monkeypatch.setenv("DATABRICKS_CLIENT_SECRET", "csec")
         monkeypatch.setenv("DATABRICKS_TOKEN", "stale-pat")
-        monkeypatch.setattr(sp_auth, "_derive_sp_bearer", lambda *a: "sp-bearer")
+        monkeypatch.setattr(sp_auth, "derive_sp_bearer", lambda *a: "sp-bearer")
         with sp_auth.sp_single_auth() as active:
             assert active is True
             assert os.environ["DATABRICKS_TOKEN"] == "sp-bearer"
@@ -124,12 +132,12 @@ class TestSpSingleAuth:
         assert os.environ["DATABRICKS_TOKEN"] == "stale-pat"
 
     def test_noop_when_bearer_cannot_be_derived(self, monkeypatch):
-        from src.services.prompt_optimization.gepa import sp_auth
+        from src.services.mlflow import sp_auth
 
         monkeypatch.setenv("DATABRICKS_HOST", "https://ws.example.com")
         monkeypatch.setenv("DATABRICKS_CLIENT_ID", "cid")
         monkeypatch.setenv("DATABRICKS_CLIENT_SECRET", "csec")
-        monkeypatch.setattr(sp_auth, "_derive_sp_bearer", lambda *a: None)
+        monkeypatch.setattr(sp_auth, "derive_sp_bearer", lambda *a: None)
         with sp_auth.sp_single_auth() as active:
             assert active is False
 

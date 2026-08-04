@@ -133,9 +133,7 @@ class CrewRunnerMixin:
                 # the granted SP → a misleading PERMISSION_DENIED. Present OAuth
                 # only for this call, and rebuild the client INSIDE that window
                 # so it picks up the single-method env.
-                from src.services.prompt_optimization.gepa.sp_auth import (
-                    sp_single_auth,
-                )
+                from src.services.mlflow.sp_auth import sp_single_auth
 
                 with sp_single_auth():
                     reg_client = mlflow.MlflowClient(registry_uri=registry_uri)

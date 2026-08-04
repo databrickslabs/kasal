@@ -62,6 +62,18 @@ const BACKEND_LABEL: Record<MLflowBackend['kind'], string> = {
   none: 'None available',
 };
 
+// The three possible backends, shown as a color-coded status chip so which one
+// is active reads at a glance: Databricks (blue), local server (green), none
+// (grey). Still DERIVED, not chosen — see the component docstring.
+const BACKEND_CHIP_COLOR: Record<
+  MLflowBackend['kind'],
+  'primary' | 'success' | 'default'
+> = {
+  databricks: 'primary',
+  local: 'success',
+  none: 'default',
+};
+
 const MLflowConfiguration: React.FC = () => {
   const [settings, setSettings] = useState<MLflowSettings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -175,10 +187,15 @@ const MLflowConfiguration: React.FC = () => {
         Backend
       </Typography>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 1 }}>
-        <Typography variant="body2">{BACKEND_LABEL[backend.kind]}</Typography>
+        <Chip
+          size="small"
+          color={BACKEND_CHIP_COLOR[backend.kind]}
+          variant={backend.kind === 'none' ? 'outlined' : 'filled'}
+          label={BACKEND_LABEL[backend.kind]}
+        />
         {backend.uri && (
           <Typography variant="body2" color="text.secondary">
-            · {backend.uri}
+            {backend.uri}
           </Typography>
         )}
         {backend.reachable === true && (

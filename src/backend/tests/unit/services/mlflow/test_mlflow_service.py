@@ -450,6 +450,16 @@ class TestTriggerEvaluation:
             )
         )
         stack.enter_context(patch("src.utils.user_context.UserContext", MagicMock()))
+        # trigger_evaluation now resolves the crew-traces experiment (a DB read)
+        # to pass into the runner; stub it so these unit tests don't need a real
+        # group/teamspace lookup.
+        stack.enter_context(
+            patch.object(
+                MLflowService,
+                "configured_crew_traces_experiment",
+                AsyncMock(return_value="/Shared/kasal-test-traces"),
+            )
+        )
         mock_runner_cls = MagicMock()
         mock_runner = MagicMock()
         mock_runner.create_run = MagicMock(
@@ -680,7 +690,11 @@ class TestInnerFunctionPaths:
 
         # Non-databricks model - should skip auth
         with patch.object(svc, "_resolve_judge_model", return_value="gpt-4"):
-            with patch(
+            with patch.object(
+                svc,
+                "configured_crew_traces_experiment",
+                AsyncMock(return_value="/Shared/kasal-test-traces"),
+            ), patch(
                 "asyncio.to_thread",
                 AsyncMock(return_value={"experiment_id": "e-99", "run_id": None}),
             ):

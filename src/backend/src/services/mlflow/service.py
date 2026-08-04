@@ -322,41 +322,28 @@ class MLflowService:
             host = os.environ.get("DATABRICKS_HOST")
 
             if client_id and client_secret and host:
+                from src.services.mlflow.sp_auth import derive_sp_bearer
                 from src.utils.databricks_auth import AuthContext
 
-                try:
-                    from databricks.sdk import WorkspaceClient
-
-                    w = WorkspaceClient(
-                        host=host,
-                        client_id=client_id,
-                        client_secret=client_secret,
+                # Shared derivation (mlflow/sp_auth.py) — the single, correct
+                # implementation for the whole app. Returns None on any failure,
+                # so we fall through to PAT.
+                spn_token = derive_sp_bearer(host, client_id, client_secret)
+                if spn_token:
+                    workspace_url = host.rstrip("/")
+                    if not workspace_url.startswith("http"):
+                        workspace_url = f"https://{workspace_url}"
+                    logger.info(
+                        "[MLflowService] MLflow authentication configured using service_principal"
                     )
-                    token = w.config.authenticate()
-                    # authenticate() returns a callable that adds headers
-                    import requests as _req
-
-                    dummy = _req.Request("GET", host)
-                    token(dummy)
-                    bearer = dummy.headers.get("Authorization", "")
-                    if bearer.startswith("Bearer "):
-                        spn_token = bearer[len("Bearer ") :]
-                        workspace_url = host.rstrip("/")
-                        if not workspace_url.startswith("http"):
-                            workspace_url = f"https://{workspace_url}"
-                        auth = AuthContext(
-                            token=spn_token,
-                            workspace_url=workspace_url,
-                            auth_method="service_principal",
-                        )
-                        logger.info(
-                            "[MLflowService] MLflow authentication configured using service_principal"
-                        )
-                        return auth
-                except Exception as spn_err:
-                    logger.warning(
-                        f"[MLflowService] SPN auth failed, falling back to PAT: {spn_err}"
+                    return AuthContext(
+                        token=spn_token,
+                        workspace_url=workspace_url,
+                        auth_method="service_principal",
                     )
+                logger.warning(
+                    "[MLflowService] SPN auth unavailable, falling back to PAT"
+                )
 
             # 2. Fall back to PAT via unified auth chain (skips OBO)
             from src.utils.databricks_auth import get_auth_context

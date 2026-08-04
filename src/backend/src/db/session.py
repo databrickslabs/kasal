@@ -832,6 +832,27 @@ async def _ensure_workflow_recipe_trials_table(conn) -> None:
         logger.warning(f"Could not ensure workflow_recipe_trials table: {e}")
 
 
+async def _ensure_mlflow_config_table(conn) -> None:
+    """Idempotently create the mlflowconfig table (per-group MLflow settings).
+
+    create_all is skipped on existing DBs, so a database created before this
+    model landed (the common local-dev case) never gets the table and every
+    ``GET /mlflow/settings`` 500s with "no such table: mlflowconfig". New table,
+    no ALTER, so a checkfirst-create reaches SQLite, PostgreSQL and Lakebase
+    identically — same pattern as _ensure_prompt_optimization_runs_table.
+    """
+    try:
+        from src.models.mlflow_config import MLflowConfig
+
+        def _create(sync_conn):
+            MLflowConfig.__table__.create(sync_conn, checkfirst=True)
+
+        await conn.run_sync(_create)
+        logger.info("Ensured mlflowconfig table exists")
+    except Exception as e:
+        logger.warning(f"Could not ensure mlflowconfig table: {e}")
+
+
 async def _ensure_a2a_push_configs_table(conn) -> None:
     """Idempotently create a2a_push_configs (A2A webhook registrations).
 
@@ -1349,6 +1370,7 @@ async def run_schema_self_heal(conn) -> None:
     await _ensure_crew_feedback_table(conn)
     await _ensure_powerbi_extraction_table(conn)
     await _ensure_prompt_optimization_runs_table(conn)
+    await _ensure_mlflow_config_table(conn)
     await _ensure_memory_maintenance_table(conn)
     await _ensure_agent_columns(conn)
     await _ensure_crew_columns(conn)
