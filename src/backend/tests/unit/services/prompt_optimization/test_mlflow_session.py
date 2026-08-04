@@ -45,11 +45,16 @@ class TestResolveBackend:
         fake_svc.configured_crew_traces_experiment = AsyncMock(
             return_value="/Shared/kasal-team-traces"
         )
+        # Reading traces from a UC-backed experiment needs the SQL warehouse id,
+        # so the backend now carries it (mlflow_session exports it as
+        # MLFLOW_TRACING_SQL_WAREHOUSE_ID for the session window).
+        fake_svc._get_uc_trace_config = AsyncMock(return_value=("cat", "sch", "wh-123"))
         with patch("src.services.mlflow.service.MLflowService", return_value=fake_svc):
             backend = await ms.resolve_mlflow_backend(MagicMock(), group)
         assert backend is not None
         assert backend.kind == "databricks"
         assert backend.experiment == "/Shared/kasal-team-traces"
+        assert backend.warehouse_id == "wh-123"
 
     @pytest.mark.asyncio
     async def test_databricks_none_when_auth_unavailable(self, monkeypatch):

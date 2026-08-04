@@ -162,13 +162,27 @@ async def _persist_run_changes(run_id: str, changes: Dict[str, Any]) -> None:
     the request returns), so this opens one per write and commits it. Failures
     are logged, never raised: losing a status write must not kill an
     optimization that is otherwise fine.
+
+    Routed through ``get_smart_db_session`` — the SAME router the INSERT takes.
+    The row is created on the request session (``SessionDep`` →
+    ``get_smart_db_session``), which re-reads ``is_lakebase_enabled()`` per call.
+    The raw ``async_session_factory`` used here before is a SNAPSHOT instead: it
+    points at Lakebase only if ``activate_lakebase()`` ran in THIS process, which
+    happens at BOOT (``main.py`` lifespan) or in a subprocess — never on a
+    runtime ``/lakebase/enable``. Enabling Lakebase without a restart therefore
+    split this one table: INSERTs landed in Lakebase while these status UPDATEs
+    went to the local DB, so a run showed up and then never progressed.
     """
     if not changes:
         return
     try:
-        from src.db.session import async_session_factory
+        from src.db.database_router import get_smart_db_session
 
-        async with async_session_factory() as session:
+        # get_smart_db_session is an async generator (FastAPI DI shape); driving
+        # it with `async for` is how the other non-request callers use it. It
+        # commits the local-DB branch itself, but the Lakebase branch commits in
+        # get_lakebase_session, so commit here to cover both.
+        async for session in get_smart_db_session():
             repo = PromptOptimizationRunRepository(session)
             await repo.update_fields(run_id, changes)
             await session.commit()

@@ -253,11 +253,25 @@ def _sync_run_crew(
         deadline = asyncio.get_running_loop().time() + timeout
         while asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(10)
-            # This coroutine runs as a background task with no request session —
-            # open a fresh one per poll (background work owns its sessions).
-            from src.db.session import async_session_factory
+            # Poll via get_smart_db_session — the SAME router the crew subprocess
+            # writes its status through (both decide Lakebase vs local off
+            # is_lakebase_enabled(), per call). The raw async_session_factory
+            # used here before is a SNAPSHOT: it points at Lakebase only if
+            # activate_lakebase() ran in THIS process, which happens at BOOT
+            # (main.py lifespan) or in a subprocess — never on a runtime
+            # /lakebase/enable. Enable Lakebase without restarting and the poll
+            # reads a DIFFERENT database than the subprocess wrote to.
+            #
+            # Confirmed against the live Lakebase, not inferred: crew eval
+            # f394de81 shows status=COMPLETED at 19:12:16 (18s after start),
+            # while its optimization run row sat at status='pending' with
+            # updated_at == created_at and executions_used=0 — so every poll tick
+            # read None for ~14 min, burned the full timeout, and returned an
+            # empty deliverable scored 0.0 ("1 eval, then nothing").
+            from src.db.database_router import get_smart_db_session
 
-            async with async_session_factory() as poll_session:
+            status = None
+            async for poll_session in get_smart_db_session():
                 status = await ExecutionService(
                     session=poll_session
                 ).get_execution_status(execution_id, group_ids)

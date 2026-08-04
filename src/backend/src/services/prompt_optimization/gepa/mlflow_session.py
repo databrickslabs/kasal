@@ -46,6 +46,11 @@ class MLflowBackend:
     experiment: str
     uri: Optional[str] = None
     auth: Optional[Any] = None
+    #: Databricks SQL warehouse id. REQUIRED to READ traces from a UC-backed
+    #: experiment (mlflow.search_traces / get_trace raise "Could not resolve a
+    #: SQL warehouse ID" without it). Only the tracer set it before, so judge/eval
+    #: reads 500'd. mlflow_session exports it as MLFLOW_TRACING_SQL_WAREHOUSE_ID.
+    warehouse_id: Optional[str] = None
 
 
 async def resolve_mlflow_backend(
@@ -91,7 +96,16 @@ async def resolve_mlflow_backend(
         # configured experiment name (Configuration.tsx) — the one an admin
         # attaches to the app as an MLflow resource — NOT a hardcoded default.
         exp_path = await svc.configured_crew_traces_experiment()
-        return MLflowBackend(kind="databricks", experiment=exp_path, auth=auth)
+        # Warehouse id is REQUIRED to READ traces from a UC-backed experiment;
+        # without it search_traces/get_trace raise "Could not resolve a SQL
+        # warehouse ID" and list_crew_evals 500s.
+        _cat, _sch, warehouse_id = await svc._get_uc_trace_config()
+        return MLflowBackend(
+            kind="databricks",
+            experiment=exp_path,
+            auth=auth,
+            warehouse_id=warehouse_id,
+        )
     except Exception as exc:  # noqa: BLE001 — absence/auth failure is a no-op
         logger.debug(f"[judges] Could not resolve Databricks MLflow backend: {exc}")
         return None
@@ -117,9 +131,14 @@ def mlflow_session(backend: MLflowBackend) -> Iterator[None]:
     # holds the UC grant. backend.auth.token is the SP's own bearer, derived in
     # _setup_mlflow_auth. The shared single_auth_env owns the env save/restore.
     if backend.kind == "databricks":
-        with single_auth_env(
-            host=backend.auth.workspace_url, token=backend.auth.token
-        ):
+        # Reading traces from a UC-backed experiment needs the SQL warehouse id
+        # in the env; without it search_traces/get_trace raise "Could not resolve
+        # a SQL warehouse ID" (list_crew_evals 500s every poll). Set it for the
+        # window and restore after.
+        prev_wh = os.environ.get("MLFLOW_TRACING_SQL_WAREHOUSE_ID")
+        if backend.warehouse_id:
+            os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = str(backend.warehouse_id)
+        with single_auth_env(host=backend.auth.workspace_url, token=backend.auth.token):
             mlflow.set_tracking_uri("databricks")
             try:
                 mlflow.set_experiment(backend.experiment)
@@ -131,6 +150,10 @@ def mlflow_session(backend: MLflowBackend) -> Iterator[None]:
                 yield
             finally:
                 mlflow.set_tracking_uri(prev_uri)
+                if prev_wh is not None:
+                    os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = prev_wh
+                elif "MLFLOW_TRACING_SQL_WAREHOUSE_ID" in os.environ:
+                    del os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"]
     else:
         try:
             mlflow.set_tracking_uri(backend.uri)
