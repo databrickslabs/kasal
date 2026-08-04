@@ -325,6 +325,30 @@ class PromptOptimizationService(
             page += 1
         return examples
 
+    async def _resolve_crew_traces_experiment(
+        self, group_context: Optional[GroupContext]
+    ) -> str:
+        """The experiment GEPA/crew traces pin, from the MLflow configuration.
+
+        Delegates to :meth:`MLflowService.configured_crew_traces_experiment` so
+        the GEPA path pins the SAME experiment the tracing path uses and the
+        admin attaches to the app — the configured name, not a hardcoded default.
+        Empty string on any failure (local dev / no workspace), which lets the
+        worker thread fall back to its env/default without raising.
+        """
+        group_id = group_context.primary_group_id if group_context else None
+        if not group_id:
+            return ""
+        try:
+            from src.services.mlflow.service import MLflowService
+
+            return await MLflowService(
+                self.session, group_id=group_id
+            ).configured_crew_traces_experiment()
+        except Exception as exc:  # noqa: BLE001 — pin is best-effort
+            logger.debug(f"Could not resolve crew-traces experiment: {exc}")
+            return ""
+
     async def _resolve_registry(
         self, template_name: str, group_context: Optional[GroupContext]
     ) -> tuple:
@@ -627,6 +651,13 @@ class PromptOptimizationService(
             _, uc_name = await self._resolve_registry("crew", group_context)
             prompt_name = uc_name.rsplit(".", 1)[0] + "." + prompt_name
 
+        # Resolve the crew-traces experiment on the event loop (a DB read) so the
+        # worker thread pins the SAME experiment tracing uses — the configured
+        # name (Configuration.tsx), the source of truth, not a hardcoded default.
+        crew_traces_experiment = await self._resolve_crew_traces_experiment(
+            group_context
+        )
+
         run_id = uuid.uuid4().hex[:12]
         group_id = group_context.primary_group_id if group_context else None
         run: Dict[str, Any] = {
@@ -674,6 +705,7 @@ class PromptOptimizationService(
                 crew_id=str(crew.id),
                 cancel_run_id=run_id,
                 group_context=group_context,
+                crew_traces_experiment=crew_traces_experiment,
             ),
             # Spawn without the request's DB session (closed at response end);
             # see db.session.background_task_context.

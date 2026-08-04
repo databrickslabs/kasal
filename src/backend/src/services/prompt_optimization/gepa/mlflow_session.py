@@ -87,10 +87,10 @@ async def resolve_mlflow_backend(
             )
             return None
         # Pin the SAME experiment tracing uses, so judges are visible alongside
-        # the crew traces in the Databricks MLflow UI.
-        exp_path = os.getenv(
-            "MLFLOW_CREW_TRACES_EXPERIMENT", "/Shared/kasal-crew-execution-traces"
-        )
+        # the crew traces in the Databricks MLflow UI. Source of truth is the
+        # configured experiment name (Configuration.tsx) — the one an admin
+        # attaches to the app as an MLflow resource — NOT a hardcoded default.
+        exp_path = await svc.configured_crew_traces_experiment()
         return MLflowBackend(kind="databricks", experiment=exp_path, auth=auth)
     except Exception as exc:  # noqa: BLE001 — absence/auth failure is a no-op
         logger.debug(f"[judges] Could not resolve Databricks MLflow backend: {exc}")

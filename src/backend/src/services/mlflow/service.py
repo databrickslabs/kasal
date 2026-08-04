@@ -187,6 +187,22 @@ class MLflowService:
                 f"[MLflowService] Could not create experiment {exp_path}: {exc}"
             )
 
+    async def configured_crew_traces_experiment(self) -> str:
+        """The experiment crew traces, judges, and GEPA runs all pin.
+
+        THE source of truth is the name saved in the MLflow configuration
+        (Configuration.tsx), resolved exactly as :meth:`get_settings` reports it
+        and :meth:`_ensure_experiment_created` creates it — so the experiment the
+        GEPA/judge path targets is the same one an admin attached to the app as
+        an MLflow resource. Falls back to the per-teamspace default when nothing
+        is configured. NOT the old hardcoded ``/Shared/kasal-crew-execution-traces``.
+        """
+        from src.services.mlflow import local
+
+        experiment_name = await self.repo.get_experiment_name(group_id=self.group_id)
+        teamspace = await self._teamspace_name()
+        return f"/Shared/{local.local_experiment_name(experiment_name, teamspace)}"
+
     async def _trace_id_for(self, job_id: Optional[str]) -> Optional[str]:
         """The MLflow trace id recorded for a job, if any."""
         if not job_id:
@@ -745,6 +761,9 @@ class MLflowService:
             prediction_text=prediction_text,
             judge_model_route=judge_model_route,
             judge_model_defaulted=judge_model_defaulted,
+            # Evaluate against the SAME experiment tracing/GEPA use — the
+            # configured name (Configuration.tsx), not a hardcoded default.
+            experiment_name=await self.configured_crew_traces_experiment(),
         )
 
         # Create evaluation run in background thread

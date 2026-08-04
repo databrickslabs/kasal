@@ -36,6 +36,7 @@ class MLflowEvaluationRunner:
         prediction_text: Optional[str],
         judge_model_route: str,
         judge_model_defaulted: bool,
+        experiment_name: Optional[str] = None,
     ):
         """
         Initialize evaluation runner.
@@ -47,6 +48,10 @@ class MLflowEvaluationRunner:
             prediction_text: Prediction text extracted from execution
             judge_model_route: Judge model route (e.g., "databricks/databricks-claude-sonnet-4-5")
             judge_model_defaulted: Whether judge model is using default value
+            experiment_name: The crew-traces experiment to evaluate against,
+                resolved from the MLflow configuration (Configuration.tsx) by the
+                async caller — the source of truth. Falls back to the env/default
+                when not supplied (None) so out-of-band callers still work.
         """
         self.exec_obj = exec_obj
         self.job_id = job_id
@@ -54,6 +59,7 @@ class MLflowEvaluationRunner:
         self.prediction_text = prediction_text
         self.judge_model_route = judge_model_route
         self.judge_model_defaulted = judge_model_defaulted
+        self.experiment_name = experiment_name
 
     def create_run(self, auth_ctx: Optional[Any]) -> Dict[str, Any]:
         """
@@ -75,9 +81,11 @@ class MLflowEvaluationRunner:
             if auth_ctx:
                 self._set_environment_vars(auth_ctx)
 
-            # Ensure Databricks tracking and target experiments
+            # Ensure Databricks tracking and target experiments. The configured
+            # experiment (Configuration.tsx) is the source of truth; env/default
+            # only when the caller supplied nothing.
             mlflow.set_tracking_uri("databricks")
-            eval_exp_name = os.getenv(
+            eval_exp_name = self.experiment_name or os.getenv(
                 "MLFLOW_CREW_TRACES_EXPERIMENT", "/Shared/kasal-crew-execution-traces"
             )
 
@@ -185,7 +193,7 @@ class MLflowEvaluationRunner:
             try:
                 search_traces = getattr(mlflow, "search_traces", None)
                 if callable(search_traces):
-                    traces_exp_name = os.getenv(
+                    traces_exp_name = self.experiment_name or os.getenv(
                         "MLFLOW_CREW_TRACES_EXPERIMENT",
                         "/Shared/kasal-crew-execution-traces",
                     )

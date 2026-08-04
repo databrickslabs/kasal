@@ -81,9 +81,14 @@ class CrewRunnerMixin:
         crew_id: str = "",
         cancel_run_id: str = "",
         group_context: Optional[GroupContext] = None,
+        crew_traces_experiment: str = "",
     ) -> Dict[str, Any]:
         """Blocking crew-optimization body (worker thread). Mirrors the
-        template body's MLflow span setup; predict = execute the crew."""
+        template body's MLflow span setup; predict = execute the crew.
+
+        ``crew_traces_experiment`` is the experiment to pin on the Databricks
+        backend, resolved from the MLflow configuration (Configuration.tsx) by
+        the async caller — the source of truth, not a hardcoded default."""
         import copy
 
         user_token = (
@@ -173,9 +178,12 @@ class CrewRunnerMixin:
             exp_name = (
                 saved_exp_env.get("MLFLOW_EXPERIMENT_NAME") or "kasal"
                 if local_mode
-                else os.getenv(
-                    "MLFLOW_CREW_TRACES_EXPERIMENT",
-                    "/Shared/kasal-crew-execution-traces",
+                else (
+                    crew_traces_experiment
+                    or os.getenv(
+                        "MLFLOW_CREW_TRACES_EXPERIMENT",
+                        "/Shared/kasal-crew-execution-traces",
+                    )
                 )
             )
             try:
