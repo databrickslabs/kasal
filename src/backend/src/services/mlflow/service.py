@@ -190,26 +190,9 @@ class MLflowService:
         # Create the SAME experiment the tracer/judges/GEPA use (incl. the -uc
         # suffix on Databricks) so the admin attaches the one traces land in.
         exp_path = await self.configured_crew_traces_experiment()
-        # Pull the UC catalog/schema/warehouse so the experiment is created WITH
-        # UC trace storage — otherwise UC-only charts stay locked and MLflow
-        # permanently refuses to add UC storage to this experiment later.
-        uc_catalog = uc_schema = warehouse_id = None
-        try:
-            from src.services.databricks.workspace.service import DatabricksService
-
-            db_config = await DatabricksService(
-                self.session, group_id=self.group_id
-            ).get_databricks_config()
-            if db_config:
-                uc_catalog = getattr(db_config, "catalog", None)
-                # schema field is `db_schema` (aliased "schema"); reading "schema"
-                # returns BaseModel.schema (a method) -> MLflow error.
-                uc_schema = getattr(db_config, "db_schema", None)
-                warehouse_id = getattr(db_config, "warehouse_id", None)
-        except Exception as cfg_err:  # noqa: BLE001 — plain experiment is the fallback
-            logger.debug(
-                f"[MLflowService] Could not read UC config for experiment: {cfg_err}"
-            )
+        # Create WITH UC trace storage so the UC-only charts unlock and MLflow
+        # doesn't refuse to add UC storage to this experiment later.
+        uc_catalog, uc_schema, warehouse_id = await self._get_uc_trace_config()
         try:
             from src.services.mlflow.experiment_setup import (
                 create_databricks_experiment,
@@ -261,6 +244,36 @@ class MLflowService:
 
             return uc_experiment_name(base)
         return base
+
+    async def _get_uc_trace_config(self) -> tuple:
+        """(catalog, schema, warehouse_id) from the Databricks config, for
+        creating an experiment WITH UC trace storage.
+
+        A plain experiment (no trace_location) leaves the UC-only charts locked
+        and MLflow then permanently refuses to attach UC storage to that name, so
+        every create path resolves these together. Returns ``(None, None, None)``
+        on any failure — the caller falls back to a plain experiment.
+        """
+        try:
+            from src.services.databricks.workspace.service import DatabricksService
+
+            db_config = await DatabricksService(
+                self.session, group_id=self.group_id
+            ).get_databricks_config()
+            if not db_config:
+                return (None, None, None)
+            # schema field is `db_schema` (aliased "schema"); reading "schema"
+            # returns BaseModel.schema (a method) -> MLflow error.
+            return (
+                getattr(db_config, "catalog", None),
+                getattr(db_config, "db_schema", None),
+                getattr(db_config, "warehouse_id", None),
+            )
+        except Exception as cfg_err:  # noqa: BLE001 — plain experiment is the fallback
+            logger.debug(
+                f"[MLflowService] Could not read UC config for experiment: {cfg_err}"
+            )
+            return (None, None, None)
 
     async def _trace_id_for(self, job_id: Optional[str]) -> Optional[str]:
         """The MLflow trace id recorded for a job, if any."""
@@ -426,7 +439,6 @@ class MLflowService:
         """{experiment_id, experiment_name} for crew traces; raises on auth or
         resolution failure."""
         import asyncio
-        import os
 
         from src.services.mlflow.experiment_setup import create_databricks_experiment
 
@@ -437,14 +449,24 @@ class MLflowService:
                 "Failed to configure MLflow authentication. Please configure Databricks credentials."
             )
 
-        exp_name = os.getenv(
-            "MLFLOW_CREW_TRACES_EXPERIMENT", "/Shared/kasal-crew-execution-traces"
-        )
+        # Resolve the SAME experiment the tracer/judges/GEPA use (the -uc name on
+        # Databricks) via the single authority — NOT the old hardcoded getenv,
+        # which resolved a different experiment. Pass the UC catalog/schema/
+        # warehouse so create-if-missing links UC trace storage (a plain create
+        # here would poison the name for UC tracing).
+        exp_name = await self.configured_crew_traces_experiment()
+        uc_catalog, uc_schema, warehouse_id = await self._get_uc_trace_config()
         try:
             # create-if-missing, in a thread (MLflow calls block); same auth
             # env-swap the settings-save path uses.
             result = await asyncio.to_thread(
-                create_databricks_experiment, auth, exp_name
+                lambda: create_databricks_experiment(
+                    auth,
+                    exp_name,
+                    uc_catalog=uc_catalog,
+                    uc_schema=uc_schema,
+                    warehouse_id=warehouse_id,
+                )
             )
 
             if not result.get("experiment_id"):
@@ -521,47 +543,34 @@ class MLflowService:
                     f"[MLflowService] Failed to get workspace URL from config: {e}"
                 )
 
-        # Resolve experiment id (crew execution traces) - run in thread to avoid blocking
+        # Resolve experiment id (crew execution traces) - run in thread to avoid blocking.
+        # Resolve the experiment NAME via the single authority (applies the -uc
+        # suffix on Databricks) so the deep link points at the SAME experiment
+        # traces land in — NOT the old hardcoded /Shared/kasal-crew-execution-traces
+        # fallback, which sent this button to the wrong experiment.
         experiment_id = ""
         if auth:
+            exp_name = await self.configured_crew_traces_experiment()
 
-            def _get_experiment_id(auth_context) -> str:
-                import os
-
+            def _get_experiment_id(auth_context, experiment_name: str) -> str:
                 import mlflow
 
+                from src.services.mlflow.sp_auth import single_auth_env
+
                 try:
-                    # Temporarily set credentials for this thread only
-                    old_host = os.environ.get("DATABRICKS_HOST")
-                    old_token = os.environ.get("DATABRICKS_TOKEN")
-
-                    try:
-                        os.environ["DATABRICKS_HOST"] = auth_context.workspace_url
-                        os.environ["DATABRICKS_TOKEN"] = auth_context.token
-
+                    # Single-method auth (removes OAuth vars, pins auth_type=pat)
+                    # so MLflow's SDK client doesn't hit "oauth and pat".
+                    with single_auth_env(
+                        host=auth_context.workspace_url, token=auth_context.token
+                    ):
                         mlflow.set_tracking_uri("databricks")
-                        exp_name = os.getenv(
-                            "MLFLOW_CREW_TRACES_EXPERIMENT",
-                            "/Shared/kasal-crew-execution-traces",
-                        )
-                        exp = mlflow.get_experiment_by_name(exp_name)
+                        exp = mlflow.get_experiment_by_name(experiment_name)
                         return str(getattr(exp, "experiment_id", "")) if exp else ""
-                    finally:
-                        # Restore original environment
-                        if old_host is not None:
-                            os.environ["DATABRICKS_HOST"] = old_host
-                        elif "DATABRICKS_HOST" in os.environ:
-                            del os.environ["DATABRICKS_HOST"]
-
-                        if old_token is not None:
-                            os.environ["DATABRICKS_TOKEN"] = old_token
-                        elif "DATABRICKS_TOKEN" in os.environ:
-                            del os.environ["DATABRICKS_TOKEN"]
                 except Exception as e:
                     logger.warning(f"[MLflowService] Failed to get experiment ID: {e}")
                     return ""
 
-            experiment_id = await asyncio.to_thread(_get_experiment_id, auth)
+            experiment_id = await asyncio.to_thread(_get_experiment_id, auth, exp_name)
         else:
             logger.warning(
                 "[MLflowService] No auth available, cannot resolve experiment ID"

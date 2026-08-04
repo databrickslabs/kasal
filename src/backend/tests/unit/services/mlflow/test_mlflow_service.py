@@ -230,13 +230,19 @@ class TestGetExperimentInfo:
             workspace_url="https://ws.databricks.com",
             auth_method="pat",
         )
+        # get_experiment_info now resolves the experiment via the single
+        # authority (the -uc name) and reads UC config; stub both.
+        svc.configured_crew_traces_experiment = AsyncMock(
+            return_value="/Shared/kasal-team-traces-uc"
+        )
         with patch.object(svc, "_setup_mlflow_auth", return_value=fake_auth):
-            with patch("asyncio.to_thread") as att:
-                att.return_value = {
-                    "experiment_id": "123",
-                    "experiment_name": "/Shared/test",
-                }
-                result = await svc.get_experiment_info()
+            with patch.object(svc, "_get_uc_trace_config", AsyncMock(return_value=(None, None, None))):
+                with patch("asyncio.to_thread") as att:
+                    att.return_value = {
+                        "experiment_id": "123",
+                        "experiment_name": "/Shared/kasal-team-traces-uc",
+                    }
+                    result = await svc.get_experiment_info()
         assert result["experiment_id"] == "123"
 
     @pytest.mark.asyncio
@@ -245,15 +251,19 @@ class TestGetExperimentInfo:
         fake_auth = SimpleNamespace(
             token="tok", workspace_url="https://ws.databricks.com", auth_method="pat"
         )
+        svc.configured_crew_traces_experiment = AsyncMock(
+            return_value="/Shared/kasal-team-traces-uc"
+        )
         with patch.object(svc, "_setup_mlflow_auth", return_value=fake_auth):
-            with patch(
-                "asyncio.to_thread",
-                return_value={"experiment_id": "", "experiment_name": "/test"},
-            ):
-                with pytest.raises(
-                    RuntimeError, match="Failed to resolve MLflow experiment ID"
+            with patch.object(svc, "_get_uc_trace_config", AsyncMock(return_value=(None, None, None))):
+                with patch(
+                    "asyncio.to_thread",
+                    return_value={"experiment_id": "", "experiment_name": "/test"},
                 ):
-                    await svc.get_experiment_info()
+                    with pytest.raises(
+                        RuntimeError, match="Failed to resolve MLflow experiment ID"
+                    ):
+                        await svc.get_experiment_info()
 
     @pytest.mark.asyncio
     async def test_reraises_exception(self):
@@ -261,10 +271,14 @@ class TestGetExperimentInfo:
         fake_auth = SimpleNamespace(
             token="tok", workspace_url="https://ws.databricks.com", auth_method="pat"
         )
+        svc.configured_crew_traces_experiment = AsyncMock(
+            return_value="/Shared/kasal-team-traces-uc"
+        )
         with patch.object(svc, "_setup_mlflow_auth", return_value=fake_auth):
-            with patch("asyncio.to_thread", side_effect=Exception("thread error")):
-                with pytest.raises(Exception, match="thread error"):
-                    await svc.get_experiment_info()
+            with patch.object(svc, "_get_uc_trace_config", AsyncMock(return_value=(None, None, None))):
+                with patch("asyncio.to_thread", side_effect=Exception("thread error")):
+                    with pytest.raises(Exception, match="thread error"):
+                        await svc.get_experiment_info()
 
 
 # ---------------------------------------------------------------------------
@@ -282,6 +296,9 @@ class TestGetTraceDeeplink:
     @pytest.mark.asyncio
     async def test_returns_url_with_workspace(self):
         svc = make_service()
+        svc.configured_crew_traces_experiment = AsyncMock(
+            return_value="/Shared/kasal-team-traces-uc"
+        )
         fake_auth = SimpleNamespace(
             token="tok",
             workspace_url="https://myws.databricks.com",
@@ -315,6 +332,9 @@ class TestGetTraceDeeplink:
         )
         fake_exec = SimpleNamespace(mlflow_trace_id="my-trace-id")
         svc.exec_repo.get_execution_by_job_id = AsyncMock(return_value=fake_exec)
+        svc.configured_crew_traces_experiment = AsyncMock(
+            return_value="/Shared/kasal-team-traces-uc"
+        )
 
         ctx, m = _patch_auth(return_value=fake_auth)
         with ctx:
@@ -333,6 +353,9 @@ class TestGetTraceDeeplink:
     @pytest.mark.asyncio
     async def test_url_with_experiment_and_workspace_id(self):
         svc = make_service()
+        svc.configured_crew_traces_experiment = AsyncMock(
+            return_value="/Shared/kasal-team-traces-uc"
+        )
         fake_auth = SimpleNamespace(
             token="tok",
             workspace_url="https://abc123.cloud.databricks.com",
@@ -735,6 +758,9 @@ async def test_get_experiment_info_auth_failed_raises_runtimeerror():
 async def test_get_trace_deeplink_with_auth_and_job_id_minimal():
     session = AsyncMock()
     svc = MLflowService(session, group_id="g1")
+    svc.configured_crew_traces_experiment = AsyncMock(
+        return_value="/Shared/kasal-team-traces-uc"
+    )
 
     # Mock unified auth and experiment id resolution
     with (
@@ -902,6 +928,9 @@ async def test_get_trace_deeplink_with_auth_and_experiment_id(monkeypatch):
     import sys
 
     svc = MLflowService(session=SimpleNamespace(), group_id="g1")
+    svc.configured_crew_traces_experiment = AsyncMock(
+        return_value="/Shared/kasal-team-traces-uc"
+    )
 
     fake_auth_mod = SimpleNamespace()
 
