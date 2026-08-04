@@ -89,44 +89,43 @@ class MLflowService:
 
         experiment = local.local_experiment_name(experiment_name, teamspace)
 
-        # Build BOTH candidate descriptors independently so the UI can show
-        # Databricks / Local / None side by side. Which one a run uses is
-        # unchanged (see `backend` below) — this list is purely informational.
+        # ALWAYS describe both Databricks and local, marking each `available` or
+        # not, so the UI can render every backend as a row (available ones live,
+        # unavailable ones greyed out) — the user sees the full picture rather
+        # than only whatever happens to exist. Which one a run uses is unchanged
+        # (see `backend` below); this list is purely informational.
         workspace_url = await self._configured_workspace_url()
-        databricks_backend = (
-            {
-                "kind": "databricks",
-                "uri": workspace_url,
-                # Reachability for Databricks is an auth question, not a socket
-                # one, so it is deliberately not answered here.
-                "reachable": None,
-                "experiment": f"/Shared/{experiment}",
-                "url": f"{workspace_url}/ml/experiments",
-            }
-            if workspace_url
-            else None
-        )
+        databricks_available = bool(workspace_url)
+        databricks_backend = {
+            "kind": "databricks",
+            "available": databricks_available,
+            "uri": workspace_url,
+            # Reachability for Databricks is an auth question, not a socket one,
+            # so it is deliberately not answered here.
+            "reachable": None,
+            "experiment": f"/Shared/{experiment}" if databricks_available else None,
+            "url": f"{workspace_url}/ml/experiments" if databricks_available else None,
+        }
         local_uri = local.local_tracking_uri()
-        local_backend = (
-            {
-                "kind": "local",
-                "uri": local_uri,
-                "reachable": local.is_reachable(local_uri),
-                "experiment": experiment,
-                "url": f"{local_uri}/#/experiments",
-            }
-            if local_uri
-            else None
-        )
-        available = [b for b in (databricks_backend, local_backend) if b]
+        local_available = bool(local_uri)
+        local_backend = {
+            "kind": "local",
+            "available": local_available,
+            "uri": local_uri,
+            "reachable": local.is_reachable(local_uri) if local_uri else None,
+            "experiment": experiment if local_available else None,
+            "url": f"{local_uri}/#/experiments" if local_available else None,
+        }
+        available = [databricks_backend, local_backend]
 
         # The ACTIVE backend — resolution unchanged: Databricks wins when a
         # workspace is configured, else a local server, else none.
-        backend = databricks_backend or local_backend or {
-            "kind": "none",
-            "uri": None,
-            "reachable": None,
-        }
+        if databricks_available:
+            backend = databricks_backend
+        elif local_available:
+            backend = local_backend
+        else:
+            backend = {"kind": "none", "available": False, "uri": None, "reachable": None}
 
         return {
             "enabled": enabled,

@@ -46,6 +46,8 @@ import { useMLflowStore } from '../../store/mlflow';
 
 interface MLflowBackend {
   kind: 'databricks' | 'local' | 'none';
+  // Whether this backend is usable right now (workspace configured / local URI set).
+  available?: boolean;
   uri?: string | null;
   reachable?: boolean | null;
   experiment?: string | null;
@@ -202,7 +204,8 @@ const MLflowConfiguration: React.FC = () => {
         ? settings.available
         : [backend]
       ).map((b) => {
-        const isActive = b.kind === backend.kind;
+        const isActive = b.kind === backend.kind && backend.kind !== 'none';
+        const isAvailable = b.available !== false;
         return (
           <Box
             key={b.kind}
@@ -212,17 +215,22 @@ const MLflowConfiguration: React.FC = () => {
               gap: 1,
               flexWrap: 'wrap',
               mb: 0.75,
-              opacity: isActive ? 1 : 0.6,
+              // Dim backends that are not usable right now so the active/available
+              // ones stand out, but keep them visible so all options are known.
+              opacity: isAvailable ? 1 : 0.5,
             }}
           >
             <Chip
               size="small"
               color={BACKEND_CHIP_COLOR[b.kind]}
-              variant={isActive && b.kind !== 'none' ? 'filled' : 'outlined'}
+              variant={isActive ? 'filled' : 'outlined'}
               label={BACKEND_LABEL[b.kind]}
             />
             {isActive && (
               <Chip size="small" color="info" variant="outlined" label="active" />
+            )}
+            {!isAvailable && (
+              <Chip size="small" variant="outlined" label="not configured" />
             )}
             {b.uri && (
               <Typography variant="body2" color="text.secondary">
@@ -248,6 +256,14 @@ const MLflowConfiguration: React.FC = () => {
           </Box>
         );
       })}
+      {/* Both backends are always listed above (unavailable ones greyed +
+          "not configured"). Explain the resolution so it is not a mystery. */}
+      {backend.kind === 'databricks' && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5, mb: 1 }}>
+          Databricks wins whenever a workspace is configured. To trace to a local
+          server instead, clear the Databricks workspace URL.
+        </Typography>
+      )}
 
       {backend.kind === 'local' && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>

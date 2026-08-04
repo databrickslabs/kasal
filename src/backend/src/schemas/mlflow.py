@@ -21,6 +21,10 @@ class MLflowBackend(BaseModel):
 
     #: "databricks" | "local" | "none"
     kind: str
+    #: Whether this backend is actually usable right now — a Databricks workspace
+    #: is configured, or a local server URI is set (and reachable). Lets the UI
+    #: show every backend as a row and grey out the ones that are not available.
+    available: bool = True
     #: Workspace URL or local server URI; None when there is no backend at all.
     uri: Optional[str] = None
     #: Whether a local server is actually answering. None for Databricks, where
