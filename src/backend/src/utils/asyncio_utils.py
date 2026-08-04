@@ -20,8 +20,22 @@ T = TypeVar("T")
 async def execute_db_operation_with_fresh_engine(
     operation: Callable[[AsyncSession], Coroutine[Any, Any, T]],
 ) -> T:
-    """
-    Execute a database operation using the global engine to avoid corruption.
+    """Run a DB operation on the LOCAL engine. **Call `execute_db_operation_smart`
+    instead** — this is that function's local-DB branch, not a general-purpose
+    helper.
+
+    It resolves its engine by importing ``nullpool_engine`` from ``db.session``
+    directly: no ``is_lakebase_enabled()`` check, no router, no way to reach
+    Lakebase however the app is configured. On a Lakebase deployment anything
+    calling this reads and writes a database the app is no longer using — a miss
+    that surfaces as "row not found" rather than an error, so it is invisible
+    until someone asks why a value that was definitely saved cannot be read.
+    That cost real debugging time: tool API keys resolved as "not configured"
+    while the row sat in Lakebase, and the execution safety-net silently found no
+    stuck rows to fix.
+
+    Kept (rather than inlined into ``execute_db_operation_smart``) because the
+    engine choice below is load-bearing for SQLite, per the note it carries:
 
     IMPORTANT: Reuses the global engine instead of creating fresh engines.
     This prevents:
@@ -44,17 +58,6 @@ async def execute_db_operation_with_fresh_engine(
 
     Returns:
         The result of the operation
-
-    Example:
-        ```
-        async def get_user(session, user_id):
-            # Database operation
-            return await session.execute(...)
-
-        result = await execute_db_operation_with_fresh_engine(
-            lambda session: get_user(session, 123)
-        )
-        ```
     """
     # Import the global nullpool_engine from session.py
     # For SQLite: nullpool_engine = engine (same StaticPool)

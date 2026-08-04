@@ -910,7 +910,7 @@ class ExecutionService:
                 update_data["result"] = ExecutionService.sanitize_for_database(result)
 
             # Update execution status using the service
-            # No need to use create_and_run_loop here since execute_db_operation_with_fresh_engine
+            # No need to use create_and_run_loop here since execute_db_operation_smart
             # already handles event loop isolation
             success = await ExecutionStatusService.update_status(
                 job_id=execution_id,

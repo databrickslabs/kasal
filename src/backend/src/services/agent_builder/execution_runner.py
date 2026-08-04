@@ -386,9 +386,12 @@ async def run_crew_in_process(
                     import concurrent.futures
 
                     from src.services.execution.status import ExecutionStatusService
-                    from src.utils.asyncio_utils import (
-                        execute_db_operation_with_fresh_engine,
-                    )
+
+                    # _smart, not _with_fresh_engine: executionhistory lives in
+                    # Lakebase when it is enabled, and _with_fresh_engine is pinned
+                    # to the local engine — so this recovery read would look in the
+                    # wrong DB, find no RUNNING row, and silently skip the fix.
+                    from src.utils.asyncio_utils import execute_db_operation_smart
 
                     async def _recovery():
                         async def _op(session):
@@ -405,7 +408,7 @@ async def run_crew_in_process(
                                     message=final_message + " (task-cancel recovery)",
                                 )
 
-                        await execute_db_operation_with_fresh_engine(_op)
+                        await execute_db_operation_smart(_op)
 
                     def _run_recovery():
                         asyncio.run(_recovery())

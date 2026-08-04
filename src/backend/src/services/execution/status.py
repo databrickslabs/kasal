@@ -14,10 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.sse_manager import SSEEvent, sse_manager
 from src.models.execution_status import ExecutionStatus
 from src.repositories.execution_repository import ExecutionRepository
-from src.utils.asyncio_utils import (
-    execute_db_operation_smart,
-    execute_db_operation_with_fresh_engine,
-)
+from src.utils.asyncio_utils import execute_db_operation_smart
 
 logger = logging.getLogger(__name__)
 

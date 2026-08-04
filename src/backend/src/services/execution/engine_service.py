@@ -374,9 +374,15 @@ class KasalEngineService(BaseEngineService):
                             ExecutionHistoryRepository,
                         )
                         from src.services.execution.status import ExecutionStatusService
-                        from src.utils.asyncio_utils import (
-                            execute_db_operation_with_fresh_engine,
-                        )
+
+                        # _smart, not _with_fresh_engine: this net reads
+                        # executionhistory, which lives in Lakebase when enabled.
+                        # _with_fresh_engine is pinned to the local engine, so the
+                        # lookup returned "not found", the net logged "no action
+                        # needed", and a genuinely stuck RUNNING execution was
+                        # never corrected — the exact failure this net exists to
+                        # catch.
+                        from src.utils.asyncio_utils import execute_db_operation_smart
 
                         async def _check_and_fix(session):
                             repo = ExecutionHistoryRepository(session)
@@ -398,7 +404,7 @@ class KasalEngineService(BaseEngineService):
                                     f"already has terminal status ({rec.status if rec else 'not found'}), no action needed"
                                 )
 
-                        await execute_db_operation_with_fresh_engine(_check_and_fix)
+                        await execute_db_operation_smart(_check_and_fix)
                     except Exception as safety_err:
                         logger.error(
                             f"[KasalEngineService] SAFETY NET failed for {execution_id}: {safety_err}"

@@ -945,13 +945,52 @@ class TestGetApiKeyAsyncNotFound:
         f = ToolFactory(config={"no_group": True}, api_keys_service=mock_svc)
 
         with patch(
-            "src.utils.asyncio_utils.execute_db_operation_with_fresh_engine",
+            "src.utils.asyncio_utils.execute_db_operation_smart",
             new_callable=AsyncMock,
             return_value="fresh-key",
         ):
             result = await f._get_api_key_async("FRESH_KEY")
 
         assert result == "fresh-key"
+
+    @pytest.mark.asyncio
+    async def test_fallback_uses_router_aware_helper_not_local_engine(self):
+        """REGRESSION: the key lookup must go through execute_db_operation_smart.
+
+        execute_db_operation_with_fresh_engine is pinned to the LOCAL engine (it
+        imports nullpool_engine from db.session directly, with no
+        is_lakebase_enabled() check). When Lakebase is enabled it therefore reads
+        a database that holds no apikey rows, and the miss is silent: the tool
+        reports "API key is required. Please configure it in the API Keys
+        settings." for a key that IS configured. Verified live — a Perplexity key
+        sat in Lakebase while six consecutive runs failed to find it.
+        """
+        mock_svc = AsyncMock()
+        mock_svc.group_id = "grp"
+        # Force the primary path to fail so the fallback is what answers.
+        mock_svc.find_by_name = AsyncMock(side_effect=Exception("primary down"))
+
+        from src.services.tools.tool_factory import ToolFactory
+
+        f = ToolFactory(config={"group_id": "grp"}, api_keys_service=mock_svc)
+
+        with (
+            patch(
+                "src.utils.asyncio_utils.execute_db_operation_smart",
+                new_callable=AsyncMock,
+                return_value="router-key",
+            ) as smart,
+            patch(
+                "src.utils.asyncio_utils.execute_db_operation_with_fresh_engine",
+                new_callable=AsyncMock,
+                return_value="local-key",
+            ) as local_only,
+        ):
+            result = await f._get_api_key_async("PERPLEXITY_API_KEY")
+
+        assert result == "router-key"
+        smart.assert_awaited_once()
+        local_only.assert_not_awaited()
 
 
 # ─── PerplexityTool with api_keys_service ────────────────────────────────────

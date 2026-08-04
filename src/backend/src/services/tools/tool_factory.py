@@ -492,9 +492,14 @@ class ToolFactory:
                     ]
                     for key_name in api_keys_to_load:
                         try:
-                            # Use utility function to avoid event loop issues
+                            # Use utility function to avoid event loop issues.
+                            # _smart, NOT _with_fresh_engine: the latter is pinned
+                            # to the local engine (it imports nullpool_engine
+                            # directly), so on Lakebase it queries a DB that has
+                            # no apikey row and every key silently pre-loads as
+                            # absent.
                             from src.utils.asyncio_utils import (
-                                execute_db_operation_with_fresh_engine,
+                                execute_db_operation_smart,
                             )
 
                             # Get group_id from config or api_keys_service
@@ -525,7 +530,7 @@ class ToolFactory:
                                 )
                                 return await api_keys_service.find_by_name(key_name)
 
-                            api_key_obj = await execute_db_operation_with_fresh_engine(
+                            api_key_obj = await execute_db_operation_smart(
                                 _get_key_operation
                             )
 
@@ -714,9 +719,20 @@ class ToolFactory:
                     )
                     # Fall through to the alternative method
 
-            # Fallback to creating a new API keys service instance using isolated UnitOfWork
-            # Import necessary modules here to avoid circular imports
-            from src.utils.asyncio_utils import execute_db_operation_with_fresh_engine
+            # Fallback to creating a new API keys service instance on its own
+            # session. Import here to avoid circular imports.
+            #
+            # _smart, NOT _with_fresh_engine: the latter pins the operation to the
+            # LOCAL engine (it imports nullpool_engine from db.session directly),
+            # with no is_lakebase_enabled() check and no way to reach Lakebase. On
+            # a Lakebase deployment this read therefore ran against a database
+            # holding no apikey rows and reported the key as missing — the tool
+            # then failed with "Perplexity API key is required. Please configure
+            # it in the API Keys settings." for a key that WAS configured
+            # (verified: the row was in Lakebase, saved 10s before the run).
+            # _smart honours the router and falls back to this same local engine
+            # when Lakebase is off, so local/SQLite behaviour is unchanged.
+            from src.utils.asyncio_utils import execute_db_operation_smart
 
             # Get group_id from config or api_keys_service
             group_id = None
@@ -733,7 +749,7 @@ class ToolFactory:
             if not group_id and self.api_keys_service:
                 group_id = getattr(self.api_keys_service, "group_id", None)
 
-            async def _get_key_with_fresh_engine(session):
+            async def _get_key_on_own_session(session):
                 from src.services.settings.api_keys import ApiKeysService
 
                 # SECURITY: Create service with group_id for multi-tenant isolation
@@ -745,10 +761,8 @@ class ToolFactory:
                     return EncryptionUtils.decrypt_value(api_key.encrypted_value)
                 return None
 
-            # Use a fresh engine to avoid transaction conflicts
-            decrypted_value = await execute_db_operation_with_fresh_engine(
-                _get_key_with_fresh_engine
-            )
+            # Own session (router-selected) to avoid transaction conflicts
+            decrypted_value = await execute_db_operation_smart(_get_key_on_own_session)
 
             if decrypted_value:
                 # Log first and last 4 characters of the key for debugging

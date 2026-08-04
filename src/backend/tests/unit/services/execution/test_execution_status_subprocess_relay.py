@@ -39,9 +39,6 @@ def _fake_db(monkeypatch, module):
         return 0
 
     monkeypatch.setattr(module, "ExecutionRepository", FakeRepo, raising=True)
-    monkeypatch.setattr(
-        module, "execute_db_operation_with_fresh_engine", fake_exec, raising=True
-    )
     monkeypatch.setattr(module, "execute_db_operation_smart", fake_exec, raising=True)
     monkeypatch.setattr(
         module.sse_manager, "broadcast_to_job", _noop_broadcast, raising=True

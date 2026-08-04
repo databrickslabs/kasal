@@ -32,9 +32,7 @@ async def test_update_status_not_found_returns_false(monkeypatch):
         )
 
     monkeypatch.setattr(module, "ExecutionRepository", FakeRepo, raising=True)
-    monkeypatch.setattr(
-        module, "execute_db_operation_with_fresh_engine", fake_exec, raising=True
-    )
+    monkeypatch.setattr(module, "execute_db_operation_smart", fake_exec, raising=True)
 
     ok = await Svc.update_status(job_id="jid", status="RUNNING", message="m")
     assert ok is False
@@ -75,9 +73,7 @@ async def test_update_status_success_with_result_and_terminal_status(monkeypatch
         return await op(FakeSession())
 
     monkeypatch.setattr(module, "ExecutionRepository", FakeRepo, raising=True)
-    monkeypatch.setattr(
-        module, "execute_db_operation_with_fresh_engine", fake_exec, raising=True
-    )
+    monkeypatch.setattr(module, "execute_db_operation_smart", fake_exec, raising=True)
 
     ok = await Svc.update_status(
         job_id="jid", status="COMPLETED", message="done", result={"x": 1}
@@ -123,9 +119,7 @@ async def test_update_mlflow_trace_id_paths(monkeypatch):
         return await op(FakeSession())
 
     monkeypatch.setattr(module, "ExecutionRepository", FakeRepo, raising=True)
-    monkeypatch.setattr(
-        module, "execute_db_operation_with_fresh_engine", fake_exec, raising=True
-    )
+    monkeypatch.setattr(module, "execute_db_operation_smart", fake_exec, raising=True)
 
     # Invalid args
     assert await Svc.update_mlflow_trace_id(job_id=None, trace_id="t1") is False
