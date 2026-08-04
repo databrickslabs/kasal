@@ -115,8 +115,27 @@ class FlowExecutionService:
                 execution.inputs = config
             if group_id:
                 execution.group_id = group_id
-        else:
-            # Create new execution record in executionhistory table
+            await self.session.commit()
+            await self.session.refresh(execution)
+            logger.info(
+                f"Flow execution {execution.id} (job_id={job_id}) ready for group {group_id}"
+            )
+            return execution
+
+        # NEW record: write it on a PRIVATE connection, NOT self.session. The
+        # flow runs in a subprocess whose OTel trace writer inserts
+        # execution_trace rows keyed by job_id (FK -> executionhistory.job_id).
+        # On SQLite self.session rides the shared StaticPool connection, and the
+        # subprocess's own connection can't reliably see this just-committed row,
+        # so every trace batch failed "FOREIGN KEY constraint failed" and the
+        # run's traces were lost. The crew path already writes its row on an
+        # isolated session for exactly this reason (see
+        # ExecutionStatusService.create_execution). get_isolated_db_session is a
+        # dedicated NullPool connection on SQLite and a normal (already-private)
+        # pooled checkout on PG/Lakebase, so this is a no-op detour there.
+        from src.db.session import get_isolated_db_session
+
+        async with get_isolated_db_session() as iso_session:
             execution = ExecutionHistory(
                 job_id=job_id,
                 status="pending",
@@ -127,16 +146,15 @@ class FlowExecutionService:
                 group_id=group_id,
                 created_at=datetime.utcnow(),
             )
-            self.session.add(execution)
-
-        await self.session.commit()
-        await self.session.refresh(execution)
-
-        logger.info(
-            f"Flow execution {execution.id} (job_id={job_id}) ready for group {group_id}"
-        )
-
-        return execution
+            iso_session.add(execution)
+            await iso_session.commit()
+            await iso_session.refresh(execution)
+            logger.info(
+                f"Flow execution {execution.id} (job_id={job_id}) ready for group {group_id}"
+            )
+            # Detached on context exit; only scalar attributes (.id) are read by
+            # callers, which SQLAlchemy keeps available after refresh+commit.
+            return execution
 
     async def get_execution(self, execution_id: int) -> Optional[ExecutionHistory]:
         """

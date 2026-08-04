@@ -100,6 +100,39 @@ def flow_execution_service(mock_session):
 
 
 @pytest.fixture
+def mock_isolated_session():
+    """Patch get_isolated_db_session so create_execution's NEW-record insert runs
+    on a mock private connection instead of a real DB.
+
+    create_execution writes NEW executionhistory rows on an isolated session (so
+    the flow subprocess's trace writer can see the row for its job_id FK — see
+    the method's docstring). The mock yields an AsyncMock session and exposes it
+    so tests can assert add/commit happened on the ISOLATED session, not
+    self.session.
+    """
+    iso = AsyncMock()
+    iso.add = MagicMock()
+    iso.commit = AsyncMock()
+    iso.refresh = AsyncMock()
+
+    class _CM:
+        async def __aenter__(self):
+            return iso
+
+        async def __aexit__(self, *exc):
+            return False
+
+    # Patched at its SOURCE module: execution_service imports it locally inside
+    # the method (from src.db.session import ...), so the name is resolved from
+    # src.db.session at call time, not the execution_service namespace.
+    with patch(
+        "src.db.session.get_isolated_db_session",
+        return_value=_CM(),
+    ):
+        yield iso
+
+
+@pytest.fixture
 def mock_execution():
     """Create a mock execution history."""
     return MockExecutionHistory()
@@ -112,7 +145,7 @@ class TestFlowExecutionService:
 
     @pytest.mark.asyncio
     async def test_create_execution_success(
-        self, flow_execution_service, mock_session, mock_execution
+        self, flow_execution_service, mock_isolated_session, mock_execution
     ):
         """Test successful flow execution creation."""
         flow_id = uuid.uuid4()
@@ -129,13 +162,14 @@ class TestFlowExecutionService:
             flow_id=flow_id, job_id=job_id, config=config, group_id=group_id
         )
 
-        # Should add new execution to session
-        mock_session.add.assert_called_once()
-        mock_session.commit.assert_called_once()
+        # NEW record is written on the ISOLATED session (subprocess-visible), not
+        # self.session — so the flow subprocess's trace writer sees it.
+        mock_isolated_session.add.assert_called_once()
+        mock_isolated_session.commit.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_create_execution_inherits_group_id_from_flow(
-        self, flow_execution_service, mock_session
+        self, flow_execution_service, mock_isolated_session
     ):
         """Test that group_id is inherited from parent flow when not provided."""
         flow_id = uuid.uuid4()
@@ -157,13 +191,14 @@ class TestFlowExecutionService:
                 flow_id=flow_id, job_id=job_id, group_id=None  # Not provided
             )
 
-            # Should have tried to get parent flow
+            # Should have tried to get parent flow (on self.session), then written
+            # the new row on the isolated session.
             mock_flow_repo.get.assert_called_once_with(flow_id)
-            mock_session.add.assert_called_once()
+            mock_isolated_session.add.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_create_execution_with_string_flow_id(
-        self, flow_execution_service, mock_session
+        self, flow_execution_service, mock_isolated_session
     ):
         """Test creation with string flow_id (converted to UUID)."""
         flow_id = uuid.uuid4()
@@ -179,8 +214,8 @@ class TestFlowExecutionService:
             flow_id=flow_id_str, job_id=job_id, group_id="group-123"
         )
 
-        mock_session.add.assert_called_once()
-        mock_session.commit.assert_called_once()
+        mock_isolated_session.add.assert_called_once()
+        mock_isolated_session.commit.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_create_execution_invalid_flow_id(self, flow_execution_service):
@@ -359,7 +394,9 @@ class TestFlowExecutionService:
     # ========== Multi-Tenancy Tests ==========
 
     @pytest.mark.asyncio
-    async def test_multi_tenant_isolation(self, flow_execution_service, mock_session):
+    async def test_multi_tenant_isolation(
+        self, flow_execution_service, mock_isolated_session
+    ):
         """Test that group_id is properly set for multi-tenant isolation."""
         flow_id = uuid.uuid4()
         job_id = "test-job"
@@ -374,9 +411,9 @@ class TestFlowExecutionService:
             flow_id=flow_id, job_id=job_id, group_id=group_id
         )
 
-        # Should add execution with group_id
-        mock_session.add.assert_called_once()
-        added_execution = mock_session.add.call_args[0][0]
+        # Should add execution with group_id — on the isolated session.
+        mock_isolated_session.add.assert_called_once()
+        added_execution = mock_isolated_session.add.call_args[0][0]
         assert added_execution.group_id == group_id
 
     # ========== Existing Execution Update Tests ==========

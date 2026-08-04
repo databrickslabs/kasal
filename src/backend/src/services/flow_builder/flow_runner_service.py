@@ -407,7 +407,15 @@ class FlowRunnerService:
                     )
 
             if execution is None:
-                # NEW EXECUTION: Create a flow execution record via service layer
+                # NEW EXECUTION: Create a flow execution record via service layer.
+                # create_execution writes the row on a PRIVATE connection (see its
+                # docstring): the flow runs in a subprocess whose OTel trace writer
+                # inserts execution_trace rows keyed by job_id (FK ->
+                # executionhistory.job_id). On SQLite the request session rides the
+                # shared StaticPool connection and the subprocess's own connection
+                # can't reliably see this just-committed row, so every trace batch
+                # failed "FOREIGN KEY constraint failed" (crew already avoids this
+                # via ExecutionStatusService.create_execution's isolated session).
                 execution = await self.flow_execution_service.create_execution(
                     flow_id=flow_id,  # None for ad-hoc executions, UUID for saved flows
                     job_id=job_id,
