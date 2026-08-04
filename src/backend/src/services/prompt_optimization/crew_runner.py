@@ -839,86 +839,96 @@ class CrewRunnerMixin:
             )
             _install_gepa_reflection_bridge()
             _GEPA_REFLECTION_STATE.reflection_fn = reflection_fn
-            result = optimize_prompts(
-                predict_fn=predict_fn,
-                train_data=[
-                    {
-                        "inputs": {"request": objective_for_training},
-                        "expectations": train_expectations,
-                    }
-                ],
-                prompt_uris=[prompt_uri],
-                optimizer=GepaPromptOptimizer(
-                    # Inert placeholder — the bridge swaps in the LLMManager
-                    # -backed callable; this string is parsed, never called.
-                    reflection_model="openai:/kasal-llm-manager",
-                    # METRIC calls are decoupled from crew EXECUTIONS: with
-                    # the caches (ours + gepa's) most metric calls are free
-                    # re-scores, so the user's number stays a hard cap on real
-                    # executions while GEPA gets iteration headroom. Observed
-                    # live without this: a 10-execution budget stopped after 4
-                    # executions because cached re-evaluations had consumed
-                    # the metric budget.
-                    max_metric_calls=max_metric_calls * 2 + 3,
-                    gepa_kwargs={
-                        # Default minibatch of 3 sampled our SINGLE training
-                        # example three times per step — every candidate cost
-                        # 3 crew executions racing the cache (two finished the
-                        # same second, observed live).
-                        "reflection_minibatch_size": 1,
-                        # Strict improvement rejected TIES: a candidate that
-                        # fully incorporated the human requirements scored
-                        # 0.9 vs 0.9 on the minibatch and was discarded
-                        # (proposals.json, observed live). Lateral moves must
-                        # survive so the search can leave a flat region.
-                        "acceptance_criterion": "improvement_or_equal",
-                        # gepa-side (candidate, example) result cache: skips
-                        # the metric call entirely on repeats, preserving the
-                        # metric budget for NEW candidates.
-                        "cache_evaluation": True,
-                        # gepa's default template says "write a new
-                        # instruction ... within ``` blocks" — an open
-                        # invitation to restructure: the reflection model
-                        # returned {"instruction": "..."} JSON blobs that
-                        # lost the [AGENT]/[TASK] document structure and
-                        # free-rejected every proposal (observed live, 11/11
-                        # malformed). Pin the output contract to the crew-doc
-                        # format instead.
-                        "reflection_prompt_template": (
-                            "I provided an assistant with the following "
-                            "DOCUMENT of prompt fields that configures an AI "
-                            "crew (agents and tasks):\n"
-                            "```\n<curr_param>\n```\n\n"
-                            "The following are examples of task inputs, the "
-                            "crew's final answer, and feedback (score and "
-                            "judge rationale) on how the answer could be "
-                            "better:\n"
-                            "```\n<side_info>\n```\n\n"
-                            "Your task is to write an IMPROVED VERSION of the "
-                            "document above so that a future answer satisfies "
-                            "the feedback and every hard requirement stated "
-                            "in the task input.\n\n"
-                            "STRICT FORMAT RULES:\n"
-                            "- Keep EXACTLY the same structure: the same "
-                            "[AGENT <id>] and [TASK <id>] section headers "
-                            "with the same ids, and the same field labels "
-                            "(ROLE:, GOAL:, BACKSTORY:, DESCRIPTION:, "
-                            "EXPECTED_OUTPUT:).\n"
-                            "- Each field label starts its line, followed by "
-                            "the improved text for that field on the same "
-                            "line.\n"
-                            "- Do NOT output JSON, commentary, or anything "
-                            "except the document.\n"
-                            "- Output ONLY the improved document, nothing "
-                            "before or after it. Start your reply directly "
-                            "with the first [AGENT line."
-                        ),
-                    },
-                ),
-                scorers=[output_format, output_correct],
-                aggregation=aggregation,
-                enable_tracking=local_mode,
-            )
+            # MLflow fires get_trace() per eval INSIDE optimize_prompts, which
+            # resolves a SQL warehouse via a bare WorkspaceClient(). On Databricks
+            # Apps the injected DATABRICKS_AUTH_TYPE=oauth-m2m makes that client
+            # fail ("cannot configure default credentials ... auth_type=oauth-m2m")
+            # and stops the run mid-optimization. Pin token auth for the whole
+            # call so the bare client uses the PAT — without stripping the SP
+            # creds the crew's own LLM auth may still fall back to. No-op locally.
+            from src.services.mlflow.sp_auth import pat_auth_env
+
+            with pat_auth_env():
+                result = optimize_prompts(
+                    predict_fn=predict_fn,
+                    train_data=[
+                        {
+                            "inputs": {"request": objective_for_training},
+                            "expectations": train_expectations,
+                        }
+                    ],
+                    prompt_uris=[prompt_uri],
+                    optimizer=GepaPromptOptimizer(
+                        # Inert placeholder — the bridge swaps in the LLMManager
+                        # -backed callable; this string is parsed, never called.
+                        reflection_model="openai:/kasal-llm-manager",
+                        # METRIC calls are decoupled from crew EXECUTIONS: with
+                        # the caches (ours + gepa's) most metric calls are free
+                        # re-scores, so the user's number stays a hard cap on real
+                        # executions while GEPA gets iteration headroom. Observed
+                        # live without this: a 10-execution budget stopped after 4
+                        # executions because cached re-evaluations had consumed
+                        # the metric budget.
+                        max_metric_calls=max_metric_calls * 2 + 3,
+                        gepa_kwargs={
+                            # Default minibatch of 3 sampled our SINGLE training
+                            # example three times per step — every candidate cost
+                            # 3 crew executions racing the cache (two finished the
+                            # same second, observed live).
+                            "reflection_minibatch_size": 1,
+                            # Strict improvement rejected TIES: a candidate that
+                            # fully incorporated the human requirements scored
+                            # 0.9 vs 0.9 on the minibatch and was discarded
+                            # (proposals.json, observed live). Lateral moves must
+                            # survive so the search can leave a flat region.
+                            "acceptance_criterion": "improvement_or_equal",
+                            # gepa-side (candidate, example) result cache: skips
+                            # the metric call entirely on repeats, preserving the
+                            # metric budget for NEW candidates.
+                            "cache_evaluation": True,
+                            # gepa's default template says "write a new
+                            # instruction ... within ``` blocks" — an open
+                            # invitation to restructure: the reflection model
+                            # returned {"instruction": "..."} JSON blobs that
+                            # lost the [AGENT]/[TASK] document structure and
+                            # free-rejected every proposal (observed live, 11/11
+                            # malformed). Pin the output contract to the crew-doc
+                            # format instead.
+                            "reflection_prompt_template": (
+                                "I provided an assistant with the following "
+                                "DOCUMENT of prompt fields that configures an AI "
+                                "crew (agents and tasks):\n"
+                                "```\n<curr_param>\n```\n\n"
+                                "The following are examples of task inputs, the "
+                                "crew's final answer, and feedback (score and "
+                                "judge rationale) on how the answer could be "
+                                "better:\n"
+                                "```\n<side_info>\n```\n\n"
+                                "Your task is to write an IMPROVED VERSION of the "
+                                "document above so that a future answer satisfies "
+                                "the feedback and every hard requirement stated "
+                                "in the task input.\n\n"
+                                "STRICT FORMAT RULES:\n"
+                                "- Keep EXACTLY the same structure: the same "
+                                "[AGENT <id>] and [TASK <id>] section headers "
+                                "with the same ids, and the same field labels "
+                                "(ROLE:, GOAL:, BACKSTORY:, DESCRIPTION:, "
+                                "EXPECTED_OUTPUT:).\n"
+                                "- Each field label starts its line, followed by "
+                                "the improved text for that field on the same "
+                                "line.\n"
+                                "- Do NOT output JSON, commentary, or anything "
+                                "except the document.\n"
+                                "- Output ONLY the improved document, nothing "
+                                "before or after it. Start your reply directly "
+                                "with the first [AGENT line."
+                            ),
+                        },
+                    ),
+                    scorers=[output_format, output_correct],
+                    aggregation=aggregation,
+                    enable_tracking=local_mode,
+                )
         finally:
             _GEPA_REFLECTION_STATE.reflection_fn = None
             if local_mode:

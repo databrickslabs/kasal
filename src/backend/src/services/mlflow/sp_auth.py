@@ -36,12 +36,21 @@ logger = logging.getLogger(__name__)
 
 #: Every Databricks auth env var the swap touches. Saved and restored as a unit
 #: so a call leaves the process env exactly as it found it.
+#:
+#: DATABRICKS_AUTH_TYPE matters: Databricks Apps inject it as "oauth-m2m". If we
+#: set DATABRICKS_TOKEN and drop CLIENT_ID/SECRET but leave AUTH_TYPE=oauth-m2m,
+#: any bare ``WorkspaceClient()`` built inside the window (e.g. MLflow's
+#: ``get_trace`` -> ``_resolve_sql_warehouse_id`` during ``optimize_prompts``)
+#: obeys oauth-m2m, finds no m2m creds, and dies with "cannot configure default
+#: credentials ... auth_type=oauth-m2m". Pinning it to "pat" makes the bare
+#: client use the token instead.
 SWAP_KEYS = (
     "DATABRICKS_HOST",
     "DATABRICKS_TOKEN",
     "DATABRICKS_API_KEY",
     "DATABRICKS_CLIENT_ID",
     "DATABRICKS_CLIENT_SECRET",
+    "DATABRICKS_AUTH_TYPE",
 )
 
 
@@ -71,6 +80,38 @@ def derive_sp_bearer(host: str, client_id: str, client_secret: str) -> Optional[
 
 
 @contextmanager
+def pat_auth_env() -> Iterator[bool]:
+    """Pin ``DATABRICKS_AUTH_TYPE=pat`` for the duration, WITHOUT stripping the
+    OAuth SP creds.
+
+    Use around calls that internally build a bare ``WorkspaceClient()`` AND also
+    run other Databricks work that may still need the SP creds — the GEPA
+    ``optimize_prompts`` call is exactly this: MLflow's per-eval ``get_trace``
+    resolves a SQL warehouse via a bare client (which dies under the app-injected
+    ``oauth-m2m`` when no m2m creds resolve), while ``predict_fn`` executes the
+    crew whose LLM auth may fall back to SPN. Pinning ``auth_type=pat``
+    disambiguates for the bare client (it uses ``DATABRICKS_TOKEN``) without
+    removing the creds the crew path might use — the same disambiguation the
+    explicit ``WorkspaceClient(..., auth_type="pat")`` in ``databricks_auth`` uses.
+
+    Yields ``True`` when a token is present to pin against, ``False`` (no-op)
+    otherwise. Restores the original ``DATABRICKS_AUTH_TYPE`` after.
+    """
+    if not os.environ.get("DATABRICKS_TOKEN"):
+        yield False
+        return
+    saved = os.environ.get("DATABRICKS_AUTH_TYPE")
+    try:
+        os.environ["DATABRICKS_AUTH_TYPE"] = "pat"
+        yield True
+    finally:
+        if saved is not None:
+            os.environ["DATABRICKS_AUTH_TYPE"] = saved
+        elif "DATABRICKS_AUTH_TYPE" in os.environ:
+            del os.environ["DATABRICKS_AUTH_TYPE"]
+
+
+@contextmanager
 def single_auth_env(
     *, host: Optional[str] = None, token: Optional[str] = None
 ) -> Iterator[None]:
@@ -90,6 +131,10 @@ def single_auth_env(
         os.environ.pop("DATABRICKS_API_KEY", None)
         os.environ.pop("DATABRICKS_CLIENT_ID", None)
         os.environ.pop("DATABRICKS_CLIENT_SECRET", None)
+        # Pin token auth so a bare WorkspaceClient() built during the window
+        # (MLflow's get_trace warehouse resolution) uses the PAT, not the
+        # app-injected oauth-m2m it can no longer satisfy.
+        os.environ["DATABRICKS_AUTH_TYPE"] = "pat"
         yield
     finally:
         for key, value in saved.items():
@@ -110,19 +155,31 @@ def sp_single_auth() -> Iterator[bool]:
     host = os.environ.get("DATABRICKS_HOST")
     client_id = os.environ.get("DATABRICKS_CLIENT_ID")
     client_secret = os.environ.get("DATABRICKS_CLIENT_SECRET")
-    if not (host and client_id and client_secret):
-        yield False
-        return
 
-    bearer = derive_sp_bearer(host, client_id, client_secret)
-    if not bearer:
-        yield False
-        return
-
-    logger.info(
-        "Registry call: authenticating as the app service principal via a single "
-        "token method (OAuth creds temporarily removed to avoid the SDK's "
-        "'more than one authorization method' error)."
+    bearer = (
+        derive_sp_bearer(host, client_id, client_secret)
+        if (host and client_id and client_secret)
+        else None
     )
-    with single_auth_env(token=bearer):
-        yield True
+
+    if bearer:
+        logger.info(
+            "MLflow call: authenticating as the app service principal via a single "
+            "token method (OAuth creds temporarily removed to avoid the SDK's "
+            "'more than one authorization method' error)."
+        )
+        with single_auth_env(token=bearer):
+            yield True
+        return
+
+    # No SP bearer, but if a PAT is already in the env, still pin token auth so a
+    # bare WorkspaceClient() built inside the window (MLflow get_trace warehouse
+    # resolution during optimize_prompts) uses it instead of the app-injected
+    # oauth-m2m it can no longer satisfy. Only a true PAT-less/token-less env is a
+    # genuine no-op.
+    if os.environ.get("DATABRICKS_TOKEN"):
+        with single_auth_env():  # keeps existing token, pins AUTH_TYPE=pat
+            yield True
+        return
+
+    yield False

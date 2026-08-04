@@ -102,14 +102,33 @@ class TestSpSingleAuth:
     """The app SP must be presented as a SINGLE auth method (SP token, OAuth
     env vars removed) so the SDK doesn't error 'oauth and pat'."""
 
-    def test_noop_without_oauth_creds(self, monkeypatch):
-        from src.services.prompt_optimization.gepa import sp_auth
+    def test_pins_pat_auth_when_only_token_present(self, monkeypatch):
+        # No OAuth SP creds but a PAT in the env: sp_single_auth cannot derive an
+        # SP bearer, but it MUST still pin DATABRICKS_AUTH_TYPE=pat so a bare
+        # WorkspaceClient() built in the window (MLflow get_trace) uses the PAT
+        # instead of the app-injected oauth-m2m. The token itself is untouched.
+        from src.services.mlflow import sp_auth
 
         monkeypatch.delenv("DATABRICKS_CLIENT_ID", raising=False)
+        monkeypatch.delenv("DATABRICKS_CLIENT_SECRET", raising=False)
         monkeypatch.setenv("DATABRICKS_TOKEN", "pat")
+        monkeypatch.setenv("DATABRICKS_AUTH_TYPE", "oauth-m2m")
+        with sp_auth.sp_single_auth() as active:
+            assert active is True
+            assert os.environ["DATABRICKS_TOKEN"] == "pat"  # untouched
+            assert os.environ["DATABRICKS_AUTH_TYPE"] == "pat"  # pinned
+        # restored after the window
+        assert os.environ["DATABRICKS_AUTH_TYPE"] == "oauth-m2m"
+
+    def test_noop_without_any_creds(self, monkeypatch):
+        # Truly no creds (no OAuth, no token) is the only genuine no-op.
+        from src.services.mlflow import sp_auth
+
+        monkeypatch.delenv("DATABRICKS_CLIENT_ID", raising=False)
+        monkeypatch.delenv("DATABRICKS_CLIENT_SECRET", raising=False)
+        monkeypatch.delenv("DATABRICKS_TOKEN", raising=False)
         with sp_auth.sp_single_auth() as active:
             assert active is False
-            assert os.environ["DATABRICKS_TOKEN"] == "pat"  # untouched
 
     def test_swaps_to_sp_token_and_removes_oauth(self, monkeypatch):
         # sp_single_auth now lives in mlflow.sp_auth (prompt_optimization.gepa.sp_auth
