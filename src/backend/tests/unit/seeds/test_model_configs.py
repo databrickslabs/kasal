@@ -563,6 +563,26 @@ class TestAuditedDatabricksModels:
         assert "databricks-gemini-3-1-flash-lite" in DEFAULT_MODELS
         assert "databricks-gemini-3-1-flash-lite" not in REMOVED_MODEL_KEYS
 
+    def test_claude_fable_5_seeded_and_not_pruned(self):
+        """Pruned while Anthropic's 2026-06-12 export-control suspension was in
+        force; lifted and re-verified 2026-08-05 (endpoint READY, serves
+        completions over mlflow/v1/chat/completions). Being in BOTH lists would
+        make the seeder delete it on every startup, so it must be seeded only."""
+        assert "databricks-claude-fable-5" in DEFAULT_MODELS
+        assert "databricks-claude-fable-5" not in REMOVED_MODEL_KEYS
+        assert DEFAULT_MODELS["databricks-claude-fable-5"]["provider"] == "databricks"
+
+    def test_claude_fable_5_temperature_is_dropped_before_the_request(self):
+        """Fable 5 400s on `temperature` ("Model global.anthropic.claude-fable-5
+        does not support the temperature parameter" — confirmed live). The seed
+        still carries a temperature like every other row, so the guard in
+        utils.model_config is what keeps it off the wire; assert that holds for
+        both the Kasal key and the served name."""
+        from src.utils.model_config import model_rejects_temperature
+
+        assert model_rejects_temperature("databricks-claude-fable-5") is True
+        assert model_rejects_temperature("global.anthropic.claude-fable-5") is True
+
     def test_codex_model_that_works_via_kasal_kept(self):
         """gpt-5-3-codex 400s on raw /invocations but works through Kasal's
         litellm path, so it stays."""

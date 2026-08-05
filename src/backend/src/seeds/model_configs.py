@@ -80,8 +80,9 @@ DEFAULT_MODELS = {
     # previous entries were the Claude 4.0 dated snapshots
     # (claude-opus-4-20250514 / claude-sonnet-4-20250514), both now deprecated.
     # Claude 5 is the current generation; Haiku 4.5 stays as the small/fast tier
-    # (there is no Haiku 5). Fable/Mythos are deliberately not seeded: Fable was
-    # suspended once already and Mythos is limited-access.
+    # (there is no Haiku 5). Mythos is deliberately not seeded here (limited
+    # access). Fable is not seeded on this DIRECT-Anthropic path either — it is
+    # served via Databricks instead, see "databricks-claude-fable-5" below.
     "claude-opus-5": {
         "name": "claude-opus-5",
         "temperature": 0.7,
@@ -286,6 +287,20 @@ DEFAULT_MODELS = {
         "max_output_tokens": 131072,
     },
     # --- Databricks (sorted alphabetically) ---
+    "databricks-claude-fable-5": {
+        # Re-seeded 2026-08-05: Anthropic's 2026-06-12 export-control suspension
+        # has been lifted. Verified against the deployed workspace — the endpoint
+        # reports READY, advertises mlflow/v1/chat/completions (the API Kasal's
+        # transport uses) and serves completions. Like Opus 4.7+ it REJECTS
+        # `temperature` ("Model global.anthropic.claude-fable-5 does not support
+        # the temperature parameter"), which utils.model_config's existing
+        # "claude-fable" guard already covers — confirmed live both ways.
+        "name": "databricks-claude-fable-5",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 64000,
+    },
     "databricks-claude-haiku-4-5": {
         "name": "databricks-claude-haiku-4-5",
         "temperature": 0.7,
@@ -598,11 +613,11 @@ REMOVED_MODEL_KEYS = [
     # endpoint databricks-claude-sonnet-4 is deprecated"). Superseded by
     # sonnet-4-5; all Kasal defaults were repointed there. Prune from seeded DBs.
     "databricks-claude-sonnet-4",
-    # Anthropic suspended Claude Fable 5 on 2026-06-12 (US export-control
-    # directive); the endpoint returns TEMPORARILY_UNAVAILABLE for all callers.
-    # Prune it from any DB it was seeded/added to so it leaves the model picker.
-    # Re-add to DEFAULT_MODELS (and drop from here) if the suspension is lifted.
-    "databricks-claude-fable-5",
+    # (databricks-claude-fable-5 was pruned here while Anthropic's 2026-06-12
+    # export-control suspension was in force. The suspension has been lifted —
+    # verified 2026-08-05: the endpoint reports READY and serves completions — so
+    # it is back in DEFAULT_MODELS and must NOT be listed here, or the seeder
+    # would delete it again on every startup.)
     # Audited 2026-06-20 against the fevm-serverless-stable workspace with a
     # hello-world run through Kasal's own LLM path: these Databricks endpoints no
     # longer work — removed/renamed in the workspace, or only support the
