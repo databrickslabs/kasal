@@ -115,15 +115,19 @@ class TestRunScheduleJob:
 
         with (
             patch(
-                "src.services.scheduling.scheduler.async_session_factory"
+                "src.services.scheduling.scheduler.get_smart_db_session"
             ) as mock_factory,
             patch(
                 "src.services.scheduling.scheduler.ScheduleRepository",
                 return_value=mock_repo,
             ),
         ):
-            mock_factory.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
-            mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+            _sess = MagicMock()
+
+            async def _gen():
+                yield _sess
+
+            mock_factory.side_effect = lambda *a, **k: _gen()
 
             # Patch ScheduleRepository inside context manager
             with patch(
@@ -157,7 +161,7 @@ class TestRunScheduleJob:
 
         with (
             patch(
-                "src.services.scheduling.scheduler.async_session_factory"
+                "src.services.scheduling.scheduler.get_smart_db_session"
             ) as mock_factory,
             patch(
                 "src.services.scheduling.scheduler.ScheduleRepository",
@@ -170,8 +174,13 @@ class TestRunScheduleJob:
             patch("src.services.scheduling.scheduler.Run") as mock_run_cls,
             patch("src.services.scheduling.scheduler.GroupContext") as mock_gc_cls,
         ):
-            mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+            # Async generator, not a context manager: the scheduler consumes
+            # get_smart_db_session (the router), so `schedules` reads and writes
+            # hit the same database even when Lakebase was enabled at runtime.
+            async def _gen():
+                yield mock_session
+
+            mock_factory.side_effect = lambda *a, **k: _gen()
             mock_es_cls.return_value = mock_exec_service
             mock_es_cls.run_crew_execution = AsyncMock()
             mock_crewai.add_execution_to_memory = MagicMock()
@@ -209,7 +218,7 @@ class TestRunScheduleJob:
 
         with (
             patch(
-                "src.services.scheduling.scheduler.async_session_factory"
+                "src.services.scheduling.scheduler.get_smart_db_session"
             ) as mock_factory,
             patch(
                 "src.services.scheduling.scheduler.ScheduleRepository"
@@ -252,15 +261,20 @@ class TestCheckAndRunSchedules:
 
         with (
             patch(
-                "src.services.scheduling.scheduler.async_session_factory"
+                "src.services.scheduling.scheduler.get_smart_db_session"
             ) as mock_factory,
             patch(
                 "src.services.scheduling.scheduler.ScheduleRepository",
                 return_value=mock_repo,
             ),
         ):
-            mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+            # Async generator, not a context manager: the scheduler consumes
+            # get_smart_db_session (the router), so `schedules` reads and writes
+            # hit the same database even when Lakebase was enabled at runtime.
+            async def _gen():
+                yield mock_session
+
+            mock_factory.side_effect = lambda *a, **k: _gen()
             mock_session.commit = AsyncMock()
 
             # Patch the module-level asyncio reference used inside scheduler_service
@@ -295,7 +309,7 @@ class TestCheckAndRunSchedules:
 
         with (
             patch(
-                "src.services.scheduling.scheduler.async_session_factory"
+                "src.services.scheduling.scheduler.get_smart_db_session"
             ) as mock_factory,
             patch(
                 "src.services.scheduling.scheduler.ScheduleRepository",
@@ -307,8 +321,13 @@ class TestCheckAndRunSchedules:
             ),
             patch.object(svc, "run_schedule_job", new=AsyncMock()),
         ):
-            mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+            # Async generator, not a context manager: the scheduler consumes
+            # get_smart_db_session (the router), so `schedules` reads and writes
+            # hit the same database even when Lakebase was enabled at runtime.
+            async def _gen():
+                yield mock_session
+
+            mock_factory.side_effect = lambda *a, **k: _gen()
 
             task = asyncio.create_task(svc.check_and_run_schedules())
             # Let one iteration complete (hits asyncio.sleep(60) at the end)

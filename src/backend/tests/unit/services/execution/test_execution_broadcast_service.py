@@ -265,7 +265,7 @@ class TestPollForStatusChanges:
 
         with patch.object(service, "_get_active_job_ids", return_value=set()):
             with patch(
-                "src.services.execution.broadcast.async_session_factory"
+                "src.services.execution.broadcast.get_smart_db_session"
             ) as mock_factory:
                 await service._poll_for_status_changes()
 
@@ -280,10 +280,14 @@ class TestPollForStatusChanges:
 
         with patch.object(service, "_get_active_job_ids", return_value={"job-1"}):
             with patch(
-                "src.services.execution.broadcast.async_session_factory"
+                "src.services.execution.broadcast.get_smart_db_session"
             ) as mock_factory:
                 mock_session = AsyncMock()
-                mock_factory.return_value.__aenter__.return_value = mock_session
+
+                async def _gen():
+                    yield mock_session
+
+                mock_factory.side_effect = lambda *a, **k: _gen()
 
                 with patch.object(
                     service, "_check_and_broadcast_status", new_callable=AsyncMock
@@ -302,10 +306,14 @@ class TestPollForStatusChanges:
             service, "_get_active_job_ids", return_value={"job-1", "job-2"}
         ):
             with patch(
-                "src.services.execution.broadcast.async_session_factory"
+                "src.services.execution.broadcast.get_smart_db_session"
             ) as mock_factory:
                 mock_session = AsyncMock()
-                mock_factory.return_value.__aenter__.return_value = mock_session
+
+                async def _gen():
+                    yield mock_session
+
+                mock_factory.side_effect = lambda *a, **k: _gen()
 
                 with patch.object(
                     service, "_check_and_broadcast_status", new_callable=AsyncMock

@@ -12,12 +12,19 @@ from src.services.execution.cleanup import ExecutionCleanupService
 
 
 def _build_session_ctx():
-    """Build a mock async session context for 'async with async_session_factory() as db:'"""
+    """Build a mock async session GENERATOR for `async for db in get_smart_db_session()`.
+
+    The service reads executionhistory and execution_trace, which live in Lakebase
+    when it is enabled, so it goes through the router rather than the raw
+    async_session_factory — the factory is a per-process snapshot that a runtime
+    /lakebase/enable never updates.
+    """
     session_mock = AsyncMock()
-    ctx = AsyncMock()
-    ctx.__aenter__ = AsyncMock(return_value=session_mock)
-    ctx.__aexit__ = AsyncMock(return_value=False)
-    factory_mock = MagicMock(return_value=ctx)
+
+    async def _gen():
+        yield session_mock
+
+    factory_mock = MagicMock(side_effect=lambda *a, **k: _gen())
     return factory_mock, session_mock
 
 
@@ -28,7 +35,7 @@ class TestCleanupZombieJobs:
         factory_mock, _ = _build_session_ctx()
 
         with (
-            patch("src.services.execution.cleanup.async_session_factory", factory_mock),
+            patch("src.services.execution.cleanup.get_smart_db_session", factory_mock),
             patch(
                 "src.services.execution.cleanup.ExecutionHistoryRepository"
             ) as MockHistoryRepo,
@@ -46,7 +53,7 @@ class TestCleanupZombieJobs:
         factory_mock, _ = _build_session_ctx()
 
         with (
-            patch("src.services.execution.cleanup.async_session_factory", factory_mock),
+            patch("src.services.execution.cleanup.get_smart_db_session", factory_mock),
             patch(
                 "src.services.execution.cleanup.ExecutionHistoryRepository"
             ) as MockHistoryRepo,
@@ -74,7 +81,7 @@ class TestCleanupZombieJobs:
         update_status_mock = AsyncMock(return_value=True)
 
         with (
-            patch("src.services.execution.cleanup.async_session_factory", factory_mock),
+            patch("src.services.execution.cleanup.get_smart_db_session", factory_mock),
             patch(
                 "src.services.execution.cleanup.ExecutionHistoryRepository"
             ) as MockHistoryRepo,
@@ -112,7 +119,7 @@ class TestCleanupZombieJobs:
         update_status_mock = AsyncMock(return_value=True)
 
         with (
-            patch("src.services.execution.cleanup.async_session_factory", factory_mock),
+            patch("src.services.execution.cleanup.get_smart_db_session", factory_mock),
             patch(
                 "src.services.execution.cleanup.ExecutionHistoryRepository"
             ) as MockHistoryRepo,
@@ -146,7 +153,7 @@ class TestCleanupZombieJobs:
         update_status_mock = AsyncMock(return_value=True)
 
         with (
-            patch("src.services.execution.cleanup.async_session_factory", factory_mock),
+            patch("src.services.execution.cleanup.get_smart_db_session", factory_mock),
             patch(
                 "src.services.execution.cleanup.ExecutionHistoryRepository"
             ) as MockHistoryRepo,
@@ -179,7 +186,7 @@ class TestCleanupZombieJobs:
         update_status_mock = AsyncMock(return_value=True)
 
         with (
-            patch("src.services.execution.cleanup.async_session_factory", factory_mock),
+            patch("src.services.execution.cleanup.get_smart_db_session", factory_mock),
             patch(
                 "src.services.execution.cleanup.ExecutionHistoryRepository"
             ) as MockHistoryRepo,
@@ -212,7 +219,7 @@ class TestCleanupZombieJobs:
         update_status_mock = AsyncMock(return_value=True)
 
         with (
-            patch("src.services.execution.cleanup.async_session_factory", factory_mock),
+            patch("src.services.execution.cleanup.get_smart_db_session", factory_mock),
             patch(
                 "src.services.execution.cleanup.ExecutionHistoryRepository"
             ) as MockHistoryRepo,
@@ -241,7 +248,7 @@ class TestCleanupZombieJobs:
         factory_mock, _ = _build_session_ctx()
 
         with (
-            patch("src.services.execution.cleanup.async_session_factory", factory_mock),
+            patch("src.services.execution.cleanup.get_smart_db_session", factory_mock),
             patch(
                 "src.services.execution.cleanup.ExecutionHistoryRepository"
             ) as MockHistoryRepo,

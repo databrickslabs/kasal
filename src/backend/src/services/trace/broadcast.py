@@ -21,7 +21,7 @@ from typing import Dict, Optional, Set
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.sse_manager import SSEEvent, sse_manager
-from src.db.session import async_session_factory
+from src.db.database_router import get_smart_db_session
 from src.repositories.execution_history_repository import ExecutionHistoryRepository
 from src.repositories.execution_trace_repository import ExecutionTraceRepository
 from src.services.execution.event_pipe import suppresses_poller_broadcast
@@ -145,13 +145,25 @@ class TraceBroadcastService:
         if not active_jobs and not has_global:
             return
 
-        async with async_session_factory() as session:
+        # Router-aware, not the raw factory. `execution_trace` lives in Lakebase
+        # when Lakebase is enabled, and the snapshot factory only points there if
+        # activate_lakebase() ran in THIS process — which happens at boot or in a
+        # subprocess, never on a runtime /lakebase/enable. Enable without a
+        # restart and this poll reads a database the crew subprocess is not
+        # writing to, so the SSE stream goes silent while the run is fine.
+        #
+        # _get_running_job_ids was already fixed this way for its own query; the
+        # session around it was not, so every OTHER read in this poll still went
+        # to the snapshot. This closes that.
+        async for session in get_smart_db_session():
             if has_global:
                 running_jobs = await self._get_running_job_ids(session)
                 active_jobs = active_jobs | running_jobs
 
             if not active_jobs:
-                return
+                # break, not return: a return abandons the generator and skips the
+                # commit/close that follow its yield.
+                break
             # Initialize tracking for new jobs - start from current max ID
             # This avoids re-broadcasting traces that the initial fetch already loaded
             trace_repo = ExecutionTraceRepository(session)

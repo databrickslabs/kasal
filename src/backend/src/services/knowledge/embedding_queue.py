@@ -106,14 +106,22 @@ class EmbeddingQueueService:
                 await self._batch_insert(batch)
 
     async def _batch_insert(self, batch: List[Dict[str, Any]]):
-        """Perform batch insert of embeddings."""
-        from src.db.session import async_session_factory
+        """Perform batch insert of embeddings.
+
+        Router-aware: `documentationembedding` lives in Lakebase when it is
+        enabled, and the raw async_session_factory is a snapshot that only points
+        there if activate_lakebase() ran in this process — at boot or in a
+        subprocess, never on a runtime /lakebase/enable. Writing to the wrong
+        database here succeeds, so nothing looks broken; the embeddings simply
+        land where no search will ever read them.
+        """
+        from src.db.database_router import get_smart_db_session
         from src.repositories.documentation_embedding_repository import (
             DocumentationEmbeddingRepository,
         )
 
         try:
-            async with async_session_factory() as session:
+            async for session in get_smart_db_session():
                 # Use bulk insert for efficiency
                 repository = DocumentationEmbeddingRepository(session)
                 await repository.bulk_insert_raw(batch)
@@ -126,20 +134,25 @@ class EmbeddingQueueService:
                 await self._insert_with_retry(item)
 
     async def _insert_with_retry(self, item: Dict[str, Any], max_retries: int = 3):
-        """Insert a single embedding with retry logic."""
-        from src.db.session import async_session_factory
+        """Insert a single embedding with retry logic.
+
+        Same router as _batch_insert — this is its per-item fallback, so a
+        mismatch would send the retry somewhere the batch did not go.
+        """
+        from src.db.database_router import get_smart_db_session
         from src.repositories.documentation_embedding_repository import (
             DocumentationEmbeddingRepository,
         )
 
         for attempt in range(max_retries):
             try:
-                async with async_session_factory() as session:
+                async for session in get_smart_db_session():
                     repository = DocumentationEmbeddingRepository(session)
                     await repository.insert_raw(item)
                     await session.commit()
                     logger.debug(f"Inserted embedding after {attempt + 1} attempts")
-                    return
+                    break
+                return
             except Exception as e:
                 if attempt < max_retries - 1:
                     wait_time = 2**attempt  # Exponential backoff

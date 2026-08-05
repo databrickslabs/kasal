@@ -251,10 +251,14 @@ class TestPollForTraces:
                 service, "_has_global_stream_listeners", return_value=False
             ):
                 with patch(
-                    "src.services.trace.broadcast.async_session_factory"
+                    "src.services.trace.broadcast.get_smart_db_session"
                 ) as mock_factory:
                     mock_session = AsyncMock()
-                    mock_factory.return_value.__aenter__.return_value = mock_session
+
+                    async def _gen():
+                        yield mock_session
+
+                    mock_factory.side_effect = lambda *a, **k: _gen()
 
                     await service._poll_for_traces()
 
@@ -268,10 +272,14 @@ class TestPollForTraces:
 
         with patch.object(service, "_get_active_job_ids", return_value={"job-123"}):
             with patch(
-                "src.services.trace.broadcast.async_session_factory"
+                "src.services.trace.broadcast.get_smart_db_session"
             ) as mock_factory:
                 mock_session = AsyncMock()
-                mock_factory.return_value.__aenter__.return_value = mock_session
+
+                async def _gen():
+                    yield mock_session
+
+                mock_factory.side_effect = lambda *a, **k: _gen()
 
                 # Mock max ID query
                 mock_result = MagicMock()
@@ -293,10 +301,14 @@ class TestPollForTraces:
 
         with patch.object(service, "_get_active_job_ids", return_value={"job-1"}):
             with patch(
-                "src.services.trace.broadcast.async_session_factory"
+                "src.services.trace.broadcast.get_smart_db_session"
             ) as mock_factory:
                 mock_session = AsyncMock()
-                mock_factory.return_value.__aenter__.return_value = mock_session
+
+                async def _gen():
+                    yield mock_session
+
+                mock_factory.side_effect = lambda *a, **k: _gen()
 
                 # Set up mock to handle the initialization call
                 mock_result = MagicMock()

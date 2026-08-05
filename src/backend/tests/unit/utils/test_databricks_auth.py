@@ -41,6 +41,20 @@ def _make_auth(**kwargs):
 # ── AuthContext ────────────────────────────────────────
 
 
+def _one_session(session):
+    """An async generator yielding *session* once.
+
+    The auth lookups consume `async for session in get_smart_db_session()` — the
+    router — rather than the raw per-process async_session_factory snapshot, so
+    the fake has to be a generator, not a context manager.
+    """
+
+    async def _gen():
+        yield session
+
+    return _gen()
+
+
 class TestAuthContext:
     def test_init_basic(self):
         ctx = AuthContext(
@@ -1272,7 +1286,8 @@ class TestGetAuthContext:
                     side_effect=make_service,
                 ),
                 patch(
-                    "src.db.session.async_session_factory", return_value=mock_session
+                    "src.db.database_router.get_smart_db_session",
+                    side_effect=lambda *a, **k: _one_session(mock_session),
                 ),
                 patch("src.utils.user_context.UserContext") as mock_uc,
                 patch("src.utils.encryption_utils.EncryptionUtils") as enc,
@@ -1550,7 +1565,7 @@ class TestGetAuthContext:
                     new_callable=AsyncMock,
                     return_value=True,
                 ),
-                patch("src.db.session.async_session_factory") as mock_sf,
+                patch("src.db.database_router.get_smart_db_session") as mock_sf,
                 patch("src.utils.user_context.UserContext") as mock_uc,
                 patch.dict(
                     os.environ, {"DATABRICKS_TOKEN": "env_pat_token"}, clear=False
@@ -1592,7 +1607,7 @@ class TestGetAuthContext:
                     new_callable=AsyncMock,
                     return_value=True,
                 ),
-                patch("src.db.session.async_session_factory") as mock_sf,
+                patch("src.db.database_router.get_smart_db_session") as mock_sf,
                 patch("src.utils.user_context.UserContext") as mock_uc,
                 patch.dict(os.environ, env_clean, clear=True),
             ):
@@ -1628,7 +1643,7 @@ class TestGetAuthContext:
                     new_callable=AsyncMock,
                     return_value=True,
                 ),
-                patch("src.db.session.async_session_factory") as mock_sf,
+                patch("src.db.database_router.get_smart_db_session") as mock_sf,
                 patch("src.utils.user_context.UserContext") as mock_uc,
                 patch.dict(
                     os.environ,
@@ -1673,7 +1688,7 @@ class TestGetAuthContext:
                     new_callable=AsyncMock,
                     return_value=True,
                 ),
-                patch("src.db.session.async_session_factory") as mock_sf,
+                patch("src.db.database_router.get_smart_db_session") as mock_sf,
                 patch("src.utils.user_context.UserContext") as mock_uc,
                 patch.dict(os.environ, env_clean, clear=True),
                 patch.object(
@@ -1712,7 +1727,7 @@ class TestGetAuthContext:
                     new_callable=AsyncMock,
                     return_value=True,
                 ),
-                patch("src.db.session.async_session_factory") as mock_sf,
+                patch("src.db.database_router.get_smart_db_session") as mock_sf,
                 patch("src.utils.user_context.UserContext") as mock_uc,
                 patch.dict(
                     os.environ,
@@ -2469,7 +2484,8 @@ class TestPatLookupCache:
                     "src.services.settings.api_keys.ApiKeysService", return_value=svc
                 ),
                 patch(
-                    "src.db.session.async_session_factory", return_value=mock_session
+                    "src.db.database_router.get_smart_db_session",
+                    side_effect=lambda *a, **k: _one_session(mock_session),
                 ),
                 patch("src.utils.encryption_utils.EncryptionUtils") as mock_enc,
             ):
@@ -2503,7 +2519,8 @@ class TestPatLookupCache:
                     "src.services.settings.api_keys.ApiKeysService", return_value=svc
                 ),
                 patch(
-                    "src.db.session.async_session_factory", return_value=mock_session
+                    "src.db.database_router.get_smart_db_session",
+                    side_effect=lambda *a, **k: _one_session(mock_session),
                 ),
             ):
                 r1 = await get_auth_context(group_id="grp-none")
@@ -2533,7 +2550,8 @@ class TestPatLookupCache:
                     "src.services.settings.api_keys.ApiKeysService", return_value=svc
                 ),
                 patch(
-                    "src.db.session.async_session_factory", return_value=mock_session
+                    "src.db.database_router.get_smart_db_session",
+                    side_effect=lambda *a, **k: _one_session(mock_session),
                 ),
                 patch("src.utils.encryption_utils.EncryptionUtils") as mock_enc,
             ):

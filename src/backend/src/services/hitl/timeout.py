@@ -81,13 +81,19 @@ class HITLTimeoutService:
         3. Applies the configured timeout action (auto_reject or fail)
         4. Sends webhook notifications for timeouts
         """
-        from src.db.session import async_session_factory
+        from src.db.database_router import get_smart_db_session
         from src.repositories.hitl_repository import HITLApprovalRepository
         from src.services.hitl.service import HITLService
         from src.services.hitl.webhook import HITLWebhookService
 
         try:
-            async with async_session_factory() as session:
+            # Router-aware: HITL approvals live in Lakebase when it is enabled, and
+            # the raw async_session_factory is a snapshot that only points there if
+            # activate_lakebase() ran in this process (boot or subprocess, never a
+            # runtime /lakebase/enable). On the wrong database this sweep finds no
+            # expired approvals, so a timed-out approval is never actioned and its
+            # run waits forever — a silent hang, not an error.
+            async for session in get_smart_db_session():
                 approval_repo = HITLApprovalRepository(session)
                 hitl_service = HITLService(session, approval_repository=approval_repo)
                 webhook_service = HITLWebhookService(session)
@@ -96,7 +102,8 @@ class HITLTimeoutService:
                 expired_approvals = await approval_repo.get_expired_pending()
 
                 if not expired_approvals:
-                    return
+                    # break, not return — see the note on the loop above.
+                    break
 
                 logger.info(f"Found {len(expired_approvals)} expired HITL approvals")
 

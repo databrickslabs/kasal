@@ -435,10 +435,11 @@ class DatabricksAuth:
 
             # Try to load workspace host from database configuration
             try:
-                from src.db.session import async_session_factory
+                from src.db.database_router import get_smart_db_session
                 from src.services.databricks.workspace.service import DatabricksService
 
-                async with async_session_factory() as session:
+                # Router-aware for the same reason as the PAT lookup below.
+                async for session in get_smart_db_session():
                     service = DatabricksService(session)
 
                     try:
@@ -1192,7 +1193,7 @@ async def get_auth_context(
                 "[AUTH] Priority 2: Attempting PAT authentication from API Keys Service"
             )
             try:
-                from src.db.session import async_session_factory
+                from src.db.database_router import get_smart_db_session
                 from src.services.settings.api_keys import ApiKeysService
                 from src.utils.user_context import UserContext
 
@@ -1244,7 +1245,14 @@ async def get_auth_context(
                     logger.debug(
                         f"[AUTH PAT] Attempting to load PAT from database with group_id={gid}"
                     )
-                    async with async_session_factory() as session:
+                    # Router-aware: `apikey` lives in Lakebase when it is
+                    # enabled, and the raw async_session_factory is a per-process
+                    # snapshot that a runtime /lakebase/enable never updates. This
+                    # is the same bug class that made a configured Perplexity key
+                    # read as absent — the query succeeds against the wrong
+                    # database and returns nothing, so the caller reports "no PAT"
+                    # and silently degrades to environment variables.
+                    async for session in get_smart_db_session():
                         api_service = ApiKeysService(session, group_id=gid)
                         for key_name in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY"]:
                             try:

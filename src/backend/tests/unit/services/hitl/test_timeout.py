@@ -21,7 +21,7 @@ from src.services.hitl.timeout import (
 
 # The imports in _check_expired_approvals are local (lazy), so we must
 # patch them at their *origin* modules rather than on the timeout service module.
-_PATCH_SESSION_FACTORY = "src.db.session.async_session_factory"
+_PATCH_SESSION_FACTORY = "src.db.database_router.get_smart_db_session"
 _PATCH_APPROVAL_REPO = "src.repositories.hitl_repository.HITLApprovalRepository"
 _PATCH_HITL_SERVICE = "src.services.hitl.service.HITLService"
 _PATCH_WEBHOOK_SERVICE = "src.services.hitl.webhook.HITLWebhookService"
@@ -62,11 +62,12 @@ def mock_session_factory(mock_session):
     So we build an object whose __call__ returns an async context manager
     that yields mock_session.
     """
-    ctx = AsyncMock()
-    ctx.__aenter__ = AsyncMock(return_value=mock_session)
-    ctx.__aexit__ = AsyncMock(return_value=False)
+    async def _gen():
+        yield mock_session
 
-    factory = MagicMock(return_value=ctx)
+    # Async generator, not a context manager: the service consumes the router's
+    # `async for session in get_smart_db_session()`.
+    factory = MagicMock(side_effect=lambda *a, **k: _gen())
     return factory
 
 

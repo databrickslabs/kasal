@@ -34,12 +34,14 @@ def _build_async_session_context(repo_mock):
     """
     session_mock = AsyncMock()
 
-    # Make the context manager for `async with async_session_factory() as db:`
-    ctx = AsyncMock()
-    ctx.__aenter__ = AsyncMock(return_value=session_mock)
-    ctx.__aexit__ = AsyncMock(return_value=False)
+    # The code consumes an async GENERATOR now (`async for db in
+    # get_smart_db_session()`), not a context manager, so the fake has to yield.
+    # The router is what decides Lakebase vs local per call — see
+    # services/execution/cleanup.py for why the raw factory could not be kept.
+    async def _fake_session_gen():
+        yield session_mock
 
-    factory_mock = MagicMock(return_value=ctx)
+    factory_mock = MagicMock(side_effect=lambda *a, **k: _fake_session_gen())
     return factory_mock, session_mock
 
 
@@ -61,7 +63,7 @@ class TestCleanupStaleJobsOnStartup:
 
         with (
             patch(
-                "src.services.execution.cleanup.async_session_factory",
+                "src.services.execution.cleanup.get_smart_db_session",
                 factory_mock,
             ),
             patch(
@@ -99,7 +101,7 @@ class TestCleanupStaleJobsOnStartup:
 
         with (
             patch(
-                "src.services.execution.cleanup.async_session_factory",
+                "src.services.execution.cleanup.get_smart_db_session",
                 factory_mock,
             ),
             patch(
@@ -140,7 +142,7 @@ class TestCleanupStaleJobsOnStartup:
 
         with (
             patch(
-                "src.services.execution.cleanup.async_session_factory",
+                "src.services.execution.cleanup.get_smart_db_session",
                 factory_mock,
             ),
             patch(
@@ -171,7 +173,7 @@ class TestCleanupStaleJobsOnStartup:
 
         with (
             patch(
-                "src.services.execution.cleanup.async_session_factory",
+                "src.services.execution.cleanup.get_smart_db_session",
                 factory_mock,
             ),
             patch(
@@ -199,7 +201,7 @@ class TestCleanupStaleJobsOnStartup:
 
         with (
             patch(
-                "src.services.execution.cleanup.async_session_factory",
+                "src.services.execution.cleanup.get_smart_db_session",
                 factory_mock,
             ),
             patch(
@@ -225,7 +227,7 @@ class TestCleanupStaleJobsOnStartup:
 
         with (
             patch(
-                "src.services.execution.cleanup.async_session_factory",
+                "src.services.execution.cleanup.get_smart_db_session",
                 factory_mock,
             ),
             patch(
@@ -251,7 +253,7 @@ class TestCleanupStaleJobsOnStartup:
         factory_mock.return_value = ctx
 
         with patch(
-            "src.services.execution.cleanup.async_session_factory",
+            "src.services.execution.cleanup.get_smart_db_session",
             factory_mock,
         ):
             result = await ExecutionCleanupService.cleanup_stale_jobs_on_startup()
@@ -270,7 +272,7 @@ class TestCleanupStaleJobsOnStartup:
 
         with (
             patch(
-                "src.services.execution.cleanup.async_session_factory",
+                "src.services.execution.cleanup.get_smart_db_session",
                 factory_mock,
             ),
             patch(
@@ -301,7 +303,7 @@ class TestCleanupStaleJobsOnStartup:
 
         with (
             patch(
-                "src.services.execution.cleanup.async_session_factory",
+                "src.services.execution.cleanup.get_smart_db_session",
                 factory_mock,
             ),
             patch(
@@ -325,7 +327,7 @@ class TestCleanupStaleJobsOnStartup:
 
         with (
             patch(
-                "src.services.execution.cleanup.async_session_factory",
+                "src.services.execution.cleanup.get_smart_db_session",
                 factory_mock,
             ),
             patch(
@@ -350,7 +352,7 @@ class TestCleanupStaleJobsOnStartup:
 
         with (
             patch(
-                "src.services.execution.cleanup.async_session_factory",
+                "src.services.execution.cleanup.get_smart_db_session",
                 factory_mock,
             ),
             patch(
@@ -380,7 +382,7 @@ class TestCleanupStaleJobsOnStartup:
 
         with (
             patch(
-                "src.services.execution.cleanup.async_session_factory",
+                "src.services.execution.cleanup.get_smart_db_session",
                 factory_mock,
             ),
             patch(
@@ -407,7 +409,7 @@ class TestCleanupStaleJobsOnStartup:
 
         with (
             patch(
-                "src.services.execution.cleanup.async_session_factory",
+                "src.services.execution.cleanup.get_smart_db_session",
                 factory_mock,
             ),
             patch(
@@ -440,7 +442,7 @@ class TestCleanupStaleJobsOnStartup:
 
         with (
             patch(
-                "src.services.execution.cleanup.async_session_factory",
+                "src.services.execution.cleanup.get_smart_db_session",
                 factory_mock,
             ),
             patch(
@@ -474,7 +476,7 @@ class TestGetStaleJobs:
 
         with (
             patch(
-                "src.services.execution.cleanup.async_session_factory",
+                "src.services.execution.cleanup.get_smart_db_session",
                 factory_mock,
             ),
             patch(
@@ -501,7 +503,7 @@ class TestGetStaleJobs:
 
         with (
             patch(
-                "src.services.execution.cleanup.async_session_factory",
+                "src.services.execution.cleanup.get_smart_db_session",
                 factory_mock,
             ),
             patch(
@@ -524,7 +526,7 @@ class TestGetStaleJobs:
 
         with (
             patch(
-                "src.services.execution.cleanup.async_session_factory",
+                "src.services.execution.cleanup.get_smart_db_session",
                 factory_mock,
             ),
             patch(
@@ -546,7 +548,7 @@ class TestGetStaleJobs:
 
         with (
             patch(
-                "src.services.execution.cleanup.async_session_factory",
+                "src.services.execution.cleanup.get_smart_db_session",
                 factory_mock,
             ),
             patch(
@@ -569,7 +571,7 @@ class TestGetStaleJobs:
 
         with (
             patch(
-                "src.services.execution.cleanup.async_session_factory",
+                "src.services.execution.cleanup.get_smart_db_session",
                 factory_mock,
             ),
             patch(
@@ -592,7 +594,7 @@ class TestGetStaleJobs:
 
         with (
             patch(
-                "src.services.execution.cleanup.async_session_factory",
+                "src.services.execution.cleanup.get_smart_db_session",
                 factory_mock,
             ),
             patch(
@@ -618,7 +620,7 @@ class TestGetStaleJobs:
 
         with (
             patch(
-                "src.services.execution.cleanup.async_session_factory",
+                "src.services.execution.cleanup.get_smart_db_session",
                 factory_mock,
             ),
             patch(
@@ -640,7 +642,7 @@ class TestGetStaleJobs:
         factory_mock.return_value = ctx
 
         with patch(
-            "src.services.execution.cleanup.async_session_factory",
+            "src.services.execution.cleanup.get_smart_db_session",
             factory_mock,
         ):
             result = await ExecutionCleanupService.get_stale_jobs()
@@ -659,7 +661,7 @@ class TestGetStaleJobs:
 
         with (
             patch(
-                "src.services.execution.cleanup.async_session_factory",
+                "src.services.execution.cleanup.get_smart_db_session",
                 factory_mock,
             ),
             patch(
@@ -689,7 +691,7 @@ class TestGetStaleJobs:
 
         with (
             patch(
-                "src.services.execution.cleanup.async_session_factory",
+                "src.services.execution.cleanup.get_smart_db_session",
                 factory_mock,
             ),
             patch(

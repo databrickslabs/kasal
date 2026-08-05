@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from src.config.settings import settings
 from src.core.exceptions import BadRequestError, KasalError, NotFoundError
 from src.core.logger import LoggerManager
-from src.db.session import async_session_factory
+from src.db.database_router import get_smart_db_session
 from src.models.execution_history import ExecutionHistory as Run
 from src.repositories.execution_history_repository import ExecutionHistoryRepository
 from src.repositories.schedule_repository import ScheduleRepository
@@ -537,14 +537,21 @@ class SchedulerService:
             model = config.model or DEFAULT_ENGINE_MODEL
             execution_type = getattr(config, "execution_type", "crew") or "crew"
 
-            # Setup async session
-            async with async_session_factory() as session:
+            # Router-aware, not the raw factory: `schedules` lives in Lakebase
+            # when it is enabled, and the raw async_session_factory is a snapshot
+            # that only points there if activate_lakebase() ran in this process
+            # (boot or subprocess — never a runtime /lakebase/enable). Reading the
+            # wrong database here means the schedule is "not found" and the run is
+            # skipped silently.
+            async for session in get_smart_db_session():
                 # Get the schedule to retrieve group information
                 repo = ScheduleRepository(session)
                 schedule = await repo.find_by_id(schedule_id)
                 if not schedule:
                     logger_manager.scheduler.error(f"Schedule {schedule_id} not found")
-                    return
+                    # break, not return: a return would abandon the session
+                    # generator before it commits and closes.
+                    break
 
                 # Generate run name based on execution type
                 execution_service = ExecutionService()
@@ -701,7 +708,7 @@ class SchedulerService:
             )
             try:
                 # Update schedule even if job fails
-                async with async_session_factory() as error_session:
+                async for error_session in get_smart_db_session():
                     repo = ScheduleRepository(error_session)
                     await repo.update_after_execution(schedule_id, execution_time)
                     await error_session.commit()
@@ -734,8 +741,10 @@ class SchedulerService:
                     f"Currently running tasks: {len(self._running_tasks)}"
                 )
 
-                # Find due schedules
-                async with async_session_factory() as session:
+                # Find due schedules. Same router as the write above, or the
+                # poller reads a table nothing is updating and no schedule ever
+                # appears due.
+                async for session in get_smart_db_session():
                     repo = ScheduleRepository(session)
                     # Convert timezone-aware now_utc to timezone-naive for database comparison
                     due_schedules = await repo.find_due_schedules(

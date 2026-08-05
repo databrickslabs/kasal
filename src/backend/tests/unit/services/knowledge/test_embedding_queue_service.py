@@ -20,7 +20,7 @@ from src.services.knowledge.embedding_queue import EmbeddingQueueService
 # _batch_insert and _insert_with_retry import async_session_factory and
 # DocumentationEmbeddingRepository locally (inside the method), so patching
 # must target the *source* module, not the service module namespace.
-_SESSION_FACTORY = "src.db.session.async_session_factory"
+_SESSION_FACTORY = "src.db.database_router.get_smart_db_session"
 _DOC_EMBEDDING_REPO = "src.repositories.documentation_embedding_repository.DocumentationEmbeddingRepository"
 _LOGGER = "src.services.knowledge.embedding_queue.logger"
 
@@ -37,11 +37,18 @@ def _make_service(**overrides) -> EmbeddingQueueService:
 
 
 def _mock_async_session_ctx(mock_session):
-    """Build an async-context-manager mock that yields *mock_session*."""
-    ctx = AsyncMock()
-    ctx.__aenter__ = AsyncMock(return_value=mock_session)
-    ctx.__aexit__ = AsyncMock(return_value=False)
-    return ctx
+    """An async GENERATOR yielding *mock_session*.
+
+    The queue writes through get_smart_db_session (the router) so embeddings land
+    in the same database the search reads. Call sites patch with
+    `return_value=...`, so this returns the generator itself — the patched
+    function IS the callable.
+    """
+
+    async def _gen():
+        yield mock_session
+
+    return _gen()
 
 
 # ===================================================================
@@ -469,8 +476,14 @@ class TestEmbeddingQueueServiceInsertWithRetry:
         mock_repo = MagicMock()
         mock_repo.insert_raw = AsyncMock()
 
+        # A generator is single-use, and this test drives THREE retry attempts —
+        # so each attempt needs a fresh one. `return_value` would hand the same
+        # exhausted generator back and attempts 2 and 3 would do nothing.
+        async def _fresh_gen(*_a, **_k):
+            yield mock_session
+
         with (
-            patch(_SESSION_FACTORY, return_value=mock_session_ctx),
+            patch(_SESSION_FACTORY, side_effect=lambda *a, **k: _fresh_gen()),
             patch(_DOC_EMBEDDING_REPO, return_value=mock_repo) as mock_repo_cls,
             patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
             patch(_LOGGER) as mock_logger,

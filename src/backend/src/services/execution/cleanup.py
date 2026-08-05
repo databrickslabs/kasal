@@ -3,13 +3,26 @@ Execution Cleanup Service.
 
 This service handles cleanup of orphaned/stale job executions
 that may occur when the service is restarted while jobs are running.
+
+Every read here goes through ``get_smart_db_session`` rather than the raw
+``async_session_factory``. Both tables it touches — ``executionhistory`` and
+``execution_trace`` — live in Lakebase when Lakebase is enabled, and the raw
+factory is a SNAPSHOT: it points at Lakebase only if ``activate_lakebase()`` ran
+in THIS process, which happens at boot or in a subprocess but NEVER on a runtime
+``/lakebase/enable``. Enable without restarting and this service reads a database
+the crew subprocesses are not writing to.
+
+That failure is silent and it inverts the service's purpose: the startup sweep
+would find no stale jobs to clean, and ``recover_completed_jobs`` — which exists
+to catch a crew that finished while its status write failed — would find no
+completion traces and leave every such run stuck at RUNNING forever.
 """
 
 import json
 import logging
 from typing import List, Optional
 
-from src.db.session import async_session_factory
+from src.db.database_router import get_smart_db_session
 from src.models.execution_status import ExecutionStatus
 from src.repositories.execution_history_repository import ExecutionHistoryRepository
 from src.repositories.execution_repository import ExecutionRepository
@@ -40,7 +53,7 @@ class ExecutionCleanupService:
 
             cleaned_count = 0
 
-            async with async_session_factory() as db:
+            async for db in get_smart_db_session():
                 repo = ExecutionRepository(db)
 
                 # Get all "active" jobs - they can't be truly active since we just started
@@ -92,7 +105,7 @@ class ExecutionCleanupService:
         """
         recovered = 0
         try:
-            async with async_session_factory() as db:
+            async for db in get_smart_db_session():
                 history_repo = ExecutionHistoryRepository(db)
                 running_job_ids = await history_repo.get_job_ids_by_statuses(
                     ["RUNNING"]
@@ -100,7 +113,7 @@ class ExecutionCleanupService:
 
             for job_id in running_job_ids:
                 # Check whether the crew actually completed
-                async with async_session_factory() as db:
+                async for db in get_smart_db_session():
                     trace_repo = ExecutionTraceRepository(db)
                     found, output = await trace_repo.has_completed_trace(
                         job_id, "crew_completed"
@@ -153,7 +166,7 @@ class ExecutionCleanupService:
 
             stale_job_ids = []
 
-            async with async_session_factory() as db:
+            async for db in get_smart_db_session():
                 repo = ExecutionRepository(db)
 
                 stale_jobs, _ = await repo.get_execution_history(

@@ -21,7 +21,7 @@ from typing import Dict, Optional, Set
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.sse_manager import SSEEvent, sse_manager
-from src.db.session import async_session_factory
+from src.db.database_router import get_smart_db_session
 from src.repositories.execution_history_repository import ExecutionHistoryRepository
 
 logger = logging.getLogger(__name__)
@@ -110,7 +110,13 @@ class ExecutionBroadcastService:
         if not active_jobs:
             return
 
-        async with async_session_factory() as session:
+        # Router-aware, not the raw factory. `executionhistory` lives in Lakebase
+        # when Lakebase is enabled, and the snapshot factory only points there if
+        # activate_lakebase() ran in THIS process — at boot or in a subprocess,
+        # never on a runtime /lakebase/enable. Enable without a restart and this
+        # poller reads a different database than the crew subprocess writes to, so
+        # the UI's status never advances while the run completes normally.
+        async for session in get_smart_db_session():
             # Clean up jobs that are no longer active
             tracked_jobs = set(self._last_statuses.keys())
             for job_id in tracked_jobs - active_jobs:
