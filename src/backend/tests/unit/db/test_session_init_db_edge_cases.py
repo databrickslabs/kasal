@@ -429,9 +429,11 @@ class TestEnsureDatabricksConfigColumns:
             side_effect=[_make_pragma_result(["id", "workspace_url"]), MagicMock()]
         )
 
-        with patch("src.db.session.settings") as mock_settings:
-            mock_settings.DATABASE_URI = "sqlite+aiosqlite:///test.db"
-            await _ensure_databricks_config_columns(conn)
+        # The dialect comes from the CONNECTION now, not settings.DATABASE_URI:
+        # the Lakebase self-heal runs while DATABASE_URI still reads "sqlite",
+        # which made these helpers issue SQLite DDL at PostgreSQL.
+        conn.engine.dialect.name = "sqlite"
+        await _ensure_databricks_config_columns(conn)
 
         sql_calls = [c.args[0] for c in conn.exec_driver_sql.await_args_list]
         assert sql_calls[0] == "PRAGMA table_info(databricksconfig)"
@@ -452,9 +454,11 @@ class TestEnsureDatabricksConfigColumns:
             )
         )
 
-        with patch("src.db.session.settings") as mock_settings:
-            mock_settings.DATABASE_URI = "sqlite+aiosqlite:///test.db"
-            await _ensure_databricks_config_columns(conn)
+        # The dialect comes from the CONNECTION now, not settings.DATABASE_URI:
+        # the Lakebase self-heal runs while DATABASE_URI still reads "sqlite",
+        # which made these helpers issue SQLite DDL at PostgreSQL.
+        conn.engine.dialect.name = "sqlite"
+        await _ensure_databricks_config_columns(conn)
 
         # Only the PRAGMA was issued; no ALTER.
         assert conn.exec_driver_sql.await_count == 1
@@ -469,9 +473,11 @@ class TestEnsureDatabricksConfigColumns:
         conn = MagicMock()
         conn.exec_driver_sql = AsyncMock(return_value=_make_pragma_result([]))
 
-        with patch("src.db.session.settings") as mock_settings:
-            mock_settings.DATABASE_URI = "sqlite+aiosqlite:///test.db"
-            await _ensure_databricks_config_columns(conn)
+        # The dialect comes from the CONNECTION now, not settings.DATABASE_URI:
+        # the Lakebase self-heal runs while DATABASE_URI still reads "sqlite",
+        # which made these helpers issue SQLite DDL at PostgreSQL.
+        conn.engine.dialect.name = "sqlite"
+        await _ensure_databricks_config_columns(conn)
 
         assert conn.exec_driver_sql.await_count == 1
 

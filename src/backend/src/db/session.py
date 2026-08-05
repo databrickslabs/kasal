@@ -700,6 +700,33 @@ sync_session_factory = sync_sessionmaker(
 
 
 # Database initialization
+def _conn_is_sqlite(conn) -> bool:
+    """Whether THIS connection is SQLite — asked of the connection, not the env.
+
+    Every ``_ensure_*`` helper branches on dialect, and reading
+    ``settings.DATABASE_URI`` to decide is wrong on the path that matters most.
+    ``run_schema_self_heal`` is called TWICE: once in ``init_db`` against the
+    local engine, and again from the ``main.py`` lifespan against the freshly
+    activated LAKEBASE engine. On that second call ``DATABASE_URI`` still says
+    ``sqlite`` — it describes the configured default, not the connection in hand —
+    so the helpers took the SQLite branch and issued SQLite-flavoured DDL at
+    PostgreSQL.
+
+    The failure was invisible because each helper swallows its exception with a
+    warning. Columns added BEFORE a Lakebase was provisioned were unaffected
+    (``create_all`` had made the whole table), so this stayed latent until the
+    first column added AFTER one existed: `modelconfig.thinking_budget_tokens`
+    never landed, and every read of the model catalogue — which is every LLM call
+    — 500'd with "column modelconfig.thinking_budget_tokens does not exist".
+
+    Asking the connection removes the coupling entirely.
+    """
+    try:
+        return conn.engine.dialect.name == "sqlite"
+    except Exception:  # noqa: BLE001 — fall back to the configured default
+        return str(settings.DATABASE_URI).startswith("sqlite")
+
+
 async def _ensure_documentation_embeddings_columns(conn) -> None:
     """Idempotently add group_id/file_path to documentation_embeddings.
 
@@ -708,7 +735,7 @@ async def _ensure_documentation_embeddings_columns(conn) -> None:
     built-in doc seeding, and group-scoped search (all reference the columns).
     Safe to run on every startup; the embedding column is unchanged here.
     """
-    is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")
+    is_sqlite = _conn_is_sqlite(conn)
     try:
         if is_sqlite:
             res = await conn.exec_driver_sql(
@@ -942,7 +969,7 @@ async def _ensure_chat_sessions_columns(conn) -> None:
     saving/reading previews and the running-job marker. Safe to run every
     startup; all columns are nullable with no default.
     """
-    is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")
+    is_sqlite = _conn_is_sqlite(conn)
     columns = [
         ("running_job_id", "VARCHAR"),
         ("preview_type", "VARCHAR(50)"),
@@ -980,7 +1007,7 @@ async def _ensure_agent_columns(conn) -> None:
     column existed would accept the field from the UI and silently drop it on
     save — the failure reads as "my selection did not persist", with nothing
     anywhere saying why. All nullable, safe every startup."""
-    is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")
+    is_sqlite = _conn_is_sqlite(conn)
     # (name, sqlite type, postgres type)
     columns = [
         ("skills", "TEXT", "JSONB"),
@@ -1021,7 +1048,7 @@ async def _ensure_execution_history_columns(conn) -> None:
     migration for this too; this covers dev databases that were built from the
     models and have no alembic_version at all.
     """
-    is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")
+    is_sqlite = _conn_is_sqlite(conn)
     try:
         if is_sqlite:
             res = await conn.exec_driver_sql("PRAGMA table_info(executionhistory)")
@@ -1061,7 +1088,7 @@ async def _ensure_crew_columns(conn) -> None:
     self-healing deployed DB keeps the orphan columns harmlessly (nullable and no
     longer mapped), and running DROP COLUMN on every startup is riskier than
     leaving them behind."""
-    is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")
+    is_sqlite = _conn_is_sqlite(conn)
     try:
         if is_sqlite:
             res = await conn.exec_driver_sql("PRAGMA table_info(crews)")
@@ -1094,7 +1121,7 @@ async def _disable_bi_specialist_crew_memory(conn) -> None:
     is insert-only (it skips a group that already exists), so DBs seeded before
     this change keep memory on. This self-heals them. Safe to run every startup —
     it only flips rows that are still True, scoped to the bi-specialist group."""
-    is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")
+    is_sqlite = _conn_is_sqlite(conn)
     # SQLite stores booleans as 0/1; Postgres uses true/false. exec_driver_sql
     # with a literal keeps this dialect-agnostic enough for both.
     true_val = "1" if is_sqlite else "true"
@@ -1121,7 +1148,7 @@ async def _ensure_ui_config_columns(conn) -> None:
     created before catalog_json/style_json existed would silently drop a workspace's
     A2UI catalog + branding on save/reload. Safe to run every startup (nullable TEXT).
     """
-    is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")
+    is_sqlite = _conn_is_sqlite(conn)
     columns = ("catalog_json", "style_json")
     try:
         if is_sqlite:
@@ -1157,7 +1184,7 @@ async def _ensure_modelconfig_columns(conn) -> None:
     SQLite (it stores JSON as text anyway), and on PostgreSQL the native type is
     what the ORM expects to decode.
     """
-    is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")
+    is_sqlite = _conn_is_sqlite(conn)
     columns = [
         ("params", "JSON"),
         ("unsupported_params", "JSON"),
@@ -1338,7 +1365,7 @@ async def _ensure_databricks_config_columns(conn) -> None:
     the Databricks configuration. Safe to run on every startup; defaults to
     false (serving-endpoints routing) to preserve existing behavior.
     """
-    is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")
+    is_sqlite = _conn_is_sqlite(conn)
     try:
         if is_sqlite:
             res = await conn.exec_driver_sql("PRAGMA table_info(databricksconfig)")

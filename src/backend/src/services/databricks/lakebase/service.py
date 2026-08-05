@@ -74,6 +74,25 @@ def _validate_identifier(name: str, kind: str = "identifier") -> str:
     return name
 
 
+def _make_async_lakebase_engine(endpoint: str, pg_user: str, token: str) -> Any:
+    """Async engine for a Lakebase endpoint, scoped to the ``kasal`` schema.
+
+    ``search_path`` is set on the connection rather than qualifying every
+    statement, so unqualified DDL (which is what the schema self-heal and the
+    seeders emit) lands in ``kasal`` and not ``public``.
+    """
+    from sqlalchemy.ext.asyncio import create_async_engine as _create_async_engine
+
+    return _create_async_engine(
+        f"postgresql+asyncpg://{pg_user}:{token}@{endpoint}:5432/databricks_postgres",
+        echo=False,
+        connect_args={
+            "ssl": "require",
+            "server_settings": {"jit": "off", "search_path": "kasal"},
+        },
+    )
+
+
 class LakebaseService(BaseService):
     """Service for managing Databricks Lakebase instances."""
 
@@ -739,6 +758,19 @@ class LakebaseService(BaseService):
                 await self.schema_service.set_search_path_async(conn)
 
             await self.schema_service.create_tables_async(lakebase_engine)
+
+            # Reconcile COLUMNS too. create_tables_async is CREATE TABLE IF NOT
+            # EXISTS, so an already-present table keeps its existing column list
+            # and a column added to a model since provisioning never lands. Same
+            # reason the streaming path below does this; best-effort either way.
+            try:
+                from src.db.session import run_schema_self_heal
+
+                async with lakebase_engine.begin() as heal_conn:
+                    await run_schema_self_heal(heal_conn)
+            except Exception as heal_error:
+                logger.warning(f"Column reconcile skipped: {heal_error}")
+
             logger.info("-" * 60)
             logger.info("📤 Starting data migration...")
 
@@ -1059,6 +1091,38 @@ class LakebaseService(BaseService):
             ):
                 yield message
 
+            # Reconcile COLUMNS. The step above is CREATE TABLE IF NOT EXISTS: it
+            # adds missing tables but leaves an existing one untouched, columns
+            # included. Without this, running "Schema Only" against a schema that
+            # already exists reports success while a column added to a model after
+            # the instance was provisioned stays missing — which is how
+            # modelconfig.thinking_budget_tokens came to 500 every model-catalogue
+            # read on a live Lakebase.
+            yield {
+                "type": "progress",
+                "message": "🔧 Adding any missing columns...",
+                "step": "reconcile_columns",
+            }
+            try:
+                from src.db.session import run_schema_self_heal
+
+                lakebase_heal_engine = _make_async_lakebase_engine(
+                    endpoint, user_email, cred.token
+                )
+                try:
+                    async with lakebase_heal_engine.begin() as heal_conn:
+                        await run_schema_self_heal(heal_conn)
+                finally:
+                    await lakebase_heal_engine.dispose()
+                yield {"type": "success", "message": "✅ Columns up to date"}
+            except Exception as heal_error:
+                # Best-effort: a reconcile failure must not abort the migration.
+                logger.warning(f"Column reconcile skipped: {heal_error}")
+                yield {
+                    "type": "warning",
+                    "message": f"⚠️ Could not reconcile columns (non-critical): {heal_error}",
+                }
+
             # Check if we should migrate data
             if not migrate_data:
                 # Schema-only mode - skip data migration, but run seeders
@@ -1077,24 +1141,11 @@ class LakebaseService(BaseService):
                     from sqlalchemy.ext.asyncio import (
                         async_sessionmaker as _async_sessionmaker,
                     )
-                    from sqlalchemy.ext.asyncio import (
-                        create_async_engine as _create_async_engine,
-                    )
 
                     from src.seeds.seed_runner import run_seeders_with_factory
 
-                    # Create async engine for Lakebase with kasal search_path
-                    lakebase_async_engine = _create_async_engine(
-                        f"postgresql+asyncpg://{user_email}:{cred.token}@"
-                        f"{endpoint}:5432/databricks_postgres",
-                        echo=False,
-                        connect_args={
-                            "ssl": "require",
-                            "server_settings": {
-                                "jit": "off",
-                                "search_path": "kasal",
-                            },
-                        },
+                    lakebase_async_engine = _make_async_lakebase_engine(
+                        endpoint, user_email, cred.token
                     )
 
                     lakebase_seed_factory = _async_sessionmaker(
@@ -1923,9 +1974,21 @@ class LakebaseService(BaseService):
                 async with lakebase_engine.begin() as conn:
                     await self.schema_service.set_search_path_async(conn)
                 await self.schema_service.create_tables_async(lakebase_engine)
+                # create_tables_async is CREATE TABLE IF NOT EXISTS — it adds
+                # missing TABLES and nothing else. A table that already exists is
+                # left exactly as-is, including its column list, so a column added
+                # to a model after the instance was provisioned never lands here.
+                # That is not a hypothetical: modelconfig.thinking_budget_tokens
+                # was missing on a live Lakebase and 500'd every model-catalogue
+                # read while this path reported "schema expanded". The self-heal is
+                # the piece that reconciles COLUMNS (ADD COLUMN IF NOT EXISTS).
+                from src.db.session import run_schema_self_heal
+
+                async with lakebase_engine.begin() as conn:
+                    await run_schema_self_heal(conn)
                 logger.info(
-                    "Lakebase schema expanded on enable (missing tables/columns "
-                    "created non-destructively)"
+                    "Lakebase schema expanded on enable (missing tables AND "
+                    "columns created non-destructively)"
                 )
             finally:
                 await lakebase_engine.dispose()

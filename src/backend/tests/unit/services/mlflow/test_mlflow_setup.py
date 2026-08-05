@@ -1781,9 +1781,7 @@ class TestPostExecutionCleanupReal:
                 "src.services.mlflow.tracing.flush_async_logging",
                 AsyncMock(side_effect=RuntimeError("flush error")),
             ),
-            patch(
-                "src.services.mlflow.mlflow_setup.log_mlflow_state", MagicMock()
-            ),
+            patch("src.services.mlflow.mlflow_setup.log_mlflow_state", MagicMock()),
             patch(
                 "src.services.mlflow.mlflow_setup.capture_trace_and_update_execution",
                 AsyncMock(return_value=None),
@@ -1808,9 +1806,7 @@ class TestPostExecutionCleanupReal:
 
         with (
             patch("src.services.mlflow.tracing.flush_async_logging", AsyncMock()),
-            patch(
-                "src.services.mlflow.mlflow_setup.log_mlflow_state", MagicMock()
-            ),
+            patch("src.services.mlflow.mlflow_setup.log_mlflow_state", MagicMock()),
             patch(
                 "src.services.mlflow.mlflow_setup.capture_trace_and_update_execution",
                 AsyncMock(return_value=None),

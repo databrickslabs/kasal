@@ -1459,7 +1459,7 @@ const DatabaseManagement: React.FC = () => {
                                 <Box>
                                   <Typography variant="body2" fontWeight="bold">Schema Only</Typography>
                                   <Typography variant="caption" color="text.secondary">
-                                    Create empty tables without migrating data
+                                    Create missing tables and columns without migrating data. Existing data is preserved.
                                   </Typography>
                                 </Box>
                               }
@@ -1550,10 +1550,19 @@ const DatabaseManagement: React.FC = () => {
                                   loadDatabaseInfo().catch(() => {});
                                 }
                               } else {
-                                // Migrate schema+data or schema only
+                                // Migrate schema+data, or create the schema only.
+                                //
+                                // recreate_schema drives a DROP SCHEMA kasal CASCADE
+                                // on the backend, so it may only be true where the
+                                // user asked for a reset. 'schema_only' says "create
+                                // empty tables" and says nothing about dropping, so
+                                // it passes false: CREATE SCHEMA/TABLE IF NOT EXISTS
+                                // plus the column self-heal, all non-destructive.
+                                // It used to hardcode true and silently wipe an
+                                // existing schema.
                                 const migrateData = migrationOption === 'recreate';
                                 setSuccess(`Connected successfully! Starting ${migrateData ? 'schema & data migration' : 'schema creation'}...`);
-                                await migrateLakebase(true, migrateData);
+                                await migrateLakebase(migrateData, migrateData);
                               }
                             } catch (err: unknown) {
                               const errorMessage = isErrorWithResponse(err)
@@ -1759,16 +1768,20 @@ const DatabaseManagement: React.FC = () => {
               startIcon={<StorageIcon />}
               onClick={async () => {
                 setShowMigrationDialog(false);
-                await migrateLakebase(true, false);
+                // Non-destructive: create missing tables/columns, keep existing
+                // data. Only the primary button above resets the schema.
+                await migrateLakebase(false, false);
               }}
               sx={{ justifyContent: 'flex-start', py: 1.5, px: 2, textTransform: 'none' }}
             >
               <Box sx={{ textAlign: 'left' }}>
                 <Typography variant="body1" fontWeight="bold">
-                  {schemaExists ? 'Recreate Schema Only' : 'Schema Only'}
+                  {schemaExists ? 'Update Schema Only' : 'Schema Only'}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  Create empty tables without migrating data
+                  {schemaExists
+                    ? 'Add missing tables and columns, keeping existing data'
+                    : 'Create empty tables without migrating data'}
                 </Typography>
               </Box>
             </Button>
