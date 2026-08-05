@@ -23,6 +23,11 @@ from src.core.events.types import (
     LLMReasoningChunkEvent,
     LLMStreamChunkEvent,
 )
+from src.core.llm.model_capabilities import (
+    ReasoningStyle,
+    allowed_efforts,
+    reasoning_style,
+)
 
 from .base import BaseLLM
 from .budget import (
@@ -101,9 +106,7 @@ _TOOLS_REJECT_REASONING_EFFORT_RE = re.compile(r"(?:^|/)gpt-5\.6")
 #
 # EXCLUDED because they reject "enabled" and demand `{"type": "adaptive"}`
 # ('"thinking.type.enabled" is not supported for this model. Use
-# "thinking.type.adaptive"'), which accepts no budget_tokens and still returns an
-# EMPTY summary — nothing to set and nothing to show:
-#     opus-4-7, opus-4-8, opus-5, sonnet-5, fable-5
+# "thinking.type.adaptive"') — see _THINKING_ADAPTIVE_MODELS.
 #
 # Note opus-4-7/4-8 sit on the ADAPTIVE side despite being "4.x". A regex like
 # `claude-(opus|sonnet|haiku)-4-\d` looks right and is wrong: it would send
@@ -141,6 +144,40 @@ _THINKING_ADAPTIVE_MODELS = (
 )
 
 
+def thinking_mode(model_name: str | None) -> str | None:
+    """Which thinking surface ``model_name`` has: "manual", "adaptive" or None.
+
+    Answered from ``core.llm.model_capabilities`` — the measured per-model
+    registry — rather than from lists kept here, so the transport, the API that
+    tells the UI which control to render, and the request builder can never
+    disagree. The cost of disagreement is a 400 on a real run: sending a budget
+    to an adaptive model, or `enabled` to one that demands `adaptive`, is
+    rejected outright.
+
+    * "manual"   — takes `{"type": "enabled", "budget_tokens": N}` (Claude 4.1–4.6)
+    * "adaptive" — takes `{"type": "adaptive"}` plus an effort (Claude 4.7+/5/Fable)
+    * None       — no thinking surface; anything sent would be an error
+    """
+    style = reasoning_style(model_name)
+    if style is ReasoningStyle.ADAPTIVE_EFFORT:
+        return "adaptive"
+    if style is ReasoningStyle.TOKEN_BUDGET:
+        return "manual"
+    return None
+
+
+def valid_thinking_efforts(model_name: str | None) -> tuple[str, ...]:
+    """Effort values ``model_name`` accepts — per model, never a global list.
+
+    There are five distinct scales across the seeded catalogue (Anthropic
+    adaptive takes low..max; gpt-5 takes minimal..high but rejects "none";
+    gpt-5-1 takes "none" but rejects "minimal"; the 5-2/5-4/5-6 line adds
+    "xhigh"; Gemini takes only low/medium/high). A single constant would be wrong
+    for most of them, which is why this delegates to the registry.
+    """
+    return allowed_efforts(model_name)
+
+
 class OpenAICompletion(BaseLLM):
     llm_type: Literal["openai"] = "openai"
 
@@ -159,7 +196,17 @@ class OpenAICompletion(BaseLLM):
     #: its budget is `thinking: {"type": "enabled", "budget_tokens": N}`, and the
     #: endpoint enforces `max_tokens > budget_tokens`. Set to a token count to
     #: enable; None leaves the request untouched. See `_thinking_for`.
+    #:
+    #: Only MANUAL-mode models (Claude 4.1–4.6) use the number. On ADAPTIVE
+    #: models a non-None value means "thinking on" and the depth comes from
+    #: `thinking_effort` instead — they reject a budget outright.
     thinking_budget_tokens: int | None = None
+    #: Depth for ADAPTIVE thinking, sent as `output_config: {"effort": ...}`.
+    #: Ignored by manual-mode models, whose depth is the budget. Must be a value
+    #: THIS model accepts — the scales differ per model, so validate against
+    #: `model_capabilities.allowed_efforts(model)` rather than a global list.
+    #: None lets the endpoint apply its own default (currently "high").
+    thinking_effort: str | None = None
     api: Literal["completions", "responses"] = "completions"
     instructions: str | None = None
     store: bool | None = None
@@ -348,7 +395,27 @@ class OpenAICompletion(BaseLLM):
         model = str(self.model).lower()
 
         # Adaptive models: no budget, but `display` is what makes it visible.
+        # Depth is `output_config: {"effort": ...}` — a sibling of `thinking`,
+        # not a key inside it, so it is applied to `params` here.
         if any(name in model for name in _THINKING_ADAPTIVE_MODELS):
+            # Validated against THIS model's own accepted set, not a global list:
+            # the scales differ per model, so a value that is valid for one
+            # Anthropic model can 400 on another.
+            accepted = allowed_efforts(self.model)
+            effort = (self.thinking_effort or "").strip().lower()
+            if effort and effort in accepted:
+                body = dict(params.get("extra_body") or {})
+                output_config = dict(body.get("output_config") or {})
+                output_config["effort"] = effort
+                body["output_config"] = output_config
+                params["extra_body"] = body
+            elif effort:
+                logger.debug(
+                    "Ignoring effort %r for %s; it accepts %s",
+                    self.thinking_effort,
+                    self.model,
+                    accepted,
+                )
             return {"type": "adaptive", "display": "summarized"}
 
         if not any(name in model for name in _THINKING_BUDGET_MODELS):

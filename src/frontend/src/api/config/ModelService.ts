@@ -18,6 +18,17 @@ interface ApiModelResponse {
   // carried through convertApiResponseToModels or the Reasoning Effort control
   // reads it as undefined and disables itself for every model.
   supports_reasoning_effort?: boolean;
+  // Per-model capability, derived server-side from measured behaviour (backend
+  // core/llm/model_capabilities.py). Every one of these MUST be listed here and
+  // copied in convertApiResponseToModels: that function rebuilds each model
+  // field-by-field instead of spreading, so an unlisted field is dropped in
+  // transit and the capability-gated control it drives simply never renders.
+  thinking_mode?: 'manual' | 'adaptive' | null;
+  thinking_budget_tokens?: number | null;
+  reasoning_effort?: string | null;
+  allowed_efforts?: string[];
+  refused_params?: string[];
+  returns_thinking_text?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -151,6 +162,17 @@ export class ModelService {
         max_output_tokens: model.max_output_tokens,
         extended_thinking: model.extended_thinking,
         supports_reasoning_effort: model.supports_reasoning_effort === true,
+        // Per-model capability, derived server-side. Every field here must be
+        // carried explicitly: this object is rebuilt field-by-field rather than
+        // spread, so anything not listed is silently dropped in transit — the API
+        // sends it, the UI never sees it, and a capability-gated control simply
+        // never renders. That is exactly what happened when these were added.
+        thinking_mode: model.thinking_mode ?? null,
+        thinking_budget_tokens: model.thinking_budget_tokens ?? null,
+        reasoning_effort: model.reasoning_effort ?? null,
+        allowed_efforts: model.allowed_efforts ?? [],
+        refused_params: model.refused_params ?? [],
+        returns_thinking_text: model.returns_thinking_text === true,
         enabled: model.enabled !== false // Default to enabled if not specified
       };
     });
@@ -219,6 +241,17 @@ export class ModelService {
               context_window: 'context_window' in value ? Number(value.context_window) : undefined,
               max_output_tokens: 'max_output_tokens' in value ? Number(value.max_output_tokens) : undefined,
               extended_thinking: 'extended_thinking' in value ? Boolean(value.extended_thinking) : undefined,
+              // Capability fields, carried for the same reason as above.
+              thinking_mode: 'thinking_mode' in value ? (value.thinking_mode as 'manual' | 'adaptive' | null) : null,
+              thinking_budget_tokens: 'thinking_budget_tokens' in value && value.thinking_budget_tokens != null
+                ? Number(value.thinking_budget_tokens) : null,
+              reasoning_effort: 'reasoning_effort' in value && value.reasoning_effort != null
+                ? String(value.reasoning_effort) : null,
+              allowed_efforts: Array.isArray((value as Record<string, unknown>).allowed_efforts)
+                ? ((value as Record<string, unknown>).allowed_efforts as unknown[]).map(String) : [],
+              refused_params: Array.isArray((value as Record<string, unknown>).refused_params)
+                ? ((value as Record<string, unknown>).refused_params as unknown[]).map(String) : [],
+              returns_thinking_text: 'returns_thinking_text' in value ? Boolean(value.returns_thinking_text) : false,
               enabled: 'enabled' in value ? Boolean(value.enabled) : true,
               created_at: 'created_at' in value ? String(value.created_at) : new Date().toISOString(),
               updated_at: 'updated_at' in value ? String(value.updated_at) : new Date().toISOString()

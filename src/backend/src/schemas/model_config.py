@@ -42,6 +42,22 @@ class ModelConfigBase(BaseModel):
     extended_thinking: Optional[bool] = Field(
         False, description="Whether extended thinking is enabled"
     )
+    thinking_budget_tokens: Optional[int] = Field(
+        None,
+        description=(
+            "Thinking token budget for MANUAL-mode Anthropic models "
+            "(Claude 4.1-4.6). Ignored by adaptive models, which reject a "
+            "budget. Null uses the Kasal default when extended_thinking is on."
+        ),
+    )
+    reasoning_effort: Optional[str] = Field(
+        None,
+        description=(
+            "Thinking depth for ADAPTIVE-mode Anthropic models (Claude "
+            "4.7+/5/Fable): low | medium | high. Ignored by manual models, whose "
+            "depth is the budget. Null uses the endpoint's own default."
+        ),
+    )
     enabled: Optional[bool] = Field(True, description="Whether the model is enabled")
 
 
@@ -71,14 +87,58 @@ class ModelConfigResponse(ModelConfigBase):
     supports_reasoning_effort: bool = Field(
         False, description="Model accepts a native reasoning-effort budget"
     )
+    # Derived for the same reason: which Anthropic thinking control this model
+    # takes is a property of the model, and the two are mutually exclusive —
+    # sending a budget to an adaptive model, or `enabled` to one that requires
+    # `adaptive`, is a hard 400 on a real run. Computed from the transport's own
+    # model lists so the UI cannot offer a control the request would be rejected
+    # for, and cannot drift from the code that builds the request.
+    #   "manual"   -> show a Thinking Budget (tokens) field
+    #   "adaptive" -> show a Thinking Effort field
+    #   None       -> show neither; this model has no thinking surface
+    thinking_mode: Optional[str] = Field(
+        None, description="Anthropic thinking surface: 'manual', 'adaptive' or null"
+    )
+    # The effort values THIS model accepts, in increasing depth. Shipped rather
+    # than hardcoded in the frontend because there are FIVE distinct scales
+    # across the catalogue and a wrong value is a 400, not a warning: Anthropic
+    # adaptive takes low..max; gpt-5 takes minimal..high but rejects "none";
+    # gpt-5-1 takes "none" but rejects "minimal"; the 5-2/5-4/5-6 line adds
+    # "xhigh"; Gemini takes only low/medium/high. Empty = no effort control.
+    allowed_efforts: List[str] = Field(
+        default_factory=list, description="Effort values this model accepts"
+    )
+    # Sampling parameters this endpoint REJECTS. The UI must hide a control for
+    # each: the catalogue declared nothing for any model, which is why Edit Model
+    # offered `temperature` on claude-opus-5 — a model that answers it with a 400.
+    refused_params: List[str] = Field(
+        default_factory=list, description="Sampling parameters this model rejects"
+    )
+    # Whether the model's thinking TEXT can be displayed at all. False does not
+    # mean it does not reason: every gpt-5* reasons and bills for it, and simply
+    # never returns the trace over chat completions.
+    returns_thinking_text: bool = Field(
+        False, description="Thinking text is retrievable for this model"
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
     @model_validator(mode="after")
     def _derive_reasoning_support(self) -> "ModelConfigResponse":
+        from src.core.llm.model_capabilities import model_capability
+        from src.core.llm.transport.completion import thinking_mode
         from src.utils.model_config import model_supports_reasoning_effort
 
         self.supports_reasoning_effort = model_supports_reasoning_effort(self.key)
+        # Keyed off `name` (the SERVED model) with the catalogue key as a
+        # fallback: the key is a Kasal alias and can differ from what the
+        # endpoint is actually running (e.g. databricks-glm-5-2 -> system.ai.*).
+        self.thinking_mode = thinking_mode(self.name) or thinking_mode(self.key)
+        capability = model_capability(self.name) or model_capability(self.key)
+        if capability:
+            self.allowed_efforts = list(capability.efforts)
+            self.refused_params = list(capability.refuses)
+            self.returns_thinking_text = capability.returns_text
         return self
 
 

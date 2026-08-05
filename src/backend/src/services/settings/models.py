@@ -420,6 +420,15 @@ class ModelConfigService:
                         "context_window": model_config.context_window,
                         "max_output_tokens": model_config.max_output_tokens,
                         "extended_thinking": model_config.extended_thinking,
+                        # Thinking depth. Which one applies is the model's
+                        # property, not a choice — transport.thinking_mode()
+                        # decides, and the wrong one is a 400.
+                        "thinking_budget_tokens": getattr(
+                            model_config, "thinking_budget_tokens", None
+                        ),
+                        "reasoning_effort": getattr(
+                            model_config, "reasoning_effort", None
+                        ),
                         "enabled": model_config.enabled,
                         # The declared sampling surface. `ModelConfig.params` /
                         # `.unsupported_params` exist, the resolver
@@ -528,6 +537,8 @@ class ModelConfigService:
             "context_window": m.context_window,
             "max_output_tokens": m.max_output_tokens,
             "extended_thinking": getattr(m, "extended_thinking", False),
+            "thinking_budget_tokens": getattr(m, "thinking_budget_tokens", None),
+            "reasoning_effort": getattr(m, "reasoning_effort", None),
             "enabled": m.enabled,
             # See get_model_config: these two columns are the declared sampling
             # surface, and a dict that omits them silently disarms it. This

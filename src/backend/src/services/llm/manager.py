@@ -90,6 +90,36 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 
+def _refused_params(
+    model_config_dict: Dict[str, Any], served_model: Optional[str]
+) -> List[str]:
+    """Parameter names to strip before the request is built.
+
+    The union of two sources, and both are needed:
+
+    * ``ModelConfig.unsupported_params`` — the hand-declared list. It is the
+      escape hatch for an endpoint nobody has measured, and for a workspace whose
+      serving config differs from ours.
+    * ``core.llm.model_capabilities`` — MEASURED refusals. This is what makes the
+      filter real: the column was empty for all 63 seeded models, so the filter
+      existed and stripped nothing, and `temperature` went to claude-opus-5 as a
+      400 in production.
+
+    Union rather than either/or so a declaration can only ever ADD to what we
+    know, never quietly cancel a measured refusal.
+
+    Matched on the SERVED model name with the catalogue key as a fallback: the key
+    is a Kasal alias and can differ from what the endpoint runs.
+    """
+    from src.core.llm.model_capabilities import refused_params
+
+    declared = model_config_dict.get("unsupported_params") or []
+    measured = refused_params(served_model) or refused_params(
+        model_config_dict.get("key")
+    )
+    return sorted({str(name) for name in declared} | set(measured))
+
+
 # The subprocess OBO token fallback lives in core/llm/subprocess_token.py — it is
 # process state that usage telemetry reads, and telemetry must not import this
 # module to get at it. Re-exported here for the existing call sites.
@@ -940,7 +970,7 @@ class LLMManager:
             llm_params.update(
                 resolve_llm_params(
                     model_config_dict.get("params"),
-                    unsupported=model_config_dict.get("unsupported_params"),
+                    unsupported=_refused_params(model_config_dict, model_name_value),
                 )
             )
             logger.info(
@@ -1088,7 +1118,7 @@ class LLMManager:
         llm_params.update(
             resolve_llm_params(
                 model_config_dict.get("params"),
-                unsupported=model_config_dict.get("unsupported_params"),
+                unsupported=_refused_params(model_config_dict, model_name_value),
             )
         )
 
@@ -1104,12 +1134,24 @@ class LLMManager:
         # (see _SUPPORTS_THINKING_BUDGET_RE); for anything else the transport
         # drops it, so setting it here is safe for every provider.
         if model_config_dict.get("extended_thinking"):
+            # `thinking_budget_tokens` doubles as the on-switch: the transport
+            # treats any positive value as "thinking on" and then picks the shape
+            # from the model. On adaptive models the number is unused (they reject
+            # a budget) and `thinking_effort` carries the depth instead.
             llm_params["thinking_budget_tokens"] = int(
-                os.getenv("KASAL_THINKING_BUDGET_TOKENS", "10240")
+                model_config_dict.get("thinking_budget_tokens")
+                or os.getenv("KASAL_THINKING_BUDGET_TOKENS", "10240")
             )
+            effort = model_config_dict.get("reasoning_effort")
+            if effort:
+                llm_params["thinking_effort"] = str(effort).strip().lower()
+            from src.core.llm.transport.completion import thinking_mode
+
             logger.info(
                 f"Extended thinking enabled for {prefixed_model} "
-                f"(budget_tokens={llm_params['thinking_budget_tokens']})"
+                f"(mode={thinking_mode(model_name_value)}, "
+                f"budget_tokens={llm_params['thinking_budget_tokens']}, "
+                f"effort={llm_params.get('thinking_effort') or 'endpoint default'})"
             )
 
         logger.info(f"Creating LLM with model: {prefixed_model}")

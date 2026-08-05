@@ -43,6 +43,7 @@ import PowerOffIcon from '@mui/icons-material/PowerOff';
 import { useTranslation } from 'react-i18next';
 import { ModelService } from '../../../api/config/ModelService';
 import { ModelConfig, Models } from '../../../types/config/models';
+import ThinkingFields from '../../Common/ThinkingFields';
 import { useModelConfig } from '../../../hooks/global/useModelConfig';
 import { useSnackbar } from 'notistack';
 
@@ -135,11 +136,19 @@ const ModelEditDialog: React.FC<ModelEditDialogProps> = ({
     setEditedModel(prev => prev ? { ...prev, [field]: value } : null);
   };
 
-  const handleBooleanChange = (field: 'extended_thinking') => (
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    setEditedModel(prev => prev ? { ...prev, [field]: e.target.checked } : null);
-  };
+  /**
+   * Whether this model accepts a sampling parameter, so a control for one it
+   * refuses is never rendered. `refused_params` is derived server-side from
+   * measured per-model capability (backend core/llm/model_capabilities.py) —
+   * refusals do NOT follow model families, so they cannot be inferred here:
+   * claude-sonnet-4-5 accepts `temperature` while claude-opus-5 rejects it, and
+   * every gpt-5* rejects all four sampling knobs plus `stop`.
+   *
+   * Defaults to accepted, which keeps every model that declares nothing behaving
+   * exactly as it did before this existed.
+   */
+  const acceptsParam = (param: string): boolean =>
+    !(editedModel?.refused_params ?? []).includes(param);
 
   const handleSave = () => {
     // Validate required fields
@@ -265,6 +274,11 @@ const ModelEditDialog: React.FC<ModelEditDialogProps> = ({
             {t('configuration.models.parameters', { defaultValue: 'Model Parameters' })}
           </Typography>
 
+          {/* Hidden when this endpoint refuses it. `refused_params` is derived
+              server-side from measured per-model capability, so the dialog can
+              no longer offer `temperature` on a model like claude-opus-5 that
+              answers it with a 400. */}
+          {acceptsParam('temperature') && (
           <TextField
             label={t('configuration.models.temperature', { defaultValue: 'Temperature' })}
             value={editedModel.temperature === undefined ? '' : editedModel.temperature}
@@ -281,6 +295,7 @@ const ModelEditDialog: React.FC<ModelEditDialogProps> = ({
             }}
             helperText={errors.temperature || t('configuration.models.temperatureHelp', { defaultValue: 'Controls randomness (0.0 to 2.0)' })}
           />
+          )}
 
           <TextField
             label={t('configuration.models.contextWindow', { defaultValue: 'Context Window' })}
@@ -316,16 +331,29 @@ const ModelEditDialog: React.FC<ModelEditDialogProps> = ({
             helperText={errors.max_output_tokens || t('configuration.models.maxOutputTokensHelp', { defaultValue: 'Maximum tokens to generate' })}
           />
 
-          <FormControlLabel
-            sx={{ mt: 1 }}
-            control={
-              <Switch
-                checked={!!editedModel.extended_thinking}
-                onChange={handleBooleanChange('extended_thinking')}
-                color="primary"
-              />
+          {/* Thinking controls, gated by what this model accepts: a token budget,
+              an effort level, or neither. The server decides which — see
+              backend core/llm/model_capabilities.py — because the two shapes are
+              mutually exclusive and the wrong one is a 400. */}
+          <ThinkingFields
+            thinkingMode={editedModel.thinking_mode}
+            allowedEfforts={editedModel.allowed_efforts}
+            returnsThinkingText={editedModel.returns_thinking_text}
+            enabled={!!editedModel.extended_thinking}
+            onEnabledChange={value =>
+              setEditedModel(prev => (prev ? { ...prev, extended_thinking: value } : null))
             }
-            label={t('configuration.models.extendedThinking', { defaultValue: 'Extended Thinking' })}
+            budgetTokens={editedModel.thinking_budget_tokens ?? null}
+            onBudgetTokensChange={value =>
+              setEditedModel(prev => (prev ? { ...prev, thinking_budget_tokens: value } : null))
+            }
+            effort={editedModel.reasoning_effort ?? null}
+            onEffortChange={value =>
+              setEditedModel(prev => (prev ? { ...prev, reasoning_effort: value } : null))
+            }
+            unsupportedHint={t('configuration.models.noThinking', {
+              defaultValue: 'This model exposes no thinking or reasoning-depth controls.',
+            })}
           />
         </Stack>
       </DialogContent>

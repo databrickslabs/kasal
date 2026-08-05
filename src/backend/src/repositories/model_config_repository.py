@@ -229,6 +229,12 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
                 existing_model.extended_thinking = model_data.get(
                     "extended_thinking", existing_model.extended_thinking
                 )
+                existing_model.thinking_budget_tokens = model_data.get(
+                    "thinking_budget_tokens", existing_model.thinking_budget_tokens
+                )
+                existing_model.reasoning_effort = model_data.get(
+                    "reasoning_effort", existing_model.reasoning_effort
+                )
                 existing_model.enabled = model_data.get(
                     "enabled", existing_model.enabled
                 )
@@ -246,6 +252,8 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
                     context_window=model_data.get("context_window"),
                     max_output_tokens=model_data.get("max_output_tokens"),
                     extended_thinking=model_data.get("extended_thinking", False),
+                    thinking_budget_tokens=model_data.get("thinking_budget_tokens"),
+                    reasoning_effort=model_data.get("reasoning_effort"),
                     enabled=model_data.get("enabled", True),
                     created_at=datetime.now().replace(tzinfo=None),
                     updated_at=datetime.now().replace(tzinfo=None),

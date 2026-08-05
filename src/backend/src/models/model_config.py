@@ -21,6 +21,15 @@ class ModelConfig(Base):
     context_window = Column(Integer)
     max_output_tokens = Column(Integer)
     extended_thinking = Column(Boolean, default=False)
+    #: Thinking depth, for the two Anthropic modes. Which one applies is a
+    #: property of the model, not a choice — `transport.thinking_mode()` decides,
+    #: and sending the wrong one is a 400:
+    #:   * "manual" models (Claude 4.1–4.6) use `thinking_budget_tokens`
+    #:   * "adaptive" models (Claude 4.7+/5/Fable) use `reasoning_effort`
+    #: Both NULL means "on with the endpoint's own default" once
+    #: `extended_thinking` is set. An agent may override either per run.
+    thinking_budget_tokens = Column(Integer, nullable=True)
+    reasoning_effort = Column(String, nullable=True)
     enabled = Column(Boolean, default=True)
 
     #: Sampling parameters sent with every request to this model.

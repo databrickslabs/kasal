@@ -65,6 +65,16 @@ export interface Agent {
   backstory: string;
   llm: string;
   temperature?: number;  // Temperature override (0-100, will be converted to 0.0-1.0 on backend)
+  /**
+   * Per-agent overrides of the model's thinking settings. Blank inherits the
+   * model row, exactly like `temperature`. Applied to the agent's own LLM by
+   * backend `services/execution/kernel/agent_builder._apply_thinking_overrides`,
+   * which still defers to the model's capability — so a budget set against a
+   * model that takes an effort level is carried but never sent, rather than
+   * 400-ing a run after someone swaps the model.
+   */
+  thinking_budget_tokens?: number;
+  thinking_effort?: string;
   tools: string[];
   /**
    * Agent Skills, BY NAME. A skill's name is its identity in the format — it

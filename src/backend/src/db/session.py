@@ -974,25 +974,38 @@ async def _ensure_chat_sessions_columns(conn) -> None:
 
 
 async def _ensure_agent_columns(conn) -> None:
-    """Idempotently add agents.skills. ``create_all`` never ALTERs an existing
-    table, so a database created before Agent Skills existed would accept the
-    field from the UI and silently drop it on save — the failure reads as "my
-    skill selection did not persist". Nullable JSON/TEXT, safe every startup."""
+    """Idempotently add the agents columns added after the table shipped.
+
+    ``create_all`` never ALTERs an existing table, so a database created before a
+    column existed would accept the field from the UI and silently drop it on
+    save — the failure reads as "my selection did not persist", with nothing
+    anywhere saying why. All nullable, safe every startup."""
     is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")
+    # (name, sqlite type, postgres type)
+    columns = [
+        ("skills", "TEXT", "JSONB"),
+        # Per-agent thinking overrides; NULL inherits the model row.
+        ("thinking_budget_tokens", "INTEGER", "INTEGER"),
+        ("reasoning_effort", "TEXT", "VARCHAR"),
+    ]
     try:
         if is_sqlite:
             res = await conn.exec_driver_sql("PRAGMA table_info(agents)")
             existing = {row[1] for row in res.fetchall()}
             if not existing:
                 return  # table not created yet (create_all handles fresh DBs)
-            if "skills" not in existing:
-                await conn.exec_driver_sql("ALTER TABLE agents ADD COLUMN skills TEXT")
-                logger.info("Added agents.skills column (SQLite self-heal)")
+            for name, sqlite_type, _pg_type in columns:
+                if name not in existing:
+                    await conn.exec_driver_sql(
+                        f"ALTER TABLE agents ADD COLUMN {name} {sqlite_type}"
+                    )
+                    logger.info(f"Added agents.{name} column (SQLite self-heal)")
         else:
-            await conn.exec_driver_sql(
-                "ALTER TABLE agents ADD COLUMN IF NOT EXISTS skills JSONB"
-            )
-            logger.info("Ensured agents.skills column")
+            for name, _sqlite_type, pg_type in columns:
+                await conn.exec_driver_sql(
+                    f"ALTER TABLE agents ADD COLUMN IF NOT EXISTS {name} {pg_type}"
+                )
+            logger.info("Ensured agents columns (skills, thinking overrides)")
     except Exception as e:
         logger.warning(f"Could not ensure agents.skills column: {e}")
 
@@ -1133,19 +1146,26 @@ async def _ensure_ui_config_columns(conn) -> None:
 
 
 async def _ensure_modelconfig_columns(conn) -> None:
-    """Idempotently add modelconfig.params + unsupported_params.
+    """Idempotently add the modelconfig columns added after the table shipped.
 
     ``create_all`` never ALTERs an existing table and Alembic does not run at
     startup here, so without this every database provisioned before these
     columns existed would raise on the first SELECT of the model catalogue —
-    which is every LLM call. Nullable JSON with no default, safe every startup.
+    which is every LLM call. All nullable with no default, safe every startup.
 
     JSON rather than TEXT: SQLAlchemy's JSON type reads a TEXT column fine on
     SQLite (it stores JSON as text anyway), and on PostgreSQL the native type is
     what the ORM expects to decode.
     """
     is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")
-    columns = [("params", "JSON"), ("unsupported_params", "JSON")]
+    columns = [
+        ("params", "JSON"),
+        ("unsupported_params", "JSON"),
+        # Anthropic thinking depth. Which of the two applies is decided by
+        # transport.thinking_mode(); see models/model_config.py.
+        ("thinking_budget_tokens", "INTEGER"),
+        ("reasoning_effort", "VARCHAR"),
+    ]
     try:
         if is_sqlite:
             res = await conn.exec_driver_sql("PRAGMA table_info(modelconfig)")

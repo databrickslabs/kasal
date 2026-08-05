@@ -104,6 +104,13 @@ class TestModelConfigModel:
             "params",
             "unsupported_params",
             "extended_thinking",
+            # Thinking depth. Which of the two applies is the MODEL's property,
+            # decided by core.llm.model_capabilities — a budget belongs to Claude
+            # 4.1-4.6, an effort level to 4.7+/5/Fable and the GPT-5/Gemini
+            # families, and sending the wrong one is a 400. Both are stored so a
+            # model swap cannot invalidate a saved row.
+            "thinking_budget_tokens",
+            "reasoning_effort",
             "enabled",
             "group_id",
             "created_by_email",
@@ -131,6 +138,13 @@ class TestModelConfigModel:
             "params",
             "unsupported_params",
             "extended_thinking",
+            # Thinking depth. Which of the two applies is the MODEL's property,
+            # decided by core.llm.model_capabilities — a budget belongs to Claude
+            # 4.1-4.6, an effort level to 4.7+/5/Fable and the GPT-5/Gemini
+            # families, and sending the wrong one is a 400. Both are stored so a
+            # model swap cannot invalidate a saved row.
+            "thinking_budget_tokens",
+            "reasoning_effort",
             "enabled",
             "group_id",
             "created_by_email",
@@ -169,6 +183,13 @@ class TestModelConfig:
             "params",
             "unsupported_params",
             "extended_thinking",
+            # Thinking depth. Which of the two applies is the MODEL's property,
+            # decided by core.llm.model_capabilities — a budget belongs to Claude
+            # 4.1-4.6, an effort level to 4.7+/5/Fable and the GPT-5/Gemini
+            # families, and sending the wrong one is a 400. Both are stored so a
+            # model swap cannot invalidate a saved row.
+            "thinking_budget_tokens",
+            "reasoning_effort",
             "enabled",
             "group_id",
             "created_by_email",

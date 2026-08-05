@@ -34,6 +34,15 @@ class Agent(Base):
     temperature = Column(
         Integer, nullable=True
     )  # Optional temperature override (0-100, will be converted to 0.0-1.0)
+    #: Per-agent overrides of the model's thinking settings. NULL inherits the
+    #: model row, the same contract as `temperature`. Which of the two applies is
+    #: the MODEL's property, not a choice here — a budget belongs to Claude
+    #: 4.1–4.6 and an effort level to 4.7+/5/Fable and the GPT-5/Gemini families,
+    #: and `core.llm.model_capabilities` is what decides. Storing both means a
+    #: model swap cannot invalidate a saved agent: the transport simply sends
+    #: whichever the new model accepts.
+    thinking_budget_tokens = Column(Integer, nullable=True)
+    reasoning_effort = Column(String, nullable=True)
     tools = Column(JSON, default=list, nullable=False)
     #: Agent Skills attached to this agent, BY NAME. Names rather than ids
     #: because a skill's name is its identity in the format — it must match the

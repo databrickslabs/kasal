@@ -102,6 +102,58 @@ def _apply_reasoning_effort(llm: Any, spec: Dict[str, Any], label: str = "") -> 
         logger.debug(f"Could not apply reasoning effort for agent {label}: {e}")
 
 
+def _apply_thinking_overrides(llm: Any, spec: Dict[str, Any], label: str = "") -> None:
+    """Let an AGENT override the model row's Anthropic thinking settings.
+
+    The model row is the workspace default; an agent states a value to override
+    just that knob and leaves it blank to inherit — the same contract as the
+    existing temperature override, so there is one rule to learn.
+
+    Model-aware by construction rather than by validation here: the transport's
+    ``_thinking_for`` picks the request shape from ``thinking_mode(model)``, so a
+    budget set against an adaptive model is carried but never sent, and an effort
+    set against a manual model is likewise ignored. That matters because sending
+    the wrong one is a hard 400 on a real run, and an agent spec can outlive the
+    model it was written for (a model swap must not start failing requests).
+
+    Never raises: a thinking preference must not be able to fail an execution.
+    """
+    if llm is None or isinstance(llm, str):
+        return
+    try:
+        budget = spec.get("thinking_budget_tokens")
+        if budget is not None:
+            llm.thinking_budget_tokens = int(budget)
+            logger.info(
+                f"Agent {label} overrides thinking budget: {int(budget)} tokens"
+            )
+        # Two names on purpose. The agent COLUMN is `reasoning_effort`, matching
+        # ModelConfig so the override reads like the thing it overrides; the
+        # transport attribute is `thinking_effort`, because on Anthropic it steers
+        # `thinking` rather than the `reasoning_effort` request field. Accept
+        # either from the spec so neither name has to win, and a payload built
+        # against one does not silently no-op.
+        effort = spec.get("reasoning_effort") or spec.get("thinking_effort")
+        if effort:
+            from src.core.llm.model_capabilities import allowed_efforts
+
+            # Validated against THIS model's accepted set: the scales differ per
+            # model (five distinct ones across the catalogue), so "high" being
+            # valid for one model says nothing about another.
+            accepted = allowed_efforts(getattr(llm, "model", None))
+            value = str(effort).strip().lower()
+            if value in accepted:
+                llm.thinking_effort = value
+                logger.info(f"Agent {label} overrides thinking effort: {value!r}")
+            else:
+                logger.info(
+                    f"Ignoring thinking effort {effort!r} for agent {label}; "
+                    f"model {getattr(llm, 'model', '?')} accepts {accepted or 'none'}"
+                )
+    except Exception as e:  # noqa: BLE001 — a preference must never fail a run
+        logger.debug(f"Could not apply thinking overrides for agent {label}: {e}")
+
+
 def _apply_reasoning_effort_unsafe(llm: Any, spec: Dict[str, Any], label: str) -> None:
     """Body of :func:`_apply_reasoning_effort`; see it for the contract."""
     from src.utils.model_config import (
@@ -247,6 +299,7 @@ async def build_agent_llm(
 
     # Reasoning = the model's native thinking budget, applied to the agent's own LLM.
     _apply_reasoning_effort(llm, spec, label=label)
+    _apply_thinking_overrides(llm, spec, label=label)
 
     # What this agent will actually run with, logged HERE so all three paths
     # report it identically — chat, crew and flow all reach this function, and

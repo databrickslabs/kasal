@@ -20,6 +20,23 @@ class AgentBase(BaseModel):
     temperature: Optional[int] = Field(
         default=None, ge=0, le=100, description="Temperature override (0-100)"
     )
+    thinking_budget_tokens: Optional[int] = Field(
+        default=None,
+        ge=1024,
+        description=(
+            "Thinking budget override for models that take one (Claude 4.1-4.6). "
+            "None inherits the model's value. Endpoint minimum is 1024."
+        ),
+    )
+    reasoning_effort: Optional[str] = Field(
+        default=None,
+        description=(
+            "Reasoning-depth override for models with an effort scale. Validated "
+            "against THAT model's accepted values at build time — the scales "
+            "differ per model, so 'high' being valid for one says nothing about "
+            "another. None inherits the model's value."
+        ),
+    )
     tools: List[Any] = Field(default_factory=list)
     #: Agent Skills, by name. See the model for why names rather than ids.
     #:
@@ -181,6 +198,23 @@ class AgentUpdate(BaseModel):
     llm: Optional[str] = None
     temperature: Optional[int] = Field(
         default=None, ge=0, le=100, description="Temperature override (0-100)"
+    )
+    thinking_budget_tokens: Optional[int] = Field(
+        default=None,
+        ge=1024,
+        description=(
+            "Thinking budget override for models that take one (Claude 4.1-4.6). "
+            "None inherits the model's value. Endpoint minimum is 1024."
+        ),
+    )
+    reasoning_effort: Optional[str] = Field(
+        default=None,
+        description=(
+            "Reasoning-depth override for models with an effort scale. Validated "
+            "against THAT model's accepted values at build time — the scales "
+            "differ per model, so 'high' being valid for one says nothing about "
+            "another. None inherits the model's value."
+        ),
     )
     tools: Optional[List[Any]] = None
     skills: Optional[List[str]] = None

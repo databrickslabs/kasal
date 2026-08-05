@@ -39,6 +39,7 @@ import SkillSelector from '../Common/SkillSelector';
 import { Agent, AgentFormProps, KnowledgeSource } from '../../types/workflow/agent';
 import { ModelService } from '../../api/config/ModelService';
 import { Models } from '../../types/config/models';
+import ThinkingFields from '../Common/ThinkingFields';
 import { PerplexityConfig, SerperConfig } from '../../types/workflow/config';
 
 import { GenerateService } from '../../api/workflow/GenerateService';
@@ -67,6 +68,14 @@ const DEFAULT_FALLBACK_MODEL = {
 
 type AgentFormData = Omit<Agent, 'id' | 'created_at'> & {
   id?: string;
+  /**
+   * Per-agent thinking overrides. Blank inherits the model's workspace default,
+   * the same contract as `temperature` above. Which one is settable depends on
+   * the selected model (`thinking_mode`): a token budget for Claude 4.1–4.6, an
+   * effort level for 4.7+/5/Fable and for the GPT-5 and Gemini families.
+   */
+  thinking_budget_tokens?: number;
+  thinking_effort?: string;
 };
 
 const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSaved, tools, isCreateMode }) => {
@@ -83,11 +92,6 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
   const [serperConfig, setSerperConfig] = useState<SerperConfig>({});
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
   const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
-  
-  // Function calling models are typically a subset - we'll filter for these
-  const functionCallingModels = Object.entries(models).filter(([_, model]) => 
-    model.provider === 'openai' || model.provider === 'anthropic'
-  );
   
   const [formData, setFormData] = useState<AgentFormData>(() => {
     // Get default memory backend config if not editing an existing agent
@@ -366,6 +370,26 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
       [field]: value
     }));
   };
+
+  /**
+   * The catalogue row for the model this agent is set to use.
+   *
+   * Every model-specific control below is gated on it, because what an endpoint
+   * accepts varies per model and does not follow families — claude-sonnet-4-5
+   * takes `temperature` while claude-opus-5 rejects it, and the two Anthropic
+   * thinking shapes (token budget vs effort level) are mutually exclusive.
+   * Offering the wrong control means a 400 at run time, so the capability fields
+   * (`refused_params`, `thinking_mode`, `allowed_efforts`) are derived
+   * server-side from the same registry that builds the request.
+   */
+  const selectedModel = formData.llm ? models[formData.llm] : undefined;
+
+  /**
+   * Whether the selected model accepts a sampling parameter. Defaults to true so
+   * a model that declares nothing behaves exactly as it did before this existed.
+   */
+  const selectedModelAcceptsParam = (param: string): boolean =>
+    !(selectedModel?.refused_params ?? []).includes(param);
 
 
   const handleToolsChange = (event: SelectChangeEvent<string[]>) => {
@@ -1061,6 +1085,14 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                       </Select>
                     </FormControl>
                   </Grid>
+                  {/* Gated on the SELECTED model. Offering an override for a
+                      parameter the endpoint refuses produces a failed run, not a
+                      fallback: claude-opus-5 and every gpt-5* reject
+                      `temperature` outright. `refused_params` is derived
+                      server-side from measured capability — see backend
+                      core/llm/model_capabilities.py — so this cannot drift from
+                      what the request builder sends. */}
+                  {selectedModelAcceptsParam('temperature') && (
                   <Grid item xs={12}>
                     <TextField
                       fullWidth
@@ -1079,45 +1111,37 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                       }}
                     />
                   </Grid>
+                  )}
+                  {/* Per-agent thinking override. Blank inherits the model's
+                      workspace default, matching the temperature override above,
+                      and the control shown depends on what THIS model takes:
+                      a token budget, an effort level, or neither. */}
                   <Grid item xs={12}>
-                    <FormControl fullWidth>
-                      <InputLabel>Function Calling LLM</InputLabel>
-                      <Select
-                        value={loadingModels ? '' : (formData.function_calling_llm || '')}
-                        onChange={(e) => handleInputChange('function_calling_llm', e.target.value)}
-                        label="Function Calling LLM"
-                        disabled={loadingModels}
-                      >
-                        <MenuItem key="default-function-model" value="">
-                          <em>Default</em>
-                        </MenuItem>
-                        {loadingModels ? (
-                          <MenuItem key="loading-function-models" value="" disabled>
-                            <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                              <CircularProgress size={20} sx={{ mr: 1 }} />
-                              Loading models...
-                            </Box>
-                          </MenuItem>
-                        ) : functionCallingModels.length > 0 ? (
-                          functionCallingModels.map(([key, model]) => (
-                            <MenuItem key={`func-model-${key}`} value={key}>
-                              {model.name}
-                              {model.provider && (
-                                <Typography variant="caption" sx={{ ml: 1, color: 'text.secondary' }}>
-                                  ({model.provider})
-                                </Typography>
-                              )}
-                            </MenuItem>
-                          ))
-                        ) : (
-                          // Fallback option when no function calling models are available
-                          <MenuItem key="no-function-models" value={formData.function_calling_llm || ''} disabled>
-                            No function calling models available
-                          </MenuItem>
-                        )}
-                      </Select>
-                    </FormControl>
+                    <ThinkingFields
+                      overrideMode
+                      thinkingMode={selectedModel?.thinking_mode}
+                      allowedEfforts={selectedModel?.allowed_efforts}
+                      returnsThinkingText={selectedModel?.returns_thinking_text}
+                      budgetTokens={formData.thinking_budget_tokens ?? null}
+                      onBudgetTokensChange={(value) =>
+                        handleInputChange('thinking_budget_tokens', value ?? undefined)
+                      }
+                      effort={formData.thinking_effort ?? null}
+                      onEffortChange={(value) =>
+                        handleInputChange('thinking_effort', value ?? undefined)
+                      }
+                    />
                   </Grid>
+                  {/* "Function Calling LLM" was removed here. It was a CrewAI-era
+                      field that survived the move to Kasal's own runtime and did
+                      NOTHING: runtime/agent.py declares it
+                      "Deprecated; accepted for compatibility and unused", no
+                      execution path reads it, and its only reader
+                      (core/llm/transport/instructor.py) is not invoked by any of
+                      the three paths. Selecting a model there changed nothing
+                      about the run, which is worse than offering no control at
+                      all. The field is still accepted on the API and stored, so
+                      existing agents are untouched. */}
                 </Grid>
               </AccordionDetails>
             </Accordion>
@@ -1519,32 +1543,24 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                     </Grid>
                   )}
 
-                  {/* Memory Storage Backend Info */}
+                  {/* Memory Storage Backend Info.
+                      The per-type breakdown that used to sit here (Short-Term /
+                      Long-Term / Entity) described the LEGACY architecture and was
+                      removed: memory is now a single unified store behind one
+                      StorageBackend (see backend services/memory/backend_factory.py),
+                      so naming three types described something that no longer
+                      exists. The "Databricks Vector Search" backend label went with
+                      it — that memory backend was retired and a `databricks` memory
+                      config now degrades to the local store. Vector Search itself is
+                      still used, but for knowledge and documentation, not memory. */}
                   <Grid item xs={12}>
                     <Divider sx={{ my: 2 }} />
                     <Alert severity="info" sx={{ mt: 2 }}>
                       <Typography variant="body2">
-                        Memory storage backend is configured globally in the Configuration settings.
-                        {formData.memory_backend_config && (
-                          <>
-                            <br />
-                            Current backend: <strong>{formData.memory_backend_config.backend_type === 'databricks' ? 'Databricks Vector Search' : 'Default (ChromaDB + SQLite)'}</strong>
-                          </>
-                        )}
+                        Memory storage is configured globally in the Configuration
+                        settings, and shared by every agent.
                       </Typography>
                     </Alert>
-                  </Grid>
-
-                  {/* Customization Help */}
-                  <Grid item xs={12}>
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                      The agent uses three memory types:
-                    </Typography>
-                    <ul style={{ color: 'rgba(0, 0, 0, 0.6)', paddingLeft: '20px', margin: '4px 0' }}>
-                      <li>Short-Term Memory: Stores recent conversations and context</li>
-                      <li>Long-Term Memory: Preserves insights and learnings between executions</li>
-                      <li>Entity Memory: Tracks information about important entities</li>
-                    </ul>
                   </Grid>
                 </Grid>
               </AccordionDetails>
