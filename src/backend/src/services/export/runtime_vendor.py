@@ -52,6 +52,16 @@ _MODULES: List[Tuple[Path, str]] = [
         BACKEND_SRC / "core" / "llm" / "json_extraction.py",
         "core/llm/json_extraction.py",
     ),
+    # transport/completion.py — decides per model whether thinking is manual
+    # (``thinking_budget_tokens``) or adaptive (``reasoning_effort``), and which
+    # effort values that model's endpoint actually accepts. It lives in
+    # ``core/llm`` rather than ``core/llm/transport``, so the tree above does NOT
+    # pick it up and it has to be listed here. Pure stdlib + dataclasses/enum,
+    # zero ``src.`` imports, so it vendors as-is.
+    (
+        BACKEND_SRC / "core" / "llm" / "model_capabilities.py",
+        "core/llm/model_capabilities.py",
+    ),
     # runtime/{agent,task,executor}.py — the tool contract. Itself has zero
     # ``src.`` imports, which is why the runtime can depend on it standalone.
     (BACKEND_SRC / "services" / "tools" / "base.py", "services/tools/base.py"),

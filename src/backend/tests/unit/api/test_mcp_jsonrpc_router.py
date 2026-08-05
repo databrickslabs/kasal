@@ -63,7 +63,11 @@ class TestInitialize:
             response = _rpc(client, "initialize", {"protocolVersion": "2025-06-18"})
 
         result = response.json()["result"]
-        assert result["capabilities"]["tools"] == {"listChanged": False}
+        # listChanged is TRUE and backed: publishing or withdrawing a capability
+        # changes the tool list, and the GET stream pushes
+        # notifications/tools/list_changed. It was false only while there was no
+        # channel to push down.
+        assert result["capabilities"]["tools"] == {"listChanged": True}
         assert result["serverInfo"]["name"] == "kasal"
 
     def test_echoes_a_protocol_version_it_supports(self, client):

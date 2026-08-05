@@ -612,20 +612,21 @@ async def test_force_delete_flow_no_executions():
     svc = make_service(session=session)
     flow_id = uuid.uuid4()
 
-    check_result = MagicMock()
-    check_result.first.return_value = (str(flow_id),)
+    # Content-aware, like the sibling test above: a fixed side_effect LIST breaks
+    # the moment the service adds a query (child-table deletes, publication
+    # withdrawal), and it fails as a bare StopIteration wrapped in KasalError —
+    # which reads like a product bug rather than an out-of-date mock.
+    def _execute(query, params=None):
+        sql = str(query)
+        r = MagicMock()
+        r.rowcount = 0
+        if "FROM flows" in sql and "SELECT" in sql:
+            r.first.return_value = (str(flow_id),)
+        elif "FROM executionhistory" in sql and "SELECT" in sql:
+            r.fetchall.return_value = []  # No executions
+        return r
 
-    find_result = MagicMock()
-    find_result.fetchall.return_value = []  # No executions
-
-    exec_result = MagicMock()
-    exec_result.rowcount = 0
-
-    delete_result = MagicMock()
-
-    session.execute = AsyncMock(
-        side_effect=[check_result, find_result, exec_result, delete_result]
-    )
+    session.execute = AsyncMock(side_effect=_execute)
 
     result = await svc.force_delete_flow_with_executions(flow_id)
     assert result is True

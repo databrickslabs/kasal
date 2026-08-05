@@ -17,11 +17,20 @@ class TestTheGateSaysWhatItIs:
 
     @staticmethod
     def _gate_configs(source: str):
-        """Every gate_config literal built in flow_builder, as parsed dicts."""
+        """Every gate_config literal built in flow_builder, as parsed dicts.
+
+        ``source`` is relative to ``src/backend``, resolved from THIS file rather
+        than the process CWD — a bare relative path only works when pytest happens
+        to be invoked from src/backend, so under xdist the test passed alone and
+        failed in the full run with a confusing FileNotFoundError.
+        """
         import ast
         import pathlib
 
-        tree = ast.parse(pathlib.Path(source).read_text())
+        backend = pathlib.Path(__file__).resolve().parents[4]
+        path = backend / source
+        assert path.exists(), f"{path} not found — did the builder move?"
+        tree = ast.parse(path.read_text())
         out = []
         for node in ast.walk(tree):
             if not isinstance(node, ast.Assign):

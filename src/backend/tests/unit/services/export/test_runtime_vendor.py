@@ -158,6 +158,50 @@ class TestRuntimeShipped:
             ), f"{path}: line count changed — the copy is not verbatim"
         assert checked >= 15, f"only {checked} files compared against source"
 
+    @pytest.mark.asyncio
+    async def test_every_intra_runtime_import_actually_ships(self, runtime_files):
+        """A module the runtime imports from itself must BE in the bundle.
+
+        The vendor list mixes whole trees with individually-named modules, so a
+        new module added next to a vendored one — same package, not inside a
+        vendored tree — is picked up by nothing. That is not hypothetical:
+        ``core/llm/model_capabilities.py`` was added beside the already-vendored
+        ``core/llm/transport/`` and imported by ``transport/completion.py``, and
+        because it never shipped, EVERY exported app died at import with
+        ``No module named 'agent_server.kasal_runtime.core.llm.model_capabilities'``.
+
+        The 21 errors that surfaced it were all fixture setup, so they read as one
+        broken test file rather than a broken product.
+        """
+        shipped = {
+            path[len(VENDOR_ROOT) + 1 :].removesuffix(".py").replace("/", ".")
+            for path in runtime_files
+        }
+        # A package is importable via its __init__, so record the package too.
+        shipped |= {m.removesuffix(".__init__") for m in shipped}
+
+        missing = []
+        for path, content in runtime_files.items():
+            for node in ast.walk(ast.parse(content)):
+                if not isinstance(node, ast.ImportFrom) or node.level:
+                    continue  # relative imports are covered by the tree copy
+                module = node.module or ""
+                if not module.startswith(f"{VENDOR_PKG}."):
+                    continue  # third-party or stdlib
+                target = module[len(VENDOR_PKG) + 1 :]
+                if target in shipped:
+                    continue
+                # `from pkg import name` where name is itself a module.
+                if any(f"{target}.{a.name}" in shipped for a in node.names):
+                    continue
+                missing.append(f"{path}: imports {module}")
+
+        assert not missing, (
+            "the vendored runtime imports modules that are not in the bundle — "
+            "add them to _TREES or _MODULES in runtime_vendor.py:\n"
+            + "\n".join(sorted(missing))
+        )
+
 
 class TestRuntimeImportsStandalone:
     """Write the bundle to disk and import it with ``src`` unavailable."""

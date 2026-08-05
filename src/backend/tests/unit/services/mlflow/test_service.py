@@ -179,14 +179,16 @@ class TestMLflowServiceAuth:
         session = AsyncMock(spec=AsyncSession)
         service = MLflowService(session=session, group_id="test-group")
 
-        mock_auth_context_cls = Mock()
-
-        mock_dummy_request = Mock()
-        mock_dummy_request.headers = {"Authorization": "Bearer spn-token-123"}
-
+        # ``config.authenticate()`` returns a HEADERS DICT, not a callable — see
+        # sp_auth.derive_sp_bearer, which exists because an earlier version called
+        # the result and got "'dict' object is not callable", swallowed it, and
+        # silently fell back to the ambient PAT (a 403 in production). Mocking it
+        # as a callable reproduces that dead contract, so the token derivation
+        # fails and _setup_mlflow_auth falls through to PAT.
         mock_workspace_client = Mock()
-        mock_authenticate = Mock(side_effect=lambda req: None)
-        mock_workspace_client.config.authenticate.return_value = mock_authenticate
+        mock_workspace_client.config.authenticate.return_value = {
+            "Authorization": "Bearer spn-token-123"
+        }
 
         with (
             patch.dict(
@@ -197,24 +199,14 @@ class TestMLflowServiceAuth:
                     "DATABRICKS_HOST": "https://test.databricks.com",
                 },
             ),
-            patch("src.utils.databricks_auth.AuthContext") as mock_ac,
             patch("databricks.sdk.WorkspaceClient", return_value=mock_workspace_client),
-            patch("requests.Request") as mock_req_cls,
         ):
-            mock_req_instance = Mock()
-            mock_req_instance.headers = {"Authorization": "Bearer spn-token-123"}
-            mock_req_cls.return_value = mock_req_instance
-
-            mock_auth = Mock()
-            mock_auth.workspace_url = "https://test.databricks.com"
-            mock_auth.token = "spn-token-123"
-            mock_auth.auth_method = "service_principal"
-            mock_ac.return_value = mock_auth
-
             result = await service._setup_mlflow_auth()
 
             assert result is not None
             assert result.auth_method == "service_principal"
+            # The bearer prefix is stripped off the header value.
+            assert result.token == "spn-token-123"
 
     @pytest.mark.asyncio
     async def test_setup_mlflow_auth_spn_fails_falls_back_to_pat(self):
@@ -326,9 +318,12 @@ class TestMLflowServiceAuth:
         session = AsyncMock(spec=AsyncSession)
         service = MLflowService(session=session, group_id="test-group")
 
+        # authenticate() returns a headers DICT — see the note in the SPN success
+        # test above.
         mock_workspace_client = Mock()
-        mock_authenticate = Mock(side_effect=lambda req: None)
-        mock_workspace_client.config.authenticate.return_value = mock_authenticate
+        mock_workspace_client.config.authenticate.return_value = {
+            "Authorization": "Bearer spn-tok"
+        }
 
         with (
             patch.dict(
@@ -339,26 +334,13 @@ class TestMLflowServiceAuth:
                     "DATABRICKS_HOST": "test.databricks.com",  # no scheme
                 },
             ),
-            patch("src.utils.databricks_auth.AuthContext") as mock_ac,
             patch("databricks.sdk.WorkspaceClient", return_value=mock_workspace_client),
-            patch("requests.Request") as mock_req_cls,
         ):
-            mock_req_instance = Mock()
-            mock_req_instance.headers = {"Authorization": "Bearer spn-tok"}
-            mock_req_cls.return_value = mock_req_instance
-
-            mock_auth = Mock()
-            mock_auth.workspace_url = "https://test.databricks.com"
-            mock_auth.token = "spn-tok"
-            mock_auth.auth_method = "service_principal"
-            mock_ac.return_value = mock_auth
-
             result = await service._setup_mlflow_auth()
 
             assert result is not None
-            # Verify AuthContext was called with https:// prefix
-            call_kwargs = mock_ac.call_args
-            assert call_kwargs[1]["workspace_url"] == "https://test.databricks.com"
+            # The bare host gets an https:// prefix — MLflow needs an absolute URL.
+            assert result.workspace_url == "https://test.databricks.com"
 
     @pytest.mark.asyncio
     async def test_setup_mlflow_auth_spn_no_bearer_prefix(self):
