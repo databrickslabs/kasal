@@ -307,6 +307,7 @@ class BaseLLM(BaseModel):
         from_task: Any = None,
         from_agent: Any = None,
         finish_reason: str | None = None,
+        reasoning: str | None = None,
     ) -> None:
         """Announce a finished call, INCLUDING why the model stopped.
 
@@ -334,6 +335,7 @@ class BaseLLM(BaseModel):
                 from_task=from_task,
                 from_agent=from_agent,
                 finish_reason=finish_reason,
+                reasoning=reasoning,
             ),
         )
 

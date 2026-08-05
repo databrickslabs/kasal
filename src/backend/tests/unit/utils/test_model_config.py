@@ -80,6 +80,17 @@ class TestModelSupportsReasoningEffort:
             "o3",
             "o3-mini",
             "o4-mini",
+            # Gemini 3.x on Databricks. Probed live 2026-08-05 against
+            # gemini-3-1-pro / 3-5-flash / 3-1-flash-lite: WITHOUT the param the
+            # response has a text-only block and no thinking; WITH it a populated
+            # `reasoning` block comes back (~2,000 chars of "**My Thought
+            # Process...**"). The native Gemini `thinking` shape is rejected
+            # (400 Invalid JSON payload), so reasoning_effort is the only lever —
+            # and excluding it was silently costing us the visible
+            # chain-of-thought these models are willing to give.
+            "databricks-gemini-3-1-pro",
+            "databricks-gemini-3-5-flash",
+            "databricks-gemini-3-1-flash-lite",
         ],
     )
     def test_supported_models(self, model):
@@ -90,12 +101,20 @@ class TestModelSupportsReasoningEffort:
         [
             None,
             "",
-            # Anthropic uses `thinking: {budget_tokens}`, not reasoning_effort.
+            # Anthropic uses `thinking: {...}`, not reasoning_effort — sending it
+            # is a 400 ("reasoning_effort: Extra inputs are not permitted"). And
+            # there is nothing to gain: on Databricks only
+            # `thinking:{"type":"adaptive"}` is accepted, and even then the
+            # reasoning block comes back with an EMPTY summary (Bedrock returns
+            # the opaque `signature` only). Verified live 2026-08-05.
             "databricks-claude-sonnet-4-5",
             "databricks-claude-opus-4-8",
+            "databricks-claude-fable-5",
+            "databricks-claude-opus-5",
             "claude-opus-4-20250514",
-            # No reasoning_effort parameter on these request surfaces.
-            "databricks-gemini-3-5-flash",
+            # No reasoning_effort parameter on these request surfaces. Note
+            # kimi-k2-7-code DOES return thinking text — unprompted, in a sibling
+            # `reasoning_content` field — so it needs no request-side flag.
             "kimi-k2.7-code",
             "deepseek-reasoner",
             "Qwen3-Coder-30B-A3B-Instruct",

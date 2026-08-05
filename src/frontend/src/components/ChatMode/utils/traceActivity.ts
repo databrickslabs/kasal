@@ -6,6 +6,7 @@
  * testing on its own.
  */
 
+import { REASONING_VISIBLE_MODELS, REDACTED_REASONING } from '../../Common/ReasoningPanel';
 
 export interface TraceEntry {
   label: string;
@@ -202,6 +203,66 @@ export function buildTraceEntry(
       detail: content,
       timestamp: now,
     };
+  }
+
+  // The model's reasoning/thinking. The backend splits it out of the answer
+  // (core/llm/transport/response_parsing.split_message_content) so it never
+  // lands in task output or memory — this is where it surfaces in the chat.
+  // Rendered as a step whose `detail` holds the text, which the activity list
+  // already shows collapsed behind a click, matching tool results.
+  //
+  // Only some models populate it (databricks-inkling, kimi-k2-7-code today).
+  // Claude Fable 5 / Opus 5 send a reasoning block whose text Databricks
+  // redacts, so they correctly produce nothing here.
+  if (eventType === 'llm_call' || eventType === 'llm_response') {
+    const reasoning = typeof extra.reasoning === 'string' ? extra.reasoning.trim() : '';
+    if (reasoning === REDACTED_REASONING) {
+      // The model DID reason; Anthropic on Databricks encrypted the trace. Say
+      // that rather than dropping the step, which would imply no thinking
+      // happened — and never render the sentinel itself.
+      return {
+        kind: 'event',
+        label: 'Reasoning',
+        sublabel: 'hidden by provider',
+        detail:
+          'This model reasoned before answering but returned only an encrypted '
+          + 'signature, with no thinking text.\n\n'
+          + 'For Anthropic Claude this is usually fixable: enable Extended '
+          + 'Thinking on the model in Settings. Claude only returns thinking text '
+          + 'when the request asks for it — `display` defaults to "omitted" on '
+          + 'Claude 5, Fable 5, Opus 4.7 and Opus 4.8, which "returns thinking '
+          + 'blocks with an empty thinking field":\n'
+          + '  https://platform.claude.com/docs/en/build-with-claude/thinking'
+          + '#controlling-thinking-display\n'
+          + 'With it enabled, Kasal opts in and the summary comes back. No '
+          + 'setting returns the raw chain of thought — it is always a summary.\n\n'
+          + 'The GPT-5 family is different: it reasons but the trace is '
+          + 'unobtainable. "While reasoning tokens are not visible via the API, '
+          + 'they still occupy space in the model\'s context window and are '
+          + 'billed as output tokens":\n'
+          + '  https://developers.openai.com/api/docs/guides/reasoning\n'
+          + 'Summaries exist only on the Responses API, which this endpoint does '
+          + 'not expose.\n\n'
+          + 'Reasoning is visible without any configuration on:\n'
+          + REASONING_VISIBLE_MODELS.map((m) => `  • ${m}`).join('\n')
+          + '\nLlama, Qwen and Gemma do not reason.',
+        durationMs,
+        source: eventSource || undefined,
+        timestamp: now,
+      };
+    }
+    if (reasoning) {
+      return {
+        kind: 'event',
+        label: 'Reasoning',
+        sublabel: `${reasoning.length.toLocaleString()} chars`,
+        detail: reasoning,
+        durationMs,
+        source: eventSource || undefined,
+        timestamp: now,
+      };
+    }
+    // No reasoning on this row — fall through to the existing handling.
   }
 
   // Checkpoint bookkeeping. These carry no text content at all — everything is

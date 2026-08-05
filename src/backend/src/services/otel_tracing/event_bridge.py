@@ -158,11 +158,18 @@ _EVENT_SPAN_MAP = {
 }
 
 # Events to skip. LLMStreamChunkEvent: too noisy (one per token).
+# LLMReasoningChunkEvent: same reason — it arrives per delta on the streaming
+# path. It is still SUBSCRIBED (see _EVENT_CLASSES) because the event pipe
+# forwards it to the live UI; it just gets no span of its own.
 # AgentExecutionCompletedEvent: pure duplicate — under the kasal engine it
 # fires alongside LLMCallCompletedEvent with the same answer text and no
 # usage data, and mapping both to "llm_response" rendered every response
 # twice in the trace timeline.
-_SKIP_EVENTS = {"LLMStreamChunkEvent", "AgentExecutionCompletedEvent"}
+_SKIP_EVENTS = {
+    "LLMStreamChunkEvent",
+    "LLMReasoningChunkEvent",
+    "AgentExecutionCompletedEvent",
+}
 
 # Tool-call span names (by _EVENT_SPAN_MAP span_name) that we ALSO mirror into
 # the active MLflow trace so tool/MCP calls show up in the UC trace
@@ -362,6 +369,10 @@ _EVENT_CLASSES = [
     ("src.core.events", "LLMCallCompletedEvent"),
     ("src.core.events", "LLMCallFailedEvent"),
     ("src.core.events", "LLMStreamChunkEvent"),
+    # Subscribed so the event pipe can forward it to the live UI; the bridge
+    # itself skips writing a span (see _SKIP_EVENTS) — one per delta is noise,
+    # and LLMCallCompletedEvent.reasoning already records it once per call.
+    ("src.core.events", "LLMReasoningChunkEvent"),
     # Memory
     ("src.core.events", "MemorySaveStartedEvent"),
     ("src.core.events", "MemorySaveCompletedEvent"),
@@ -1200,6 +1211,16 @@ class OTelEventBridge:
                     completion_tokens,
                     getattr(event, "model", None),
                 )
+
+        # ── The model's reasoning/thinking ──
+        # Recorded once per CALL (LLMCallCompletedEvent.reasoning), not per
+        # streamed delta — LLMReasoningChunkEvent is on _SKIP_EVENTS because a
+        # span per delta is unreadable. Kept as its own attribute rather than
+        # folded into the response so the UI can show it collapsed and separate:
+        # it is the model's private deliberation, not the answer.
+        reasoning = getattr(event, "reasoning", None)
+        if reasoning:
+            span.set_attribute("kasal.extra.reasoning", str(reasoning))
 
         # ── Agent execution fields ──
         task_prompt = getattr(event, "task_prompt", None)

@@ -42,10 +42,26 @@ DEFAULT_ENGINE_MODEL = os.getenv("DEFAULT_LLM_MODEL", "databricks-claude-sonnet-
 # resolved provider model name: sending the param to an endpoint that does not know
 # it is a 400 on strict gateways, so anything not proven here is dropped silently.
 # Excluded on purpose:
-#   - Anthropic Claude (Databricks or direct): uses `thinking: {budget_tokens}`,
-#     not `reasoning_effort`.
-#   - Gemini / Kimi / self-hosted vLLM: no `reasoning_effort` param
-#     (Kimi K2.7 cannot even disable thinking).
+#   - Anthropic Claude: uses a thinking BUDGET, not `reasoning_effort`
+#     ("reasoning_effort: Extra inputs are not permitted"). It is handled
+#     separately and DOES work — see `_SUPPORTS_THINKING_BUDGET_RE` and
+#     `_thinking_for` in core/llm/transport/completion.py, driven by the
+#     `ModelConfig.extended_thinking` toggle:
+#       * Claude 4.x → `thinking: {"type": "enabled", "budget_tokens": N}` in
+#         extra_body, subject to `max_tokens > budget_tokens`. Returns REAL
+#         thinking text (haiku-4-5 1,630 chars, sonnet-4-5 1,600 — measured
+#         through this transport).
+#       * Claude 5 / Fable → reject "enabled", demand `{"type": "adaptive"}`,
+#         which takes no sub-keys and still returns an EMPTY summary (Bedrock
+#         sends only the opaque `signature`). Nothing to enable, nothing to show.
+#     An earlier version of this comment claimed Claude's thinking was
+#     unavailable by ANY request. That was wrong, and wrong in a costly way: the
+#     first probe set `max_tokens` (3,000) BELOW `budget_tokens` (10,240), and the
+#     resulting 400 ("`max_tokens` must be greater than `thinking.budget_tokens`")
+#     was misread as "unsupported" and generalised across the whole family.
+#   - Kimi / self-hosted vLLM: no `reasoning_effort` param (Kimi K2.7 cannot
+#     even disable thinking). Note kimi-k2-7-code DOES return thinking text —
+#     unprompted, in a sibling `reasoning_content` field.
 #   - DeepSeek v4 (flash/pro): DOES support reasoning effort, but NESTED —
 #     `thinking: {"type": "enabled", "reasoning_effort": "high"|"max"}`, where
 #     low/medium collapse to "high". Our emitter sends a TOP-LEVEL
@@ -55,7 +71,35 @@ DEFAULT_ENGINE_MODEL = os.getenv("DEFAULT_LLM_MODEL", "databricks-claude-sonnet-
 #     api-docs.deepseek.com/api/create-chat-completion.
 #   - o1 / o1-preview / o1-mini: predate `reasoning_effort`.
 #   - *deep-research*: fixed internal budget, rejects an explicit effort.
-_REASONING_EFFORT_SUBSTRINGS = ("gpt-5", "gpt5", "gpt-oss")
+#
+# Gemini 3.x WAS excluded here on the belief that it has no `reasoning_effort`
+# param. That is wrong for the Databricks-served endpoints, and it was costing us
+# most of the visible chain-of-thought available anywhere in the catalogue.
+# WITHOUT the param the response carries a text-only block and no thinking; WITH
+# it a populated `reasoning` block comes back ("**My Thought Process for
+# Calculating 17 x 23**..."). The native Gemini `thinking` shape is rejected
+# (400 Invalid JSON payload), so `reasoning_effort` is the only lever.
+#
+# Note that ACCEPTING the param and RETURNING the trace are different things.
+# Full sweep of all 37 seeded Databricks models, 2026-08-05 — reasoning TEXT via
+# `reasoning_effort` (this list) comes back from five:
+#     gemini-3-1-flash-lite  2,226    inkling         309
+#     gemini-3-5-flash       2,104    kimi-k2-7-code  137
+#     gemini-3-1-pro         1,648
+# Every gpt-5* ACCEPTS `reasoning_effort` and still returns NOTHING. It genuinely
+# reasons — `usage.completion_tokens_details.reasoning_tokens` scales with the
+# effort (1,344 at high, 896 at medium, 0 at minimal) — but the message carries
+# only ['annotations','content','refusal','role']: no reasoning block, no
+# `reasoning_content`. OpenAI's `reasoning: {"summary": ...}` lever is rejected
+# here ("Unknown parameter"), so the trace is unobtainable, not merely unrequested.
+# Llama, Qwen, Gemma and gemini-2-5-flash expose none. gemini-3-5-flash-lite and
+# 3-6-flash accept the param (HTTP 200) but return no text, which is harmless.
+#
+# Claude is NOT covered by this list and is not "none": the 4.x line returns real
+# thinking through the extended-thinking BUDGET instead (see the Anthropic bullet
+# above), while Claude 5 / Fable return a redacted block. So this allow-list
+# governs one of two mechanisms, and neither one promises visible reasoning.
+_REASONING_EFFORT_SUBSTRINGS = ("gpt-5", "gpt5", "gpt-oss", "gemini-3")
 # o3 / o4 families (o3, o3-mini, o4-mini, ...) do accept `reasoning_effort`.
 _REASONING_EFFORT_PREFIX_RE = re.compile(r"^o[34](\b|[-_.]|$)")
 

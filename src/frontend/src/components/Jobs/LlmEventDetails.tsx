@@ -8,7 +8,7 @@
  */
 import React, { useState } from 'react';
 import { Alert, Box, Button, Chip, Stack, Typography } from '@mui/material';
-import { PaginatedOutput } from '../Common';
+import { PaginatedOutput, ReasoningPanel } from '../Common';
 import { SelectedTraceEvent } from '../../types/execution/trace';
 import { asCount, asText, extractLlmText } from './llmEventText';
 
@@ -69,6 +69,11 @@ export const LlmEventDetails: React.FC<LlmEventDetailsProps> = ({ event, maxHeig
           {chips}
         </Stack>
       )}
+
+      {/* The model's thinking, collapsed. Above the answer because it came
+          first, and separate because the backend deliberately keeps it out of
+          the response text. Renders nothing when the model sent none. */}
+      <ReasoningPanel reasoning={extra.reasoning} sx={{ mt: 0, mb: 2 }} />
 
       {text ? (
         <>

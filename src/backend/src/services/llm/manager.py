@@ -1091,6 +1091,27 @@ class LLMManager:
                 unsupported=model_config_dict.get("unsupported_params"),
             )
         )
+
+        # Anthropic extended thinking. `ModelConfig.extended_thinking` has existed
+        # (and been editable in the Edit Model dialog) since before this line: it
+        # was stored, seeded and returned by the API, but NOTHING ever read it when
+        # building an LLM, so the toggle silently did nothing.
+        #
+        # Claude takes a token BUDGET, not an effort level — the transport turns
+        # this into `extra_body: {"thinking": {"type": "enabled", "budget_tokens":
+        # N}}` and raises max_tokens to satisfy the endpoint's
+        # `max_tokens > budget_tokens` rule. Only the Claude 4.x line honours it
+        # (see _SUPPORTS_THINKING_BUDGET_RE); for anything else the transport
+        # drops it, so setting it here is safe for every provider.
+        if model_config_dict.get("extended_thinking"):
+            llm_params["thinking_budget_tokens"] = int(
+                os.getenv("KASAL_THINKING_BUDGET_TOKENS", "10240")
+            )
+            logger.info(
+                f"Extended thinking enabled for {prefixed_model} "
+                f"(budget_tokens={llm_params['thinking_budget_tokens']})"
+            )
+
         logger.info(f"Creating LLM with model: {prefixed_model}")
 
         # Self-hosted vLLM: a subclass that states tool_choice explicitly rather

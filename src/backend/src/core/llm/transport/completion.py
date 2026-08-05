@@ -20,6 +20,7 @@ from src.core.events.bus import event_bus
 from src.core.events.types import (
     ContextCompactionEvent,
     LLMCallType,
+    LLMReasoningChunkEvent,
     LLMStreamChunkEvent,
 )
 
@@ -47,6 +48,7 @@ from .response_parsing import function_calls as parse_function_calls
 from .response_parsing import (
     reasoning_items,
     responses_token_usage,
+    split_message_content,
 )
 from .rpm import throttle
 from .tool_rounds import run_chat_round, run_responses_round
@@ -88,6 +90,56 @@ _WINDOW_SAFETY_TOKENS = 128
 # An optional provider prefix ("openai/gpt-5.6-terra") is tolerated.
 _TOOLS_REJECT_REASONING_EFFORT_RE = re.compile(r"(?:^|/)gpt-5\.6")
 
+# Anthropic models that accept `thinking: {"type": "enabled", "budget_tokens": N}`
+# AND return real thinking text. Enumerated per-model rather than by family,
+# because the split does NOT follow the version boundary you would expect —
+# every entry was probed live 2026-08-05 with max_tokens=16000:
+#
+#     haiku-4-5    1,867 chars      opus-4-1       562
+#     sonnet-4-5   1,739            opus-4-5       375
+#     sonnet-4-6      76            opus-4-6       167
+#
+# EXCLUDED because they reject "enabled" and demand `{"type": "adaptive"}`
+# ('"thinking.type.enabled" is not supported for this model. Use
+# "thinking.type.adaptive"'), which accepts no budget_tokens and still returns an
+# EMPTY summary — nothing to set and nothing to show:
+#     opus-4-7, opus-4-8, opus-5, sonnet-5, fable-5
+#
+# Note opus-4-7/4-8 sit on the ADAPTIVE side despite being "4.x". A regex like
+# `claude-(opus|sonnet|haiku)-4-\d` looks right and is wrong: it would send
+# "enabled" to those two and 400 the call. Hence the explicit list.
+_THINKING_BUDGET_MODELS = (
+    "claude-opus-4-1",
+    "claude-opus-4-5",
+    "claude-opus-4-6",
+    "claude-sonnet-4-5",
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5",
+)
+
+# Models on ADAPTIVE thinking: `{"type": "adaptive", "display": "summarized"}`.
+# They reject `type: "enabled"` and take no budget_tokens.
+#
+# `display` is the whole story, and missing it cost real time here. Per
+# platform.claude.com/docs/en/build-with-claude/thinking#controlling-thinking-display
+# it defaults to "omitted" on exactly these models, which returns "thinking blocks
+# with an empty `thinking` field" — the signature only. Sending `adaptive` WITHOUT
+# `display` therefore looks identical to a provider that redacts its reasoning,
+# and that is what an earlier version of this code concluded. Opting in returns
+# the summary: fable-5 255 chars, opus-5 1,629 (measured 2026-08-05).
+#
+# opus-4-7 and opus-4-8 are adaptive too but returned 0 even with
+# display="summarized", so they are listed for correct REQUEST shape while the
+# UI still reports nothing to show for them.
+_THINKING_ADAPTIVE_MODELS = (
+    "claude-opus-5",
+    "claude-sonnet-5",
+    "claude-fable-5",
+    "claude-mythos-5",
+    "claude-opus-4-7",
+    "claude-opus-4-8",
+)
+
 
 class OpenAICompletion(BaseLLM):
     llm_type: Literal["openai"] = "openai"
@@ -103,6 +155,11 @@ class OpenAICompletion(BaseLLM):
     stream: bool = False
     response_format: Any | None = None
     reasoning_effort: str | None = None
+    #: Anthropic extended thinking. Claude does NOT accept `reasoning_effort`;
+    #: its budget is `thinking: {"type": "enabled", "budget_tokens": N}`, and the
+    #: endpoint enforces `max_tokens > budget_tokens`. Set to a token count to
+    #: enable; None leaves the request untouched. See `_thinking_for`.
+    thinking_budget_tokens: int | None = None
     api: Literal["completions", "responses"] = "completions"
     instructions: str | None = None
     store: bool | None = None
@@ -114,6 +171,11 @@ class OpenAICompletion(BaseLLM):
     _client: Any = PrivateAttr(default=None)
     _last_response_id: str | None = PrivateAttr(default=None)
     _last_reasoning_items: list[Any] | None = PrivateAttr(default=None)
+    #: Reasoning/thinking text the model exposed on the CURRENT call, collected
+    #: across streamed deltas (or read once when not streaming). Reported on
+    #: LLMCallCompletedEvent so the trace records it once per call instead of
+    #: once per delta. Reset per call, like _finish_reason.
+    _reasoning_text: str = PrivateAttr(default="")
 
     @property
     def client(self) -> Any:
@@ -209,6 +271,7 @@ class OpenAICompletion(BaseLLM):
             from_task,
             from_agent,
             finish_reason=self._finish_reason,
+            reasoning=self._reasoning_text or None,
         )
         # `response_model` was accepted and ignored here, so structured-output
         # callers got a JSON *string* and their
@@ -252,6 +315,59 @@ class OpenAICompletion(BaseLLM):
             return "none"
         return self.reasoning_effort
 
+    def _thinking_for(self, params: dict[str, Any]) -> dict[str, Any] | None:
+        """The Anthropic `thinking` block for this call, or None.
+
+        Claude does not take ``reasoning_effort`` ("Extra inputs are not
+        permitted"); it takes a ``thinking`` block, and the two generations want
+        DIFFERENT shapes. Verified live 2026-08-05 and documented at
+        platform.claude.com/docs/en/build-with-claude/thinking plus
+        docs.databricks.com/aws/en/machine-learning/model-serving/query-reason-models:
+
+        * MANUAL (Claude 4.1–4.6) — ``{"type": "enabled", "budget_tokens": N}``,
+          subject to ``max_tokens > budget_tokens``. Measured: haiku-4-5 1,867
+          chars, sonnet-4-5 1,739, opus-4-1 562, opus-4-5 375, opus-4-6 167,
+          sonnet-4-6 76.
+        * ADAPTIVE (Claude 4.7+, 5, Fable) — ``{"type": "adaptive"}``; "enabled"
+          is rejected ('"thinking.type.enabled" is not supported for this model')
+          and no budget is accepted. Depth is the model's own decision.
+
+        BOTH need ``display: "summarized"`` to return any text. Per the docs it
+        defaults to ``"omitted"`` on Claude Fable 5, Mythos 5, Opus 5, Sonnet 5,
+        Opus 4.8 and Opus 4.7, which returns "thinking blocks with an empty
+        `thinking` field" — the encrypted ``signature`` alone. Omitting `display`
+        is therefore indistinguishable from a provider that redacts its
+        reasoning, and that is exactly the wrong conclusion this code reached
+        before: opting in yields fable-5 255 chars and opus-5 1,629.
+
+        ``max_tokens`` is raised to clear the budget rather than letting the
+        endpoint 400 on an otherwise reasonable configuration.
+        """
+        if not self.thinking_budget_tokens or self.thinking_budget_tokens <= 0:
+            return None
+        model = str(self.model).lower()
+
+        # Adaptive models: no budget, but `display` is what makes it visible.
+        if any(name in model for name in _THINKING_ADAPTIVE_MODELS):
+            return {"type": "adaptive", "display": "summarized"}
+
+        if not any(name in model for name in _THINKING_BUDGET_MODELS):
+            # Not an Anthropic model — `thinking` is not part of its surface.
+            return None
+
+        budget = int(self.thinking_budget_tokens)
+        cap = params.get("max_tokens") or params.get("max_completion_tokens")
+        if cap is not None and cap <= budget:
+            params["max_tokens"] = budget + 4096
+            params.pop("max_completion_tokens", None)
+        elif cap is None:
+            params["max_tokens"] = budget + 4096
+        return {
+            "type": "enabled",
+            "budget_tokens": budget,
+            "display": "summarized",
+        }
+
     def _prepare_completion_params(
         self,
         messages: list[dict[str, Any]],
@@ -284,6 +400,19 @@ class OpenAICompletion(BaseLLM):
             params["max_completion_tokens"] = self.max_completion_tokens
         elif self.max_tokens is not None:
             params["max_tokens"] = self.max_tokens
+        # Anthropic extended thinking. Emitted AFTER max_tokens because the
+        # endpoint requires `max_tokens > budget_tokens` and will 400 otherwise —
+        # this raises max_tokens to fit rather than letting a valid budget fail.
+        #
+        # Goes in `extra_body`, NOT as a top-level kwarg: the OpenAI SDK validates
+        # its signature and raises "Completions.create() got an unexpected keyword
+        # argument 'thinking'" before any request is made. `extra_body` is the
+        # SDK's documented passthrough and is what the Databricks docs use.
+        thinking = self._thinking_for(params)
+        if thinking is not None:
+            extra_body = dict(params.get("extra_body") or {})
+            extra_body["thinking"] = thinking
+            params["extra_body"] = extra_body
         if isinstance(self.response_format, type) and issubclass(
             self.response_format, BaseModel
         ):
@@ -614,6 +743,9 @@ class OpenAICompletion(BaseLLM):
     ) -> tuple[str, dict[str, Any] | None, LLMCallType]:
         call_type = LLMCallType.LLM_CALL
         usage: dict[str, Any] | None = None
+        # Per-call, like _finish_reason: a previous call's thinking must not be
+        # reported against this one. Both API paths share the emit site.
+        self._reasoning_text = ""
         rounds, deadline = self._execution_budget(from_agent)
         for _round in range(rounds):
             self._check_deadline(deadline, _round, conversation)
@@ -627,7 +759,15 @@ class OpenAICompletion(BaseLLM):
                 usage = self._extract_chat_token_usage(response)
                 self._track_token_usage_internal(usage)
                 function_calls = self._extract_function_calls_from_response(response)
-                content = response.choices[0].message.content
+                # Same block-list shape as the streaming path: without this the
+                # reasoning blocks became part of the returned "answer".
+                content, reasoning = split_message_content(response.choices[0].message)
+                if reasoning:
+                    self._reasoning_text += reasoning
+                    event_bus.emit(
+                        self,
+                        LLMReasoningChunkEvent(model=self.model, reasoning=reasoning),
+                    )
                 self._finish_reason = getattr(
                     response.choices[0], "finish_reason", None
                 )
@@ -688,7 +828,23 @@ class OpenAICompletion(BaseLLM):
             if getattr(choices[0], "finish_reason", None):
                 finish_reason = choices[0].finish_reason
             delta = choices[0].delta
-            text = getattr(delta, "content", None)
+            # `content` is a plain string on most endpoints, but Anthropic-style
+            # reasoning models (Claude Fable 5) send a LIST of typed blocks and
+            # MIX the two within one stream. Passing that list straight into
+            # LLMStreamChunkEvent(chunk=...) — declared `chunk: str` — killed
+            # every run with a pydantic string_type error, and appending it to
+            # `chunks` would have put the reasoning block into the answer.
+            text, reasoning = split_message_content(delta)
+            if reasoning:
+                self._reasoning_text += reasoning
+                event_bus.emit(
+                    self,
+                    LLMReasoningChunkEvent(
+                        model=self.model,
+                        reasoning=reasoning,
+                        chunk_index=chunk_index,
+                    ),
+                )
             if text:
                 chunks.append(text)
                 event_bus.emit(
@@ -839,6 +995,9 @@ class OpenAICompletion(BaseLLM):
     ) -> tuple[str, dict[str, Any] | None, LLMCallType]:
         call_type = LLMCallType.LLM_CALL
         usage: dict[str, Any] | None = None
+        # Per-call, like _finish_reason: a previous call's thinking must not be
+        # reported against this one. Both API paths share the emit site.
+        self._reasoning_text = ""
         rounds, deadline = self._execution_budget(from_agent)
         for _round in range(rounds):
             self._check_deadline(deadline, _round, conversation)

@@ -21,6 +21,7 @@ import DashboardIcon from '@mui/icons-material/Dashboard';
 
 // Import Trace type from the store
 import { Trace } from '../../store/runStatus';
+import { REDACTED_REASONING } from '../Common/ReasoningPanel';
 
 // ============================================================================
 // Shared Extraction Helpers
@@ -266,9 +267,22 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
       : isMemoryLabelling(metadata)
         ? 'Memory Labels'
         : 'LLM Response';
+    // Flag reasoning in the row itself so it is discoverable without opening
+    // the detail pane — otherwise the only hint that a model exposed its
+    // thinking is a collapsed section one click away. The REDACTED sentinel gets
+    // its own wording: the model did think, the provider just withheld it, and
+    // saying plain "reasoning" would promise text the pane cannot show.
+    const rawReasoning = typeof metadata?.reasoning === 'string'
+      ? (metadata.reasoning as string).trim()
+      : '';
+    const suffix = !rawReasoning
+      ? ''
+      : rawReasoning === REDACTED_REASONING
+        ? ' · reasoning hidden'
+        : ' · reasoning';
     const description = outputLen > 0
-      ? `${label} (${outputLen.toLocaleString()} chars)`
-      : label;
+      ? `${label} (${outputLen.toLocaleString()} chars)${suffix}`
+      : `${label}${suffix}`;
 
     return { type: 'llm_response', description };
   },

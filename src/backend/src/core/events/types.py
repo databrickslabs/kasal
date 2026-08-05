@@ -217,6 +217,12 @@ class LLMCallCompletedEvent(LLMEventBase):
     usage: dict[str, Any] | None = None
     finish_reason: str | None = None
     response_id: str | None = None
+    #: The model's reasoning/thinking text for this call, when it exposed any.
+    #: Carried HERE as well as on LLMReasoningChunkEvent so the trace gets it
+    #: once per call rather than once per streamed delta (the chunk event is on
+    #: the bridge's skip list for exactly that reason). Never part of `response`
+    #: — that stays the answer the caller acts on.
+    reasoning: str | None = None
 
     @field_validator("finish_reason", "response_id", mode="before")
     @classmethod
@@ -242,6 +248,31 @@ class LLMStreamChunkEvent(LLMEventBase):
 
     type: Literal["llm_stream_chunk"] = "llm_stream_chunk"
     chunk: str
+    chunk_index: int | None = None
+
+
+class LLMReasoningChunkEvent(LLMEventBase):
+    """A reasoning/thinking summary emitted alongside the answer text.
+
+    Anthropic-style reasoning models on Databricks (Claude Fable 5, Opus 4.7+)
+    return Chat-Completions ``content`` as a LIST of typed blocks — a
+    ``reasoning`` block plus the ``text`` block that is the real answer — and mix
+    plain-string deltas into the same stream. The reasoning summary is NOT part
+    of the answer: folding it into the text would put a model's private
+    deliberation into task output and memory.
+
+    So it gets its own event. ``LLMStreamChunkEvent`` stays strictly the answer
+    text (it is what the live-UI forwarders concatenate); this carries the
+    thinking, for a UI that wants to show a "thinking" indicator.
+
+    Frequently EMPTY in practice: Fable's ``summary`` list usually holds no text
+    (the opaque ``signature`` carries the payload), and this event is only
+    emitted when there is actually something to report. Skipped by the otel
+    bridge for the same reason chunks are — too noisy for a span per delta.
+    """
+
+    type: Literal["llm_reasoning_chunk"] = "llm_reasoning_chunk"
+    reasoning: str
     chunk_index: int | None = None
 
 

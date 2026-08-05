@@ -1,5 +1,6 @@
 import React from 'react';
 import { ToolResultCard } from './ToolResultCard';
+import { ReasoningTraceDetail, matchesReasoning } from './ReasoningTraceDetail';
 
 /** Props an inline trace renderer receives (the whole resolved trace entry). */
 export interface InlineTraceProps {
@@ -44,6 +45,10 @@ export const TRACE_DETAIL_RENDERERS: TraceDetailRenderer[] = [
   // view in TraceDetail — fine for raw JSON, and no per-tool formatting to keep.
   { match: (_detail, label) => /perplexity/i.test(label || ''), Component: ToolResultCard },
   { match: (_detail, label) => /read website|website content|scrape/i.test(label || ''), Component: ToolResultCard },
+  // The model's own thinking. Registered only to render it UNCAPPED — the
+  // generic block is max-h-72, which turns a long train of thought into a nested
+  // scrollbar right when the reader has asked to see all of it.
+  { match: matchesReasoning, Component: ReasoningTraceDetail },
   // Future tools register here, e.g.:
   // { match: (detail, label) => label === 'SomeTool', Component: SomeToolTraceDetail },
 ];
