@@ -16,7 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import LakebaseUnavailableError
 from src.core.logger import LoggerManager
-from src.db.lakebase_session import get_lakebase_session
+from src.db.lakebase_session import (
+    _is_disposed_connection_error,
+    get_lakebase_session,
+)
 from src.db.lakebase_state import is_fallback_allowed, record_successful_connection
 from src.db.session import _request_session, async_session_factory
 
@@ -185,19 +188,45 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
         if not instance_name:
             instance_name = os.environ.get("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
 
-        # Get user token and email from unified auth
-        try:
-            from src.utils.databricks_auth import get_auth_context
+        # Lakebase authenticates as the APP'S SERVICE PRINCIPAL, from environment
+        # variables — see LakebaseConnectionService.get_workspace_client, which
+        # requires DATABRICKS_CLIENT_ID/SECRET/HOST for the `postgres` scope and
+        # deliberately STRIPS DATABRICKS_TOKEN/API_KEY first because a PAT
+        # conflicts with SPN ("more than one authorization method"). get_username()
+        # likewise prefers the SPN client_id. So on a deployed app the PAT chain
+        # contributes nothing here.
+        #
+        # It also cannot be used here. get_auth_context() reads the `apikey` table,
+        # and once that read is routed the router calls auth to reach Lakebase
+        # while auth calls the router to read the key:
+        #
+        #     get_auth_context → get_smart_db_session → get_auth_context → …
+        #
+        # which the deployed app logged 1,287 times as "maximum recursion depth
+        # exceeded", killing every crew and flow subprocess (Chat survived on a
+        # warm per-process PAT cache — that asymmetry is what identified it).
+        #
+        # Only the LOCAL-DEV fallback needs an identity, and only when no SPN is
+        # configured; that path has no Lakebase config row to fetch, so there is no
+        # cycle to close.
+        if not os.environ.get("DATABRICKS_CLIENT_ID"):
+            try:
+                from src.utils.databricks_auth import get_auth_context
 
-            auth = await get_auth_context()
-            if auth:
-                user_token = auth.token
-                user_email = auth.user_identity
-                logger.debug(
-                    f"Using unified {auth.auth_method} auth for Lakebase session"
-                )
-        except Exception as e:
-            logger.warning(f"Failed to get unified auth for Lakebase: {e}")
+                auth = await get_auth_context()
+                if auth:
+                    user_token = auth.token
+                    user_email = auth.user_identity
+                    logger.debug(
+                        f"Using unified {auth.auth_method} auth for Lakebase session"
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to get unified auth for Lakebase: {e}")
+        else:
+            logger.debug(
+                "Lakebase session using the app service principal (SPN env vars); "
+                "skipping the PAT chain"
+            )
 
         use_lakebase = True
 
@@ -274,7 +303,7 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
             # remains to commit or roll back on a disposed connection, so treat
             # that specific teardown race as non-fatal instead of surfacing a raw
             # 500 to the (usually polling) client.
-            if "no active connection" in str(e).lower():
+            if _is_disposed_connection_error(e):
                 logger.warning(
                     f"[DB ROUTER] Session {id(session)} connection disposed "
                     f"(backend switch in progress); ignoring: {e}"

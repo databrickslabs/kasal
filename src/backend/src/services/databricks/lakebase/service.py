@@ -1973,7 +1973,24 @@ class LakebaseService(BaseService):
                 )
                 async with lakebase_engine.begin() as conn:
                     await self.schema_service.set_search_path_async(conn)
-                await self.schema_service.create_tables_async(lakebase_engine)
+
+                # TABLES and COLUMNS are reconciled INDEPENDENTLY. Table creation
+                # can fail for reasons that say nothing about the columns — e.g.
+                # `type "vector" does not exist` on an instance without pgvector —
+                # and when these shared one try block, that single error skipped
+                # the column pass entirely. The live app then 500'd on
+                # `agents.thinking_budget_tokens` and `executionhistory.*`, which
+                # the column pass would have added.
+                table_error: Optional[Exception] = None
+                try:
+                    await self.schema_service.create_tables_async(lakebase_engine)
+                except Exception as exc:  # noqa: BLE001 — columns still worth doing
+                    table_error = exc
+                    logger.warning(
+                        f"Lakebase table creation incomplete, continuing to the "
+                        f"column reconcile: {exc}"
+                    )
+
                 # create_tables_async is CREATE TABLE IF NOT EXISTS — it adds
                 # missing TABLES and nothing else. A table that already exists is
                 # left exactly as-is, including its column list, so a column added
@@ -1986,10 +2003,18 @@ class LakebaseService(BaseService):
 
                 async with lakebase_engine.begin() as conn:
                     await run_schema_self_heal(conn)
-                logger.info(
-                    "Lakebase schema expanded on enable (missing tables AND "
-                    "columns created non-destructively)"
-                )
+
+                if table_error is None:
+                    logger.info(
+                        "Lakebase schema expanded on enable (missing tables AND "
+                        "columns created non-destructively)"
+                    )
+                else:
+                    reconcile_status = "partial"
+                    logger.warning(
+                        "Lakebase columns reconciled, but some tables could not be "
+                        f"created: {table_error}"
+                    )
             finally:
                 await lakebase_engine.dispose()
         except Exception as reconcile_err:  # noqa: BLE001 — never block enable

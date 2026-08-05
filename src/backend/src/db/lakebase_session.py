@@ -34,6 +34,37 @@ from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct, get_applicati
 logger_manager = LoggerManager.get_instance()
 logger = logging.getLogger(__name__)
 
+
+#: Ways a driver reports "the connection you are committing on is already gone".
+#: Enabling/migrating Lakebase calls ``dispose_engines()`` to switch backends,
+#: which closes connections underneath any CONCURRENT request still holding a
+#: session — so its commit fails on something there is nothing left to commit.
+#:
+#: Matching only "no active connection" (SQLAlchemy's wording) missed asyncpg's,
+#: and a polling client got a raw 500 during every backend switch:
+#:
+#:     InterfaceError: cannot call Transaction.commit():
+#:                     the underlying connection is closed
+_DISPOSED_CONNECTION_PHRASES = (
+    "no active connection",
+    "the underlying connection is closed",
+    "connection is closed",
+    "connection was closed",
+    "connection already closed",
+)
+
+
+def _is_disposed_connection_error(exc: Exception) -> bool:
+    """Whether ``exc`` is the engine-disposed teardown race, not a real failure.
+
+    Deliberately phrase-based: the drivers do not share an exception type for
+    this, and asyncpg's ``InterfaceError`` also covers genuine protocol misuse
+    that must NOT be swallowed.
+    """
+    message = str(exc).lower()
+    return any(phrase in message for phrase in _DISPOSED_CONNECTION_PHRASES)
+
+
 # Token refresh interval: 50 minutes (tokens expire at 60 min, 10 min safety margin)
 TOKEN_REFRESH_INTERVAL_SECONDS = 50 * 60
 
@@ -713,12 +744,22 @@ async def get_lakebase_session(
                 await session.commit()
             except GeneratorExit:
                 pass
-            except Exception:
-                try:
-                    await session.rollback()
-                except Exception:
-                    pass
-                raise
+            except Exception as exc:
+                if _is_disposed_connection_error(exc):
+                    # Engine disposed underneath us (backend switch / token
+                    # refresh). There is nothing left to commit or roll back on a
+                    # closed connection, and the request itself succeeded — see
+                    # database_router._is_disposed_connection_error.
+                    logger.warning(
+                        f"[LAKEBASE SESSION] Connection disposed during commit; "
+                        f"ignoring: {exc}"
+                    )
+                else:
+                    try:
+                        await session.rollback()
+                    except Exception:
+                        pass
+                    raise
             finally:
                 try:
                     await session.close()
@@ -746,12 +787,21 @@ async def get_lakebase_session(
             # Client disconnected — skip commit/rollback to avoid
             # asyncpg "another operation is in progress" errors.
             pass
-        except Exception:
-            try:
-                await session.rollback()
-            except Exception:
-                pass
-            raise
+        except Exception as exc:
+            if _is_disposed_connection_error(exc):
+                # See the crew-thread branch above: a disposed connection is a
+                # teardown race, not a request failure. Surfacing it turned every
+                # backend switch into a 500 for whichever request was in flight.
+                logger.warning(
+                    f"[LAKEBASE SESSION] Connection disposed during commit; "
+                    f"ignoring: {exc}"
+                )
+            else:
+                try:
+                    await session.rollback()
+                except Exception:
+                    pass
+                raise
         finally:
             try:
                 await session.close()

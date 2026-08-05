@@ -68,6 +68,23 @@ ROUTER_REQUIRED = {
     "utils/databricks_auth.py",
 }
 
+#: Modules that must ROUTE but are also allowed to hold the raw factory, with the
+#: reason. Auth is the one genuine case: the router needs a credential to reach
+#: Lakebase, so ``get_smart_db_session`` calls ``get_auth_context``. Routing
+#: auth's own read unconditionally closed the loop
+#: (``get_auth_context → get_smart_db_session → get_auth_context``) and the
+#: deployed app logged 1,287 "maximum recursion depth exceeded", killing every
+#: crew and flow subprocess.
+#:
+#: ``_auth_scoped_session`` resolves it: route on the OUTERMOST entry (so the
+#: Lakebase split is still fixed) and use the raw factory only for a read made
+#: while already resolving auth — which wants the local database anyway, since the
+#: Lakebase config row lives there. Hence the factory import is correct HERE and
+#: nowhere else on this list.
+RAW_FACTORY_ALLOWED = {
+    "utils/databricks_auth.py": "_auth_scoped_session, for the reentrant case",
+}
+
 
 def _imports_raw_factory(tree: ast.AST) -> bool:
     """Whether the module imports ``async_session_factory`` at all."""
@@ -84,12 +101,29 @@ def test_module_does_not_use_the_snapshot_factory(relative_path):
     path = BACKEND_SRC / relative_path
     assert path.exists(), f"{relative_path} moved — update this list, do not delete it"
     tree = ast.parse(path.read_text())
+    if relative_path in RAW_FACTORY_ALLOWED:
+        pytest.skip(f"allowed: {RAW_FACTORY_ALLOWED[relative_path]}")
     assert not _imports_raw_factory(tree), (
         f"{relative_path} imports async_session_factory. That factory is a "
         "per-process snapshot: after a runtime /lakebase/enable it still points "
         "at the local database while routed reads go to Lakebase, and the "
         "resulting miss is SILENT. Use get_smart_db_session() (or "
         "execute_db_operation_smart) instead."
+    )
+
+
+@pytest.mark.parametrize("relative_path", sorted(RAW_FACTORY_ALLOWED))
+def test_an_allowed_module_still_routes_somewhere(relative_path):
+    """An exemption is for a REENTRANT read, not for abandoning the router.
+
+    Without this, "allowed to use the raw factory" would quietly become "no longer
+    routed at all" — reintroducing the silent Lakebase split the list exists to
+    prevent.
+    """
+    source = (BACKEND_SRC / relative_path).read_text()
+    assert "get_smart_db_session" in source, (
+        f"{relative_path} is exempt from the raw-factory ban but no longer routes "
+        "at all. The exemption covers the nested call only."
     )
 
 

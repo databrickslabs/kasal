@@ -82,6 +82,36 @@ class TestEnableWithExpandSchema:
         heal.assert_awaited_once()
         assert heal.await_args.args[0] is conn
 
+    async def test_columns_are_reconciled_even_when_table_creation_fails(self):
+        """Table creation and column reconcile are INDEPENDENT.
+
+        They shared one try block, so any table failure skipped the column pass —
+        and table creation fails for reasons that say nothing about columns. On the
+        live app `type "vector" does not exist` (no pgvector) did exactly this, and
+        the app then 500'd on `agents.thinking_budget_tokens` and
+        `executionhistory.*`, which the column pass would have added.
+        """
+        svc = _make_service()
+        engine, conn = _engine_stub()
+        svc.connection_service.create_lakebase_engine_async = AsyncMock(
+            return_value=engine
+        )
+        svc.schema_service.create_tables_async = AsyncMock(
+            side_effect=Exception('type "vector" does not exist')
+        )
+        heal = AsyncMock()
+        with patch("src.db.session.run_schema_self_heal", heal):
+            result = await svc.enable_lakebase(
+                "inst", "h.example.com", expand_schema=True
+            )
+
+        heal.assert_awaited_once()
+        assert heal.await_args.args[0] is conn
+        # Reported honestly rather than as a clean success.
+        assert result["schema_reconcile"] == "partial"
+        assert result["success"] is True
+        engine.dispose.assert_awaited()
+
     async def test_plain_connect_changes_nothing(self):
         """Without expand_schema the user asked to connect, not to alter."""
         svc = _make_service()

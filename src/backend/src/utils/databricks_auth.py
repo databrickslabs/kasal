@@ -209,6 +209,7 @@ This pattern allows graceful fallback and clear error reporting.
 
 import asyncio
 import contextlib
+import contextvars
 import hashlib
 import json
 import logging
@@ -221,6 +222,56 @@ from databricks.sdk import WorkspaceClient
 from databricks.sdk.config import Config
 
 logger = logging.getLogger(__name__)
+
+#: True while this task is already resolving auth, so a DB read made from INSIDE
+#: the auth path must not go back through the database router.
+#:
+#: The router cannot be used here: reaching Lakebase requires a credential, so
+#: ``get_smart_db_session()`` calls ``get_auth_context()`` to get one. Routing
+#: auth's own reads through it therefore closes a loop —
+#: ``get_auth_context → get_smart_db_session → get_auth_context`` — which the
+#: deployed app hit as::
+#:
+#:     [AUTH PAT] Error during PAT lookup: maximum recursion depth exceeded
+#:
+#: repeated thousands of times, taking every LLM call with it.
+#:
+#: A ContextVar, not a module flag: concurrent requests each resolve auth on their
+#: own task, and a shared bool would let one request's lookup silently disable
+#: routing for another's.
+_RESOLVING_AUTH: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "kasal_resolving_auth", default=False
+)
+
+
+@contextlib.asynccontextmanager
+async def _auth_scoped_session():
+    """A session for a read made from inside the auth path.
+
+    Uses the router when it is safe (so a runtime ``/lakebase/enable`` is picked up
+    — that split is what made a configured Perplexity key read as absent), and the
+    raw factory when we are ALREADY resolving auth, where the router would recurse.
+
+    The bootstrap read is the correct one to serve locally anyway: the Lakebase
+    config row itself lives in the local database.
+    """
+    if _RESOLVING_AUTH.get():
+        from src.db.session import async_session_factory
+
+        async with async_session_factory() as session:
+            yield session
+        return
+
+    from src.db.database_router import get_smart_db_session
+
+    token = _RESOLVING_AUTH.set(True)
+    try:
+        async for session in get_smart_db_session():
+            yield session
+            break
+    finally:
+        _RESOLVING_AUTH.reset(token)
+
 
 # OBO token validation cache (PERF-006). The SCIM me() call only derives
 # user_identity, which doesn't need revalidation on every LLM/embedding call —
@@ -435,11 +486,12 @@ class DatabricksAuth:
 
             # Try to load workspace host from database configuration
             try:
-                from src.db.database_router import get_smart_db_session
                 from src.services.databricks.workspace.service import DatabricksService
 
-                # Router-aware for the same reason as the PAT lookup below.
-                async for session in get_smart_db_session():
+                # Router-aware WHERE SAFE — see _auth_scoped_session. Routing this
+                # unconditionally recursed, because the router needs auth to reach
+                # Lakebase.
+                async with _auth_scoped_session() as session:
                     service = DatabricksService(session)
 
                     try:
@@ -1193,7 +1245,6 @@ async def get_auth_context(
                 "[AUTH] Priority 2: Attempting PAT authentication from API Keys Service"
             )
             try:
-                from src.db.database_router import get_smart_db_session
                 from src.services.settings.api_keys import ApiKeysService
                 from src.utils.user_context import UserContext
 
@@ -1252,7 +1303,7 @@ async def get_auth_context(
                     # read as absent — the query succeeds against the wrong
                     # database and returns nothing, so the caller reports "no PAT"
                     # and silently degrades to environment variables.
-                    async for session in get_smart_db_session():
+                    async with _auth_scoped_session() as session:
                         api_service = ApiKeysService(session, group_id=gid)
                         for key_name in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY"]:
                             try:
