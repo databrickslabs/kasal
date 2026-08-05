@@ -15,7 +15,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, AsyncGenerator, Dict, Generator, List, Optional, Tuple
 
-from sqlalchemy import text
+from sqlalchemy import MetaData, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -39,6 +39,66 @@ def _validate_identifier(name: str, kind: str = "identifier") -> str:
     if not name or not _SAFE_IDENTIFIER_RE.match(name):
         raise ValueError(f"Invalid SQL {kind}: {name!r}")
     return name
+
+
+def vector_column_tables() -> set[str]:
+    """Tables carrying a pgvector ``vector(...)`` column, read from the models.
+
+    ``CREATE TABLE`` fails with 42704 ``type "vector" does not exist`` whenever
+    pgvector is absent — and a deployed app CANNOT install it: ``vector`` is not a
+    trusted extension, so ``CREATE EXTENSION`` needs ``databricks_superuser`` while
+    the app's service principal only has CONNECT/CREATE/DML. So these tables need
+    handling that does not depend on the extension.
+
+    DERIVED, not hardcoded. The old literal
+    ``{"documentation_embeddings", "knowledge_embeddings"}`` was correct when
+    written and silently went stale: ``workflow_recipes`` later gained
+    ``embedding = Column(Vector(1024))``, was not on the list, and its creation
+    failed on every Lakebase without pgvector — taking the recipes feature with
+    it. Asking the metadata means the next such column is covered on the day it is
+    added, in all four copies of this list.
+    """
+    from src.models.documentation_embedding import Vector
+
+    return {
+        table.name
+        for table in Base.metadata.sorted_tables
+        if any(isinstance(col.type, Vector) for col in table.columns)
+    }
+
+
+def create_table_without_vector_sql(table_name: str) -> Optional[str]:
+    """``CREATE TABLE IF NOT EXISTS`` for ``table_name``, minus its vector column.
+
+    Generated from the model with the PostgreSQL dialect, so it stays correct as
+    the model changes — no second copy of the schema to keep in sync.
+
+    Why the column is dropped rather than the table skipped: a deployed app cannot
+    install pgvector (see :func:`vector_column_tables`), so a table naming
+    ``vector(1024)`` can never be created there. Everything EXCEPT the embedding
+    works without it, and the column can be added later once an instance owner
+    enables the extension. Skipping the table entirely means the feature has no
+    storage at all — which is what happened to ``workflow_recipes``: it was
+    excluded from creation and nothing created it afterwards, so every write to it
+    failed.
+    """
+    from sqlalchemy.dialects import postgresql
+    from sqlalchemy.schema import CreateTable
+
+    from src.models.documentation_embedding import Vector
+
+    table = Base.metadata.tables.get(table_name)
+    if table is None:
+        return None
+    trimmed = table.to_metadata(
+        MetaData(),
+        # to_metadata copies the table; drop the vector column from the copy so
+        # the original metadata (used everywhere else) is untouched.
+    )
+    for col in [c for c in trimmed.columns if isinstance(c.type, Vector)]:
+        trimmed._columns.remove(col)
+    stmt = CreateTable(trimmed, if_not_exists=True)
+    return str(stmt.compile(dialect=postgresql.dialect())).strip()
 
 
 def _quote_pg_role(identifier: str) -> str:
@@ -272,35 +332,32 @@ class LakebaseSchemaService(BaseService):
                 logger.info("Set kasal schema as default search path")
 
                 # Tables with vector columns that need special handling
-                tables_to_skip = ["documentation_embeddings", "knowledge_embeddings"]
+                tables_to_skip = vector_column_tables()
 
                 # Get all table objects from metadata
                 for table in Base.metadata.sorted_tables:
                     if table.name in tables_to_skip:
-                        logger.info(
-                            f"Skipping table {table.name} (contains vector column)"
-                        )
-                        # Create a modified version without vector column
+                        # Create it WITHOUT the vector column rather than not at
+                        # all. This used to special-case documentation_embeddings
+                        # and silently create nothing for any other vector table,
+                        # so workflow_recipes never existed and every write to it
+                        # failed. The DDL is generated from the model.
+                        create_sql = create_table_without_vector_sql(table.name)
+                        if not create_sql:
+                            logger.warning(
+                                f"Skipping {table.name}: no metadata to build a "
+                                "vector-free CREATE from"
+                            )
+                            continue
+                        await conn.execute(text(create_sql))
                         if table.name == "documentation_embeddings":
-                            # Create table without the embedding column
-                            create_sql = """
-                            CREATE TABLE IF NOT EXISTS documentation_embeddings (
-                                id SERIAL PRIMARY KEY,
-                                source VARCHAR NOT NULL,
-                                title VARCHAR NOT NULL,
-                                content TEXT NOT NULL,
-                                doc_metadata JSON,
-                                group_id VARCHAR(100),
-                                file_path VARCHAR,
-                                created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-                                updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
-                            )
-                            """
-                            await conn.execute(text(create_sql))
+                            # Adds the embedding column + HNSW index when pgvector
+                            # is present, and the scoping columns either way.
                             await self._ensure_doc_embeddings_columns_async(conn)
-                            logger.info(
-                                "Created documentation_embeddings table (pgvector embedding + scoping columns ensured)"
-                            )
+                        logger.info(
+                            f"Created {table.name} without its vector column "
+                            "(pgvector unavailable to a non-superuser role)"
+                        )
                     else:
                         # Create table normally using SQLAlchemy metadata
                         await conn.run_sync(table.create, checkfirst=True)
@@ -325,7 +382,7 @@ class LakebaseSchemaService(BaseService):
             Exception: If table creation fails
         """
         try:
-            tables_to_skip = {"documentation_embeddings", "knowledge_embeddings"}
+            tables_to_skip = vector_column_tables()
             all_tables = Base.metadata.sorted_tables
             waves, table_map = self._get_dependency_waves(all_tables)
             max_parallel = 10
@@ -369,12 +426,7 @@ class LakebaseSchemaService(BaseService):
                                         )
 
                 for name in special:
-                    if name == "documentation_embeddings":
-                        logger.info(f"Skipping table {name} (contains vector column)")
-                        self._create_doc_embeddings_sync(engine)
-                        logger.info(
-                            "Created documentation_embeddings without vector column"
-                        )
+                    self._create_without_vector_sync(engine, name)
 
             logger.info("Created table structure in Lakebase")
 
@@ -406,36 +458,29 @@ class LakebaseSchemaService(BaseService):
                 }
 
                 # Tables with vector columns that need special handling
-                tables_to_skip = ["documentation_embeddings", "knowledge_embeddings"]
+                tables_to_skip = vector_column_tables()
 
                 # Get all table objects from metadata
                 for table in Base.metadata.sorted_tables:
                     if table.name in tables_to_skip:
-                        yield {
-                            "type": "info",
-                            "message": f"Skipping table {table.name} (contains vector column)",
-                        }
-                        # Create a modified version without vector column
-                        if table.name == "documentation_embeddings":
-                            create_sql = """
-                            CREATE TABLE IF NOT EXISTS documentation_embeddings (
-                                id SERIAL PRIMARY KEY,
-                                source VARCHAR NOT NULL,
-                                title VARCHAR NOT NULL,
-                                content TEXT NOT NULL,
-                                doc_metadata JSON,
-                                group_id VARCHAR(100),
-                                file_path VARCHAR,
-                                created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-                                updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
-                            )
-                            """
-                            await conn.execute(text(create_sql))
-                            await self._ensure_doc_embeddings_columns_async(conn)
+                        # Created WITHOUT the vector column, not skipped — see the
+                        # same branch in create_tables_async.
+                        create_sql = create_table_without_vector_sql(table.name)
+                        if not create_sql:
                             yield {
-                                "type": "success",
-                                "message": f"Created {table.name} (pgvector embedding + scoping columns ensured)",
+                                "type": "warning",
+                                "message": f"Skipped {table.name}: no metadata to "
+                                "build a vector-free CREATE from",
                             }
+                            continue
+                        await conn.execute(text(create_sql))
+                        if table.name == "documentation_embeddings":
+                            await self._ensure_doc_embeddings_columns_async(conn)
+                        yield {
+                            "type": "success",
+                            "message": f"Created {table.name} without its vector "
+                            "column (pgvector needs a superuser to enable)",
+                        }
                     else:
                         # Create table normally
                         await conn.run_sync(table.create, checkfirst=True)
@@ -627,28 +672,39 @@ class LakebaseSchemaService(BaseService):
                 "'CREATE EXTENSION IF NOT EXISTS vector;' then re-run initialization."
             )
 
-    def _create_doc_embeddings_sync(self, engine: Engine) -> None:
-        """Create documentation_embeddings table and ensure pgvector schema."""
-        create_sql = """
-        CREATE TABLE IF NOT EXISTS documentation_embeddings (
-            id SERIAL PRIMARY KEY,
-            source VARCHAR NOT NULL,
-            title VARCHAR NOT NULL,
-            content TEXT NOT NULL,
-            doc_metadata JSON,
-            group_id VARCHAR(100),
-            file_path VARCHAR,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
-        )
+    def _create_without_vector_sync(self, engine: Engine, table_name: str) -> None:
+        """Create a vector-column table WITHOUT its vector column (sync).
+
+        Works for ANY table carrying a ``Vector`` column, because the DDL is
+        generated from the model. The predecessor was hardcoded to
+        documentation_embeddings, so ``workflow_recipes`` — added later with
+        ``embedding = Column(Vector(1024))`` — was excluded from normal creation
+        and had no special case either, i.e. never created at all.
         """
+        create_sql = create_table_without_vector_sql(table_name)
+        if not create_sql:
+            logger.warning(
+                f"Cannot create {table_name}: no metadata to build a "
+                "vector-free CREATE from"
+            )
+            return
         with engine.begin() as conn:
             # Include public so the pgvector `vector` type (installed in public by
             # CREATE EXTENSION) resolves when adding the embedding column below —
             # see the note in _create_tables_batch_sync.
             conn.execute(text("SET search_path TO kasal, public"))
             conn.execute(text(create_sql))
-            self._ensure_doc_embeddings_columns_sync(conn)
+            if table_name == "documentation_embeddings":
+                # Adds the embedding column + HNSW index IF pgvector is present.
+                self._ensure_doc_embeddings_columns_sync(conn)
+        logger.info(f"Created {table_name} without its vector column")
+
+    def _create_doc_embeddings_sync(self, engine: Engine) -> None:
+        """Create documentation_embeddings and ensure its pgvector schema.
+
+        Thin wrapper kept for existing callers; the generic path does the work.
+        """
+        self._create_without_vector_sync(engine, "documentation_embeddings")
 
     def create_tables_sync_stream(
         self, engine: Engine
@@ -667,7 +723,7 @@ class LakebaseSchemaService(BaseService):
             Dict with event type and progress information
         """
         try:
-            tables_to_skip = {"documentation_embeddings", "knowledge_embeddings"}
+            tables_to_skip = vector_column_tables()
             all_tables = Base.metadata.sorted_tables
             waves, table_map = self._get_dependency_waves(all_tables)
 
@@ -742,18 +798,23 @@ class LakebaseSchemaService(BaseService):
                                             "message": f"Error creating table {name}: {e}",
                                         }
 
-                # Handle special tables (need custom DDL)
+                # Vector tables: created WITHOUT the vector column (pgvector needs
+                # a superuser to enable, which a deployed app is not). Previously
+                # only documentation_embeddings was handled and every other one was
+                # merely announced as "skipping" and then never created — which is
+                # why workflow_recipes did not exist.
                 for name in special:
-                    yield {
-                        "type": "info",
-                        "message": f"Skipping table {name} (contains vector column)",
-                    }
-                    if name == "documentation_embeddings":
-                        self._create_doc_embeddings_sync(engine)
+                    try:
+                        self._create_without_vector_sync(engine, name)
                         created_count += 1
                         yield {
                             "type": "success",
-                            "message": f"Created {name} without vector column",
+                            "message": f"Created {name} without its vector column",
+                        }
+                    except Exception as e:
+                        yield {
+                            "type": "error",
+                            "message": f"Error creating table {name}: {e}",
                         }
 
             yield {

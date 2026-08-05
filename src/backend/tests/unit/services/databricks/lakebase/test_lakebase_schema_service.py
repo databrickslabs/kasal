@@ -257,12 +257,28 @@ class TestCreateTablesAsync:
         mock_table = MagicMock()
         mock_table.name = "documentation_embeddings"
 
-        with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
+        # The vector-table set and its DDL are DERIVED from Base.metadata now, so
+        # patching Base alone would make the table unrecognised. Patch both, which
+        # is also what keeps this test about routing rather than about SQL text.
+        with (
+            patch("src.services.databricks.lakebase.schema.Base") as mock_base,
+            patch(
+                "src.services.databricks.lakebase.schema.vector_column_tables",
+                return_value={"documentation_embeddings"},
+            ),
+            patch(
+                "src.services.databricks.lakebase.schema.create_table_without_vector_sql",
+                return_value="CREATE TABLE IF NOT EXISTS documentation_embeddings (id SERIAL PRIMARY KEY)",
+            ),
+        ):
             mock_base.metadata.sorted_tables = [mock_table]
             await service.create_tables_async(mock_engine)
 
-        # run_sync should NOT have been called for the skipped table
+        # It must NOT go through the model's own CREATE (that emits vector(1024)
+        # and fails with 42704 where pgvector is absent) — it takes the
+        # vector-free path instead.
         mock_conn.run_sync.assert_not_called()
+        mock_conn.execute.assert_called()
 
     @pytest.mark.asyncio
     async def test_creates_normal_tables(self, service):
@@ -544,14 +560,26 @@ class TestCreateTablesSyncStream:
 
         mock_engine.begin.return_value = SyncCtxMgr()
 
-        with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
+        with (
+            patch("src.services.databricks.lakebase.schema.Base") as mock_base,
+            patch(
+                "src.services.databricks.lakebase.schema.vector_column_tables",
+                return_value={"documentation_embeddings"},
+            ),
+            patch.object(service, "_create_without_vector_sync") as mock_create,
+        ):
             mock_base.metadata.sorted_tables = [mock_table]
-            with patch.object(service, "_create_doc_embeddings_sync"):
-                events = list(service.create_tables_sync_stream(mock_engine))
+            events = list(service.create_tables_sync_stream(mock_engine))
 
-        # Should see info about skipping the vector table
-        info_events = [e for e in events if e["type"] == "info"]
-        assert any("documentation_embeddings" in e["message"] for e in info_events)
+        # It is CREATED (without its vector column), not merely announced as
+        # skipped. The old version only reported "skipping ..." for anything other
+        # than documentation_embeddings and created nothing, which is how
+        # workflow_recipes ended up with no table at all.
+        mock_create.assert_called_once_with(mock_engine, "documentation_embeddings")
+        assert any(
+            e["type"] == "success" and "documentation_embeddings" in e["message"]
+            for e in events
+        ), events
 
     def test_yields_error_event_on_failure(self, service):
         mock_engine = MagicMock()

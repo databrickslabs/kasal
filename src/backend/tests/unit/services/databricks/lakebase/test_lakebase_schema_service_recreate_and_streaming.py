@@ -315,13 +315,26 @@ class TestCreateTablesAsyncDetailed:
         mock_emb_table = MagicMock()
         mock_emb_table.name = "documentation_embeddings"
 
-        with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
+        # vector_column_tables() reads Base.metadata, which is patched here, so
+        # patch the derived set too — otherwise the table is unrecognised and the
+        # test silently checks the NORMAL path.
+        with (
+            patch("src.services.databricks.lakebase.schema.Base") as mock_base,
+            patch(
+                "src.services.databricks.lakebase.schema.vector_column_tables",
+                return_value={"documentation_embeddings"},
+            ),
+            patch(
+                "src.services.databricks.lakebase.schema.create_table_without_vector_sql",
+                return_value="CREATE TABLE IF NOT EXISTS documentation_embeddings (id SERIAL PRIMARY KEY)",
+            ),
+        ):
             mock_base.metadata.sorted_tables = [mock_emb_table]
             await service.create_tables_async(engine)
 
-        # execute called for SET search_path and for the custom DDL
+        # execute called for SET search_path and for the generated DDL
         assert conn.execute.call_count >= 2
-        # run_sync should NOT have been called for the skipped table
+        # NOT the model's own CREATE — that emits vector(1024) and 42704s.
         conn.run_sync.assert_not_called()
 
     @pytest.mark.asyncio
@@ -422,11 +435,19 @@ class TestCreateTablesSyncDetailed:
         mock_table.foreign_keys = set()
         engine = _sync_engine(mock_conn)
 
-        with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
+        with (
+            patch("src.services.databricks.lakebase.schema.Base") as mock_base,
+            patch(
+                "src.services.databricks.lakebase.schema.vector_column_tables",
+                return_value={"documentation_embeddings"},
+            ),
+            patch.object(service, "_create_without_vector_sync") as doc_mock,
+        ):
             mock_base.metadata.sorted_tables = [mock_table]
-            with patch.object(service, "_create_doc_embeddings_sync") as doc_mock:
-                service.create_tables_sync(engine)
-                doc_mock.assert_called_once_with(engine)
+            service.create_tables_sync(engine)
+            # Generic now: takes the table NAME, so it works for any vector table
+            # (workflow_recipes included) instead of documentation_embeddings only.
+            doc_mock.assert_called_once_with(engine, "documentation_embeddings")
 
     def test_large_wave_uses_thread_pool(self, service):
         """When wave has >2 normal tables, ThreadPoolExecutor is used."""
@@ -892,14 +913,20 @@ class TestCreateTablesSyncStreamDetailed:
         batch_results = [
             (t.name, True, None) for t in tables if t.name != "documentation_embeddings"
         ]
-        with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
-            mock_base.metadata.sorted_tables = tables
-            with patch.object(
+        with (
+            patch("src.services.databricks.lakebase.schema.Base") as mock_base,
+            patch(
+                "src.services.databricks.lakebase.schema.vector_column_tables",
+                return_value={"documentation_embeddings"},
+            ),
+            patch.object(
                 service, "_create_tables_batch_sync", return_value=batch_results
-            ):
-                with patch.object(service, "_create_doc_embeddings_sync") as doc_mock:
-                    events = list(service.create_tables_sync_stream(engine))
-                doc_mock.assert_called_once_with(engine)
+            ),
+            patch.object(service, "_create_without_vector_sync") as doc_mock,
+        ):
+            mock_base.metadata.sorted_tables = tables
+            events = list(service.create_tables_sync_stream(engine))
+            doc_mock.assert_called_once_with(engine, "documentation_embeddings")
 
     def test_small_wave_single_table_success(self, service):
         """Small wave (1 table) goes through non-threaded path."""
