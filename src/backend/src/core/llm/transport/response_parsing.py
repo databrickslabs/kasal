@@ -175,9 +175,18 @@ def reasoning_was_redacted(content: Any) -> bool:
     from "this model does not reason" is what lets the UI explain an empty
     reasoning panel instead of silently showing nothing.
 
-    Not fixable by asking differently: ``reasoning_effort`` is rejected outright,
-    ``thinking:{"type":"enabled"}`` is rejected in favour of ``"adaptive"``, and
-    adaptive still returns an empty summary (verified live 2026-08-05).
+    Usually FIXABLE by asking correctly, and the earlier claim here that it was
+    not was measured wrong. Re-probed live 2026-08-05 against fable-5 and opus-5:
+    with no ``thinking`` field the summary is ``text: ""`` + signature, but with
+    ``thinking:{"type":"adaptive","display":"summarized"}`` the same question
+    returns real summary text ("That's a classic one—the answer is 9."). The
+    default is ``display: "omitted"``, so omitting the field is what produced the
+    empty summary — not a provider that withholds it.
+
+    So treat a true result as "we did not ask for the summary, or this model has
+    none to give", and check the REQUEST before concluding the text is
+    unavailable. ``reasoning_effort`` is still rejected outright, and
+    ``thinking:{"type":"enabled"}`` is still rejected in favour of ``"adaptive"``.
     """
     if not isinstance(content, (list, tuple)):
         return False

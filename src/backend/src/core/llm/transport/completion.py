@@ -46,6 +46,7 @@ from .exceptions import (
 # Aliased: `function_calls` is the local variable name throughout the round
 # loops, and a module-level import of the same name would shadow confusingly.
 from .response_parsing import (
+    REDACTED_REASONING,
     builtin_tool_outputs,
     chat_token_usage,
 )
@@ -224,6 +225,25 @@ class OpenAICompletion(BaseLLM):
     #: once per delta. Reset per call, like _finish_reason.
     _reasoning_text: str = PrivateAttr(default="")
 
+    def _add_reasoning(self, reasoning: str) -> None:
+        """Accumulate a reasoning delta.
+
+        ``REDACTED_REASONING`` is a FLAG, not prose: it means "the model thought
+        but the provider encrypted the trace". Every delta of an encrypted stream
+        reports it, so appending it like text rendered
+        ``__kasal_reasoning_redacted____kasal_reasoning_redacted__…`` in the UI —
+        the frontend tests the value for EQUALITY, so a repeated sentinel matched
+        nothing and leaked to the user verbatim. Keep it idempotent, and never let
+        it mix with real text: if any delta carries actual reasoning, that wins.
+        """
+        if reasoning == REDACTED_REASONING:
+            if not self._reasoning_text:
+                self._reasoning_text = REDACTED_REASONING
+            return
+        if self._reasoning_text == REDACTED_REASONING:
+            self._reasoning_text = ""  # real text supersedes the placeholder
+        self._reasoning_text += reasoning
+
     @property
     def client(self) -> Any:
         if self._client is None:
@@ -390,14 +410,35 @@ class OpenAICompletion(BaseLLM):
         ``max_tokens`` is raised to clear the budget rather than letting the
         endpoint 400 on an otherwise reasonable configuration.
         """
-        if not self.thinking_budget_tokens or self.thinking_budget_tokens <= 0:
-            return None
         model = str(self.model).lower()
+        has_budget = (
+            bool(self.thinking_budget_tokens) and self.thinking_budget_tokens > 0
+        )
+        is_adaptive = any(name in model for name in _THINKING_ADAPTIVE_MODELS)
+
+        # An ADAPTIVE model's opt-in knob is `thinking_effort`, because it REJECTS
+        # a budget. Gating the whole function on a budget therefore made
+        # effort-only configuration a silent no-op: no `thinking` block was sent,
+        # so `display` defaulted to "omitted", the reply carried an encrypted
+        # signature with an empty `thinking` field, and this code reported it as
+        # redacted — a summary the user was entitled to, shown as a placeholder.
+        #
+        # On an adaptive model we ask for the summary even with NOTHING configured.
+        # It reasons regardless — probed live 2026-08-05, an unconfigured request
+        # still comes back with a signed reasoning block — so `display` only
+        # decides whether we can SEE work already being paid for. Requesting it is
+        # not the same as turning thinking on, and no model config seeds a
+        # thinking default, so without this every adaptive Claude shows the
+        # redaction placeholder out of the box. Manual-mode models still require
+        # an explicit budget: there, `thinking` genuinely enables the feature and
+        # consumes part of `max_tokens`.
+        if not (has_budget or is_adaptive):
+            return None
 
         # Adaptive models: no budget, but `display` is what makes it visible.
         # Depth is `output_config: {"effort": ...}` — a sibling of `thinking`,
         # not a key inside it, so it is applied to `params` here.
-        if any(name in model for name in _THINKING_ADAPTIVE_MODELS):
+        if is_adaptive:
             # Validated against THIS model's own accepted set, not a global list:
             # the scales differ per model, so a value that is valid for one
             # Anthropic model can 400 on another.
@@ -421,8 +462,12 @@ class OpenAICompletion(BaseLLM):
         if not any(name in model for name in _THINKING_BUDGET_MODELS):
             # Not an Anthropic model — `thinking` is not part of its surface.
             return None
+        if not has_budget:
+            # Manual mode with only an effort set: the number IS the depth here,
+            # and effort is not part of this model's surface. Nothing to send.
+            return None
 
-        budget = int(self.thinking_budget_tokens)
+        budget = int(self.thinking_budget_tokens or 0)
         cap = params.get("max_tokens") or params.get("max_completion_tokens")
         if cap is not None and cap <= budget:
             params["max_tokens"] = budget + 4096
@@ -830,7 +875,7 @@ class OpenAICompletion(BaseLLM):
                 # reasoning blocks became part of the returned "answer".
                 content, reasoning = split_message_content(response.choices[0].message)
                 if reasoning:
-                    self._reasoning_text += reasoning
+                    self._add_reasoning(reasoning)
                     event_bus.emit(
                         self,
                         LLMReasoningChunkEvent(model=self.model, reasoning=reasoning),
@@ -903,15 +948,20 @@ class OpenAICompletion(BaseLLM):
             # `chunks` would have put the reasoning block into the answer.
             text, reasoning = split_message_content(delta)
             if reasoning:
-                self._reasoning_text += reasoning
-                event_bus.emit(
-                    self,
-                    LLMReasoningChunkEvent(
-                        model=self.model,
-                        reasoning=reasoning,
-                        chunk_index=chunk_index,
-                    ),
-                )
+                self._add_reasoning(reasoning)
+                # Don't stream the placeholder: it is a per-call fact, not a
+                # chunk, and one event per delta is what produced the repeated
+                # sentinel the user saw. The final LLMCallCompletedEvent carries
+                # it once.
+                if reasoning != REDACTED_REASONING:
+                    event_bus.emit(
+                        self,
+                        LLMReasoningChunkEvent(
+                            model=self.model,
+                            reasoning=reasoning,
+                            chunk_index=chunk_index,
+                        ),
+                    )
             if text:
                 chunks.append(text)
                 event_bus.emit(

@@ -131,17 +131,37 @@ describe('ReasoningPanel', () => {
       expect(screen.queryByText(REDACTED_REASONING)).not.toBeInTheDocument();
     });
 
+    it('handles the sentinel REPEATED, which is what shipped', () => {
+      // The sentinel is a per-call flag, but the streaming path reported it once
+      // per delta and the backend appended each one, so the stored reasoning read
+      // `__kasal_reasoning_redacted__` six times over. Every consumer tested it
+      // for EQUALITY, so a repeat matched nothing and rendered to the user as
+      // literal text — exactly how this was found. The backend no longer
+      // accumulates it; traces already written still hold the repeat.
+      const repeated = REDACTED_REASONING.repeat(6);
+      render(<ReasoningPanel reasoning={repeated} />);
+
+      expect(screen.getByText('Reasoning (hidden by provider)')).toBeInTheDocument();
+      expect(screen.queryByText(/chars/)).not.toBeInTheDocument();
+      expect(screen.queryByText(repeated)).not.toBeInTheDocument();
+    });
+
     it('tells the user the actionable fix, not just that it is hidden', async () => {
-      // The first version claimed this could not be enabled from Kasal at all.
-      // That was wrong: `display` defaults to "omitted" on Claude 5/Fable/4.7/4.8,
-      // and Extended Thinking makes the transport opt in. Saying "impossible"
-      // when the answer is a toggle is the worst version of this message.
+      // This message has been wrong twice. First it claimed the text could not be
+      // had from Kasal at all — false: `display` defaults to "omitted" on Claude
+      // 5/Fable/4.7/4.8 and the transport can opt in. Then it said to enable
+      // Extended Thinking in Settings — also stale, because the transport now
+      // asks for the summary on every adaptive Claude automatically, so the only
+      // way to still see this is an old run (re-run it) or a manual-mode model
+      // that needs a budget. Saying "flip a toggle" when there is no toggle left
+      // sends the reader somewhere that cannot help.
       const user = userEvent.setup();
       render(<ReasoningPanel reasoning={REDACTED_REASONING} />);
 
       await user.click(screen.getByRole('button', { name: /show model reasoning/i }));
 
-      expect(screen.getByText(/Extended Thinking/)).toBeInTheDocument();
+      expect(screen.getByText(/re-run it/)).toBeInTheDocument();
+      expect(screen.getByText(/thinking budget/)).toBeInTheDocument();
       expect(screen.getByText(/GPT-5 family/)).toBeInTheDocument();
       for (const model of REASONING_VISIBLE_MODELS) {
         expect(screen.getByText(model)).toBeInTheDocument();

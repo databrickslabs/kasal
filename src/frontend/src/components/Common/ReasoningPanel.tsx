@@ -52,6 +52,20 @@ export interface ReasoningPanelProps {
 export const REDACTED_REASONING = '__kasal_reasoning_redacted__';
 
 /**
+ * Whether `text` is the redaction placeholder rather than real reasoning.
+ *
+ * Tolerates the sentinel REPEATED. It is a per-call flag, but a streaming
+ * response reports it on every delta, and the backend used to append each one —
+ * so traces already recorded say `__kasal_reasoning_redacted__` six times over
+ * and an equality check let that leak to the user as literal text. The backend no
+ * longer accumulates it; this keeps existing traces readable.
+ */
+export const isRedactedReasoning = (text: string): boolean => {
+  const trimmed = text.trim();
+  return trimmed.length > 0 && trimmed.split(REDACTED_REASONING).join('') === '';
+};
+
+/**
  * Seeded Databricks models that actually return reasoning TEXT, newest probe
  * first by volume. Every one was verified against the live workspace on
  * 2026-08-05 by asking a step-by-step question and reading the response:
@@ -105,10 +119,13 @@ export const ReasoningPanel: React.FC<ReasoningPanelProps> = ({
   const text = reasoningText(reasoning);
   if (!text) return null;
 
-  // The model reasoned but the provider encrypted the trace (Anthropic Claude on
-  // Databricks). Showing nothing here would read as "this model does not think",
-  // which is the wrong claim — so say what actually happened.
-  const redacted = text === REDACTED_REASONING;
+  // The model reasoned but no summary text came back. Showing nothing here would
+  // read as "this model does not think", which is the wrong claim.
+  //
+  // Uses isRedactedReasoning, not equality: the sentinel is a per-call flag, but
+  // streaming reported it per delta and the backend appended each one, so older
+  // traces hold it repeated and an equality check leaked it as literal text.
+  const redacted = isRedactedReasoning(text);
   const summary = redacted
     ? 'Reasoning (hidden by provider)'
     : `Reasoning (${text.length.toLocaleString()} chars)`;
@@ -180,8 +197,6 @@ export const ReasoningPanel: React.FC<ReasoningPanelProps> = ({
               This model reasoned before answering but returned only an encrypted{' '}
               <code>signature</code>, with no thinking text.
               <Box component="p" sx={{ mt: 1, mb: 0 }}>
-                For Anthropic Claude this is usually fixable:{' '}
-                <strong>enable Extended Thinking</strong> on the model in Settings.
                 Claude only returns thinking text when the request asks for it —{' '}
                 <code>display</code> defaults to <code>&quot;omitted&quot;</code>{' '}
                 on Claude 5, Fable 5, Opus 4.7 and Opus 4.8, which
@@ -194,7 +209,11 @@ export const ReasoningPanel: React.FC<ReasoningPanelProps> = ({
                 >
                   Anthropic: Controlling thinking display
                 </Link>
-                ). With it enabled, Kasal opts in and the summary comes back.
+                ). Kasal now asks for the summary on every Claude model that
+                supports it, so seeing this on a recent run usually means the run
+                predates that change — re-run it. On Claude 4.1&ndash;4.6, set a{' '}
+                <strong>thinking budget</strong> on the model or agent: those
+                models need the budget to think at all.
               </Box>
               <Box component="p" sx={{ mt: 1, mb: 0 }}>
                 Note that no setting returns the raw chain of thought — what you

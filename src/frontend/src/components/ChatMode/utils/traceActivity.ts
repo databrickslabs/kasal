@@ -6,7 +6,7 @@
  * testing on its own.
  */
 
-import { REASONING_VISIBLE_MODELS, REDACTED_REASONING } from '../../Common/ReasoningPanel';
+import { REASONING_VISIBLE_MODELS, isRedactedReasoning } from '../../Common/ReasoningPanel';
 
 export interface TraceEntry {
   label: string;
@@ -216,7 +216,7 @@ export function buildTraceEntry(
   // redacts, so they correctly produce nothing here.
   if (eventType === 'llm_call' || eventType === 'llm_response') {
     const reasoning = typeof extra.reasoning === 'string' ? extra.reasoning.trim() : '';
-    if (reasoning === REDACTED_REASONING) {
+    if (isRedactedReasoning(reasoning)) {
       // The model DID reason; Anthropic on Databricks encrypted the trace. Say
       // that rather than dropping the step, which would imply no thinking
       // happened — and never render the sentinel itself.

@@ -21,7 +21,7 @@ import DashboardIcon from '@mui/icons-material/Dashboard';
 
 // Import Trace type from the store
 import { Trace } from '../../store/runStatus';
-import { REDACTED_REASONING } from '../Common/ReasoningPanel';
+import { isRedactedReasoning } from '../Common/ReasoningPanel';
 
 // ============================================================================
 // Shared Extraction Helpers
@@ -277,7 +277,7 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
       : '';
     const suffix = !rawReasoning
       ? ''
-      : rawReasoning === REDACTED_REASONING
+      : isRedactedReasoning(rawReasoning)
         ? ' · reasoning hidden'
         : ' · reasoning';
     const description = outputLen > 0
