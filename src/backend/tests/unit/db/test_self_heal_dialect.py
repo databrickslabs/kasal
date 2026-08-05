@@ -45,6 +45,33 @@ def _conn(dialect: str) -> MagicMock:
     return conn
 
 
+def _pg_conn_missing_columns(table_columns: list[str]) -> MagicMock:
+    """A Postgres connection that reports ``table_columns`` as already present.
+
+    The Postgres branch now reads information_schema BEFORE altering (an ALTER on
+    a table this role does not own raises "must be owner" even when the column is
+    there, and that aborts the whole self-heal transaction). So the catalogue read
+    has to be answered, and only the genuinely missing columns get an ALTER.
+    """
+    conn = MagicMock()
+    conn.engine.dialect.name = "postgresql"
+    catalogue = MagicMock()
+    catalogue.fetchall = MagicMock(return_value=[(c,) for c in table_columns])
+    conn.exec_driver_sql = AsyncMock(
+        side_effect=[catalogue] + [MagicMock() for _ in range(12)]
+    )
+    return conn
+
+
+def _ddl(conn) -> list[str]:
+    """Statements issued, excluding the information_schema catalogue read."""
+    return [
+        c.args[0]
+        for c in conn.exec_driver_sql.await_args_list
+        if "information_schema" not in c.args[0]
+    ]
+
+
 class TestConnIsSqlite:
     def test_reads_the_connections_dialect(self):
         assert _conn_is_sqlite(_conn("sqlite")) is True
@@ -72,12 +99,12 @@ class TestPostgresBranchIsTakenForALakebaseConnection:
     """With DATABASE_URI still on sqlite — exactly the lifespan's situation."""
 
     async def test_modelconfig_uses_add_column_if_not_exists(self):
-        conn = _conn("postgresql")
+        conn = _pg_conn_missing_columns(["id", "key"])
         with patch("src.db.session.settings") as mock_settings:
             mock_settings.DATABASE_URI = "sqlite+aiosqlite:///app.db"
             await _ensure_modelconfig_columns(conn)
 
-        statements = [c.args[0] for c in conn.exec_driver_sql.await_args_list]
+        statements = _ddl(conn)
         assert statements, "no DDL issued at all"
         # Postgres form, and no PRAGMA anywhere.
         assert all("IF NOT EXISTS" in s for s in statements), statements
@@ -86,15 +113,28 @@ class TestPostgresBranchIsTakenForALakebaseConnection:
         assert any("thinking_budget_tokens" in s for s in statements), statements
 
     async def test_agents_uses_add_column_if_not_exists(self):
-        conn = _conn("postgresql")
+        conn = _pg_conn_missing_columns(["id", "name"])
         with patch("src.db.session.settings") as mock_settings:
             mock_settings.DATABASE_URI = "sqlite+aiosqlite:///app.db"
             await _ensure_agent_columns(conn)
 
-        statements = [c.args[0] for c in conn.exec_driver_sql.await_args_list]
+        statements = _ddl(conn)
         assert statements
         assert all("IF NOT EXISTS" in s for s in statements), statements
         assert not any("PRAGMA" in s for s in statements), statements
+        assert any("thinking_budget_tokens" in s for s in statements), statements
+
+    async def test_a_column_that_already_exists_is_not_altered(self):
+        """No ALTER means no "must be owner" on work that need not happen.
+
+        This is the guard that keeps one orphaned-owner table from aborting the
+        transaction and skipping every later step.
+        """
+        conn = _pg_conn_missing_columns(
+            ["id", "name", "skills", "thinking_budget_tokens", "reasoning_effort"]
+        )
+        await _ensure_agent_columns(conn)
+        assert _ddl(conn) == []
 
 
 @pytest.mark.asyncio

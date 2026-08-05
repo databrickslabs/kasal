@@ -727,6 +727,25 @@ def _conn_is_sqlite(conn) -> bool:
         return str(settings.DATABASE_URI).startswith("sqlite")
 
 
+async def _pg_columns(conn, table: str) -> set[str]:
+    """Column names of ``table`` on PostgreSQL; empty set if it does not exist.
+
+    The Postgres counterpart of ``PRAGMA table_info``. Reading the catalogue
+    before altering matters for more than efficiency: Postgres checks OWNERSHIP
+    before it checks existence, so ``ADD COLUMN IF NOT EXISTS`` raises 42501
+    "must be owner" on a table this role does not own EVEN WHEN the column is
+    already there and the statement would do nothing.
+
+    Unqualified so it follows ``search_path``, matching the DDL that uses it.
+    """
+    res = await conn.exec_driver_sql(
+        "SELECT column_name FROM information_schema.columns "
+        f"WHERE table_name = '{table}' "
+        "AND table_schema = ANY (current_schemas(false))"
+    )
+    return {row[0] for row in res.fetchall()}
+
+
 async def _ensure_documentation_embeddings_columns(conn) -> None:
     """Idempotently add group_id/file_path to documentation_embeddings.
 
@@ -753,12 +772,26 @@ async def _ensure_documentation_embeddings_columns(conn) -> None:
                     "ALTER TABLE documentation_embeddings ADD COLUMN file_path VARCHAR"
                 )
         else:
-            await conn.exec_driver_sql(
-                "ALTER TABLE documentation_embeddings ADD COLUMN IF NOT EXISTS group_id VARCHAR(100)"
-            )
-            await conn.exec_driver_sql(
-                "ALTER TABLE documentation_embeddings ADD COLUMN IF NOT EXISTS file_path VARCHAR"
-            )
+            # Ask before altering. `ADD COLUMN IF NOT EXISTS` is a no-op when the
+            # column is there, but Postgres checks OWNERSHIP before it checks
+            # existence — so on a table owned by a previous deploy's service
+            # principal it raises 42501 "must be owner" for work that did not need
+            # doing. That error is what aborted the shared transaction and took
+            # the other 23 self-heal steps down with it, leaving
+            # agents.thinking_budget_tokens missing. Skipping the ALTER when the
+            # columns already exist keeps the common case off the failure path.
+            existing = await _pg_columns(conn, "documentation_embeddings")
+            if not existing:
+                return  # table not created yet
+            for name, ddl_type in (
+                ("group_id", "VARCHAR(100)"),
+                ("file_path", "VARCHAR"),
+            ):
+                if name not in existing:
+                    await conn.exec_driver_sql(
+                        f"ALTER TABLE documentation_embeddings "
+                        f"ADD COLUMN IF NOT EXISTS {name} {ddl_type}"
+                    )
         logger.info("Ensured documentation_embeddings group_id/file_path columns")
     except Exception as e:
         logger.warning(f"Could not ensure documentation_embeddings columns: {e}")
@@ -1028,13 +1061,22 @@ async def _ensure_agent_columns(conn) -> None:
                     )
                     logger.info(f"Added agents.{name} column (SQLite self-heal)")
         else:
+            # Read the catalogue first — see _pg_columns: an ALTER on a table this
+            # role does not own raises "must be owner" even when the column is
+            # already present, and that error aborts the whole self-heal
+            # transaction.
+            existing = await _pg_columns(conn, "agents")
+            if not existing:
+                return  # table not created yet
             for name, _sqlite_type, pg_type in columns:
-                await conn.exec_driver_sql(
-                    f"ALTER TABLE agents ADD COLUMN IF NOT EXISTS {name} {pg_type}"
-                )
+                if name not in existing:
+                    await conn.exec_driver_sql(
+                        f"ALTER TABLE agents ADD COLUMN IF NOT EXISTS {name} {pg_type}"
+                    )
+                    logger.info(f"Added agents.{name} column")
             logger.info("Ensured agents columns (skills, thinking overrides)")
     except Exception as e:
-        logger.warning(f"Could not ensure agents.skills column: {e}")
+        logger.warning(f"Could not ensure agents columns: {e}")
 
 
 async def _ensure_execution_history_columns(conn) -> None:
@@ -1206,10 +1248,16 @@ async def _ensure_modelconfig_columns(conn) -> None:
                     )
                     logger.info(f"Added modelconfig.{name} column (SQLite self-heal)")
         else:
+            # Catalogue first — see _pg_columns and _ensure_agent_columns.
+            existing = await _pg_columns(conn, "modelconfig")
+            if not existing:
+                return  # table not created yet
             for name, ddl_type in columns:
-                await conn.exec_driver_sql(
-                    f"ALTER TABLE modelconfig ADD COLUMN IF NOT EXISTS {name} {ddl_type}"
-                )
+                if name not in existing:
+                    await conn.exec_driver_sql(
+                        f"ALTER TABLE modelconfig ADD COLUMN IF NOT EXISTS {name} {ddl_type}"
+                    )
+                    logger.info(f"Added modelconfig.{name} column")
             logger.info("Ensured modelconfig params/unsupported_params columns")
     except Exception as e:
         logger.warning(f"Could not ensure modelconfig columns: {e}")
@@ -1403,31 +1451,79 @@ async def run_schema_self_heal(conn) -> None:
     the active Lakebase engine after the runtime hot-swap (``main.py`` lifespan) —
     the latter is the only path that heals a customer's PRE-EXISTING Lakebase,
     which ``init_db`` alone misses because it fires before Lakebase activation.
+
+    Each step runs in its own SAVEPOINT. Every helper already catches its own
+    exception and logs a warning, which LOOKS like isolation but is not: on
+    PostgreSQL a failed statement aborts the whole transaction, so every
+    subsequent statement on the same connection dies with
+    ``InFailedSQLTransactionError`` — "current transaction is aborted, commands
+    ignored until end of transaction block". Swallowing the first error therefore
+    converted one skippable failure into a silent, total no-op.
+
+    That is not hypothetical. On the deployed app ``documentation_embeddings`` was
+    left owned by a PREVIOUS deploy's service principal, so its ALTER failed with
+    ``must be owner of table`` — and because it runs FIRST, it took the other 23
+    steps with it. ``agents.thinking_budget_tokens`` was never added, and agent
+    creation failed with ``column "thinking_budget_tokens" of relation "agents"
+    does not exist``. Rolling back to a savepoint makes each step independently
+    skippable, which is what the per-helper try/except was always meant to give.
     """
-    await _ensure_documentation_embeddings_columns(conn)
-    await _ensure_databricks_config_columns(conn)
-    await _ensure_chat_sessions_table(conn)
-    await _ensure_chat_sessions_columns(conn)
-    await _ensure_workflow_recipes_table(conn)
-    await _ensure_workflow_recipe_trials_table(conn)
-    await _ensure_crew_publications_table(conn)
-    await _ensure_a2a_push_configs_table(conn)
-    await _ensure_a2a_agents_table(conn)
-    await _ensure_skills_tables(conn)
-    await _ensure_crew_feedback_table(conn)
-    await _ensure_powerbi_extraction_table(conn)
-    await _ensure_prompt_optimization_runs_table(conn)
-    await _ensure_mlflow_config_table(conn)
-    await _ensure_memory_maintenance_table(conn)
-    await _ensure_agent_columns(conn)
-    await _ensure_crew_columns(conn)
-    await _ensure_execution_history_columns(conn)
-    await _ensure_ui_config_columns(conn)
-    await _ensure_modelconfig_columns(conn)
-    await _ensure_hot_polling_indexes(conn)
-    await _heal_personal_group_names(conn)
-    await _heal_engine_config_names(conn)
-    await _disable_bi_specialist_crew_memory(conn)
+    steps = (
+        _ensure_documentation_embeddings_columns,
+        _ensure_databricks_config_columns,
+        _ensure_chat_sessions_table,
+        _ensure_chat_sessions_columns,
+        _ensure_workflow_recipes_table,
+        _ensure_workflow_recipe_trials_table,
+        _ensure_crew_publications_table,
+        _ensure_a2a_push_configs_table,
+        _ensure_a2a_agents_table,
+        _ensure_skills_tables,
+        _ensure_crew_feedback_table,
+        _ensure_powerbi_extraction_table,
+        _ensure_prompt_optimization_runs_table,
+        _ensure_mlflow_config_table,
+        _ensure_memory_maintenance_table,
+        _ensure_agent_columns,
+        _ensure_crew_columns,
+        _ensure_execution_history_columns,
+        _ensure_ui_config_columns,
+        _ensure_modelconfig_columns,
+        _ensure_hot_polling_indexes,
+        _heal_personal_group_names,
+        _heal_engine_config_names,
+        _disable_bi_specialist_crew_memory,
+    )
+    for step in steps:
+        await _run_self_heal_step(conn, step)
+
+
+async def _run_self_heal_step(conn, step) -> None:
+    """Run one self-heal step so its failure cannot abort the ones after it.
+
+    ``conn.begin_nested()`` is a SAVEPOINT: releasing it on success keeps the
+    work, rolling it back on failure returns the transaction to a usable state.
+    Without it a single failed DDL poisons every later step (see
+    ``run_schema_self_heal``).
+
+    Falls back to calling the step directly if the connection cannot nest — a
+    mock in tests, or a driver without savepoint support. The helpers still log
+    their own warnings, so behaviour there is exactly what it was before.
+    """
+    try:
+        nested = conn.begin_nested()
+    except Exception:  # noqa: BLE001 — no savepoint support; degrade, don't fail
+        await step(conn)
+        return
+    try:
+        async with nested:
+            await step(conn)
+    except Exception as exc:  # noqa: BLE001 — one broken step must not stop the rest
+        # The step logged the cause; this records that it was ISOLATED, which is
+        # the difference between "one table skipped" and "nothing healed".
+        logger.warning(
+            f"Schema self-heal step {step.__name__} rolled back, continuing: {exc}"
+        )
 
 
 async def init_db() -> None:
