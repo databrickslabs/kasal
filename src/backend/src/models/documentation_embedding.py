@@ -8,6 +8,12 @@ from src.db.base import Base
 
 # Define a custom type for pgvector with SQLite fallback
 class Vector(UserDefinedType):
+    #: The type's only state is ``dim``, which is immutable per column, so it is
+    #: safe in a statement cache key. Without this SQLAlchemy refuses to cache any
+    #: statement touching an embedding column and warns on every one — a real cost
+    #: on the similarity queries, which run per prompt.
+    cache_ok = True
+
     def __init__(self, dim=1024):
         self.dim = dim
 
@@ -54,6 +60,52 @@ class Vector(UserDefinedType):
             return value
 
         return process
+
+    class comparator_factory(UserDefinedType.Comparator):
+        """Expose pgvector's distance operators on this hand-rolled type.
+
+        This is NOT the pgvector library's ``Vector`` — it is a local
+        ``UserDefinedType`` so the same model works on SQLite (where the column is
+        TEXT holding JSON). Being hand-rolled, it shipped without the comparator
+        methods callers assume, so ``WorkflowRecipe.embedding.cosine_distance(...)``
+        raised::
+
+            Neither 'InstrumentedAttribute' object nor 'Comparator' object
+            associated with WorkflowRecipe.embedding has an attribute
+            'cosine_distance'
+
+        The recipe repository catches that and skips, so exemplar lookup silently
+        degraded to no exemplars on every Postgres/Lakebase run — a feature quietly
+        off rather than a visible failure.
+
+        ``<=>`` is cosine distance, ``<->`` L2, ``<#>`` negative inner product.
+        PostgreSQL only; on SQLite the repository takes its own Python-side path
+        (``_find_similar_sqlite``) and never reaches these.
+        """
+
+        def _distance(self, other, operator: str):
+            from sqlalchemy import Float, cast, literal
+
+            # Two things are load-bearing here:
+            #
+            # 1. Bind through THIS type, so bind_processor formats the list as
+            #    '[a,b,c]' instead of sending a raw ARRAY.
+            # 2. CAST it explicitly. Without the cast the driver sends the string
+            #    as `unknown` and PostgreSQL cannot resolve the operator:
+            #      operator does not exist: public.vector <=> unknown
+            #    A compile-only test does not catch that — the SQL looks right and
+            #    only the live server rejects it.
+            vector_param = cast(literal(other, self.expr.type), self.expr.type)
+            return self.op(operator, return_type=Float)(vector_param)
+
+        def cosine_distance(self, other):
+            return self._distance(other, "<=>")
+
+        def l2_distance(self, other):
+            return self._distance(other, "<->")
+
+        def max_inner_product(self, other):
+            return self._distance(other, "<#>")
 
 
 class DocumentationEmbedding(Base):
