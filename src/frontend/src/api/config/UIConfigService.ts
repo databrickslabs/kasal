@@ -8,8 +8,10 @@ import { apiClient } from '../../config/api/ApiConfig';
  */
 export interface UIConfig {
   enabled: boolean;
-  catalog_type: 'minimal' | 'full' | 'custom';
+  catalog_type: 'minimal' | 'full' | 'select' | 'custom';
   catalog_json?: string | null;
+  // JSON array of component names switched off; only for catalog_type 'select'.
+  disabled_components?: string | null;
   style_json?: string | null;
   id?: number | null;
   group_id?: string | null;
@@ -20,7 +22,7 @@ export interface UIConfig {
 
 export type UIConfigUpdate = Pick<
   UIConfig,
-  'enabled' | 'catalog_type' | 'catalog_json' | 'style_json'
+  'enabled' | 'catalog_type' | 'catalog_json' | 'disabled_components' | 'style_json'
 >;
 
 /** Notified with the freshest config whenever it changes (i.e. a save), so open

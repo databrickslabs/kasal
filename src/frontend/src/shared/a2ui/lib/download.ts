@@ -408,6 +408,22 @@ export async function downloadPptx(
     slide.addShape('rect', { x: 0.62, y: y - 0.1, w: 0.9, h: 0.06, fill: { color: accentC } })
     y += 0.25
 
+    // 'kpi-split' carries a KeyValue band ABOVE a body. Draw the band here and
+    // let the generic body handling below place the rest, so the tiles survive
+    // the export instead of being flattened into "label: value" bullet lines.
+    if (variant === 'kpi-split') {
+      const kvs = (node?.children || []).map((id) => byId[id]).filter((n) => n && n.component === 'KeyValue')
+      if (kvs.length) {
+        const tileW = 12.1 / kvs.length
+        kvs.forEach((kv, i) => {
+          const vx = 0.6 + i * tileW
+          slide.addText(String(resolve(kv.value) ?? ''), { x: vx, y, w: tileW - 0.2, h: 0.6, fontSize: 26, bold: true, color: accentC })
+          slide.addText(String(resolve(kv.label) ?? ''), { x: vx, y: y + 0.6, w: tileW - 0.2, h: 0.45, fontSize: 11, color: bodyC })
+        })
+        y += 1.25
+      }
+    }
+
     if (variant === 'stats') {
       const kvs = (node?.children || []).map((id) => byId[id]).filter((n) => n && n.component === 'KeyValue')
       const n = Math.max(kvs.length, 1)

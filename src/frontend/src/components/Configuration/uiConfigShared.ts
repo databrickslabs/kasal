@@ -158,7 +158,12 @@ export const TYPE_OPTIONS: Record<string, OptionSpec[]> = {
     { kind: 'switch', key: 'deltas', label: 'Show deltas / trends on tiles', default: true, phrase: (v) => (v ? 'show a delta/trend on each Stat tile' : 'omit deltas on Stat tiles') },
   ],
   presentation: [
-    { kind: 'number', key: 'slides', label: 'Target slide count', min: 3, max: 20, default: 20, phrase: (v) => `aim for about ${v} slides` },
+    // max 60, not 20: a templated corporate deck (country profile, QBR, annual
+    // review) routinely runs 40-50 slides, and the old cap silently made that
+    // unrequestable. The composer reads this number back out of the phrase
+    // (compose.py::slide_target) and derives BOTH prompt sites and the outline
+    // clamp from it, so it is now the single place deck length is set.
+    { kind: 'number', key: 'slides', label: 'Target slide count', min: 3, max: 60, default: 20, phrase: (v) => `aim for about ${v} slides` },
     { kind: 'number', key: 'bullets', label: 'Max bullets per slide', min: 2, max: 6, default: 4, phrase: (v) => `at most ${v} bullet points per slide` },
     { kind: 'select', key: 'visuals', label: 'Visual density', default: 'balanced', choices: [{ value: 'light', label: 'Mostly text' }, { value: 'balanced', label: 'Balanced' }, { value: 'rich', label: 'Visual-first' }], phrase: (v) => (v === 'light' ? 'keep slides mostly text; add a visual only where essential' : v === 'rich' ? 'give MOST slides a visual (Diagram, Chart, Table or stats) — text-only slides should be the exception' : 'give at least one in three slides a visual (Diagram, Chart, Table or stats)') },
     { kind: 'switch', key: 'titleSlide', label: 'Open with a title slide', default: true, phrase: (v) => (v ? 'open with a dedicated title slide' : 'skip the title slide') },

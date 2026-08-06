@@ -15,8 +15,10 @@ class UIConfigBase(BaseModel):
     # This matches the unconfigured-workspace behavior, so enabling A2UI and saving
     # does NOT silently downgrade to a structure-only catalog. "minimal" is an
     # explicit opt-in that restricts the composer to document/conversation surfaces.
-    catalog_type: str = "full"  # "full" | "minimal" | "custom"
+    catalog_type: str = "full"  # "full" | "select" | "minimal" | "custom"
     catalog_json: Optional[str] = None  # used only when catalog_type == "custom"
+    # JSON array of component names switched off; only for catalog_type "select".
+    disabled_components: Optional[str] = None
     style_json: Optional[str] = None  # renderer style overrides (accent/density/theme)
 
 

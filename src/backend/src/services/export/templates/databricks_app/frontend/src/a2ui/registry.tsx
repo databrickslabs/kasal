@@ -3,6 +3,7 @@ import type { NodeProps } from './types'
 import {
   Markdown, Text, Heading, Image, Card, KeyValue, List, Table, Divider,
   Row, Column, Grid, Chart, SlideDeck, Slide, Mindmap, Quiz, Flashcards, GeoMap,
+  RegionHeatmap, Sankey,
   Forecast, Graph, Sequence, Album, Diagram, Unsupported,
 } from './components'
 
@@ -16,7 +17,7 @@ export const registry: Record<string, FC<NodeProps>> = {
   // 'GeoMap' is the renderer; the catalog/composer name is 'Map'.
   Map: GeoMap,
   // Data-viz + diagram components (usable inside dashboard/document surfaces).
-  Forecast, Graph, Sequence, Album, Diagram,
+  Forecast, Graph, Sequence, Album, Diagram, RegionHeatmap, Sankey,
 }
 
 export { Unsupported }

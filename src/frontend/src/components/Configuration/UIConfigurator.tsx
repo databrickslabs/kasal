@@ -37,58 +37,23 @@ import {
   buildDirective,
 } from './uiConfigShared';
 
-type CatalogType = 'minimal' | 'full' | 'custom';
+// Every component the shared A2UI renderer can draw — the universe the toggles
+// tick off from. MUST match the renderer's registry (src/shared/a2ui/registry.tsx)
+// and the backend catalog.json. A component added to A2UI appears here and is
+// ENABLED by default, which is the point of storing exclusions rather than
+// inclusions: a workspace gains new components instead of freezing at the set
+// that existed when it was configured.
+const ALL_COMPONENTS: string[] = [
+  'Markdown', 'Text', 'Heading', 'Image', 'Card', 'KeyValue', 'List', 'Table',
+  'Divider', 'Row', 'Column', 'Grid', 'Chart', 'SlideDeck', 'Slide', 'Mindmap',
+  'Quiz', 'Flashcards', 'Map', 'Forecast', 'Graph', 'Sequence', 'Album',
+  'Diagram', 'RegionHeatmap', 'Sankey',
+];
 
-// Components available in each built-in catalog (shown as chips). These MUST match
-// the shared A2UI renderer's registry (src/shared/a2ui) and the backend's
-// MINIMAL_COMPONENTS / catalog.json — they are the components the composer is
-// allowed to emit and the renderer can actually draw.
-const CATALOG_COMPONENTS: Record<Exclude<CatalogType, 'custom'>, string[]> = {
-  // Mirrors backend MINIMAL_COMPONENTS — structure + prose, no rich surfaces.
-  minimal: ['Markdown', 'Text', 'Heading', 'List', 'Table', 'Divider', 'Row', 'Column', 'Card', 'Image'],
-  // The full shared catalog (catalog.json) — adds KPIs, charts, slides, mindmap, quiz.
-  full: [
-    'Markdown', 'Text', 'Heading', 'Image', 'Card', 'KeyValue', 'List', 'Table',
-    'Divider', 'Row', 'Column', 'Grid', 'Chart', 'SlideDeck', 'Slide', 'Mindmap', 'Quiz',
-    'Flashcards', 'Map',
-  ],
-};
-
-// Rich starting point prefilled into the custom-catalog editor. Mirrors the shared
-// catalog.json shape ({ version, surfaceKinds, components:{ Name:{ summary, props }}})
-// that the backend composer reads and the shared renderer draws — so a saved custom
-// catalog is a valid edit of the real contract. Trim components to constrain agents.
-const SAMPLE_CUSTOM_CATALOG = JSON.stringify(
-  {
-    version: '1.0',
-    description: 'Components agents may use. Extend or trim to taste. Names must match the shared renderer.',
-    surfaceKinds: ['conversation', 'document', 'presentation', 'dashboard', 'mindmap', 'quiz', 'flashcards', 'map'],
-    components: {
-      Markdown: { summary: 'A block of GitHub-flavored markdown.', props: { content: 'string(binding)' } },
-      Text: { summary: 'A short run of plain text.', props: { text: 'string(binding)', variant: ['body', 'caption', 'label'] } },
-      Heading: { summary: 'A section heading.', props: { text: 'string(binding)', level: 'int(1-6)' } },
-      Image: { summary: 'An image with optional caption.', props: { src: 'string(binding)', alt: 'string?', caption: 'string?' } },
-      Card: { summary: 'A titled container grouping children.', props: { title: 'string?', children: 'id[]' } },
-      KeyValue: { summary: 'A label/value pair; good for KPIs.', props: { label: 'string(binding)', value: 'string(binding)' } },
-      List: { summary: 'An ordered or unordered list of strings.', props: { items: 'array(binding)', ordered: 'bool?' } },
-      Table: { summary: 'A data table.', props: { columns: '[string]', rows: '[[cell, …]](binding)' } },
-      Divider: { summary: 'A horizontal rule / separator.', props: {} },
-      Row: { summary: 'Lays out children horizontally.', props: { children: 'id[]', gap: 'int?' } },
-      Column: { summary: 'Lays out children vertically.', props: { children: 'id[]', gap: 'int?' } },
-      Grid: { summary: 'Responsive grid with a column count.', props: { children: 'id[]', columns: 'int' } },
-      Chart: { summary: 'A bar/line/pie chart.', props: { chartType: ['bar', 'line', 'pie'], data: 'array(binding)', xKey: 'string', yKeys: '[string]', title: 'string?' } },
-      SlideDeck: { summary: 'Presentation container; children are Slides. Root for surfaceKind "presentation".', props: { children: 'slideId[]' } },
-      Slide: { summary: 'One slide. variant: title|stats|quote|content|section.', props: { variant: 'string', kicker: 'string?', title: 'string?', subtitle: 'string?', children: 'id[]' } },
-      Mindmap: { summary: 'A mindmap/tree. Root for surfaceKind "mindmap".', props: { root: '{ id, label, description?, children:[node] }(binding)' } },
-      Quiz: { summary: 'Interactive multiple-choice quiz. Root for surfaceKind "quiz".', props: { title: 'string?', questions: '[{ question, options:[string], answer:int, explanation? }](binding)' } },
-      Flashcards: { summary: 'Anki-style flippable study deck. Root for surfaceKind "flashcards".', props: { title: 'string?', cards: '[{ front, back, hint? }](binding)' } },
-      Map: { summary: 'Geographic map plotting lat/lng points. Root for surfaceKind "map".', props: { title: 'string?', points: '[{ lat, lng, label?, value? }](binding)' } },
-    },
-  },
-  null,
-  2,
-);
-
+// Every component the shared renderer can draw — the universe the 'select' mode
+// ticks off from. Kept as the 'full' list so it stays one definition; a component
+// added to A2UI appears here and is ENABLED by default, which is the whole point
+// of storing exclusions rather than inclusions.
 /** A labeled color swatch input. */
 const ColorField: React.FC<{ label: string; value: string; onChange: (v: string) => void }> = ({ label, value, onChange }) => (
   <TextField
@@ -150,8 +115,9 @@ const UIConfigurator: React.FC = () => {
   const [saved, setSaved] = useState(false);
 
   const [enabled, setEnabled] = useState(false);
-  const [catalogType, setCatalogType] = useState<CatalogType>('full');
-  const [catalogJson, setCatalogJson] = useState('');
+  // Component names switched OFF. Stored as exclusions so the enabled set grows
+  // with the product instead of freezing at whatever existed when saved.
+  const [disabledComps, setDisabledComps] = useState<string[]>([]);
   // Collapsed by default: the catalog's component list is reference info, shown as a
   // compact count row that expands to a chip grid on demand.
   const [showCatalogComps, setShowCatalogComps] = useState(false);
@@ -171,9 +137,12 @@ const UIConfigurator: React.FC = () => {
         if (!active) return;
         setEnabled(cfg.enabled);
         // Legacy rows may carry the old "basic" value — treat it as "full".
-        const ct = (cfg.catalog_type as string) === 'basic' ? 'full' : cfg.catalog_type;
-        setCatalogType((ct as CatalogType) || 'full');
-        setCatalogJson(cfg.catalog_json || '');
+        try {
+          const off = cfg.disabled_components ? JSON.parse(cfg.disabled_components) : [];
+          setDisabledComps(Array.isArray(off) ? off.map(String) : []);
+        } catch {
+          setDisabledComps([]);
+        }
         // Hydrate palettes: prefer a `themes` map; else migrate the legacy
         // single {accent, density} style into the Default palette.
         let loaded: Record<string, Theme> = { default: { ...DEFAULT_THEME } };
@@ -209,16 +178,6 @@ const UIConfigurator: React.FC = () => {
     setSaving(true);
     setError(null);
     setSaved(false);
-    // Validate custom catalog JSON before saving.
-    if (enabled && catalogType === 'custom' && catalogJson.trim()) {
-      try {
-        JSON.parse(catalogJson);
-      } catch {
-        setError('Custom catalog is not valid JSON.');
-        setSaving(false);
-        return;
-      }
-    }
     // Derive a directive sentence per type from its settings — the backend
     // appends these verbatim, so all option phrasing stays in this file.
     const directives: Record<string, string> = {};
@@ -236,8 +195,12 @@ const UIConfigurator: React.FC = () => {
     });
     const payload: UIConfigUpdate = {
       enabled,
-      catalog_type: catalogType,
-      catalog_json: catalogType === 'custom' ? catalogJson : null,
+      // Derived, not chosen: "everything on" IS the full catalog, so the mode
+      // follows the toggles rather than asking the user to state it twice.
+      catalog_type: disabledComps.length ? 'select' : 'full',
+      // Legacy: hand-written catalog JSON is replaced by the per-component toggles.
+      catalog_json: null,
+      disabled_components: disabledComps.length ? JSON.stringify(disabledComps) : null,
       style_json,
     };
     try {
@@ -248,7 +211,7 @@ const UIConfigurator: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  }, [enabled, catalogType, catalogJson, themes, options]);
+  }, [enabled, disabledComps, themes, options]);
 
   // The palette currently being edited, and whether the active type is themed.
   const activeTheme: Theme = themes[activeType] || themes.default;
@@ -294,7 +257,18 @@ const UIConfigurator: React.FC = () => {
           type="number"
           size="small"
           value={value as number}
-          onChange={(e) => patchOption(s.key, Number(e.target.value))}
+          // `inputProps` min/max are only a browser hint — a typed or pasted value
+          // outside the range still reaches onChange and was saved as-is, so a
+          // setting the UI presents as bounded could be silently out of range.
+          // Clamp here; NaN (an emptied field) falls back to the spec default
+          // rather than persisting as null.
+          onChange={(e) => {
+            const raw = Number(e.target.value);
+            // NaN means the field was emptied — fall back to the spec default
+            // instead of persisting null.
+            const next = Number.isNaN(raw) ? s.default : raw;
+            patchOption(s.key, Math.min(Math.max(next, s.min), s.max));
+          }}
           inputProps={{ min: s.min, max: s.max, step: s.step ?? 1 }}
           sx={{ width: 170 }}
         />
@@ -345,31 +319,10 @@ const UIConfigurator: React.FC = () => {
         <Box sx={{ mt: 2 }}>
           <Divider sx={{ mb: 2 }} />
 
-          <FormControl fullWidth size="small" sx={{ mb: 2 }}>
-            <InputLabel id="ui-catalog-label">Component catalog</InputLabel>
-            <Select
-              labelId="ui-catalog-label"
-              label="Component catalog"
-              value={catalogType}
-              onChange={(e) => {
-                const next = e.target.value as CatalogType;
-                setCatalogType(next);
-                // Prefill the custom editor with a rich starting catalog.
-                if (next === 'custom' && !catalogJson.trim()) {
-                  setCatalogJson(SAMPLE_CUSTOM_CATALOG);
-                }
-              }}
-            >
-              <MenuItem value="minimal">Minimal — essentials (Markdown, Text, Heading, List, Table, Card, Row/Column…)</MenuItem>
-              <MenuItem value="full">Full — full set (adds KPIs, Charts, Slides, Mindmap, Quiz…)</MenuItem>
-              <MenuItem value="custom">Custom — bring your own catalog JSON</MenuItem>
-            </Select>
-          </FormControl>
-
           {/* The catalog's components are reference info, not a selector — show a
               compact, professional count row that expands to a chip grid on demand
               (stays tidy as the catalog grows). */}
-          {catalogType !== 'custom' && (
+          {(
             <Box sx={{ mb: 2 }}>
               <Box
                 onClick={() => setShowCatalogComps((s) => !s)}
@@ -388,9 +341,9 @@ const UIConfigurator: React.FC = () => {
                 }}
               >
                 <Typography variant="body2" color="text.secondary">
-                  Components agents may use
+                  Components — click to switch one off
                   <Box component="span" sx={{ ml: 1, color: 'text.primary', fontWeight: 600 }}>
-                    {CATALOG_COMPONENTS[catalogType].length}
+                    {`${ALL_COMPONENTS.length - disabledComps.length} of ${ALL_COMPONENTS.length}`}
                   </Box>
                 </Typography>
                 <KeyboardArrowDownIcon
@@ -404,27 +357,29 @@ const UIConfigurator: React.FC = () => {
               </Box>
               <Collapse in={showCatalogComps}>
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, pt: 1 }}>
-                  {CATALOG_COMPONENTS[catalogType].map((c) => (
-                    <Chip key={c} label={c} size="small" variant="outlined" />
-                  ))}
+                  {ALL_COMPONENTS.map((c) => {
+                    const off = disabledComps.includes(c);
+                    // The chips ARE the control — filled means the composer may
+                    // emit it, struck through means switched off.
+                    return (
+                      <Chip
+                        key={c}
+                        label={c}
+                        size="small"
+                        color={off ? 'default' : 'primary'}
+                        variant={off ? 'outlined' : 'filled'}
+                        onClick={() =>
+                          setDisabledComps((prev) =>
+                            prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c],
+                          )
+                        }
+                        sx={{ opacity: off ? 0.5 : 1, textDecoration: off ? 'line-through' : 'none' }}
+                      />
+                    );
+                  })}
                 </Box>
               </Collapse>
             </Box>
-          )}
-
-          {catalogType === 'custom' && (
-            <TextField
-              label="Custom catalog JSON"
-              multiline
-              minRows={10}
-              fullWidth
-              size="small"
-              value={catalogJson}
-              onChange={(e) => setCatalogJson(e.target.value)}
-              placeholder={SAMPLE_CUSTOM_CATALOG}
-              sx={{ mb: 2, fontFamily: 'monospace' }}
-              InputProps={{ sx: { fontFamily: 'monospace', fontSize: '0.8rem' } }}
-            />
           )}
 
           <Divider sx={{ mb: 2 }} />

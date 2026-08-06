@@ -276,6 +276,11 @@ _DATA_COMPONENTS = frozenset(
         "Album",
         "Map",
         "Diagram",
+        # Region shading and flow ribbons are genuine deliverables: omitted here,
+        # their whole surface is dropped as "prose-only" and the answer silently
+        # falls back to markdown (the Album bug in the A2UI checklist).
+        "RegionHeatmap",
+        "Sankey",
     }
 )
 

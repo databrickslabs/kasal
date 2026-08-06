@@ -1332,7 +1332,10 @@ async def _ensure_ui_config_columns(conn) -> None:
     except Exception as e:
         logger.warning(f"Could not ensure ui_config table: {e}")
     is_sqlite = _conn_is_sqlite(conn)
-    columns = ("catalog_json", "style_json")
+    # `disabled_components` arrived with the per-component toggles: create_all
+    # never ALTERs an existing table, so without it every database provisioned
+    # before the toggles would raise on the first read of a UI config.
+    columns = ("catalog_json", "style_json", "disabled_components")
     try:
         if is_sqlite:
             res = await conn.exec_driver_sql("PRAGMA table_info(ui_config)")
@@ -1350,7 +1353,7 @@ async def _ensure_ui_config_columns(conn) -> None:
                 await conn.exec_driver_sql(
                     f"ALTER TABLE ui_config ADD COLUMN IF NOT EXISTS {col} TEXT"
                 )
-            logger.info("Ensured ui_config catalog_json/style_json columns")
+            logger.info("Ensured ui_config catalog_json/style_json/disabled_components columns")
     except Exception as e:
         logger.warning(f"Could not ensure ui_config columns: {e}")
 

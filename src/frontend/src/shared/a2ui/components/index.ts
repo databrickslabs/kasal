@@ -9,7 +9,7 @@
  * kind of surface they draw. The dependency order is strictly one-way:
  *
  *   values / icons / slideContext   (leaves, no component imports)
- *     -> primitives -> data -> diagrams -> media -> slides -> interactive / mindmap
+ *     -> primitives -> data -> diagrams / geo -> media -> slides -> interactive / mindmap
  *
  * Slides render their children through the `render` prop rather than importing
  * the other component modules, which is what keeps the graph acyclic.
@@ -38,6 +38,10 @@ export { Graph, Sequence, Diagram, normDiagramItems } from './diagrams'
 export type { DiagramItem } from './diagrams'
 
 export { Album, GeoMap } from './media'
+
+// Region shading + flow ribbons. Dependency-free SVG, like ./diagrams.
+// RegionHeatmap shades a GRID of regions, not real geography — see ./geo.tsx.
+export { RegionHeatmap, Sankey } from './geo'
 
 export { Slide, SlideDeck, SurfaceDownloadMenu } from './slides'
 

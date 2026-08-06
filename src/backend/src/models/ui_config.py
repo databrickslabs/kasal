@@ -25,13 +25,21 @@ class UIConfig(Base):
     # renderer unless an admin explicitly turns this off.
     enabled = Column(Boolean, default=True, nullable=False)
 
-    # Which component catalog agents may use: "full" | "minimal" | "custom".
-    # Defaults to "full" (the full catalog) so saving a config doesn't silently strip
-    # rich surfaces; "minimal" is an explicit opt-in restriction. (Legacy rows stored
-    # as "basic" still resolve to the full catalog — see resolve_catalog.)
+    # Which component catalog agents may use:
+    #   "full"    — everything bundled (default)
+    #   "select"  — everything EXCEPT disabled_components
+    #   "minimal" — the essentials subset
+    #   "custom"  — the admin's own catalog_json (legacy; a frozen snapshot that
+    #               does not pick up components added to A2UI later)
+    # Defaults to "full" so saving a config doesn't silently strip rich surfaces.
+    # (Legacy rows stored as "basic" still resolve to full — see resolve_catalog.)
     catalog_type = Column(String(50), default="full", nullable=False)
     # Custom catalog JSON (only used when catalog_type == "custom").
     catalog_json = Column(Text, nullable=True)
+    # Component names switched OFF, as a JSON array (only for "select"). Stored as
+    # EXCLUSIONS, not inclusions, so a workspace automatically gains components as
+    # A2UI grows instead of freezing at the set that existed when it was saved.
+    disabled_components = Column(Text, nullable=True)
     # Renderer style overrides (accent color, density, theme) as JSON.
     style_json = Column(Text, nullable=True)
 

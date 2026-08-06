@@ -223,12 +223,39 @@ def resolve_catalog(
 
     Unconfigured workspaces (no saved row → ``id`` is None) get the FULL bundled
     catalog so rich surfaces keep working out of the box. Admin choices: minimal →
-    essentials subset; custom → the admin's catalog_json (surfaceKinds backfilled);
-    full (or any legacy/unknown value like "basic") → the full bundled catalog."""
+    essentials subset; select → the full catalog minus ``disabled_components``
+    (what the per-component toggles write); custom → the admin's catalog_json
+    (surfaceKinds backfilled); full (or any legacy/unknown value like "basic") →
+    the full bundled catalog.
+
+    ``minimal`` and ``custom`` are retained for rows saved before the toggles
+    existed — the UI no longer offers either, but a stored value must keep
+    resolving to what it always meant."""
     cfg = cfg or {}
     if cfg.get("id") is None:
         return default_catalog
     ctype = (cfg.get("catalog_type") or "full").lower()
+    # "select" — the admin ticked components off in the UI. Everything is enabled
+    # by default and `disabled_components` names the exceptions, so a workspace
+    # AUTOMATICALLY gains new components as A2UI grows. Hand-written catalog JSON
+    # cannot do that: it is a frozen snapshot, so anything added later is invisible
+    # to the composer until someone re-pastes it. Storing the exclusions rather
+    # than the inclusions is the whole difference.
+    if ctype == "select":
+        disabled = cfg.get("disabled_components")
+        if isinstance(disabled, str):
+            try:
+                disabled = json.loads(disabled)
+            except (ValueError, TypeError):
+                disabled = None
+        if not isinstance(disabled, (list, tuple, set)) or not disabled:
+            return default_catalog
+        off = {str(x) for x in disabled}
+        keep = [k for k in (default_catalog.get("components") or {}) if k not in off]
+        # Never hand back an empty catalog: the composer cannot emit anything and
+        # every surface silently degrades to plain text. A config that disabled
+        # everything is a mistake, not an instruction.
+        return subset_catalog(default_catalog, keep) if keep else default_catalog
     if ctype == "custom":
         raw = (cfg.get("catalog_json") or "").strip()
         if raw:
@@ -521,6 +548,55 @@ def presentation_design_lint(
     return findings
 
 
+#: Fallback deck depth when the workspace has configured no target. The range,
+#: not a single number, because with nothing configured the right length is
+#: genuinely "however much the answer supports".
+DEFAULT_SLIDE_DEPTH = "10-16"
+
+#: Headroom over the target for the outline clamp. A plan slightly longer than
+#: asked for is trimmed by the compose pass anyway; one an order of magnitude
+#: longer is noise.
+OUTLINE_SLACK = 10
+MIN_OUTLINE_CAP = 24
+
+
+def slide_target(guidance: str) -> Optional[int]:
+    """The slide count the workspace asked for, read back out of its directive.
+
+    The UIConfigurator renders "Target slide count" into the phrase
+    "aim for about N slides" (uiConfigShared.ts). That phrase was being appended
+    to a prompt that ALSO hardcoded "plan 10-16 slides", so the model received two
+    contradictory instructions and the setting silently lost. Parsing the number
+    back out lets one configured value drive both prompt sites and the outline
+    clamp, without threading a new argument through every caller.
+
+    Returns None when nothing is configured, which keeps the old behaviour.
+    """
+    if not guidance:
+        return None
+    m = re.search(r"about\s+(\d+)\s+slides", guidance, re.I)
+    if not m:
+        return None
+    n = int(m.group(1))
+    # A deck of 1 is not a deck; an implausibly large number is a typo, not a
+    # request, and honouring it would burn a very long compose call.
+    return n if 3 <= n <= 200 else None
+
+
+def slide_depth_phrase(guidance: str) -> str:
+    """What to tell the model about deck length: the configured target, or the
+    default range when there is none."""
+    target = slide_target(guidance)
+    return f"about {target}" if target else DEFAULT_SLIDE_DEPTH
+
+
+def outline_cap(guidance: str) -> int:
+    """How many planned slides to keep. Derived from the target so a 50-slide
+    request is not silently sliced to the old fixed 24."""
+    target = slide_target(guidance)
+    return max(MIN_OUTLINE_CAP, target + OUTLINE_SLACK) if target else MIN_OUTLINE_CAP
+
+
 def plan_presentation_outline(
     text: str,
     query: str,
@@ -541,7 +617,8 @@ def plan_presentation_outline(
             'JSON object only: {"slides": [{"title": str, "variant": str, '
             '"visual": str, "focus": str}]}.\n'
             "variant is one of: title, content, two-column, comparison, visual, "
-            "image-full, stats, agenda, quote, section. visual names the visual that "
+            "image-full, stats, agenda, quote, section, kpi-split, boxes, split. "
+            "visual names the visual that "
             "slide carries: "
             "'chart:<bar|line|pie|area|scatter|radar>', "
             "'diagram:<process|timeline|cycle|funnel|pyramid|comparison|matrix2x2|hierarchy>', "
@@ -557,10 +634,10 @@ def plan_presentation_outline(
             "peers are weighed in TEXT on both sides; never plan two consecutive "
             "slides with the same variant unless both are 'content'; plan only "
             "slides the content can genuinely fill.\n"
-            "DEPTH: plan 10-16 slides when the answer supports it — split a crowded "
-            "topic into two focused slides rather than dropping material. Plan fewer "
-            "only when the answer genuinely has less to say; never pad with slides "
-            "the content cannot fill.\n"
+            f"DEPTH: plan {slide_depth_phrase(guidance)} slides when the answer supports "
+            "it — split a crowded topic into two focused slides rather than dropping "
+            "material. Plan fewer only when the answer genuinely has less to say; "
+            "never pad with slides the content cannot fill.\n"
             + (f"Deck purpose: {purpose}\n" if purpose else "")
             + (f"The user's request: {query}\n" if query else "")
             + (
@@ -594,7 +671,7 @@ def plan_presentation_outline(
             )
         # A plan under 3 slides is weaker than no plan; an absurdly long one is
         # noise — clamp to a real deck's size.
-        return out[:24] if len(out) >= 3 else None
+        return out[: outline_cap(guidance)] if len(out) >= 3 else None
     except Exception:  # noqa: BLE001
         return None
 
@@ -871,7 +948,8 @@ def a2ui_system_prompt(
         "6. For presentations build a REAL deck of Slides, each with a 'variant'. Start "
         "with variant='title' (a short UPPERCASE 'kicker', a strong 'title', a 'subtitle'), "
         "then the body slides, and end with a closing slide. "
-        "EVERY body slide (variant 'content', 'two-column', 'visual' or 'agenda') MUST "
+        "EVERY body slide (variant 'content', 'two-column', 'visual', 'agenda', "
+        "'kpi-split', 'boxes' or 'split') MUST "
         "carry a BODY in its 'children': for 'content', 3-5 Text nodes (one concise, FULL "
         "sentence each) OR a Markdown node whose content is 3-5 '- ' bullet lines. A body "
         "slide with only a kicker+title and no children is INVALID — never emit one. Make "
@@ -889,8 +967,17 @@ def a2ui_system_prompt(
         "rows -> a Table. LAYOUT VARIETY: pair bullets WITH a visual using "
         "variant='two-column' (children = the Text nodes then the visual node); give a "
         "dominant Chart/Diagram/Table its own variant='visual' slide; use variant='agenda' "
-        "(children = short Text nodes) for the overview; variant='quote' for a punchy "
+        "(children = short Text nodes) for the overview — with 'columns':2 when there "
+        "are more than 8 rows, so a long contents page does not overflow; "
+        "variant='quote' for a punchy "
         "takeaway (put it in 'title'). Weigh TWO peers — options, vendors, before/after, "
+        "HEADLINE FIGURES PLUS DETAIL on one slide -> variant='kpi-split': put 4-6 KeyValue "
+        "tiles FIRST in 'children', then the body nodes, and set 'ratio' ('60/40' when a "
+        "chart leads, '40/60' when a table does). A SET OF PEER ITEMS that is not two "
+        "— challenges, policy areas, solution or stakeholder maps, scenarios -> "
+        "variant='boxes' with 'columns' 2, 3 or 4 and one Markdown/Text child per "
+        "panel. A LEADING VISUAL beside supporting detail (a map next to a table, a "
+        "diagram next to notes) -> variant='split' with an explicit 'ratio'. "
         "pros/cons — with variant='comparison': set 'leftLabel' and 'rightLabel' to the "
         "two things being compared and list the left-hand Text nodes THEN the right-hand "
         "ones in 'children' (use this, NOT 'two-column', when both sides are text). Open a "
@@ -898,8 +985,9 @@ def a2ui_system_prompt(
         "(one Image child, title overlaid). NEVER use the same variant on more than two "
         "consecutive slides. Use AS MANY slides as the content needs, give each a DISTINCT "
         "focus, and NEVER cram everything onto one slide. DEPTH: a substantial answer "
-        "deserves 10-16 slides — prefer splitting a crowded slide into two focused slides "
-        "over dropping material; only go shorter when the answer genuinely has less to say. "
+        f"deserves {slide_depth_phrase(guidance)} slides — prefer splitting a crowded "
+        "slide into two focused slides over dropping material; only go shorter when the "
+        "answer genuinely has less to say. "
         "ATTRIBUTION: when the answer cites sources (URLs, publications, datasets, report "
         "names), put the ones backing THAT slide's claims in its 'sources' as "
         '[{"label":"IEA Global EV Outlook 2025","url":"https://..."}] — label is required, '

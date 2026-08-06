@@ -14,7 +14,7 @@ import { DeckThemeContext } from '../lib/deckThemes'
 import { SurfaceContext, SurfaceChromeContext } from '../lib/surfaceContext'
 import { cn } from '../lib/utils'
 import { SlideCtx } from './slideContext'
-import { asStr } from './values'
+import { asNum, asStr } from './values'
 import { normSlideSources } from '../lib/slideSources'
 
 // Whether a slide-child subtree carries any real content. A 'content' slide is
@@ -132,7 +132,10 @@ export function Slide({ node, render, resolve }: NodeProps) {
     variant === 'visual' ||
     variant === 'agenda' ||
     variant === 'comparison' ||
-    variant === 'image-full'
+    variant === 'image-full' ||
+    variant === 'kpi-split' ||
+    variant === 'boxes' ||
+    variant === 'split'
   const titleOnlyContent = bodyVariant && !slideHasBody && node.title != null
   if (variant === 'title' || variant === 'section' || titleOnlyContent) {
     return (
@@ -155,7 +158,12 @@ export function Slide({ node, render, resolve }: NodeProps) {
   }
 
   if (variant === 'stats') {
-    const cols = Math.min(Math.max(children.length, 1), 4)
+    // Up to SIX per row: corporate templates routinely run a 5- or 6-tile
+    // headline band (area / population / GDP / GDP-per-capita / urbanisation /
+    // divisions), and a cap of 4 wrapped that into 4+2 — a ragged row where the
+    // source is one line. `columns` lets a deck pin the count; otherwise it is
+    // the child count, still bounded so 12 tiles cannot render unreadably.
+    const cols = Math.min(Math.max(asNum(node.columns) || children.length, 1), 6)
     return (
       <div className="a2-slide relative flex h-full flex-col p-10" style={stageStyle}>
         {chrome}
@@ -272,21 +280,175 @@ export function Slide({ node, render, resolve }: NodeProps) {
   if (variant === 'agenda') {
     // Numbered overview rows — each child (a short Text) gets an accent number
     // badge, the staple "agenda / what we'll cover" layout.
+    //
+    // `columns` flows the rows into more than one column. A 12-section contents
+    // page in one column either overflows the stage or shrinks to unreadable;
+    // two columns of six is how printed decks lay it out. Rows fill COLUMN-FIRST
+    // (1-6 left, 7-12 right) so the numbering reads down each column, which is
+    // what a reader scanning a contents page expects.
+    const agendaCols = Math.min(Math.max(asNum(node.columns) || 1, 1), 3)
+    const perCol = Math.ceil(children.length / agendaCols)
+    const columns =
+      agendaCols === 1
+        ? [children]
+        : Array.from({ length: agendaCols }, (_, c) => children.slice(c * perCol, (c + 1) * perCol))
+    const rowSize = agendaCols > 1 ? 'text-[1.15rem]' : 'text-[1.45rem]'
+    const badgeSize = agendaCols > 1 ? 'size-8 text-sm' : 'size-10 text-lg'
     return (
       <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={stageStyle}>
         {header}
-        <div className="mt-6 flex min-h-0 flex-1 flex-col justify-center gap-5">
-          {children.map((id, i) => (
-            <div key={id} className="flex items-center gap-5">
-              <span
-                className="flex size-10 shrink-0 items-center justify-center rounded-full text-lg font-extrabold"
-                style={{ background: theme.panel, border: `1px solid ${theme.panelBorder}`, color: theme.accent }}
-              >
-                {i + 1}
-              </span>
-              <div className="min-w-0 flex-1 text-pretty text-[1.45rem] leading-snug">{render(id)}</div>
+        <div
+          className="mt-6 grid min-h-0 flex-1 content-center gap-x-10"
+          style={{ gridTemplateColumns: `repeat(${agendaCols}, minmax(0, 1fr))` }}
+        >
+          {columns.map((col, ci) => (
+            <div key={ci} className={cn('flex flex-col justify-center', agendaCols > 1 ? 'gap-3' : 'gap-5')}>
+              {col.map((id, i) => (
+                <div key={id} className="flex items-center gap-4">
+                  <span
+                    className={cn(
+                      'flex shrink-0 items-center justify-center rounded-full font-extrabold',
+                      badgeSize,
+                    )}
+                    style={{ background: theme.panel, border: `1px solid ${theme.panelBorder}`, color: theme.accent }}
+                  >
+                    {ci * perCol + i + 1}
+                  </span>
+                  <div className={cn('min-w-0 flex-1 text-pretty leading-snug', rowSize)}>{render(id)}</div>
+                </div>
+              ))}
             </div>
           ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (variant === 'kpi-split') {
+    // A headline KPI band over a split body — the workhorse of corporate country
+    // and market briefs (14 of the 50 pages in the deck this was built for).
+    // `stats` could not express it: that variant is tiles ONLY, so a slide with
+    // tiles AND a body had to drop one or the other.
+    //
+    // KeyValue children form the band; everything else falls to the body, split
+    // text-then-visual like 'two-column'. `ratio` sets the body columns, because
+    // the same layout appears at 50/50, 60/40 (chart-led) and 40/60 (table-led)
+    // and the difference is which side carries the argument.
+    const byId: Record<string, ComponentNode> = Object.fromEntries((surface?.components || []).map((c) => [c.id, c]))
+    const tileIds = children.filter((id) => byId[id]?.component === 'KeyValue')
+    const rest = children.filter((id) => !tileIds.includes(id))
+    const tileCols = Math.min(Math.max(tileIds.length, 1), 6)
+    const visualIds = rest.filter((id) => byId[id] && SLIDE_VISUAL_COMPONENTS.has(byId[id].component))
+    const textIds = rest.filter((id) => !visualIds.includes(id))
+    // Text left, visual right when both exist; otherwise keep the emitted order
+    // rather than inventing a split the content does not have.
+    const mixed = visualIds.length > 0 && textIds.length > 0
+    const mid = Math.ceil(rest.length / 2)
+    const left = mixed ? textIds : rest.slice(0, mid)
+    const right = mixed ? visualIds : rest.slice(mid)
+    const ratio = asStr(node.ratio) || '50/50'
+    const bodyCols =
+      ratio === '60/40' ? '3fr 2fr' : ratio === '40/60' ? '2fr 3fr' : '1fr 1fr'
+    return (
+      <div className="a2-slide relative flex h-full flex-col p-10" style={stageStyle}>
+        {chrome}
+        {eyebrow}
+        {node.title != null && (
+          <h2 className="mt-1 text-balance text-3xl font-bold tracking-tight" style={{ color: theme.title }}>
+            {asStr(node.title)}
+          </h2>
+        )}
+        {tileIds.length > 0 && (
+          <div
+            className="mt-5 grid shrink-0 gap-4"
+            style={{ gridTemplateColumns: `repeat(${tileCols}, minmax(0, 1fr))` }}
+          >
+            {tileIds.map((id) => render(id))}
+          </div>
+        )}
+        {rest.length > 0 && (
+          <div className="mt-6 grid min-h-0 flex-1 gap-8" style={{ gridTemplateColumns: bodyCols }}>
+            <div className="flex min-w-0 flex-col justify-center space-y-3 text-pretty text-[1.15rem] leading-relaxed [&_ul]:space-y-2 [&_ol]:space-y-2">
+              {left.map((id) => render(id))}
+            </div>
+            {right.length > 0 && (
+              <div className="flex min-w-0 flex-col justify-center gap-3">{right.map((id) => render(id))}</div>
+            )}
+          </div>
+        )}
+        {subtitle && <p className="mt-4 text-pretty text-sm" style={{ color: theme.muted }}>{subtitle}</p>}
+      </div>
+    )
+  }
+
+  if (variant === 'boxes') {
+    // N titled panels on a fixed grid — the other recurring corporate shape (13
+    // pages): challenge matrices, regulatory areas, solution maps, stakeholder
+    // maps, scenario sets. `content` stacked these vertically and overflowed;
+    // 'comparison' handles exactly two and no more.
+    //
+    // `columns` is honoured when given, else chosen so the cells stay legible:
+    // 4 children read best 2x2, 6 as 3x2, 8 as 4x2.
+    const n = children.length
+    const cols = Math.min(
+      Math.max(asNum(node.columns) || (n <= 2 ? n || 1 : n <= 4 ? 2 : n <= 6 ? 3 : 4), 1),
+      4,
+    )
+    return (
+      <div className="a2-slide relative flex h-full flex-col p-10" style={stageStyle}>
+        {chrome}
+        {eyebrow}
+        {node.title != null && (
+          <h2 className="mt-1 text-balance text-3xl font-bold tracking-tight" style={{ color: theme.title }}>
+            {asStr(node.title)}
+          </h2>
+        )}
+        {/* auto-rows-fr keeps every cell the same height, so a box with one line
+            does not collapse next to a box with six — the template's panels are
+            visually equal regardless of content length. */}
+        <div
+          className="mt-6 grid min-h-0 flex-1 auto-rows-fr gap-4"
+          style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+        >
+          {children.map((id) => (
+            <div
+              key={id}
+              className="min-w-0 overflow-hidden rounded-lg border p-4 text-pretty text-[1.05rem] leading-snug [&_ul]:space-y-1.5 [&_ol]:space-y-1.5"
+              style={{ background: theme.panel, borderColor: theme.panelBorder }}
+            >
+              {render(id)}
+            </div>
+          ))}
+        </div>
+        {subtitle && <p className="mt-4 text-pretty text-sm" style={{ color: theme.muted }}>{subtitle}</p>}
+      </div>
+    )
+  }
+
+  if (variant === 'split') {
+    // Two regions at an explicit ratio, with NO assumption about which side is
+    // text and which is visual — that is what separates it from 'two-column'
+    // (text-left/visual-right) and 'comparison' (two labelled peers). Needed for
+    // the map-left/table-right and diagram-left/notes-right pages, where the
+    // visual leads and the ratio is the whole point.
+    const ratio = asStr(node.ratio) || '60/40'
+    const cols =
+      ratio === '50/50' ? '1fr 1fr' : ratio === '40/60' ? '2fr 3fr' : ratio === '70/30' ? '7fr 3fr' : '3fr 2fr'
+    const mid = Math.ceil(children.length / 2)
+    const left = children.slice(0, mid)
+    const right = children.slice(mid)
+    return (
+      <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={stageStyle}>
+        {header}
+        <div className="mt-6 grid min-h-0 flex-1 items-center gap-8" style={{ gridTemplateColumns: cols }}>
+          <div className="flex min-w-0 flex-col justify-center gap-4 text-pretty text-[1.2rem] leading-relaxed [&_ul]:space-y-2 [&_ol]:space-y-2">
+            {left.map((id) => render(id))}
+          </div>
+          {right.length > 0 && (
+            <div className="flex min-w-0 flex-col justify-center gap-4 text-pretty text-[1.2rem] leading-relaxed [&_ul]:space-y-2 [&_ol]:space-y-2">
+              {right.map((id) => render(id))}
+            </div>
+          )}
         </div>
       </div>
     )
