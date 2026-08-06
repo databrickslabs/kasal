@@ -1306,11 +1306,31 @@ async def _disable_bi_specialist_crew_memory(conn) -> None:
 
 
 async def _ensure_ui_config_columns(conn) -> None:
-    """Idempotently add the Predefined-UI columns to ui_config. The table itself is
-    created via create_all, but create_all never ALTERs an existing table — so DBs
-    created before catalog_json/style_json existed would silently drop a workspace's
-    A2UI catalog + branding on save/reload. Safe to run every startup (nullable TEXT).
+    """Idempotently create ui_config and add its Predefined-UI columns.
+
+    The TABLE was previously left to ``create_all`` — but ``init_db`` skips
+    ``create_all`` entirely once the database has more than one table
+    ("Tables already exist"), so on any install created before ui_config shipped the
+    table simply never appeared. Opening the UI Configurator then 500'd on every
+    request with ``no such table: ui_config``, which is why every other
+    later-than-the-DB table in this module has its own checkfirst-create.
+
+    The COLUMNS still need the ALTER pass: create_all never ALTERs an existing
+    table, so DBs created before catalog_json/style_json existed would silently
+    drop a workspace's A2UI catalog + branding on save/reload.
+
+    Safe to run every startup (checkfirst-create, nullable TEXT columns).
     """
+    try:
+        from src.models.ui_config import UIConfig
+
+        def _create_ui_config_table(sync_conn):
+            UIConfig.__table__.create(sync_conn, checkfirst=True)
+
+        await conn.run_sync(_create_ui_config_table)
+        logger.info("Ensured ui_config table exists")
+    except Exception as e:
+        logger.warning(f"Could not ensure ui_config table: {e}")
     is_sqlite = _conn_is_sqlite(conn)
     columns = ("catalog_json", "style_json")
     try:

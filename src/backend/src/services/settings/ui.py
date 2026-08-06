@@ -19,6 +19,9 @@ class UIConfigService:
     """
     Group-aware service for the per-workspace Predefined UI configuration.
 
+    Resolution is two-level, like MCP servers: a workspace's own row wins, else the
+    global default row (``group_id IS NULL``), else the schema defaults.
+
     A workspace that has never configured it gets the schema defaults — which are
     ``enabled=True`` + ``catalog_type="minimal"`` (see UIConfigBase). So Predefined
     UI is ON by default until an admin disables it; the A2UI composer treats an
@@ -43,7 +46,11 @@ class UIConfigService:
         self, config_in: UIConfigUpdate, created_by_email: Optional[str] = None
     ) -> UIConfigResponse:
         """Upsert this workspace's UI config."""
-        existing = await self.repository.get_for_group(self.group_id)
+        # EXACT, not the resolving lookup: get_for_group falls back to the global
+        # default (group_id IS NULL), and editing that in place would rewrite the
+        # default for every other workspace. A workspace saving for the first time
+        # must create its OWN row.
+        existing = await self.repository.get_for_group_exact(self.group_id)
         if existing is None:
             existing = UIConfig(
                 group_id=self.group_id, created_by_email=created_by_email

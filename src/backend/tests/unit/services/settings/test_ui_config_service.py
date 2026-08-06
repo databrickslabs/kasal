@@ -56,12 +56,17 @@ async def test_get_config_returns_existing_row():
 
 @pytest.mark.asyncio
 async def test_update_config_creates_when_missing():
+    """The write path uses the EXACT lookup, never the resolving one.
+
+    ``get_for_group`` falls back to the global default (``group_id IS NULL``);
+    editing that in place would rewrite the default for every other workspace.
+    """
     session = AsyncMock()
     session.add = MagicMock()
     with patch("src.services.settings.ui.UIConfigRepository") as Repo:
         repo = AsyncMock()
         Repo.return_value = repo
-        repo.get_for_group = AsyncMock(return_value=None)
+        repo.get_for_group_exact = AsyncMock(return_value=None)
 
         svc = UIConfigService(session, group_id="g1")
         body = UIConfigUpdate(
@@ -87,7 +92,7 @@ async def test_update_config_updates_existing_row():
         repo = AsyncMock()
         Repo.return_value = repo
         existing = UIConfig(id=3, group_id="g1", enabled=False, catalog_type="minimal")
-        repo.get_for_group = AsyncMock(return_value=existing)
+        repo.get_for_group_exact = AsyncMock(return_value=existing)
 
         svc = UIConfigService(session, group_id="g1")
         body = UIConfigUpdate(
