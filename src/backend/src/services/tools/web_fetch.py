@@ -50,8 +50,20 @@ def _http_json(
     return dict(results)
 
 
-def _safe_fetch(url: str, headers: dict[str, str], timeout: int = 15) -> str:
-    """Fetch a URL, refusing non-HTTP schemes and private/loopback hosts."""
+def _safe_fetch(
+    url: str,
+    headers: dict[str, str],
+    timeout: int = 15,
+    max_bytes: int | None = None,
+) -> str:
+    """Fetch a URL, refusing non-HTTP schemes and private/loopback hosts.
+
+    ``max_bytes`` bounds how much of the response body is READ. Without it a
+    multi-megabyte page is pulled into memory in full and only trimmed later,
+    which pays the download and decode cost regardless — and on a hostile or
+    misconfigured URL there is no upper bound at all. None keeps the previous
+    unbounded behaviour for callers that have their own limit.
+    """
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise ValueError(f"Unsupported URL scheme: {parsed.scheme!r}")
@@ -73,7 +85,10 @@ def _safe_fetch(url: str, headers: dict[str, str], timeout: int = 15) -> str:
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             charset = response.headers.get_content_charset() or "utf-8"
-            return response.read().decode(charset, errors="replace")
+            # read(n) caps the transfer itself. One extra byte is requested so the
+            # caller can tell "exactly at the limit" from "truncated".
+            raw = response.read() if max_bytes is None else response.read(max_bytes + 1)
+            return raw.decode(charset, errors="replace")
     except urllib.error.HTTPError as e:
         # urllib's message is just "HTTP Error 404: Not Found" — no URL. The
         # model receives this as the tool result and needs to know WHICH source
