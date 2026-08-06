@@ -900,35 +900,58 @@ async def _ensure_pgvector_embedding_columns(conn) -> None:
     """
     if _conn_is_sqlite(conn):
         return
+    # Which schema holds the extension. pgvector installs its `vector` type and
+    # its operator classes into ONE schema — usually `public` — and this
+    # connection's search_path is not guaranteed to include it. The first version
+    # of this helper used the bare name and every statement failed with
+    # `type "vector" does not exist` / `operator class "vector_cosine_ops" does
+    # not exist` even though the extension WAS installed. Qualifying removes the
+    # dependency on search_path entirely.
     try:
         result = await conn.exec_driver_sql(
-            "SELECT 1 FROM pg_extension WHERE extname IN ('vector', 'pgvector')"
+            "SELECT n.nspname FROM pg_extension e "
+            "JOIN pg_namespace n ON n.oid = e.extnamespace "
+            "WHERE e.extname IN ('vector', 'pgvector')"
         )
-        if result.fetchone() is None:
+        row = result.fetchone()
+        if row is None:
             logger.info(
                 "pgvector not enabled; embedding columns skipped. An instance owner "
                 "can run 'CREATE EXTENSION IF NOT EXISTS vector;' and restart to "
                 "enable similarity search."
             )
             return
+        ext_schema = row[0]
     except Exception as e:  # noqa: BLE001 — never block startup on the probe
         logger.warning(f"Could not check for pgvector: {e}")
         return
 
+    applied = True
     for table in _VECTOR_EMBEDDING_TABLES:
         # Each statement in its own SAVEPOINT: an orphaned-owner table (42501)
         # must not abort the surrounding self-heal transaction.
         for stmt in (
-            f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS embedding vector(1024)",
+            f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS embedding "
+            f"{ext_schema}.vector(1024)",
             f"CREATE INDEX IF NOT EXISTS idx_{table}_embedding ON {table} "
-            "USING hnsw (embedding vector_cosine_ops)",
+            f"USING hnsw (embedding {ext_schema}.vector_cosine_ops)",
         ):
             try:
                 async with conn.begin_nested():
                     await conn.exec_driver_sql(stmt)
             except Exception as e:  # noqa: BLE001 — best-effort per statement
+                applied = False
                 logger.warning(f"Could not apply '{stmt[:60]}...': {e}")
-    logger.info("Ensured pgvector embedding columns + HNSW indexes")
+    if applied:
+        logger.info("Ensured pgvector embedding columns + HNSW indexes")
+    else:
+        # Do NOT log success when nothing was applied. The first version did, so
+        # "Ensured pgvector embedding columns" appeared in the logs while every
+        # ALTER had failed and knowledge upload stayed broken.
+        logger.warning(
+            "pgvector embedding columns INCOMPLETE — knowledge/document similarity "
+            "search will not work until the warnings above are resolved"
+        )
 
 
 async def _ensure_chat_sessions_table(conn) -> None:

@@ -22,7 +22,7 @@ not (created after). Same code, different history — which is why it looked
 intermittent.
 """
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -33,7 +33,7 @@ def _conn(dialect: str = "postgresql", pgvector: bool = True) -> MagicMock:
     conn = MagicMock()
     conn.engine.dialect.name = dialect
     probe = MagicMock()
-    probe.fetchone = MagicMock(return_value=(1,) if pgvector else None)
+    probe.fetchone = MagicMock(return_value=("public",) if pgvector else None)
     conn.exec_driver_sql = AsyncMock(
         side_effect=[probe] + [MagicMock() for _ in range(12)]
     )
@@ -71,7 +71,7 @@ class TestWithPgvectorAvailable:
         conn = _conn()
         await _ensure_pgvector_embedding_columns(conn)
         sql = " ".join(_statements(conn))
-        assert "USING hnsw (embedding vector_cosine_ops)" in sql
+        assert "USING hnsw (embedding public.vector_cosine_ops)" in sql
 
     async def test_it_is_idempotent(self):
         """Runs on every startup, so it must be safe to repeat."""
@@ -90,7 +90,7 @@ class TestWithPgvectorAvailable:
     async def test_one_failing_table_does_not_stop_the_other(self):
         conn = _conn()
         probe = MagicMock()
-        probe.fetchone = MagicMock(return_value=(1,))
+        probe.fetchone = MagicMock(return_value=("public",))
         # First ALTER blows up; everything after must still be attempted.
         conn.exec_driver_sql = AsyncMock(
             side_effect=[probe, Exception("must be owner")]
@@ -103,6 +103,12 @@ class TestWithPgvectorAvailable:
 
 @pytest.mark.asyncio
 class TestWithoutPgvector:
+    async def test_the_probe_asks_which_schema_holds_the_extension(self):
+        conn = _conn()
+        await _ensure_pgvector_embedding_columns(conn)
+        probe = _statements(conn)[0]
+        assert "extnamespace" in probe and "nspname" in probe, probe
+
     async def test_no_ddl_is_attempted(self):
         """`ADD COLUMN ... vector(1024)` would fail; skip and say why."""
         conn = _conn(pgvector=False)
@@ -139,3 +145,39 @@ class TestItRunsOnEveryStartup:
 
         source = inspect.getsource(session_module)
         assert "_ensure_pgvector_embedding_columns(conn)" in source
+
+
+@pytest.mark.asyncio
+class TestTheLogTellsTheTruth:
+    """A heal that applied nothing must not log success.
+
+    The first version logged "Ensured pgvector embedding columns + HNSW indexes"
+    unconditionally, so on the deployed app that line appeared at 09:11:48 while
+    EVERY statement had failed — and knowledge upload was still broken two minutes
+    later. The misleading line is what made the fix look deployed and working.
+    """
+
+    async def test_success_is_logged_only_when_everything_applied(self):
+        conn = _conn()
+        with patch("src.db.session.logger") as mock_logger:
+            await _ensure_pgvector_embedding_columns(conn)
+        messages = [c.args[0] for c in mock_logger.info.call_args_list]
+        assert any("Ensured pgvector embedding columns" in m for m in messages)
+
+    async def test_a_failure_is_reported_as_incomplete(self):
+        conn = _conn()
+        probe = MagicMock()
+        probe.fetchone = MagicMock(return_value=("public",))
+        conn.exec_driver_sql = AsyncMock(
+            side_effect=[probe] + [Exception("must be owner")] * 8
+        )
+        with patch("src.db.session.logger") as mock_logger:
+            await _ensure_pgvector_embedding_columns(conn)
+
+        infos = [c.args[0] for c in mock_logger.info.call_args_list]
+        warnings = [c.args[0] for c in mock_logger.warning.call_args_list]
+        assert not any("Ensured pgvector embedding columns" in m for m in infos), (
+            "logged success while every statement failed — exactly what hid this "
+            "bug on the deployed app"
+        )
+        assert any("INCOMPLETE" in m for m in warnings), warnings
