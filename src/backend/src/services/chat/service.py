@@ -151,7 +151,15 @@ class LightAgentService:
         import re
         from datetime import UTC, datetime
 
-        from src.db.session import request_scoped_session
+        # ROUTED, not request_scoped_session. Chat is the only path that runs
+        # IN-PROCESS, in a FastAPI BackgroundTask — so the request's session is
+        # already closed and request_scoped_session falls back to the raw
+        # async_session_factory, a per-process snapshot that ONLY a subprocess ever
+        # swaps to Lakebase. Every read below is tenant data that lives in
+        # Lakebase (agent tool_configs, API keys, chat history), so on the snapshot
+        # chat silently read local SQLite: an MCP server enabled for the workspace
+        # gave "Added 1 explicit MCP servers" in Agent Builder and "Added 0" here.
+        from src.db.session import routed_scoped_session
         from src.services.catalog.agents import AgentService
         from src.services.execution.kernel.agent_tools import build_agent_with_tools
         from src.services.execution.logs.queue import enqueue_log
@@ -208,7 +216,7 @@ class LightAgentService:
             # agents). Chat-generated agents already carry their own tool_configs.
             if not agent_spec.get("tool_configs"):
                 try:
-                    async with request_scoped_session() as db_session:
+                    async with routed_scoped_session() as db_session:
                         db_id = (
                             str(agent_spec.get("id", ""))
                             .replace("agent_", "")
@@ -382,7 +390,7 @@ class LightAgentService:
             from src.services.tools.tool_factory import ToolFactory
 
             _factory_group = group_id if group_id != "default" else None
-            async with request_scoped_session() as db_session:
+            async with routed_scoped_session() as db_session:
                 try:
                     api_keys_service = ApiKeysService(
                         db_session, group_id=_factory_group
@@ -1612,7 +1620,7 @@ class LightAgentService:
         context_summary = None
         summary_upto = None
         try:
-            from src.db.session import request_scoped_session
+            from src.db.session import routed_scoped_session
             from src.repositories.chat_history_repository import (
                 ChatHistoryRepository,
             )
@@ -1620,7 +1628,7 @@ class LightAgentService:
                 ChatSessionRepository,
             )
 
-            async with request_scoped_session() as db_session:
+            async with routed_scoped_session() as db_session:
                 # MOST RECENT window (not the oldest page) — a session longer than
                 # one page must still recall what was just said.
                 messages = await ChatHistoryRepository(

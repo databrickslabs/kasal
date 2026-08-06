@@ -510,6 +510,46 @@ async def request_scoped_session():
             yield session
 
 
+@asynccontextmanager
+async def routed_scoped_session():
+    """Like :func:`request_scoped_session`, but ROUTES instead of snapshotting.
+
+    Same first branch — inside a request, reuse that request's session so the
+    caller joins the single transaction. The difference is the fallback: this one
+    goes through the database ROUTER, which re-reads ``is_lakebase_enabled()`` per
+    call, instead of the raw ``async_session_factory``.
+
+    That factory is a per-process SNAPSHOT, and only a SUBPROCESS ever swaps it to
+    Lakebase (``activate_lakebase_in_subprocess``). The main process never does, so
+    anything running IN-PROCESS outside a request — a FastAPI ``BackgroundTask``,
+    which is where the whole Chat path runs — read local SQLite while the crew and
+    flow subprocesses read Lakebase. Same config, opposite answers, no error: an
+    MCP server enabled for the workspace produced "Added 1 explicit MCP servers"
+    in Agent Builder and "Added 0" in Chat.
+
+    **Not a drop-in replacement for every caller.** ``request_scoped_session`` is
+    still correct where routing would recurse: the router needs a credential to
+    reach Lakebase, and in local dev it resolves one via ``get_auth_context`` →
+    ``ApiKeysService``, which is itself a ``request_scoped_session`` caller. The
+    router sets the ContextVar only AFTER connecting, so during connect the
+    fallback is live and routing it would close the loop that produced 1,287
+    "maximum recursion depth exceeded" in production. Use this for reads that are
+    NOT on the router's own connect path — MCP servers, tool configs, model
+    configs — and leave credential lookups alone.
+    """
+    existing = _request_session.get(None)
+    if existing is not None:
+        yield existing
+        return
+
+    # Imported here, not at module scope: database_router imports THIS module.
+    from src.db.database_router import get_smart_db_session
+
+    async for session in get_smart_db_session():
+        yield session
+        break
+
+
 def detach_request_session() -> None:
     """Clear the request-scoped session for the CURRENT context.
 

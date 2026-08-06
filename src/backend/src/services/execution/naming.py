@@ -48,7 +48,7 @@ class ExecutionNameService:
             session: Database session for repository operations, or None. The chat
                 auto-execute path constructs the whole execution stack with
                 ``session=None`` (it runs detached, off an asyncio task, and each
-                layer opens its OWN ``request_scoped_session()``). When None is
+                layer opens its OWN ``routed_scoped_session()``). When None is
                 passed here we defer dependency creation and open a standalone
                 session per DB call — so the template read and LLM-interaction log
                 never run on a ``None`` session ("'NoneType' has no attribute
@@ -72,10 +72,10 @@ class ExecutionNameService:
         when none was injected (so the read never hits a ``None`` session)."""
         if self.template_service is not None:
             return await self.template_service.get_template_content("generate_job_name")
-        from src.db.session import request_scoped_session
+        from src.db.session import routed_scoped_session
         from src.services.catalog.templates import TemplateService
 
-        async with request_scoped_session() as session:
+        async with routed_scoped_session() as session:
             return await TemplateService(session).get_template_content(
                 "generate_job_name"
             )
@@ -104,9 +104,9 @@ class ExecutionNameService:
             else:
                 # No injected session: open a standalone one and COMMIT (the
                 # repository only flushes — a request would normally commit at end).
-                from src.db.session import request_scoped_session
+                from src.db.session import routed_scoped_session
 
-                async with request_scoped_session() as session:
+                async with routed_scoped_session() as session:
                     await LLMLogService.create(session).create_log(
                         endpoint=endpoint,
                         prompt=prompt,

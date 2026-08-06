@@ -186,7 +186,11 @@ async def _async_noop(*args, **kwargs):
 # The chat auto-execute builds the whole execution stack with session=None
 # (ExecutionService(session=None)). Previously the name service crashed on a
 # None session ("'NoneType' has no attribute 'execute'/'add'"); now it opens its
-# OWN request_scoped_session() per DB call, like the rest of that stack.
+# OWN routed_scoped_session() per DB call, like the rest of that stack.
+# ROUTED, not request-scoped: this runs off an asyncio task in the MAIN
+# process, where the raw session factory is a snapshot that never points
+# at Lakebase (only subprocesses swap it), so the template read and the
+# LLM log would silently go to the local database.
 
 
 def _fake_session_cm():
@@ -213,7 +217,7 @@ async def test_get_name_template_opens_standalone_session_when_none():
     fake_template.get_template_content = AsyncMock(return_value="TEMPLATE BODY")
 
     with (
-        patch("src.db.session.request_scoped_session", return_value=_fake_session_cm()),
+        patch("src.db.session.routed_scoped_session", return_value=_fake_session_cm()),
         patch(
             "src.services.catalog.templates.TemplateService", return_value=fake_template
         ),
@@ -234,7 +238,7 @@ async def test_log_llm_interaction_standalone_commits_when_no_session():
     fake_log.create_log = AsyncMock()
 
     with (
-        patch("src.db.session.request_scoped_session", return_value=session),
+        patch("src.db.session.routed_scoped_session", return_value=session),
         patch.object(Svc, "_log_llm_interaction", Svc._log_llm_interaction),
         patch(
             "src.services.execution.logs.llm_log_service.LLMLogService.create",
@@ -261,7 +265,7 @@ async def test_log_llm_interaction_standalone_swallows_errors():
     fake_log.create_log = AsyncMock(side_effect=RuntimeError("db down"))
 
     with (
-        patch("src.db.session.request_scoped_session", return_value=session),
+        patch("src.db.session.routed_scoped_session", return_value=session),
         patch(
             "src.services.execution.logs.llm_log_service.LLMLogService.create",
             return_value=fake_log,
@@ -304,7 +308,7 @@ async def test_generate_execution_name_none_session_end_to_end(monkeypatch):
     )
 
     with (
-        patch("src.db.session.request_scoped_session", return_value=_fake_session_cm()),
+        patch("src.db.session.routed_scoped_session", return_value=_fake_session_cm()),
         patch(
             "src.services.catalog.templates.TemplateService", return_value=fake_template
         ),

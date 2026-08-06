@@ -114,10 +114,19 @@ async def add_mcp_tools(
             (mcp_config or {}).get("tool_configs", {})
         )
         if requested:
-            from src.db.session import request_scoped_session
+            from src.db.session import routed_scoped_session
             from src.services.mcp.mcp_client.service import MCPService
 
-            async with request_scoped_session() as session:
+            # ROUTED, not request_scoped_session. That helper reuses the request's
+            # session when one is set and otherwise falls back to the RAW
+            # async_session_factory — a per-process snapshot that only a
+            # SUBPROCESS ever swaps to Lakebase
+            # (activate_lakebase_in_subprocess). Chat runs IN-PROCESS in a
+            # FastAPI BackgroundTask, where the request session is already gone,
+            # so this read went to local SQLite while the crew subprocess read
+            # Lakebase: identical config, "Added 1 explicit MCP servers" for
+            # Agent Builder and "Added 0" for chat, with no error either way.
+            async with routed_scoped_session() as session:
                 mcp_service = MCPService(session)
                 mcp_tools = await MCPIntegration.create_mcp_tools_for_agent(
                     mcp_config, label, mcp_service, call_config

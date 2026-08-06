@@ -124,12 +124,12 @@ async def maintain_session_summary(
     if not compaction_enabled() or not session_id or not group_ids:
         return False
     try:
-        from src.db.session import request_scoped_session
+        from src.db.session import routed_scoped_session
         from src.repositories.chat_history_repository import ChatHistoryRepository
         from src.repositories.chat_session_repository import ChatSessionRepository
         from src.services.llm.manager import LLMManager
 
-        async with request_scoped_session() as db_session:
+        async with routed_scoped_session() as db_session:
             session_record = await ChatSessionRepository(
                 db_session
             ).get_by_id_and_group(session_id, group_ids)
@@ -170,7 +170,7 @@ async def maintain_session_summary(
         new_upto = getattr(to_fold[-1], "timestamp", None)
         if new_upto is None:
             return False
-        async with request_scoped_session() as db_session:
+        async with routed_scoped_session() as db_session:
             await ChatSessionRepository(db_session).set_context_summary(
                 session_id, group_ids, new_summary, new_upto
             )

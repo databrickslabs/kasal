@@ -211,9 +211,22 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
         # cycle to close.
         if not os.environ.get("DATABRICKS_CLIENT_ID"):
             try:
-                from src.utils.databricks_auth import get_auth_context
+                from src.utils.databricks_auth import _RESOLVING_AUTH, get_auth_context
 
-                auth = await get_auth_context()
+                # Mark the auth resolution as IN PROGRESS before calling it. The
+                # flag is what makes auth's own DB read use the raw factory instead
+                # of routing; auth sets it itself, but only on ITS outermost entry —
+                # and here the ROUTER is the outermost caller, so without this the
+                # first entry routes and re-enters this very function. Measured: 2
+                # simultaneous get_smart_db_session frames before this line existed.
+                # One level is survivable, but it is the same loop that produced
+                # 1,287 "maximum recursion depth exceeded", so close it here rather
+                # than rely on it staying shallow.
+                _auth_token = _RESOLVING_AUTH.set(True)
+                try:
+                    auth = await get_auth_context()
+                finally:
+                    _RESOLVING_AUTH.reset(_auth_token)
                 if auth:
                     user_token = auth.token
                     user_email = auth.user_identity
