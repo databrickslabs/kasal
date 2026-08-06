@@ -33,6 +33,15 @@ class TestModelRejectsTemperature:
             "databricks-claude-opus-4-7",
             "databricks-claude-opus-4-8",
             "databricks-claude-fable-5",
+            # REGRESSION 2: the same enumeration then missed claude-sonnet-5.
+            # Measured against the live workspace — EVERY Claude 5 rejects
+            # temperature, so the family is not the discriminator, the generation
+            # is. This one 400'd all 24 LLM calls in a 12-task flow and each fell
+            # back to another model, so the run "succeeded" and the only symptom
+            # was a trace full of "LLM Error: 400 ... does not support the
+            # temperature parameter" beside answers from a model nobody picked.
+            "databricks-claude-sonnet-5",
+            "global.anthropic.claude-sonnet-5",
             "gpt-5",
             "databricks-gpt-5-1",
         ],
@@ -40,14 +49,39 @@ class TestModelRejectsTemperature:
     def test_rejecting_models(self, model):
         assert model_rejects_temperature(model) is True
 
+    def test_it_reads_the_capability_registry(self):
+        """One source of truth, so the UI and the runtime cannot disagree.
+
+        The registry already had claude-sonnet-5 down as refusing temperature
+        while this function's own list did not — the UI correctly hid the control
+        and the runtime sent the parameter anyway. A second list is the bug.
+        """
+        from src.core.llm.model_capabilities import model_capability
+
+        for model in (
+            "databricks-claude-sonnet-5",
+            "databricks-claude-opus-5",
+            "databricks-claude-sonnet-4-6",
+            "databricks-claude-opus-4-1",
+        ):
+            capability = model_capability(model)
+            assert capability is not None, model
+            assert model_rejects_temperature(model) is (
+                not capability.accepts("temperature")
+            ), model
+
     @pytest.mark.parametrize(
         "model",
         [
             # Sonnet/Haiku accept temperature — dropping it would silently change
             # sampling for the DEFAULT_ENGINE_MODEL family.
             "databricks-claude-sonnet-4-6",
-            "databricks-claude-sonnet-5",
+            # 4-5 is a MINOR version — measured as ACCEPTING temperature, unlike
+            # the 5 generation.
+            "databricks-claude-sonnet-4-5",
             "databricks-claude-haiku-4-5",
+            "databricks-claude-opus-4-1",
+            "databricks-claude-opus-4-6",
             "databricks-llama-4-maverick",
             None,
             "",

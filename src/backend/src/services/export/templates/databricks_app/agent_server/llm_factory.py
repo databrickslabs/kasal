@@ -37,27 +37,35 @@ def _is_codex_model(model_name: str) -> bool:
 def _model_rejects_temperature(model_name: str) -> bool:
     """True for models whose Databricks endpoint 400s on the `temperature` param.
 
-    Covers GPT-5 / reasoning models and the newest Anthropic models (Claude Opus
-    4.7+, Fable 5) — e.g. ``databricks-claude-opus-4-8`` (served as
-    ``us.anthropic.claude-opus-4-8``) raises BAD_REQUEST: "Model ... does not
-    support the temperature parameter." litellm's DatabricksConfig lists
-    temperature as supported, so we must drop it explicitly. Mirrors Kasal's
-    src/utils/model_config.model_rejects_temperature so the exported app behaves
-    like live chat.
+    e.g. ``databricks-claude-opus-4-8`` raises BAD_REQUEST: "Model ... does not
+    support the temperature parameter". litellm's DatabricksConfig lists
+    temperature as supported, so it must be dropped explicitly.
+
+    Reads the same vendored registry the backend reads, so the exported app and
+    live chat cannot disagree.
     """
     if not model_name:
         return False
+
+    # The vendored capability registry is the single source of truth, exactly as
+    # in the backend (src/utils/model_config.model_rejects_temperature). Keeping a
+    # second hand-maintained list here is what let claude-opus-5 and then
+    # claude-sonnet-5 slip through — each 400'd every request while silently
+    # falling back to another model, so runs "succeeded" with answers from a model
+    # nobody chose.
+    from agent_server.kasal_runtime.core.llm.model_capabilities import (
+        model_capability,
+    )
+
+    capability = model_capability(model_name)
+    if capability is not None:
+        return not capability.accepts("temperature")
+
+    # Unknown to the registry: GPT-5 is the one family whose naming is reliable
+    # enough to pattern-match, and new gpt-5-* endpoints appear faster than the
+    # registry is updated.
     m = str(model_name).lower()
-    if "gpt-5" in m or "gpt5" in m:
-        return True
-    # Opus 4.7 and NEWER. The enumerated form silently missed opus-5 the day it
-    # shipped — every run on it died with "Model global.anthropic.claude-opus-5
-    # does not support the temperature parameter."
-    if "claude-opus-4-7" in m or "claude-opus-4-8" in m or "claude-opus-5" in m:
-        return True
-    if "claude-fable" in m:
-        return True
-    return False
+    return "gpt-5" in m or "gpt5" in m
 
 
 def _gateway_on() -> bool:
@@ -183,7 +191,9 @@ def _make_llm(model_name: str, temperature: float = 0.7):
         kwargs["temperature"] = temperature
     if host:
         kwargs["base_url"] = (
-            f"{host}/ai-gateway/mlflow/v1" if _gateway_on() else f"{host}/serving-endpoints"
+            f"{host}/ai-gateway/mlflow/v1"
+            if _gateway_on()
+            else f"{host}/serving-endpoints"
         )
     if token:
         kwargs["api_key"] = token

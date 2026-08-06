@@ -153,26 +153,41 @@ def model_supports_reasoning_effort(model_name: Optional[str]) -> bool:
 def model_rejects_temperature(model_name: Optional[str]) -> bool:
     """
     Return True for models whose serving endpoint rejects the `temperature`
-    parameter (a 400 BAD_REQUEST otherwise). Covers GPT-5 / reasoning models and
-    the newest Anthropic Claude Opus models (4.7+) on Databricks, e.g.
-    `databricks-claude-opus-4-8` (served as `global.anthropic.claude-opus-4-8`).
+    parameter (a 400 BAD_REQUEST otherwise).
+
+    Delegates to the capability registry rather than keeping its own list — see
+    the note in the body. To mark a new model, add it there.
     """
     if not model_name:
         return False
+
+    # Ask the per-model capability registry (core/llm/model_capabilities.py),
+    # which already records `refuses=("temperature", ...)` for every model
+    # measured against the live endpoints. It is the single source of truth the
+    # UI uses to decide whether to render the temperature control.
+    #
+    # Duplicating that knowledge here is what caused the bug this replaces: the
+    # registry had claude-sonnet-5 down as refusing temperature, this function's
+    # hand-maintained list did not, so the UI correctly hid the field while the
+    # runtime sent it anyway. Every request in a 12-task flow 400'd with "Model
+    # global.anthropic.claude-sonnet-5 does not support the temperature
+    # parameter" and silently fell back to another model — the run "succeeded"
+    # with answers from a model the user never chose.
+    #
+    # The list had already missed claude-opus-5 the same way. One registry, one
+    # place to add a model.
+    from src.core.llm.model_capabilities import model_capability
+
+    capability = model_capability(model_name)
+    if capability is not None:
+        return not capability.accepts("temperature")
+
+    # Unknown to the registry: GPT-5 is the one family whose naming is reliable
+    # enough to pattern-match, and new gpt-5-* endpoints appear faster than the
+    # registry is updated. Everything else defaults to "sends temperature",
+    # matching the previous behaviour for unrecognised models.
     m = model_name.lower()
-    if "gpt-5" in m or "gpt5" in m:
-        return True
-    # Opus 4.7 and NEWER. Matched by prefix rather than an exact list: the
-    # enumerated form ("4-7" or "4-8") silently missed opus-5 the day it shipped,
-    # and every run on it died with "Model global.anthropic.claude-opus-5 does
-    # not support the temperature parameter."
-    if "claude-opus-4-7" in m or "claude-opus-4-8" in m or "claude-opus-5" in m:
-        return True
-    if "claude-fable" in m:
-        # Fable 5 has the same request surface as Opus 4.7/4.8 — sampling
-        # params (temperature/top_p/top_k) return 400.
-        return True
-    return False
+    return "gpt-5" in m or "gpt5" in m
 
 
 def get_model_config(model_key: str, db: Optional[Session] = None) -> Dict[str, Any]:

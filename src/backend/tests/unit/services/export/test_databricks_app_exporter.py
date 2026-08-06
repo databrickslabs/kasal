@@ -108,6 +108,37 @@ def _files(result):
     return {f["path"]: f["content"] for f in result["files"]}
 
 
+def _assert_temperature_rules(rejects, agent: str) -> None:
+    """The measured matrix, asserted on the exported helper.
+
+    Left column was probed against the live Databricks workspace across all
+    twelve Claude endpoints — this is the DATABRICKS-served Anthropic path
+    (``global.anthropic.*`` / ``us.anthropic.*``), not direct Anthropic.
+    """
+    for model in (
+        "databricks-claude-opus-4-8",
+        "us.anthropic.claude-opus-4-8",
+        "databricks-claude-opus-4-7",
+        "databricks-claude-fable-5",
+        # The one that broke a 12-task flow: every call 400'd and fell back.
+        "databricks-claude-sonnet-5",
+        "global.anthropic.claude-sonnet-5",
+        "databricks-claude-opus-5",
+        "databricks-gpt-5",
+    ):
+        assert rejects(model) is True, model
+    for model in (
+        "databricks-llama-4-maverick",
+        # 4-5 is a MINOR version: temperature IS accepted here.
+        "databricks-claude-sonnet-4-5",
+        "databricks-claude-sonnet-4-6",
+        "",
+        None,
+    ):
+        assert rejects(model) is False, model
+    assert "OpenAICompletion" in agent
+
+
 class TestDatabricksAppExporter:
     @pytest.mark.asyncio
     async def test_returns_expected_structure(self, exporter, crew_data):
@@ -440,26 +471,41 @@ class TestDatabricksAppExporter:
             for n in tree.body
             if isinstance(n, ast.FunctionDef) and n.name == "_model_rejects_temperature"
         )
-        ns: dict = {}
-        exec(compile(ast.Module(body=[fn], type_ignores=[]), "<agent>", "exec"), ns)
-        rejects = ns["_model_rejects_temperature"]
+        # The helper now reads the VENDORED capability registry rather than a
+        # second hand-maintained list — that duplication is what let
+        # claude-opus-5 and then claude-sonnet-5 slip through, each 400ing every
+        # request while silently falling back to another model. Point its import
+        # at the backend copy (identical file; runtime_vendor copies it verbatim)
+        # so the extracted function can run outside a rendered bundle.
+        assert "kasal_runtime.core.llm.model_capabilities" in agent, (
+            "the exported helper must read the vendored registry, not keep its "
+            "own list of model names"
+        )
+        import sys
+        import types
 
-        for model in (
-            "databricks-claude-opus-4-8",
-            "us.anthropic.claude-opus-4-8",
-            "databricks-claude-opus-4-7",
-            "databricks-claude-fable-5",
-            "databricks-gpt-5",
-        ):
-            assert rejects(model) is True, model
-        for model in (
-            "databricks-llama-4-maverick",
-            "databricks-claude-sonnet-4-5",
-            "",
-            None,
-        ):
-            assert rejects(model) is False, model
-        assert "OpenAICompletion" in agent
+        import src.core.llm.model_capabilities as _caps
+
+        pkg_path = "agent_server.kasal_runtime.core.llm.model_capabilities"
+        created = []
+        parts = pkg_path.split(".")
+        for i in range(1, len(parts)):
+            name = ".".join(parts[:i])
+            if name not in sys.modules:
+                sys.modules[name] = types.ModuleType(name)
+                created.append(name)
+        if pkg_path not in sys.modules:
+            sys.modules[pkg_path] = _caps
+            created.append(pkg_path)
+        try:
+            ns: dict = {}
+            exec(compile(ast.Module(body=[fn], type_ignores=[]), "<agent>", "exec"), ns)
+            rejects = ns["_model_rejects_temperature"]
+            _assert_temperature_rules(rejects, agent)
+        finally:
+            for name in created:
+                sys.modules.pop(name, None)
+        return
 
     @pytest.mark.asyncio
     async def test_app_yaml_uses_uv_start_app(self, exporter, crew_data):
