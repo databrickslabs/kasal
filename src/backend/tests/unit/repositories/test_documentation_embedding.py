@@ -338,23 +338,38 @@ async def test_search_similar_postgres_reports_how_close_each_row_was():
 
 @pytest.mark.asyncio
 async def test_search_similar_postgres_casts_bound_vector():
-    """The order-by MUST cast the bound param to ``vector`` — without
-    ``(:embedding)::vector`` pgvector raises 'operator does not exist:
-    vector <=> text' and the search silently returns nothing on Lakebase."""
+    """The distance is built by the type's comparator, not hand-written SQL.
+
+    It must still CAST to ``vector`` — the operator is ``vector <=> vector`` and an
+    uncast bind arrives as text/unknown, which does not resolve.
+
+    The previous implementation hand-wrote
+    ``literal_column("embedding <=> (:embedding)::vector")`` and passed the value
+    via ``execute(stmt, {"embedding": ...})``. That mixes paramstyles: SQLAlchemy
+    renders the rest of the statement as asyncpg ``$1``/``$2`` positional params
+    and leaves the ``:embedding`` alone, so PostgreSQL got a stray colon and
+    rejected the whole query — ``syntax error at or near ":"``. Every knowledge
+    search failed, and the tool reported "nothing in the knowledge base came close"
+    instead of an error, so a broken query looked like an empty index.
+    """
+    from sqlalchemy.dialects import postgresql
+
     async_session = make_async_session()
     async_session.execute.return_value = make_result_mock([])
     repo = DocumentationEmbeddingRepository(db=async_session)
 
     await repo._search_similar_postgres([0.1, 0.2], limit=5, group_id="g1")
 
-    # Inspect the compiled ORDER BY of the statement passed to execute.
     stmt = async_session.execute.call_args.args[0]
-    compiled = str(stmt)
-    assert "(:embedding)::vector" in compiled
-    assert "embedding <=> (:embedding)::vector" in compiled
-    # And the embedding is passed as a pgvector literal string.
-    params = async_session.execute.call_args.args[1]
-    assert params["embedding"].startswith("[") and params["embedding"].endswith("]")
+    compiled = str(stmt.compile(dialect=postgresql.dialect()))
+    assert "<=>" in compiled
+    assert "CAST" in compiled.upper() and "vector" in compiled.lower()
+    # No stray named placeholder: that is the bug this replaced.
+    assert ":embedding" not in compiled, compiled
+    # The vector travels as a BOUND parameter, not a second positional dict.
+    assert (
+        len(async_session.execute.call_args.args) == 1
+    ), "a second params dict reintroduces the paramstyle mismatch"
 
 
 # ---- Tests for update ----

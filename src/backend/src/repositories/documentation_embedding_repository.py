@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Type, Union
 
-from sqlalchemy import desc, literal_column, select
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -541,7 +541,6 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
         from sqlalchemy import text
 
         # Format the embedding as a vector string for PostgreSQL
-        embedding_str = f"[{','.join(str(x) for x in query_embedding)}]"
         query = select(self._model)
         if group_id is None:
             # Built-in docs only (uploaded knowledge always carries a group_id).
@@ -550,24 +549,31 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
             query = query.where(self._model.group_id == group_id)
             if file_paths:
                 query = query.where(self._model.file_path.in_(file_paths))
-        # The bound parameter MUST be cast to ``vector`` — pgvector's ``<=>``
-        # operator is ``vector <=> vector``, and asyncpg sends a bare string as
-        # text, so without ``::vector`` Postgres raises
-        # "operator does not exist: vector <=> text" and the search silently
-        # returns nothing (the SQLite path ranks in Python and is unaffected,
-        # which is why this only bites on Lakebase/Postgres deployments).
-        # Select the distance alongside the row. Ordering by it was never enough:
-        # the caller could tell which chunk ranked FIRST but not whether any of
-        # them were actually close to the query, so twenty unrelated chunks were
-        # handed to an agent as "relevant results" and it re-queried forever
-        # looking for the answer they did not contain.
-        # literal_column, not text(): a bare TextClause is not a column role, so
-        # add_columns() rejects it — the ORDER BY alone accepted either.
-        distance = literal_column("embedding <=> (:embedding)::vector").label(
+        # Built by the Vector type's comparator, NOT hand-written SQL. The
+        # previous version was `literal_column("embedding <=> (:embedding)::vector")`
+        # with the value passed via execute(..., {"embedding": ...}). That mixes
+        # paramstyles: SQLAlchemy renders the rest of the statement as asyncpg's
+        # `$1`/`$2` positional params and leaves the literal_column's `:embedding`
+        # untouched, so PostgreSQL received a stray colon and rejected the whole
+        # query — "syntax error at or near \":\"". Every knowledge search then
+        # failed, and the tool reported "nothing in the knowledge base came close"
+        # rather than an error, so it read as an empty index instead of a broken
+        # query.
+        #
+        # cosine_distance() handles both things the hand-written SQL was trying to
+        # do: it formats the list through the type's bind_processor and casts to
+        # ``vector`` (the operator is ``vector <=> vector``; an uncast bind arrives
+        # as text or unknown and does not resolve).
+        #
+        # The distance is SELECTed, not merely ordered by: ordering alone tells the
+        # caller which chunk ranked first but not whether ANY of them are close, so
+        # twenty unrelated chunks were handed to an agent as "relevant results" and
+        # it re-queried forever looking for an answer they did not contain.
+        distance = self._model.embedding.cosine_distance(query_embedding).label(
             "distance"
         )
         query = query.add_columns(distance).order_by(distance).limit(limit)
-        result = await self.db.execute(query, {"embedding": embedding_str})
+        result = await self.db.execute(query)
         rows = []
         for row, dist in result.all():
             # pgvector's <=> is cosine DISTANCE; similarity is its complement.
