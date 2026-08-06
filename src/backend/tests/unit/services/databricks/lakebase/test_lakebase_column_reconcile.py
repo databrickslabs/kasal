@@ -230,13 +230,22 @@ class TestMigrateStreamReconcilesColumns:
         assert not any(e["type"] == "error" for e in events), events
 
 
-class TestSchemaOnlyIsNotDestructive:
-    """The UI wiring, asserted on the source.
+class TestTheFourSetupOptions:
+    """Each Lakebase setup option does exactly what its label says.
 
-    "Schema Only" passed ``recreateSchema=true``, which the backend turns into
-    ``DROP SCHEMA kasal CASCADE``. A label reading "Create empty tables without
-    migrating data" must never drop a schema, and a user reaching for it to
-    recover a missing column would instead have lost the database.
+    The intended semantics, confirmed with the product owner:
+
+      Migrate Schema & Data  DROP the target schema, recreate, copy the data over.
+      Schema Only            DROP the target schema, recreate it EMPTY (no copy).
+      Use Existing Data      attach only; change nothing.
+      Use & Expand           attach and add missing tables/columns, keep data.
+
+    So BOTH migrate options pass ``recreate_schema=true`` and differ only in
+    ``migrate_data``. An earlier change here made "Schema Only" non-destructive
+    because its caption promised "create empty tables" while it dropped the schema.
+    The caption was the wrong thing to fix: reset-to-empty is a workflow people
+    rely on, and removing it left no way to get one. The drop is restored and the
+    captions now state it outright.
     """
 
     def _source(self) -> str:
@@ -247,17 +256,34 @@ class TestSchemaOnlyIsNotDestructive:
         assert path.exists(), path
         return path.read_text()
 
-    def test_no_call_site_hardcodes_a_recreate(self):
+    def test_migrate_schema_and_data_drops_and_copies(self):
+        assert "migrateLakebase(true, true)" in self._source()
+
+    def test_schema_only_drops_and_creates_empty(self):
+        """migrateLakebase(recreateSchema, migrateData) = (true, false)."""
+        assert "migrateLakebase(true, false)" in self._source()
+
+    def test_no_migrate_option_skips_the_drop(self):
+        """A (false, ...) call would silently leave the old schema in place.
+
+        Both migrate paths reset; the non-destructive choices are the separate
+        "Use Existing" / "Use & Expand" buttons, which call /lakebase/enable
+        instead of the migrate stream.
+        """
         source = self._source()
-        # migrateLakebase(recreateSchema, migrateData). A literal `true` in the
-        # first slot with `false` in the second is "drop everything, then create
-        # empty tables" — never what Schema Only should mean.
-        assert "migrateLakebase(true, false)" not in source, (
-            "'Schema Only' is wired to recreate_schema=true, which DROPs the "
-            "kasal schema. Pass false — the backend's CREATE ... IF NOT EXISTS "
-            "plus the column self-heal already handle an existing schema."
+        assert "migrateLakebase(false" not in source, (
+            "a migrate call site is not dropping the target schema; Use Existing "
+            "and Use & Expand go through /lakebase/enable, not migrateLakebase"
         )
 
-    def test_the_reset_path_still_exists(self):
-        """Recreate-and-migrate is a legitimate choice; it must stay available."""
-        assert "migrateLakebase(true, true)" in self._source()
+    def test_the_destructive_captions_say_so(self):
+        """The original bug was a label that hid a DROP — not the drop itself."""
+        source = self._source()
+        assert "Drops the existing Lakebase schema, then copies all data" in source
+        assert "Drops the existing Lakebase schema and recreates it EMPTY" in source
+
+    def test_use_and_expand_is_still_non_destructive(self):
+        """expand_schema adds missing tables/columns; it must never drop."""
+        source = self._source()
+        assert "expand_schema: expandSchema" in source
+        assert "use_expand" in source

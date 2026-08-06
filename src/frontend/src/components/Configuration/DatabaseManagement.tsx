@@ -1446,8 +1446,8 @@ const DatabaseManagement: React.FC = () => {
                               label={
                                 <Box>
                                   <Typography variant="body2" fontWeight="bold">Migrate Schema & Data</Typography>
-                                  <Typography variant="caption" color="text.secondary">
-                                    Create schema and copy all data from current database
+                                  <Typography variant="caption" color="error">
+                                    Drops the existing Lakebase schema, then copies all data from the current database
                                   </Typography>
                                 </Box>
                               }
@@ -1458,8 +1458,8 @@ const DatabaseManagement: React.FC = () => {
                               label={
                                 <Box>
                                   <Typography variant="body2" fontWeight="bold">Schema Only</Typography>
-                                  <Typography variant="caption" color="text.secondary">
-                                    Create missing tables and columns without migrating data. Existing data is preserved.
+                                  <Typography variant="caption" color="error">
+                                    Drops the existing Lakebase schema and recreates it EMPTY — no data is copied
                                   </Typography>
                                 </Box>
                               }
@@ -1550,19 +1550,26 @@ const DatabaseManagement: React.FC = () => {
                                   loadDatabaseInfo().catch(() => {});
                                 }
                               } else {
-                                // Migrate schema+data, or create the schema only.
+                                // The four setup options, and exactly what each does:
                                 //
-                                // recreate_schema drives a DROP SCHEMA kasal CASCADE
-                                // on the backend, so it may only be true where the
-                                // user asked for a reset. 'schema_only' says "create
-                                // empty tables" and says nothing about dropping, so
-                                // it passes false: CREATE SCHEMA/TABLE IF NOT EXISTS
-                                // plus the column self-heal, all non-destructive.
-                                // It used to hardcode true and silently wipe an
-                                // existing schema.
+                                //   recreate     DROP the target schema, recreate it,
+                                //                and migrate the data across.
+                                //   schema_only  DROP the target schema and recreate it
+                                //                EMPTY — a deliberate reset with no copy.
+                                //   use          attach to the existing schema, change
+                                //                nothing (handled in the branch above).
+                                //   use_expand   attach and add missing tables/columns,
+                                //                keeping data (also above).
+                                //
+                                // BOTH options here drop, so recreate_schema is always
+                                // true; they differ only in whether data is copied.
+                                // This deliberately reverts an earlier change that made
+                                // schema_only non-destructive: the label was the reason
+                                // given, but a reset-to-empty is a workflow people rely
+                                // on and removing it left no way to get one.
                                 const migrateData = migrationOption === 'recreate';
-                                setSuccess(`Connected successfully! Starting ${migrateData ? 'schema & data migration' : 'schema creation'}...`);
-                                await migrateLakebase(migrateData, migrateData);
+                                setSuccess(`Connected successfully! Starting ${migrateData ? 'schema & data migration' : 'fresh schema creation'}...`);
+                                await migrateLakebase(true, migrateData);
                               }
                             } catch (err: unknown) {
                               const errorMessage = isErrorWithResponse(err)
@@ -1768,19 +1775,21 @@ const DatabaseManagement: React.FC = () => {
               startIcon={<StorageIcon />}
               onClick={async () => {
                 setShowMigrationDialog(false);
-                // Non-destructive: create missing tables/columns, keep existing
-                // data. Only the primary button above resets the schema.
-                await migrateLakebase(false, false);
+                // DROP + recreate EMPTY. Same reset as the primary button, minus
+                // the data copy — matching the "Schema Only" radio option. The
+                // "Use Existing" / "Use & Expand" buttons below are the
+                // non-destructive choices.
+                await migrateLakebase(true, false);
               }}
               sx={{ justifyContent: 'flex-start', py: 1.5, px: 2, textTransform: 'none' }}
             >
               <Box sx={{ textAlign: 'left' }}>
                 <Typography variant="body1" fontWeight="bold">
-                  {schemaExists ? 'Update Schema Only' : 'Schema Only'}
+                  {schemaExists ? 'Recreate Schema Only' : 'Schema Only'}
                 </Typography>
-                <Typography variant="caption" color="text.secondary">
+                <Typography variant="caption" color={schemaExists ? 'error' : 'text.secondary'}>
                   {schemaExists
-                    ? 'Add missing tables and columns, keeping existing data'
+                    ? 'Drops the existing schema and recreates it empty — no data is copied'
                     : 'Create empty tables without migrating data'}
                 </Typography>
               </Box>

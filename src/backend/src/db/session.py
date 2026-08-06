@@ -872,6 +872,64 @@ async def _ensure_documentation_embeddings_columns(conn) -> None:
     except Exception as e:
         logger.warning(f"Could not ensure knowledge_embeddings.created_by column: {e}")
 
+    await _ensure_pgvector_embedding_columns(conn)
+
+
+#: Tables whose ``embedding vector(1024)`` column has to be added AFTER the table,
+#: with the HNSW index that makes similarity search usable.
+_VECTOR_EMBEDDING_TABLES = ("documentation_embeddings", "knowledge_embeddings")
+
+
+async def _ensure_pgvector_embedding_columns(conn) -> None:
+    """Add back the ``embedding`` column on PostgreSQL when pgvector is present.
+
+    Vector tables are created WITHOUT their vector column, because a deployed app
+    cannot install pgvector (``CREATE EXTENSION`` needs ``databricks_superuser``)
+    and ``CREATE TABLE ... vector(1024)`` fails outright without it. That keeps the
+    rest of the table usable — but nothing added the column back once an instance
+    owner HAD enabled the extension, so the ORM kept inserting a column that did
+    not exist::
+
+        column "embedding" of relation "knowledge_embeddings" does not exist
+
+    which broke knowledge upload after the text was extracted and 56 chunks were
+    embedded — the work was done and then discarded.
+
+    SQLite is skipped: there the column is TEXT holding JSON and ``create_all``
+    makes it with the table, and the repository uses a Python-side similarity path.
+    """
+    if _conn_is_sqlite(conn):
+        return
+    try:
+        result = await conn.exec_driver_sql(
+            "SELECT 1 FROM pg_extension WHERE extname IN ('vector', 'pgvector')"
+        )
+        if result.fetchone() is None:
+            logger.info(
+                "pgvector not enabled; embedding columns skipped. An instance owner "
+                "can run 'CREATE EXTENSION IF NOT EXISTS vector;' and restart to "
+                "enable similarity search."
+            )
+            return
+    except Exception as e:  # noqa: BLE001 — never block startup on the probe
+        logger.warning(f"Could not check for pgvector: {e}")
+        return
+
+    for table in _VECTOR_EMBEDDING_TABLES:
+        # Each statement in its own SAVEPOINT: an orphaned-owner table (42501)
+        # must not abort the surrounding self-heal transaction.
+        for stmt in (
+            f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS embedding vector(1024)",
+            f"CREATE INDEX IF NOT EXISTS idx_{table}_embedding ON {table} "
+            "USING hnsw (embedding vector_cosine_ops)",
+        ):
+            try:
+                async with conn.begin_nested():
+                    await conn.exec_driver_sql(stmt)
+            except Exception as e:  # noqa: BLE001 — best-effort per statement
+                logger.warning(f"Could not apply '{stmt[:60]}...': {e}")
+    logger.info("Ensured pgvector embedding columns + HNSW indexes")
+
 
 async def _ensure_chat_sessions_table(conn) -> None:
     """Idempotently create the chat_sessions table (named chat-mode sessions).
