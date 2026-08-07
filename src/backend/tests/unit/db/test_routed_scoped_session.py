@@ -1,6 +1,6 @@
 """In-process background work must ROUTE its DB reads, not snapshot them.
 
-``request_scoped_session`` reuses the request's session when one is set and
+``routed_scoped_session`` reuses the request's session when one is set and
 otherwise falls back to the raw ``async_session_factory``. That factory is a
 per-process SNAPSHOT, and ONLY a subprocess ever swaps it to Lakebase
 (``activate_lakebase_in_subprocess``) — the main process never does.
@@ -21,7 +21,7 @@ global and the workspace override were ``enabled=True``).
 
 It is deliberately NOT a drop-in replacement everywhere. The router needs a
 credential to reach Lakebase and, in local dev, resolves one through
-``get_auth_context`` → ``ApiKeysService`` — itself a ``request_scoped_session``
+``get_auth_context`` → ``ApiKeysService`` — itself a ``routed_scoped_session``
 caller. Routing that would close the loop that produced 1,287 "maximum recursion
 depth exceeded" in production. So credential lookups keep the old helper.
 """
@@ -30,6 +30,8 @@ import asyncio
 import contextlib
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
+
+from sqlalchemy import text
 
 import pytest
 
@@ -98,7 +100,7 @@ def _on_lakebase(stack):
 @pytest.mark.asyncio
 class TestTheFallbackRoutes:
     async def test_outside_a_request_it_reaches_lakebase(self):
-        """THE fix. request_scoped_session would hand back the local snapshot."""
+        """THE fix. The helper this replaced handed back the local snapshot here."""
         from contextlib import ExitStack
 
         factory, _ = _raw_factory()
@@ -110,12 +112,32 @@ class TestTheFallbackRoutes:
         # The snapshot must not even be consulted.
         factory.assert_not_called()
 
-    async def test_the_old_helper_still_snapshots(self):
-        """Contrast, so the difference between the two is pinned, not implied."""
+    async def test_the_snapshot_is_used_only_while_resolving_auth(self):
+        """The one branch that still takes the raw factory, and why.
+
+        The router needs a credential to reach Lakebase, so a session opened while
+        auth is already resolving must NOT route or it re-enters the router — the
+        loop that logged 1,287 "maximum recursion depth exceeded" and killed every
+        crew and flow subprocess. Outside that window the same call routes (above),
+        which is what the deleted request_scoped_session got wrong: it took the
+        snapshot unconditionally.
+        """
+        from contextlib import ExitStack
+
+        from src.utils.databricks_auth import _RESOLVING_AUTH
+
         factory, _ = _raw_factory()
-        with _snapshot_factory(factory):
-            async with session_module.request_scoped_session() as session:
-                assert session._mock_name == "LOCAL_SQLITE"
+        token = _RESOLVING_AUTH.set(True)
+        try:
+            with ExitStack() as stack:
+                _on_lakebase(stack)  # Lakebase IS enabled...
+                stack.enter_context(_snapshot_factory(factory))
+                async with session_module.routed_scoped_session() as session:
+                    # ...and we still get the local snapshot, deliberately.
+                    assert session._mock_name == "LOCAL_SQLITE"
+            factory.assert_called_once()
+        finally:
+            _RESOLVING_AUTH.reset(token)
 
 
 @pytest.mark.asyncio
@@ -134,7 +156,7 @@ class TestInsideARequestNothingChanges:
         """Why converting only the OUTER opens is sufficient.
 
         The router sets ``_request_session``, so every nested
-        ``request_scoped_session`` — tool_factory, LLMManager, the MCP lookup —
+        ``routed_scoped_session`` — tool_factory, LLMManager, the MCP lookup —
         rides the same routed session. ~45 call sites therefore need no change,
         which matters because most of them are shared with the subprocess paths
         where the snapshot is already correct.
@@ -146,7 +168,7 @@ class TestInsideARequestNothingChanges:
             _on_lakebase(stack)
             stack.enter_context(_snapshot_factory(factory))
             async with session_module.routed_scoped_session() as outer:
-                async with session_module.request_scoped_session() as inner:
+                async with session_module.routed_scoped_session() as inner:
                     assert inner is outer
                     assert inner._mock_name == "LAKEBASE"
 
@@ -255,11 +277,115 @@ class TestTheChatPathIsConverted:
             "raw snapshot it silently reads the local database"
         )
 
-    def test_credential_lookups_are_left_alone(self):
-        """api_keys must NOT be routed — that is the recursion path."""
+    def test_credential_lookups_are_protected_by_the_auth_guard(self):
+        """api_keys uses the same helper — the GUARD is what keeps it safe.
+
+        This used to assert that api_keys kept a different helper
+        (``request_scoped_session``) so the API-key read could not route and reopen
+        the auth↔router cycle: the router calls ``get_auth_context``, which reads api
+        keys. Two helpers meant the protection was a naming convention, and picking
+        the wrong name was silent.
+
+        Now there is one helper and the protection is explicit: it takes the raw
+        factory only while ``_RESOLVING_AUTH`` is set. That is strictly better here —
+        an API-key read made OUTSIDE the auth path now routes, where before it always
+        snapshotted, which is how a configured Perplexity key read as absent.
+        """
         source = self._source("services/settings/api_keys.py")
-        assert "request_scoped_session" in source
-        assert "routed_scoped_session" not in source, (
-            "routing the API-key read reopens the auth↔router cycle: the router "
-            "calls get_auth_context, which reads api keys"
+        assert "routed_scoped_session" in source
+        assert (
+            "request_scoped_session" not in source
+        ), "request_scoped_session was deleted; this file must not resurrect it"
+        # The guard lives in the helper, so that is where it must be asserted.
+        session_source = self._source("db/session.py")
+        routed = session_source[
+            session_source.index("async def routed_scoped_session") :
+        ]
+        assert "_RESOLVING_AUTH" in routed, (
+            "routed_scoped_session lost the _RESOLVING_AUTH branch — api_keys now "
+            "routes unconditionally and the auth↔router cycle is back"
         )
+
+
+@pytest.mark.asyncio
+class TestASessionMidCommitIsNotReused:
+    """Branch 1 must not hand back a session that cannot take more SQL.
+
+    Reusing the request session is the point of that branch, but a session being
+    COMMITTED is briefly in ``PREPARED`` state and SQLAlchemy refuses further SQL on
+    it. ``commit()`` -> ``_prepare_impl()`` -> ``flush()``, and a flush can run
+    application code that reads the database again.
+
+    That happened: the light-agent path committed a terminal run status, then built
+    its embedder config, whose API-key lookup landed back on the same session and
+    failed with::
+
+        Error getting provider API key: This session is in 'prepared' state;
+        no further SQL can be emitted within this transaction.
+
+    The Databricks key then read as ABSENT, embeddings fell back to a local Ollama
+    that was not running (404), and crew memory saved with no vector — three
+    symptoms, all from one reused session.
+    """
+
+    @staticmethod
+    async def _sqlite_session():
+        import tempfile
+        from pathlib import Path
+
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        engine = create_async_engine(
+            f"sqlite+aiosqlite:///{Path(tempfile.mkdtemp()) / 'mid.db'}"
+        )
+        session = async_sessionmaker(engine, expire_on_commit=False)()
+        await session.execute(text("SELECT 1"))  # open a transaction
+        return engine, session
+
+    async def test_a_prepared_session_is_not_yielded(self):
+        """THE bug. A fresh session is opened instead, and it works."""
+        from sqlalchemy.orm.session import SessionTransactionState
+
+        engine, poisoned = await self._sqlite_session()
+        try:
+            poisoned.sync_session._transaction._state = SessionTransactionState.PREPARED
+            token = session_module._request_session.set(poisoned)
+            try:
+                async with session_module.routed_scoped_session() as got:
+                    # The poisoned session is NOT handed back. What the substitute is
+                    # depends on the routing branch (and earlier tests in this module
+                    # patch the factory), so assert the refusal, which is the fix.
+                    assert got is not poisoned
+                assert not session_module._usable_for_more_sql(poisoned)
+            finally:
+                session_module._request_session.reset(token)
+                poisoned.sync_session._transaction._state = (
+                    SessionTransactionState.ACTIVE
+                )
+        finally:
+            await poisoned.close()
+            await engine.dispose()
+
+    async def test_an_active_session_is_still_reused(self):
+        """The guard must not break the normal case it exists to protect."""
+        engine, healthy = await self._sqlite_session()
+        try:
+            token = session_module._request_session.set(healthy)
+            try:
+                async with session_module.routed_scoped_session() as got:
+                    assert got is healthy
+            finally:
+                session_module._request_session.reset(token)
+        finally:
+            await healthy.close()
+            await engine.dispose()
+
+    async def test_a_test_double_is_treated_as_usable(self):
+        """A MagicMock has no real transaction; it must not be rejected."""
+        fake = MagicMock(name="A_MOCK_SESSION")
+        token = session_module._request_session.set(fake)
+        try:
+            async with session_module.routed_scoped_session() as got:
+                assert got is fake
+        finally:
+            session_module._request_session.reset(token)

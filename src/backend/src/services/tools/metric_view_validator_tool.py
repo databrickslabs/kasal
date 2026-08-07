@@ -499,9 +499,6 @@ class MetricViewValidatorTool(BaseTool):
     @staticmethod
     def _fetch_measures_from_db() -> list:
         """Fetch measures from the latest UCMV Generator execution's stats/migration_report."""
-        import asyncio
-
-        from sqlalchemy import text
 
         async def _query():
             from src.services.tools.tool_session_provider import ToolSessionProvider
@@ -510,18 +507,14 @@ class MetricViewValidatorTool(BaseTool):
                 # The UCMV tool output contains the full result with yaml/sql/stats
                 # The stats section has per-table measure info, but we need the raw
                 # DAX measures. Try fetching from the UCMV tool's input (execution inputs).
-                result = await session.execute(
-                    text(
-                        "SELECT et.output::text "
-                        "FROM execution_trace et "
-                        "WHERE et.span_name LIKE 'UC Metric View Generator%run' "
-                        "ORDER BY et.created_at DESC LIMIT 1"
-                    )
-                )
-                row = result.fetchone()
-                if not row:
+                from src.services.trace.service import ExecutionTraceService
+
+                raw = await ExecutionTraceService(
+                    session
+                ).latest_output_for_span_prefix("UC Metric View Generator")
+                if not raw:
                     return []
-                data = json.loads(row[0])
+                data = json.loads(raw)
                 content = data.get("content", "")
                 inner = json.loads(content) if isinstance(content, str) else content
                 if not isinstance(inner, dict):
@@ -577,9 +570,6 @@ class MetricViewValidatorTool(BaseTool):
 
         Returns the edited UCMV result dict if found, otherwise empty dict.
         """
-        import asyncio
-
-        from sqlalchemy import text
 
         async def _query():
             from src.services.tools.tool_session_provider import ToolSessionProvider
@@ -588,17 +578,13 @@ class MetricViewValidatorTool(BaseTool):
                 # Look for the dedicated UCMV yaml edits key written by the
                 # save button in the UI (separate from Config Generator's
                 # edited_config to avoid collisions in a multi-step flow).
-                result = await session.execute(text("""
-                    SELECT checkpoint_data::text
-                    FROM executionhistory
-                    WHERE checkpoint_data::text LIKE '%ucmv_yaml_edits%'
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                """))
-                row = result.fetchone()
-                if row and row[0]:
+                from src.services.execution.service import ExecutionService
+
+                cp = await ExecutionService(session).latest_checkpoint_containing(
+                    "ucmv_yaml_edits"
+                )
+                if cp:
                     try:
-                        cp = json.loads(row[0])
                         edits = cp.get("ucmv_yaml_edits", {})
                         if isinstance(edits, dict) and "yaml" in edits:
                             logger.info(
@@ -622,27 +608,21 @@ class MetricViewValidatorTool(BaseTool):
     @staticmethod
     def _fetch_latest_ucmv_from_db() -> dict:
         """Fetch YAML from the latest UCMV Generator execution trace in the DB."""
-        import asyncio
-
-        from sqlalchemy import text
 
         async def _query():
             from src.services.tools.tool_session_provider import ToolSessionProvider
 
             async with ToolSessionProvider.session() as session:
-                # Strategy 1: Look in execution_trace for the latest UCMV Generator run span
-                result = await session.execute(
-                    text(
-                        "SELECT et.output::text "
-                        "FROM execution_trace et "
-                        "WHERE et.span_name LIKE 'UC Metric View Generator%run' "
-                        "ORDER BY et.created_at DESC LIMIT 1"
-                    )
-                )
-                row = result.fetchone()
-                if row and row[0]:
+                from src.services.execution.service import ExecutionService
+                from src.services.trace.service import ExecutionTraceService
+
+                # Strategy 1: the latest UCMV Generator run span.
+                raw = await ExecutionTraceService(
+                    session
+                ).latest_output_for_span_prefix("UC Metric View Generator")
+                if raw:
                     try:
-                        data = json.loads(row[0])
+                        data = json.loads(raw)
                         content = data.get("content", "")
                         inner = (
                             json.loads(content) if isinstance(content, str) else content
@@ -655,21 +635,13 @@ class MetricViewValidatorTool(BaseTool):
                     except Exception:
                         pass
 
-                # Strategy 2: Look in executionhistory.result for the latest UCMV result
-                # (populated by the safety-net status update after queue-drain fix)
-                result2 = await session.execute(
-                    text(
-                        "SELECT result::text FROM executionhistory "
-                        "WHERE result::text LIKE '%\"yaml\"%' "
-                        "  AND result::text LIKE '%\"sql\"%' "
-                        "  AND result::text LIKE '%\"stats\"%' "
-                        "ORDER BY created_at DESC LIMIT 1"
-                    )
+                # Strategy 2: the latest run whose result carries a full UCMV payload
+                # (written by the safety-net status update after the queue-drain fix).
+                inner2 = await ExecutionService(session).latest_result_with_keys(
+                    ["yaml", "sql", "stats"]
                 )
-                row2 = result2.fetchone()
-                if row2 and row2[0]:
+                if inner2:
                     try:
-                        inner2 = json.loads(row2[0])
                         if isinstance(inner2, dict) and "yaml" in inner2:
                             logger.info(
                                 "[Validator] Found UCMV output in executionhistory.result"

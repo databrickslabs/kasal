@@ -382,7 +382,7 @@ class TestGetDatabricksWorkspaceHost:
                 return_value=mock_service,
             ),
             patch(
-                "src.db.session.request_scoped_session",
+                "src.db.session.routed_scoped_session",
                 return_value=mock_session,
             ),
         ):
@@ -408,7 +408,7 @@ class TestGetDatabricksWorkspaceHost:
                 return_value=mock_service,
             ),
             patch(
-                "src.db.session.request_scoped_session",
+                "src.db.session.routed_scoped_session",
                 return_value=mock_session,
             ),
         ):
@@ -430,7 +430,7 @@ class TestGetDatabricksWorkspaceHost:
                 return_value=mock_service,
             ),
             patch(
-                "src.db.session.request_scoped_session",
+                "src.db.session.routed_scoped_session",
                 return_value=mock_session,
             ),
         ):
@@ -446,7 +446,7 @@ class TestGetDatabricksWorkspaceHost:
                 side_effect=Exception("db error"),
             ),
             patch(
-                "src.db.session.request_scoped_session",
+                "src.db.session.routed_scoped_session",
                 side_effect=Exception("db error"),
             ),
         ):

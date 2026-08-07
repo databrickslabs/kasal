@@ -46,12 +46,12 @@ def make_service(group_id="g1"):
     session = AsyncMock(spec=AsyncSession)
     with (
         patch("src.services.mlflow.service.MLflowRepository"),
-        patch("src.services.mlflow.service.ExecutionHistoryRepository"),
+        patch("src.services.mlflow.service.ExecutionService"),
         patch("src.services.mlflow.service.ModelConfigService"),
     ):
         svc = MLflowService(session=session, group_id=group_id)
     svc.repo = AsyncMock()
-    svc.exec_repo = AsyncMock()
+    svc.execution_service = AsyncMock()
     svc.model_config_service = AsyncMock()
     return svc
 
@@ -236,7 +236,9 @@ class TestGetExperimentInfo:
             return_value="/Shared/kasal-team-traces-uc"
         )
         with patch.object(svc, "_setup_mlflow_auth", return_value=fake_auth):
-            with patch.object(svc, "_get_uc_trace_config", AsyncMock(return_value=(None, None, None))):
+            with patch.object(
+                svc, "_get_uc_trace_config", AsyncMock(return_value=(None, None, None))
+            ):
                 with patch("asyncio.to_thread") as att:
                     att.return_value = {
                         "experiment_id": "123",
@@ -255,7 +257,9 @@ class TestGetExperimentInfo:
             return_value="/Shared/kasal-team-traces-uc"
         )
         with patch.object(svc, "_setup_mlflow_auth", return_value=fake_auth):
-            with patch.object(svc, "_get_uc_trace_config", AsyncMock(return_value=(None, None, None))):
+            with patch.object(
+                svc, "_get_uc_trace_config", AsyncMock(return_value=(None, None, None))
+            ):
                 with patch(
                     "asyncio.to_thread",
                     return_value={"experiment_id": "", "experiment_name": "/test"},
@@ -275,7 +279,9 @@ class TestGetExperimentInfo:
             return_value="/Shared/kasal-team-traces-uc"
         )
         with patch.object(svc, "_setup_mlflow_auth", return_value=fake_auth):
-            with patch.object(svc, "_get_uc_trace_config", AsyncMock(return_value=(None, None, None))):
+            with patch.object(
+                svc, "_get_uc_trace_config", AsyncMock(return_value=(None, None, None))
+            ):
                 with patch("asyncio.to_thread", side_effect=Exception("thread error")):
                     with pytest.raises(Exception, match="thread error"):
                         await svc.get_experiment_info()
@@ -331,7 +337,7 @@ class TestGetTraceDeeplink:
             auth_method="pat",
         )
         fake_exec = SimpleNamespace(mlflow_trace_id="my-trace-id")
-        svc.exec_repo.get_execution_by_job_id = AsyncMock(return_value=fake_exec)
+        svc.execution_service.get_run_by_job_id = AsyncMock(return_value=fake_exec)
         svc.configured_crew_traces_experiment = AsyncMock(
             return_value="/Shared/kasal-team-traces-uc"
         )
@@ -454,7 +460,7 @@ class TestTriggerEvaluation:
     async def test_raises_when_execution_not_found(self):
         svc = make_service()
         svc.repo.is_evaluation_enabled = AsyncMock(return_value=True)
-        svc.exec_repo.get_execution_by_job_id = AsyncMock(return_value=None)
+        svc.execution_service.get_run_by_job_id = AsyncMock(return_value=None)
         with pytest.raises(RuntimeError, match="No execution found"):
             await svc.trigger_evaluation("job-1")
 
@@ -521,7 +527,7 @@ class TestTriggerEvaluation:
             result={"content": "AI is artificial intelligence."},
             mlflow_trace_id=None,
         )
-        svc.exec_repo.get_execution_by_job_id = AsyncMock(return_value=fake_exec)
+        svc.execution_service.get_run_by_job_id = AsyncMock(return_value=fake_exec)
         with patch.object(
             svc, "_resolve_judge_model", return_value="databricks/claude-sonnet-4"
         ):
@@ -536,7 +542,7 @@ class TestTriggerEvaluation:
         fake_exec = SimpleNamespace(
             inputs={"unknown_key": "some value"}, result=None, mlflow_trace_id=None
         )
-        svc.exec_repo.get_execution_by_job_id = AsyncMock(return_value=fake_exec)
+        svc.execution_service.get_run_by_job_id = AsyncMock(return_value=fake_exec)
         with patch.object(svc, "_resolve_judge_model", return_value="gpt-4"):
             with self._trigger_context(run_id=None):
                 result = await svc.trigger_evaluation("job-2")
@@ -551,7 +557,7 @@ class TestTriggerEvaluation:
             result={"content": "my answer"},
             mlflow_trace_id=None,
         )
-        svc.exec_repo.get_execution_by_job_id = AsyncMock(return_value=fake_exec)
+        svc.execution_service.get_run_by_job_id = AsyncMock(return_value=fake_exec)
         with patch.object(svc, "_resolve_judge_model", return_value="gpt-4"):
             with self._trigger_context(run_id=None):
                 result = await svc.trigger_evaluation("job-3")
@@ -566,7 +572,7 @@ class TestTriggerEvaluation:
             result="plain string output",
             mlflow_trace_id=None,
         )
-        svc.exec_repo.get_execution_by_job_id = AsyncMock(return_value=fake_exec)
+        svc.execution_service.get_run_by_job_id = AsyncMock(return_value=fake_exec)
         with patch.object(svc, "_resolve_judge_model", return_value="gpt-4"):
             with self._trigger_context(run_id=None):
                 result = await svc.trigger_evaluation("job-4")
@@ -579,7 +585,7 @@ class TestTriggerEvaluation:
         fake_exec = SimpleNamespace(
             inputs={"query": "q"}, result=None, mlflow_trace_id=None
         )
-        svc.exec_repo.get_execution_by_job_id = AsyncMock(return_value=fake_exec)
+        svc.execution_service.get_run_by_job_id = AsyncMock(return_value=fake_exec)
         with patch.object(svc, "_resolve_judge_model", return_value="gpt-4"):
             with self._trigger_context():
                 with patch(
@@ -709,17 +715,20 @@ class TestInnerFunctionPaths:
         fake_exec = SimpleNamespace(
             inputs={"prompt": "hello"}, result=None, mlflow_trace_id=None
         )
-        svc.exec_repo.get_execution_by_job_id = AsyncMock(return_value=fake_exec)
+        svc.execution_service.get_run_by_job_id = AsyncMock(return_value=fake_exec)
 
         # Non-databricks model - should skip auth
         with patch.object(svc, "_resolve_judge_model", return_value="gpt-4"):
-            with patch.object(
-                svc,
-                "configured_crew_traces_experiment",
-                AsyncMock(return_value="/Shared/kasal-test-traces"),
-            ), patch(
-                "asyncio.to_thread",
-                AsyncMock(return_value={"experiment_id": "e-99", "run_id": None}),
+            with (
+                patch.object(
+                    svc,
+                    "configured_crew_traces_experiment",
+                    AsyncMock(return_value="/Shared/kasal-test-traces"),
+                ),
+                patch(
+                    "asyncio.to_thread",
+                    AsyncMock(return_value={"experiment_id": "e-99", "run_id": None}),
+                ),
             ):
                 with patch(
                     "src.services.mlflow.evaluation_runner.MLflowEvaluationRunner"
@@ -778,7 +787,7 @@ async def test_get_trace_deeplink_with_auth_and_job_id_minimal():
     ):
         # Also mock execution repo to provide a trace id
         exec_obj = SimpleNamespace(mlflow_trace_id="trace-123")
-        svc.exec_repo.get_execution_by_job_id = AsyncMock(return_value=exec_obj)
+        svc.execution_service.get_run_by_job_id = AsyncMock(return_value=exec_obj)
 
         out = await svc.get_trace_deeplink(job_id="job-xyz")
         assert isinstance(out, dict)
@@ -890,7 +899,7 @@ async def test_get_trace_deeplink_builds_url(monkeypatch):
     assert out["url"].startswith("https://acme.databricks.com/ml/experiments")
 
     # with job id and trace id
-    svc.exec_repo.get_execution_by_job_id = AsyncMock(
+    svc.execution_service.get_run_by_job_id = AsyncMock(
         return_value=SimpleNamespace(mlflow_trace_id=123)
     )
     out2 = await svc.get_trace_deeplink(job_id="job-1")

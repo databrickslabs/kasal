@@ -95,11 +95,64 @@ Two rules the contracts encode:
   multi-tenant isolation guarantee, and reaching past it into `ApiKeyRepository`
   would silently drop the check the contract exists to protect.
 
-Not yet encoded, and the next thing worth adding: **a service should not build
-queries.** Repositories own query construction; a service holds a session only
-for transaction control (`commit`/`rollback`) or uses `UnitOfWork`. The
-exemption is DDL — `databricks/lakebase/{migration,schema,permission,management}`
-execute raw SQL because there is no repository for `CREATE SCHEMA`.
+Two more rules that `import-linter` cannot express (constructing a query or
+opening a session is about what you DO with an object, not what you import), so
+each has an AST check in `tests/unit/architecture/`:
+
+- **A service should not build queries, and should not persist rows.**
+  Repositories own both; a service holds a session only for transaction control
+  (`commit`/`rollback`). `test_service_query_construction.py` checks two things:
+  - *queries* (`session.execute`, `select(...)`) — a RATCHET, down to **2** files,
+    both of which are the DEAD post-subprocess log writers and should be deleted
+    rather than refactored.
+  - *ORM writes* (`session.add/add_all/delete/merge`) — **zero, no baseline.** This
+    is the half a query check cannot see: ten services were persisting rows with no
+    SQL in sight while the query ratchet reported six offenders. It skips modules
+    using `aiohttp.ClientSession`, whose `.delete()` is an HTTP call.
+
+  The exemption for both is DDL — `databricks/lakebase/{migration,schema,permission,management}`
+  execute raw SQL because there is no repository for `CREATE SCHEMA`.
+- **A service should not open a session.** See the next section;
+  `test_sessions_go_through_the_router.py` enforces it with no baseline.
+
+## Another domain's data goes through that domain's SERVICE
+
+Repositories are not a shared data-access pool. Each belongs to a domain, and that
+domain's service is where its invariants live — group scoping, encryption, cascade
+order, status transitions. Construct another domain's repository and you get the
+table without the rules.
+
+`tests/unit/architecture/test_service_repository_ownership.py` enforces this as a
+ratchet: `_OWNED` says which repositories each domain may use freely, and `_BASELINE`
+records what is left. It started at **42** pairs and is down to **6** — all of them
+the `repositories` dict the flow runner injects into `BackendFlow` inside the flow
+SUBPROCESS, which cannot be converted safely from in-process tests. Convert that and
+this becomes a hard ban.
+
+Closing the other 36 surfaced four real bugs, every one swallowed by an `except`:
+GEPA wrote agent/task rows past `get_with_group_check`;
+`TemplateService(template_repository)` passed a repository where a session was
+expected, so `generate_connections` never loaded its prompt; `tool_factory` called
+`get_databricks_config(group_id=...)` on a no-argument method and reported "no config"
+for every workspace; and `delete_all_traces_for_group` called a repository method that
+does not exist, so bulk trace deletion always failed silently. That is the argument
+for the rule — the bypass is where this class of bug hides.
+
+**When the owning service does not expose what you need, add it there.** That is not
+a platitude — it is what the scheduler needed. `SchedulerService` built
+`ExecutionHistoryRepository` itself because `ExecutionService.get_execution()`
+returns a flow-shaped dict and applies NO tenant filter, while the scheduler needs
+the ORM row AND `group_ids` (without the filter, anyone could schedule from another
+tenant's run and read its config and prompts). The fix was
+`ExecutionService.get_execution_record(execution_id, group_ids=...)` — the guarantee
+moved into the owning service instead of the caller reaching past it.
+
+The exemptions are `databricks/lakebase/` (it migrates, backs up and truncates every
+table — routing through 20 services would be absurd) and `export/templates/`
+(shipped into exported apps, which have no service layer).
+
+Note what this does NOT forbid: a service using its own domain's repositories. That
+is the normal chain.
 
 ## Conventions (match `agent_service.py`)
 
@@ -117,18 +170,168 @@ execute raw SQL because there is no repository for `CREATE SCHEMA`.
   ```
   Injecting `repository_class`/`model_class` with defaults keeps the service unit
   testable (pass a fake repository).
-- Accept the request-scoped `session` from the router. **Do not** open your own
-  engine/session for request work.
+- Accept the `session` you are given — see the next section.
 
-## Two ways to get repositories (pick deliberately)
+## Sessions: one place decides the database
 
-1. **Request-scoped session** (the default): the router passes the DI session and
-   the service instantiates repositories on it. The router's `get_db`/smart
-   session commits at the end of the request.
-2. **`UnitOfWork`** (`src.core.unit_of_work`): use only for multi-repository
-   atomic work outside a single request (background tasks, seeders, engine
-   subprocesses) where you need explicit transaction control across repositories.
-   Do not mix a UoW session with the request session.
+**A service NEVER opens a database session or builds an engine.** Not for a
+background task, not "just for logging", not because the request session is
+closed, not behind a comment saying it is a special case. If you are typing
+`async_session_factory(`, `create_async_engine(`, `async_sessionmaker(` or
+`sessionmaker(` inside `services/`, the change is wrong — use
+`routed_scoped_session()` (outside a request) or the injected session (inside
+one). `tests/unit/architecture/test_sessions_go_through_the_router.py` fails the
+build on it, and the allowlist there is a record of past exceptions, not an
+invitation to add one.
+
+A service receives a session, hands it to its repositories, and controls the
+transaction. The flow is one-directional:
+
+    entry point (router / task / tool)  ->  decides the database
+      service                           ->  transaction control
+        repository                       ->  queries only
+
+Repositories NEVER acquire or commit a session — they take one in the constructor
+(`BaseRepository(model, session)`). Three of them once opened their own; the
+comments recording the removal are still there (`flow_repository.py`,
+`task_repository.py`, `execution_history_repository.py`). Don't reintroduce it.
+
+### Which helper to use
+
+| Situation | Use |
+|---|---|
+| Inside an HTTP request | the injected `SessionDep` — do not open anything |
+| Background task, subprocess, tool — anything outside a request | `routed_scoped_session()` |
+| A commit spanning a slow LLM call on SQLite | `get_isolated_db_session()` (a private connection; the shared StaticPool one can have another request's rollback discard your committed row) |
+| Code that runs on its OWN event loop (`new_event_loop`, a sync bridge) | `get_isolated_db_session()` — see below |
+
+**The loop trap.** On SQLite the router hands back the shared StaticPool
+connection, which is bound to whichever event loop first opened it. Code that
+creates a *new* loop per call — `kasal_flow_persistence`, which bridges CrewAI's
+sync `FlowPersistence` hooks — then fails on the second call with "Future attached
+to a different loop" / "Event loop is closed". `get_isolated_db_session()` is the
+answer there and loses nothing: it checks `is_lakebase_enabled()` itself, so it
+still reaches Lakebase, and does so by the same signal the reads use rather than
+relying on this process having hot-swapped the global factory.
+
+`routed_scoped_session()` is the default and covers most cases: it reuses the
+request's session when there is one and otherwise goes through the database ROUTER,
+which re-reads `is_lakebase_enabled()` on every call — so you do not have to know
+which situation you are in. The two `get_isolated_db_session()` rows are the only
+exceptions, and both are about CONNECTION isolation on SQLite, not about which
+database to use. Neither is licence to reach for the raw factory.
+
+**There is exactly one helper, and that is deliberate.**
+`request_scoped_session` used to sit beside `routed_scoped_session` and has been
+DELETED. It was the trap: the name read as the safe, request-aware option, and
+inside a request it *was* identical — but outside one its fallback was literally
+`async with async_session_factory()`, the same snapshot and the same silent split.
+That indirection is why it survived several audits. 37 call sites looked
+request-scoped; 33 were plain snapshot reads.
+
+`routed_scoped_session` absorbed the one case that genuinely needed the raw
+factory: a read made while auth is ALREADY resolving. The router needs an API key
+to reach Lakebase, so routing the key lookup closes the loop
+(`get_smart_db_session` → `get_auth_context` → `ApiKeysService` →
+`get_smart_db_session`) — which logged 1,287 "maximum recursion depth exceeded"
+and killed every crew and flow subprocess. That is now a `_RESOLVING_AUTH`
+ContextVar check *inside* the helper rather than a second helper you had to know
+to pick, and it is strictly better for credential reads: an API-key lookup made
+away from the auth path now ROUTES, where before it always snapshotted — which is
+how a configured Perplexity key read as absent.
+
+So: **outside a request, `routed_scoped_session` is the only answer.** There is no
+longer a wrong helper to choose, and the architecture test fails if the deleted one
+is reintroduced.
+
+### Providers: when the same wiring repeats
+
+Outside a request there is no router to construct your service, so the caller does
+it by hand — acquire a session, build the service, call it. That is legitimate DI,
+done manually. It becomes a problem when the SAME three lines appear in unrelated
+files, because each copy is a chance to get it wrong:
+
+    async with routed_scoped_session() as session:
+        config = await DatabricksService(session, group_id=gid).get_databricks_config()
+
+That block existed verbatim in **seven** files, and two copies were broken. One
+called `get_databricks_config(group_id=...)` — the method takes no arguments — so it
+raised `TypeError`, an enclosing `try` swallowed it, and the auth check reported "no
+Databricks config found" for every workspace. The same copy built the service
+without a `group_id`, which would have read another tenant's row once the TypeError
+was fixed. Nobody noticed because the failure mode was a soft fallback.
+
+When you see that shape three or more times, add a **provider**: one place that owns
+the acquisition and the construction, with the parameters that matter as real
+arguments rather than things you may forget.
+
+- `services/databricks/workspace/config_provider.py` — `DatabricksConfigProvider.get(group_id=...)`
+- `services/tools/tool_session_provider.py` — sessions and pre-built services for tools
+
+A provider is **not a new layer**. It is still service → repository → session; it
+just does the wiring a FastAPI DI provider would have done. Do not put logic in one.
+
+Use the session directly (not a provider) when the block needs the SAME session for
+a second repository — `mlflow_setup` reads `MLflowRepository` alongside the config,
+and both must see one transaction.
+
+### Why the raw factory is almost always wrong
+
+`async_session_factory` is a global mutable singleton that gets hot-swapped to
+Lakebase — but only in the `main.py` lifespan (i.e. Lakebase was already on at
+BOOT) or inside a spawned subprocess. A runtime `/lakebase/enable` never swaps it.
+So the process runs SPLIT: routed reads go to Lakebase while every raw-factory
+holder keeps reading the local database.
+
+The failures share a shape that makes them expensive to find: **the query succeeds
+and returns nothing.** No exception, no log — the caller concludes "no rows" and
+carries on. That has now cost five separate incidents:
+
+- a GEPA optimizer scored a completed crew 0.0 for 14 minutes
+- a configured Perplexity API key read as absent
+- an MCP server enabled for a workspace gave 1 tool in Agent Builder and 0 in Chat
+- `workflow_recipes.embedding` was never created, so recipe lookup failed
+- chat read a different `databricksconfig` than the crew subprocess
+
+`tests/unit/architecture/test_sessions_go_through_the_router.py` enforces this. It
+checks CALLS, not imports (importing the factory to inspect `is_lakebase` is
+fine), and it follows `as` aliases — `async_session_factory as _plan_factory` hid
+the last unrouted write in this codebase from every grep. Its allowlist carries
+the reason each entry cannot route; the ones that are genuinely impossible rather
+than merely entrenched:
+
+- **`db/`** — it IS the session layer; it builds the engines everyone receives
+- **`utils/databricks_auth`** — REENTRANT. The router needs a credential to reach
+  Lakebase, so routing auth's own read closes the loop; that logged 1,287
+  "maximum recursion depth exceeded" in production and killed every crew and flow
+  subprocess. `_auth_scoped_session` routes the outermost entry only
+- **`api/healthcheck_router`** — deliberately probes the FACTORY to report whether
+  the swap happened; routing it would make the check pass by construction
+- **`seeds/`**, **`main.py`**, **`scripts/`** — entry points; choosing the
+  database is their job
+- **`services/databricks/lakebase/`** — connects TO Lakebase to test and migrate
+  it, so it cannot ask the router for a session to the thing it is setting up
+- **the post-subprocess log flush** (`execution/logs/db_handler`,
+  `flow_builder/process_executor`) — runs after the subprocess event loop is gone,
+  with no router context left to borrow
+
+Adding to that list needs a reason in review. The whole value of the check is that
+it fails on a new one.
+
+## How a service gets its repositories
+
+The service instantiates them on the session it was given — the DI session inside
+a request (committed by the router at the end of it), or the one
+`routed_scoped_session()` yielded outside a request. That is the whole pattern.
+
+**`UnitOfWork` (`src.core.unit_of_work`) is on the way out — do not add callers.**
+It exists for multi-repository atomic work, and nothing here does that: of its 4
+async call sites, 3 (`tools/databricks_jobs_tool.py`) open a UoW and then use no
+repository at all, and the 4th (`agent_builder/task_adapter.py`) uses exactly one.
+A single repository needs no unit of work — the session already is one. What the
+ceremony does buy is a second way to acquire a session, which is the bug class
+this document is mostly about. `SyncUnitOfWork` (a singleton, for the sync
+guardrail callbacks) goes with it.
 
 ## Group isolation (required)
 

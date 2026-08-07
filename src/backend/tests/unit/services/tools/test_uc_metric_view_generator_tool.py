@@ -131,20 +131,23 @@ class TestSaveDaxToConversionHistory:
         mock_repo = MagicMock()
         mock_record = SimpleNamespace(id=7, group_id=None)
 
-        async def _create(data):
-            captured["data"] = data
+        async def _create(payload, *_a, **_k):
+            # create_history receives a ConversionHistoryCreate model, not a dict.
+            captured["data"] = (
+                payload.model_dump() if hasattr(payload, "model_dump") else payload
+            )
             return mock_record
 
-        mock_repo.create = AsyncMock(side_effect=_create)
+        mock_repo.create_history = AsyncMock(side_effect=_create)
         mock_repo.session = MagicMock()
         mock_repo.session.commit = AsyncMock()
 
         @asynccontextmanager
-        async def _repo_ctx():
+        async def _repo_ctx(*_a, **_k):
             yield mock_repo
 
         with patch(
-            "src.services.tools.tool_session_provider.ToolSessionProvider.conversion_repo",
+            "src.services.tools.tool_session_provider.ToolSessionProvider.converter_service",
             _repo_ctx,
         ):
             self._run(
@@ -176,20 +179,24 @@ class TestSaveDaxToConversionHistory:
         tool = UCMetricViewGeneratorTool()
         captured = {}
         mock_repo = MagicMock()
-        mock_repo.create = AsyncMock(
-            side_effect=lambda d: captured.update({"data": d})
-            or SimpleNamespace(id=9, group_id=None)
-        )
+
+        def _capture(payload, *_a, **_k):
+            captured["data"] = (
+                payload.model_dump() if hasattr(payload, "model_dump") else payload
+            )
+            return SimpleNamespace(id=1, group_id=None)
+
+        mock_repo.create_history = AsyncMock(side_effect=_capture)
         mock_repo.session = MagicMock()
         mock_repo.session.commit = AsyncMock()
 
         @asynccontextmanager
-        async def _repo_ctx():
+        async def _repo_ctx(*_a, **_k):
             yield mock_repo
 
         yaml_out = {"fact_a": "version: '1.1'", "fact_b": "...", "fact_c": "..."}
         with patch(
-            "src.services.tools.tool_session_provider.ToolSessionProvider.conversion_repo",
+            "src.services.tools.tool_session_provider.ToolSessionProvider.converter_service",
             _repo_ctx,
         ):
             self._run(
@@ -217,7 +224,7 @@ class TestSaveDaxToConversionHistory:
             yield  # pragma: no cover
 
         with patch(
-            "src.services.tools.tool_session_provider.ToolSessionProvider.conversion_repo",
+            "src.services.tools.tool_session_provider.ToolSessionProvider.converter_service",
             _boom_ctx,
         ):
             result = self._run(

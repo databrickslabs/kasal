@@ -77,9 +77,11 @@ async def test_update_config_creates_when_missing():
         )
         out = await svc.update_config(body, created_by_email="a@b.com")
 
-    session.add.assert_called_once()
+    # The new row is staged through the REPOSITORY; the service keeps only the
+    # transaction boundary (commit) and the post-commit re-read.
+    repo.add.assert_awaited_once()
+    repo.reload.assert_awaited()
     session.commit.assert_awaited()
-    session.refresh.assert_awaited()
     assert out.enabled is True
     assert out.catalog_type == "custom"
 

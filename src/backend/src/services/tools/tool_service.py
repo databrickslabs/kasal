@@ -240,6 +240,20 @@ class ToolService:
 
         return ToolListResponse(tools=responses, count=len(responses))
 
+    async def list_tool_records(self) -> List[Any]:
+        """All tool ROWS (ORM), not response schemas.
+
+        :meth:`get_all_tools` returns ``ToolListResponse`` of Pydantic models, which
+        drops the ORM fields another domain may need to make a decision — the group
+        mapping service filters on ``group_id`` to separate global tools from a
+        workspace's own. It used to build ``ToolRepository`` for that.
+        """
+        return await self.repository.list()
+
+    async def get_tool_record(self, tool_id: int) -> Optional[Any]:
+        """One tool ROW (ORM) by id, or None. See :meth:`list_tool_records`."""
+        return await self.repository.get(tool_id)
+
     async def get_tool_by_id(self, tool_id: int) -> ToolResponse:
         """
         Get a tool by ID.

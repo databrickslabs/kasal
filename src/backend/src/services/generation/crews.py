@@ -368,16 +368,15 @@ class CrewGenerationService(
             if not primary_group_id:
                 return False
             from src.models.memory_backend import MemoryBackendTypeEnum
-            from src.repositories.memory_backend_repository import (
-                MemoryBackendRepository,
-            )
+            from src.services.memory.backend_service import MemoryBackendService
 
-            mem_repo = MemoryBackendRepository(session)
+            # Memory backends are MemoryBackendService's domain.
+            mem_svc = MemoryBackendService(session)
             for backend_type in (
                 MemoryBackendTypeEnum.DATABRICKS,
                 MemoryBackendTypeEnum.LAKEBASE,
             ):
-                if await mem_repo.get_by_type(primary_group_id, backend_type):
+                if await mem_svc.get_by_type(primary_group_id, backend_type):
                     return True
             return False
         except Exception as e:

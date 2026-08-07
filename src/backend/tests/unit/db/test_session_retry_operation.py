@@ -1,7 +1,7 @@
 """
 Additional unit tests for src/db/session.py to push coverage above 50%.
 Focuses on SwappableSessionFactory, retry_db_operation decorator,
-request_scoped_session, get_db edge cases, get_smart_engine, and dispose_engines.
+routed_scoped_session, get_db edge cases, get_smart_engine, and dispose_engines.
 """
 
 import asyncio
@@ -200,48 +200,52 @@ class TestRetryDbOperation:
 
 
 # ---------------------------------------------------------------------------
-# request_scoped_session
+# routed_scoped_session
 # ---------------------------------------------------------------------------
 
 
-class TestRequestScopedSession:
-    """Tests for request_scoped_session context manager."""
+class TestRoutedScopedSession:
+    """Tests for the routed_scoped_session context manager."""
 
     @pytest.mark.asyncio
-    async def test_yields_new_session_when_no_request_session(self):
-        """Outside request context, creates a standalone session."""
-        from src.db.session import request_scoped_session
+    async def test_yields_a_routed_session_when_no_request_session(self):
+        """Outside a request it goes through the ROUTER, not the raw factory.
 
-        mock_session = AsyncMock()
+        The helper this replaced (``request_scoped_session``) took
+        ``async_session_factory`` here — a per-process snapshot that a runtime
+        /lakebase/enable never swaps, so the read silently hit the local database.
+        """
+        from src.db.session import routed_scoped_session
 
-        class MockCtx:
-            async def __aenter__(self):
-                return mock_session
+        routed = AsyncMock()
 
-            async def __aexit__(self, *args):
-                pass
+        async def fake_router():
+            yield routed
 
-        mock_factory = MagicMock(return_value=MockCtx())
-        with patch("src.db.session.async_session_factory", mock_factory):
-            async with request_scoped_session() as session:
-                assert session is mock_session
+        with patch(
+            "src.db.database_router.get_smart_db_session", side_effect=fake_router
+        ):
+            with patch("src.db.session.async_session_factory") as raw:
+                async with routed_scoped_session() as session:
+                    assert session is routed
+                raw.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_reuses_existing_request_session(self):
         """Inside request context, returns the stored ContextVar session."""
-        from src.db.session import _request_session, request_scoped_session
+        from src.db.session import _request_session, routed_scoped_session
 
         existing = AsyncMock()
         token = _request_session.set(existing)
         try:
-            async with request_scoped_session() as session:
+            async with routed_scoped_session() as session:
                 assert session is existing
         finally:
             _request_session.reset(token)
 
     @pytest.mark.asyncio
     async def test_detach_request_session_forces_fresh_session(self):
-        """After detach, request_scoped_session must NOT reuse the inherited
+        """After detach, routed_scoped_session must NOT reuse the inherited
         ContextVar session — it opens a fresh standalone one.
 
         Regression for the background-task bug: asyncio.create_task copies the
@@ -252,7 +256,7 @@ class TestRequestScopedSession:
         from src.db.session import (
             _request_session,
             detach_request_session,
-            request_scoped_session,
+            routed_scoped_session,
         )
 
         leaked_closed = AsyncMock()  # the inherited, now-closed request session
@@ -270,12 +274,15 @@ class TestRequestScopedSession:
             detach_request_session()
             # The inherited session is cleared from this context...
             assert _request_session.get(None) is None
-            # ...so a fresh standalone session is opened instead.
+
+            # ...so a fresh session is opened instead — via the router.
+            async def fake_router():
+                yield fresh
+
             with patch(
-                "src.db.session.async_session_factory",
-                MagicMock(return_value=MockCtx()),
+                "src.db.database_router.get_smart_db_session", side_effect=fake_router
             ):
-                async with request_scoped_session() as session:
+                async with routed_scoped_session() as session:
                     assert session is fresh
                     assert session is not leaked_closed
         finally:

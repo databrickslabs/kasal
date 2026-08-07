@@ -2004,17 +2004,17 @@ class ProcessFlowExecutor:
             # Route through get_smart_db_session so logs land in
             # Lakebase when enabled (same path as API endpoints).
             from src.db.database_router import get_smart_db_session
-            from src.repositories.execution_logs_repository import (
-                ExecutionLogsRepository,
-            )
+            from src.services.execution.logs.writer import ExecutionLogsService
 
             logger.info(
                 f"[ProcessFlowExecutor] Writing {len(logs_to_write)} logs via smart DB session"
             )
             async for session in get_smart_db_session():
-                repo = ExecutionLogsRepository(session)
+                # Logs are ExecutionService's domain — via its service, not its
+                # repository.
+                logs_service = ExecutionLogsService(session)
                 for log_data in logs_to_write:
-                    await repo.create_log(
+                    await logs_service.write_log(
                         execution_id=log_data["execution_id"],
                         content=log_data["content"],
                         timestamp=log_data["timestamp"],

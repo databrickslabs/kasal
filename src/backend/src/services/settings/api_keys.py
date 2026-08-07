@@ -30,14 +30,24 @@ class ApiKeysService(BaseService):
         Initialize the service with session.
 
         Args:
-            session: Database session from FastAPI DI
+            session: Database session from FastAPI DI, or a SYNC ``Session`` for
+                the ``*_sync`` helpers (see below)
             group_id: Group ID for multi-tenant filtering
         """
         self.repository = ApiKeyRepository(session)
         self.encryption_utils = EncryptionUtils()
         self.group_id = group_id
-        self.session = None  # For compatibility with older code
-        self.is_async = True  # Always async now
+        # KEEP the session. This used to be hardcoded to None ("for compatibility
+        # with older code"), which silently disabled the whole sync path:
+        # find_by_name_sync guards on `isinstance(self.session, Session)`, so with
+        # None it ALWAYS raised TypeError, and setup_provider_api_key_sync — which
+        # loads OPENAI/ANTHROPIC/DEEPSEEK/GEMINI keys into the environment — could
+        # never read a key from the database. It swallowed the TypeError and
+        # returned False, so a configured key simply looked absent. The unit tests
+        # missed it because they mock the repository rather than pass a real
+        # Session.
+        self.session = session
+        self.is_async = not isinstance(session, Session)
 
     def _invalidate_pat_cache(self) -> None:
         """Drop the cached PAT lookup for this group after a key mutation
@@ -281,9 +291,9 @@ class ApiKeysService(BaseService):
             )
 
         # Create a service instance using session factory
-        from src.db.session import request_scoped_session
+        from src.db.session import routed_scoped_session
 
-        async with request_scoped_session() as session:
+        async with routed_scoped_session() as session:
             service = cls(session, group_id=group_id)
 
             # Find the API key
@@ -574,9 +584,9 @@ class ApiKeysService(BaseService):
 
         try:
             # Create a service instance using session factory
-            from src.db.session import request_scoped_session
+            from src.db.session import routed_scoped_session
 
-            async with request_scoped_session() as session:
+            async with routed_scoped_session() as session:
                 service = cls(session, group_id=group_id)
 
                 # Find the API key by name (provider name with _API_KEY suffix)

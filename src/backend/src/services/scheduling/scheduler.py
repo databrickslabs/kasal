@@ -4,16 +4,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
 
-from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import sessionmaker
 
 from src.config.settings import settings
 from src.core.exceptions import BadRequestError, KasalError, NotFoundError
 from src.core.logger import LoggerManager
 from src.db.database_router import get_smart_db_session
-from src.models.execution_history import ExecutionHistory as Run
-from src.repositories.execution_history_repository import ExecutionHistoryRepository
 from src.repositories.schedule_repository import ScheduleRepository
 from src.schemas.execution import CrewConfig, ExecutionNameGenerationRequest
 from src.schemas.schedule import (
@@ -57,7 +53,10 @@ class SchedulerService:
             session: SQLAlchemy async session
         """
         self.repository = ScheduleRepository(session)
-        self.execution_history_repository = ExecutionHistoryRepository(session)
+        # Runs are ANOTHER domain: read them through ExecutionService rather than
+        # reaching into its repository. `get_execution_record` exists precisely so
+        # this caller does not have to — it returns the ORM row AND takes group_ids.
+        self.execution_service = ExecutionService(session)
         self.session = session
         self._running_tasks: Set[asyncio.Task] = set()
 
@@ -126,7 +125,7 @@ class SchedulerService:
             # execution_id). Falls back to unscoped lookup only when no group
             # context is available (e.g. local/non-multitenant mode).
             group_ids = group_context.group_ids if group_context else None
-            execution = await self.execution_history_repository.get_execution_by_id(
+            execution = await self.execution_service.get_execution_record(
                 schedule_data.execution_id, group_ids=group_ids
             )
             if not execution:
@@ -616,29 +615,24 @@ class SchedulerService:
                 else:
                     execution_time_naive = execution_time
 
-                # Create run record with group information from schedule
-                db_run = Run(
+                # Runs belong to ExecutionService, so it builds the row — this used
+                # to construct the model and call its repository directly.
+                # ExecutionHistory.planning is a historical column kept for old rows;
+                # Kasal no longer models planning, so it keeps its column default.
+                # commit=True: this session is the scheduler's own and the row must
+                # be visible to the run we are about to spawn.
+                db_run = await ExecutionService.create_run_record(
+                    session,
                     job_id=job_id,
-                    status="pending",
-                    inputs=config_dict,
-                    created_at=execution_time_naive,
-                    trigger_type="scheduled",
-                    # ExecutionHistory.planning is a historical-record column kept for
-                    # old rows; Kasal no longer models planning, so leave it to its
-                    # column default (False) instead of copying a request field.
                     run_name=run_name,
+                    inputs=config_dict,
+                    execution_type=execution_type,
                     group_id=schedule.group_id,
                     group_email=schedule.created_by_email,
-                    execution_type=execution_type,
+                    flow_id=config.flow_id if execution_type == "flow" else None,
+                    trigger_type="scheduled",
+                    created_at=execution_time_naive,
                 )
-
-                # Add flow_id if it's a flow execution with a saved flow
-                if execution_type == "flow" and config.flow_id:
-                    db_run.flow_id = config.flow_id
-
-                session.add(db_run)
-                await session.commit()
-                await session.refresh(db_run)
 
                 # Ensure Databricks auth is available via unified auth for scheduled jobs
                 import os

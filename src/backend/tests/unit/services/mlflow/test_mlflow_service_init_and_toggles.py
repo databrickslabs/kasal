@@ -21,7 +21,7 @@ class TestMLflowServiceInit:
         assert service.session == mock_session
         assert service.group_id == group_id
         assert hasattr(service, "repo")
-        assert hasattr(service, "exec_repo")
+        assert hasattr(service, "execution_service")
         assert hasattr(service, "model_config_service")
 
     def test_mlflow_service_init_none_group_id(self):
@@ -270,7 +270,7 @@ class TestMLflowServiceAttributes:
         assert hasattr(service, "session")
         assert hasattr(service, "group_id")
         assert hasattr(service, "repo")
-        assert hasattr(service, "exec_repo")
+        assert hasattr(service, "execution_service")
         assert hasattr(service, "model_config_service")
 
         # Check attribute types

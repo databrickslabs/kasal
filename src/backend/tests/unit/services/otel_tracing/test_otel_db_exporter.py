@@ -660,7 +660,7 @@ class TestExtractTraceMetadata:
 class TestKasalDBSpanExporterInit:
     """Tests for KasalDBSpanExporter constructor.
 
-    The exporter uses request_scoped_session() + create_and_run_loop() in
+    The exporter uses routed_scoped_session() + create_and_run_loop() in
     _write_batch, so __init__ just sets up the thread pool and state.
     """
 
@@ -934,7 +934,7 @@ class TestSpanToRecord:
 class TestWriteBatch:
     """Tests for the _write_batch method (async DB writes via smart session).
 
-    _write_batch uses request_scoped_session() + create_and_run_loop() to
+    _write_batch uses routed_scoped_session() + create_and_run_loop() to
     write traces to whichever DB is configured (local or Lakebase).
     """
 
@@ -965,7 +965,7 @@ class TestWriteBatch:
     def _mock_write_batch(
         self, exporter, records, mock_trace_cls=None, mock_logger=None
     ):
-        """Run _write_batch with mocked request_scoped_session and create_and_run_loop.
+        """Run _write_batch with mocked routed_scoped_session and create_and_run_loop.
 
         Instead of actually running an event loop, we execute the async
         coroutine inline by using AsyncMock for the session.
@@ -982,12 +982,12 @@ class TestWriteBatch:
             finally:
                 loop.close()
 
-        # _write_batch uses local imports: `from src.db.session import request_scoped_session`
+        # _write_batch uses local imports: `from src.db.session import routed_scoped_session`
         # and `from src.utils.asyncio_utils import create_and_run_loop`.
         # Patch at the source module so the local import picks up the mock.
         patches = [
             patch(
-                "src.db.session.request_scoped_session",
+                "src.db.session.routed_scoped_session",
                 return_value=AsyncMock(
                     __aenter__=AsyncMock(return_value=mock_session),
                     __aexit__=AsyncMock(return_value=False),
@@ -1052,7 +1052,7 @@ class TestWriteBatch:
 
         with (
             patch(
-                "src.db.session.request_scoped_session",
+                "src.db.session.routed_scoped_session",
                 return_value=AsyncMock(
                     __aenter__=AsyncMock(return_value=mock_session),
                     __aexit__=AsyncMock(return_value=False),

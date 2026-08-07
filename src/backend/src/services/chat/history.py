@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime
-from typing import List, Optional, Type
+from typing import Any, List, Optional, Type
 from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -195,7 +195,7 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         try:
             # Detached on purpose: the memory build opens its OWN session
             # (CrewMemoryService.fetch_memory_backend_config uses
-            # request_scoped_session), so it does not outlive this request's
+            # routed_scoped_session), so it does not outlive this request's
             # session or hold it open while an embedder is configured.
             asyncio.ensure_future(_record())
         except RuntimeError:  # no running loop (sync call sites, tests)
@@ -220,6 +220,20 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         except Exception as exc:  # noqa: BLE001
             logger.debug("Could not read the question for this answer: %s", exc)
         return ""
+
+    async def get_recent_messages(
+        self, session_id: str, group_ids: List[str], limit: int = 50
+    ) -> List[Any]:
+        """The most recent messages in a session, scoped to ``group_ids``.
+
+        Chat history is this service's domain. Crew generation reads it to build a
+        conversation preamble and used to construct ``ChatHistoryRepository``
+        itself; ``group_ids`` is what keeps one workspace's transcript out of
+        another's prompt.
+        """
+        return await self.repository.get_recent_by_session_and_group(
+            session_id, group_ids, limit=limit
+        )
 
     async def get_chat_session(
         self,
@@ -521,5 +535,5 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
             record.intent = intent
         if generation_result is not None:
             record.generation_result = generation_result
-        await self.session.flush()
+        await self.repository.save()
         return ChatHistoryResponse.model_validate(record)

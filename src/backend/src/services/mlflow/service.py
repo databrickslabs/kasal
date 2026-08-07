@@ -4,8 +4,8 @@ from databricks.sdk.useragent import with_product
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger import LoggerManager
-from src.repositories.execution_history_repository import ExecutionHistoryRepository
 from src.repositories.mlflow_repository import MLflowRepository
+from src.services.execution.service import ExecutionService
 from src.services.settings.models import ModelConfigService
 from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
 
@@ -42,7 +42,9 @@ class MLflowService:
         self.session = session
         self.group_id = group_id
         self.repo = MLflowRepository(session)
-        self.exec_repo = ExecutionHistoryRepository(session)
+        # Runs belong to ExecutionService — mlflow only reads them to attach traces,
+        # so it goes through that service rather than its repository.
+        self.execution_service = ExecutionService(session)
         # SECURITY: Pass group_id for multi-tenant isolation
         self.model_config_service = ModelConfigService(session, group_id=group_id)
 
@@ -132,7 +134,12 @@ class MLflowService:
         elif local_available:
             backend = local_backend
         else:
-            backend = {"kind": "none", "available": False, "uri": None, "reachable": None}
+            backend = {
+                "kind": "none",
+                "available": False,
+                "uri": None,
+                "reachable": None,
+            }
 
         return {
             "enabled": enabled,
@@ -284,7 +291,7 @@ class MLflowService:
         if not job_id:
             return None
         try:
-            exec_obj = await self.exec_repo.get_execution_by_job_id(
+            exec_obj = await self.execution_service.get_run_by_job_id(
                 job_id, group_ids=[self.group_id]
             )
         except Exception as e:  # noqa: BLE001 — a deep link must never raise
@@ -338,9 +345,10 @@ class MLflowService:
         an experiment name must never be the thing that fails a run.
         """
         try:
-            from src.repositories.group_repository import GroupRepository
+            from src.services.groups.groups import GroupService
 
-            name = await GroupRepository(self.session).get_name(self.group_id)
+            # Groups are GroupService's domain.
+            name = await GroupService(self.session).get_group_name(self.group_id)
             # Fall back to the group ID when no row names it. A synthetic
             # teamspace (the dev "user_dev_localhost", an auto-created group)
             # has no `groups` entry, and naming its experiment after the id it
@@ -584,7 +592,7 @@ class MLflowService:
         trace_id: Optional[str] = None
         if job_id:
             try:
-                exec_obj = await self.exec_repo.get_execution_by_job_id(
+                exec_obj = await self.execution_service.get_run_by_job_id(
                     job_id, group_ids=[self.group_id]
                 )
                 if exec_obj and getattr(exec_obj, "mlflow_trace_id", None):
@@ -724,7 +732,7 @@ class MLflowService:
             raise RuntimeError("MLflow evaluation is disabled for this workspace")
 
         # Load execution by job_id (respect group isolation if provided)
-        exec_obj = await self.exec_repo.get_execution_by_job_id(
+        exec_obj = await self.execution_service.get_run_by_job_id(
             job_id=job_id,
             group_ids=[self.group_id] if self.group_id else None,
         )

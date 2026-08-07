@@ -21,12 +21,22 @@ class _Ctx:
 
 
 def _service():
-    session = MagicMock()
-    session.add = MagicMock()
-    session.flush = AsyncMock()
-    session.delete = AsyncMock()
-    service = A2AAgentService(session)
+    """Persistence goes through a FAKE REPOSITORY, not a session.
+
+    ``insert`` assigns an id like the real one, since a create reads the row back
+    (and fetches its card) straight afterwards.
+    """
+    service = A2AAgentService(MagicMock())
     service.repository = MagicMock()
+
+    async def _insert(agent):
+        if getattr(agent, "id", None) is None:
+            agent.id = 1
+        return agent
+
+    service.repository.insert = AsyncMock(side_effect=_insert)
+    service.repository.remove = AsyncMock()
+    service.repository.save = AsyncMock()
     service.repository.get = AsyncMock(return_value=None)
     service.repository.find_base_by_name = AsyncMock(return_value=None)
     service.repository.find_by_name_and_group = AsyncMock(return_value=None)
@@ -87,7 +97,7 @@ class TestCreate:
             )
 
         assert agent.last_error and "no such host" in agent.last_error
-        service.session.add.assert_called_once()
+        service.repository.insert.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_the_key_is_encrypted_and_the_plaintext_is_not_kept(self):
@@ -289,7 +299,7 @@ class TestGlobalVersusWorkspace:
 
         assert result is own
         assert own.enabled is False
-        service.session.add.assert_not_called()
+        service.repository.insert.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_another_workspaces_row_is_not_found(self):

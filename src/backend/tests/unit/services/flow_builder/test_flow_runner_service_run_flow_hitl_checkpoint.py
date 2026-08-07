@@ -73,9 +73,7 @@ class TestRunFlowExecutionAdditional:
             patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
             patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
             patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
-            ),
+            patch("src.services.execution.service.ExecutionService"),
             patch(
                 "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
             ),
@@ -151,9 +149,7 @@ class TestRunFlowExecutionAdditional:
             patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
             patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
             patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
-            ),
+            patch("src.services.execution.service.ExecutionService"),
             patch(
                 "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
             ),
@@ -211,9 +207,7 @@ class TestRunFlowExecutionAdditional:
             patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
             patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
             patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
-            ),
+            patch("src.services.execution.service.ExecutionService"),
             patch(
                 "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
             ),
@@ -273,9 +267,7 @@ class TestRunFlowExecutionAdditional:
             patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
             patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
             patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
-            ),
+            patch("src.services.execution.service.ExecutionService"),
             patch(
                 "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
             ),
@@ -337,9 +329,7 @@ class TestRunFlowExecutionAdditional:
             patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
             patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
             patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
-            ),
+            patch("src.services.execution.service.ExecutionService"),
             patch(
                 "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
             ),
@@ -415,9 +405,7 @@ class TestRunDynamicFlowOuter:
             patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
             patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
             patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
-            ),
+            patch("src.services.execution.service.ExecutionService"),
             patch(
                 "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
             ),
@@ -467,9 +455,7 @@ class TestRunDynamicFlowOuter:
             patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
             patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
             patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
-            ),
+            patch("src.services.execution.service.ExecutionService"),
             patch(
                 "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
             ),
@@ -553,9 +539,7 @@ class TestRunFlowResumeScenario:
         flow_result = {"success": True, "result": "done"}
 
         with (
-            patch(
-                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
-            ) as MockExecRepo,
+            patch("src.services.execution.service.ExecutionService") as MockExecRepo,
             patch.object(
                 svc, "_run_dynamic_flow", new=AsyncMock(return_value=flow_result)
             ),
@@ -563,8 +547,8 @@ class TestRunFlowResumeScenario:
 
             repo_inst = MagicMock()
             # Integer PK passed: job_id lookup misses, int-PK fallback finds it.
-            repo_inst.get_execution_by_job_id = AsyncMock(return_value=None)
-            repo_inst.get_execution_by_id = AsyncMock(return_value=existing_execution)
+            repo_inst.get_run_by_job_id = AsyncMock(return_value=None)
+            repo_inst.get_run_by_id = AsyncMock(return_value=existing_execution)
             MockExecRepo.return_value = repo_inst
 
             result = await svc.run_flow(
@@ -761,7 +745,7 @@ class TestTaskConfigSupplemental:
         agent_repo = MagicMock()
         agent_repo.get = AsyncMock(return_value=None)
 
-        with patch("src.db.session.request_scoped_session") as MockSess:
+        with patch("src.db.session.routed_scoped_session") as MockSess:
             mock_session_ctx = MagicMock()
             mock_session = AsyncMock()
             mock_result = MagicMock()
@@ -853,7 +837,7 @@ class TestTaskConfigSupplemental:
 
         with (
             patch(
-                "src.db.session.request_scoped_session", return_value=mock_session_ctx()
+                "src.db.session.routed_scoped_session", return_value=mock_session_ctx()
             ),
             patch("src.services.settings.api_keys.ApiKeysService"),
             patch("src.services.tools.tool_factory.ToolFactory") as MockTF,

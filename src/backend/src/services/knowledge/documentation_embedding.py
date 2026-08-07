@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger import LoggerManager
 from src.models.documentation_embedding import DocumentationEmbedding
-from src.repositories.memory_backend_repository import MemoryBackendRepository
 from src.schemas.documentation_embedding import DocumentationEmbeddingCreate
 from src.schemas.memory_backend import MemoryBackendType
 from src.services.knowledge.embedding_queue import embedding_queue
@@ -44,15 +43,16 @@ class DocumentationEmbeddingService:
             from src.schemas.memory_backend import MemoryBackendConfig
 
             # Use the injected session or get a new one
-            if self.session:
-                repository = MemoryBackendRepository(self.session)
-                all_backends = await repository.get_all()
-            else:
-                from src.db.session import request_scoped_session
+            # Memory backends are MemoryBackendService's domain.
+            from src.services.memory.backend_service import MemoryBackendService
 
-                async with request_scoped_session() as session:
-                    repository = MemoryBackendRepository(session)
-                    all_backends = await repository.get_all()
+            if self.session:
+                all_backends = await MemoryBackendService(self.session).get_all()
+            else:
+                from src.db.session import routed_scoped_session
+
+                async with routed_scoped_session() as session:
+                    all_backends = await MemoryBackendService(session).get_all()
 
             # Filter active Databricks backends and sort by created_at descending
             databricks_backends = [

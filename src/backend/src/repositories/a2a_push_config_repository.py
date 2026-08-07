@@ -77,6 +77,16 @@ class A2APushConfigRepository(BaseRepository[A2APushConfig]):
         )
         return list(result.scalars().all())
 
+    async def insert(self, config: A2APushConfig) -> A2APushConfig:
+        """Persist a new push config and flush so its ``id`` is available."""
+        self.session.add(config)
+        await self.session.flush()
+        return config
+
+    async def save(self) -> None:
+        """Flush pending changes — e.g. the delivery counters after a send."""
+        await self.session.flush()
+
     async def delete_for_group(self, config_id: int, group_ids: List[str]) -> int:
         """Remove a registration. Returns the number of rows removed."""
         if not group_ids:

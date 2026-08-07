@@ -61,7 +61,7 @@ class TestCreateAgentDateAwareness:
                 "src.services.execution.kernel.agent_builder.Agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
-            patch("src.db.session.request_scoped_session") as mock_session_factory,
+            patch("src.db.session.routed_scoped_session") as mock_session_factory,
         ):
 
             mock_agent_instance = MagicMock()
@@ -115,7 +115,7 @@ class TestCreateAgentDateAwareness:
                 "src.services.execution.kernel.agent_builder.Agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
-            patch("src.db.session.request_scoped_session") as mock_session_factory,
+            patch("src.db.session.routed_scoped_session") as mock_session_factory,
         ):
 
             mock_agent_instance = MagicMock()
@@ -169,7 +169,7 @@ class TestCreateAgentDateAwareness:
                 "src.services.execution.kernel.agent_builder.Agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
-            patch("src.db.session.request_scoped_session") as mock_session_factory,
+            patch("src.db.session.routed_scoped_session") as mock_session_factory,
         ):
 
             mock_agent_instance = MagicMock()
@@ -222,7 +222,7 @@ class TestCreateAgentDateAwareness:
                 "src.services.execution.kernel.agent_builder.Agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
-            patch("src.db.session.request_scoped_session") as mock_session_factory,
+            patch("src.db.session.routed_scoped_session") as mock_session_factory,
         ):
 
             mock_agent_instance = MagicMock()
@@ -274,7 +274,7 @@ class TestCreateAgentDateAwareness:
                 "src.services.execution.kernel.agent_builder.Agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
-            patch("src.db.session.request_scoped_session") as mock_session_factory,
+            patch("src.db.session.routed_scoped_session") as mock_session_factory,
         ):
 
             mock_agent_instance = MagicMock()
@@ -326,7 +326,7 @@ class TestCreateAgentDateAwareness:
                 "src.services.execution.kernel.agent_builder.Agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
-            patch("src.db.session.request_scoped_session") as mock_session_factory,
+            patch("src.db.session.routed_scoped_session") as mock_session_factory,
         ):
 
             mock_agent_instance = MagicMock()
@@ -378,7 +378,7 @@ class TestCreateAgentDateAwareness:
                 "src.services.execution.kernel.agent_builder.Agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
-            patch("src.db.session.request_scoped_session") as mock_session_factory,
+            patch("src.db.session.routed_scoped_session") as mock_session_factory,
         ):
 
             mock_agent_instance = MagicMock()
@@ -435,7 +435,7 @@ class TestCreateAgentDateAwareness:
                 "src.services.execution.kernel.agent_builder.Agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
-            patch("src.db.session.request_scoped_session") as mock_session_factory,
+            patch("src.db.session.routed_scoped_session") as mock_session_factory,
         ):
 
             mock_agent_instance = MagicMock()
@@ -494,7 +494,7 @@ class TestCreateAgentDateAwareness:
                 "src.services.execution.kernel.agent_builder.Agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
-            patch("src.db.session.request_scoped_session") as mock_session_factory,
+            patch("src.db.session.routed_scoped_session") as mock_session_factory,
         ):
 
             mock_agent_instance = MagicMock()
@@ -581,7 +581,7 @@ class TestCreateAgentDateFormatVariations:
                 "src.services.execution.kernel.agent_builder.Agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
-            patch("src.db.session.request_scoped_session") as mock_session_factory,
+            patch("src.db.session.routed_scoped_session") as mock_session_factory,
         ):
 
             mock_agent_instance = MagicMock()
@@ -634,7 +634,7 @@ class TestCreateAgentDateFormatVariations:
                 "src.services.execution.kernel.agent_builder.Agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
-            patch("src.db.session.request_scoped_session") as mock_session_factory,
+            patch("src.db.session.routed_scoped_session") as mock_session_factory,
         ):
 
             mock_agent_instance = MagicMock()
@@ -715,7 +715,7 @@ class TestCreateAgentDateAwarenessWithOtherParams:
                 "src.services.execution.kernel.agent_builder.Agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
-            patch("src.db.session.request_scoped_session") as mock_session_factory,
+            patch("src.db.session.routed_scoped_session") as mock_session_factory,
         ):
 
             mock_agent_instance = MagicMock()
@@ -778,7 +778,7 @@ class TestCreateAgentDateAwarenessWithOtherParams:
                 "src.services.execution.kernel.agent_builder.Agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
-            patch("src.db.session.request_scoped_session") as mock_session_factory,
+            patch("src.db.session.routed_scoped_session") as mock_session_factory,
         ):
 
             mock_agent_instance = MagicMock()
@@ -844,7 +844,7 @@ class TestCreateAgentDateAwarenessWithOtherParams:
                 "src.services.execution.kernel.agent_builder.Agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
-            patch("src.db.session.request_scoped_session") as mock_session_factory,
+            patch("src.db.session.routed_scoped_session") as mock_session_factory,
         ):
 
             mock_agent_instance = MagicMock()

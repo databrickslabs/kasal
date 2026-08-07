@@ -2472,22 +2472,25 @@ class TestSaveToConversionHistory:
         mock_repo = MagicMock()
         mock_record = SimpleNamespace(id=42, group_id=None)
 
-        async def _create(data):
-            captured["data"] = data
+        async def _create(payload, *_a, **_k):
+            # create_history receives a ConversionHistoryCreate model, not a dict.
+            captured["data"] = (
+                payload.model_dump() if hasattr(payload, "model_dump") else payload
+            )
             return mock_record
 
-        mock_repo.create = AsyncMock(side_effect=_create)
+        mock_repo.create_history = AsyncMock(side_effect=_create)
         mock_repo.session = MagicMock()
         mock_repo.session.commit = AsyncMock()
 
         from contextlib import asynccontextmanager
 
         @asynccontextmanager
-        async def _repo_ctx():
+        async def _repo_ctx(*_a, **_k):
             yield mock_repo
 
         with patch(
-            "src.services.tools.tool_session_provider.ToolSessionProvider.conversion_repo",
+            "src.services.tools.tool_session_provider.ToolSessionProvider.converter_service",
             _repo_ctx,
         ):
             self._run(
@@ -2521,7 +2524,7 @@ class TestSaveToConversionHistory:
             yield  # pragma: no cover
 
         with patch(
-            "src.services.tools.tool_session_provider.ToolSessionProvider.conversion_repo",
+            "src.services.tools.tool_session_provider.ToolSessionProvider.converter_service",
             _boom_ctx,
         ):
             # Should swallow the error and return None

@@ -22,6 +22,16 @@ class UserRepository(BaseRepository[User]):
         result = await self.session.execute(query)
         return result.scalars().first()
 
+    async def insert(self, user: User) -> User:
+        """Persist a new user and flush so its ``id`` is available.
+
+        Flush, not commit: this runs mid-transaction when adding someone to a
+        group — the user row and the group association must land together.
+        """
+        self.session.add(user)
+        await self.session.flush()
+        return user
+
     async def update_last_login(self, user_id: str) -> None:
         """Update user's last login timestamp"""
         query = (

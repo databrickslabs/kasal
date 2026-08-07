@@ -4,12 +4,12 @@ import logging
 import os
 from typing import Any, Dict, List, Optional, Union
 
+from src.services.tools.a2a_agent_tool import A2AAgentTool
+from src.services.tools.async_bridge import run_async_with_context
 from src.services.tools.base import BaseTool
 
 # Import only the CrewAI tools we're keeping
 from src.services.tools.image_generation import ImageGenerationTool
-from src.services.tools.a2a_agent_tool import A2AAgentTool
-from src.services.tools.async_bridge import run_async_with_context
 from src.services.tools.scrape_website import ScrapeWebsiteTool
 from src.services.tools.serper_search import SerperDevTool
 
@@ -238,7 +238,7 @@ except ImportError as e:
 logger = logging.getLogger(__name__)
 
 # Import request-scoped session helper
-from src.db.session import request_scoped_session
+from src.db.session import routed_scoped_session
 from src.schemas.tool import ToolUpdate
 from src.services.settings.api_keys import ApiKeysService
 from src.services.tools.tool_service import ToolService
@@ -401,8 +401,9 @@ class ToolFactory:
 
             # Check for Databricks config in database
             try:
-                from src.db.session import request_scoped_session
-                from src.services.databricks.workspace.service import DatabricksService
+                from src.services.databricks.workspace.config_provider import (
+                    DatabricksConfigProvider,
+                )
 
                 group_id = (
                     self.config.get("group_id", "default")
@@ -410,36 +411,40 @@ class ToolFactory:
                     else "default"
                 )
 
-                async with request_scoped_session() as session:
-                    service = DatabricksService(session)
-                    config = await service.get_databricks_config(group_id=group_id)
+                # Via the provider, which takes group_id as a real argument. The
+                # hand-rolled version here called
+                # get_databricks_config(group_id=...) — a method that takes NO
+                # arguments — so it raised TypeError, the enclosing `try` swallowed
+                # it, and this check reported "no Databricks config found" for
+                # every workspace.
+                config = await DatabricksConfigProvider.get(group_id=group_id)
 
-                    if config and config.workspace_url:
-                        # Check if we have any auth method configured
-                        has_auth = bool(
-                            config.api_key or config.client_id or config.oauth_enabled
+                if config and config.workspace_url:
+                    # Check if we have any auth method configured
+                    has_auth = bool(
+                        config.api_key or config.client_id or config.oauth_enabled
+                    )
+                    if has_auth:
+                        logger.info(
+                            f"[AUTH VALIDATION] Databricks config found for group {group_id}"
                         )
-                        if has_auth:
-                            logger.info(
-                                f"[AUTH VALIDATION] Databricks config found for group {group_id}"
-                            )
-                            return (True, "Database configuration available")
-                        else:
-                            logger.warning(
-                                "[AUTH VALIDATION] Databricks config exists but no auth method configured"
-                            )
-                            return (
-                                False,
-                                "No authentication method configured in database",
-                            )
+                        return (True, "Database configuration available")
                     else:
                         logger.warning(
-                            f"[AUTH VALIDATION] No Databricks config found for group {group_id}"
+                            "[AUTH VALIDATION] Databricks config exists but no auth method configured"
                         )
                         return (
                             False,
-                            f"No Databricks configuration for group {group_id}",
+                            "No authentication method configured in database",
                         )
+                else:
+                    logger.warning(
+                        f"[AUTH VALIDATION] No Databricks config found for group {group_id}"
+                    )
+                    return (
+                        False,
+                        f"No Databricks configuration for group {group_id}",
+                    )
 
             except Exception as e:
                 logger.debug(f"[AUTH VALIDATION] Database config check failed: {e}")
@@ -614,11 +619,11 @@ class ToolFactory:
         """Load all available tools from the service asynchronously"""
         try:
             # Get services using session factory
-            from src.db.session import request_scoped_session
+            from src.db.session import routed_scoped_session
             from src.services.tools.tool_service import ToolService
             from src.utils.user_context import GroupContext
 
-            async with request_scoped_session() as session:
+            async with routed_scoped_session() as session:
                 # Create tool service with session
                 tool_service = ToolService(session)
 
@@ -898,10 +903,10 @@ class ToolFactory:
     ):
         """Async implementation of tool config update"""
         # Get services using session factory
-        from src.db.session import request_scoped_session
+        from src.db.session import routed_scoped_session
         from src.services.tools.tool_service import ToolService
 
-        async with request_scoped_session() as session:
+        async with routed_scoped_session() as session:
             # Create tool service with session
             tool_service = ToolService(session)
 
@@ -1597,21 +1602,17 @@ class ToolFactory:
                     # If not in environment, try to get from DatabricksService
                     if not databricks_host:
                         try:
-                            # Try to get from DatabricksService configuration
-                            from src.db.session import request_scoped_session
-                            from src.services.databricks.workspace.service import (
-                                DatabricksService,
+                            from src.services.databricks.workspace.config_provider import (  # noqa: E501
+                                DatabricksConfigProvider,
                             )
 
                             async def get_databricks_config():
-                                async with request_scoped_session() as session:
-                                    service = DatabricksService(session)
-                                    config = await service.get_databricks_config()
-                                    if config and config.workspace_url:
-                                        workspace_url = config.workspace_url.rstrip("/")
-                                        if not workspace_url.startswith("https://"):
-                                            workspace_url = f"https://{workspace_url}"
-                                        return workspace_url
+                                config = await DatabricksConfigProvider.get()
+                                if config and config.workspace_url:
+                                    workspace_url = config.workspace_url.rstrip("/")
+                                    if not workspace_url.startswith("https://"):
+                                        workspace_url = f"https://{workspace_url}"
+                                    return workspace_url
                                 return None
 
                             # Execute the async function

@@ -28,18 +28,18 @@ from src.services.knowledge.documentation_embedding import DocumentationEmbeddin
 #
 # The service uses LOCAL imports (inside method bodies), so we must patch at
 # the *source* module where the symbol lives, not on the service module.
-# The service's MemoryBackendRepository and embedding_queue are top-level
-# imports, so they ARE on the service module namespace.
+# embedding_queue is a top-level import, so it IS on the service module namespace.
+# Memory backends are read through MemoryBackendService (their owning domain), which
+# the service imports LOCALLY — so that one is patched at its source module.
 # ---------------------------------------------------------------------------
 _SVC = "src.services.knowledge.documentation_embedding"
 
-# Top-level imports in the service - can patch on service module directly
-_MEMORY_BACKEND_REPO = f"{_SVC}.MemoryBackendRepository"
+_MEMORY_BACKEND_REPO = "src.services.memory.backend_service.MemoryBackendService"
 _EMBEDDING_QUEUE = f"{_SVC}.embedding_queue"
 
 # Local imports inside methods - must patch at SOURCE modules
 _DOC_EMBEDDING_REPO_CLS = "src.repositories.documentation_embedding_repository.DocumentationEmbeddingRepository"
-_ASYNC_SESSION_FACTORY = "src.db.session.request_scoped_session"
+_ASYNC_SESSION_FACTORY = "src.db.session.routed_scoped_session"
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +275,7 @@ class TestCheckDatabricksConfig:
 
     @pytest.mark.asyncio
     async def test_uses_session_factory_when_no_session(self):
-        """When no session is provided, use request_scoped_session."""
+        """When no session is provided, use routed_scoped_session."""
         svc = _make_service(session=None)
 
         backend = _make_backend()

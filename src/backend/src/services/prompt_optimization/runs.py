@@ -17,8 +17,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from src.core.exceptions import BadRequestError
-from src.repositories.log_repository import LLMLogRepository
-from src.repositories.model_config_repository import ModelConfigRepository
 from src.schemas.template import PromptTemplateUpdate
 from src.services.catalog.templates import TemplateService
 from src.services.prompt_optimization import run_state
@@ -234,7 +232,7 @@ class RunRegistryMixin:
             )
 
         if row.kind == "crew":
-            result = await self._apply_crew_run(row)
+            result = await self._apply_crew_run(row, group_context)
         else:
             template_service = TemplateService(self.session)
             template_row = await template_service.find_by_name_with_group_check(
@@ -274,7 +272,9 @@ class RunRegistryMixin:
             run["applied"] = True
         return result
 
-    async def _apply_crew_run(self, row: Any) -> Dict[str, Any]:
+    async def _apply_crew_run(
+        self, row: Any, group_context: Optional[GroupContext] = None
+    ) -> Dict[str, Any]:
         """Write a crew run's optimized fields onto the agent/task rows.
 
         Returns the result plus a `before_image` of every field written, read
@@ -297,8 +297,8 @@ class RunRegistryMixin:
                 continue
             changes.setdefault((entity_kind, entity_id), {})[field] = value
 
-        before_image = await self._read_crew_fields(changes)
-        applied = await self._write_crew_fields(changes)
+        before_image = await self._read_crew_fields(changes, group_context)
+        applied = await self._write_crew_fields(changes, group_context)
         # The canvas renders crews.nodes, NOT the agent/task rows — the graph is
         # stored twice. Writing only the rows made an apply report success while
         # the canvas and the exported JSON still showed the old prompts, which
@@ -337,10 +337,10 @@ class RunRegistryMixin:
             import copy
             from uuid import UUID
 
-            from src.repositories.crew_repository import CrewRepository
+            # Crews are CrewService's domain.
+            from src.services.catalog.crews import CrewService
 
-            crew_repo = CrewRepository(self.session)
-            crew = await crew_repo.get(UUID(str(crew_id)))
+            crew = await CrewService(self.session).get(UUID(str(crew_id)))
             if crew is None or not crew.nodes:
                 return 0
 
@@ -382,20 +382,26 @@ class RunRegistryMixin:
             return 0
 
     async def _read_crew_fields(
-        self, changes: Dict[tuple, Dict[str, str]]
+        self,
+        changes: Dict[tuple, Dict[str, str]],
+        group_context: Optional[GroupContext] = None,
     ) -> Dict[str, str]:
         """Current values of every field about to be written, as a flat
-        'agent.<id>.role' -> text map (the same shape as optimized_fields)."""
-        from src.repositories.agent_repository import AgentRepository
-        from src.repositories.task_repository import TaskRepository
+        'agent.<id>.role' -> text map (the same shape as optimized_fields).
 
-        agent_repo = AgentRepository(self.session)
-        task_repo = TaskRepository(self.session)
+        Group-checked through the owning services, matching the write path: an id
+        this caller may not update is one it may not snapshot either.
+        """
+        from src.services.catalog.agents import AgentService
+        from src.services.catalog.tasks import TaskService
+
+        agent_service = AgentService(self.session)
+        task_service = TaskService(self.session)
         before: Dict[str, str] = {}
         for (entity_kind, entity_id), patch in changes.items():
-            repo = agent_repo if entity_kind == "agent" else task_repo
+            service = agent_service if entity_kind == "agent" else task_service
             try:
-                entity = await repo.get(entity_id)
+                entity = await service.get_with_group_check(entity_id, group_context)
             except Exception as read_err:
                 logger.warning(
                     f"Could not snapshot {entity_kind} {entity_id} before apply: "
@@ -410,21 +416,41 @@ class RunRegistryMixin:
                 )
         return before
 
-    async def _write_crew_fields(self, changes: Dict[tuple, Dict[str, str]]) -> int:
-        """Write per-entity field patches; returns the number of rows updated."""
-        from src.repositories.agent_repository import AgentRepository
-        from src.repositories.task_repository import TaskRepository
+    async def _write_crew_fields(
+        self,
+        changes: Dict[tuple, Dict[str, str]],
+        group_context: Optional[GroupContext] = None,
+    ) -> int:
+        """Write per-entity field patches; returns the number of rows updated.
 
-        agent_repo = AgentRepository(self.session)
-        task_repo = TaskRepository(self.session)
+        Through AgentService/TaskService, which OWN agent and task rows. This used
+        to call ``AgentRepository.update()`` / ``TaskRepository.update()`` directly
+        and so skipped their group verification — and the entity ids here are parsed
+        out of a JSON blob on the run (``optimized_fields``), so that check is what
+        stands between a foreign id in that blob and a cross-tenant write.
+
+        The service methods also allowlist which fields may change, so a malformed
+        key cannot reach ``enabled``, ``tool_configs`` or ``group_id``.
+        """
+        from src.services.catalog.agents import AgentService
+        from src.services.catalog.tasks import TaskService
+
+        agent_service = AgentService(self.session)
+        task_service = TaskService(self.session)
         written = 0
         for (entity_kind, entity_id), patch in changes.items():
             if entity_kind == "agent":
-                if await agent_repo.update(entity_id, patch):
-                    written += 1
+                ok = await agent_service.update_prompt_text_with_group_check(
+                    entity_id, patch, group_context
+                )
             elif entity_kind == "task":
-                if await task_repo.update(entity_id, patch):
-                    written += 1
+                ok = await task_service.update_prompt_text_with_group_check(
+                    entity_id, patch, group_context
+                )
+            else:
+                continue
+            if ok:
+                written += 1
         return written
 
     async def revert_run(
@@ -461,7 +487,7 @@ class RunRegistryMixin:
                 except ValueError:
                     continue
                 changes.setdefault((entity_kind, entity_id), {})[field] = value
-            restored = await self._write_crew_fields(changes)
+            restored = await self._write_crew_fields(changes, group_context)
             # Same two-copy problem as apply, mirrored: restoring only the rows
             # would leave the canvas still showing the reverted-away prompts.
             synced = await self._sync_crew_nodes(row.crew_id, changes)

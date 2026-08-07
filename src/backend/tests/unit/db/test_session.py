@@ -294,11 +294,11 @@ class TestModuleLevelConfiguration:
 
         assert async_session_factory is not None
 
-    def test_request_scoped_session_exists(self):
-        """Test that request_scoped_session is defined."""
-        from src.db.session import request_scoped_session
+    def test_routed_scoped_session_exists(self):
+        """Test that routed_scoped_session is defined."""
+        from src.db.session import routed_scoped_session
 
-        assert request_scoped_session is not None
+        assert routed_scoped_session is not None
 
     def test_engine_exists(self):
         """Test that the engine is defined."""

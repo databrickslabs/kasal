@@ -255,9 +255,10 @@ class PublicationService:
         crew_ids = [str(row.entity_id) for row in rows if row.entity_type == "crew"]
         if crew_ids:
             try:
-                from src.repositories.crew_repository import CrewRepository
+                # Crews are CrewService's domain.
+                from src.services.catalog.crews import CrewService
 
-                crews = await CrewRepository(self.session).find_by_ids(crew_ids)
+                crews = await CrewService(self.session).get_crews_by_ids(crew_ids)
                 existing["crew"] = {_normalize_id(crew.id) for crew in crews}
             except Exception as exc:  # noqa: BLE001 — a catalogue must render
                 logger.debug("[publications] could not read crews: %s", exc)
@@ -271,9 +272,10 @@ class PublicationService:
             existing["flow"] = set()
             return existing, conversational
         try:
-            from src.repositories.flow_repository import FlowRepository
+            # Flows are FlowService's domain.
+            from src.services.flow_builder.flow_service import FlowService
 
-            flows = await FlowRepository(self.session).find_by_ids(flow_ids)
+            flows = await FlowService(self.session).get_flows_by_ids(flow_ids)
         except Exception as exc:  # noqa: BLE001 — a catalogue must still render
             logger.debug("[publications] could not read flows: %s", exc)
             existing["flow"] = None
@@ -414,7 +416,7 @@ class PublicationService:
             entity_id=holder.entity_id,
             group_ids=group_context.group_ids or [],
         )
-        await self.session.flush()
+        await self.repository.save()
 
     async def publish(
         self,
@@ -446,7 +448,7 @@ class PublicationService:
             existing.description = data.description
             existing.protocols = list(data.protocols)
             existing.input_schema = data.input_schema
-            await self.session.flush()
+            await self.repository.save()
             await self._announce(group_context)
             return existing
 
@@ -464,8 +466,7 @@ class PublicationService:
             group_id=group_id,
             created_by_email=group_context.group_email,
         )
-        self.session.add(row)
-        await self.session.flush()
+        await self.repository.insert(row)
         logger.info(
             "[external] published %s %s as %s over %s (group %s)",
             entity_type,
@@ -519,7 +520,7 @@ class PublicationService:
         if data.input_schema is not None:
             row.input_schema = data.input_schema
 
-        await self.session.flush()
+        await self.repository.save()
         await self._announce(group_context)
         return row
 

@@ -2,12 +2,28 @@
 Centralized DB session provider for CrewAI tools.
 
 Tools run in subprocess context where there is no request-scoped session.
-Instead of each tool importing async_session_factory() directly, they use
+
+Sessions come from ``routed_scoped_session``, which asks the database ROUTER on
+every call. The raw ``async_session_factory`` was used here before: that is a
+per-process SNAPSHOT, correct only where something has hot-swapped it to Lakebase
+— which happens in a subprocess but NOT in the main process after a runtime
+``/lakebase/enable``. A tool running in-process (chat) therefore read the local
+database while the same tool in a crew subprocess read Lakebase, with no error
+either way. Routing removes the distinction.
+Instead of each tool importing a session factory directly, they use
 this provider — giving us a single point of control for session lifecycle,
 logging, and future connection pool guards.
 
-Option B: Service context managers (`cache_service()`, `conversion_repo()`)
-hide session+service construction so tools need only one import.
+**This is the one place in `tools/` that may import a session helper**, and it is
+why the import below is correct rather than a layering violation: a tool runs in a
+subprocess with no request-scoped session, so something has to acquire one, and
+concentrating that here is what let a single change route every tool at once.
+
+Prefer the typed context managers — `cache_service()`, `conversion_repo()`,
+`powerbi_extraction_repo()`, `knowledge_service()` — which yield a repository or
+service and never expose the session. `session()` is the escape hatch for a read
+with no repository wrapper yet; hand what it yields to a repository rather than
+querying it, or the tool has re-created the bypass this provider removed.
 """
 
 import logging
@@ -27,14 +43,14 @@ class ToolSessionProvider:
     async def session() -> AsyncGenerator[AsyncSession, None]:
         """Yield a scoped async session for tool DB operations.
 
-        Usage::
+        Usage — hand the session to a repository, do not query it directly::
 
             async with ToolSessionProvider.session() as session:
-                result = await session.execute(stmt)
+                rows = await SomeRepository(session).find_whatever(...)
         """
-        from src.db.session import async_session_factory
+        from src.db.session import routed_scoped_session
 
-        async with async_session_factory() as session:
+        async with routed_scoped_session() as session:
             try:
                 yield session
             except Exception:
@@ -51,12 +67,12 @@ class ToolSessionProvider:
             async with ToolSessionProvider.cache_service() as svc:
                 cached = await svc.get_cached_metadata(group_id=gid, ...)
         """
-        from src.db.session import async_session_factory
+        from src.db.session import routed_scoped_session
         from src.services.powerbi.semantic_model_cache import (
             PowerBISemanticModelCacheService,
         )
 
-        async with async_session_factory() as session:
+        async with routed_scoped_session() as session:
             try:
                 yield PowerBISemanticModelCacheService(session)
             except Exception:
@@ -65,50 +81,38 @@ class ToolSessionProvider:
 
     @staticmethod
     @asynccontextmanager
-    async def conversion_repo():
-        """Yield a ConversionHistoryRepository with scoped session.
+    async def converter_service(group_context=None):
+        """Yield a ConverterService — the owner of conversion history.
 
-        The caller is responsible for committing if needed (the session
-        is accessible via ``repo.session``).
-
-        Usage::
-
-            async with ToolSessionProvider.conversion_repo() as repo:
-                record = await repo.create(data)
-                await repo.session.commit()
+        Prefer this over :meth:`conversion_repo`: the service stamps ``group_id``
+        and ``created_by_email`` from the group context, which every tool that used
+        the repository directly had to remember to do by hand (and did
+        inconsistently).
         """
-        from src.db.session import async_session_factory
-        from src.repositories.conversion_repository import ConversionHistoryRepository
+        from src.db.session import routed_scoped_session
+        from src.services.powerbi.conversions import ConverterService
 
-        async with async_session_factory() as session:
+        async with routed_scoped_session() as session:
             try:
-                yield ConversionHistoryRepository(session)
+                yield ConverterService(session, group_context=group_context)
             except Exception:
                 await session.rollback()
                 raise
 
     @staticmethod
     @asynccontextmanager
-    async def powerbi_extraction_repo():
-        """Yield a PowerBIExtractionRepository with scoped session.
+    async def powerbi_extraction_service(group_context=None):
+        """Yield a PowerBIExtractionService — the owner of extraction rows.
 
-        The caller commits via ``repo.session`` (same contract as
-        ``conversion_repo``).
-
-        Usage::
-
-            async with ToolSessionProvider.powerbi_extraction_repo() as repo:
-                record = await repo.create(data)
-                await repo.session.commit()
+        Replaced ``conversion_repo``/``powerbi_extraction_repo``, which handed tools a
+        raw repository and left each one to stamp ``group_id`` itself.
         """
-        from src.db.session import async_session_factory
-        from src.repositories.powerbi_extraction_repository import (
-            PowerBIExtractionRepository,
-        )
+        from src.db.session import routed_scoped_session
+        from src.services.powerbi.extractions import PowerBIExtractionService
 
-        async with async_session_factory() as session:
+        async with routed_scoped_session() as session:
             try:
-                yield PowerBIExtractionRepository(session)
+                yield PowerBIExtractionService(session, group_context=group_context)
             except Exception:
                 await session.rollback()
                 raise
@@ -123,10 +127,10 @@ class ToolSessionProvider:
             async with ToolSessionProvider.knowledge_service(gid, token) as svc:
                 results = await svc.search_knowledge(query=q, ...)
         """
-        from src.db.session import async_session_factory
+        from src.db.session import routed_scoped_session
         from src.services.knowledge.databricks_service import DatabricksKnowledgeService
 
-        async with async_session_factory() as session:
+        async with routed_scoped_session() as session:
             try:
                 yield DatabricksKnowledgeService(
                     session=session,

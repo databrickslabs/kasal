@@ -4,11 +4,12 @@ Repository for execution trace operations.
 This module provides functions for CRUD operations on execution traces.
 """
 
+import json
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import delete, func, update
+from sqlalchemy import Text, cast, delete, func, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -36,6 +37,58 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         self.session = session
 
     # Methods that require an existing session (primarily for internal use)
+
+    async def outputs_containing(self, job_id: str, needle: str) -> List[Any]:
+        """This run's trace outputs whose serialised form contains ``needle``.
+
+        Serves the flow runner's CI/CD artifact scrape. ``cast(..., Text)`` keeps
+        the LIKE working whether the column is JSON (Postgres) or text (SQLite) —
+        the caller's raw ``CAST(output AS TEXT)`` did the same thing but outside a
+        repository, so nothing shared it.
+        """
+        result = await self.session.execute(
+            select(ExecutionTrace.output)
+            .where(
+                ExecutionTrace.job_id == job_id,
+                cast(ExecutionTrace.output, Text).like(f"%{needle}%"),
+            )
+            .order_by(ExecutionTrace.created_at.asc())
+        )
+        return [row[0] for row in result.all()]
+
+    async def latest_output_for_span_prefix(self, prefix: str) -> Optional[str]:
+        """The most recent trace ``output`` whose ``span_name`` starts with ``prefix``.
+
+        Serves the PowerBI/UCMV tools, which hand later steps the output of an
+        earlier one. Returns the raw JSON string, or None when nothing matched.
+
+        Built with typed constructs rather than raw SQL on purpose: the callers'
+        version used ``output::text``, a Postgres-only cast that fails on SQLite,
+        so the tool silently found nothing in local dev. ``like(f"{prefix}%")``
+        parameterises the prefix, and JSON serialisation is left to the caller.
+        """
+        result = await self.session.execute(
+            select(ExecutionTrace.output)
+            .where(ExecutionTrace.span_name.like(f"{prefix}%"))
+            .order_by(ExecutionTrace.created_at.desc())
+            .limit(1)
+        )
+        row = result.first()
+        if not row or row[0] is None:
+            return None
+        value = row[0]
+        return value if isinstance(value, str) else json.dumps(value)
+
+    async def add_batch(self, traces: List[ExecutionTrace]) -> int:
+        """Stage many trace rows in one transaction, returning how many.
+
+        Separate from ``_create``: that path commits and refreshes per row, which
+        for the OTel exporter's batches would be one round trip per span. Staging
+        only — the caller commits once for the whole batch.
+        """
+        for trace in traces:
+            self.session.add(trace)
+        return len(traces)
 
     async def _create(self, trace_data: Dict[str, Any]) -> ExecutionTrace:
         """

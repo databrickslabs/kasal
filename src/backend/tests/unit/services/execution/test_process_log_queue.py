@@ -90,7 +90,7 @@ class TestProcessCrewExecutorLogQueue:
             with (
                 patch("src.db.database_router.get_smart_db_session", fake_smart_db),
                 patch(
-                    "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                    "src.services.execution.logs.writer.ExecutionLogsRepository",
                     return_value=mock_repo,
                 ),
             ):
@@ -134,7 +134,7 @@ class TestProcessCrewExecutorLogQueue:
             with (
                 patch("src.db.database_router.get_smart_db_session", fake_smart_db),
                 patch(
-                    "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                    "src.services.execution.logs.writer.ExecutionLogsRepository",
                     return_value=mock_repo,
                 ),
             ):
@@ -188,7 +188,7 @@ class TestProcessCrewExecutorLogQueue:
             with (
                 patch("src.db.database_router.get_smart_db_session", fake_smart_db),
                 patch(
-                    "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                    "src.services.execution.logs.writer.ExecutionLogsRepository",
                     return_value=mock_repo,
                 ),
             ):
@@ -247,7 +247,7 @@ class TestProcessFlowExecutorLogQueue:
             with (
                 patch("src.db.database_router.get_smart_db_session", fake_smart_db),
                 patch(
-                    "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                    "src.services.execution.logs.writer.ExecutionLogsRepository",
                     return_value=mock_repo,
                 ),
             ):
@@ -288,7 +288,7 @@ class TestProcessFlowExecutorLogQueue:
             with (
                 patch("src.db.database_router.get_smart_db_session", fake_smart_db),
                 patch(
-                    "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                    "src.services.execution.logs.writer.ExecutionLogsRepository",
                     return_value=mock_repo,
                 ),
             ):
@@ -339,7 +339,7 @@ class TestProcessFlowExecutorLogQueue:
             with (
                 patch("src.db.database_router.get_smart_db_session", fake_smart_db),
                 patch(
-                    "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                    "src.services.execution.logs.writer.ExecutionLogsRepository",
                     return_value=mock_repo,
                 ),
             ):
@@ -392,7 +392,7 @@ class TestProcessFlowExecutorLogQueue:
             with (
                 patch("src.db.database_router.get_smart_db_session", fake_smart_db),
                 patch(
-                    "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                    "src.services.execution.logs.writer.ExecutionLogsRepository",
                     return_value=mock_repo,
                 ),
             ):
@@ -440,7 +440,7 @@ class TestBothExecutorsIntegration:
             with (
                 patch("src.db.database_router.get_smart_db_session", crew_smart_db),
                 patch(
-                    "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                    "src.services.execution.logs.writer.ExecutionLogsRepository",
                     return_value=crew_repo,
                 ),
             ):
@@ -452,7 +452,7 @@ class TestBothExecutorsIntegration:
             with (
                 patch("src.db.database_router.get_smart_db_session", flow_smart_db),
                 patch(
-                    "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                    "src.services.execution.logs.writer.ExecutionLogsRepository",
                     return_value=flow_repo,
                 ),
             ):

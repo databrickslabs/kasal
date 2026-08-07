@@ -405,11 +405,8 @@ class TestFlowService:
             MockRepository.return_value = mock_repo
             mock_repo.get.return_value = mock_flow
             mock_repo.delete.return_value = True
-
-            # Mock session execute for execution count check
-            mock_result = MagicMock()
-            mock_result.scalar_one.return_value = 0  # No executions
-            flow_service.session.execute = AsyncMock(return_value=mock_result)
+            # The execution count is the REPOSITORY's job now, not a raw query.
+            mock_repo.count_executions = AsyncMock(return_value=0)
 
             result = await flow_service.delete_flow(flow_id)
 
@@ -446,11 +443,8 @@ class TestFlowService:
             mock_repo = AsyncMock()
             MockRepository.return_value = mock_repo
             mock_repo.get.return_value = mock_flow
-
-            # Mock session execute to return execution count > 0
-            mock_result = MagicMock()
-            mock_result.scalar_one.return_value = 5  # Has executions
-            flow_service.session.execute = AsyncMock(return_value=mock_result)
+            # The execution count is the REPOSITORY's job now, not a raw query.
+            mock_repo.count_executions = AsyncMock(return_value=5)
 
             with pytest.raises(BadRequestError) as exc_info:
                 await flow_service.delete_flow(flow_id)

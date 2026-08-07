@@ -90,7 +90,7 @@ async def register(
         existing.secret = secret
         existing.consecutive_failures = 0
         existing.last_error = None
-        await session.flush()
+        await repository.save()
         row = existing
     else:
         row = A2APushConfig(
@@ -101,8 +101,7 @@ async def register(
             group_id=group_id,
             created_by_email=caller.identifier,
         )
-        session.add(row)
-        await session.flush()
+        await repository.insert(row)
 
     logger.info("[a2a-push] %s registered %s for task %s", caller.origin, url, task_id)
     return _to_dict(row)
@@ -139,10 +138,9 @@ async def deliver(task_id: str, payload: Dict[str, Any], session: Any) -> int:
     """
     from src.repositories.a2a_push_config_repository import A2APushConfigRepository
 
+    repository = A2APushConfigRepository(session)
     try:
-        rows = await A2APushConfigRepository(session).list_deliverable(
-            task_id, FAILURE_LIMIT
-        )
+        rows = await repository.list_deliverable(task_id, FAILURE_LIMIT)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[a2a-push] could not load configs for %s: %s", task_id, exc)
         return 0
@@ -152,7 +150,7 @@ async def deliver(task_id: str, payload: Dict[str, Any], session: Any) -> int:
         if await _deliver_one(row, payload):
             delivered += 1
     try:
-        await session.flush()
+        await repository.save()
     except Exception:  # noqa: BLE001
         logger.debug("[a2a-push] could not record delivery state", exc_info=True)
     return delivered

@@ -77,7 +77,7 @@ def _patch_all_deps():
             new_callable=AsyncMock,
             return_value=[],
         ),
-        patch("src.db.session.request_scoped_session"),
+        patch("src.db.session.routed_scoped_session"),
         patch("src.services.mcp.mcp_client.service.MCPService"),
         patch(
             "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
@@ -183,7 +183,7 @@ class TestSecurityPreambleInjection:
                 new_callable=AsyncMock,
                 return_value=MagicMock(),
             ),
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
                 new_callable=AsyncMock,
@@ -230,7 +230,7 @@ class TestSecurityPreambleInjection:
                 new_callable=AsyncMock,
                 return_value=MagicMock(),
             ),
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
                 new_callable=AsyncMock,
@@ -264,7 +264,7 @@ class TestSecurityPreambleInjection:
                 new_callable=AsyncMock,
                 return_value=MagicMock(),
             ),
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
                 new_callable=AsyncMock,
@@ -313,7 +313,7 @@ class TestCreateAgentLlmConfig:
                 new_callable=AsyncMock,
                 return_value=mock_llm,
             ) as mock_configure,
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
                 new_callable=AsyncMock,
@@ -344,7 +344,7 @@ class TestCreateAgentLlmConfig:
                 new_callable=AsyncMock,
                 return_value=MagicMock(),
             ) as mock_configure,
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
                 new_callable=AsyncMock,
@@ -385,7 +385,7 @@ class TestCreateAgentLlmConfig:
                 new_callable=AsyncMock,
                 return_value=mock_llm,
             ) as mock_configure,
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
                 new_callable=AsyncMock,
@@ -434,7 +434,7 @@ class TestKnowledgeSourcesRemoval:
                 new_callable=AsyncMock,
                 return_value=MagicMock(),
             ),
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
                 new_callable=AsyncMock,
@@ -479,7 +479,7 @@ class TestToolResolution:
                 new_callable=AsyncMock,
                 return_value=MagicMock(),
             ),
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
                 new_callable=AsyncMock,
@@ -518,7 +518,7 @@ class TestToolResolution:
                 new_callable=AsyncMock,
                 return_value=MagicMock(),
             ),
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
                 new_callable=AsyncMock,
@@ -564,7 +564,7 @@ class TestToolResolution:
                 new_callable=AsyncMock,
                 return_value=MagicMock(),
             ),
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
                 new_callable=AsyncMock,
@@ -617,7 +617,7 @@ class TestToolResolution:
                 new_callable=AsyncMock,
                 return_value=MagicMock(),
             ),
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
                 new_callable=AsyncMock,
@@ -681,7 +681,7 @@ class TestAdditionalAgentParams:
                 new_callable=AsyncMock,
                 return_value=MagicMock(),
             ),
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
                 new_callable=AsyncMock,
@@ -718,7 +718,7 @@ class TestAdditionalAgentParams:
                 new_callable=AsyncMock,
                 return_value=MagicMock(),
             ),
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
                 new_callable=AsyncMock,
@@ -757,7 +757,7 @@ class TestAdditionalAgentParams:
                 new_callable=AsyncMock,
                 return_value=MagicMock(),
             ),
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
                 new_callable=AsyncMock,
@@ -805,7 +805,7 @@ class TestPromptTemplates:
                 new_callable=AsyncMock,
                 return_value=MagicMock(),
             ),
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
                 new_callable=AsyncMock,
@@ -845,7 +845,7 @@ class TestPromptTemplates:
                 new_callable=AsyncMock,
                 return_value=MagicMock(),
             ),
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
                 new_callable=AsyncMock,
@@ -882,7 +882,7 @@ class TestPromptTemplates:
                 new_callable=AsyncMock,
                 return_value=MagicMock(),
             ),
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
                 new_callable=AsyncMock,
@@ -924,7 +924,7 @@ class TestDefaultAgentSettings:
                 new_callable=AsyncMock,
                 return_value=MagicMock(),
             ),
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
                 new_callable=AsyncMock,
@@ -959,7 +959,7 @@ class TestDefaultAgentSettings:
                 new_callable=AsyncMock,
                 return_value=MagicMock(),
             ),
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
                 new_callable=AsyncMock,
@@ -989,7 +989,7 @@ class TestDefaultAgentSettings:
                 new_callable=AsyncMock,
                 return_value=MagicMock(),
             ),
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
                 new_callable=AsyncMock,
@@ -1036,7 +1036,7 @@ class TestLlmFallback:
                 new_callable=AsyncMock,
                 side_effect=Exception("LLM config failed"),
             ),
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
                 new_callable=AsyncMock,

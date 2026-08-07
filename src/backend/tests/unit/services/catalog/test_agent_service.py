@@ -378,31 +378,44 @@ class TestAgentServiceUpdateLimitedFields:
 class TestAgentServiceDelete:
     """Test cases for delete method."""
 
+    @staticmethod
+    def _iso_session_finding(agent):
+        """A mock private session whose SELECT returns ``agent``.
+
+        The existence check goes through ``AgentRepository`` (a repositories file)
+        rather than ``session.get``, so what has to be stubbed is the query result,
+        not the session's own ORM helper.
+        """
+        iso_session = AsyncMock(spec=AsyncSession)
+        found = MagicMock()
+        found.scalars.return_value.first.return_value = agent
+        iso_session.execute = AsyncMock(return_value=found)
+        return iso_session
+
     @pytest.mark.asyncio
     async def test_delete_success(self, agent_service):
         """Test successful agent deletion (deletes tasks + agent, commits)."""
-        iso_session = AsyncMock(spec=AsyncSession)
-        iso_session.get = AsyncMock(return_value=MockAgent(id="agent-123"))
+        iso_session = self._iso_session_finding(MockAgent(id="agent-123"))
 
         with _patch_isolated_session(iso_session):
             result = await agent_service.delete("agent-123")
 
         assert result is True
-        # Two deletes: tasks then agents, then an explicit commit
-        assert iso_session.execute.await_count == 2
+        # One SELECT for the existence check, then two deletes (tasks, agents).
+        assert iso_session.execute.await_count == 3
         iso_session.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_delete_not_found(self, agent_service):
         """Test delete when agent is not found."""
-        iso_session = AsyncMock(spec=AsyncSession)
-        iso_session.get = AsyncMock(return_value=None)
+        iso_session = self._iso_session_finding(None)
 
         with _patch_isolated_session(iso_session):
             result = await agent_service.delete("non-existent")
 
         assert result is False
-        iso_session.execute.assert_not_awaited()
+        # Only the existence SELECT ran — no deletes, no commit.
+        assert iso_session.execute.await_count == 1
         iso_session.commit.assert_not_awaited()
 
 

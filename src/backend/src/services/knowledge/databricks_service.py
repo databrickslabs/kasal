@@ -3,9 +3,9 @@ Databricks Knowledge Source Service
 """
 
 import asyncio
+import hashlib
 import io
 import logging
-import hashlib
 import os
 import tempfile
 from datetime import datetime
@@ -15,7 +15,6 @@ from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import KasalError, UnprocessableEntityError
-from src.repositories.databricks_config_repository import DatabricksConfigRepository
 from src.repositories.databricks_volume_repository import DatabricksVolumeRepository
 
 logger = logging.getLogger(__name__)
@@ -46,7 +45,14 @@ class DatabricksKnowledgeService:
             user_token: Optional user token for OBO authentication
         """
         self.session = session
-        self.repository = DatabricksConfigRepository(session)
+        # Databricks config belongs to the databricks domain, so it comes from
+        # DatabricksService rather than a repository built here. Nothing in this class
+        # currently reads it — the old DatabricksConfigRepository attribute was
+        # constructed and never used — but the seam is kept so a future config read
+        # goes through the owning service instead of reintroducing the repository.
+        from src.services.databricks.workspace.service import DatabricksService
+
+        self.databricks_service = DatabricksService(session, group_id=group_id)
         self.volume_repository = DatabricksVolumeRepository(
             user_token=user_token, group_id=group_id
         )

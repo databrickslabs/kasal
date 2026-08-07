@@ -223,15 +223,14 @@ class WorkflowRecipeService:
         self.session = session
         self.repository = WorkflowRecipeRepository(session)
         self.trial_repository = WorkflowRecipeTrialRepository(session)
-        # Cross-domain READS go through the owning repository, never a raw query
-        # on another table (see tests/unit/architecture/).
-        from src.repositories.execution_history_repository import (
-            ExecutionHistoryRepository,
-        )
-        from src.repositories.execution_trace_repository import ExecutionTraceRepository
+        # Cross-domain reads go through the OWNING SERVICE, not its repository:
+        # runs and traces are execution's/trace's data, and their services are where
+        # scoping and shaping live (see tests/unit/architecture/).
+        from src.services.execution.service import ExecutionService
+        from src.services.trace.service import ExecutionTraceService
 
-        self.history_repository = ExecutionHistoryRepository(session)
-        self.trace_repository = ExecutionTraceRepository(session)
+        self.execution_service = ExecutionService(session)
+        self.trace_service = ExecutionTraceService(session)
 
     # ------------------------------------------------------------------ mining
 
@@ -243,7 +242,7 @@ class WorkflowRecipeService:
         ``source_job_id`` would miss every run that dedup folded in and rewrote
         away, which is exactly how the sweep failed to converge.
         """
-        return await self.history_repository.get_recent(
+        return await self.execution_service.get_recent_runs(
             limit=_BATCH, status=_MINEABLE_STATUS
         )
 
@@ -273,7 +272,7 @@ class WorkflowRecipeService:
         the ratio against ``tool_call_count`` is the clearest available signal of
         that. One observed run made 59 calls of which ~12 were distinct.
         """
-        rows = await self.trace_repository.get_event_shape_by_job_id(job_id)
+        rows = await self.trace_service.get_event_shape_by_job_id(job_id)
 
         tools: set = set()
         signatures: set = set()
@@ -641,7 +640,7 @@ class WorkflowRecipeService:
         recipe.curated_by = curated_by if curation else None
         recipe.curated_at = datetime.utcnow() if curation else None
         await self.session.commit()
-        await self.session.refresh(recipe)
+        await self.repository.reload(recipe)
         return recipe
 
     async def record_reuse(self, recipe_id: int, group_ids: List[str]) -> Optional[Any]:
@@ -657,7 +656,7 @@ class WorkflowRecipeService:
             return None
         recipe.times_reused = (recipe.times_reused or 0) + 1
         await self.session.commit()
-        await self.session.refresh(recipe)
+        await self.repository.reload(recipe)
         return recipe
 
     async def delete(self, recipe_id: int, group_ids: List[str]) -> bool:
@@ -945,7 +944,7 @@ class WorkflowRecipeService:
         produced a crew which then failed is exactly the outcome the report needs
         to count, and dropping it would leave only successes in both arms.
         """
-        return await self.history_repository.get_recent(limit=limit)
+        return await self.execution_service.get_recent_runs(limit=limit)
 
     async def effectiveness(
         self, group_ids: List[str], days: int = 30
@@ -1048,9 +1047,9 @@ class WorkflowRecipeService:
         crews produced, which can only happen here: the generation that wrote the
         trial finished long before the user pressed run.
         """
-        from src.db.session import async_session_factory
+        from src.db.session import routed_scoped_session
 
-        async with async_session_factory() as session:
+        async with routed_scoped_session() as session:
             service = WorkflowRecipeService(session)
             mined = await service.mine_new_executions()
             await service.backfill_embeddings()

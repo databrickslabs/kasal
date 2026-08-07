@@ -3932,16 +3932,19 @@ class TestProgressiveGeneration:
             lm.completion = AsyncMock(return_value='{"agents":[{"name":"A"}]}')
             rjp.return_value = plan_dict
 
-            # Make the session factory raise to trigger the except on line 1502
-            mock_session_factory = AsyncMock()
-            mock_session_factory.__aenter__ = AsyncMock(
+            # Make acquiring the session raise, to trigger the except.
+            # The log write is ROUTED (routed_scoped_session), because this runs
+            # in a background task where the raw factory would have written the
+            # row to the local DB while the rest of the generation used Lakebase.
+            mock_session_ctx = AsyncMock()
+            mock_session_ctx.__aenter__ = AsyncMock(
                 side_effect=RuntimeError("db connection failed")
             )
-            mock_session_factory.__aexit__ = AsyncMock(return_value=False)
+            mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
 
             with patch(
-                "src.db.session.async_session_factory",
-                return_value=mock_session_factory,
+                "src.db.session.routed_scoped_session",
+                return_value=mock_session_ctx,
             ):
                 result = await self.service._generate_crew_plan(request, None, "m")
 

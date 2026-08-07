@@ -106,7 +106,7 @@ class TestTaskConfigToolOverride:
     """Test that _configure_task_tools passes tool_config_override to create_tool.
 
     _configure_task_tools creates a ToolFactory internally via a local import.
-    The ``async with request_scoped_session()`` will fail in stubs, so the code
+    The ``async with routed_scoped_session()`` will fail in stubs, so the code
     falls back to ``ToolFactory(factory_config)`` → ``tool_factory.initialize()``.
     We make that fallback return our controlled factory mock by having
     ``ToolFactory(...)`` return the mock and its ``.initialize()`` succeed.
@@ -120,7 +120,7 @@ class TestTaskConfigToolOverride:
         tf_mod = sys.modules["src.services.tools.tool_factory"]
         db_mod = sys.modules["src.db.session"]
         orig_tf = getattr(tf_mod, "ToolFactory", None)
-        orig_rss = getattr(db_mod, "request_scoped_session", None)
+        orig_rss = getattr(db_mod, "routed_scoped_session", None)
 
         # ToolFactory(factory_config) should return our tool_factory instance.
         # The .create() async classmethod path will fail (session mock isn't perfect),
@@ -132,14 +132,14 @@ class TestTaskConfigToolOverride:
         tool_factory.initialize = AsyncMock()
 
         tf_mod.ToolFactory = mock_tf_class
-        # Ensure the async-with request_scoped_session() fails so we hit fallback
-        db_mod.request_scoped_session = MagicMock(side_effect=Exception("stub"))
+        # Ensure the async-with routed_scoped_session() fails so we hit fallback
+        db_mod.routed_scoped_session = MagicMock(side_effect=Exception("stub"))
 
         return tf_mod, db_mod, orig_tf, orig_rss
 
     def _restore(self, tf_mod, db_mod, orig_tf, orig_rss):
         tf_mod.ToolFactory = orig_tf
-        db_mod.request_scoped_session = orig_rss
+        db_mod.routed_scoped_session = orig_rss
 
     @pytest.mark.asyncio
     async def test_task_tools_pass_override_via_tool_configs(self):

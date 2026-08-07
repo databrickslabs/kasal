@@ -14,7 +14,6 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from src.core.logger import LoggerManager
 from src.core.sse_manager import SSEEvent, sse_manager
-from src.repositories.execution_history_repository import ExecutionHistoryRepository
 from src.repositories.execution_trace_repository import ExecutionTraceRepository
 from src.schemas.execution_trace import (
     DeleteTraceResponse,
@@ -48,9 +47,37 @@ class ExecutionTraceService:
         """
         self.session = session
         self.repository = ExecutionTraceRepository(session)
-        self.execution_history_repository = ExecutionHistoryRepository(
+        # Runs are ExecutionService's domain — traces only READ them to authorize
+        # access and to resolve a run id.
+        from src.services.execution.service import ExecutionService
+
+        self.execution_service = ExecutionService(
             auth_session if auth_session is not None else session
         )
+
+    async def outputs_containing(self, job_id: str, needle: str) -> List[Any]:
+        """This run's trace outputs whose serialised form contains ``needle``.
+
+        Serves the flow runner's CI/CD artifact scrape.
+        """
+        return await self.repository.outputs_containing(job_id, needle)
+
+    async def latest_output_for_span_prefix(self, prefix: str) -> Optional[str]:
+        """The most recent trace ``output`` whose ``span_name`` starts with ``prefix``.
+
+        Serves the PowerBI/UCMV tools, which hand a later step the output of an
+        earlier one; they used to build ``ExecutionTraceRepository`` for this.
+        """
+        return await self.repository.latest_output_for_span_prefix(prefix)
+
+    async def get_event_shape_by_job_id(self, job_id: str) -> List[Any]:
+        """Per-event (source, context, type) rows for a run — the trace SHAPE.
+
+        Used by recipe mining to fingerprint what a run actually did without
+        pulling every output payload. Traces are this service's domain, so the
+        accessor lives here rather than callers building ExecutionTraceRepository.
+        """
+        return await self.repository.get_event_shape_by_job_id(job_id)
 
     async def get_traces_by_run_id(
         self, group_context=None, run_id: int = None, limit: int = 100, offset: int = 0
@@ -74,7 +101,7 @@ class ExecutionTraceService:
             group_ids = group_context.group_ids if group_context else None
 
             # Check if the execution exists and the user has access to it
-            execution = await self.execution_history_repository.get_execution_by_id(
+            execution = await self.execution_service.get_run_by_id(
                 run_id, group_ids=group_ids
             )
 
@@ -153,17 +180,17 @@ class ExecutionTraceService:
             # Authorize with the SLIM summary lookup — the full-row variant
             # dragged the result/inputs JSON blobs through the driver on every
             # 2s poll just to check group access and resolve run_id.
-            execution = (
-                await self.execution_history_repository.get_execution_summary_by_job_id(
-                    job_id, group_ids=group_ids
-                )
+            execution = await self.execution_service.get_run_summary_by_job_id(
+                job_id, group_ids=group_ids
             )
 
             if not execution:
                 # Either doesn't exist or user doesn't have access
                 # Try to get execution without group filter to diagnose
-                execution_no_filter = await self.execution_history_repository.get_execution_summary_by_job_id(
-                    job_id, group_ids=None
+                execution_no_filter = (
+                    await self.execution_service.get_run_summary_by_job_id(
+                        job_id, group_ids=None
+                    )
                 )
                 if execution_no_filter:
                     logger.warning(
@@ -241,10 +268,8 @@ class ExecutionTraceService:
         try:
             group_ids = group_context.group_ids if group_context else None
 
-            execution = (
-                await self.execution_history_repository.get_execution_summary_by_job_id(
-                    job_id, group_ids=group_ids
-                )
+            execution = await self.execution_service.get_run_summary_by_job_id(
+                job_id, group_ids=group_ids
             )
             if not execution:
                 logger.warning(
@@ -395,10 +420,8 @@ class ExecutionTraceService:
 
             # Check if trace belongs to user's group via job_id
             if trace.job_id and group_context and group_context.group_ids:
-                execution = (
-                    await self.execution_history_repository.get_execution_by_job_id(
-                        trace.job_id, group_ids=group_context.group_ids
-                    )
+                execution = await self.execution_service.get_run_by_job_id(
+                    trace.job_id, group_ids=group_context.group_ids
                 )
                 if not execution:
                     return None  # Not authorized
@@ -513,10 +536,8 @@ class ExecutionTraceService:
                 and group_context
                 and group_context.group_ids
             ):
-                execution = (
-                    await self.execution_history_repository.get_execution_by_job_id(
-                        trace_data["job_id"], group_ids=group_context.group_ids
-                    )
+                execution = await self.execution_service.get_run_by_job_id(
+                    trace_data["job_id"], group_ids=group_context.group_ids
                 )
                 if not execution:
                     raise ValueError("Not authorized to create trace for this job")
@@ -586,10 +607,8 @@ class ExecutionTraceService:
 
             # Check authorization via job_id
             if trace.job_id and group_context and group_context.group_ids:
-                execution = (
-                    await self.execution_history_repository.get_execution_by_job_id(
-                        trace.job_id, group_ids=group_context.group_ids
-                    )
+                execution = await self.execution_service.get_run_by_job_id(
+                    trace.job_id, group_ids=group_context.group_ids
                 )
                 if not execution:
                     return None  # Not authorized
@@ -653,7 +672,7 @@ class ExecutionTraceService:
         try:
             # Check if execution belongs to group
             if group_context and group_context.group_ids:
-                execution = await self.execution_history_repository.get_execution_by_id(
+                execution = await self.execution_service.get_run_by_id(
                     run_id, group_ids=group_context.group_ids
                 )
                 if not execution:
@@ -723,10 +742,8 @@ class ExecutionTraceService:
         try:
             # Check if job belongs to group
             if group_context and group_context.group_ids:
-                execution = (
-                    await self.execution_history_repository.get_execution_by_job_id(
-                        job_id, group_ids=group_context.group_ids
-                    )
+                execution = await self.execution_service.get_run_by_job_id(
+                    job_id, group_ids=group_context.group_ids
                 )
                 if not execution:
                     return DeleteTraceResponse(
@@ -791,26 +808,24 @@ class ExecutionTraceService:
                     deleted_traces=0, message="No group context provided"
                 )
 
-            # Get all executions for the group
-            executions = (
-                await self.execution_history_repository.get_all_executions_for_groups(
-                    group_ids=group_context.group_ids
-                )
+            # Runs are ExecutionService's domain. This called a method that did NOT
+            # exist on the repository (get_all_executions_for_groups), so every
+            # attempt raised AttributeError and deleted nothing — the router test
+            # mocked this whole method, so nothing caught it.
+            job_ids = await self.execution_service.get_job_ids_for_groups(
+                group_context.group_ids
             )
 
-            if not executions:
+            if not job_ids:
                 return DeleteTraceResponse(
                     deleted_traces=0, message="No executions found for group"
                 )
 
             # Delete traces for each execution
             total_deleted = 0
-            for execution in executions:
-                if execution.job_id:
-                    deleted_count = await self.repository.delete_by_job_id(
-                        execution.job_id
-                    )
-                    total_deleted += deleted_count
+            for job_id in job_ids:
+                if job_id:
+                    total_deleted += await self.repository.delete_by_job_id(job_id)
 
             return DeleteTraceResponse(
                 deleted_traces=total_deleted,

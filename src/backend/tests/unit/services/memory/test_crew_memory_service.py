@@ -92,7 +92,7 @@ class TestFetchMemoryBackendConfig:
         mock_service = AsyncMock()
         mock_service.get_active_config.return_value = None
 
-        with patch("src.db.session.request_scoped_session") as mock_ctx:
+        with patch("src.db.session.routed_scoped_session") as mock_ctx:
             mock_ctx.return_value.__aenter__.return_value = mock_session
             with patch(
                 "src.services.memory.backend_service.MemoryBackendService",
@@ -111,7 +111,7 @@ class TestFetchMemoryBackendConfig:
         mock_service = AsyncMock()
         mock_service.get_active_config.return_value = None  # no active backend
 
-        with patch("src.db.session.request_scoped_session") as mock_ctx:
+        with patch("src.db.session.routed_scoped_session") as mock_ctx:
             mock_ctx.return_value.__aenter__.return_value = mock_session
             with patch(
                 "src.services.memory.backend_service.MemoryBackendService",
@@ -136,7 +136,7 @@ class TestFetchMemoryBackendConfig:
         mock_service = AsyncMock()
         mock_service.get_active_config.return_value = mock_active
 
-        with patch("src.db.session.request_scoped_session") as mock_ctx:
+        with patch("src.db.session.routed_scoped_session") as mock_ctx:
             mock_ctx.return_value.__aenter__.return_value = mock_session
             with patch(
                 "src.services.memory.backend_service.MemoryBackendService",
@@ -152,7 +152,7 @@ class TestFetchMemoryBackendConfig:
     async def test_returns_none_on_exception(self):
         service = CrewMemoryService({"group_id": "grp1"})
 
-        with patch("src.db.session.request_scoped_session") as mock_ctx:
+        with patch("src.db.session.routed_scoped_session") as mock_ctx:
             mock_ctx.return_value.__aenter__.side_effect = Exception("DB error")
             result = await service.fetch_memory_backend_config()
 
@@ -172,7 +172,7 @@ class TestFetchMemoryBackendConfig:
         mock_service = AsyncMock()
         mock_service.get_active_config.return_value = mock_active
 
-        with patch("src.db.session.request_scoped_session") as mock_ctx:
+        with patch("src.db.session.routed_scoped_session") as mock_ctx:
             mock_ctx.return_value.__aenter__.return_value = mock_session
             with patch(
                 "src.services.memory.backend_service.MemoryBackendService",

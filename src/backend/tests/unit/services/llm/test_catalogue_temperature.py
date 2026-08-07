@@ -43,7 +43,7 @@ def _patch_lookup(model_config_dict):
     mock_service.get_model_config.return_value = model_config_dict
 
     return (
-        patch("src.db.session.request_scoped_session", return_value=mock_ctx),
+        patch("src.db.session.routed_scoped_session", return_value=mock_ctx),
         patch("src.services.llm.manager.ModelConfigService", return_value=mock_service),
     )
 

@@ -632,7 +632,7 @@ class ExecutionStatusService:
             else:
                 # No caller-supplied session: write the parent row on a PRIVATE
                 # connection (get_isolated_db_session = a dedicated NullPool engine
-                # on SQLite). The previous request_scoped_session() rode the shared
+                # on SQLite). The helper used here before rode the shared
                 # StaticPool connection, so a concurrent run's commit/rollback — or
                 # the request session being closed when the response returned, while
                 # this still ran in a background task ("sqlite3.ProgrammingError:

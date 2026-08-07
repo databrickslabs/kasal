@@ -372,22 +372,19 @@ class EmbedderConfigBuilder:
         # If no endpoint, get from database
         if not databricks_endpoint:
             try:
-                from src.db.session import request_scoped_session
-                from src.services.databricks.workspace.service import DatabricksService
+                from src.services.databricks.workspace.config_provider import (
+                    DatabricksConfigProvider,
+                )
 
-                async with request_scoped_session() as session:
-                    databricks_service = DatabricksService(session)
-                    db_config = await databricks_service.get_databricks_config()
-                    if db_config and db_config.workspace_url:
-                        databricks_endpoint = (
-                            DatabricksURLUtils.normalize_workspace_url(
-                                db_config.workspace_url
-                            )
+                db_config = await DatabricksConfigProvider.get()
+                if db_config and db_config.workspace_url:
+                    databricks_endpoint = DatabricksURLUtils.normalize_workspace_url(
+                        db_config.workspace_url
+                    )
+                    if databricks_endpoint:
+                        logger.info(
+                            f"Using Databricks workspace URL from database: {databricks_endpoint}"
                         )
-                        if databricks_endpoint:
-                            logger.info(
-                                f"Using Databricks workspace URL from database: {databricks_endpoint}"
-                            )
             except Exception as e:
                 logger.warning(
                     f"Could not get Databricks workspace URL from database: {e}"

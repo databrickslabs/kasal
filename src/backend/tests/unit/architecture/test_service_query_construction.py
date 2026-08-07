@@ -51,13 +51,20 @@ _EXEMPT = (
 )
 
 #: Files that already build queries. Shrink this; never add to it.
+#:
+#: Down from 6 to 2. The four that left moved their SQL into a repositories file:
+#: `flow_service` (the flow cascade-delete, now on FlowRepository), the two PowerBI
+#: /UCMV tools and `flow_execution_runner` (latest-trace and checkpoint lookups, now
+#: on ExecutionTraceRepository / ExecutionHistoryRepository). Three of those queries
+#: also used Postgres-only casts (`output::text`, `result::text`) that silently
+#: matched nothing on SQLite; the repository versions are dialect-neutral.
+#:
+#: The two left are the DEAD post-subprocess log writers — raw DBAPI against
+#: `execution_logs`, neither reachable from src/ (see the allowlist in
+#: test_sessions_go_through_the_router.py). They should be DELETED, not refactored.
 _BASELINE = {
     "services/execution/logs/db_handler.py",
-    "services/flow_builder/flow_execution_runner.py",
-    "services/flow_builder/flow_service.py",
     "services/flow_builder/process_executor.py",
-    "services/tools/databricks_dashboard_creator_tool.py",
-    "services/tools/metric_view_validator_tool.py",
 }
 
 _SERVICES = pathlib.Path(__file__).resolve().parents[3] / "src" / "services"
@@ -130,4 +137,78 @@ def test_baseline_has_no_stale_entries():
         not stale
     ), "These no longer build queries — delete them from _BASELINE:\n  " + "\n  ".join(
         stale
+    )
+
+
+# ---------------------------------------------------------------------------
+# ORM writes — the half the query check above cannot see
+# ---------------------------------------------------------------------------
+#
+# `_builds_queries` looks for `session.execute(...)` and `select(...)`. It says
+# nothing about `session.add(row)` / `session.delete(row)`, which is how a service
+# persists WITHOUT writing SQL at all — and that is the more common bypass: ten
+# services were doing it while this file reported six offenders.
+#
+# The rule is the same one, applied to writes: the repositories file owns
+# persistence for its model. A service that adds or deletes a row itself skips
+# whatever that repository enforces — group scoping, field encryption, cascade
+# order. All three have been real bugs here.
+#
+# A service may still own the TRANSACTION (`commit`, `rollback`), and may mutate an
+# instance a repository handed it — an ORM attribute assignment is not a query.
+# What it may not do is stage or remove rows.
+
+#: `session.<op>(...)` — persistence operations that belong behind a repository.
+_WRITE_OPS = {"add", "add_all", "delete", "merge"}
+
+#: Identifiers that mean "a database session" in this codebase.
+_SESSION_NAMES = {"session", "db", "iso_session", "log_session", "_session"}
+
+
+def _looks_like_a_session(name: str) -> bool:
+    return name in _SESSION_NAMES or name.endswith("_session")
+
+
+def _orm_writers(path: pathlib.Path) -> set[str]:
+    """ORM write ops this module calls on something that looks like a session."""
+    source = path.read_text()
+    # aiohttp's ClientSession has .delete()/.put() too, and `async with
+    # aiohttp.ClientSession() as session` is a common shape here — an HTTP DELETE
+    # is not a database write. mcp_handler tripped exactly this.
+    if "aiohttp" in source and "ClientSession" in source:
+        return set()
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+    found = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        owner = (
+            getattr(node.func.value, "id", "") or getattr(node.func.value, "attr", "")
+        ).lower()
+        if _looks_like_a_session(owner) and node.func.attr in _WRITE_OPS:
+            found.add(node.func.attr)
+    return found
+
+
+def test_no_service_persists_rows_itself():
+    """Cleared to zero — keep it there. There is no baseline on purpose."""
+    offenders = {}
+    for path in _SERVICES.rglob("*.py"):
+        rel = path.relative_to(_SERVICES.parents[0]).as_posix()
+        if any(part in rel for part in _EXEMPT):
+            continue
+        writers = _orm_writers(path)
+        if writers:
+            offenders[rel] = sorted(writers)
+
+    assert not offenders, (
+        "These services stage or remove rows themselves:\n  "
+        + "\n  ".join(f"{p}: {ops}" for p, ops in sorted(offenders.items()))
+        + "\n\nPut the write on the model's repository in src/repositories/ "
+        "(insert/remove/save) and call that instead. The service keeps the "
+        "transaction (commit/rollback); the repository owns persistence, and with "
+        "it group scoping, encryption and cascade order."
     )

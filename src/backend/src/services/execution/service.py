@@ -227,6 +227,297 @@ class ExecutionService:
             logger.error(error_msg, exc_info=True)
             raise KasalError(detail=error_msg)
 
+    async def get_run_by_job_id(
+        self, job_id: str, group_ids: Optional[List[str]] = None
+    ) -> Optional[Any]:
+        """The ``ExecutionHistory`` row for a job id, scoped to ``group_ids``.
+
+        The most-wanted read in the codebase: flow_builder, agent_builder, mlflow
+        and hitl all needed it and each built ``ExecutionHistoryRepository`` itself.
+        Runs are this service's domain, so the accessor belongs here — and having one
+        means the group filter is applied in one place instead of five.
+        """
+        from src.repositories.execution_history_repository import (
+            ExecutionHistoryRepository,
+        )
+
+        session = self._require_session("get_run_by_job_id")
+        return await ExecutionHistoryRepository(session).get_execution_by_job_id(
+            job_id, group_ids=group_ids
+        )
+
+    async def get_run_by_id(
+        self, execution_id: int, group_ids: Optional[List[str]] = None
+    ) -> Optional[Any]:
+        """The ``ExecutionHistory`` row for an integer id, scoped when asked.
+
+        ``group_ids`` is optional because two kinds of caller share this: internal
+        resume paths that already hold a group-checked row, and the trace service,
+        which authorizes by passing the caller's groups. PASS IT whenever the id
+        came from outside — omitting it returns any tenant's run.
+        """
+        from src.repositories.execution_history_repository import (
+            ExecutionHistoryRepository,
+        )
+
+        session = self._require_session("get_run_by_id")
+        repository = ExecutionHistoryRepository(session)
+        if group_ids is None:
+            return await repository.find_by_id(execution_id)
+        return await repository.get_execution_by_id(execution_id, group_ids=group_ids)
+
+    async def get_run_summary_by_job_id(
+        self, job_id: str, group_ids: Optional[List[str]] = None
+    ) -> Optional[Any]:
+        """Scalar-only run lookup for HOT paths (SSE polling, trace authorization).
+
+        The full-row variant drags result/inputs/checkpoint JSON through the driver
+        on every poll just to authorize access.
+        """
+        from src.repositories.execution_history_repository import (
+            ExecutionHistoryRepository,
+        )
+
+        session = self._require_session("get_run_summary_by_job_id")
+        return await ExecutionHistoryRepository(
+            session
+        ).get_execution_summary_by_job_id(job_id, group_ids=group_ids)
+
+    async def get_job_ids_for_groups(self, group_ids: List[str]) -> List[str]:
+        """Job ids belonging to any of these groups.
+
+        Used by bulk cleanup — deleting every trace a workspace owns needs the run
+        ids first. The trace service called a NON-EXISTENT
+        ``get_all_executions_for_groups`` on the repository for this, so
+        ``delete_all_traces_for_group`` raised AttributeError and deleted nothing;
+        its router test mocked the whole method, so nothing caught it.
+        """
+        from src.repositories.execution_history_repository import (
+            ExecutionHistoryRepository,
+        )
+
+        session = self._require_session("get_job_ids_for_groups")
+        return await ExecutionHistoryRepository(session).get_job_ids_for_groups(
+            group_ids
+        )
+
+    async def get_job_ids_with_statuses(self, statuses: List[str]) -> List[str]:
+        """Job ids currently in any of ``statuses`` — for the SSE poller."""
+        from src.repositories.execution_history_repository import (
+            ExecutionHistoryRepository,
+        )
+
+        session = self._require_session("get_job_ids_with_statuses")
+        return await ExecutionHistoryRepository(session).get_job_ids_by_statuses(
+            statuses
+        )
+
+    async def get_recent_runs(
+        self, limit: int, status: Optional[str] = None
+    ) -> List[Any]:
+        """The most recent runs, newest first, optionally filtered to one status."""
+        from src.repositories.execution_history_repository import (
+            ExecutionHistoryRepository,
+        )
+
+        session = self._require_session("get_recent_runs")
+        return await ExecutionHistoryRepository(session).get_recent(
+            limit=limit, status=status
+        )
+
+    async def latest_checkpoint_containing(self, key: str) -> Optional[dict]:
+        """Most recent run whose ``checkpoint_data`` holds ``key``.
+
+        For the UCMV tools, which look for edits a user saved in an earlier step of
+        a multi-step flow.
+        """
+        from src.repositories.execution_history_repository import (
+            ExecutionHistoryRepository,
+        )
+
+        session = self._require_session("latest_checkpoint_containing")
+        return await ExecutionHistoryRepository(session).latest_checkpoint_containing(
+            key
+        )
+
+    async def latest_result_with_keys(self, keys: List[str]) -> Optional[dict]:
+        """Most recent run whose ``result`` dict holds ALL of ``keys``."""
+        from src.repositories.execution_history_repository import (
+            ExecutionHistoryRepository,
+        )
+
+        session = self._require_session("latest_result_with_keys")
+        return await ExecutionHistoryRepository(session).latest_result_with_keys(keys)
+
+    async def get_run_of_type(
+        self, execution_id: int, execution_type: str
+    ) -> Optional[Any]:
+        """A run by id, only if it is of ``execution_type`` ("flow"/"crew"/"agent")."""
+        from src.repositories.execution_history_repository import (
+            ExecutionHistoryRepository,
+        )
+
+        session = self._require_session("get_run_of_type")
+        return await ExecutionHistoryRepository(session).get_by_id_and_type(
+            execution_id, execution_type
+        )
+
+    async def get_run_of_type_by_job_id(
+        self, job_id: str, execution_type: str
+    ) -> Optional[Any]:
+        """A run by job id, only if it is of ``execution_type``."""
+        from src.repositories.execution_history_repository import (
+            ExecutionHistoryRepository,
+        )
+
+        session = self._require_session("get_run_of_type_by_job_id")
+        return await ExecutionHistoryRepository(session).get_by_job_id_and_type(
+            job_id, execution_type
+        )
+
+    async def get_runs_of_type_for_flow(
+        self, flow_id: Any, execution_type: str
+    ) -> List[Any]:
+        """Every run of ``execution_type`` belonging to one flow."""
+        from src.repositories.execution_history_repository import (
+            ExecutionHistoryRepository,
+        )
+
+        session = self._require_session("get_runs_of_type_for_flow")
+        return await ExecutionHistoryRepository(session).get_by_flow_id_and_type(
+            flow_id, execution_type
+        )
+
+    async def reload_run(self, run: Any) -> Any:
+        """Re-read a run after commit so server-side defaults are populated."""
+        from src.repositories.execution_history_repository import (
+            ExecutionHistoryRepository,
+        )
+
+        session = self._require_session("reload_run")
+        return await ExecutionHistoryRepository(session).reload(run)
+
+    async def delete_run(self, run: Any, commit: bool = True) -> None:
+        """Delete one run row."""
+        from src.repositories.execution_history_repository import (
+            ExecutionHistoryRepository,
+        )
+
+        session = self._require_session("delete_run")
+        await ExecutionHistoryRepository(session).remove(run, commit=commit)
+
+    def _require_session(self, method: str):
+        """The session this service was constructed with, or a clear error."""
+        if self.session is None:
+            raise ValueError(
+                f"{method} requires a session; construct ExecutionService(session)."
+            )
+        return self.session
+
+    @staticmethod
+    async def create_run_record(
+        session,
+        *,
+        job_id: str,
+        run_name: str,
+        inputs: Dict[str, Any],
+        execution_type: str,
+        group_id: Optional[str] = None,
+        group_email: Optional[str] = None,
+        flow_id: Optional[Any] = None,
+        status: Optional[str] = None,
+        trigger_type: Optional[str] = None,
+        created_at: Optional[datetime] = None,
+        commit: bool = True,
+    ) -> Any:
+        """Create the ``executionhistory`` row for a run that is about to start.
+
+        The scheduler and the flow builder both need this and both used to build the
+        model and call ``ExecutionHistoryRepository.insert`` themselves — the two
+        cross-domain WRITES into this table. Runs are this service's domain, so the
+        construction belongs here: the status a new run starts in, and the fact that
+        ``flow_id`` is only meaningful for a flow, are decisions about runs.
+
+        ``session`` is passed IN rather than acquired: both callers already hold one
+        chosen for a reason — the flow builder a PRIVATE connection (a shared SQLite
+        one can have a concurrent rollback discard this committed row), the scheduler
+        its own routed session.
+
+        ``commit`` defaults True because both callers then hand the job to a
+        subprocess, which must be able to see the row.
+
+        Args:
+            session: the caller's session — see above.
+            job_id: the run's external identifier.
+            run_name: human-readable name, already generated by the caller.
+            inputs: the stored config for the run.
+            execution_type: ``"crew"``, ``"flow"`` or ``"agent"``.
+            group_id / group_email: tenant stamps.
+            flow_id: set only for a flow with a saved definition.
+            status: defaults to PENDING; pass one only to override.
+            trigger_type: e.g. ``"scheduled"`` — how the run was started.
+            created_at: defaults to now; the scheduler passes the (naive) time the
+                schedule was DUE, so a delayed sweep records when it should have run.
+            commit: commit before returning (default) or leave it to the caller.
+
+        Returns:
+            The persisted ``ExecutionHistory`` row.
+        """
+        from src.models.execution_history import ExecutionHistory
+        from src.repositories.execution_history_repository import (
+            ExecutionHistoryRepository,
+        )
+
+        run = ExecutionHistory(
+            job_id=job_id,
+            status=status or ExecutionStatus.PENDING.value,
+            inputs=inputs or {},
+            run_name=run_name,
+            execution_type=execution_type,
+            group_id=group_id,
+            group_email=group_email,
+            created_at=created_at or datetime.utcnow(),
+        )
+        if trigger_type:
+            run.trigger_type = trigger_type
+        # Only for a flow with a saved definition — an ad-hoc flow run (nodes passed
+        # inline) has no row to point at.
+        if execution_type == "flow" and flow_id:
+            run.flow_id = flow_id
+
+        return await ExecutionHistoryRepository(session).insert(run, commit=commit)
+
+    async def get_execution_record(
+        self, execution_id: int, group_ids: Optional[List[str]] = None
+    ) -> Optional[Any]:
+        """The raw ``ExecutionHistory`` row for one run, scoped to ``group_ids``.
+
+        Distinct from :meth:`get_execution`, which returns a flow-shaped DICT via
+        ``KasalFlowService`` and applies NO tenant filter. Callers that need the
+        stored config off the row — the scheduler, building a schedule from a past
+        run — need both the ORM object and the scoping, and previously had to reach
+        into ``ExecutionHistoryRepository`` themselves to get them.
+
+        ``group_ids`` is what stops a caller creating a schedule from ANOTHER
+        tenant's execution and reading its config and prompts. Pass it whenever a
+        group context exists; None is for local/non-multitenant use only.
+
+        Args:
+            execution_id: integer primary key of the run
+            group_ids: groups the caller may see, or None to skip filtering
+
+        Returns:
+            The ``ExecutionHistory`` row, or None when absent or not visible.
+        """
+        from src.repositories.execution_history_repository import (
+            ExecutionHistoryRepository,
+        )
+
+        session = self._require_session("get_execution_record")
+        return await ExecutionHistoryRepository(session).get_execution_by_id(
+            execution_id, group_ids=group_ids
+        )
+
     async def get_execution(self, execution_id: int) -> Dict[str, Any]:
         """
         Get details of a specific execution
@@ -1289,13 +1580,16 @@ class ExecutionService:
                         )
                         try:
                             # Use async query for the most recent flow from the database
-                            from src.db.session import request_scoped_session
-                            from src.repositories.flow_repository import FlowRepository
+                            from src.db.session import routed_scoped_session
+                            from src.services.flow_builder.flow_service import (
+                                FlowService,
+                            )
 
-                            async with request_scoped_session() as db:
-                                most_recent_flow = await FlowRepository(
+                            async with routed_scoped_session() as db:
+                                # Flows are FlowService's domain.
+                                most_recent_flow = await FlowService(
                                     db
-                                ).get_most_recent()
+                                ).get_most_recent_flow()
 
                                 if most_recent_flow:
                                     flow_id = most_recent_flow.id
@@ -1907,10 +2201,10 @@ class ExecutionService:
             ]
 
             # Use ExecutionRepository to check for active executions
-            from src.db.session import request_scoped_session
+            from src.db.session import routed_scoped_session
             from src.repositories.execution_repository import ExecutionRepository
 
-            async with request_scoped_session() as db:
+            async with routed_scoped_session() as db:
                 repo = ExecutionRepository(db)
 
                 # Get executions with group filtering

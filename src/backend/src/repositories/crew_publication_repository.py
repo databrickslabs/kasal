@@ -81,6 +81,20 @@ class PublicationRepository(BaseRepository[Publication]):
         result = await self.session.execute(query)
         return result.scalars().first()
 
+    async def insert(self, publication: Publication) -> Publication:
+        """Persist a new publication and flush so its ``id`` is available.
+
+        Flush, not commit: publishing also claims the external name and announces
+        the change, and those must stand or fall together.
+        """
+        self.session.add(publication)
+        await self.session.flush()
+        return publication
+
+    async def save(self) -> None:
+        """Flush pending attribute changes on already-tracked publications."""
+        await self.session.flush()
+
     async def delete_by_entity(
         self, entity_type: str, entity_id: str, group_ids: List[str]
     ) -> int:

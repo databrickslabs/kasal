@@ -337,51 +337,67 @@ class TestFlowExecutionWarnings:
 
 
 # ---------------------------------------------------------------------------
-# CI/CD artifact aggregation query — SQLite/Postgres portability (regression)
+# CI/CD artifact aggregation — SQLite/Postgres portability (regression)
 # ---------------------------------------------------------------------------
 #
-# The query previously used the Postgres-only ``output::text`` cast, which on
-# SQLite (dev) raised "(sqlite3.OperationalError) unrecognized token: ':'" and
-# silently skipped CI/CD artifact injection. It now uses CAST(... AS TEXT).
+# This query used the Postgres-only ``output::text`` cast, which on SQLite (dev)
+# raised "(sqlite3.OperationalError) unrecognized token: ':'" and silently skipped
+# CI/CD artifact injection. It then lived as a raw-SQL constant in the service; it
+# now lives in ExecutionTraceRepository, so the portability guarantee is tested
+# where the query actually is — against a real SQLite engine rather than by
+# asserting on the SQL string.
 
-import sqlite3  # noqa: E402
+import tempfile  # noqa: E402
+from pathlib import Path  # noqa: E402
 
-from src.services.flow_builder.flow_execution_runner import (  # noqa: E402
-    CICD_ARTIFACT_QUERY,
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
+
+import src.db.all_models  # noqa: F401,E402  (register every model)
+from src.db.base import Base  # noqa: E402
+from src.models.execution_trace import ExecutionTrace  # noqa: E402
+from src.repositories.execution_trace_repository import (  # noqa: E402
+    ExecutionTraceRepository,
 )
 
 
-def test_cicd_query_has_no_postgres_only_cast():
-    """The query must not use the Postgres-only ``::text`` cast (SQLite chokes)."""
-    assert "::text" not in CICD_ARTIFACT_QUERY
-    assert "CAST(output AS TEXT)" in CICD_ARTIFACT_QUERY
+@pytest.mark.asyncio
+async def test_cicd_artifact_scrape_runs_on_sqlite_and_filters():
+    """Parses on SQLite, and matches only this job's rows containing the needle."""
+    path = Path(tempfile.mkdtemp()) / "traces.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{path}")
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
 
-def test_cicd_query_runs_on_sqlite_and_filters():
-    """Regression: the query parses on SQLite and matches only rows whose output
-    contains cicd_download_url."""
-    conn = sqlite3.connect(":memory:")
-    conn.execute(
-        "CREATE TABLE execution_trace (job_id TEXT, output TEXT, created_at TEXT)"
-    )
-    conn.execute(
-        "INSERT INTO execution_trace VALUES (?, ?, ?)",
-        ("job-1", '{"cicd_download_url": "/api/x"}', "2026-01-01"),
-    )
-    conn.execute(
-        "INSERT INTO execution_trace VALUES (?, ?, ?)",
-        ("job-1", '{"something_else": true}', "2026-01-02"),
-    )
-    conn.execute(
-        "INSERT INTO execution_trace VALUES (?, ?, ?)",
-        ("job-2", '{"cicd_download_url": "/api/y"}', "2026-01-03"),
-    )
+            def _trace(job_id, output):
+                # event_source/event_type are NOT NULL on the real model.
+                return ExecutionTrace(
+                    job_id=job_id,
+                    event_source="agent",
+                    event_context="ci",
+                    event_type="tool_end",
+                    output=output,
+                )
 
-    # SQLAlchemy's ``:jid`` bind param maps to SQLite's ``?`` — run the named SQL
-    # via a tiny translation so we exercise the real query text on SQLite.
-    sqlite_sql = CICD_ARTIFACT_QUERY.replace(":jid", "?")
-    rows = conn.execute(sqlite_sql, ("job-1",)).fetchall()
+            session.add_all(
+                [
+                    _trace("job-1", {"cicd_download_url": "/api/x"}),
+                    _trace("job-1", {"something_else": True}),
+                    _trace("job-2", {"cicd_download_url": "/api/y"}),
+                ]
+            )
+            await session.commit()
 
-    assert len(rows) == 1  # only job-1's cicd row, not the non-cicd row nor job-2
-    assert rows[0][0] == '{"cicd_download_url": "/api/x"}'
-    conn.close()
+            found = await ExecutionTraceRepository(session).outputs_containing(
+                "job-1", "cicd_download_url"
+            )
+
+        # Only job-1's cicd row — not its non-cicd row, and not job-2's.
+        assert len(found) == 1, found
+        assert "cicd_download_url" in str(found[0])
+        assert "/api/x" in str(found[0])
+    finally:
+        await engine.dispose()

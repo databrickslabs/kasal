@@ -5,7 +5,7 @@ Tests the PowerBISemanticModelDaxTool — generates & executes DAX from natural 
 
 Strategy:
   - Instantiate the real tool class
-  - Mock only: httpx.AsyncClient, ToolSessionProvider.cache_service / .conversion_repo,
+  - Mock only: httpx.AsyncClient, ToolSessionProvider.cache_service / .converter_service,
     powerbi_auth_utils helpers
   - Test: init, placeholder detection, _run validation, _format_output, _extract_measures_from_dax,
     _dax_quote_table, config merging, and integration with mocked pipeline
@@ -37,11 +37,14 @@ def _mock_cache_service_ctx(mock_service):
 
 
 def _mock_conversion_repo_ctx(mock_repo):
-    """Return an async context manager that yields mock_repo."""
+    """An async context manager yielding mock_repo.
+
+    Takes ``*_a, **_k`` because converter_service is called with a group_context.
+    """
     from contextlib import asynccontextmanager
 
     @asynccontextmanager
-    async def _ctx():
+    async def _ctx(*_a, **_k):
         yield mock_repo
 
     return _ctx
@@ -1778,7 +1781,7 @@ class TestSaveToConversionHistory:
         ):
             with patch.object(
                 ToolSessionProvider,
-                "conversion_repo",
+                "converter_service",
                 _mock_conversion_repo_ctx(mock_repo),
             ):
                 try:
@@ -2970,13 +2973,15 @@ class TestSaveToConversionHistory:
             from contextlib import asynccontextmanager
 
             @asynccontextmanager
-            async def _ctx():
+            async def _ctx(*_a, **_k):
                 raise Exception("DB error")
                 yield  # unreachable; present to make this a generator
 
             return _ctx
 
-        with patch.object(ToolSessionProvider, "conversion_repo", _raising_repo_ctx()):
+        with patch.object(
+            ToolSessionProvider, "converter_service", _raising_repo_ctx()
+        ):
             self._run(self.tool._save_to_conversion_history(results, config, []))
         # Should not raise
 

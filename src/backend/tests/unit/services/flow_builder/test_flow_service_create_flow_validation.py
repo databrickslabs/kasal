@@ -793,11 +793,9 @@ async def test_delete_flow_has_executions():
         mock_repo = AsyncMock()
         flow = make_flow(flow_id=flow_id)
         mock_repo.get = AsyncMock(return_value=flow)
+        # The execution count is the REPOSITORY's job now, not a raw session query.
+        mock_repo.count_executions = AsyncMock(return_value=3)
         MockRepo.return_value = mock_repo
-
-        mock_count_result = MagicMock()
-        mock_count_result.scalar_one.return_value = 3
-        session.execute = AsyncMock(return_value=mock_count_result)
 
         with pytest.raises(BadRequestError):
             await svc.delete_flow(flow_id)
@@ -814,11 +812,9 @@ async def test_delete_flow_success():
         flow = make_flow(flow_id=flow_id)
         mock_repo.get = AsyncMock(return_value=flow)
         mock_repo.delete = AsyncMock()
+        # The execution count is the REPOSITORY's job now, not a raw session query.
+        mock_repo.count_executions = AsyncMock(return_value=0)
         MockRepo.return_value = mock_repo
-
-        mock_count_result = MagicMock()
-        mock_count_result.scalar_one.return_value = 0
-        session.execute = AsyncMock(return_value=mock_count_result)
 
         result = await svc.delete_flow(flow_id)
         assert result is True

@@ -22,6 +22,8 @@ import pytest
 
 from src.core.exceptions import BadRequestError
 from src.schemas.prompt_optimization import PromptOptimizationRequest
+from src.services.catalog.agents import AgentService
+from src.services.catalog.tasks import TaskService
 from src.services.prompt_optimization import run_state as run_state_mod
 from src.services.prompt_optimization import runs as runs_mod
 from src.services.prompt_optimization import service as svc_module
@@ -349,10 +351,10 @@ class TestMineExamples:
             ),  # system error string
             SimpleNamespace(prompt="run crew", status="success", created_at=now),
         ]
-        svc.log_repository = MagicMock()
-        svc.log_repository.get_logs_paginated_by_group = AsyncMock(
-            side_effect=[rows, []]
-        )
+        # LLM logs are read through LLMLogService (execution's domain), not through
+        # LLMLogRepository directly.
+        svc.log_service = MagicMock()
+        svc.log_service.get_logs_paginated_by_group = AsyncMock(side_effect=[rows, []])
         examples = await svc._mine_examples(
             "detect-intent", _group(), lookback_days=30, max_examples=10
         )
@@ -734,10 +736,17 @@ class TestCrewDocSerialization:
     @staticmethod
     def _crew():
         agent = SimpleNamespace(
-            id="a1", role="Researcher", goal="Find facts", backstory="line1\nline2"
+            id="a1",
+            role="Researcher",
+            goal="Find facts",
+            backstory="line1\nline2",
+            group_id=None,
         )
         task = SimpleNamespace(
-            id="t1", description="Do the research", expected_output="A table"
+            id="t1",
+            description="Do the research",
+            expected_output="A table",
+            group_id=None,
         )
         return [agent], [task]
 
@@ -1427,29 +1436,57 @@ class TestApplyIsReversible:
     def _entity_repos(agent_current="LIVE role", task_current="LIVE desc"):
         """Agent/task repositories whose CURRENT values differ from the run's
         baseline — the before-image must capture what is actually overwritten,
-        not what the run started from."""
+        not what the run started from.
+
+        ``group_id`` matches the run's ("grp1"): apply and revert now go through
+        AgentService/TaskService, which refuse an entity outside the caller's group.
+        """
         agent_repo = MagicMock()
         agent_repo.get = AsyncMock(
-            return_value=SimpleNamespace(id="a1", role=agent_current)
+            return_value=SimpleNamespace(id="a1", role=agent_current, group_id="grp1")
         )
         agent_repo.update = AsyncMock(return_value=True)
         task_repo = MagicMock()
         task_repo.get = AsyncMock(
-            return_value=SimpleNamespace(id="t1", description=task_current)
+            return_value=SimpleNamespace(
+                id="t1", description=task_current, group_id="grp1"
+            )
         )
         task_repo.update = AsyncMock(return_value=True)
         return agent_repo, task_repo
 
     @contextlib.contextmanager
     def _patched_entity_repos(self, agent_repo, task_repo):
+        """Stub the SERVICE methods apply/revert now go through.
+
+        These used to patch AgentRepository/TaskRepository, because the optimiser
+        called them directly. It goes through AgentService/TaskService now (for the
+        group check), so the seam moved up one layer — the fakes still carry the
+        agent/task rows, they are just reached via the service.
+        """
         with (
-            patch(
-                "src.repositories.agent_repository.AgentRepository",
-                return_value=agent_repo,
+            patch.object(
+                AgentService,
+                "get_with_group_check",
+                new=AsyncMock(side_effect=lambda i, g: agent_repo.get.return_value),
             ),
-            patch(
-                "src.repositories.task_repository.TaskRepository",
-                return_value=task_repo,
+            patch.object(
+                TaskService,
+                "get_with_group_check",
+                new=AsyncMock(side_effect=lambda i, g: task_repo.get.return_value),
+            ),
+            # Real async funcs, not AsyncMock(side_effect=lambda ...): a lambda
+            # returning a coroutine leaves it un-awaited, so the tests'
+            # assert_awaited_* on the repo mock would never see the call.
+            patch.object(
+                AgentService,
+                "update_prompt_text_with_group_check",
+                new=_forward_to(agent_repo.update),
+            ),
+            patch.object(
+                TaskService,
+                "update_prompt_text_with_group_check",
+                new=_forward_to(task_repo.update),
             ),
         ):
             yield
@@ -1908,6 +1945,21 @@ class TestTemplateOptimizationOrchestration:
         assert "disable" not in stack.autolog.get("crewai", {})
 
 
+def _forward_to(repo_update):
+    """A group-checked service updater that delegates to a repository mock.
+
+    Awaits the mock so ``assert_awaited_once_with`` in the tests still describes
+    the write that happened.
+    """
+
+    async def _update(_self, entity_id, fields, group_context=None):
+        # `_self`: patch.object replaces an unbound method, so the instance is
+        # passed positionally.
+        return bool(await repo_update(entity_id, fields))
+
+    return _update
+
+
 def _crew_fixture():
     """A one-agent/one-task crew, serialized exactly as the service does."""
     agent = SimpleNamespace(
@@ -1918,6 +1970,8 @@ def _crew_fixture():
         backstory="Experienced",
         tools=[],
         llm="m",
+        # Real Agent rows always have this; the apply path is group-checked.
+        group_id=None,
     )
     task = SimpleNamespace(
         id="t1",
@@ -1926,6 +1980,7 @@ def _crew_fixture():
         expected_output="A table",
         tools=[],
         agent_id="a1",
+        group_id=None,
     )
     doc, keys = svc_module._serialize_crew_doc([agent], [task])
     agents_yaml = {
@@ -2563,7 +2618,7 @@ class TestCrewNodeSync:
 
     @pytest.mark.asyncio
     async def test_apply_patches_the_matching_nodes(self, monkeypatch):
-        import src.repositories.crew_repository as crew_repo_module
+        import src.services.catalog.crews as crew_service_module
 
         crew = self._crew(self._nodes())
         committed = {"n": 0}
@@ -2579,7 +2634,7 @@ class TestCrewNodeSync:
             async def commit(self):
                 committed["n"] += 1
 
-        monkeypatch.setattr(crew_repo_module, "CrewRepository", FakeRepo)
+        monkeypatch.setattr(crew_service_module, "CrewService", FakeRepo)
         svc = PromptOptimizationService.__new__(PromptOptimizationService)
         svc.session = FakeSession()
 
@@ -2607,7 +2662,7 @@ class TestCrewNodeSync:
     async def test_sync_is_best_effort_and_never_raises(self, monkeypatch):
         """The rows are the system of record and are already written by the time
         this runs, so a snapshot failure must not fail or half-undo the apply."""
-        import src.repositories.crew_repository as crew_repo_module
+        import src.services.catalog.crews as crew_service_module
 
         class ExplodingRepo:
             def __init__(self, session):
@@ -2616,7 +2671,7 @@ class TestCrewNodeSync:
             async def get(self, _id):
                 raise RuntimeError("crew table on fire")
 
-        monkeypatch.setattr(crew_repo_module, "CrewRepository", ExplodingRepo)
+        monkeypatch.setattr(crew_service_module, "CrewService", ExplodingRepo)
         svc = PromptOptimizationService.__new__(PromptOptimizationService)
         svc.session = SimpleNamespace()
 

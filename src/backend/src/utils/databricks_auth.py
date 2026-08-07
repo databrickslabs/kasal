@@ -254,6 +254,13 @@ async def _auth_scoped_session():
 
     The bootstrap read is the correct one to serve locally anyway: the Lakebase
     config row itself lives in the local database.
+
+    NOTE: ``db.session.routed_scoped_session`` now performs the identical
+    three-branch logic (request session / mid-auth snapshot / route), because the
+    ``_RESOLVING_AUTH`` guard moved into it when ``request_scoped_session`` was
+    deleted. This function is therefore redundant and should collapse into it —
+    left in place deliberately rather than folded in as a drive-by, since it has its
+    own test file and two architecture tests name it.
     """
     if _RESOLVING_AUTH.get():
         from src.db.session import async_session_factory

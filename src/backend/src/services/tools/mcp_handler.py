@@ -433,23 +433,22 @@ async def get_databricks_workspace_host():
         Tuple[Optional[str], Optional[str]]: (workspace_host, error_message)
     """
     try:
-        from src.db.session import request_scoped_session
-        from src.services.databricks.workspace.service import DatabricksService
+        from src.services.databricks.workspace.config_provider import (
+            DatabricksConfigProvider,
+        )
 
-        async with request_scoped_session() as session:
-            service = DatabricksService(session)
-            config = await service.get_databricks_config()
+        config = await DatabricksConfigProvider.get()
 
-            if config and config.workspace_url:
-                # Remove https:// prefix if present for consistency
-                workspace_host = config.workspace_url.rstrip("/")
-                if workspace_host.startswith("https://"):
-                    workspace_host = workspace_host[8:]
-                elif workspace_host.startswith("http://"):
-                    workspace_host = workspace_host[7:]
-                return workspace_host, None
-            else:
-                return None, "No workspace URL found in configuration"
+        if config and config.workspace_url:
+            # Remove https:// prefix if present for consistency
+            workspace_host = config.workspace_url.rstrip("/")
+            if workspace_host.startswith("https://"):
+                workspace_host = workspace_host[8:]
+            elif workspace_host.startswith("http://"):
+                workspace_host = workspace_host[7:]
+            return workspace_host, None
+        else:
+            return None, "No workspace URL found in configuration"
 
     except Exception as e:
         logger.error(f"Error getting workspace host: {e}")

@@ -208,7 +208,7 @@ def _msg(mtype, content):
 
 
 def _history_patches(messages):
-    """Patch request_scoped_session + ChatHistoryRepository to return ``messages``."""
+    """Patch routed_scoped_session + ChatHistoryRepository to return ``messages``."""
 
     @asynccontextmanager
     async def _fake_session():
@@ -218,7 +218,7 @@ def _history_patches(messages):
     # The preamble fetches the most-recent window via get_recent_by_session_and_group.
     repo.get_recent_by_session_and_group = AsyncMock(return_value=messages)
     repo.get_by_session_and_group = AsyncMock(return_value=messages)
-    return patch("src.db.session.request_scoped_session", _fake_session), patch(
+    return patch("src.db.session.routed_scoped_session", _fake_session), patch(
         "src.repositories.chat_history_repository.ChatHistoryRepository",
         MagicMock(return_value=repo),
     )
@@ -304,7 +304,7 @@ async def test_preamble_best_effort_on_repo_failure():
     repo.get_by_session_and_group = AsyncMock(side_effect=RuntimeError("db down"))
     config, ctx = _cfg_ctx()
     with (
-        patch("src.db.session.request_scoped_session", _fake_session),
+        patch("src.db.session.routed_scoped_session", _fake_session),
         patch(
             "src.repositories.chat_history_repository.ChatHistoryRepository",
             MagicMock(return_value=repo),

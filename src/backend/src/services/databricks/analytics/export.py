@@ -629,7 +629,7 @@ class AnalyticsExportService:
                     break
         if not token:
             try:
-                from src.db.session import async_session_factory
+                from src.db.session import routed_scoped_session
                 from src.services.settings.api_keys import ApiKeysService
                 from src.utils.user_context import UserContext
 
@@ -641,7 +641,7 @@ class AnalyticsExportService:
                 except Exception:
                     pass
                 if group_id:
-                    async with async_session_factory() as session:
+                    async with routed_scoped_session() as session:
                         svc = ApiKeysService(session, group_id=group_id)
                         for key_name in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY"):
                             api_key = await svc.find_by_name(key_name)

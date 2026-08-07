@@ -318,7 +318,7 @@ class KasalDBSpanExporter(SpanExporter):
     job_id, event_source, event_context, event_type, output, trace_metadata,
     plus new OTel columns: span_id, trace_id, parent_span_id.
 
-    Uses request_scoped_session() (the same smart session used by the rest of
+    Uses routed_scoped_session() (the same smart session used by the rest of
     the subprocess) so that traces automatically go to Lakebase when active or
     local DB otherwise.  Writes happen in a ThreadPoolExecutor; each worker
     creates its own event loop via create_and_run_loop() to run the async
@@ -432,7 +432,7 @@ class KasalDBSpanExporter(SpanExporter):
     def _write_batch(self, records: list) -> None:
         """Write a batch of trace records to the DB (runs in thread pool).
 
-        Uses request_scoped_session() — the same smart session used by the
+        Uses routed_scoped_session() — the same smart session used by the
         rest of the subprocess.  When Lakebase is active (hot-swapped via
         activate_lakebase_in_subprocess), traces go to Lakebase automatically.
         Otherwise they go to the local DB.
@@ -440,16 +440,20 @@ class KasalDBSpanExporter(SpanExporter):
         Runs in a ThreadPoolExecutor, so we create a fresh event loop via
         create_and_run_loop() to execute the async session operations.
         """
-        from src.db.session import request_scoped_session
+        from src.db.session import routed_scoped_session
         from src.models.execution_trace import ExecutionTrace
+        from src.repositories.execution_trace_repository import (
+            ExecutionTraceRepository,
+        )
         from src.utils.asyncio_utils import create_and_run_loop
 
         job_id = self._job_id
 
         async def _write_async():
             written = 0
+            batch: list = []
             try:
-                async with request_scoped_session() as session:
+                async with routed_scoped_session() as session:
                     for record in records:
                         try:
                             # Clean output for JSON serialization
@@ -485,14 +489,18 @@ class KasalDBSpanExporter(SpanExporter):
                                 group_id=record.get("group_id"),
                                 group_email=record.get("group_email"),
                             )
-                            session.add(trace)
-                            written += 1
+                            batch.append(trace)
                         except Exception as e:
                             logger.error(
                                 f"[OTel-DB][{job_id}] Failed to write trace: {e}",
                                 exc_info=True,
                             )
 
+                    # Staged through the repository, which owns ExecutionTrace
+                    # persistence; the commit stays here because this session is
+                    # ours and one commit per BATCH is the point (per-row would be
+                    # a round trip per span).
+                    written = await ExecutionTraceRepository(session).add_batch(batch)
                     if written:
                         await session.commit()
                         logger.info(

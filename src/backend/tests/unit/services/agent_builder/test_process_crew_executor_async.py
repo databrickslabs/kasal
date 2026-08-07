@@ -664,7 +664,7 @@ class TestProcessLogQueue:
                             _fake_smart_session,
                         ):
                             with patch(
-                                "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                                "src.services.execution.logs.writer.ExecutionLogsRepository",
                                 return_value=mock_repo,
                             ):
                                 await executor._process_log_queue(MagicMock(), eid, gc)
@@ -731,7 +731,7 @@ class TestProcessLogQueue:
                             _fake_smart_session,
                         ):
                             with patch(
-                                "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                                "src.services.execution.logs.writer.ExecutionLogsRepository",
                                 return_value=mock_repo,
                             ):
                                 await executor._process_log_queue(

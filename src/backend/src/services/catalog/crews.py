@@ -427,6 +427,14 @@ class CrewService:
             self._decrypt_crew_tool_configs(crew)
         return crews
 
+    async def get_crews_by_ids(self, crew_ids: List[Any]) -> List[Crew]:
+        """Crews for a set of ids.
+
+        Crews are this service's domain; `publications` and the prompt optimiser
+        used to build ``CrewRepository`` themselves to resolve references.
+        """
+        return await self.repository.find_by_ids(crew_ids)
+
     async def get_by_group(
         self, id: UUID, group_context: GroupContext
     ) -> Optional[Crew]:

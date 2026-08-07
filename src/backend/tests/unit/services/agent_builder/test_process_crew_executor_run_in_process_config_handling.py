@@ -269,7 +269,7 @@ class TestProcessLogQueueCoverage:
                 return_value=mock_smart_session(),
             ),
             patch(
-                "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                "src.services.execution.logs.writer.ExecutionLogsRepository",
                 return_value=mock_repo,
             ),
         ):

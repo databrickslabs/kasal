@@ -98,7 +98,7 @@ async def test_run_light_agent_success_writes_completed_with_raw_answer():
 
     update_mock = AsyncMock(return_value=True)
     with (
-        patch("src.db.session.request_scoped_session", return_value=_fake_session()),
+        patch("src.db.session.routed_scoped_session", return_value=_fake_session()),
         patch("src.utils.user_context.UserContext"),
         patch("src.services.settings.api_keys.ApiKeysService"),
         patch(
@@ -170,7 +170,7 @@ async def _run_with_captured_handlers(
     trace_cls = MagicMock(return_value=trace_instance)
     update_mock = AsyncMock(return_value=True)
     with (
-        patch("src.db.session.request_scoped_session", return_value=_fake_session()),
+        patch("src.db.session.routed_scoped_session", return_value=_fake_session()),
         patch(
             "src.db.session.get_isolated_db_session",
             side_effect=lambda: _fake_session(),
@@ -478,7 +478,7 @@ async def test_run_light_agent_failure_marks_failed():
 
     update_mock = AsyncMock(return_value=True)
     with (
-        patch("src.db.session.request_scoped_session", return_value=_fake_session()),
+        patch("src.db.session.routed_scoped_session", return_value=_fake_session()),
         patch("src.utils.user_context.UserContext"),
         patch("src.services.settings.api_keys.ApiKeysService"),
         patch(
@@ -546,7 +546,7 @@ async def test_run_light_agent_requires_a_prompt():
 
     update_mock = AsyncMock(return_value=True)
     with (
-        patch("src.db.session.request_scoped_session", return_value=_fake_session()),
+        patch("src.db.session.routed_scoped_session", return_value=_fake_session()),
         patch("src.utils.user_context.UserContext"),
         patch(
             "src.services.execution.status.ExecutionStatusService.update_status",
@@ -575,7 +575,7 @@ async def test_run_light_agent_requires_a_prompt():
 def _light_patches(mock_agent, update_mock, compose_mock):
     """The standard happy-path patch stack + a patched A2UI composer."""
     return (
-        patch("src.db.session.request_scoped_session", return_value=_fake_session()),
+        patch("src.db.session.routed_scoped_session", return_value=_fake_session()),
         patch("src.utils.user_context.UserContext"),
         patch("src.services.settings.api_keys.ApiKeysService"),
         patch(

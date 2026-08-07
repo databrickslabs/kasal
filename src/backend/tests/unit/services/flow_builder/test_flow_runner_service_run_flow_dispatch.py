@@ -251,13 +251,11 @@ class TestRunFlow:
         svc = self._service_with_mocks()
         svc.db.commit = AsyncMock()
 
-        with patch(
-            "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
-        ) as MockRepo:
+        with patch("src.services.execution.service.ExecutionService") as MockRepo:
             repo_instance = MagicMock()
             # resume_from_execution_id is resolved by job_id first, then int PK fallback.
-            repo_instance.get_execution_by_job_id = AsyncMock(return_value=None)
-            repo_instance.get_execution_by_id = AsyncMock(return_value=None)
+            repo_instance.get_run_by_job_id = AsyncMock(return_value=None)
+            repo_instance.get_run_by_id = AsyncMock(return_value=None)
             MockRepo.return_value = repo_instance
 
             fid = uuid.uuid4()
@@ -279,9 +277,7 @@ class TestRunFlow:
         svc = self._service_with_mocks()
         svc.db.commit = AsyncMock()
 
-        with patch(
-            "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
-        ) as MockRepo:
+        with patch("src.services.execution.service.ExecutionService") as MockRepo:
             repo_instance = MagicMock()
             existing = MagicMock()
             existing.id = 42
@@ -292,8 +288,8 @@ class TestRunFlow:
             async def by_job_id(value):
                 return existing if value == job_uuid else None
 
-            repo_instance.get_execution_by_job_id = AsyncMock(side_effect=by_job_id)
-            repo_instance.get_execution_by_id = AsyncMock(return_value=None)
+            repo_instance.get_run_by_job_id = AsyncMock(side_effect=by_job_id)
+            repo_instance.get_run_by_id = AsyncMock(return_value=None)
             MockRepo.return_value = repo_instance
             svc._run_dynamic_flow = AsyncMock(
                 return_value={"success": True, "result": "ok"}
@@ -312,9 +308,9 @@ class TestRunFlow:
             # Looked up by job_id (UUID), and int() fallback never attempted.
             # Two lookups now: this job_id (no record -> legacy path), then
             # the source by job_id.
-            assert repo_instance.get_execution_by_job_id.await_count == 2
-            assert repo_instance.get_execution_by_job_id.await_args.args[0] == job_uuid
-            repo_instance.get_execution_by_id.assert_not_awaited()
+            assert repo_instance.get_run_by_job_id.await_count == 2
+            assert repo_instance.get_run_by_job_id.await_args.args[0] == job_uuid
+            repo_instance.get_run_by_id.assert_not_awaited()
             assert result["status"] == FlowExecutionStatus.COMPLETED
 
     @pytest.mark.asyncio
@@ -436,9 +432,7 @@ class TestRunFlow:
         svc = self._service_with_mocks()
         svc.db.commit = AsyncMock()
 
-        with patch(
-            "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
-        ) as MockRepo:
+        with patch("src.services.execution.service.ExecutionService") as MockRepo:
             repo_instance = MagicMock()
 
             own = MagicMock()
@@ -451,8 +445,8 @@ class TestRunFlow:
             async def by_job_id(value):
                 return own if value == "new-job" else source
 
-            repo_instance.get_execution_by_job_id = AsyncMock(side_effect=by_job_id)
-            repo_instance.get_execution_by_id = AsyncMock(return_value=source)
+            repo_instance.get_run_by_job_id = AsyncMock(side_effect=by_job_id)
+            repo_instance.get_run_by_id = AsyncMock(return_value=source)
             MockRepo.return_value = repo_instance
 
             svc._run_dynamic_flow = AsyncMock(
@@ -754,9 +748,7 @@ class TestRunDynamicFlow:
             patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
             patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
             patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
-            ),
+            patch("src.services.execution.service.ExecutionService"),
             patch(
                 "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
             ),
@@ -821,9 +813,7 @@ class TestRunDynamicFlow:
             patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
             patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
             patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
-            ),
+            patch("src.services.execution.service.ExecutionService"),
             patch(
                 "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
             ),
@@ -875,9 +865,7 @@ class TestRunDynamicFlow:
             patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
             patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
             patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
-            ),
+            patch("src.services.execution.service.ExecutionService"),
             patch(
                 "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
             ),
@@ -946,9 +934,7 @@ class TestRunDynamicFlow:
             patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
             patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
             patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
-            ),
+            patch("src.services.execution.service.ExecutionService"),
             patch(
                 "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
             ),
@@ -1035,9 +1021,7 @@ class TestRunFlowExecutionResultConversion:
             patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
             patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
             patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
-            ),
+            patch("src.services.execution.service.ExecutionService"),
             patch(
                 "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
             ),
@@ -1082,9 +1066,7 @@ class TestRunFlowExecutionResultConversion:
             patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
             patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
             patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
-            ),
+            patch("src.services.execution.service.ExecutionService"),
             patch(
                 "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
             ),

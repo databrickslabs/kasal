@@ -1039,19 +1039,20 @@ class PipelineConfigGeneratorTool(BaseTool):
                 measure_count=len(measures),
             )
 
-            group_id = None
+            group_context = None
             try:
-                gc = UserContext.get_group_context()
-                if gc:
-                    group_id = getattr(gc, "primary_group_id", None)
+                group_context = UserContext.get_group_context()
             except Exception:
                 pass
 
-            async with ToolSessionProvider.conversion_repo() as repo:
-                record = await repo.create(history_data.model_dump())
-                if group_id:
-                    record.group_id = group_id
-                await repo.session.commit()
+            # Through ConverterService, which OWNS conversion history and stamps
+            # group_id/created_by_email itself — the repository path required every
+            # tool to remember that by hand.
+            async with ToolSessionProvider.converter_service(
+                group_context=group_context
+            ) as converter:
+                record = await converter.create_history(history_data)
+                await converter.session.commit()
                 logger.info(
                     f"[PipelineConfigGen] Saved conversion_history id={record.id} "
                     f"(measures={len(measures)}, with_dax={with_dax}, switch={switch_cnt})"
@@ -1101,6 +1102,7 @@ class PipelineConfigGeneratorTool(BaseTool):
 
             group_id = None
             created_by_email = None
+            gc = None  # bound before the try so the service call below cannot NameError
             try:
                 gc = UserContext.get_group_context()
                 if gc:
@@ -1131,9 +1133,12 @@ class PipelineConfigGeneratorTool(BaseTool):
                 created_by_email=created_by_email,
             )
 
-            async with ToolSessionProvider.powerbi_extraction_repo() as repo:
-                record = await repo.create(data.model_dump())
-                await repo.session.commit()
+            # Extractions are PowerBIExtractionService's domain; it stamps the tenant.
+            async with ToolSessionProvider.powerbi_extraction_service(
+                group_context=gc
+            ) as extractions:
+                record = await extractions.record_extraction(data)
+                await extractions.session.commit()
                 logger.info(
                     f"[PipelineConfigGen] Saved powerbi_extraction id={record.id} "
                     f"({summary})"

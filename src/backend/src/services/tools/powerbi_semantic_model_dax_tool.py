@@ -18,6 +18,7 @@ import json
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Type
 
 import httpx
@@ -884,15 +885,22 @@ class PowerBISemanticModelDaxTool(BaseTool):
                 },
             )
 
+            # This tool derives a raw group id from config/trace_context rather than
+            # holding a GroupContext, so hand the service a minimal stand-in: it only
+            # reads primary_group_id and user_email off it.
             group_id = config.get("group_id") or (
                 getattr(self, "trace_context", None) or {}
             ).get("group_context", {}).get("primary_group_id")
+            group_context = SimpleNamespace(primary_group_id=group_id, user_email=None)
 
-            async with ToolSessionProvider.conversion_repo() as repo:
-                record = await repo.create(history_data.model_dump())
-                if group_id:
-                    record.group_id = group_id
-                await repo.session.commit()
+            # Through ConverterService, which OWNS conversion history and stamps
+            # group_id/created_by_email itself — the repository path required every
+            # tool to remember that by hand.
+            async with ToolSessionProvider.converter_service(
+                group_context=group_context
+            ) as converter:
+                record = await converter.create_history(history_data)
+                await converter.session.commit()
                 logger.info(
                     f"[DaxTool] Saved conversion_history record id={record.id} "
                     f"(status={history_data.status}, filters={list(active_filters.keys())})"

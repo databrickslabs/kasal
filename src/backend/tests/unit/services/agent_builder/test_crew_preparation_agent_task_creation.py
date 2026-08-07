@@ -355,7 +355,7 @@ class TestLookupKasalAgentUUID:
         db_agent.name = "agent-1"
 
         with (
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch("src.services.catalog.agents.AgentService") as mock_svc_cls,
             patch("src.utils.user_context.GroupContext") as mock_gc,
         ):
@@ -386,7 +386,7 @@ class TestLookupKasalAgentUUID:
         db_agent.name = "target-agent"
 
         with (
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch("src.services.catalog.agents.AgentService") as mock_svc_cls,
             patch("src.utils.user_context.GroupContext"),
         ):
@@ -416,7 +416,7 @@ class TestLookupKasalAgentUUID:
         db_agent.name = "AgentName"
 
         with (
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch("src.services.catalog.agents.AgentService") as mock_svc_cls,
             patch("src.utils.user_context.GroupContext"),
         ):
@@ -447,7 +447,7 @@ class TestLookupKasalAgentUUID:
         db_agent.name = "OtherAgent"
 
         with (
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch("src.services.catalog.agents.AgentService") as mock_svc_cls,
             patch("src.utils.user_context.GroupContext"),
         ):
@@ -472,7 +472,7 @@ class TestLookupKasalAgentUUID:
         cp = CrewPreparation(config=config)
 
         with patch(
-            "src.db.session.request_scoped_session", side_effect=Exception("db error")
+            "src.db.session.routed_scoped_session", side_effect=Exception("db error")
         ):
             result = await cp._lookup_kasal_agent_uuid_via_service(
                 {"role": "R"}, "config-id"

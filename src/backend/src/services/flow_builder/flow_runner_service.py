@@ -71,10 +71,8 @@ class FlowRunnerService:
         self.db = db
         self.flow_execution_service = FlowExecutionService(db)
         self.flow_repo = FlowRepository(db)
-        self.task_repo = TaskRepository(db)
-        self.agent_repo = AgentRepository(db)
-        self.tool_repo = ToolRepository(db)
-        self.crew_repo = CrewRepository(db)
+        # No task/agent/tool/crew repositories here: they were constructed and NEVER
+        # read. The dynamic-flow path below builds its own bundle for BackendFlow.
 
     async def _emit_error_span(
         self,
@@ -348,7 +346,10 @@ class FlowRunnerService:
             execution = None
 
             if resume_from_execution_id:
-                exec_repo = ExecutionHistoryRepository(self.db)
+                # Runs are ExecutionService's domain.
+                from src.services.execution.service import ExecutionService
+
+                exec_service = ExecutionService(self.db)
 
                 # A record may ALREADY exist for THIS job_id, because a
                 # checkpoint resume deliberately creates a NEW execution seeded
@@ -358,7 +359,7 @@ class FlowRunnerService:
                 # Reusing the SOURCE row here is what made a resume look like
                 # two jobs: the finished run it was resumed from got flipped
                 # back to RUNNING and never reached a terminal status again.
-                own_execution = await exec_repo.get_execution_by_job_id(str(job_id))
+                own_execution = await exec_service.get_run_by_job_id(str(job_id))
                 if own_execution is not None:
                     execution = own_execution
                     execution.status = FlowExecutionStatus.RUNNING.value
@@ -379,12 +380,12 @@ class FlowRunnerService:
                         f"🔄 RESUME: Reusing existing execution for execution_id={resume_from_execution_id}"
                     )
 
-                    existing_execution = await exec_repo.get_execution_by_job_id(
+                    existing_execution = await exec_service.get_run_by_job_id(
                         str(resume_from_execution_id)
                     )
                     if not existing_execution:
                         try:
-                            existing_execution = await exec_repo.get_execution_by_id(
+                            existing_execution = await exec_service.get_run_by_id(
                                 int(resume_from_execution_id)
                             )
                         except (TypeError, ValueError):
@@ -552,32 +553,15 @@ class FlowRunnerService:
 
                 # Execute the flow directly using BackendFlow (do NOT call engine_service.run_flow() - that creates another subprocess)
                 from src.repositories.agent_repository import AgentRepository
-                from src.repositories.crew_repository import CrewRepository
-                from src.repositories.flow_repository import FlowRepository
-                from src.repositories.task_repository import TaskRepository
-                from src.repositories.tool_repository import ToolRepository
                 from src.services.flow_builder.backend_flow import BackendFlow
-
-                # Initialize repositories for loading crew data from database
-                flow_repo = FlowRepository(session)
-                task_repo = TaskRepository(session)
-                agent_repo = AgentRepository(session)
-                tool_repo = ToolRepository(session)
-                crew_repo = CrewRepository(session)
-                execution_history_repo = ExecutionHistoryRepository(session)
-                execution_trace_repo = ExecutionTraceRepository(session)
+                from src.services.flow_builder.data_access import (
+                    build_flow_data_access,
+                )
 
                 # Initialize BackendFlow with the job_id (no flow_id for dynamic flows)
                 backend_flow = BackendFlow(job_id=job_id, flow_id=None)
-                backend_flow.repositories = {
-                    "flow": flow_repo,
-                    "task": task_repo,
-                    "agent": agent_repo,
-                    "tool": tool_repo,
-                    "crew": crew_repo,
-                    "execution_history": execution_history_repo,
-                    "execution_trace": execution_trace_repo,
-                }
+                # Owning SERVICES, not other domains' repositories — see data_access.
+                backend_flow.repositories = build_flow_data_access(session)
 
                 # CRITICAL: For dynamic flows, we need to populate _flow_data from config
                 # (not load from database since there's no flow_id)
@@ -937,15 +921,8 @@ class FlowRunnerService:
         # Create a session with safe cleanup to prevent stale-connection errors
         # from corrupting successful results after long-running kickoff()
         async with self._safe_session() as session:
-            # Create fresh service and repository instances with the new session
+            # Create fresh service instances with the new session
             flow_execution_service = FlowExecutionService(session)
-            flow_repo = FlowRepository(session)
-            task_repo = TaskRepository(session)
-            agent_repo = AgentRepository(session)
-            tool_repo = ToolRepository(session)
-            crew_repo = CrewRepository(session)
-            execution_history_repo = ExecutionHistoryRepository(session)
-            execution_trace_repo = ExecutionTraceRepository(session)
 
             # Convert string to UUID if needed
             if isinstance(flow_id, str):
@@ -1019,15 +996,12 @@ class FlowRunnerService:
 
                 # Initialize BackendFlow with the flow_id and job_id
                 backend_flow = BackendFlow(job_id=job_id, flow_id=flow_id)
-                backend_flow.repositories = {
-                    "flow": flow_repo,
-                    "task": task_repo,
-                    "agent": agent_repo,
-                    "tool": tool_repo,
-                    "crew": crew_repo,
-                    "execution_history": execution_history_repo,
-                    "execution_trace": execution_trace_repo,
-                }
+                # Owning SERVICES, not other domains' repositories — see data_access.
+                from src.services.flow_builder.data_access import (
+                    build_flow_data_access,
+                )
+
+                backend_flow.repositories = build_flow_data_access(session)
 
                 # Log what we have in the config BEFORE loading from database
                 logger.info(

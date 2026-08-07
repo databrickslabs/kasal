@@ -75,7 +75,6 @@ class ProgressiveGenerationMixin:
         )
         from src.db.lakebase_session import get_lakebase_session
         from src.db.session import (
-            async_session_factory,
             detach_request_session,
             get_isolated_db_session,
         )
@@ -83,7 +82,7 @@ class ProgressiveGenerationMixin:
         # This runs via asyncio.create_task, so it inherited a COPY of the
         # dispatch request's context — including the request-scoped DB session,
         # which FastAPI has already closed. Detach it so every
-        # request_scoped_session() below (notably the model-config read inside
+        # routed_scoped_session() below (notably the model-config read inside
         # LLMManager.configure_kasal_llm during planning) opens a fresh session
         # instead of failing with "Cannot operate on a closed database".
         detach_request_session()
@@ -961,7 +960,7 @@ class ProgressiveGenerationMixin:
                             )
                         )
                         # session=None: the whole execution stack opens its own
-                        # request_scoped_session() (already detached above), so a
+                        # routed_scoped_session() (already detached above), so a
                         # request-scoped session would only be a closed handle.
                         # background_tasks=None launches via asyncio.create_task.
                         exec_result = await ExecutionService(
@@ -1188,11 +1187,15 @@ class ProgressiveGenerationMixin:
         )
 
         # Log via an independent session (the request-scoped session is closed
-        # by the time this background task runs).
-        from src.db.session import async_session_factory as _plan_session_factory
+        # by the time this background task runs). ROUTED: this runs IN-PROCESS
+        # under asyncio.create_task, where the raw factory is a snapshot only a
+        # subprocess ever swaps to Lakebase — so the log row would have landed in
+        # the local database while every other write from this generation went to
+        # Lakebase.
+        from src.db.session import routed_scoped_session
 
         try:
-            async with _plan_session_factory() as log_session:
+            async with routed_scoped_session() as log_session:
                 log_service = LLMLogService(LLMLogRepository(log_session))
                 await log_service.create_log(
                     endpoint="generate-crew-plan",

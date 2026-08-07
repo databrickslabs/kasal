@@ -1201,47 +1201,51 @@ class TestUpdateExecutionStatus:
     """Test cases for _update_execution_status private method."""
 
     @pytest.mark.asyncio
-    async def test_update_execution_status_success(self, hitl_service, mock_session):
-        """Test successful status update."""
-        mock_execution = MockExecutionHistory()
+    async def test_update_execution_status_delegates_to_the_owning_service(
+        self, hitl_service, mock_session
+    ):
+        """Run status belongs to ExecutionStatusService, so HITL asks it.
 
+        This used to patch ExecutionHistoryRepository and assert HITL mutated the
+        row itself — which duplicated the transition rules the owning service
+        applies (terminal-status handling, completed_at, the in-memory cache).
+        """
         with patch(
-            "src.repositories.execution_history_repository.ExecutionHistoryRepository"
-        ) as mock_repo_class:
-            mock_repo = AsyncMock()
-            mock_repo.get_execution_by_job_id.return_value = mock_execution
-            mock_repo_class.return_value = mock_repo
-
+            "src.services.execution.status.ExecutionStatusService.update_status",
+            new=AsyncMock(return_value=True),
+        ) as mock_update:
             await hitl_service._update_execution_status(
                 execution_id="exec-123",
                 status="waiting_for_approval",
                 message="Waiting for approval",
             )
 
-            assert mock_execution.status == "waiting_for_approval"
-            mock_session.flush.assert_called_once()
+        mock_update.assert_awaited_once()
+        kwargs = mock_update.await_args.kwargs
+        assert kwargs["job_id"] == "exec-123"
+        assert kwargs["status"] == "waiting_for_approval"
+        assert kwargs["message"] == "Waiting for approval"
+        # The caller's session is passed through, not a new one.
+        assert kwargs["session"] is hitl_service.session
 
     @pytest.mark.asyncio
-    async def test_update_execution_status_with_error_message(
+    async def test_update_execution_status_forwards_a_failure_message(
         self, hitl_service, mock_session
     ):
-        """Test status update includes error message for failure statuses."""
-        mock_execution = MockExecutionHistory()
-
+        """The owning service decides that a FAILED status stores the message."""
         with patch(
-            "src.repositories.execution_history_repository.ExecutionHistoryRepository"
-        ) as mock_repo_class:
-            mock_repo = AsyncMock()
-            mock_repo.get_execution_by_job_id.return_value = mock_execution
-            mock_repo_class.return_value = mock_repo
-
+            "src.services.execution.status.ExecutionStatusService.update_status",
+            new=AsyncMock(return_value=True),
+        ) as mock_update:
             await hitl_service._update_execution_status(
                 execution_id="exec-123",
                 status=ExecutionStatus.FAILED.value,
                 message="HITL gate failed",
             )
 
-            assert mock_execution.error == "HITL gate failed"
+        kwargs = mock_update.await_args.kwargs
+        assert kwargs["status"] == ExecutionStatus.FAILED.value
+        assert kwargs["message"] == "HITL gate failed"
 
     @pytest.mark.asyncio
     async def test_update_execution_status_not_found(self, hitl_service, mock_session):

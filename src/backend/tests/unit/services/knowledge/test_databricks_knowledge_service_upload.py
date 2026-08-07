@@ -28,9 +28,8 @@ def make_svc(group_id="g1"):
     session = AsyncMock()
     # KnowledgeEmbeddingService and KnowledgeSearchService are imported locally in __init__
     with (
-        patch(
-            "src.services.knowledge.databricks_service.DatabricksConfigRepository"
-        ) as cfg_repo,
+        # DatabricksConfigRepository is gone from this service — it was constructed
+        # and never read.
         patch(
             "src.services.knowledge.databricks_service.DatabricksVolumeRepository"
         ) as vol_repo,
@@ -52,7 +51,6 @@ def make_svc(group_id="g1"):
             created_by_email="u@test.com",
             user_token="token-123",
         )
-    svc.repository = AsyncMock()
     svc.volume_repository = AsyncMock()
     svc.embedding_service = AsyncMock()
     svc.search_service = AsyncMock()
@@ -76,7 +74,6 @@ class TestUploadKnowledgeFile:
             workspace_url="https://ws.databricks.com",
             encrypted_personal_access_token="pat-tok",
         )
-        svc.repository.get_active_config = AsyncMock(return_value=fake_config)
         svc.volume_repository.upload_file_to_volume = AsyncMock(
             return_value={"success": True}
         )
@@ -111,7 +108,6 @@ class TestUploadKnowledgeFile:
         svc = make_svc()
         file = make_upload_file()
 
-        svc.repository.get_active_config = AsyncMock(return_value=None)
         svc.volume_repository.upload_file_to_volume = AsyncMock(
             return_value={"success": True}
         )
@@ -150,7 +146,6 @@ class TestUploadKnowledgeFile:
             workspace_url="https://ws.databricks.com",
             encrypted_personal_access_token="",
         )
-        svc.repository.get_active_config = AsyncMock(return_value=fake_config)
         svc.volume_repository.upload_file_to_volume = AsyncMock(
             return_value={"success": True}
         )
@@ -217,7 +212,6 @@ class TestUploadKnowledgeFile:
         assert result["status"] == "success"
         assert result["upload_method"] == "temp_embed"
         svc.volume_repository.upload_file_to_volume.assert_not_called()
-        svc.repository.get_active_config.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_upload_embeds_logical_path_with_uploader(self):
@@ -348,7 +342,6 @@ class TestUploadKnowledgeFile:
             workspace_url="https://ws.databricks.com",
             encrypted_personal_access_token="",
         )
-        svc.repository.get_active_config = AsyncMock(return_value=fake_config)
         svc.volume_repository.upload_file_to_volume = AsyncMock(
             return_value={"success": True}
         )
@@ -417,7 +410,6 @@ class TestUploadKnowledgeFile:
             knowledge_volume_enabled=True,
             workspace_url="https://ws.databricks.com",
         )
-        svc.repository.get_active_config = AsyncMock(return_value=fake_config)
         svc.volume_repository.upload_file_to_volume = AsyncMock(
             return_value={"success": True}
         )
@@ -585,7 +577,6 @@ class TestListKnowledgeFiles:
 
     def test_service_has_expected_attributes(self):
         svc = make_svc()
-        assert hasattr(svc, "repository")
         assert hasattr(svc, "volume_repository")
         assert hasattr(svc, "embedding_service")
         assert hasattr(svc, "search_service")
@@ -881,7 +872,6 @@ class TestAdditionalCoverage:
             knowledge_volume_enabled=True,
             workspace_url="https://ws.databricks.com",
         )
-        svc.repository.get_active_config = AsyncMock(return_value=fake_config)
         svc.volume_repository.upload_file_to_volume = AsyncMock(
             return_value={"success": True}
         )

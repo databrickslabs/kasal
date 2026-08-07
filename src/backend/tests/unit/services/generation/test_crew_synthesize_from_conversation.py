@@ -36,12 +36,14 @@ def _msg(mtype, content):
 
 
 def _patch_history(messages):
-    """Patch ChatHistoryRepository so get_recent_by_session_and_group returns messages."""
-    repo = Mock()
-    repo.get_recent_by_session_and_group = AsyncMock(return_value=messages)
+    """Stub ChatHistoryService.get_recent_messages to return ``messages``.
+
+    Chat history is that service's domain; this used to patch
+    ChatHistoryRepository, because generation constructed it directly.
+    """
     return patch(
-        "src.repositories.chat_history_repository.ChatHistoryRepository",
-        return_value=repo,
+        "src.services.chat.history.ChatHistoryService.get_recent_messages",
+        new=AsyncMock(return_value=messages),
     )
 
 

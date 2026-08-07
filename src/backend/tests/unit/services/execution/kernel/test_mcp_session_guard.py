@@ -10,7 +10,7 @@ import pytest
 
 def _no_session_patch():
     return patch(
-        "src.db.session.request_scoped_session",
+        "src.db.session.routed_scoped_session",
         side_effect=AssertionError("DB session opened despite no MCP servers"),
     )
 

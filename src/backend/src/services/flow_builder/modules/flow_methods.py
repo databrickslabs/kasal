@@ -141,10 +141,10 @@ async def get_model_context_limits(agent, group_context) -> tuple[int, int]:
             return default_context_window, default_max_output
 
         # Use ModelConfigService to get model configuration
-        from src.db.session import request_scoped_session
+        from src.db.session import routed_scoped_session
         from src.services.settings.models import ModelConfigService
 
-        async with request_scoped_session() as session:
+        async with routed_scoped_session() as session:
             model_config_service = ModelConfigService(session, group_id)
             model_config = await model_config_service.find_by_key(model_name)
 
@@ -2137,9 +2137,8 @@ class FlowMethodFactory:
         @listen(previous_method_name)
         async def hitl_gate_method(self, previous_output=None):
             """HITL gate method - pauses flow for human approval."""
-            from src.db.session import request_scoped_session
+            from src.db.session import routed_scoped_session
             from src.models.hitl_approval import HITLApprovalStatus
-            from src.repositories.hitl_repository import HITLApprovalRepository
             from src.services.flow_builder.exceptions import (
                 FlowPausedForApprovalException,
             )
@@ -2186,11 +2185,11 @@ class FlowMethodFactory:
 
             # Check if there's already an APPROVED approval for this gate
             # This happens when resuming after approval
-            async with request_scoped_session() as session:
-                hitl_repo = HITLApprovalRepository(session)
-                existing_approvals = await hitl_repo.get_all_for_execution(
-                    job_id, group_id
-                )
+            async with routed_scoped_session() as session:
+                # Approvals are HITLService's domain.
+                existing_approvals = await HITLService(
+                    session
+                ).get_approvals_for_execution(job_id, group_id)
 
                 # Look for an approved approval for this specific gate
                 approved_for_gate = None
@@ -2215,12 +2214,12 @@ class FlowMethodFactory:
                     # If so, pass the edited version to the next crew instead of
                     # the original crew output.
                     try:
-                        from src.repositories.execution_history_repository import (
-                            ExecutionHistoryRepository,
-                        )
+                        # Runs are ExecutionService's domain.
+                        from src.services.execution.service import ExecutionService
 
-                        exec_repo = ExecutionHistoryRepository(session)
-                        execution = await exec_repo.get_execution_by_job_id(job_id)
+                        execution = await ExecutionService(session).get_run_by_job_id(
+                            job_id
+                        )
                         if execution and execution.checkpoint_data:
                             edited_config = execution.checkpoint_data.get(
                                 "edited_config"
@@ -2297,7 +2296,7 @@ class FlowMethodFactory:
                         logger.warning(f"   Could not store flow_uuid in state: {e}")
 
             # Create HITL approval request
-            async with request_scoped_session() as session:
+            async with routed_scoped_session() as session:
                 hitl_service = HITLService(session)
                 webhook_service = HITLWebhookService(session)
 

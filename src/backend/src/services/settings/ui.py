@@ -55,7 +55,7 @@ class UIConfigService:
             existing = UIConfig(
                 group_id=self.group_id, created_by_email=created_by_email
             )
-            self.session.add(existing)
+            await self.repository.add(existing)
 
         existing.enabled = config_in.enabled
         existing.catalog_type = config_in.catalog_type
@@ -63,7 +63,7 @@ class UIConfigService:
         existing.style_json = config_in.style_json
 
         await self.session.commit()
-        await self.session.refresh(existing)
+        await self.repository.reload(existing)
         logger.info(
             "Updated UI config for group %s (enabled=%s, catalog=%s)",
             self.group_id,

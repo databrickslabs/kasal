@@ -181,10 +181,10 @@ class TaskConfig:
             # Fallback to direct database lookup if repository not available or agent not found
             if not agent_data:
                 try:
-                    from src.db.session import request_scoped_session
+                    from src.db.session import routed_scoped_session
                     from src.repositories.agent_repository import AgentRepository
 
-                    async with request_scoped_session() as db:
+                    async with routed_scoped_session() as db:
                         agent_data = await AgentRepository(db).get(task_data.agent_id)
                 except Exception as db_error:
                     logger.error(
@@ -242,12 +242,12 @@ class TaskConfig:
                         # Fallback to direct database lookup
                         if not agent_data:
                             try:
-                                from src.db.session import request_scoped_session
+                                from src.db.session import routed_scoped_session
                                 from src.repositories.agent_repository import (
                                     AgentRepository,
                                 )
 
-                                async with request_scoped_session() as db:
+                                async with routed_scoped_session() as db:
                                     agent_data = await AgentRepository(db).get(
                                         inferred_agent_id
                                     )
@@ -305,10 +305,10 @@ class TaskConfig:
         # Create api_keys_service for tool factory to access API keys from database
         api_keys_service = None
         try:
-            from src.db.session import request_scoped_session
+            from src.db.session import routed_scoped_session
             from src.services.settings.api_keys import ApiKeysService
 
-            async with request_scoped_session() as session:
+            async with routed_scoped_session() as session:
                 group_id = factory_config.get("group_id")
                 api_keys_service = ApiKeysService(session, group_id=group_id)
                 # Create tool factory with proper context

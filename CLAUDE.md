@@ -58,28 +58,32 @@ you are editing wins on specifics:
 - **CRITICAL: Never include real URLs, endpoints, or addresses in code**
 - Always use placeholder values like "https://example.com" or environment variables
 - Follow clean architecture principles
-- **Keep files small** — see File Size Limits below (≤400 lines target, 800 hard ceiling)
+- **Keep files small** — see File Size Limits below (≤800 lines target, 1500 hard ceiling)
 - Never commit without running linting tools
 
 ### File Size Limits (keep files small)
 
-**Target ≤ 400 lines per source file. 800 is the hard ceiling.** ~75% of the
-codebase is already under 400 lines; the outliers are the exception, not the
-norm, and they are where bugs hide. A 2,000-line module cannot be read in one
-sitting, cannot be reviewed properly, and blows out the context of every future
-change to it.
+**Target ≤ 800 lines per file. 1500 is the hard ceiling.** Same pair for source
+and tests.
 
-Applies to `.py`, `.ts`, and `.tsx` under `src/backend/` and `src/frontend/src/`
-(tests included — a 2,800-line test file is as unreviewable as the code it covers).
+Set from the tree as it is: 89% of files are already under 800, and only 2.8% are
+over 1500 — exceptional, which is what a ceiling should mean. The previous pair
+(400 / 800) put the target at the 75th percentile and left 131 files above the
+"hard" ceiling, so it taught people to skip the rule rather than split the file.
+
+The point is reviewability, not tidiness: a 2,000-line module cannot be read in
+one sitting, cannot be reviewed properly, and blows out the context of every
+future change to it. Applies to `.py`, `.ts`, and `.tsx` under `src/backend/` and
+`src/frontend/src/`.
 
 **The ratchet — this is the operative rule:**
-- **Never create a new file over 400 lines.** If what you are writing will land
-  above that, it is at least two modules; design it that way from the start.
+- **Never create a new file over the target.** If what you are writing will land
+  above 800 lines, it is at least two modules; design it that way from the start.
 - **A file already over the ceiling must not grow.** When adding to one, extract
   the new code (and the cohesive block it belongs to) into a sibling module
   instead of appending. "It was already 2,000 lines" is not a licence to make it
   2,100.
-- **Touch it, shrink it.** Any non-trivial edit to a file over 800 lines should
+- **Touch it, shrink it.** Any non-trivial edit to a file over the ceiling should
   leave it smaller than you found it — pull out one coherent seam, not a token
   gesture.
 - **Do not mass-refactor files you were not asked to touch.** Splitting modules
@@ -100,28 +104,22 @@ one another engineer can name:
 - **Keep the public import path stable.** Re-export from the package
   `__init__.py` / `index.ts` so call sites do not churn.
 
-**Known offenders** — every file currently over the 800 ceiling. Do not add to
-them; shrink when you are in them. Paths, not bare names: three used to be
-listed under filenames that no longer exist, and a rule you cannot look up is a
-rule nobody applies.
+**Known offenders.** 31 source files are over the 1500 ceiling, so there is no
+hand-maintained table here — a list that long goes stale the week it is written
+(the previous one named 8 files, three of them under paths that no longer existed).
+Ask the tree instead:
 
-| File | Lines |
-|---|---|
-| `services/agent_builder/process_executor.py` | 3051 |
-| `services/tools/tool_factory.py` | 2694 |
-| `services/execution/service.py` | 2430 |
-| `Tasks/TaskForm.tsx` | 2126 |
-| `services/flow_builder/modules/flow_methods.py` | 2159 |
-| `services/chat/dispatcher.py` | 2090 |
-| `WorkflowDesigner/WorkflowDesigner.tsx` | 2047 |
-| `services/tools/powerbi_analysis_tool.py` | 908 |
+```bash
+# worst offenders, source only
+find src/backend/src src/frontend/src \( -name '*.py' -o -name '*.ts' -o -name '*.tsx' \) \
+  ! -path '*/node_modules/*' ! -name '*.test.*' -exec wc -l {} + \
+  | sort -rn | awk '$1 > 1500' | head -40
+```
 
-Three former entries have come back under the ceiling and are off the list:
-`shared/a2ui/components.tsx` (split into `shared/a2ui/components/`, largest
-piece 591), `ChatMode/ChatWorkspace.tsx` (758) and
-`services/prompt_optimization/service.py` (697). All three are still over the
-400 target, so they are not free of the rule — they are just no longer the
-worst of it.
+The heaviest are `services/agent_builder/process_executor.py` (3051), the PowerBI
+semantic-model tools (~2900–3000 each), `services/tools/tool_factory.py` (2708) and
+`services/execution/service.py` (2441). Do not add to any file already over the
+ceiling; shrink it when you are in it.
 
 Check before you commit: `wc -l <files you touched>`.
 

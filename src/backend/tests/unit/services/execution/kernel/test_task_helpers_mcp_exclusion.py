@@ -81,7 +81,7 @@ class TestMCPServersExcludedFromAutoResolution:
                 mock_mcp_service_cls,
             ),
             patch(
-                "src.db.session.request_scoped_session",
+                "src.db.session.routed_scoped_session",
                 _fake_scoped_session,
             ),
         ):

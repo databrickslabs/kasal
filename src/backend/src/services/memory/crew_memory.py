@@ -52,10 +52,10 @@ class CrewMemoryService:
         logger.info("FETCH_MEMORY_BACKEND_CONFIG CALLED")
         logger.info("=" * 80)
         try:
-            from src.db.session import request_scoped_session
+            from src.db.session import routed_scoped_session
             from src.services.memory.backend_service import MemoryBackendService
 
-            async with request_scoped_session() as session:
+            async with routed_scoped_session() as session:
                 service = MemoryBackendService(session)
                 group_id = self.config.get("group_id")
                 logger.info(

@@ -631,7 +631,7 @@ class TestValidateDatabricksAuth:
             mock_svc_cls.return_value = mock_svc
 
             with (
-                patch("src.db.session.request_scoped_session", mock_sess_ctx),
+                patch("src.db.session.routed_scoped_session", mock_sess_ctx),
                 patch(
                     "src.services.databricks.workspace.service.DatabricksService",
                     mock_svc_cls,

@@ -137,7 +137,7 @@ class TestGetModelContextLimits:
 
         with (
             patch(
-                "src.db.session.request_scoped_session", return_value=mock_session_ctx
+                "src.db.session.routed_scoped_session", return_value=mock_session_ctx
             ),
             patch("src.services.settings.models.ModelConfigService") as MockMCS,
         ):
@@ -165,7 +165,7 @@ class TestGetModelContextLimits:
 
         with (
             patch(
-                "src.db.session.request_scoped_session", return_value=mock_session_ctx
+                "src.db.session.routed_scoped_session", return_value=mock_session_ctx
             ),
             patch("src.services.settings.models.ModelConfigService") as MockMCS,
         ):
@@ -202,7 +202,7 @@ class TestGetModelContextLimits:
         fail_ctx.__aenter__ = AsyncMock(side_effect=Exception("session err"))
         fail_ctx.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("src.db.session.request_scoped_session", return_value=fail_ctx):
+        with patch("src.db.session.routed_scoped_session", return_value=fail_ctx):
             ctx, max_out = await get_model_context_limits(agent, group_ctx)
 
         assert ctx == 128000
@@ -568,21 +568,19 @@ class TestFlowMethodFactoryCreateHitlGate:
         session_ctx = self._make_session_ctx()
 
         with (
-            patch("src.db.session.request_scoped_session", return_value=session_ctx),
-            patch(
-                "src.repositories.hitl_repository.HITLApprovalRepository"
-            ) as MockRepo,
-            patch(
-                "src.repositories.execution_history_repository.ExecutionHistoryRepository"
-            ) as MockExecRepo,
+            patch("src.db.session.routed_scoped_session", return_value=session_ctx),
+            patch("src.services.hitl.service.HITLService") as MockRepo,
+            patch("src.services.execution.service.ExecutionService") as MockExecRepo,
         ):
 
             repo_instance = MagicMock()
-            repo_instance.get_all_for_execution = AsyncMock(return_value=[approved])
+            repo_instance.get_approvals_for_execution = AsyncMock(
+                return_value=[approved]
+            )
             MockRepo.return_value = repo_instance
 
             exec_repo_inst = MagicMock()
-            exec_repo_inst.get_execution_by_job_id = AsyncMock(return_value=None)
+            exec_repo_inst.get_run_by_job_id = AsyncMock(return_value=None)
             MockExecRepo.return_value = exec_repo_inst
 
             result = await method._meth(mock_self, previous_output="prev data")
@@ -621,21 +619,19 @@ class TestFlowMethodFactoryCreateHitlGate:
         session_ctx = self._make_session_ctx()
 
         with (
-            patch("src.db.session.request_scoped_session", return_value=session_ctx),
-            patch(
-                "src.repositories.hitl_repository.HITLApprovalRepository"
-            ) as MockRepo,
-            patch(
-                "src.repositories.execution_history_repository.ExecutionHistoryRepository"
-            ) as MockExecRepo,
+            patch("src.db.session.routed_scoped_session", return_value=session_ctx),
+            patch("src.services.hitl.service.HITLService") as MockRepo,
+            patch("src.services.execution.service.ExecutionService") as MockExecRepo,
         ):
 
             repo_instance = MagicMock()
-            repo_instance.get_all_for_execution = AsyncMock(return_value=[approved])
+            repo_instance.get_approvals_for_execution = AsyncMock(
+                return_value=[approved]
+            )
             MockRepo.return_value = repo_instance
 
             exec_repo_inst = MagicMock()
-            exec_repo_inst.get_execution_by_job_id = AsyncMock(return_value=execution)
+            exec_repo_inst.get_run_by_job_id = AsyncMock(return_value=execution)
             MockExecRepo.return_value = exec_repo_inst
 
             result = await method._meth(mock_self, previous_output="prev data")
@@ -672,19 +668,16 @@ class TestFlowMethodFactoryCreateHitlGate:
         session_ctx = self._make_session_ctx()
 
         with (
-            patch("src.db.session.request_scoped_session", return_value=session_ctx),
-            patch(
-                "src.repositories.hitl_repository.HITLApprovalRepository"
-            ) as MockRepo,
+            patch("src.db.session.routed_scoped_session", return_value=session_ctx),
+            # ONE patch: the gate both reads approvals and creates one through
+            # HITLService, so patching it twice made the second win and dropped the
+            # read stub.
             patch("src.services.hitl.service.HITLService") as MockHITLSvc,
             patch("src.services.hitl.webhook.HITLWebhookService") as MockWebhook,
         ):
 
-            repo_instance = MagicMock()
-            repo_instance.get_all_for_execution = AsyncMock(return_value=[])
-            MockRepo.return_value = repo_instance
-
             hitl_svc_instance = MagicMock()
+            hitl_svc_instance.get_approvals_for_execution = AsyncMock(return_value=[])
             hitl_svc_instance.create_approval_request = AsyncMock(return_value=approval)
             MockHITLSvc.return_value = hitl_svc_instance
 
@@ -726,19 +719,16 @@ class TestFlowMethodFactoryCreateHitlGate:
         session_ctx = self._make_session_ctx()
 
         with (
-            patch("src.db.session.request_scoped_session", return_value=session_ctx),
-            patch(
-                "src.repositories.hitl_repository.HITLApprovalRepository"
-            ) as MockRepo,
+            patch("src.db.session.routed_scoped_session", return_value=session_ctx),
+            # ONE patch: the gate both reads approvals and creates one through
+            # HITLService, so patching it twice made the second win and dropped the
+            # read stub.
             patch("src.services.hitl.service.HITLService") as MockHITLSvc,
             patch("src.services.hitl.webhook.HITLWebhookService") as MockWebhook,
         ):
 
-            repo_instance = MagicMock()
-            repo_instance.get_all_for_execution = AsyncMock(return_value=[])
-            MockRepo.return_value = repo_instance
-
             hitl_svc_instance = MagicMock()
+            hitl_svc_instance.get_approvals_for_execution = AsyncMock(return_value=[])
             hitl_svc_instance.create_approval_request = AsyncMock(return_value=approval)
             MockHITLSvc.return_value = hitl_svc_instance
 

@@ -129,6 +129,30 @@ class SkillRepository(BaseRepository[Skill]):
                 by_name[row.name] = row
         return [by_name[n] for n in names if n in by_name]
 
+    async def insert(self, skill: Skill) -> Skill:
+        """Persist a new skill and flush so its ``id`` is available.
+
+        Flush, not commit: the caller is mid-unit-of-work (a create also writes
+        the skill's files, and both must land or neither), and ending the
+        transaction here would take that choice away from it.
+        """
+        self.session.add(skill)
+        await self.session.flush()
+        return skill
+
+    async def remove(self, skill: Skill) -> None:
+        """Delete a skill row (its files cascade)."""
+        await self.session.delete(skill)
+        await self.session.flush()
+
+    async def save(self) -> None:
+        """Flush pending attribute changes on already-tracked skills.
+
+        The update paths mutate a loaded instance and need those values visible
+        to the follow-up read in the same transaction.
+        """
+        await self.session.flush()
+
     async def replace_files(self, skill_id: int, files: List[dict]) -> None:
         """Set a skill's bundled files to exactly this set.
 

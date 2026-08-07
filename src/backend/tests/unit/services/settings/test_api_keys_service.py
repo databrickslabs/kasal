@@ -57,10 +57,10 @@ def _build_service(group_id="grp_1"):
     return service, repo
 
 
-def _mock_request_scoped_session():
+def _mock_routed_scoped_session():
     """
     Build a mock that works as an async context manager, mimicking
-    ``async with request_scoped_session() as session:``.
+    ``async with routed_scoped_session() as session:``.
     Returns (factory_mock, session_mock) so callers can configure
     the session mock's repository behaviour.
     """
@@ -90,7 +90,9 @@ class TestInit:
 
         assert service.group_id == "g1"
         assert service.is_async is True
-        assert service.session is None
+        # The session is KEPT. This asserted `is None` and so pinned the bug that
+        # disabled every *_sync helper — see TestTheSyncPathIsWiredUp.
+        assert service.session is session
         RepoClass.assert_called_once_with(session)
 
     def test_init_default_group_id_is_none(self):
@@ -476,10 +478,10 @@ class TestGetApiKeyValue:
     @pytest.mark.asyncio
     async def test_returns_decrypted_value(self):
         fake_key = _make_api_key(encrypted_value="enc_val")
-        factory_mock, mock_session = _mock_request_scoped_session()
+        factory_mock, mock_session = _mock_routed_scoped_session()
 
         with (
-            patch("src.db.session.request_scoped_session", factory_mock),
+            patch("src.db.session.routed_scoped_session", factory_mock),
             patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass,
             patch("src.services.settings.api_keys.EncryptionUtils") as EU,
         ):
@@ -501,10 +503,10 @@ class TestGetApiKeyValue:
 
     @pytest.mark.asyncio
     async def test_returns_none_when_key_not_found(self):
-        factory_mock, mock_session = _mock_request_scoped_session()
+        factory_mock, mock_session = _mock_routed_scoped_session()
 
         with (
-            patch("src.db.session.request_scoped_session", factory_mock),
+            patch("src.db.session.routed_scoped_session", factory_mock),
             patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass,
             patch("src.services.settings.api_keys.EncryptionUtils"),
         ):
@@ -521,10 +523,10 @@ class TestGetApiKeyValue:
     @pytest.mark.asyncio
     async def test_returns_none_on_decryption_error(self):
         fake_key = _make_api_key(encrypted_value="bad")
-        factory_mock, mock_session = _mock_request_scoped_session()
+        factory_mock, mock_session = _mock_routed_scoped_session()
 
         with (
-            patch("src.db.session.request_scoped_session", factory_mock),
+            patch("src.db.session.routed_scoped_session", factory_mock),
             patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass,
             patch("src.services.settings.api_keys.EncryptionUtils") as EU,
         ):
@@ -542,10 +544,10 @@ class TestGetApiKeyValue:
     @pytest.mark.asyncio
     async def test_handles_string_as_first_argument(self):
         """When db is passed as a string, it is treated as key_name."""
-        factory_mock, mock_session = _mock_request_scoped_session()
+        factory_mock, mock_session = _mock_routed_scoped_session()
 
         with (
-            patch("src.db.session.request_scoped_session", factory_mock),
+            patch("src.db.session.routed_scoped_session", factory_mock),
             patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass,
             patch("src.services.settings.api_keys.EncryptionUtils") as EU,
         ):
@@ -613,12 +615,12 @@ class TestSetupProviderApiKey:
 class TestSetupProviderApiKeySync:
     """Tests for the sync staticmethod setup_provider_api_key_sync.
 
-    The method internally creates ``ApiKeysService(db)`` which sets
-    ``self.session = None``.  Since the ``find_by_name_sync`` check on
-    ``self.session`` would then fail, we patch ``ApiKeysService`` inside
-    the service module so the constructor returns a mock we control.
-    We use the saved reference ``_real_setup_provider_api_key_sync``
-    to call the real function while the module-level name is patched.
+    These patch ``ApiKeysService`` in the service module so the constructor
+    returns a mock we control, calling the real function via the saved
+    ``_real_setup_provider_api_key_sync`` reference.
+
+    Mocking the service is why these passed while the path was BROKEN — see
+    ``TestTheSyncPathIsWiredUp`` below, which uses the real constructor.
     """
 
     def test_sets_env_var_on_success(self):
@@ -1037,10 +1039,10 @@ class TestGetProviderApiKey:
     @pytest.mark.asyncio
     async def test_returns_decrypted_key(self):
         fake_key = _make_api_key(encrypted_value="enc_openai")
-        factory_mock, mock_session = _mock_request_scoped_session()
+        factory_mock, mock_session = _mock_routed_scoped_session()
 
         with (
-            patch("src.db.session.request_scoped_session", factory_mock),
+            patch("src.db.session.routed_scoped_session", factory_mock),
             patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass,
             patch("src.services.settings.api_keys.EncryptionUtils") as EU,
         ):
@@ -1065,10 +1067,10 @@ class TestGetProviderApiKey:
 
     @pytest.mark.asyncio
     async def test_returns_none_when_key_not_found(self):
-        factory_mock, mock_session = _mock_request_scoped_session()
+        factory_mock, mock_session = _mock_routed_scoped_session()
 
         with (
-            patch("src.db.session.request_scoped_session", factory_mock),
+            patch("src.db.session.routed_scoped_session", factory_mock),
             patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass,
             patch("src.services.settings.api_keys.EncryptionUtils"),
         ):
@@ -1085,10 +1087,10 @@ class TestGetProviderApiKey:
     @pytest.mark.asyncio
     async def test_returns_none_on_decryption_error(self):
         fake_key = _make_api_key(encrypted_value="bad")
-        factory_mock, mock_session = _mock_request_scoped_session()
+        factory_mock, mock_session = _mock_routed_scoped_session()
 
         with (
-            patch("src.db.session.request_scoped_session", factory_mock),
+            patch("src.db.session.routed_scoped_session", factory_mock),
             patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass,
             patch("src.services.settings.api_keys.EncryptionUtils") as EU,
         ):
@@ -1108,7 +1110,7 @@ class TestGetProviderApiKey:
         """Test the outer try/except that catches session factory errors."""
         factory_mock = MagicMock(side_effect=Exception("session factory broke"))
 
-        with patch("src.db.session.request_scoped_session", factory_mock):
+        with patch("src.db.session.routed_scoped_session", factory_mock):
             result = await ApiKeysService.get_provider_api_key(
                 "openai", group_id="grp_1"
             )
@@ -1118,10 +1120,10 @@ class TestGetProviderApiKey:
     @pytest.mark.asyncio
     async def test_uppercases_provider_name(self):
         """Verify provider name is uppercased when building key_name."""
-        factory_mock, mock_session = _mock_request_scoped_session()
+        factory_mock, mock_session = _mock_routed_scoped_session()
 
         with (
-            patch("src.db.session.request_scoped_session", factory_mock),
+            patch("src.db.session.routed_scoped_session", factory_mock),
             patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass,
             patch("src.services.settings.api_keys.EncryptionUtils"),
         ):
@@ -1314,3 +1316,57 @@ class TestPatCacheInvalidationHooks:
             result = await service.create_api_key(data)  # must not raise
 
         assert result is not None
+
+
+# ===========================================================================
+# The sync path, with the REAL constructor (regression)
+# ===========================================================================
+
+
+class TestTheSyncPathIsWiredUp:
+    """``__init__`` must keep the session it was given.
+
+    It used to hardcode ``self.session = None`` ("for compatibility with older
+    code"), which silently disabled every ``*_sync`` helper: ``find_by_name_sync``
+    guards on ``isinstance(self.session, Session)``, so with None it ALWAYS raised
+    TypeError. ``setup_provider_api_key_sync`` — which loads the OPENAI / ANTHROPIC
+    / DEEPSEEK / GEMINI keys into the environment at startup — caught that and
+    returned False, so a key that WAS configured simply read as absent.
+
+    The tests above could not catch it: they replace ``ApiKeysService`` with a mock,
+    so the real ``__init__`` never runs. These use the real one.
+    """
+
+    def test_a_sync_session_is_kept(self):
+        from sqlalchemy.orm import Session
+
+        service = ApiKeysService(MagicMock(spec=Session), group_id="g1")
+        assert service.session is not None, "the session was discarded again"
+        assert service.is_async is False
+
+    def test_an_async_session_still_reports_async(self):
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        service = ApiKeysService(MagicMock(spec=AsyncSession), group_id="g1")
+        assert service.is_async is True
+
+    def test_find_by_name_sync_no_longer_always_raises(self):
+        """THE bug: this raised TypeError for every caller, on every key."""
+        from sqlalchemy.orm import Session
+
+        service = ApiKeysService(MagicMock(spec=Session), group_id="g1")
+        service.repository = MagicMock()
+        service.repository.find_by_name_sync.return_value = "the-row"
+
+        assert service.find_by_name_sync("OPENAI_API_KEY") == "the-row"
+        service.repository.find_by_name_sync.assert_called_once_with(
+            "OPENAI_API_KEY", group_id="g1"
+        )
+
+    def test_group_scoping_is_still_enforced_on_the_sync_path(self):
+        """Re-enabling the path must not re-open a cross-tenant read."""
+        from sqlalchemy.orm import Session
+
+        service = ApiKeysService(MagicMock(spec=Session), group_id=None)
+        with pytest.raises(ValueError, match="SECURITY"):
+            service.find_by_name_sync("OPENAI_API_KEY")

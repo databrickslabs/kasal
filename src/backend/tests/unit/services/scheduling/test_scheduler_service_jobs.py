@@ -25,13 +25,13 @@ def _make_service():
     mock_session = MagicMock()
     with (
         patch("src.services.scheduling.scheduler.ScheduleRepository"),
-        patch("src.services.scheduling.scheduler.ExecutionHistoryRepository"),
+        patch("src.services.scheduling.scheduler.ExecutionService"),
     ):
         from src.services.scheduling.scheduler import SchedulerService
 
         svc = SchedulerService(mock_session)
     svc.repository = AsyncMock()
-    svc.execution_history_repository = AsyncMock()
+    svc.execution_service = AsyncMock()
     return svc
 
 
@@ -171,7 +171,6 @@ class TestRunScheduleJob:
             patch(
                 "src.services.scheduling.scheduler.KasalExecutionService"
             ) as mock_crewai,
-            patch("src.services.scheduling.scheduler.Run") as mock_run_cls,
             patch("src.services.scheduling.scheduler.GroupContext") as mock_gc_cls,
         ):
             # Async generator, not a context manager: the scheduler consumes
@@ -183,8 +182,10 @@ class TestRunScheduleJob:
             mock_factory.side_effect = lambda *a, **k: _gen()
             mock_es_cls.return_value = mock_exec_service
             mock_es_cls.run_crew_execution = AsyncMock()
+            # The run row is built by ExecutionService.create_run_record now, not
+            # by the scheduler constructing the model itself.
+            mock_es_cls.create_run_record = AsyncMock(return_value=MagicMock())
             mock_crewai.add_execution_to_memory = MagicMock()
-            mock_run_cls.return_value = MagicMock()
             mock_gc_cls.return_value = MagicMock()
 
             with patch(

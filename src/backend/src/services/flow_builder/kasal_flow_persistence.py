@@ -11,9 +11,18 @@ Bridging note: CrewAI's :class:`FlowPersistence` API is *synchronous* and its ho
 run inside the flow's already-running event loop, while Kasal's DB access is async
 (and, for Lakebase, loop-/token-bound). We therefore run each async DB operation on
 a short-lived dedicated thread + event loop. This avoids ``asyncio.run`` deadlocks
-(we're already inside a running loop) and lets Kasal's swappable session factory
-build a loop-correct, Lakebase-aware engine for that thread — the same mechanism
-crew threads already rely on.
+(we're already inside a running loop) and lets Kasal build a loop-correct,
+Lakebase-aware engine for that thread — the same mechanism crew threads already
+rely on.
+
+Session choice: ``get_isolated_db_session``, NOT ``routed_scoped_session``, and the
+new-loop-per-call above is exactly why. The router hands back the shared StaticPool
+connection, which is bound to whichever loop first opened it — so the second call
+gets "Future attached to a different loop" / "Event loop is closed". The isolated
+helper gives this thread a PRIVATE connection, and it honours Lakebase by the same
+signal the reads use: it checks ``is_lakebase_enabled()`` itself and opens a
+Lakebase session when enabled — independent of whether this process happened to
+hot-swap the global factory.
 """
 
 import asyncio
@@ -107,10 +116,10 @@ class KasalFlowPersistence(FlowPersistence):
         global _table_ensured
 
         async def _init() -> None:
-            from src.db.session import async_session_factory
+            from src.db.session import get_isolated_db_session
             from src.models.flow_state import FlowState
 
-            async with async_session_factory() as session:
+            async with get_isolated_db_session() as session:
                 conn = await session.connection()
                 await conn.run_sync(
                     lambda sync_conn: FlowState.__table__.create(
@@ -173,10 +182,10 @@ class KasalFlowPersistence(FlowPersistence):
         async def _save() -> None:
             # The session is the unit-of-work boundary; DB access goes through the
             # repository (clean architecture), and the caller commits.
-            from src.db.session import async_session_factory
+            from src.db.session import get_isolated_db_session
             from src.repositories.flow_state_repository import FlowStateRepository
 
-            async with async_session_factory() as session:
+            async with get_isolated_db_session() as session:
                 repo = FlowStateRepository(session)
                 await repo.add_state(
                     flow_uuid, method_name, state_json, group_id=self._group_id
@@ -192,10 +201,10 @@ class KasalFlowPersistence(FlowPersistence):
         """Load the most recent persisted state for a flow UUID (for resume)."""
 
         async def _load() -> Optional[str]:
-            from src.db.session import async_session_factory
+            from src.db.session import get_isolated_db_session
             from src.repositories.flow_state_repository import FlowStateRepository
 
-            async with async_session_factory() as session:
+            async with get_isolated_db_session() as session:
                 repo = FlowStateRepository(session)
                 return await repo.get_latest_state_json(
                     flow_uuid, group_id=self._group_id

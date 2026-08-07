@@ -29,6 +29,10 @@ class WorkflowRecipeRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    async def reload(self, recipe) -> None:
+        """Re-read a row after commit so server-side defaults are populated."""
+        await self.session.refresh(recipe)
+
     async def create(self, data: Dict[str, Any]) -> WorkflowRecipe:
         record = WorkflowRecipe(**data)
         self.session.add(record)

@@ -491,58 +491,95 @@ _request_session: ContextVar[Optional[AsyncSession]] = ContextVar(
 )
 
 
-@asynccontextmanager
-async def request_scoped_session():
-    """Get the current request-scoped session or create a standalone one.
+def _usable_for_more_sql(session: AsyncSession) -> bool:
+    """Whether ``session`` can still take a query, i.e. is not mid-commit.
 
-    Inside an HTTP request (where ``get_db()`` or ``get_smart_db_session()``
-    has set the ContextVar), this yields the *same* session so that all
-    service-layer code participates in the single request transaction.
+    Reusing the request session is the whole point of branch 1, but a session
+    COMMITTING is briefly in ``PREPARED`` state, and SQLAlchemy refuses further SQL
+    on it: "This session is in 'prepared' state; no further SQL can be emitted
+    within this transaction."
 
-    Outside a request (background tasks, seeds, scripts) the ContextVar is
-    unset, so a fresh standalone session is created and cleaned up normally.
+    That is reachable because ``commit()`` -> ``_prepare_impl()`` -> ``flush()``, and
+    a flush can run application code that reads the database again — the light-agent
+    path did exactly this, committing a terminal run status and then building its
+    embedder config, whose API-key lookup landed back on the same session. The read
+    failed, the Databricks key read as absent, embeddings fell back to a local Ollama
+    that was not running, and memory silently saved with no vector.
+
+    Falling through to a NEW session is correct here: a nested read that cannot join
+    the in-flight transaction is better served by its own, and it sees the committed
+    state either way.
     """
-    existing = _request_session.get(None)
-    if existing is not None:
-        yield existing
-    else:
-        async with async_session_factory() as session:
-            yield session
+    from sqlalchemy.orm.session import SessionTransactionState
+
+    try:
+        transaction = session.sync_session._transaction
+    except Exception:  # noqa: BLE001 - a test double, or no sync_session
+        return True
+    if transaction is None:
+        return True
+    state = getattr(transaction, "_state", None)
+    # Only REFUSE on a state we positively recognise as unusable. A MagicMock's
+    # attribute access yields another Mock, so an `is ACTIVE` test would reject every
+    # test double and every future SQLAlchemy state name.
+    return state not in (
+        SessionTransactionState.PREPARED,
+        SessionTransactionState.COMMITTED,
+        SessionTransactionState.CLOSED,
+        SessionTransactionState.DEACTIVE,
+    )
 
 
 @asynccontextmanager
 async def routed_scoped_session():
-    """Like :func:`request_scoped_session`, but ROUTES instead of snapshotting.
+    """The one way to get a session outside an HTTP request.
 
-    Same first branch — inside a request, reuse that request's session so the
-    caller joins the single transaction. The difference is the fallback: this one
-    goes through the database ROUTER, which re-reads ``is_lakebase_enabled()`` per
-    call, instead of the raw ``async_session_factory``.
+    Three branches, in order:
 
-    That factory is a per-process SNAPSHOT, and only a SUBPROCESS ever swaps it to
-    Lakebase (``activate_lakebase_in_subprocess``). The main process never does, so
-    anything running IN-PROCESS outside a request — a FastAPI ``BackgroundTask``,
-    which is where the whole Chat path runs — read local SQLite while the crew and
-    flow subprocesses read Lakebase. Same config, opposite answers, no error: an
-    MCP server enabled for the workspace produced "Added 1 explicit MCP servers"
-    in Agent Builder and "Added 0" in Chat.
+    1. **Inside a request** — yield THAT session, so the caller joins the single
+       request transaction rather than opening a competing one.
+    2. **Already resolving auth** — use the raw factory. This is the recursion
+       break; see below.
+    3. **Otherwise** — go through the database ROUTER, which re-reads
+       ``is_lakebase_enabled()`` on every call.
 
-    **Not a drop-in replacement for every caller.** ``request_scoped_session`` is
-    still correct where routing would recurse: the router needs a credential to
-    reach Lakebase, and in local dev it resolves one via ``get_auth_context`` →
-    ``ApiKeysService``, which is itself a ``request_scoped_session`` caller. The
-    router sets the ContextVar only AFTER connecting, so during connect the
-    fallback is live and routing it would close the loop that produced 1,287
-    "maximum recursion depth exceeded" in production. Use this for reads that are
-    NOT on the router's own connect path — MCP servers, tool configs, model
-    configs — and leave credential lookups alone.
+    Branch 3 is the point. ``async_session_factory`` is a per-process SNAPSHOT that
+    only a SUBPROCESS ever swaps to Lakebase (``activate_lakebase_in_subprocess``);
+    the main process never does. So anything running IN-PROCESS outside a request —
+    a FastAPI ``BackgroundTask``, which is where the whole Chat path runs — read
+    local SQLite while the crew and flow subprocesses read Lakebase. Same config,
+    opposite answers, no error: an MCP server enabled for the workspace produced
+    "Added 1 explicit MCP servers" in Agent Builder and "Added 0" in Chat.
+
+    Branch 2 is why this helper cannot simply always route. The router needs a
+    credential to reach Lakebase and resolves one via ``get_auth_context`` →
+    ``ApiKeysService`` — itself a caller of this function. Routing that read closes
+    the loop, which the deployed app logged 1,287 times as "maximum recursion depth
+    exceeded", killing every crew and flow subprocess. ``_RESOLVING_AUTH`` is set
+    for the duration of an auth resolution (by ``get_auth_context`` on its
+    outermost entry, and by the router before it calls auth), and it is a
+    ContextVar rather than a bool so one task's lookup cannot disable routing for
+    another's. The bootstrap read wants the local database anyway: the Lakebase
+    config row lives there by design.
+
+    This replaced ``request_scoped_session``, which had branch 1 and then went
+    straight to the snapshot — unconditionally, whether or not auth was involved.
+    That looked safe (the name says "request-scoped") and was the same silent split
+    as the raw factory in 33 of its 37 call sites.
     """
     existing = _request_session.get(None)
-    if existing is not None:
+    if existing is not None and _usable_for_more_sql(existing):
         yield existing
         return
 
-    # Imported here, not at module scope: database_router imports THIS module.
+    # Imported here, not at module scope: both modules import THIS one.
+    from src.utils.databricks_auth import _RESOLVING_AUTH
+
+    if _RESOLVING_AUTH.get():
+        async with async_session_factory() as session:
+            yield session
+        return
+
     from src.db.database_router import get_smart_db_session
 
     async for session in get_smart_db_session():

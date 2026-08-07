@@ -1,16 +1,16 @@
+import logging
 import uuid
 from typing import List, Optional, Union
 from uuid import UUID
 
-from sqlalchemy import desc, select, text
+from sqlalchemy import bindparam, desc, func, select, text
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
 from src.models.flow import Flow
 
-# Session import removed - use AsyncSession only
-
-# SessionLocal removed - use async_session_factory instead
+logger = logging.getLogger(__name__)
 
 
 class FlowRepository(BaseRepository[Flow]):
@@ -133,6 +133,139 @@ class FlowRepository(BaseRepository[Flow]):
             select(Flow).order_by(desc(Flow.created_at)).limit(1)
         )
         return result.scalars().first()
+
+    async def list_for_groups(self, group_ids: List[str]) -> List[Flow]:
+        """Flows visible to these groups, newest edit first."""
+        if not group_ids:
+            return []
+        result = await self.session.execute(
+            select(Flow)
+            .where(Flow.group_id.in_(group_ids))
+            .order_by(Flow.updated_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def exists(self, flow_id: uuid.UUID) -> bool:
+        """Whether a flow row is present, without loading it."""
+        result = await self.session.execute(
+            select(Flow.id).where(Flow.id == self._uuid_param(flow_id))
+        )
+        return result.first() is not None
+
+    async def get_group_id(self, flow_id: uuid.UUID) -> tuple[bool, Optional[str]]:
+        """``(exists, group_id)`` for one flow — the authorization pre-check."""
+        result = await self.session.execute(
+            select(Flow.id, Flow.group_id).where(Flow.id == self._uuid_param(flow_id))
+        )
+        row = result.first()
+        return (row is not None, row[1] if row else None)
+
+    async def count_executions(self, flow_id: uuid.UUID) -> int:
+        """How many runs reference this flow (a non-force delete refuses if any)."""
+        from src.models.execution_history import ExecutionHistory
+
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(ExecutionHistory)
+            .where(ExecutionHistory.flow_id == flow_id)
+        )
+        return int(result.scalar_one())
+
+    async def find_execution_keys(
+        self, flow_id: uuid.UUID
+    ) -> tuple[List[int], List[str]]:
+        """``(execution_ids, job_ids)`` for this flow's runs.
+
+        Both keys, because the FK children are split between them: some reference
+        ``executionhistory.id`` and some ``executionhistory.job_id``.
+        """
+        result = await self.session.execute(
+            text(
+                "SELECT id, job_id FROM executionhistory "
+                "WHERE flow_id = :flow_id AND execution_type = 'flow'"
+            ).bindparams(self._flow_id_bindparam()),
+            {"flow_id": self._uuid_param(flow_id)},
+        )
+        rows = result.fetchall()
+        return [r[0] for r in rows], [r[1] for r in rows]
+
+    async def delete_execution_children(
+        self, execution_ids: List[int], job_ids: List[str]
+    ) -> None:
+        """Delete every row FK-referencing these runs.
+
+        Must precede the ``executionhistory`` delete or SQLite raises "FOREIGN KEY
+        constraint failed". Covers all enforced children:
+          - execution_trace:   run_id (-> id) AND job_id (-> job_id)
+          - errortrace:        run_id (-> id)
+          - taskstatus:        job_id (-> job_id)
+          - llm_usage_billing: execution_id (-> job_id)
+
+        Table/column names are hardcoded constants — no injection surface.
+        """
+        if execution_ids:
+            for table, col in (("execution_trace", "run_id"), ("errortrace", "run_id")):
+                result = await self.session.execute(
+                    text(f"DELETE FROM {table} WHERE {col} IN :ids").bindparams(
+                        bindparam("ids", expanding=True)
+                    ),
+                    {"ids": execution_ids},
+                )
+                logger.info(f"Deleted {result.rowcount} {table} records (by {col})")
+
+        if job_ids:
+            for table, col in (
+                ("execution_trace", "job_id"),
+                ("taskstatus", "job_id"),
+                ("llm_usage_billing", "execution_id"),
+            ):
+                result = await self.session.execute(
+                    text(f"DELETE FROM {table} WHERE {col} IN :jids").bindparams(
+                        bindparam("jids", expanding=True)
+                    ),
+                    {"jids": job_ids},
+                )
+                logger.info(f"Deleted {result.rowcount} {table} records (by {col})")
+
+    async def delete_executions_of(self, flow_id: uuid.UUID) -> int:
+        """Delete this flow's runs, returning how many."""
+        result = await self.session.execute(
+            text(
+                "DELETE FROM executionhistory "
+                "WHERE flow_id = :flow_id AND execution_type = 'flow'"
+            ).bindparams(self._flow_id_bindparam()),
+            {"flow_id": self._uuid_param(flow_id)},
+        )
+        return result.rowcount or 0
+
+    async def delete_row(self, flow_id: uuid.UUID) -> int:
+        """Delete the flow row itself, returning how many rows went."""
+        result = await self.session.execute(
+            text("DELETE FROM flows WHERE id = :flow_id").bindparams(
+                self._flow_id_bindparam()
+            ),
+            {"flow_id": self._uuid_param(flow_id)},
+        )
+        return result.rowcount or 0
+
+    @staticmethod
+    def _uuid_param(flow_id) -> uuid.UUID:
+        """Coerce to a real ``UUID``.
+
+        Required, not cosmetic: a raw ``str``/``UUID`` passed into ``text()`` fails
+        on SQLite (cannot bind UUID) and ``str()`` yields the dashed form, which
+        does not match SQLite's stored dashless hex.
+        """
+        return flow_id if isinstance(flow_id, uuid.UUID) else uuid.UUID(str(flow_id))
+
+    @staticmethod
+    def _flow_id_bindparam():
+        """Bind ``flow_id`` with the column's UUID type.
+
+        Lets SQLAlchemy apply the per-dialect conversion — native UUID on
+        Postgres, dashless hex on SQLite.
+        """
+        return bindparam("flow_id", type_=PGUUID(as_uuid=True))
 
     async def delete_with_executions(self, flow_id: uuid.UUID) -> bool:
         """

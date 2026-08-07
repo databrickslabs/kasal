@@ -49,7 +49,7 @@ class HumanReviewGuardrail:
     # ------------------------------ async I/O ------------------------------
 
     async def _create(self, raw_output: str) -> Optional[str]:
-        from src.db.session import request_scoped_session
+        from src.db.session import routed_scoped_session
         from src.services.hitl.service import HITLService
 
         gate_config = {
@@ -62,7 +62,7 @@ class HumanReviewGuardrail:
                 "before the run continues."
             ),
         }
-        async with request_scoped_session() as session:
+        async with routed_scoped_session() as session:
             service = HITLService(session)
             approval = await service.create_approval_request(
                 execution_id=self.execution_id,
@@ -78,11 +78,11 @@ class HumanReviewGuardrail:
             return str(approval.id) if approval is not None else None
 
     async def _decision(self, approval_id: str) -> Tuple[Optional[str], Optional[str]]:
-        from src.db.session import request_scoped_session
-        from src.repositories.hitl_repository import HITLApprovalRepository
+        from src.db.session import routed_scoped_session
+        from src.services.hitl.service import HITLService
 
-        async with request_scoped_session() as session:
-            approval = await HITLApprovalRepository(session).get_by_id(approval_id)
+        async with routed_scoped_session() as session:
+            approval = await HITLService(session).get_approval(approval_id)
             if approval is None:
                 return None, None
             status = approval.status

@@ -55,6 +55,11 @@ def _offenders() -> set[str]:
 
 #: Files whose directory does not match what they import. Shrink this.
 _BASELINE = {
+    # An architecture check by definition: it walks EVERY module under src/ and
+    # asserts none of them opens its own database session. There is no single
+    # module it could sit beside, and putting it next to db/session.py would
+    # imply it only covers that file.
+    "architecture/test_sessions_go_through_the_router.py",
     "api/test_memory_backend_router.py",
     "services/agent_builder/test_execution_runner_callbacks.py",
     "services/chat/test_context_compaction_event.py",

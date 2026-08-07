@@ -102,18 +102,15 @@ class CompleteGenerationMixin:
             # Filter out Databricks knowledge tool if no Databricks memory is configured for this group
             try:
                 from src.models.memory_backend import MemoryBackendTypeEnum
-                from src.repositories.memory_backend_repository import (
-                    MemoryBackendRepository,
-                )
+                from src.services.memory.backend_service import MemoryBackendService
 
                 primary_group_id = (
                     group_context.primary_group_id if group_context else None
                 )
                 if primary_group_id:
-                    mem_repo = MemoryBackendRepository(self.session)
-                    databricks_backends = await mem_repo.get_by_type(
-                        primary_group_id, MemoryBackendTypeEnum.DATABRICKS
-                    )
+                    databricks_backends = await MemoryBackendService(
+                        self.session
+                    ).get_by_type(primary_group_id, MemoryBackendTypeEnum.DATABRICKS)
                     if not databricks_backends:
                         before_count = len(tools_with_details)
                         tools_with_details = [

@@ -52,6 +52,13 @@ async def db_health():
 
     if lakebase_enabled:
         try:
+            # DELIBERATELY UNROUTED — the one place in the API that should touch
+            # the raw factory. Everywhere else it is a bug (see
+            # services/CLAUDE.md), because it is a per-process snapshot that a
+            # runtime /lakebase/enable never swaps. Here that IS the question:
+            # this endpoint reports whether THIS process's factory got swapped.
+            # Routing it would make the check pass by construction and hide the
+            # split it exists to detect.
             from src.db.session import async_session_factory
 
             if async_session_factory.is_lakebase:

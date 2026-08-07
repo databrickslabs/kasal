@@ -85,9 +85,12 @@ def mock_session():
 
 @pytest.fixture
 def mock_tool_repo():
-    """Create a mock ToolRepository with all async methods."""
-    repo = AsyncMock()
-    return repo
+    """A mock ToolService — tools are that service's domain now.
+
+    Kept under this name so the many tests that stub tool lookups still read the
+    same; only the seam moved from ToolRepository up to ToolService.
+    """
+    return AsyncMock()
 
 
 @pytest.fixture
@@ -102,7 +105,7 @@ def service(mock_session, mock_tool_repo, mock_group_tool_repo):
     """Create a GroupToolService with mocked repository dependencies."""
     with (
         patch(
-            "src.services.groups.group_tools.ToolRepository",
+            "src.services.tools.tool_service.ToolService",
             return_value=mock_tool_repo,
         ),
         patch(
@@ -194,7 +197,7 @@ class TestListAvailableToAddForGroup:
         non_global = _make_tool(id=3, enabled=True, group_id="other-group")
         already_mapped = _make_tool(id=4, enabled=True, group_id=None)
 
-        mock_tool_repo.list.return_value = [
+        mock_tool_repo.list_tool_records.return_value = [
             global_enabled,
             global_disabled,
             non_global,
@@ -235,7 +238,7 @@ class TestAddToolToGroup:
     ):
         """Successfully adds a global enabled tool to a group and returns GroupToolResponse."""
         tool = _make_tool(id=5, enabled=True, group_id=None)
-        mock_tool_repo.get.return_value = tool
+        mock_tool_repo.get_tool_record.return_value = tool
 
         created_mapping = _make_group_tool(
             id=200, tool_id=5, group_id="group-abc", enabled=True
@@ -244,7 +247,7 @@ class TestAddToolToGroup:
 
         result = await service.add_tool_to_group(5, group_context)
 
-        mock_tool_repo.get.assert_called_once_with(5)
+        mock_tool_repo.get_tool_record.assert_called_once_with(5)
         # Adding a tool now enables it by default (no separate enable step).
         mock_group_tool_repo.upsert.assert_called_once_with(
             tool_id=5, group_id="group-abc", defaults={"enabled": True}
@@ -258,7 +261,7 @@ class TestAddToolToGroup:
     ):
         """Passes optional defaults dict through to the repository upsert."""
         tool = _make_tool(id=6, enabled=True, group_id=None)
-        mock_tool_repo.get.return_value = tool
+        mock_tool_repo.get_tool_record.return_value = tool
 
         defaults = {"enabled": True, "config": {"api_key": "secret"}}
         mapping = _make_group_tool(
@@ -290,7 +293,7 @@ class TestAddToolToGroup:
         self, service, mock_tool_repo, group_context
     ):
         """Raises NotFoundError when the tool ID does not exist in the catalog."""
-        mock_tool_repo.get.return_value = None
+        mock_tool_repo.get_tool_record.return_value = None
 
         with pytest.raises(NotFoundError, match="Tool not found"):
             await service.add_tool_to_group(999, group_context)
@@ -301,7 +304,7 @@ class TestAddToolToGroup:
     ):
         """Raises BadRequestError when the tool is group-specific (group_id is not None)."""
         non_global_tool = _make_tool(id=7, enabled=True, group_id="other-group")
-        mock_tool_repo.get.return_value = non_global_tool
+        mock_tool_repo.get_tool_record.return_value = non_global_tool
 
         with pytest.raises(BadRequestError, match="Only global tools"):
             await service.add_tool_to_group(7, group_context)
@@ -312,7 +315,7 @@ class TestAddToolToGroup:
     ):
         """Raises BadRequestError when the global tool is disabled."""
         disabled_tool = _make_tool(id=8, enabled=False, group_id=None)
-        mock_tool_repo.get.return_value = disabled_tool
+        mock_tool_repo.get_tool_record.return_value = disabled_tool
 
         with pytest.raises(BadRequestError, match="not globally available"):
             await service.add_tool_to_group(8, group_context)
@@ -493,7 +496,7 @@ class TestPersonalWorkspaceToolGuard:
         from src.core.exceptions import ForbiddenError
 
         gmail = _make_tool(id=96, title="Gmail", enabled=True, group_id=None)
-        mock_tool_repo.get.return_value = gmail
+        mock_tool_repo.get_tool_record.return_value = gmail
 
         with pytest.raises(ForbiddenError, match="personal workspace"):
             await service.add_tool_to_group(96, group_context)
@@ -504,7 +507,7 @@ class TestPersonalWorkspaceToolGuard:
         self, service, mock_tool_repo, mock_group_tool_repo, personal_context
     ):
         gmail = _make_tool(id=96, title="Gmail", enabled=True, group_id=None)
-        mock_tool_repo.get.return_value = gmail
+        mock_tool_repo.get_tool_record.return_value = gmail
         mock_group_tool_repo.upsert.return_value = _make_group_tool(
             id=300, tool_id=96, group_id="user_user_example_com", enabled=True
         )
@@ -517,7 +520,7 @@ class TestPersonalWorkspaceToolGuard:
     async def test_available_list_excludes_gmail_in_shared_workspace(
         self, service, mock_tool_repo, mock_group_tool_repo, group_context
     ):
-        mock_tool_repo.list.return_value = [
+        mock_tool_repo.list_tool_records.return_value = [
             _make_tool(id=96, title="Gmail", enabled=True, group_id=None),
             _make_tool(id=2, title="WebSearch", enabled=True, group_id=None),
         ]
@@ -532,7 +535,7 @@ class TestPersonalWorkspaceToolGuard:
     async def test_available_list_includes_gmail_in_personal_workspace(
         self, service, mock_tool_repo, mock_group_tool_repo, personal_context
     ):
-        mock_tool_repo.list.return_value = [
+        mock_tool_repo.list_tool_records.return_value = [
             _make_tool(id=96, title="Gmail", enabled=True, group_id=None),
             _make_tool(id=2, title="WebSearch", enabled=True, group_id=None),
         ]

@@ -233,20 +233,18 @@ async def run_flow_in_process(
                 import json as _json
                 import re as _re
 
-                from sqlalchemy import text as _text
+                from src.db.session import routed_scoped_session
+                from src.services.trace.service import ExecutionTraceService
 
-                from src.db.session import async_session_factory
-
-                async with async_session_factory() as _session:
-                    _rows = await _session.execute(
-                        _text(CICD_ARTIFACT_QUERY), {"jid": execution_id}
+                async with routed_scoped_session() as _session:
+                    # Traces are ExecutionTraceService's domain.
+                    _outputs = await ExecutionTraceService(_session).outputs_containing(
+                        execution_id, "cicd_download_url"
                     )
-                    _trace_rows = _rows.fetchall()
 
                 _artifacts: list = []
                 _seen_urls: set = set()
-                for _row in _trace_rows:
-                    _output = _row[0]
+                for _output in _outputs:
                     try:
                         _parsed = (
                             _json.loads(_output)

@@ -134,23 +134,19 @@ class DatabricksDashboardCreatorTool(BaseTool):
         covers resumed flows and runs where flow-state injection did not deliver
         the mapper output. Returns the raw JSON string ('' if none found).
         """
-        from sqlalchemy import text
 
         async def _query() -> str:
             from src.services.tools.tool_session_provider import ToolSessionProvider
 
             async with ToolSessionProvider.session() as session:
-                result = await session.execute(
-                    text(
-                        "SELECT et.output::text FROM execution_trace et "
-                        "WHERE et.span_name LIKE 'PBI Visual-UCMV Mapper%run' "
-                        "ORDER BY et.created_at DESC LIMIT 1"
-                    )
-                )
-                row = result.fetchone()
-                if not row or not row[0]:
+                from src.services.trace.service import ExecutionTraceService
+
+                raw = await ExecutionTraceService(
+                    session
+                ).latest_output_for_span_prefix("PBI Visual-UCMV Mapper")
+                if not raw:
                     return ""
-                data = json.loads(row[0])
+                data = json.loads(raw)
                 content = data.get("content", "")
                 if isinstance(content, str) and "visual_mappings" in content:
                     return content

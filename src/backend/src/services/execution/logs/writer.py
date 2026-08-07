@@ -88,6 +88,30 @@ class ExecutionLogsService:
             logger.error("[create_execution_log] Exception details:", exc_info=True)
             return False
 
+    async def write_log(
+        self,
+        execution_id: str,
+        content: str,
+        timestamp=None,
+        group_id: str = None,
+        group_email: str = None,
+    ):
+        """Write one log line with explicit group STAMPS rather than a context.
+
+        :meth:`create_execution_log` takes a ``GroupContext``; the crew and flow
+        post-subprocess flushes have neither — they replay buffered rows that already
+        carry their ``group_id``/``group_email``. They used to construct
+        ``ExecutionLogsRepository`` directly for this, which is how a caller in
+        another domain ends up owning a write.
+        """
+        return await self.repository.create_log(
+            execution_id=execution_id,
+            content=content,
+            timestamp=timestamp,
+            group_id=group_id,
+            group_email=group_email,
+        )
+
     async def get_execution_logs(
         self, execution_id: str, limit: int = 1000, offset: int = 0
     ) -> List[ExecutionLogResponse]:

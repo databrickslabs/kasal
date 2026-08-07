@@ -674,7 +674,7 @@ class TestResolveAgentForTask:
         fallback_repo.get = AsyncMock(return_value=MagicMock())
 
         with (
-            patch("src.db.session.request_scoped_session") as MockSession,
+            patch("src.db.session.routed_scoped_session") as MockSession,
             patch(
                 "src.repositories.agent_repository.AgentRepository",
                 return_value=fallback_repo,
@@ -728,7 +728,7 @@ class TestResolveAgentForTask:
         fallback_repo.get = AsyncMock(return_value=None)
 
         with (
-            patch("src.db.session.request_scoped_session") as MockSession,
+            patch("src.db.session.routed_scoped_session") as MockSession,
             patch(
                 "src.repositories.agent_repository.AgentRepository",
                 return_value=fallback_repo,
@@ -755,7 +755,7 @@ class TestResolveAgentForTask:
         agent_repo = MagicMock()
         agent_repo.get = AsyncMock(return_value=None)
 
-        with patch("src.db.session.request_scoped_session") as MockSession:
+        with patch("src.db.session.routed_scoped_session") as MockSession:
             mock_session_ctx = MagicMock()
             mock_session_ctx.__aenter__ = AsyncMock(side_effect=Exception("db error"))
             mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
@@ -795,7 +795,7 @@ class TestConfigureTaskTools:
         session_ctx, _ = _make_mock_session_ctx()
 
         with (
-            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch("src.db.session.routed_scoped_session", return_value=session_ctx),
             patch("src.services.settings.api_keys.ApiKeysService"),
             patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
         ):
@@ -820,7 +820,7 @@ class TestConfigureTaskTools:
         session_ctx, _ = _make_mock_session_ctx()
 
         with (
-            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch("src.db.session.routed_scoped_session", return_value=session_ctx),
             patch("src.services.settings.api_keys.ApiKeysService"),
             patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
         ):
@@ -843,7 +843,7 @@ class TestConfigureTaskTools:
         session_ctx, _ = _make_mock_session_ctx()
 
         with (
-            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch("src.db.session.routed_scoped_session", return_value=session_ctx),
             patch("src.services.settings.api_keys.ApiKeysService"),
             patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
         ):
@@ -862,7 +862,7 @@ class TestConfigureTaskTools:
         session_ctx, _ = _make_mock_session_ctx()
 
         with (
-            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch("src.db.session.routed_scoped_session", return_value=session_ctx),
             patch("src.services.settings.api_keys.ApiKeysService"),
             patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
         ):
@@ -880,7 +880,7 @@ class TestConfigureTaskTools:
         session_ctx, _ = _make_mock_session_ctx()
 
         with (
-            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch("src.db.session.routed_scoped_session", return_value=session_ctx),
             patch("src.services.settings.api_keys.ApiKeysService"),
             patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
         ):
@@ -904,7 +904,7 @@ class TestConfigureTaskTools:
         session_ctx, _ = _make_mock_session_ctx()
 
         with (
-            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch("src.db.session.routed_scoped_session", return_value=session_ctx),
             patch("src.services.settings.api_keys.ApiKeysService"),
             patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
         ):
@@ -928,7 +928,7 @@ class TestConfigureTaskTools:
         session_ctx, _ = _make_mock_session_ctx()
 
         with (
-            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch("src.db.session.routed_scoped_session", return_value=session_ctx),
             patch("src.services.settings.api_keys.ApiKeysService"),
             patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
         ):
@@ -949,7 +949,7 @@ class TestConfigureTaskTools:
         session_ctx, _ = _make_mock_session_ctx()
 
         with (
-            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch("src.db.session.routed_scoped_session", return_value=session_ctx),
             patch("src.services.settings.api_keys.ApiKeysService"),
             patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
         ):
@@ -967,7 +967,7 @@ class TestConfigureTaskTools:
 
     @pytest.mark.asyncio
     async def test_task_api_keys_service_fails_fallback(self):
-        """When request_scoped_session fails for ApiKeys, falls back to basic factory."""
+        """When routed_scoped_session fails for ApiKeys, falls back to basic factory."""
         task_data = _make_task_data(tools=["1"])
         _, agent = _make_real_task_with_mock_agent()
         agent.tools = []
@@ -985,7 +985,7 @@ class TestConfigureTaskTools:
         mock_factory.get_tool_info.return_value = None
 
         with (
-            patch("src.db.session.request_scoped_session", return_value=fail_ctx),
+            patch("src.db.session.routed_scoped_session", return_value=fail_ctx),
             patch("src.services.settings.api_keys.ApiKeysService"),
             patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
         ):
@@ -1022,7 +1022,7 @@ class TestConfigureTaskTools:
         session_ctx, _ = _make_mock_session_ctx()
 
         with (
-            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch("src.db.session.routed_scoped_session", return_value=session_ctx),
             patch("src.services.settings.api_keys.ApiKeysService"),
             patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
         ):
@@ -1042,7 +1042,7 @@ class TestConfigureTaskTools:
         session_ctx, _ = _make_mock_session_ctx()
 
         with (
-            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch("src.db.session.routed_scoped_session", return_value=session_ctx),
             patch("src.services.settings.api_keys.ApiKeysService"),
             patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
         ):

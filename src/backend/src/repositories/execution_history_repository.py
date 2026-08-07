@@ -4,6 +4,7 @@ Repository for execution history data access.
 This module provides database operations for execution history models.
 """
 
+import json
 import logging
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
@@ -36,6 +37,95 @@ class ExecutionHistoryRepository:
     def __init__(self, session: AsyncSession):
         """Initialize with required session."""
         self.session = session
+
+    async def reload(self, run: ExecutionHistory) -> ExecutionHistory:
+        """Re-read a run after commit so server-side defaults are populated."""
+        await self.session.refresh(run)
+        return run
+
+    async def save(self) -> None:
+        """Flush pending attribute changes on already-tracked runs."""
+        await self.session.flush()
+
+    async def latest_result_with_keys(self, keys: List[str]) -> Optional[dict]:
+        """The most recent run whose ``result`` dict holds ALL of ``keys``.
+
+        Serves the UCMV validator's fallback lookup. Same dialect reasoning as
+        :meth:`latest_checkpoint_containing`: the caller's raw ``result::text LIKE``
+        chain was Postgres-only and matched substrings anywhere in the JSON — a
+        value that merely CONTAINED the word counted as the key being present.
+        Filtering the decoded dict checks real keys and works on every dialect.
+        """
+        result = await self.session.execute(
+            select(ExecutionHistory.result)
+            .where(ExecutionHistory.result.isnot(None))
+            .order_by(ExecutionHistory.created_at.desc())
+            .limit(50)
+        )
+        for (data,) in result.all():
+            if isinstance(data, str):
+                try:
+                    data = json.loads(data)
+                except ValueError:
+                    continue
+            if isinstance(data, dict) and all(k in data for k in keys):
+                return data
+        return None
+
+    async def latest_checkpoint_containing(self, key: str) -> Optional[dict]:
+        """The most recent run whose ``checkpoint_data`` holds ``key``.
+
+        Serves the UCMV validator, which looks for edits a user saved in an
+        earlier step of a multi-step flow.
+
+        The caller's version cast ``checkpoint_data::text`` in raw SQL — a
+        Postgres-only cast that fails on SQLite, so this silently found nothing in
+        local dev. Filtering is done in Python over a bounded, ordered window
+        instead, which behaves the same on every dialect.
+        """
+        result = await self.session.execute(
+            select(ExecutionHistory.checkpoint_data)
+            .where(ExecutionHistory.checkpoint_data.isnot(None))
+            .order_by(ExecutionHistory.created_at.desc())
+            .limit(50)
+        )
+        for (data,) in result.all():
+            if isinstance(data, str):
+                try:
+                    data = json.loads(data)
+                except ValueError:
+                    continue
+            if isinstance(data, dict) and key in data:
+                return data
+        return None
+
+    async def insert(
+        self, run: ExecutionHistory, commit: bool = False
+    ) -> ExecutionHistory:
+        """Persist a new run row.
+
+        ``commit`` is opt-in because the two callers differ: the scheduler owns
+        its session and must commit so the spawned run can see the row, while a
+        request-scoped caller leaves the commit to the router. Refresh follows the
+        commit so server-side defaults (id, created_at) are populated.
+        """
+        self.session.add(run)
+        if commit:
+            await self.session.commit()
+            await self.session.refresh(run)
+        else:
+            await self.session.flush()
+        return run
+
+    async def remove(self, run: ExecutionHistory, commit: bool = True) -> None:
+        """Delete a run row.
+
+        Commits by default: the callers own their session and expect the row gone
+        when this returns.
+        """
+        await self.session.delete(run)
+        if commit:
+            await self.session.commit()
 
     async def get_execution_history(
         self, limit: int = 50, offset: int = 0, group_ids: List[str] = None

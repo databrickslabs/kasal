@@ -990,11 +990,14 @@ class MqueryConversionPipelineTool(BaseTool):
                     f"[MQueryTool] Could not resolve group_id for history: {_gc_err}"
                 )
 
-            async with ToolSessionProvider.conversion_repo() as repo:
-                record = await repo.create(history_data.model_dump())
-                if group_id:
-                    record.group_id = group_id
-                await repo.session.commit()
+            # Through ConverterService, which OWNS conversion history and stamps
+            # group_id/created_by_email itself — the repository path required every
+            # tool to remember that by hand.
+            async with ToolSessionProvider.converter_service(
+                group_context=group_context
+            ) as converter:
+                record = await converter.create_history(history_data)
+                await converter.session.commit()
                 logger.info(
                     f"[MQueryTool] Saved conversion_history record id={record.id} "
                     f"(source_format=powerbi_mquery, tables={table_count}, status={status})"

@@ -385,10 +385,10 @@ def _make_model_config(
 
 
 def _patch_session_and_config(model_config_dict):
-    """Create patches for request_scoped_session and ModelConfigService.
+    """Create patches for routed_scoped_session and ModelConfigService.
 
-    request_scoped_session is imported inside configure_kasal_llm via
-    ``from src.db.session import request_scoped_session``, so we patch
+    routed_scoped_session is imported inside configure_kasal_llm via
+    ``from src.db.session import routed_scoped_session``, so we patch
     at the original module location.
     """
     mock_session = AsyncMock()
@@ -400,7 +400,7 @@ def _patch_session_and_config(model_config_dict):
     mock_service.get_model_config.return_value = model_config_dict
 
     return (
-        patch("src.db.session.request_scoped_session", return_value=mock_ctx),
+        patch("src.db.session.routed_scoped_session", return_value=mock_ctx),
         patch("src.services.llm.manager.ModelConfigService", return_value=mock_service),
     )
 

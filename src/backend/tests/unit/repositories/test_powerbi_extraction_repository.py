@@ -150,8 +150,10 @@ class TestToolPersistenceHook:
 
         monkeypatch.setattr(
             tsp.ToolSessionProvider,
-            "powerbi_extraction_repo",
-            staticmethod(lambda: _Boom()),
+            # Extractions go through PowerBIExtractionService (their owning domain)
+            # rather than a raw repository, so the provider method changed name.
+            "powerbi_extraction_service",
+            staticmethod(lambda *a, **k: _Boom()),
         )
 
         # Should complete without raising.

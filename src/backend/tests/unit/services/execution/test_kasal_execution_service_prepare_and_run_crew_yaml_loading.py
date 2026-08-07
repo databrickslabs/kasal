@@ -98,7 +98,7 @@ async def test_prepare_and_run_crew_agents_yaml_path():
             return_value=mock_engine,
         ),
         patch(
-            "src.services.execution.kasal_service.request_scoped_session",
+            "src.services.execution.kasal_service.routed_scoped_session",
             return_value=mock_session,
         ),
         patch(
@@ -155,7 +155,7 @@ async def test_prepare_and_run_crew_with_db_agent():
             return_value=mock_engine,
         ),
         patch(
-            "src.services.execution.kasal_service.request_scoped_session",
+            "src.services.execution.kasal_service.routed_scoped_session",
             return_value=mock_session,
         ),
         patch(
@@ -236,7 +236,7 @@ async def test_prepare_and_run_crew_hierarchical_process():
             return_value=mock_engine,
         ),
         patch(
-            "src.services.execution.kasal_service.request_scoped_session",
+            "src.services.execution.kasal_service.routed_scoped_session",
             return_value=mock_session,
         ),
         patch(
@@ -290,7 +290,7 @@ async def test_prepare_and_run_crew_planning_llm():
             return_value=mock_engine,
         ),
         patch(
-            "src.services.execution.kasal_service.request_scoped_session",
+            "src.services.execution.kasal_service.routed_scoped_session",
             return_value=mock_session,
         ),
         patch(
@@ -344,7 +344,7 @@ async def test_prepare_and_run_crew_with_group_context():
             return_value=mock_engine,
         ),
         patch(
-            "src.services.execution.kasal_service.request_scoped_session",
+            "src.services.execution.kasal_service.routed_scoped_session",
             return_value=mock_session,
         ),
         patch(
@@ -403,7 +403,7 @@ async def test_prepare_and_run_crew_agents_yaml_db_exception_fallback():
     mock_engine = AsyncMock()
     mock_engine.run_execution = AsyncMock(return_value={})
 
-    # Make request_scoped_session raise to hit the except block for agents
+    # Make routed_scoped_session raise to hit the except block for agents
     mock_session = AsyncMock()
     mock_session.__aenter__ = AsyncMock(side_effect=RuntimeError("DB down"))
     mock_session.__aexit__ = AsyncMock(return_value=None)
@@ -415,7 +415,7 @@ async def test_prepare_and_run_crew_agents_yaml_db_exception_fallback():
             return_value=mock_engine,
         ),
         patch(
-            "src.services.execution.kasal_service.request_scoped_session",
+            "src.services.execution.kasal_service.routed_scoped_session",
             return_value=mock_session,
         ),
         patch(
@@ -773,7 +773,7 @@ async def test_run_flow_execution_with_nodes_directly():
 
     with (
         patch(
-            "src.services.execution.kasal_service.request_scoped_session",
+            "src.services.execution.kasal_service.routed_scoped_session",
             return_value=mock_session,
         ),
         patch(
@@ -805,7 +805,7 @@ async def test_run_flow_execution_with_group_context():
 
     with (
         patch(
-            "src.services.execution.kasal_service.request_scoped_session",
+            "src.services.execution.kasal_service.routed_scoped_session",
             return_value=mock_session,
         ),
         patch(
@@ -835,7 +835,7 @@ async def test_run_flow_execution_flow_service_error():
 
     with (
         patch(
-            "src.services.execution.kasal_service.request_scoped_session",
+            "src.services.execution.kasal_service.routed_scoped_session",
             return_value=mock_session,
         ),
         patch(
@@ -867,7 +867,7 @@ async def test_run_flow_execution_no_job_id_generates_one():
 
     with (
         patch(
-            "src.services.execution.kasal_service.request_scoped_session",
+            "src.services.execution.kasal_service.routed_scoped_session",
             return_value=mock_session,
         ),
         patch(
@@ -891,7 +891,7 @@ async def test_run_flow_execution_with_flow_id_loads_from_repo():
     mock_flow.flow_config = {"type": "default"}
 
     mock_flow_repo_instance = AsyncMock()
-    mock_flow_repo_instance.get = AsyncMock(return_value=mock_flow)
+    mock_flow_repo_instance.find_flow = AsyncMock(return_value=mock_flow)
 
     mock_db_session = AsyncMock()
     mock_db_session.__aenter__ = AsyncMock(return_value=mock_db_session)
@@ -912,15 +912,16 @@ async def test_run_flow_execution_with_flow_id_loads_from_repo():
             return mock_db_session
         return mock_exec_session
 
-    import src.repositories.flow_repository as flow_repo_mod
+    # Flows are read through FlowService.find_flow (their owning domain).
+    import src.services.flow_builder.flow_service as flow_svc_mod
 
-    orig_flow_repo = flow_repo_mod.FlowRepository
-    flow_repo_mod.FlowRepository = lambda s: mock_flow_repo_instance
+    orig_flow_repo = flow_svc_mod.FlowService
+    flow_svc_mod.FlowService = lambda s: mock_flow_repo_instance
 
     try:
         with (
             patch(
-                "src.services.execution.kasal_service.request_scoped_session",
+                "src.services.execution.kasal_service.routed_scoped_session",
                 side_effect=get_session,
             ),
             patch(
@@ -930,7 +931,7 @@ async def test_run_flow_execution_with_flow_id_loads_from_repo():
         ):
             result = await svc.run_flow_execution(flow_id=flow_id, job_id="j4")
     finally:
-        flow_repo_mod.FlowRepository = orig_flow_repo
+        flow_svc_mod.FlowService = orig_flow_repo
 
 
 @pytest.mark.asyncio
@@ -939,25 +940,26 @@ async def test_run_flow_execution_with_flow_id_not_found():
     flow_id = str(uuid.uuid4())
 
     mock_flow_repo_instance = AsyncMock()
-    mock_flow_repo_instance.get = AsyncMock(return_value=None)
+    mock_flow_repo_instance.find_flow = AsyncMock(return_value=None)
 
     mock_db_session = AsyncMock()
     mock_db_session.__aenter__ = AsyncMock(return_value=mock_db_session)
     mock_db_session.__aexit__ = AsyncMock(return_value=None)
 
-    import src.repositories.flow_repository as flow_repo_mod
+    # Flows are read through FlowService.find_flow (their owning domain).
+    import src.services.flow_builder.flow_service as flow_svc_mod
 
-    orig_flow_repo = flow_repo_mod.FlowRepository
-    flow_repo_mod.FlowRepository = lambda s: mock_flow_repo_instance
+    orig_flow_repo = flow_svc_mod.FlowService
+    flow_svc_mod.FlowService = lambda s: mock_flow_repo_instance
 
     try:
         with patch(
-            "src.services.execution.kasal_service.request_scoped_session",
+            "src.services.execution.kasal_service.routed_scoped_session",
             return_value=mock_db_session,
         ):
             result = await svc.run_flow_execution(flow_id=flow_id, job_id="j5")
     finally:
-        flow_repo_mod.FlowRepository = orig_flow_repo
+        flow_svc_mod.FlowService = orig_flow_repo
 
     assert result["success"] is False
     assert "not found" in result["error"]
@@ -982,7 +984,7 @@ async def test_run_flow_execution_with_resume_params():
 
     with (
         patch(
-            "src.services.execution.kasal_service.request_scoped_session",
+            "src.services.execution.kasal_service.routed_scoped_session",
             return_value=mock_session,
         ),
         patch(
@@ -1011,7 +1013,7 @@ async def test_run_flow_execution_unexpected_outer_exception():
 
     with (
         patch(
-            "src.services.execution.kasal_service.request_scoped_session",
+            "src.services.execution.kasal_service.routed_scoped_session",
             return_value=mock_session,
         ),
         patch(
@@ -1048,7 +1050,7 @@ async def test_get_flow_execution():
 
     with (
         patch(
-            "src.services.execution.kasal_service.request_scoped_session",
+            "src.services.execution.kasal_service.routed_scoped_session",
             return_value=mock_session,
         ),
         patch(
@@ -1074,7 +1076,7 @@ async def test_get_flow_execution_error():
 
     with (
         patch(
-            "src.services.execution.kasal_service.request_scoped_session",
+            "src.services.execution.kasal_service.routed_scoped_session",
             return_value=mock_session,
         ),
         patch(
@@ -1101,7 +1103,7 @@ async def test_get_flow_executions_by_flow():
 
     with (
         patch(
-            "src.services.execution.kasal_service.request_scoped_session",
+            "src.services.execution.kasal_service.routed_scoped_session",
             return_value=mock_session,
         ),
         patch(
@@ -1129,7 +1131,7 @@ async def test_get_flow_executions_by_flow_error():
 
     with (
         patch(
-            "src.services.execution.kasal_service.request_scoped_session",
+            "src.services.execution.kasal_service.routed_scoped_session",
             return_value=mock_session,
         ),
         patch(

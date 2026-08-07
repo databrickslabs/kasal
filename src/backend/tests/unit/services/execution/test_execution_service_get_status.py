@@ -1381,7 +1381,7 @@ class TestCheckForRunningJobs:
                     ExecutionRepository=MagicMock(return_value=mock_repo)
                 ),
                 "src.db.session": MagicMock(
-                    request_scoped_session=MagicMock(
+                    routed_scoped_session=MagicMock(
                         return_value=AsyncMock(
                             __aenter__=AsyncMock(return_value=AsyncMock()),
                             __aexit__=AsyncMock(return_value=None),
@@ -1399,9 +1399,9 @@ class TestCheckForRunningJobs:
 
                 import src.services.execution.service as svc_mod
 
-                orig_rss = getattr(svc_mod, "request_scoped_session", None)
+                orig_rss = getattr(svc_mod, "routed_scoped_session", None)
                 # Patch locally
-                with patch("src.db.session.request_scoped_session") as rss_mock:
+                with patch("src.db.session.routed_scoped_session") as rss_mock:
                     rss_mock.return_value.__aenter__ = AsyncMock(return_value=mock_db)
                     rss_mock.return_value.__aexit__ = AsyncMock(return_value=None)
                     mock_db.__class__ = type("MockDB", (), {})
@@ -1446,7 +1446,7 @@ class TestCheckForRunningJobs:
             "sys.modules",
             {
                 "src.db.session": MagicMock(
-                    request_scoped_session=MagicMock(
+                    routed_scoped_session=MagicMock(
                         side_effect=Exception("connection error")
                     )
                 ),
@@ -1658,7 +1658,7 @@ class TestCreateExecutionBranches:
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
         mock_db.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("src.db.session.request_scoped_session", return_value=mock_db):
+        with patch("src.db.session.routed_scoped_session", return_value=mock_db):
             with pytest.raises(KasalError):
                 await svc.create_execution(cfg)
         ExecutionService.executions.clear()

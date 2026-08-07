@@ -50,70 +50,47 @@ class TestFlowRunnerServiceInit:
 
         assert service.db == mock_session
 
-    def test_flow_runner_service_init_creates_repositories(self):
-        """Test FlowRunnerService __init__ creates all repository instances"""
+    def test_flow_runner_service_init_creates_only_what_it_uses(self):
+        """__init__ builds the flow repository and the execution service — no more.
+
+        It used to construct TaskRepository/AgentRepository/ToolRepository/
+        CrewRepository too, and NONE of them was ever read: the dynamic-flow path
+        builds its own bundle for BackendFlow. Four dead attributes, four
+        cross-domain repository constructions that meant nothing.
+        """
         mock_db = Mock()
 
-        with patch(
-            "src.services.flow_builder.flow_runner_service.FlowExecutionService"
-        ) as mock_flow_exec_service:
-            with patch(
+        with (
+            patch(
+                "src.services.flow_builder.flow_runner_service.FlowExecutionService"
+            ) as mock_flow_exec_service,
+            patch(
                 "src.services.flow_builder.flow_runner_service.FlowRepository"
-            ) as mock_flow_repo:
-                with patch(
-                    "src.services.flow_builder.flow_runner_service.TaskRepository"
-                ) as mock_task_repo:
-                    with patch(
-                        "src.services.flow_builder.flow_runner_service.AgentRepository"
-                    ) as mock_agent_repo:
-                        with patch(
-                            "src.services.flow_builder.flow_runner_service.ToolRepository"
-                        ) as mock_tool_repo:
-                            with patch(
-                                "src.services.flow_builder.flow_runner_service.CrewRepository"
-                            ) as mock_crew_repo:
-                                service = FlowRunnerService(mock_db)
+            ) as mock_flow_repo,
+        ):
+            FlowRunnerService(mock_db)
 
-                                # Verify all repositories were created with the database session
-                                mock_flow_exec_service.assert_called_once_with(mock_db)
-                                mock_flow_repo.assert_called_once_with(mock_db)
-                                mock_task_repo.assert_called_once_with(mock_db)
-                                mock_agent_repo.assert_called_once_with(mock_db)
-                                mock_tool_repo.assert_called_once_with(mock_db)
-                                mock_crew_repo.assert_called_once_with(mock_db)
+            mock_flow_exec_service.assert_called_once_with(mock_db)
+            mock_flow_repo.assert_called_once_with(mock_db)
 
     def test_flow_runner_service_init_stores_attributes(self):
         """Test FlowRunnerService __init__ stores all attributes correctly"""
         mock_db = Mock()
 
-        with patch(
-            "src.services.flow_builder.flow_runner_service.FlowExecutionService"
+        with (
+            patch("src.services.flow_builder.flow_runner_service.FlowExecutionService"),
+            patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
         ):
-            with patch("src.services.flow_builder.flow_runner_service.FlowRepository"):
-                with patch(
-                    "src.services.flow_builder.flow_runner_service.TaskRepository"
-                ):
-                    with patch(
-                        "src.services.flow_builder.flow_runner_service.AgentRepository"
-                    ):
-                        with patch(
-                            "src.services.flow_builder.flow_runner_service.ToolRepository"
-                        ):
-                            with patch(
-                                "src.services.flow_builder.flow_runner_service.CrewRepository"
-                            ):
-                                service = FlowRunnerService(mock_db)
+            service = FlowRunnerService(mock_db)
 
-                                # Check all attributes are stored
-                                assert hasattr(service, "db")
-                                assert hasattr(service, "flow_execution_service")
-                                assert hasattr(service, "flow_repo")
-                                assert hasattr(service, "task_repo")
-                                assert hasattr(service, "agent_repo")
-                                assert hasattr(service, "tool_repo")
-                                assert hasattr(service, "crew_repo")
+            assert hasattr(service, "db")
+            assert hasattr(service, "flow_execution_service")
+            assert hasattr(service, "flow_repo")
+            # The task/agent/tool/crew repositories are deliberately absent.
+            for gone in ("task_repo", "agent_repo", "tool_repo", "crew_repo"):
+                assert not hasattr(service, gone), f"{gone} came back"
 
-                                assert service.db == mock_db
+            assert service.db == mock_db
 
 
 class TestCreateFlowExecution:

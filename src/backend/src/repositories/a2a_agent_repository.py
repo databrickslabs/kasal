@@ -122,6 +122,25 @@ class A2AAgentRepository(BaseRepository[A2AAgent]):
         )
         return result.scalars().first()
 
+    async def insert(self, agent: A2AAgent) -> A2AAgent:
+        """Persist a new agent and flush so its ``id`` is available.
+
+        Flush, not commit: creating an agent also fetches its card, and the
+        caller decides whether that whole unit of work stands.
+        """
+        self.session.add(agent)
+        await self.session.flush()
+        return agent
+
+    async def remove(self, agent: A2AAgent) -> None:
+        """Delete one agent row."""
+        await self.session.delete(agent)
+        await self.session.flush()
+
+    async def save(self) -> None:
+        """Flush pending attribute changes on already-tracked agents."""
+        await self.session.flush()
+
     async def delete_overrides_by_name(self, name: str) -> int:
         """Remove every workspace override for a name.
 

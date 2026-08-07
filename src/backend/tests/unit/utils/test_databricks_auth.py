@@ -199,7 +199,7 @@ class TestLoadConfig:
                 "src.services.databricks.workspace.service.DatabricksService",
                 return_value=mock_service,
             ),
-            patch("src.db.session.request_scoped_session", return_value=mock_session),
+            patch("src.db.session.routed_scoped_session", return_value=mock_session),
         ):
             result = await auth._load_config()
         assert result is True
@@ -219,7 +219,7 @@ class TestLoadConfig:
                 "src.services.databricks.workspace.service.DatabricksService",
                 return_value=mock_service,
             ),
-            patch("src.db.session.request_scoped_session", return_value=mock_session),
+            patch("src.db.session.routed_scoped_session", return_value=mock_session),
         ):
             result = await auth._load_config()
         assert result is True
@@ -1151,7 +1151,7 @@ class TestGetAuthContext:
                 ),
                 patch("src.services.settings.api_keys.ApiKeysService"),
                 patch(
-                    "src.db.session.request_scoped_session", return_value=mock_session
+                    "src.db.session.routed_scoped_session", return_value=mock_session
                 ),
                 patch("src.utils.user_context.UserContext") as mock_uc,
             ):
@@ -1190,7 +1190,7 @@ class TestGetAuthContext:
                     return_value=mock_service,
                 ),
                 patch(
-                    "src.db.session.request_scoped_session", return_value=mock_session
+                    "src.db.session.routed_scoped_session", return_value=mock_session
                 ),
                 patch("src.utils.user_context.UserContext"),
                 patch("src.utils.encryption_utils.EncryptionUtils") as enc,
@@ -1230,7 +1230,7 @@ class TestGetAuthContext:
                     return_value=mock_service,
                 ),
                 patch(
-                    "src.db.session.request_scoped_session", return_value=mock_session
+                    "src.db.session.routed_scoped_session", return_value=mock_session
                 ),
                 patch("src.utils.user_context.UserContext") as mock_uc,
                 patch("src.utils.encryption_utils.EncryptionUtils") as enc,
@@ -1324,7 +1324,7 @@ class TestGetAuthContext:
                 ),
                 patch("src.services.settings.api_keys.ApiKeysService"),
                 patch(
-                    "src.db.session.request_scoped_session", return_value=mock_session
+                    "src.db.session.routed_scoped_session", return_value=mock_session
                 ),
                 patch("src.utils.user_context.UserContext") as mock_uc,
             ):
@@ -1358,7 +1358,7 @@ class TestGetAuthContext:
                     return_value=mock_service,
                 ),
                 patch(
-                    "src.db.session.request_scoped_session", return_value=mock_session
+                    "src.db.session.routed_scoped_session", return_value=mock_session
                 ),
                 patch("src.utils.user_context.UserContext"),
             ):
@@ -1393,7 +1393,7 @@ class TestGetAuthContext:
                     return_value=mock_service,
                 ),
                 patch(
-                    "src.db.session.request_scoped_session", return_value=mock_session
+                    "src.db.session.routed_scoped_session", return_value=mock_session
                 ),
                 patch("src.utils.user_context.UserContext"),
             ):
@@ -1460,7 +1460,7 @@ class TestGetAuthContext:
                 ),
                 patch("src.services.settings.api_keys.ApiKeysService"),
                 patch(
-                    "src.db.session.request_scoped_session", return_value=mock_session
+                    "src.db.session.routed_scoped_session", return_value=mock_session
                 ),
                 patch("src.utils.user_context.UserContext") as uc,
             ):
@@ -1493,7 +1493,7 @@ class TestGetAuthContext:
                 ),
                 patch("src.services.settings.api_keys.ApiKeysService"),
                 patch(
-                    "src.db.session.request_scoped_session", return_value=mock_session
+                    "src.db.session.routed_scoped_session", return_value=mock_session
                 ),
                 patch("src.utils.user_context.UserContext") as uc,
             ):
@@ -1531,7 +1531,7 @@ class TestGetAuthContext:
                 ),
                 patch("src.services.settings.api_keys.ApiKeysService"),
                 patch(
-                    "src.db.session.request_scoped_session", return_value=mock_session
+                    "src.db.session.routed_scoped_session", return_value=mock_session
                 ),
                 patch("src.utils.user_context.UserContext") as uc,
             ):

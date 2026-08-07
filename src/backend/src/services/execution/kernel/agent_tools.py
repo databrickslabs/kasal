@@ -117,8 +117,8 @@ async def add_mcp_tools(
             from src.db.session import routed_scoped_session
             from src.services.mcp.mcp_client.service import MCPService
 
-            # ROUTED, not request_scoped_session. That helper reuses the request's
-            # session when one is set and otherwise falls back to the RAW
+            # ROUTED. The helper this replaced reused the request's session when
+            # one was set and otherwise fell back to the RAW
             # async_session_factory — a per-process snapshot that only a
             # SUBPROCESS ever swaps to Lakebase
             # (activate_lakebase_in_subprocess). Chat runs IN-PROCESS in a

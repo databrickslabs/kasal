@@ -94,10 +94,10 @@ class FlowService:
             # Set to None if the crew doesn't exist to avoid FK constraint violations
             validated_crew_id = None
             if flow_in.crew_id:
-                from src.repositories.crew_repository import CrewRepository
+                # Crews are CrewService's domain.
+                from src.services.catalog.crews import CrewService
 
-                crew_repo = CrewRepository(self.session)
-                existing_crew = await crew_repo.get(flow_in.crew_id)
+                existing_crew = await CrewService(self.session).get(flow_in.crew_id)
                 if existing_crew:
                     validated_crew_id = flow_in.crew_id
                     logger.info(f"Validated crew_id: {validated_crew_id}")
@@ -198,21 +198,11 @@ class FlowService:
         Returns:
             List of flows belonging to user's groups
         """
-        from sqlalchemy import or_, select
-
-        # If user has no groups, return empty list
         if not group_context or not group_context.group_ids:
             return []
-
-        # Query flows where group_id matches any of the user's groups
-        query = (
-            select(Flow)
-            .where(or_(*[Flow.group_id == gid for gid in group_context.group_ids]))
-            .order_by(Flow.updated_at.desc())
+        return await FlowRepository(self.session).list_for_groups(
+            group_context.group_ids
         )
-
-        result = await self.session.execute(query)
-        return list(result.scalars().all())
 
     async def update_flow_with_group_check(
         self, flow_id: uuid.UUID, flow_in: FlowUpdate, group_context
@@ -282,6 +272,34 @@ class FlowService:
                 await self.force_delete_flow_with_executions(flow.id)
             except Exception as e:
                 logger.error(f"Error deleting flow {flow.id}: {e}")
+
+    async def find_flow(self, flow_id: uuid.UUID) -> Optional[Flow]:
+        """One flow by id, or None.
+
+        Distinct from :meth:`get_flow`, which RAISES when missing. The crew/flow
+        runner needs the None so it can return a clean error payload to a caller
+        that is not an HTTP request — it used to build ``FlowRepository`` for that.
+        """
+        return await FlowRepository(self.session).get(flow_id)
+
+    async def get_flows_by_ids(
+        self, flow_ids: List[Union[uuid.UUID, str]]
+    ) -> List[Flow]:
+        """Flows for a set of ids — for callers rendering a list of references.
+
+        Flows are this service's domain; `publications` used to build
+        ``FlowRepository`` itself to resolve the flows it advertises.
+        """
+        return await FlowRepository(self.session).find_by_ids(flow_ids)
+
+    async def get_most_recent_flow(self) -> Optional[Flow]:
+        """The most recently authored flow, or None.
+
+        A fallback for a run that arrived without a flow id. Unscoped by design —
+        it exists for a single-tenant/dev path — so do NOT use it to resolve a
+        flow on behalf of a tenant.
+        """
+        return await FlowRepository(self.session).get_most_recent()
 
     async def get_flows_by_crew(self, crew_id: Union[uuid.UUID, str]) -> List[Flow]:
         """
@@ -362,40 +380,10 @@ class FlowService:
     async def _delete_execution_children(
         self, execution_ids: list, job_ids: list
     ) -> None:
-        """Delete every row that FK-references the given executionhistory rows.
-
-        Must run before deleting from executionhistory, otherwise SQLite raises
-        "FOREIGN KEY constraint failed". Covers all enforced FK children:
-          - execution_trace: run_id (-> id) AND job_id (-> job_id)
-          - errortrace:      run_id (-> id)
-          - taskstatus:      job_id (-> job_id)
-          - llm_usage_billing: execution_id (-> job_id)
-
-        Table/column names are hardcoded constants (no injection surface).
-        """
-        from sqlalchemy import bindparam, text
-
-        # Children keyed by executionhistory.id
-        if execution_ids:
-            for table, col in (("execution_trace", "run_id"), ("errortrace", "run_id")):
-                query = text(f"DELETE FROM {table} WHERE {col} IN :ids").bindparams(
-                    bindparam("ids", expanding=True)
-                )
-                result = await self.session.execute(query, {"ids": execution_ids})
-                logger.info(f"Deleted {result.rowcount} {table} records (by {col})")
-
-        # Children keyed by executionhistory.job_id
-        if job_ids:
-            for table, col in (
-                ("execution_trace", "job_id"),
-                ("taskstatus", "job_id"),
-                ("llm_usage_billing", "execution_id"),
-            ):
-                query = text(f"DELETE FROM {table} WHERE {col} IN :jids").bindparams(
-                    bindparam("jids", expanding=True)
-                )
-                result = await self.session.execute(query, {"jids": job_ids})
-                logger.info(f"Deleted {result.rowcount} {table} records (by {col})")
+        """Delegates to the repository, which owns the cascade order."""
+        await FlowRepository(self.session).delete_execution_children(
+            execution_ids, job_ids
+        )
 
     async def force_delete_flow_with_executions(self, flow_id: uuid.UUID) -> bool:
         """
@@ -409,55 +397,20 @@ class FlowService:
             True if deleted, raises HTTPException if not found
         """
         try:
-            # Use direct SQL queries instead of the repository to avoid transaction issues
-            from sqlalchemy import bindparam, text
-            from sqlalchemy.dialects.postgresql import UUID as PGUUID
+            repository = FlowRepository(self.session)
 
-            # Coerce to a UUID object and bind it with the column's UUID type so
-            # SQLAlchemy applies the correct per-dialect conversion (native UUID on
-            # Postgres, dashless hex on SQLite). Passing a raw str/UUID into text()
-            # fails: SQLite can't bind UUID, and str() yields the dashed form that
-            # doesn't match SQLite's stored hex.
-            flow_id = (
-                flow_id if isinstance(flow_id, uuid.UUID) else uuid.UUID(str(flow_id))
-            )
-            flow_id_param = bindparam("flow_id", type_=PGUUID(as_uuid=True))
-
-            # First check if the flow exists
-            check_query = text("SELECT id FROM flows WHERE id = :flow_id").bindparams(
-                flow_id_param
-            )
-            result = await self.session.execute(check_query, {"flow_id": flow_id})
-            if not result.first():
+            if not await repository.exists(flow_id):
                 raise NotFoundError(detail="Flow not found")
 
             logger.info(f"Starting force deletion of flow {flow_id}")
 
-            # First, find all execution history IDs (and job_ids) for this flow
-            find_executions_query = text("""
-                SELECT id, job_id FROM executionhistory
-                WHERE flow_id = :flow_id AND execution_type = 'flow'
-            """).bindparams(flow_id_param)
-            result = await self.session.execute(
-                find_executions_query, {"flow_id": flow_id}
-            )
-            rows = result.fetchall()
-            execution_ids = [row[0] for row in rows]
-            job_ids = [row[1] for row in rows]
+            execution_ids, job_ids = await repository.find_execution_keys(flow_id)
 
-            # Delete every child row that FK-references these executions, or the
-            # executionhistory delete below fails with "FOREIGN KEY constraint failed".
-            await self._delete_execution_children(execution_ids, job_ids)
+            # Children first, or the executionhistory delete fails with
+            # "FOREIGN KEY constraint failed".
+            await repository.delete_execution_children(execution_ids, job_ids)
 
-            # Delete all flow executions from executionhistory
-            execution_delete_query = text("""
-                DELETE FROM executionhistory
-                WHERE flow_id = :flow_id AND execution_type = 'flow'
-            """).bindparams(flow_id_param)
-            result = await self.session.execute(
-                execution_delete_query, {"flow_id": flow_id}
-            )
-            deleted_count = result.rowcount
+            deleted_count = await repository.delete_executions_of(flow_id)
             if deleted_count > 0:
                 logger.info(
                     f"Deleted {deleted_count} flow executions for flow {flow_id}"
@@ -468,11 +421,7 @@ class FlowService:
             # to live here too and not only on the group-checked twin.
             await self._withdraw_publication(flow_id)
 
-            # Delete the flow itself
-            flow_delete_query = text(
-                "DELETE FROM flows WHERE id = :flow_id"
-            ).bindparams(flow_id_param)
-            result = await self.session.execute(flow_delete_query, {"flow_id": flow_id})
+            await repository.delete_row(flow_id)
 
             logger.info(f"Successfully deleted flow {flow_id} with all its executions")
             return True
@@ -528,31 +477,11 @@ class FlowService:
             HTTPException: If flow not found or user doesn't have access
         """
         try:
-            # Use direct SQL queries instead of the repository to avoid transaction issues
-            from sqlalchemy import bindparam, text
-            from sqlalchemy.dialects.postgresql import UUID as PGUUID
+            repository = FlowRepository(self.session)
 
-            # Coerce to a UUID object and bind it with the column's UUID type so
-            # SQLAlchemy applies the correct per-dialect conversion (native UUID on
-            # Postgres, dashless hex on SQLite). Passing a raw str/UUID into text()
-            # fails: SQLite can't bind UUID, and str() yields the dashed form that
-            # doesn't match SQLite's stored hex.
-            flow_id = (
-                flow_id if isinstance(flow_id, uuid.UUID) else uuid.UUID(str(flow_id))
-            )
-            flow_id_param = bindparam("flow_id", type_=PGUUID(as_uuid=True))
-
-            # First check if the flow exists and user has access
-            check_query = text(
-                "SELECT id, group_id FROM flows WHERE id = :flow_id"
-            ).bindparams(flow_id_param)
-            result = await self.session.execute(check_query, {"flow_id": flow_id})
-            row = result.first()
-
-            if not row:
+            exists, flow_group_id = await repository.get_group_id(flow_id)
+            if not exists:
                 raise NotFoundError(detail="Flow not found")
-
-            flow_group_id = row[1]
 
             # Check if user has access to this flow's group
             if flow_group_id and group_context and group_context.group_ids:
@@ -561,31 +490,14 @@ class FlowService:
 
             logger.info(f"Starting force deletion of flow {flow_id} with group check")
 
-            # Find all flow executions for this flow using executionhistory table
-            find_executions_query = text("""
-                SELECT id, job_id FROM executionhistory
-                WHERE flow_id = :flow_id AND execution_type = 'flow'
-            """).bindparams(flow_id_param)
-            result = await self.session.execute(
-                find_executions_query, {"flow_id": flow_id}
-            )
-            rows = result.fetchall()
-            execution_ids = [row[0] for row in rows]
-            job_ids = [row[1] for row in rows]
-
+            execution_ids, job_ids = await repository.find_execution_keys(flow_id)
             if job_ids:
                 logger.info(f"Found {len(job_ids)} flow executions to delete")
 
-            # Delete every child row that FK-references these executions, or the
-            # executionhistory delete below fails with "FOREIGN KEY constraint failed".
-            await self._delete_execution_children(execution_ids, job_ids)
-
-            # Delete all flow executions from executionhistory
-            execution_delete_query = text("""
-                DELETE FROM executionhistory
-                WHERE flow_id = :flow_id AND execution_type = 'flow'
-            """).bindparams(flow_id_param)
-            await self.session.execute(execution_delete_query, {"flow_id": flow_id})
+            # Children first, or the executionhistory delete fails with
+            # "FOREIGN KEY constraint failed".
+            await repository.delete_execution_children(execution_ids, job_ids)
+            await repository.delete_executions_of(flow_id)
 
             # Take it off every external surface before the row goes. A
             # publication outlives the flow it names unless something removes
@@ -594,11 +506,7 @@ class FlowService:
             # eight flows that no longer existed.
             await self._withdraw_publication(flow_id, group_context)
 
-            # Delete the flow itself
-            flow_delete_query = text(
-                "DELETE FROM flows WHERE id = :flow_id"
-            ).bindparams(flow_id_param)
-            result = await self.session.execute(flow_delete_query, {"flow_id": flow_id})
+            await repository.delete_row(flow_id)
 
             logger.info(
                 f"Successfully deleted flow {flow_id} with all its executions (group verified)"
@@ -726,18 +634,7 @@ class FlowService:
             raise NotFoundError(detail="Flow not found")
 
         # Check for execution records
-        from sqlalchemy import func, select
-
-        from src.models.execution_history import ExecutionHistory
-
-        count_query = (
-            select(func.count())
-            .select_from(ExecutionHistory)
-            .where(ExecutionHistory.flow_id == flow_id)
-        )
-        result = await self.session.execute(count_query)
-        execution_count = result.scalar_one()
-
+        execution_count = await repository.count_executions(flow_id)
         if execution_count > 0:
             raise BadRequestError(
                 detail=f"Cannot delete flow with {execution_count} execution records. Use force delete instead."

@@ -395,12 +395,12 @@ async def run_crew_in_process(
 
                     async def _recovery():
                         async def _op(session):
-                            from src.repositories.execution_history_repository import (
-                                ExecutionHistoryRepository,
-                            )
+                            # Runs are ExecutionService's domain.
+                            from src.services.execution.service import ExecutionService
 
-                            repo = ExecutionHistoryRepository(session)
-                            rec = await repo.get_execution_by_job_id(execution_id)
+                            rec = await ExecutionService(session).get_run_by_job_id(
+                                execution_id
+                            )
                             if rec and rec.status and rec.status.upper() == "RUNNING":
                                 await ExecutionStatusService.update_status(
                                     job_id=execution_id,

@@ -108,11 +108,12 @@ class ConversationGenerationMixin:
         if not session_id or not group_ids:
             return ""
 
-        from src.repositories.chat_history_repository import ChatHistoryRepository
+        # Chat history is ChatHistoryService's domain.
+        from src.services.chat.history import ChatHistoryService
 
-        messages = await ChatHistoryRepository(
-            self.session
-        ).get_recent_by_session_and_group(session_id, group_ids, limit=200)
+        messages = await ChatHistoryService(self.session).get_recent_messages(
+            session_id, group_ids, limit=200
+        )
 
         placeholders = {"thinking...", "[ui-card]", ""}
         user_cap = 800

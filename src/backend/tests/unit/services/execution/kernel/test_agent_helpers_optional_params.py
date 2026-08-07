@@ -55,7 +55,7 @@ async def _make_agent(agent_config=None, config=None, **kwargs):
     with (
         patch("src.services.llm.manager.LLMManager") as mock_lm,
         patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
-        patch("src.db.session.request_scoped_session") as mock_sess,
+        patch("src.db.session.routed_scoped_session") as mock_sess,
         patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_svc,
         patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
         patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls,
@@ -159,7 +159,7 @@ class TestCreateAgentBasic:
         with (
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
@@ -209,7 +209,7 @@ class TestCreateAgentLLMConfig:
         with (
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
@@ -247,7 +247,7 @@ class TestCreateAgentLLMConfig:
         with (
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
@@ -287,7 +287,7 @@ class TestCreateAgentLLMConfig:
         with (
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
@@ -327,7 +327,7 @@ class TestCreateAgentLLMConfig:
         with (
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
@@ -377,7 +377,7 @@ class TestCreateAgentToolResolution:
         with (
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
@@ -429,7 +429,7 @@ class TestCreateAgentToolResolution:
         with (
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
@@ -477,7 +477,7 @@ class TestCreateAgentToolResolution:
         with (
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
@@ -522,7 +522,7 @@ class TestCreateAgentToolResolution:
         with (
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
@@ -565,7 +565,7 @@ class TestCreateAgentToolResolution:
         with (
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
@@ -682,7 +682,7 @@ class TestCreateAgentAdditionalParams:
         with (
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
@@ -724,7 +724,7 @@ class TestCreateAgentAdditionalParams:
         with (
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
@@ -759,7 +759,7 @@ class TestCreateAgentAdditionalParams:
         with (
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
@@ -800,7 +800,7 @@ class TestCreateAgentLLMConfigExtended:
         with (
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
@@ -841,7 +841,7 @@ class TestCreateAgentLLMConfigExtended:
         with (
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
@@ -890,7 +890,7 @@ class TestCreateAgentLLMConfigExtended:
         with (
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
@@ -928,7 +928,7 @@ class TestCreateAgentLLMConfigExtended:
         with (
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
@@ -965,7 +965,7 @@ class TestCreateAgentLLMConfigExtended:
         with (
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
-            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.db.session.routed_scoped_session") as mock_sess,
             patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(

@@ -238,10 +238,10 @@ async def _resolve_config(
     if not group_id:
         return enabled, catalog, guidance
     try:
-        from src.db.session import request_scoped_session
+        from src.db.session import routed_scoped_session
         from src.services.settings.ui import UIConfigService
 
-        async with request_scoped_session() as session:
+        async with routed_scoped_session() as session:
             cfg = await UIConfigService(session, group_id=group_id).get_config()
         enabled = bool(cfg.enabled)
         catalog = _resolve_catalog(cfg, catalog)

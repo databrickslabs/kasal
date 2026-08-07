@@ -58,7 +58,7 @@ _CLONED_FIELDS = (
 
 class A2AAgentService:
     def __init__(self, session: AsyncSession):
-        self.session = session
+        # No `self.session`: reads and writes both go through the repository.
         self.repository = A2AAgentRepository(session)
 
     # ---------------------------------------------------------------- reading
@@ -109,8 +109,7 @@ class A2AAgentService:
             group_id=None,
             created_by_email=getattr(group_context, "group_email", None),
         )
-        self.session.add(agent)
-        await self.session.flush()
+        await self.repository.insert(agent)
 
         # Fetch the card immediately so a typo in the URL is a message on the
         # form rather than a tool that silently does nothing at run time.
@@ -153,7 +152,7 @@ class A2AAgentService:
                 EncryptionUtils.encrypt_value(data.api_key) if data.api_key else None
             )
 
-        await self.session.flush()
+        await self.repository.save()
         if data.card_url is not None or data.api_key is not None:
             await self._refresh_card(agent, group_context)
         return agent
@@ -168,10 +167,9 @@ class A2AAgentService:
         if not agent or agent.group_id is not None:
             return False
         name = agent.name
-        await self.session.delete(agent)
-        await self.session.flush()
+        await self.repository.remove(agent)
         await self.repository.delete_overrides_by_name(name)
-        await self.session.flush()
+        await self.repository.save()
         return True
 
     async def set_global_availability(self, agent_id: int, enabled: bool) -> Any:
@@ -185,7 +183,7 @@ class A2AAgentService:
         if not agent or agent.group_id is not None:
             return None
         agent.enabled = enabled
-        await self.session.flush()
+        await self.repository.save()
         return agent
 
     # ------------------------------------------------------ workspace opt-in
@@ -209,7 +207,7 @@ class A2AAgentService:
 
         if target.group_id == group_id:
             target.enabled = enabled
-            await self.session.flush()
+            await self.repository.save()
             return target
 
         if target.group_id is not None:
@@ -218,7 +216,7 @@ class A2AAgentService:
         existing = await self.repository.find_by_name_and_group(target.name, group_id)
         if existing:
             existing.enabled = enabled
-            await self.session.flush()
+            await self.repository.save()
             return existing
 
         from src.models.a2a_agent import A2AAgent
@@ -229,8 +227,7 @@ class A2AAgentService:
             global_enabled=bool(target.global_enabled),
             group_id=group_id,
         )
-        self.session.add(override)
-        await self.session.flush()
+        await self.repository.insert(override)
         return override
 
     # ------------------------------------------------------------- behaviour
@@ -290,7 +287,7 @@ class A2AAgentService:
         except Exception as exc:  # noqa: BLE001
             agent.last_error = str(exc)[:500]
             agent.card_fetched_at = datetime.utcnow()
-            await self.session.flush()
+            await self.repository.save()
             return A2AConnectionTest(connected=False, message=str(exc)[:500])
 
         agent.cached_card = card
@@ -298,7 +295,7 @@ class A2AAgentService:
         agent.last_error = None
         if not agent.description:
             agent.description = str(card.get("description") or "")[:1000]
-        await self.session.flush()
+        await self.repository.save()
 
         skills = a2a_client.skills_of(card)
         return A2AConnectionTest(

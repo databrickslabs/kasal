@@ -1,7 +1,7 @@
 """
 Service for crew execution operations.
 
-This module provides business logic for executing CrewAI operations including
+This module provides business logic for executing crew operations including
 running execution jobs, managing execution lifecycle, and handling results.
 """
 
@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger import LoggerManager
-from src.db.session import request_scoped_session
+from src.db.session import routed_scoped_session
 from src.models.execution_status import ExecutionStatus
 from src.repositories.execution_repository import ExecutionRepository
 from src.schemas.execution import CrewConfig
@@ -116,7 +116,7 @@ class KasalExecutionService:
             if config.agents_yaml and isinstance(config.agents_yaml, dict):
                 # Get agent service to fetch tool_configs
                 try:
-                    async with request_scoped_session() as session:
+                    async with routed_scoped_session() as session:
                         agent_service = AgentService(session)
 
                         for agent_id, agent_config in config.agents_yaml.items():
@@ -252,7 +252,7 @@ class KasalExecutionService:
             if config.tasks_yaml and isinstance(config.tasks_yaml, dict):
                 # Get task service to fetch tool_configs
                 try:
-                    async with request_scoped_session() as session:
+                    async with routed_scoped_session() as session:
                         task_service = TaskService(session)
 
                         for task_id, task_config in config.tasks_yaml.items():
@@ -812,14 +812,13 @@ class KasalExecutionService:
                 )
                 try:
                     # Get repository instance through async factory function with session
-                    from src.db.session import request_scoped_session
-                    from src.repositories.flow_repository import FlowRepository
+                    from src.db.session import routed_scoped_session
+                    from src.services.flow_builder.flow_service import FlowService
 
-                    async with request_scoped_session() as db:
-                        flow_repository = FlowRepository(db)
-
-                        # Find flow by ID using async method
-                        flow = await flow_repository.get(flow_id)
+                    async with routed_scoped_session() as db:
+                        # Flows are FlowService's domain. find_flow, not get_flow:
+                        # the latter RAISES and this path returns an error payload.
+                        flow = await FlowService(db).find_flow(flow_id)
                         if not flow:
                             crew_logger.error(
                                 f"Flow with ID {flow_id} not found in repository"
@@ -882,10 +881,13 @@ class KasalExecutionService:
                     group_context.primary_group_id
                 )  # For background task API key loading
 
-            # Create a database session for flow execution
-            from src.db.session import request_scoped_session
+            # A SEPARATE session from the flow-config read above, deliberately:
+            # run_flow() makes an LLM call (execution-name generation) and then
+            # spawns the flow engine, so one session spanning both would pin a
+            # connection — the shared one, on SQLite — for the whole run.
+            from src.db.session import routed_scoped_session
 
-            async with request_scoped_session() as session:
+            async with routed_scoped_session() as session:
                 # Create a flow service instance with session
                 flow_service = KasalFlowService(session)
 
@@ -981,9 +983,9 @@ class KasalExecutionService:
         crew_logger.info(f"Getting flow execution {execution_id}")
 
         # Create a database session for flow execution retrieval
-        from src.db.session import request_scoped_session
+        from src.db.session import routed_scoped_session
 
-        async with request_scoped_session() as session:
+        async with routed_scoped_session() as session:
             # Create a flow service instance with session
             flow_service = KasalFlowService(session)
 
@@ -1007,9 +1009,9 @@ class KasalExecutionService:
         crew_logger.info(f"Getting executions for flow {flow_id}")
 
         # Create a database session for flow executions retrieval
-        from src.db.session import request_scoped_session
+        from src.db.session import routed_scoped_session
 
-        async with request_scoped_session() as session:
+        async with routed_scoped_session() as session:
             # Create a flow service instance with session
             flow_service = KasalFlowService(session)
 

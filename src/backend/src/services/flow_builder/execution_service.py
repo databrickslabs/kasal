@@ -17,7 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger import LoggerManager
 from src.models.execution_history import ExecutionHistory
-from src.repositories.execution_history_repository import ExecutionHistoryRepository
 
 logger = LoggerManager.get_instance().flow
 
@@ -42,7 +41,11 @@ class FlowExecutionService:
             session: Database session for repository operations
         """
         self.session = session
-        self.execution_repo = ExecutionHistoryRepository(session)
+        # Runs belong to ExecutionService; this service adds the FLOW-specific view
+        # of them (type filtering, checkpointing) on top.
+        from src.services.execution.service import ExecutionService
+
+        self.execution_service = ExecutionService(session)
 
     async def create_execution(
         self,
@@ -100,7 +103,7 @@ class FlowExecutionService:
             logger.info(f"Generated default run_name: {run_name}")
 
         # Check if an execution record already exists (created by execution_service.py)
-        execution = await self.execution_repo.get_execution_by_job_id(job_id)
+        execution = await self.execution_service.get_run_by_job_id(job_id)
 
         if execution:
             # Update existing record with flow-specific fields
@@ -116,7 +119,7 @@ class FlowExecutionService:
             if group_id:
                 execution.group_id = group_id
             await self.session.commit()
-            await self.session.refresh(execution)
+            await self.execution_service.reload_run(execution)
             logger.info(
                 f"Flow execution {execution.id} (job_id={job_id}) ready for group {group_id}"
             )
@@ -136,19 +139,24 @@ class FlowExecutionService:
         from src.db.session import get_isolated_db_session
 
         async with get_isolated_db_session() as iso_session:
-            execution = ExecutionHistory(
+            # Runs are ExecutionService's domain, so it builds the row — this used to
+            # construct ExecutionHistory and call its repository directly. The
+            # PRIVATE session is still ours (see the comment above); commit=True so
+            # the row is durable before the subprocess that runs the flow looks for
+            # it.
+            # Local import: execution/service.py lazily imports flow_builder's
+            # process_executor, so a module-level import here would risk a cycle.
+            from src.services.execution.service import ExecutionService
+
+            execution = await ExecutionService.create_run_record(
+                iso_session,
                 job_id=job_id,
-                status="pending",
-                inputs=config or {},
                 run_name=run_name,
+                inputs=config or {},
                 execution_type="flow",
                 flow_id=flow_id,
                 group_id=group_id,
-                created_at=datetime.utcnow(),
             )
-            iso_session.add(execution)
-            await iso_session.commit()
-            await iso_session.refresh(execution)
             logger.info(
                 f"Flow execution {execution.id} (job_id={job_id}) ready for group {group_id}"
             )
@@ -166,7 +174,7 @@ class FlowExecutionService:
         Returns:
             ExecutionHistory instance or None if not found
         """
-        return await self.execution_repo.get_by_id_and_type(execution_id, "flow")
+        return await self.execution_service.get_run_of_type(execution_id, "flow")
 
     async def get_execution_by_job_id(self, job_id: str) -> Optional[ExecutionHistory]:
         """
@@ -178,7 +186,7 @@ class FlowExecutionService:
         Returns:
             ExecutionHistory instance or None if not found
         """
-        return await self.execution_repo.get_by_job_id_and_type(job_id, "flow")
+        return await self.execution_service.get_run_of_type_by_job_id(job_id, "flow")
 
     async def get_executions_by_flow(
         self, flow_id: Union[uuid.UUID, str]
@@ -195,7 +203,7 @@ class FlowExecutionService:
         if isinstance(flow_id, str):
             flow_id = uuid.UUID(flow_id)
 
-        return await self.execution_repo.get_by_flow_id_and_type(flow_id, "flow")
+        return await self.execution_service.get_runs_of_type_for_flow(flow_id, "flow")
 
     async def update_execution_status(
         self,
@@ -233,7 +241,7 @@ class FlowExecutionService:
             execution.completed_at = datetime.utcnow()
 
         await self.session.commit()
-        await self.session.refresh(execution)
+        await self.execution_service.reload_run(execution)
 
         logger.info(f"Updated execution {execution_id} to status {status}")
 
@@ -262,7 +270,7 @@ class FlowExecutionService:
 
         execution.inputs = config
         await self.session.commit()
-        await self.session.refresh(execution)
+        await self.execution_service.reload_run(execution)
 
         return execution
 
@@ -283,8 +291,7 @@ class FlowExecutionService:
             logger.warning(f"Execution {execution_id} not found")
             return False
 
-        await self.session.delete(execution)
-        await self.session.commit()
+        await self.execution_service.delete_run(execution)
 
         logger.info(f"Deleted flow execution {execution_id}")
 

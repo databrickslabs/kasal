@@ -360,6 +360,21 @@ class HITLService:
             logger.error(f"Database error rejecting HITL: {str(e)}")
             raise HITLServiceError(f"Failed to reject: {str(e)}")
 
+    async def get_approval(self, approval_id: str) -> Optional[HITLApproval]:
+        """One approval row by id.
+
+        Callers in other domains — the runtime's tool-approval gate and the
+        human-review guardrail — used to build ``HITLApprovalRepository``
+        themselves to poll a decision. Approvals are this service's domain.
+        """
+        return await self.approval_repo.get_by_id(approval_id)
+
+    async def get_approvals_for_execution(
+        self, execution_id: str, group_id: Optional[str] = None
+    ) -> List[HITLApproval]:
+        """Every approval raised during one run, scoped to ``group_id``."""
+        return await self.approval_repo.get_all_for_execution(execution_id, group_id)
+
     async def get_pending_approvals(
         self, group_id: str, limit: int = 50, offset: int = 0
     ) -> HITLApprovalListResponse:
@@ -578,24 +593,21 @@ class HITLService:
     async def _update_execution_status(
         self, execution_id: str, status: str, message: Optional[str] = None
     ) -> None:
-        """Update execution status in the database."""
-        from src.repositories.execution_history_repository import (
-            ExecutionHistoryRepository,
+        """Update execution status in the database.
+
+        Through ExecutionStatusService, which OWNS run status: it used to mutate the
+        row via ExecutionHistoryRepository here, duplicating the transition rules
+        (terminal-status handling, completed_at, the in-memory cache) that the owning
+        service applies.
+        """
+        from src.services.execution.status import ExecutionStatusService
+
+        await ExecutionStatusService.update_status(
+            job_id=execution_id,
+            status=status,
+            message=message or "",
+            session=self.session,
         )
-
-        repo = ExecutionHistoryRepository(self.session)
-        execution = await repo.get_execution_by_job_id(execution_id)
-
-        if execution:
-            execution.status = status
-            if message:
-                # Store message in error field for visibility
-                if status in [
-                    ExecutionStatus.FAILED.value,
-                    ExecutionStatus.REJECTED.value,
-                ]:
-                    execution.error = message
-            await self.session.flush()
 
     async def _resume_flow_execution(
         self, approval: HITLApproval, user_token: Optional[str] = None
@@ -614,16 +626,15 @@ class HITLService:
             # Import here to avoid circular imports
             import asyncio
 
-            from src.repositories.execution_history_repository import (
-                ExecutionHistoryRepository,
-            )
             from src.services.execution.kasal_service import KasalExecutionService
+            from src.services.execution.service import ExecutionService
             from src.services.execution.status import ExecutionStatusService
             from src.utils.user_context import GroupContext
 
-            # Get execution record
-            exec_repo = ExecutionHistoryRepository(self.session)
-            execution = await exec_repo.get_execution_by_job_id(approval.execution_id)
+            # Get execution record — runs are ExecutionService's domain.
+            execution = await ExecutionService(self.session).get_run_by_job_id(
+                approval.execution_id
+            )
 
             if not execution:
                 logger.error(f"Execution {approval.execution_id} not found for resume")
@@ -723,16 +734,15 @@ class HITLService:
             # Import here to avoid circular imports
             import asyncio
 
-            from src.repositories.execution_history_repository import (
-                ExecutionHistoryRepository,
-            )
             from src.services.execution.kasal_service import KasalExecutionService
+            from src.services.execution.service import ExecutionService
             from src.services.execution.status import ExecutionStatusService
             from src.utils.user_context import GroupContext
 
-            # Get execution record
-            exec_repo = ExecutionHistoryRepository(self.session)
-            execution = await exec_repo.get_execution_by_job_id(approval.execution_id)
+            # Get execution record — runs are ExecutionService's domain.
+            execution = await ExecutionService(self.session).get_run_by_job_id(
+                approval.execution_id
+            )
 
             if not execution:
                 logger.error(f"Execution {approval.execution_id} not found for retry")

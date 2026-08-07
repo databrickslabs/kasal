@@ -1274,12 +1274,12 @@ class CrewPreparation:
             # agent in the crew (previously each agent re-fetched the whole
             # group table, including tool_config decryption per row).
             if self._group_agents_cache is None:
-                from src.db.session import request_scoped_session
+                from src.db.session import routed_scoped_session
                 from src.services.catalog.agents import AgentService
                 from src.utils.user_context import GroupContext
 
                 group_id = self.config.get("group_id", "default")
-                async with request_scoped_session() as session:
+                async with routed_scoped_session() as session:
                     agent_service = AgentService(session)
                     group_context = GroupContext(group_ids=[group_id])
                     self._group_agents_cache = await agent_service.find_by_group(

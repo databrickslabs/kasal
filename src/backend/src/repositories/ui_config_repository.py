@@ -39,6 +39,20 @@ class UIConfigRepository(BaseRepository[UIConfig]):
         # Fall back to the global default (group_id IS NULL).
         return await self.get_for_group_exact(None)
 
+    async def add(self, config: UIConfig) -> UIConfig:
+        """Stage a new UI-config row.
+
+        No flush: the caller sets the payload fields next and commits once, so
+        flushing here would write a half-populated row for no benefit.
+        """
+        self.session.add(config)
+        return config
+
+    async def reload(self, config: UIConfig) -> UIConfig:
+        """Re-read a row after commit, so server-side defaults are populated."""
+        await self.session.refresh(config)
+        return config
+
     async def get_for_group_exact(self, group_id: Optional[str]) -> Optional[UIConfig]:
         """The row belonging to EXACTLY this group (most recent if duplicated).
 

@@ -15,8 +15,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from src.core.exceptions import BadRequestError
-from src.repositories.log_repository import LLMLogRepository
-from src.repositories.model_config_repository import ModelConfigRepository
 from src.services.prompt_optimization.gepa.crew_doc import (  # noqa: E402
     _CREW_DOC_FIELD_LABELS,
     _distill_requirements,

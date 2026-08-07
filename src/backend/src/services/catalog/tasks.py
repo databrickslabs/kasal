@@ -178,6 +178,43 @@ class TaskService(BaseService[Task, TaskCreate]):
 
         return await self.repository.update(id, update_data)
 
+    #: The only fields a prompt optimiser may rewrite — see the twin on
+    #: AgentService for why this is an allowlist and not an arbitrary dict.
+    PROMPT_TEXT_FIELDS = ("description", "expected_output")
+
+    async def update_prompt_text_with_group_check(
+        self,
+        id: str,
+        fields: Dict[str, str],
+        group_context: GroupContext,
+    ) -> bool:
+        """Rewrite a task's prompt TEXT, verifying it belongs to the caller's group.
+
+        Added for the prompt optimiser, which used to call ``TaskRepository.update()``
+        directly and so skipped this check.
+
+        Returns:
+            True when a row was updated; False when absent, not visible to this
+            group, or nothing valid was supplied.
+        """
+        import logging
+
+        task = await self.get_with_group_check(id, group_context)
+        if task is None:
+            logging.getLogger(__name__).warning(
+                f"Refusing prompt update for task {id}: not found in caller's group"
+            )
+            return False
+
+        allowed = {
+            key: value
+            for key, value in (fields or {}).items()
+            if key in self.PROMPT_TEXT_FIELDS
+        }
+        if not allowed:
+            return False
+        return bool(await self.repository.update(id, allowed))
+
     async def update_with_group_check(
         self, id: str, obj_in: TaskUpdate, group_context: GroupContext
     ) -> Optional[Task]:

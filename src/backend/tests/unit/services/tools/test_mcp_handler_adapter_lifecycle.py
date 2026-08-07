@@ -270,7 +270,7 @@ async def test_get_databricks_workspace_host_success():
                 DatabricksService=MagicMock(return_value=mock_service)
             ),
             "src.db.session": MagicMock(
-                request_scoped_session=MagicMock(return_value=mock_session)
+                routed_scoped_session=MagicMock(return_value=mock_session)
             ),
         },
     ):
@@ -298,7 +298,7 @@ async def test_get_databricks_workspace_host_http_prefix():
                 DatabricksService=MagicMock(return_value=mock_service)
             ),
             "src.db.session": MagicMock(
-                request_scoped_session=MagicMock(return_value=mock_session)
+                routed_scoped_session=MagicMock(return_value=mock_session)
             ),
         },
     ):
@@ -326,7 +326,7 @@ async def test_get_databricks_workspace_host_no_url():
                 DatabricksService=MagicMock(return_value=mock_service)
             ),
             "src.db.session": MagicMock(
-                request_scoped_session=MagicMock(return_value=mock_session)
+                routed_scoped_session=MagicMock(return_value=mock_session)
             ),
         },
     ):
@@ -337,19 +337,26 @@ async def test_get_databricks_workspace_host_no_url():
 
 
 @pytest.mark.asyncio
-async def test_get_databricks_workspace_host_exception():
-    with patch.dict(
-        sys.modules,
-        {
-            "src.db.session": MagicMock(
-                request_scoped_session=MagicMock(side_effect=Exception("session error"))
-            )
-        },
+async def test_get_databricks_workspace_host_when_the_config_is_unreadable():
+    """A DB failure reads as "no config", not as an error string.
+
+    This used to patch ``src.db.session`` and assert the exception text came back,
+    because the session was acquired here. It now comes from
+    ``DatabricksConfigProvider``, which deliberately swallows failures and returns
+    None: every caller treats a missing config as "not configured" and falls back to
+    environment variables, so surfacing an exception would turn a soft fallback into
+    a failed run. The trade-off is that this caller can no longer tell "unset" from
+    "unreachable" — the provider logs which it was at debug level.
+    """
+    with patch(
+        "src.services.databricks.workspace.config_provider."
+        "DatabricksConfigProvider.get",
+        new=AsyncMock(return_value=None),
     ):
         host, error = await mcp_handler.get_databricks_workspace_host()
 
     assert host is None
-    assert "session error" in error
+    assert error == "No workspace URL found in configuration"
 
 
 # ─── call_databricks_api ──────────────────────────────────────────────────────

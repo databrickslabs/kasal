@@ -260,6 +260,50 @@ class AgentService(BaseService[Agent, AgentCreate]):
         agent = await self.repository.update(id, update_data)
         return self._decrypt_agent_tool_configs(agent)
 
+    #: The only fields a prompt optimiser may rewrite. An allowlist rather than an
+    #: arbitrary dict: this path exists for GEPA, and a typo'd or hostile key must
+    #: not be able to reach `enabled`, `tool_configs` or `group_id`.
+    PROMPT_TEXT_FIELDS = ("role", "goal", "backstory")
+
+    async def update_prompt_text_with_group_check(
+        self,
+        id: str,
+        fields: Dict[str, str],
+        group_context: GroupContext,
+    ) -> bool:
+        """Rewrite an agent's prompt TEXT, verifying it belongs to the caller's group.
+
+        Added for the prompt optimiser, which used to call
+        ``AgentRepository.update()`` directly — getting the row without this check.
+        The optimiser derives its field keys from a JSON blob on the run, so the
+        group verification here is the thing standing between a foreign id in that
+        blob and a cross-tenant write.
+
+        Args:
+            id: agent id to update.
+            fields: subset of :attr:`PROMPT_TEXT_FIELDS`; anything else is ignored.
+            group_context: caller's groups.
+
+        Returns:
+            True when a row was updated, False when the agent is absent, not
+            visible to this group, or nothing valid was supplied.
+        """
+        agent = await self.get_with_group_check(id, group_context)
+        if agent is None:
+            logger.warning(
+                f"Refusing prompt update for agent {id}: not found in caller's group"
+            )
+            return False
+
+        allowed = {
+            key: value
+            for key, value in (fields or {}).items()
+            if key in self.PROMPT_TEXT_FIELDS
+        }
+        if not allowed:
+            return False
+        return bool(await self.repository.update(id, allowed))
+
     async def update_limited_with_group_check(
         self, id: str, obj_in: AgentLimitedUpdate, group_context: GroupContext
     ) -> Optional[Agent]:
@@ -334,7 +378,9 @@ class AgentService(BaseService[Agent, AgentCreate]):
         from src.db.session import get_isolated_db_session
 
         async with get_isolated_db_session() as session:
-            existing = await session.get(Agent, id)
+            # Repository, on THIS private session — the isolation is about the
+            # connection, not a reason to hand-roll the lookup.
+            existing = await self.repository_class(session).get(id)
             if not existing:
                 return False
             await self._delete_agents_and_tasks(session, [id])

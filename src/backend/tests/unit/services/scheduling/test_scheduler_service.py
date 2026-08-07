@@ -17,7 +17,7 @@ def _make_service():
     mock_session = Mock()
     service = SchedulerService(mock_session)
     service.repository = AsyncMock()
-    service.execution_history_repository = AsyncMock()
+    service.execution_service = AsyncMock()
     return service
 
 
@@ -66,24 +66,31 @@ class TestSchedulerServiceInit:
         service = SchedulerService(mock_session)
         assert service.session == mock_session
         assert hasattr(service, "repository")
-        assert hasattr(service, "execution_history_repository")
+        assert hasattr(service, "execution_service")
         assert hasattr(service, "_running_tasks")
         assert isinstance(service._running_tasks, set)
         assert len(service._running_tasks) == 0
 
-    def test_init_creates_repositories(self):
+    def test_init_owns_its_repository_and_borrows_the_execution_service(self):
+        """Schedules are this service's own data; runs belong to another domain.
+
+        So ``ScheduleRepository`` is constructed here, while runs are reached
+        through ``ExecutionService`` rather than through its repository.
+        """
         mock_session = Mock()
-        with patch(
-            "src.services.scheduling.scheduler.ScheduleRepository"
-        ) as mock_schedule_repo:
-            with patch(
-                "src.services.scheduling.scheduler.ExecutionHistoryRepository"
-            ) as mock_exec_repo:
-                mock_schedule_repo.return_value = Mock()
-                mock_exec_repo.return_value = Mock()
-                service = SchedulerService(mock_session)
-                mock_schedule_repo.assert_called_once_with(mock_session)
-                mock_exec_repo.assert_called_once_with(mock_session)
+        with (
+            patch(
+                "src.services.scheduling.scheduler.ScheduleRepository"
+            ) as mock_schedule_repo,
+            patch(
+                "src.services.scheduling.scheduler.ExecutionService"
+            ) as mock_exec_service,
+        ):
+            mock_schedule_repo.return_value = Mock()
+            mock_exec_service.return_value = Mock()
+            SchedulerService(mock_session)
+            mock_schedule_repo.assert_called_once_with(mock_session)
+            mock_exec_service.assert_called_once_with(mock_session)
 
 
 class TestSchedulerServiceShutdown:
@@ -473,9 +480,7 @@ class TestCreateScheduleFromExecution:
         from src.schemas.schedule import ScheduleCreateFromExecution
 
         service = _make_service()
-        service.execution_history_repository.get_execution_by_id = AsyncMock(
-            return_value=None
-        )
+        service.execution_service.get_execution_record = AsyncMock(return_value=None)
 
         schedule_data = MagicMock()
         schedule_data.execution_id = "exec-1"
@@ -493,7 +498,7 @@ class TestCreateScheduleFromExecution:
             "agents_yaml": {},
             "tasks_yaml": {},
         }
-        service.execution_history_repository.get_execution_by_id = AsyncMock(
+        service.execution_service.get_execution_record = AsyncMock(
             return_value=mock_execution
         )
 
@@ -521,7 +526,7 @@ class TestCreateScheduleFromExecution:
             "nodes": [],
             "edges": [],
         }
-        service.execution_history_repository.get_execution_by_id = AsyncMock(
+        service.execution_service.get_execution_record = AsyncMock(
             return_value=mock_execution
         )
 
@@ -548,7 +553,7 @@ class TestCreateScheduleFromExecution:
             "tasks_yaml": {"task1": {"description": "D"}},
             "inputs": {},
         }
-        service.execution_history_repository.get_execution_by_id = AsyncMock(
+        service.execution_service.get_execution_record = AsyncMock(
             return_value=mock_execution
         )
         service.repository.create = AsyncMock(return_value=MagicMock())
@@ -584,7 +589,7 @@ class TestCreateScheduleFromExecution:
             "edges": [{"id": "e1"}],
             "inputs": {},
         }
-        service.execution_history_repository.get_execution_by_id = AsyncMock(
+        service.execution_service.get_execution_record = AsyncMock(
             return_value=mock_execution
         )
         service.repository.create = AsyncMock(return_value=MagicMock())
@@ -616,7 +621,7 @@ class TestCreateScheduleFromExecution:
             "agents_yaml": {"a": {}},
             "tasks_yaml": {"t": {}},
         }
-        service.execution_history_repository.get_execution_by_id = AsyncMock(
+        service.execution_service.get_execution_record = AsyncMock(
             return_value=mock_execution
         )
 

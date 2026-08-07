@@ -47,11 +47,11 @@ async def load_resume_outputs(
     if not resume_from_execution_id or not repositories:
         return {}, {}
 
-    execution_history_repo = repositories.get("execution_history")
-    if not execution_history_repo:
-        logger.warning(
-            "No execution_history repository — cannot load checkpoint outputs"
-        )
+    # ExecutionService, not ExecutionHistoryRepository: runs are execution's domain,
+    # and a flow resume reads them like any other caller.
+    execution_service = repositories.get("execution_history")
+    if not execution_service:
+        logger.warning("No execution service — cannot load checkpoint outputs")
         return {}, {}
 
     try:
@@ -64,11 +64,11 @@ async def load_resume_outputs(
             isinstance(resume_from_execution_id, str)
             and resume_from_execution_id.isdigit()
         ):
-            execution = await execution_history_repo.get_execution_by_id(
+            execution = await execution_service.get_run_by_id(
                 int(resume_from_execution_id)
             )
         if execution is None:
-            execution = await execution_history_repo.get_execution_by_job_id(
+            execution = await execution_service.get_run_by_job_id(
                 str(resume_from_execution_id)
             )
 

@@ -1032,12 +1032,12 @@ class BackendFlow:
             # execution.  CrewAI's kickoff_async() runs all @start() methods via
             # asyncio.gather(), meaning multiple starting-point coroutines execute
             # concurrently.  If they inherit the parent's _request_session, every call
-            # to request_scoped_session() returns the SAME AsyncSession — which is NOT
+            # to routed_scoped_session() returns the SAME AsyncSession — which is NOT
             # safe for concurrent coroutine use with PostgreSQL (Lakebase).
             # By clearing the ContextVar, each @start()/@listen() method that needs
             # DB access will create its own independent session via
-            # request_scoped_session() → async_session_factory() (already swapped to
-            # Lakebase by activate_lakebase_in_subprocess()).
+            # routed_scoped_session() → the router (which in this subprocess resolves
+            # to Lakebase, already activated by activate_lakebase_in_subprocess()).
             try:
                 from src.db.session import _request_session
 

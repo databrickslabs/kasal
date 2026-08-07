@@ -28,7 +28,8 @@ logger = logging.getLogger(__name__)
 
 class SkillService:
     def __init__(self, session: AsyncSession):
-        self.session = session
+        # No `self.session`: every read AND write goes through the repository, so
+        # holding the session would only invite the next edit to bypass it.
         self.repository = SkillRepository(session)
 
     async def list_skills(self, group_context: GroupContext) -> List[Any]:
@@ -69,8 +70,7 @@ class SkillService:
             enabled=data.enabled,
             global_enabled=data.global_enabled,
         )
-        self.session.add(skill)
-        await self.session.flush()
+        await self.repository.insert(skill)
 
         supplied = files if files is not None else self._files_of(data)
         if supplied:
@@ -142,7 +142,7 @@ class SkillService:
             # the model can still read.
             await self.repository.replace_files(skill.id, self._files_of(data))
 
-        await self.session.flush()
+        await self.repository.save()
         # Same reason: replace_files went round the ORM, so this instance's
         # collection is stale or unloaded.
         return (
@@ -191,16 +191,14 @@ class SkillService:
             # skill, which is not what the word means.
             return None
 
-        await self.session.delete(skill)
-        await self.session.flush()
+        await self.repository.remove(skill)
         return builtin
 
     async def delete_skill(self, skill_id: int, group_context: GroupContext) -> bool:
         skill = await self.get_skill(skill_id, group_context)
         if not skill or skill.group_id is None:
             return False
-        await self.session.delete(skill)
-        await self.session.flush()
+        await self.repository.remove(skill)
         return True
 
     async def set_enabled(
@@ -218,14 +216,14 @@ class SkillService:
 
         if skill.group_id is not None:
             skill.enabled = enabled
-            await self.session.flush()
+            await self.repository.save()
             return skill
 
         group_id = self._group_of(group_context)
         existing = await self._own_skill_named(skill.name, group_id)
         if existing:
             existing.enabled = enabled
-            await self.session.flush()
+            await self.repository.save()
             return existing
 
         from src.models.skill import Skill
@@ -243,8 +241,7 @@ class SkillService:
             enabled=enabled,
             global_enabled=bool(skill.global_enabled),
         )
-        self.session.add(override)
-        await self.session.flush()
+        await self.repository.insert(override)
         await self.repository.replace_files(
             override.id,
             [
@@ -285,7 +282,7 @@ class SkillService:
             existing.compatibility = parsed.compatibility
             existing.skill_metadata = parsed.metadata or {}
             existing.source = "uploaded"
-            await self.session.flush()
+            await self.repository.save()
             await self.repository.replace_files(existing.id, files)
             return await self.repository.find_visible(
                 existing.id, group_context.group_ids or []
@@ -361,8 +358,7 @@ class SkillService:
             enabled=bool(builtin.enabled),
             global_enabled=bool(builtin.global_enabled),
         )
-        self.session.add(copy)
-        await self.session.flush()
+        await self.repository.insert(copy)
         await self.repository.replace_files(
             copy.id,
             [

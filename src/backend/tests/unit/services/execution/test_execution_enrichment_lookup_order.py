@@ -62,7 +62,7 @@ async def test_agent_and_task_lookup_is_id_first():
 
     with (
         patch(
-            "src.services.execution.kasal_service.request_scoped_session",
+            "src.services.execution.kasal_service.routed_scoped_session",
             return_value=session_cm,
         ),
         patch(

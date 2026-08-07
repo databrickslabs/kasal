@@ -33,7 +33,7 @@ class TestDatabricksKnowledgeServiceInit:
         assert service.group_id == group_id
         assert service.created_by_email == created_by_email
         assert service.user_token == user_token
-        assert hasattr(service, "repository")
+        assert hasattr(service, "databricks_service")
         assert hasattr(service, "volume_repository")
 
     def test_init_minimal_parameters(self):
@@ -48,14 +48,14 @@ class TestDatabricksKnowledgeServiceInit:
         assert service.created_by_email is None
         assert service.user_token is None
 
-    def test_init_repositories_created(self):
-        """Test that repositories are properly initialized"""
+    def test_init_dependencies_created(self):
+        """Databricks config comes from its OWNING service, not a repository here."""
         mock_session = Mock()
         group_id = "test-group-id"
 
         service = DatabricksKnowledgeService(mock_session, group_id)
 
-        assert service.repository is not None
+        assert service.databricks_service is not None
         assert service.volume_repository is not None
 
 
@@ -128,7 +128,9 @@ class TestDatabricksKnowledgeServiceUploadKnowledgeFile:
         execution_id = "test-execution-id"
 
         # Happy path: a successful Volume upload + read + embed.
-        self.service.repository.get_active_config = AsyncMock(return_value=None)
+        self.service.databricks_service.get_databricks_config = AsyncMock(
+            return_value=None
+        )
         self.service.volume_repository.upload_file_to_volume = AsyncMock(
             return_value={"success": True}
         )
@@ -161,7 +163,9 @@ class TestDatabricksKnowledgeServiceUploadKnowledgeFile:
         execution_id = "test-execution-id"
         agent_ids = ["agent1", "agent2"]
 
-        self.service.repository.get_active_config = AsyncMock(return_value=None)
+        self.service.databricks_service.get_databricks_config = AsyncMock(
+            return_value=None
+        )
         self.service.volume_repository.upload_file_to_volume = AsyncMock(
             return_value={"success": True}
         )
@@ -285,7 +289,7 @@ class TestDatabricksKnowledgeServiceReadKnowledgeFile:
 
         with (
             patch.object(
-                self.service.repository, "get_active_config"
+                self.service.databricks_service, "get_databricks_config"
             ) as mock_get_config,
             patch.object(
                 self.service.volume_repository, "download_file_from_volume"
@@ -313,7 +317,7 @@ class TestDatabricksKnowledgeServiceReadKnowledgeFile:
 
         with (
             patch.object(
-                self.service.repository, "get_active_config"
+                self.service.databricks_service, "get_databricks_config"
             ) as mock_get_config,
             patch.object(
                 self.service.volume_repository, "download_file_from_volume"
@@ -446,7 +450,7 @@ class TestDatabricksKnowledgeServiceBrowseVolumeFiles:
 
         with (
             patch.object(
-                self.service.repository, "get_active_config"
+                self.service.databricks_service, "get_databricks_config"
             ) as mock_get_config,
             patch.object(
                 self.service.volume_repository, "list_volume_contents"
@@ -475,7 +479,7 @@ class TestDatabricksKnowledgeServiceBrowseVolumeFiles:
         volume_path = "/Volumes/catalog/schema/volume"
 
         with patch.object(
-            self.service.repository, "get_active_config"
+            self.service.databricks_service, "get_databricks_config"
         ) as mock_get_config:
             mock_get_config.side_effect = Exception("Config error")
 
@@ -563,7 +567,7 @@ class TestDatabricksKnowledgeServiceIntegration:
         # Mock repository and services directly on the service instance
         with (
             patch.object(
-                self.service.repository, "get_active_config"
+                self.service.databricks_service, "get_databricks_config"
             ) as mock_get_config,
             patch.object(
                 self.service.volume_repository, "upload_file_to_volume"

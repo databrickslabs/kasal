@@ -16,8 +16,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from src.core.exceptions import BadRequestError
-from src.repositories.log_repository import LLMLogRepository
-from src.repositories.model_config_repository import ModelConfigRepository
 from src.services.prompt_optimization.gepa import reflection
 from src.services.prompt_optimization.gepa.crew_doc import (  # noqa: E402
     _CREW_DOC_FIELD_LABELS,
@@ -846,8 +844,6 @@ class CrewRunnerMixin:
             # and stops the run mid-optimization. Pin token auth for the whole
             # call so the bare client uses the PAT — without stripping the SP
             # creds the crew's own LLM auth may still fall back to. No-op locally.
-            from src.services.mlflow.sp_auth import pat_auth_env
-
             # optimize_prompts re-enables tracing per eval and calls
             # mlflow.get_trace(request_id, silent=True) to read each trace back.
             # On a Databricks App that read blocks/retries against trace storage
@@ -860,6 +856,8 @@ class CrewRunnerMixin:
             # duration. Restored after. silent=True already means callers tolerate
             # a missing trace, so this only removes a blocking round trip.
             from contextlib import contextmanager
+
+            from src.services.mlflow.sp_auth import pat_auth_env
 
             @contextmanager
             def _suppressed_trace_reads():

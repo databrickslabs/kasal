@@ -22,7 +22,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.sse_manager import SSEEvent, sse_manager
 from src.db.database_router import get_smart_db_session
-from src.repositories.execution_history_repository import ExecutionHistoryRepository
 from src.repositories.execution_trace_repository import ExecutionTraceRepository
 from src.services.execution.event_pipe import suppresses_poller_broadcast
 
@@ -107,8 +106,12 @@ class TraceBroadcastService:
             from src.utils.asyncio_utils import execute_db_operation_smart
 
             async def _query(s: AsyncSession) -> Set[str]:
-                repo = ExecutionHistoryRepository(s)
-                job_ids = await repo.get_job_ids_by_statuses(["RUNNING", "running"])
+                # Runs are ExecutionService's domain.
+                from src.services.execution.service import ExecutionService
+
+                job_ids = await ExecutionService(s).get_job_ids_with_statuses(
+                    ["RUNNING", "running"]
+                )
                 return set(job_ids)
 
             return await execute_db_operation_smart(_query)

@@ -66,6 +66,19 @@ class MemoryBackendService:
         repository = MemoryBackendRepository(self.session)
         return await repository.get_all()
 
+    async def get_by_type(self, group_id: str, backend_type) -> List[MemoryBackend]:
+        """Memory backends of one type for a group.
+
+        Backends are this service's domain; crew generation used to build
+        ``MemoryBackendRepository`` itself to decide whether Databricks memory tools
+        should be offered.
+        """
+        from src.repositories.memory_backend_repository import MemoryBackendRepository
+
+        return await MemoryBackendRepository(self.session).get_by_type(
+            group_id, backend_type
+        )
+
     async def get_memory_backend(
         self, group_id: str, backend_id: str
     ) -> Optional[MemoryBackend]:

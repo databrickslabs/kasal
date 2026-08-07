@@ -45,8 +45,6 @@ from typing import Any, Dict, List, Optional
 
 from src.core.exceptions import BadRequestError
 from src.db.session import background_task_context
-from src.repositories.log_repository import LLMLogRepository
-from src.repositories.model_config_repository import ModelConfigRepository
 from src.repositories.prompt_optimization_run_repository import (
     PromptOptimizationRunRepository,
 )
@@ -170,8 +168,12 @@ class PromptOptimizationService(
 
     def __init__(self, session: Any):
         self.session = session
-        self.log_repository = LLMLogRepository(session)
-        self.model_repository = ModelConfigRepository(session)
+        # LLM logs belong to execution's logging domain — via its service, using the
+        # session factory so this file never touches LLMLogRepository.
+        # (ModelConfigRepository was constructed here and never used.)
+        from src.services.execution.logs.llm_log_service import LLMLogService
+
+        self.log_service = LLMLogService.create(session)
         self.run_repository = PromptOptimizationRunRepository(session)
 
     # ------------------------------------------------------------------ start
@@ -294,8 +296,11 @@ class PromptOptimizationService(
         page = 0
         # Over-fetch pages (dedup shrinks them) but bound total scanned rows.
         while len(examples) < max_examples and page < 20:
-            rows = await self.log_repository.get_logs_paginated_by_group(
-                page=page, per_page=100, endpoint=endpoint, group_ids=group_ids
+            rows = await self.log_service.get_logs_paginated_by_group(
+                page=page,
+                per_page=100,
+                endpoint=endpoint,
+                group_context=group_context,
             )
             if not rows:
                 break
@@ -524,9 +529,9 @@ class PromptOptimizationService(
         the evaluation: every metric call runs the crew (tools included) and a
         judge scores the final deliverable. Expensive by design — the budget is
         the number of crew executions."""
-        from src.repositories.agent_repository import AgentRepository
-        from src.repositories.crew_repository import CrewRepository
-        from src.repositories.task_repository import TaskRepository
+        from src.services.catalog.agents import AgentService
+        from src.services.catalog.crews import CrewService
+        from src.services.catalog.tasks import TaskService
 
         group_ids = group_context.group_ids if group_context else []
         # The crews PK is a UUID column — normalize the string id and treat any
@@ -535,17 +540,31 @@ class PromptOptimizationService(
             crew_key = uuid.UUID(str(request.crew_id))
         except (ValueError, AttributeError):
             raise ValueError(f"Crew '{request.crew_id}' not found")
-        crew = await CrewRepository(self.session).get_by_group(crew_key, group_ids)
+        # Crews are CrewService's domain. get_by_group takes a GroupContext, so the
+        # group check lives in the owning service rather than here.
+        crew = await CrewService(self.session).get_by_group(crew_key, group_context)
         if crew is None:
             raise ValueError(f"Crew '{request.crew_id}' not found")
 
-        agent_repo = AgentRepository(self.session)
-        task_repo = TaskRepository(self.session)
+        # Through the owning services: agents and tasks are catalog's domain, and
+        # their group check matches the one applied to the crew above.
+        agent_service = AgentService(self.session)
+        task_service = TaskService(self.session)
         agents = [
-            a for a in [await agent_repo.get(i) for i in (crew.agent_ids or [])] if a
+            a
+            for a in [
+                await agent_service.get_with_group_check(i, group_context)
+                for i in (crew.agent_ids or [])
+            ]
+            if a
         ]
         tasks = [
-            t for t in [await task_repo.get(i) for i in (crew.task_ids or [])] if t
+            t
+            for t in [
+                await task_service.get_with_group_check(i, group_context)
+                for i in (crew.task_ids or [])
+            ]
+            if t
         ]
         if not agents or not tasks:
             raise ValueError("Crew has no agent/task records to optimize")
@@ -593,11 +612,13 @@ class PromptOptimizationService(
         # comments) into the judge's rubric so the automated grade reflects what
         # actual users praised or flagged, not just the task contracts.
         try:
-            from src.repositories.crew_feedback_repository import CrewFeedbackRepository
+            # Feedback is CrewFeedbackService's domain, and its list_for_crew takes
+            # the GroupContext so the scoping stays with the owner.
+            from src.services.catalog.crew_feedback import CrewFeedbackService
 
-            feedback = await CrewFeedbackRepository(
-                self.session
-            ).list_by_crew_and_group(str(crew.id), group_ids)
+            feedback = await CrewFeedbackService(self.session).list_for_crew(
+                str(crew.id), group_context
+            )
             complaints = [
                 f.comment.strip()
                 for f in feedback

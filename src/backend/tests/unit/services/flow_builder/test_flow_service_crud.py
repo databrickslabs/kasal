@@ -9,8 +9,15 @@ from src.services.flow_builder.flow_service import FlowService as Svc
 
 
 class FakeRepo:
-    def __init__(self, session):
+    def __init__(self, session, execution_count=None):
         self.session = session
+        # The patched FlowRepository factory ignores the session, so several tests
+        # build this with None. Keep an explicit count for those.
+        self.execution_count = (
+            execution_count
+            if execution_count is not None
+            else getattr(session, "execution_count", 0)
+        )
         self._get = None
         self.created = None
         self.updated = None
@@ -36,6 +43,33 @@ class FakeRepo:
 
     async def find_by_crew_id(self, crew_id):
         return []
+
+    # --- the cascade-delete surface the service now delegates instead of
+    # --- hand-writing SQL. Counts come off the session fake so the existing
+    # --- execution_count wiring keeps working.
+    async def count_executions(self, flow_id):
+        return self.execution_count
+
+    async def exists(self, flow_id):
+        return self._get is not None
+
+    async def get_group_id(self, flow_id):
+        row = self._get
+        return (row is not None, getattr(row, "group_id", None))
+
+    async def find_execution_keys(self, flow_id):
+        n = self.execution_count
+        return list(range(n)), [f"job-{i}" for i in range(n)]
+
+    async def delete_execution_children(self, execution_ids, job_ids):
+        self.deleted_children = (list(execution_ids), list(job_ids))
+
+    async def delete_executions_of(self, flow_id):
+        return self.execution_count
+
+    async def delete_row(self, flow_id):
+        self.deleted.append(flow_id)
+        return 1
 
 
 class FakeSession:
@@ -156,7 +190,7 @@ async def test_delete_flow_not_found_raises_404(monkeypatch):
 @pytest.mark.asyncio
 async def test_delete_flow_with_executions_raises_400(monkeypatch):
     svc = Svc(FakeSession(execution_count=3))
-    fake_repo = FakeRepo(None)
+    fake_repo = FakeRepo(None, execution_count=3)
     flow = SimpleNamespace(id=uuid.uuid4())
     fake_repo._get = flow
     monkeypatch.setattr(
@@ -172,7 +206,7 @@ async def test_delete_flow_with_executions_raises_400(monkeypatch):
 @pytest.mark.asyncio
 async def test_delete_flow_no_executions_succeeds(monkeypatch):
     svc = Svc(FakeSession(execution_count=0))
-    fake_repo = FakeRepo(None)
+    fake_repo = FakeRepo(None, execution_count=0)
     flow = SimpleNamespace(id=uuid.uuid4())
     fake_repo._get = flow
     monkeypatch.setattr(

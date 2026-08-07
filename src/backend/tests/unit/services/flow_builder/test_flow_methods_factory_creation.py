@@ -126,7 +126,7 @@ class TestGetModelContextLimits:
 
         # Patch at the source modules since imports happen inside the function
         with (
-            patch("src.db.session.request_scoped_session") as mock_session,
+            patch("src.db.session.routed_scoped_session") as mock_session,
             patch("src.services.settings.models.ModelConfigService") as mock_service,
         ):
             mock_session.return_value.__aenter__ = AsyncMock()
@@ -166,7 +166,7 @@ class TestGetModelContextLimits:
 
         # Patch at the source modules since imports happen inside the function
         with (
-            patch("src.db.session.request_scoped_session") as mock_session,
+            patch("src.db.session.routed_scoped_session") as mock_session,
             patch("src.services.settings.models.ModelConfigService") as mock_service,
         ):
             mock_session.return_value.__aenter__ = AsyncMock()
@@ -230,7 +230,7 @@ class TestGetModelContextLimits:
         mock_group_context.primary_group_id = str(uuid.uuid4())
 
         # Patch at the source module since import happens inside the function
-        with patch("src.db.session.request_scoped_session") as mock_session:
+        with patch("src.db.session.routed_scoped_session") as mock_session:
             mock_session.side_effect = Exception("Database error")
 
             context_window, max_output = await get_model_context_limits(
@@ -255,7 +255,7 @@ class TestGetModelContextLimits:
 
         # Patch at the source modules since imports happen inside the function
         with (
-            patch("src.db.session.request_scoped_session") as mock_session,
+            patch("src.db.session.routed_scoped_session") as mock_session,
             patch("src.services.settings.models.ModelConfigService") as mock_service,
         ):
             mock_session.return_value.__aenter__ = AsyncMock()

@@ -31,7 +31,7 @@ def _patch_session_and_service(agents):
     service.find_by_group = AsyncMock(return_value=agents)
 
     return (
-        patch("src.db.session.request_scoped_session", return_value=session_cm),
+        patch("src.db.session.routed_scoped_session", return_value=session_cm),
         patch("src.services.catalog.agents.AgentService", return_value=service),
         service,
     )

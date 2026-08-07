@@ -154,7 +154,7 @@ class TestFlowExecutionService:
         group_id = "group-123"
 
         # Mock no existing execution
-        flow_execution_service.execution_repo.get_execution_by_job_id = AsyncMock(
+        flow_execution_service.execution_service.get_run_by_job_id = AsyncMock(
             return_value=None
         )
 
@@ -177,7 +177,7 @@ class TestFlowExecutionService:
         mock_flow = MockFlow(id=flow_id, group_id="inherited-group")
 
         # Mock no existing execution
-        flow_execution_service.execution_repo.get_execution_by_job_id = AsyncMock(
+        flow_execution_service.execution_service.get_run_by_job_id = AsyncMock(
             return_value=None
         )
 
@@ -206,7 +206,7 @@ class TestFlowExecutionService:
         job_id = "test-job-123"
 
         # Mock no existing execution
-        flow_execution_service.execution_repo.get_execution_by_job_id = AsyncMock(
+        flow_execution_service.execution_service.get_run_by_job_id = AsyncMock(
             return_value=None
         )
 
@@ -389,7 +389,8 @@ class TestFlowExecutionService:
     def test_service_initialization(self, flow_execution_service, mock_session):
         """Test FlowExecutionService initialization."""
         assert flow_execution_service.session == mock_session
-        assert hasattr(flow_execution_service, "execution_repo")
+        # Runs are reached through ExecutionService (their owning domain).
+        assert hasattr(flow_execution_service, "execution_service")
 
     # ========== Multi-Tenancy Tests ==========
 
@@ -403,7 +404,7 @@ class TestFlowExecutionService:
         group_id = "tenant-abc"
 
         # Mock no existing execution
-        flow_execution_service.execution_repo.get_execution_by_job_id = AsyncMock(
+        flow_execution_service.execution_service.get_run_by_job_id = AsyncMock(
             return_value=None
         )
 
@@ -427,7 +428,7 @@ class TestFlowExecutionService:
         job_id = "existing-job"
 
         # Mock existing execution found
-        flow_execution_service.execution_repo.get_execution_by_job_id = AsyncMock(
+        flow_execution_service.execution_service.get_run_by_job_id = AsyncMock(
             return_value=mock_execution
         )
 

@@ -32,8 +32,11 @@ Backend-specific instructions for Claude Code when working in the backend direct
 ## Architecture
 
 ### Clean Architecture Pattern
-- **Repository Pattern**: All database access through repositories
-- **Unit of Work**: Transaction management for complex operations
+- **Repository Pattern**: All database access through repositories, which
+  RECEIVE a session and never open one (see `src/repositories/CLAUDE.md`)
+- **One session owner**: the entry point picks the database, the service holds
+  the transaction, the repository queries. A service that opens its own session
+  is a bug and CI fails on it — see "Sessions" in `src/services/CLAUDE.md`
 - **Service Layer**: Business logic orchestration
 - **Dependency Injection**: Use FastAPI's built-in DI system
 - **Async/Await**: All database operations are async

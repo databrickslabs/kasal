@@ -197,13 +197,14 @@ class ConnectionService:
         try:
             # Get the prompt template using proper dependency injection
             if self.session:
-                from src.repositories.template_repository import TemplateRepository
-
-                template_repository = TemplateRepository(self.session)
-                template_service = TemplateService(template_repository)
-                system_message = await template_service.get_template_content(
-                    "generate_connections"
-                )
+                # TemplateService takes a SESSION. This passed a TemplateRepository,
+                # so the service built TemplateRepository(TemplateRepository(session))
+                # and every read raised "'TemplateRepository' object has no attribute
+                # 'execute'" — swallowed inside get_template_content, which returned
+                # "" and made this path fail as "template not found".
+                system_message = await TemplateService(
+                    self.session
+                ).get_template_content("generate_connections")
             else:
                 # Fallback for backward compatibility when no session is provided
                 system_message = await TemplateService.get_template_content(

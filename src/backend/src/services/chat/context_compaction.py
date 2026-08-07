@@ -170,6 +170,9 @@ async def maintain_session_summary(
         new_upto = getattr(to_fold[-1], "timestamp", None)
         if new_upto is None:
             return False
+        # A SECOND session on purpose. The summarising LLM call above takes
+        # seconds, and holding the read session across it would pin a connection
+        # (and on SQLite the shared one) for the whole round trip.
         async with routed_scoped_session() as db_session:
             await ChatSessionRepository(db_session).set_context_summary(
                 session_id, group_ids, new_summary, new_upto

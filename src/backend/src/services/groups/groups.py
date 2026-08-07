@@ -251,6 +251,14 @@ class GroupService:
         """
         return await self.group_repo.list_with_user_counts(skip, limit)
 
+    async def get_group_name(self, group_id: str) -> Optional[str]:
+        """The group's display name, or None.
+
+        Just the name — mlflow needs it to label an experiment and used to build
+        ``GroupRepository`` itself rather than pull the whole row through a service.
+        """
+        return await self.group_repo.get_name(group_id)
+
     async def get_group_by_id(self, group_id: str) -> Optional[Group]:
         """
         Get group by ID.
@@ -380,8 +388,10 @@ class GroupService:
                 created_at=datetime.utcnow(),
                 updated_at=datetime.utcnow(),
             )
-            self.session.add(user)
-            await self.session.flush()  # Get the ID without committing
+            # Through the repository: it owns User persistence, and the flush
+            # (not a commit) keeps this inside the caller's transaction so the
+            # user row and the group association land together.
+            await self.user_repo.insert(user)
 
         # Use the actual user ID
         actual_user_id = user.id

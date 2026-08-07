@@ -151,11 +151,11 @@ class LightAgentService:
         import re
         from datetime import UTC, datetime
 
-        # ROUTED, not request_scoped_session. Chat is the only path that runs
-        # IN-PROCESS, in a FastAPI BackgroundTask — so the request's session is
-        # already closed and request_scoped_session falls back to the raw
-        # async_session_factory, a per-process snapshot that ONLY a subprocess ever
-        # swaps to Lakebase. Every read below is tenant data that lives in
+        # ROUTED. Chat is the only path that runs IN-PROCESS, in a FastAPI
+        # BackgroundTask — so the request's session is already closed, and the
+        # helper used here before (request_scoped_session, since deleted) fell back
+        # to the raw async_session_factory, a per-process snapshot that ONLY a
+        # subprocess ever swaps to Lakebase. Every read below is tenant data that lives in
         # Lakebase (agent tool_configs, API keys, chat history), so on the snapshot
         # chat silently read local SQLite: an MCP server enabled for the workspace
         # gave "Added 1 explicit MCP servers" in Agent Builder and "Added 0" here.
@@ -1467,8 +1467,16 @@ class LightAgentService:
 
             import mlflow
 
-            from src.db.session import async_session_factory
-            from src.services.databricks.workspace.service import DatabricksService
+            from src.db.session import routed_scoped_session
+
+            # Load the workspace's Databricks config (same source crew/flow use).
+            # The provider ROUTES: chat runs IN-PROCESS, where the raw factory is a
+            # snapshot only a subprocess ever swaps to Lakebase — so this read got
+            # the LOCAL databricksconfig while the crew subprocess got the Lakebase
+            # one (verified: 1 row in Lakebase, 2 locally, different contents).
+            from src.services.databricks.workspace.config_provider import (
+                DatabricksConfigProvider,
+            )
             from src.services.mlflow.tracing import start_root_trace
             from src.services.otel_tracing.mlflow_setup import (
                 configure_mlflow_in_subprocess,
@@ -1476,11 +1484,7 @@ class LightAgentService:
                 set_trace_attributes,
             )
 
-            # Load the workspace's Databricks config (same source crew/flow use).
-            async with async_session_factory() as _session:
-                db_config = await DatabricksService(
-                    session=_session, group_id=group_id
-                ).get_databricks_config()
+            db_config = await DatabricksConfigProvider.get(group_id=group_id)
 
             # Run the EXACT MLflow setup crew/flow use — auth → bind the `-uc`
             # experiment to the UC Delta-table trace location → enable native

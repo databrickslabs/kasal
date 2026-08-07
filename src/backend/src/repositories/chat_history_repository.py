@@ -16,6 +16,10 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
     def __init__(self, session: AsyncSession):
         super().__init__(ChatHistory, session)
 
+    async def save(self) -> None:
+        """Flush pending attribute changes on already-tracked messages."""
+        await self.session.flush()
+
     async def get_by_session_and_group(
         self, session_id: str, group_ids: List[str], page: int = 0, per_page: int = 50
     ) -> List[ChatHistory]:

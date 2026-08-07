@@ -257,10 +257,10 @@ async def create_task(
         if MCPIntegration._extract_mcp_servers_from_config(
             task_config.get("tool_configs", {})
         ):
-            from src.db.session import request_scoped_session
+            from src.db.session import routed_scoped_session
             from src.services.mcp.mcp_client.service import MCPService
 
-            async with request_scoped_session() as session:
+            async with routed_scoped_session() as session:
                 mcp_service = MCPService(session)
                 mcp_tools = await MCPIntegration.create_mcp_tools_for_task(
                     task_config, task_key, mcp_service, config
@@ -499,22 +499,24 @@ async def create_task(
     # Check for global Databricks volume configuration if no callback is set
     if not existing_callback:
         try:
-            from src.db.session import request_scoped_session
-            from src.services.databricks.workspace.service import DatabricksService
+            from src.db.session import routed_scoped_session
+            from src.services.databricks.workspace.config_provider import (
+                DatabricksConfigProvider,
+            )
             from src.services.memory.backend_service import MemoryBackendService
 
-            async with request_scoped_session() as session:
-                databricks_service = DatabricksService(session)
-                databricks_config = await databricks_service.get_databricks_config()
+            databricks_config = await DatabricksConfigProvider.get()
 
-                # Only consider auto-adding the DatabricksVolumeCallback if:
-                # - Global volume uploads are enabled, AND
-                # - The active memory backend for this workspace/group is Databricks
-                if (
-                    databricks_config
-                    and databricks_config.volume_enabled
-                    and databricks_config.volume_path
-                ):
+            # The guard comes FIRST: volume uploads are off in the common case, and
+            # opening a session before checking meant paying for one every task.
+            if (
+                databricks_config
+                and databricks_config.volume_enabled
+                and databricks_config.volume_path
+            ):
+                # Only consider auto-adding the DatabricksVolumeCallback when the
+                # active memory backend for this workspace is also Databricks.
+                async with routed_scoped_session() as session:
                     group_id = None
                     try:
                         group_id = (

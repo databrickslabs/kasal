@@ -100,7 +100,7 @@ class TestPrepareAndRunCrew:
             mock_prepare.return_value = mock_engine
 
             with patch(
-                "src.services.execution.kasal_service.request_scoped_session"
+                "src.services.execution.kasal_service.routed_scoped_session"
             ) as mock_factory:
                 mock_session = MagicMock()
                 mock_context = MagicMock()
@@ -153,7 +153,7 @@ class TestPrepareAndRunCrew:
             mock_prepare.return_value = mock_engine
 
             with patch(
-                "src.services.execution.kasal_service.request_scoped_session"
+                "src.services.execution.kasal_service.routed_scoped_session"
             ) as mock_factory:
                 mock_session = MagicMock()
                 mock_context = MagicMock()
@@ -206,7 +206,7 @@ class TestPrepareAndRunCrew:
             mock_prepare.return_value = mock_engine
 
             with patch(
-                "src.services.execution.kasal_service.request_scoped_session"
+                "src.services.execution.kasal_service.routed_scoped_session"
             ) as mock_factory:
                 mock_context = MagicMock()
                 mock_context.__aenter__ = AsyncMock(return_value=MagicMock())
@@ -683,7 +683,7 @@ class TestRunFlowExecution:
         mock_flow.flow_config = {}
 
         with patch(
-            "src.services.execution.kasal_service.request_scoped_session"
+            "src.services.execution.kasal_service.routed_scoped_session"
         ) as mock_factory:
             mock_session = MagicMock()
             mock_context = MagicMock()
@@ -692,10 +692,10 @@ class TestRunFlowExecution:
             mock_factory.return_value = mock_context
 
             with patch(
-                "src.repositories.flow_repository.FlowRepository"
+                "src.services.flow_builder.flow_service.FlowService"
             ) as mock_flow_repo:
                 mock_flow_repo_inst = MagicMock()
-                mock_flow_repo_inst.get = AsyncMock(return_value=mock_flow)
+                mock_flow_repo_inst.find_flow = AsyncMock(return_value=mock_flow)
                 mock_flow_repo.return_value = mock_flow_repo_inst
 
                 with patch(
@@ -724,7 +724,7 @@ class TestRunFlowExecution:
         edges = []
 
         with patch(
-            "src.services.execution.kasal_service.request_scoped_session"
+            "src.services.execution.kasal_service.routed_scoped_session"
         ) as mock_factory:
             mock_session = MagicMock()
             mock_context = MagicMock()
@@ -758,7 +758,7 @@ class TestRunFlowExecution:
         job_id = "flow-job-3"
 
         with patch(
-            "src.services.execution.kasal_service.request_scoped_session"
+            "src.services.execution.kasal_service.routed_scoped_session"
         ) as mock_factory:
             mock_session = MagicMock()
             mock_context = MagicMock()
@@ -767,10 +767,10 @@ class TestRunFlowExecution:
             mock_factory.return_value = mock_context
 
             with patch(
-                "src.repositories.flow_repository.FlowRepository"
+                "src.services.flow_builder.flow_service.FlowService"
             ) as mock_flow_repo:
                 mock_flow_repo_inst = MagicMock()
-                mock_flow_repo_inst.get = AsyncMock(return_value=None)
+                mock_flow_repo_inst.find_flow = AsyncMock(return_value=None)
                 mock_flow_repo.return_value = mock_flow_repo_inst
 
                 result = await service.run_flow_execution(
@@ -796,7 +796,7 @@ class TestRunFlowExecution:
         nodes = [{"id": "node-1"}]
 
         with patch(
-            "src.services.execution.kasal_service.request_scoped_session"
+            "src.services.execution.kasal_service.routed_scoped_session"
         ) as mock_factory:
             mock_session = MagicMock()
             mock_context = MagicMock()
@@ -843,7 +843,7 @@ class TestGetFlowExecution:
         execution_id = 1
 
         with patch(
-            "src.services.execution.kasal_service.request_scoped_session"
+            "src.services.execution.kasal_service.routed_scoped_session"
         ) as mock_factory:
             mock_session = MagicMock()
             mock_context = MagicMock()
@@ -873,7 +873,7 @@ class TestGetFlowExecution:
         execution_id = 1
 
         with patch(
-            "src.services.execution.kasal_service.request_scoped_session"
+            "src.services.execution.kasal_service.routed_scoped_session"
         ) as mock_factory:
             mock_session = MagicMock()
             mock_context = MagicMock()
@@ -908,7 +908,7 @@ class TestGetFlowExecutionsByFlow:
         flow_id = str(uuid.uuid4())
 
         with patch(
-            "src.services.execution.kasal_service.request_scoped_session"
+            "src.services.execution.kasal_service.routed_scoped_session"
         ) as mock_factory:
             mock_session = MagicMock()
             mock_context = MagicMock()

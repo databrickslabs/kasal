@@ -22,17 +22,27 @@ class _Ctx:
 
 
 def _service():
-    session = MagicMock()
-    session.add = MagicMock()
-    session.flush = AsyncMock()
-    session.delete = AsyncMock()
-    service = SkillService(session)
+    """A service whose persistence goes through a FAKE REPOSITORY, not a session.
+
+    ``insert`` mimics the real one by assigning an id on flush, because several
+    callers read ``skill.id`` straight afterwards to write the skill's files.
+    """
+    service = SkillService(MagicMock())
     service.repository = MagicMock()
     service.repository.find_by_name = AsyncMock(return_value=None)
     service.repository.find_visible = AsyncMock(return_value=None)
     service.repository.list_visible = AsyncMock(return_value=[])
     service.repository.replace_files = AsyncMock()
     service.repository.find_builtin_by_name = AsyncMock(return_value=None)
+
+    async def _insert(skill):
+        if getattr(skill, "id", None) is None:
+            skill.id = 1
+        return skill
+
+    service.repository.insert = AsyncMock(side_effect=_insert)
+    service.repository.remove = AsyncMock()
+    service.repository.save = AsyncMock()
     return service
 
 
@@ -71,7 +81,7 @@ class TestAuthoring:
         service.repository.find_visible = AsyncMock(return_value=_row())
         await service.create_skill(_create(), _Ctx())
 
-        created = service.session.add.call_args[0][0]
+        created = service.repository.insert.await_args[0][0]
         assert created.group_id == "acme"
         assert created.source == "authored"
 
@@ -84,7 +94,7 @@ class TestAuthoring:
             await service.create_skill(
                 SkillCreate(name="Not Kebab", description="d", body=""), _Ctx()
             )
-        service.session.add.assert_not_called()
+        service.repository.insert.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_a_duplicate_name_in_the_same_workspace_is_refused(self):
@@ -138,7 +148,7 @@ class TestBuiltins:
         result = await service.reset_skill(1, _Ctx())
 
         assert result is shipped
-        service.session.delete.assert_awaited_with(override)
+        service.repository.remove.assert_awaited_with(override)
 
     @pytest.mark.asyncio
     async def test_reset_on_a_workspaces_own_skill_is_refused(self):
@@ -149,7 +159,7 @@ class TestBuiltins:
         service.repository.find_builtin_by_name = AsyncMock(return_value=None)
 
         assert await service.reset_skill(1, _Ctx()) is None
-        service.session.delete.assert_not_awaited()
+        service.repository.remove.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_a_builtin_cannot_be_deleted(self):
@@ -179,7 +189,7 @@ class TestBuiltins:
         await service.set_enabled(1, False, _Ctx())
 
         assert own.enabled is False
-        service.session.add.assert_not_called()
+        service.repository.insert.assert_not_awaited()
 
 
 class TestUpload:
@@ -200,7 +210,7 @@ class TestUpload:
         with patch("src.services.skills.packaging.read_zip", return_value=(parsed, [])):
             await service.import_zip(b"zip", _Ctx())
 
-        assert service.session.add.call_args[0][0].source == "uploaded"
+        assert service.repository.insert.await_args[0][0].source == "uploaded"
 
     @pytest.mark.asyncio
     async def test_re_uploading_without_replace_is_refused(self):

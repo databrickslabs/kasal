@@ -51,11 +51,11 @@ async def _prior_decision(
     execution_id: str, tool_name: str, group_id: str
 ) -> Optional[str]:
     """Latest approved/rejected tool_call decision for this tool in this run."""
-    from src.db.session import request_scoped_session
-    from src.repositories.hitl_repository import HITLApprovalRepository
+    from src.db.session import routed_scoped_session
+    from src.services.hitl.service import HITLService
 
-    async with request_scoped_session() as session:
-        approvals = await HITLApprovalRepository(session).get_all_for_execution(
+    async with routed_scoped_session() as session:
+        approvals = await HITLService(session).get_approvals_for_execution(
             execution_id, group_id
         )
     decision = None
@@ -86,10 +86,10 @@ async def _create_approval(
     group_id: str,
     gate_config: Dict[str, Any],
 ) -> Optional[str]:
-    from src.db.session import request_scoped_session
+    from src.db.session import routed_scoped_session
     from src.services.hitl.service import HITLService
 
-    async with request_scoped_session() as session:
+    async with routed_scoped_session() as session:
         service = HITLService(session)
         approval = await service.create_approval_request(
             execution_id=execution_id,
@@ -133,11 +133,11 @@ async def _restore_running(execution_id: str) -> None:
 
 
 async def _approval_status(approval_id: str) -> Optional[str]:
-    from src.db.session import request_scoped_session
-    from src.repositories.hitl_repository import HITLApprovalRepository
+    from src.db.session import routed_scoped_session
+    from src.services.hitl.service import HITLService
 
-    async with request_scoped_session() as session:
-        approval = await HITLApprovalRepository(session).get_by_id(approval_id)
+    async with routed_scoped_session() as session:
+        approval = await HITLService(session).get_approval(approval_id)
         if approval is None:
             return None
         status = approval.status

@@ -546,7 +546,7 @@ class TestExecutionStatusService:
         """
         with (
             patch("src.db.session.get_isolated_db_session") as mock_isolated,
-            patch("src.db.session.request_scoped_session") as mock_shared,
+            patch("src.db.session.routed_scoped_session") as mock_shared,
         ):
             mock_session = AsyncMock()
             mock_isolated.return_value.__aenter__.return_value = mock_session

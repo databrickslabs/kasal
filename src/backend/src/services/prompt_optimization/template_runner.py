@@ -16,8 +16,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from src.core.exceptions import BadRequestError
-from src.repositories.log_repository import LLMLogRepository
-from src.repositories.model_config_repository import ModelConfigRepository
 from src.services.prompt_optimization.config import TEMPLATE_TASKS
 from src.services.prompt_optimization.gepa import reflection
 from src.services.prompt_optimization.gepa.grading import (  # noqa: E402

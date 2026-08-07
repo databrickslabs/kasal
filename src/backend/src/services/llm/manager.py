@@ -708,9 +708,9 @@ class LLMManager:
             )
 
         # Get model configuration using ModelConfigService
-        from src.db.session import request_scoped_session
+        from src.db.session import routed_scoped_session
 
-        async with request_scoped_session() as session:
+        async with routed_scoped_session() as session:
             model_config_service = ModelConfigService(session, group_id=group_id)
             model_config_dict = await model_config_service.get_model_config(model_name)
 
@@ -1203,14 +1203,14 @@ class LLMManager:
         ``configure_kasal_llm`` with the same auth/endpoint. gpt-5-3-codex is
         excluded because it needs the Responses API (different base path).
         """
-        from src.db.session import request_scoped_session
+        from src.db.session import routed_scoped_session
         from src.services.llm.handlers.model_fallback import (
             candidates_from_model_configs,
         )
         from src.services.settings.models import ModelConfigService
 
         try:
-            async with request_scoped_session() as session:
+            async with routed_scoped_session() as session:
                 service = ModelConfigService(session, group_id=group_id)
                 models = await service.find_enabled_models()
                 return candidates_from_model_configs(models, current_model_key)

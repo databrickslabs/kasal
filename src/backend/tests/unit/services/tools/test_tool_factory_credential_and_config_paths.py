@@ -619,7 +619,7 @@ class TestUpdateToolConfigAsync:
         mock_svc.update_tool = AsyncMock(return_value=MagicMock())
 
         with (
-            patch("src.db.session.request_scoped_session") as mock_sess_ctx,
+            patch("src.db.session.routed_scoped_session") as mock_sess_ctx,
             patch("src.services.tools.tool_service.ToolService", return_value=mock_svc),
             patch.object(f, "_load_available_tools_async", new_callable=AsyncMock),
         ):
@@ -646,7 +646,7 @@ class TestUpdateToolConfigAsync:
         )
 
         with (
-            patch("src.db.session.request_scoped_session") as mock_sess_ctx,
+            patch("src.db.session.routed_scoped_session") as mock_sess_ctx,
             patch("src.services.tools.tool_service.ToolService", return_value=mock_svc),
             patch.object(f, "_load_available_tools_async", new_callable=AsyncMock),
         ):
@@ -737,7 +737,7 @@ class TestValidateDatabricksAuthExtended:
                 new_callable=AsyncMock,
                 side_effect=Exception("no auth"),
             ),
-            patch("src.db.session.request_scoped_session") as mock_sess_ctx,
+            patch("src.db.session.routed_scoped_session") as mock_sess_ctx,
             patch(
                 "src.services.databricks.workspace.service.DatabricksService",
                 return_value=mock_svc,
@@ -770,7 +770,7 @@ class TestValidateDatabricksAuthExtended:
                 new_callable=AsyncMock,
                 side_effect=Exception("no auth"),
             ),
-            patch("src.db.session.request_scoped_session") as mock_sess_ctx,
+            patch("src.db.session.routed_scoped_session") as mock_sess_ctx,
             patch(
                 "src.services.databricks.workspace.service.DatabricksService",
                 return_value=mock_svc,
@@ -798,7 +798,7 @@ class TestValidateDatabricksAuthExtended:
                 new_callable=AsyncMock,
                 side_effect=Exception("no auth"),
             ),
-            patch("src.db.session.request_scoped_session") as mock_sess_ctx,
+            patch("src.db.session.routed_scoped_session") as mock_sess_ctx,
             patch(
                 "src.services.databricks.workspace.service.DatabricksService",
                 return_value=mock_svc,
@@ -834,7 +834,7 @@ class TestLoadAvailableToolsAsync:
         )
 
         with (
-            patch("src.db.session.request_scoped_session") as mock_sess_ctx,
+            patch("src.db.session.routed_scoped_session") as mock_sess_ctx,
             patch("src.services.tools.tool_service.ToolService") as mock_svc_cls,
         ):
             mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
@@ -864,7 +864,7 @@ class TestLoadAvailableToolsAsync:
         mock_svc_instance.get_all_tools = AsyncMock(return_value=mock_response)
 
         with (
-            patch("src.db.session.request_scoped_session") as mock_sess_ctx,
+            patch("src.db.session.routed_scoped_session") as mock_sess_ctx,
             patch("src.services.tools.tool_service.ToolService") as mock_svc_cls,
         ):
             mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
@@ -881,7 +881,7 @@ class TestLoadAvailableToolsAsync:
         f = _make_factory()
 
         with patch(
-            "src.db.session.request_scoped_session", side_effect=Exception("DB error")
+            "src.db.session.routed_scoped_session", side_effect=Exception("DB error")
         ):
             # Should not raise
             await f._load_available_tools_async()
@@ -1109,7 +1109,7 @@ class TestUpdateToolConfigAsyncNonDictConfig:
         mock_svc_instance.update_tool = AsyncMock(return_value=MagicMock())
 
         with (
-            patch("src.db.session.request_scoped_session") as mock_sess_ctx,
+            patch("src.db.session.routed_scoped_session") as mock_sess_ctx,
             patch(
                 "src.services.tools.tool_service.ToolService",
                 return_value=mock_svc_instance,
@@ -1195,7 +1195,7 @@ class TestValidateDatabricksAuthFallbacks:
                 new_callable=AsyncMock,
                 side_effect=Exception("no unified auth"),
             ),
-            patch("src.db.session.request_scoped_session") as mock_sess_ctx,
+            patch("src.db.session.routed_scoped_session") as mock_sess_ctx,
         ):
             # Make the DB session itself raise
             mock_sess_ctx.side_effect = Exception("DB session error")
@@ -1235,7 +1235,7 @@ class TestValidateDatabricksAuthFallbacks:
                 new_callable=AsyncMock,
                 side_effect=Exception("no auth"),
             ),
-            patch("src.db.session.request_scoped_session") as mock_sess_ctx,
+            patch("src.db.session.routed_scoped_session") as mock_sess_ctx,
             patch(
                 "src.services.databricks.workspace.service.DatabricksService"
             ) as mock_svc_cls,

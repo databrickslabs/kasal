@@ -45,7 +45,7 @@ class TestGetDatabricksEndpointEnvFallback:
             return_value=None,
         ):
             with patch(
-                "src.db.session.request_scoped_session", side_effect=Exception("no db")
+                "src.db.session.routed_scoped_session", side_effect=Exception("no db")
             ):
                 with patch.dict(
                     os.environ, {"DATABRICKS_HOST": "e2-demo.cloud.databricks.com"}
@@ -66,7 +66,7 @@ class TestGetDatabricksEndpointEnvFallback:
             return_value=None,
         ):
             with patch(
-                "src.db.session.request_scoped_session", side_effect=Exception("no db")
+                "src.db.session.routed_scoped_session", side_effect=Exception("no db")
             ):
                 with patch.dict(
                     os.environ, {"DATABRICKS_HOST": "https://workspace.databricks.com"}
@@ -87,7 +87,7 @@ class TestGetDatabricksEndpointEnvFallback:
             return_value=None,
         ):
             with patch(
-                "src.db.session.request_scoped_session", side_effect=Exception("no db")
+                "src.db.session.routed_scoped_session", side_effect=Exception("no db")
             ):
                 with patch.dict(
                     os.environ, {"DATABRICKS_HOST": "e2-demo.cloud.databricks.com/"}
@@ -108,7 +108,7 @@ class TestGetDatabricksEndpointEnvFallback:
             return_value=None,
         ):
             with patch(
-                "src.db.session.request_scoped_session", side_effect=Exception("no db")
+                "src.db.session.routed_scoped_session", side_effect=Exception("no db")
             ):
                 with patch.dict(os.environ, {}, clear=False):
                     # Remove DATABRICKS_HOST if present
@@ -157,7 +157,7 @@ class TestGetDatabricksEndpointEnvFallback:
             new_callable=AsyncMock,
             return_value=None,
         ):
-            with patch("src.db.session.request_scoped_session") as mock_rss:
+            with patch("src.db.session.routed_scoped_session") as mock_rss:
                 mock_rss.return_value.__aenter__ = AsyncMock(return_value=mock_session)
                 mock_rss.return_value.__aexit__ = AsyncMock(return_value=None)
                 with patch(
@@ -220,7 +220,7 @@ class TestGetDatabricksEndpointUserToken:
             return_value=None,
         ) as mock_get_auth:
             with patch(
-                "src.db.session.request_scoped_session", side_effect=Exception("no db")
+                "src.db.session.routed_scoped_session", side_effect=Exception("no db")
             ):
                 with patch.dict(os.environ, {}, clear=False):
                     env_copy = os.environ.copy()
@@ -242,7 +242,7 @@ class TestGetDatabricksEndpointUserToken:
             side_effect=Exception("auth boom"),
         ):
             with patch(
-                "src.db.session.request_scoped_session", side_effect=Exception("no db")
+                "src.db.session.routed_scoped_session", side_effect=Exception("no db")
             ):
                 with patch.dict(
                     os.environ, {"DATABRICKS_HOST": "fallback.databricks.com"}

@@ -117,9 +117,10 @@ async def _teamspace_name(session: Any, group_id: Optional[str]) -> Optional[str
     if not group_id:
         return None
     try:
-        from src.repositories.group_repository import GroupRepository
+        from src.services.groups.groups import GroupService
 
-        name = await GroupRepository(session).get_name(group_id)
+        # Groups are GroupService's domain.
+        name = await GroupService(session).get_group_name(group_id)
         # Fall back to the id when no row names the group — see the matching
         # comment in MLflowService._teamspace_name.
         return name or group_id
@@ -273,10 +274,10 @@ async def configure_mlflow_in_subprocess(
     teamspace_name: Optional[str] = None
     if not legacy_enabled:
         try:
-            from src.db.session import async_session_factory
+            from src.db.session import routed_scoped_session
             from src.repositories.mlflow_repository import MLflowRepository
 
-            async with async_session_factory() as session:
+            async with routed_scoped_session() as session:
                 enabled_for_workspace = await MLflowRepository(session).is_enabled(
                     group_id=group_id
                 )
@@ -505,10 +506,13 @@ async def configure_mlflow_in_subprocess(
         uc_schema = None
         warehouse_id = None
         try:
-            from src.db.session import async_session_factory
+            from src.db.session import routed_scoped_session
             from src.services.databricks.workspace.service import DatabricksService
 
-            async with async_session_factory() as session:
+            # Not DatabricksConfigProvider here: this block ALSO reads
+            # MLflowRepository off the same session, and both must see the same
+            # transaction. The provider is for the standalone config read.
+            async with routed_scoped_session() as session:
                 databricks_service = DatabricksService(
                     session=session,
                     group_id=group_id,
@@ -530,9 +534,8 @@ async def configure_mlflow_in_subprocess(
                 )
                 if teamspace_name is None:
                     teamspace_name = await _teamspace_name(session, group_id)
-                experiment_name = (
-                    "/Shared/"
-                    + _local_ns.local_experiment_name(configured, teamspace_name)
+                experiment_name = "/Shared/" + _local_ns.local_experiment_name(
+                    configured, teamspace_name
                 )
                 alog.info(
                     f"[SUBPROCESS] Using MLflow experiment from config: {experiment_name}"

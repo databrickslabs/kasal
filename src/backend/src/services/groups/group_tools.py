@@ -3,7 +3,6 @@ from typing import Any, Dict, List, Optional
 
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.repositories.group_tool_repository import GroupToolRepository
-from src.repositories.tool_repository import ToolRepository
 from src.schemas.group_tool import (
     GroupToolCreate,
     GroupToolListResponse,
@@ -27,7 +26,10 @@ class GroupToolService:
     """
 
     def __init__(self, session):
-        self.tool_repo = ToolRepository(session)
+        # Tools are ToolService's domain; the group MAPPING is this service's own.
+        from src.services.tools.tool_service import ToolService
+
+        self.tool_service = ToolService(session)
         self.group_tool_repo = GroupToolRepository(session)
 
     @staticmethod
@@ -62,7 +64,7 @@ class GroupToolService:
         group_id = group_context.primary_group_id
 
         # All global tools
-        all_tools = await self.tool_repo.list()
+        all_tools = await self.tool_service.list_tool_records()
         base_global_available = [
             t
             for t in all_tools
@@ -94,7 +96,7 @@ class GroupToolService:
         group_id = group_context.primary_group_id
 
         # Validate that tool exists and is a base/global tool
-        tool = await self.tool_repo.get(tool_id)
+        tool = await self.tool_service.get_tool_record(tool_id)
         if not tool:
             raise NotFoundError(detail="Tool not found")
         if tool.group_id is not None:
