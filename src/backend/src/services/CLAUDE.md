@@ -179,8 +179,8 @@ is the normal chain.
 **A service NEVER opens a database session or builds an engine.** Not for a
 background task, not "just for logging", not because the request session is
 closed, not behind a comment saying it is a special case. If you are typing
-`async_session_factory(`, `create_async_engine(`, `async_sessionmaker(` or
-`sessionmaker(` inside `services/`, the change is wrong — use
+`async_session_factory(`, `sync_session_factory(`, `create_async_engine(`,
+`async_sessionmaker(` or `sessionmaker(` inside `services/`, the change is wrong — use
 `routed_scoped_session()` (outside a request) or the injected session (inside
 one). `tests/unit/architecture/test_sessions_go_through_the_router.py` fails the
 build on it, and the allowlist there is a record of past exceptions, not an
@@ -355,7 +355,11 @@ Where its callers went, in case you are following an old example:
   The three demo guardrails under `services/guardrails/demo/` open a scoped
   `sync_session_factory()` for the life of one check instead of sharing one
   process-wide session — the singleton was also constructing 15 repositories to
-  hand back the single one that was used
+  hand back the single one that was used. That is a RECORDED exception on the
+  allowlist, not a pattern to copy: `sync_session_factory` is the same
+  snapshot shape as the async one, and those guardrails get away with it only
+  because the demo `data_processing` table lives solely on the local DB. A
+  guardrail touching tenant data may not do this
 
 ## Group isolation (required)
 

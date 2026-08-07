@@ -21,7 +21,10 @@ from src.services.memory.config_service import MemoryConfigService
 
 @pytest.fixture
 def mock_uow():
-    """Create a mock Unit of Work."""
+    """Create a mock container holding the repository mock.
+
+    Named `uow` for history only — there is no UnitOfWork; it was deleted.
+    """
     uow = AsyncMock()
     uow.memory_backend_repository = AsyncMock()
     return uow

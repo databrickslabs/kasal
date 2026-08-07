@@ -22,7 +22,11 @@ from src.services.memory.backend_base_service import MemoryBackendBaseService
 
 @pytest.fixture
 def mock_uow():
-    """Create a mock Unit of Work (only used as a container for repository mock)."""
+    """Create a mock container for the repository mock.
+
+    Named `uow` for history only — there is no UnitOfWork; it was deleted. The
+    old docstring's own parenthetical already said what this actually is.
+    """
     uow = AsyncMock()
     uow.memory_backend_repository = AsyncMock()
     return uow

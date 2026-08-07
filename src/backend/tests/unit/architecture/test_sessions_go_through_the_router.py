@@ -59,6 +59,13 @@ ACQUIRING_NAMES = {
     "async_sessionmaker",
     "sessionmaker",
     "create_engine",
+    # The SYNC twin, added late. It is the same snapshot shape as
+    # async_session_factory — bound to engine.sync_engine at import, with no
+    # Lakebase awareness — but it sat outside this set while `services/CLAUDE.md`
+    # told readers the build fails on session acquisition in services/. Three
+    # guardrails call it, so that prose was writing a cheque this test did not
+    # honour. Now it is a RECORDED exception (below) instead of an invisible one.
+    "sync_session_factory",
 }
 
 #: Paths allowed to acquire, each with the reason. Prefix match on the
@@ -105,6 +112,18 @@ ALLOWED = {
     "services/databricks/lakebase/": (
         "connects TO Lakebase to test/migrate/seed it — it cannot ask the router "
         "for a session to the thing it is still setting up"
+    ),
+    # ---- sync callbacks: there is no async router to ask ------------------
+    "services/guardrails/demo/": (
+        "sync_session_factory, in guardrail callbacks the engine invokes "
+        "SYNCHRONOUSLY — routed_scoped_session is an async context manager and "
+        "cannot be awaited from there. Previously laundered through the "
+        "SyncUnitOfWork singleton, which held ONE session open for the process "
+        "and built 15 repositories to hand back the single one used; these now "
+        "scope a session to one check. Still a snapshot with no Lakebase "
+        "awareness, so it is an exception, not a pattern: these three guardrails "
+        "read only the demo `data_processing` table, which exists solely on the "
+        "local DB. Do not copy this into a guardrail that touches tenant data"
     ),
     # ---- (was: two DEAD post-subprocess log writers) ----------------------
     # `execution/logs/db_handler.py` and
