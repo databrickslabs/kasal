@@ -107,3 +107,55 @@ describe('PPTX export keeps every part of the slide', () => {
     expect(xml).toContain('01');
   });
 });
+
+// A table slide has to divide a fixed body area between the table and its notes.
+// `h` on pptxgenjs `addTable` is a MINIMUM, not a clamp — PowerPoint grows a row
+// whose cell wraps — so a table with long cells ran past the height it was given
+// and printed straight over the notes band below it.
+describe('table slides divide the body area without overlapping', () => {
+  const wide = {
+    surfaceKind: 'presentation' as const,
+    root: 'deck',
+    components: [
+      { id: 'deck', component: 'SlideDeck', children: ['s'] },
+      { id: 's', component: 'Slide', variant: 'kpi-split', kicker: 'NETWORK', title: 'Network',
+        sources: [{ label: 'A source' }], children: ['k1', 't1', 'm1'] },
+      { id: 'k1', component: 'KeyValue', label: 'Lines', value: '12,300 km' },
+      { id: 't1', component: 'Table',
+        columns: ['Classification', 'Range', 'Application'],
+        rows: [
+          ['Low', '< 1 kV', 'Final delivery to households and small consumers'],
+          ['Medium', '6-35 kV', 'Local distribution feeders in cities and rural areas'],
+          ['High', '110 kV', 'Sub-transmission to distribution substations'],
+          ['Extra-high', '220-500 kV', 'Bulk transmission; forms the north-south backbone'],
+          ['Direct current', 'n/a', 'None in operation; two projects in pre-feasibility study'],
+        ] },
+      { id: 'm1', component: 'Markdown', content: '- First note that is reasonably long\n- Second note\n- Third note\n- Fourth note\n- Fifth note' },
+    ] as never[],
+  };
+
+  it('keeps the table legible and does not drop every note', async () => {
+    const xml = await slideXml(wide);
+    // The table is there…
+    expect(xml).toContain('Classification');
+    // …and at least the leading notes survived. Dropping ALL of them is data loss
+    // the reader cannot detect, which is why a floor is reserved for them.
+    expect(xml).toContain('First note');
+  });
+
+  it('gives the header a fill that differs from its text colour', async () => {
+    const xml = await slideXml(wide);
+    // The header fill used to be `titleC`, which on a dark theme resolves to
+    // FFFFFF — white text on a white fill, an invisible band above the table.
+    // In the cell XML the run colour sits in <a:rPr> BEFORE the text and the cell
+    // fill in <a:tcPr> AFTER it, so read them in that order.
+    const at = xml.indexOf('Classification');
+    const before = xml.slice(Math.max(at - 300, 0), at);
+    const after = xml.slice(at, at + 400);
+    const textC = /<a:solidFill><a:srgbClr val="([0-9A-Fa-f]{6})"\/><\/a:solidFill>/.exec(before)?.[1];
+    const fillC = /<a:tcPr[^>]*>[\s\S]{0,120}?<a:srgbClr val="([0-9A-Fa-f]{6})"\/>/.exec(after)?.[1];
+    expect(textC).toBeTruthy();
+    expect(fillC).toBeTruthy();
+    expect(textC!.toUpperCase()).not.toBe(fillC!.toUpperCase());
+  });
+});

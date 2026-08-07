@@ -560,7 +560,7 @@ export async function downloadPptx(
       // Prose accompanying a table (the template's "table above, notes below"
       // pages) gets a band beneath it. Without this the table took the full area
       // and `continue`d, dropping the notes from the download entirely.
-      let noteLines = lines.slice(0, 6)
+      const noteLines = lines.slice(0, 6)
       // Provisional: what the notes would LIKE. Revised down after the table is
       // measured, because the table carries the substance on these pages and a
       // fixed half-and-half split drove both to ~7pt — technically fitting and
@@ -592,13 +592,17 @@ export async function downloadPptx(
         if (tableH <= areaH - noteH - (noteH ? 0.2 : 0)) break
       }
       tableH = measure(tFont)
-      // Whatever the table genuinely needs, the notes take the remainder — and
-      // shed lines until they fit it, so the table keeps a legible size.
-      const leftForNotes = Math.max(areaH - tableH - 0.2, 0)
-      if (noteLines.length && noteH > leftForNotes) {
-        noteH = leftForNotes
-        while (noteLines.length && 0.3 + noteLines.length * 0.24 > noteH) noteLines.pop()
-        if (!noteLines.length) noteH = 0
+      // Whatever the table genuinely needs, the notes take the remainder — but a
+      // floor is reserved first so they are never dropped ENTIRELY. Silently
+      // losing every note is data loss the reader cannot detect; losing the tail
+      // of a list is visible. Two lines is the floor.
+      if (noteLines.length) {
+        const floor = Math.min(0.3 + 2 * 0.24, areaH * 0.3)
+        const leftForNotes = Math.max(areaH - tableH - 0.2, floor)
+        if (noteH > leftForNotes) {
+          noteH = leftForNotes
+          while (noteLines.length > 1 && 0.3 + noteLines.length * 0.24 > noteH) noteLines.pop()
+        }
       }
       tableH = Math.min(Math.max(tableH, 1), Math.max(areaH - noteH - (noteH ? 0.2 : 0), 1))
       slide.addTable(head.length ? [head, ...bodyRows] : bodyRows, {

@@ -547,7 +547,13 @@ export async function downloadPptx(
       const cols = (Array.isArray(tableNode.columns) ? tableNode.columns : []).map((c) => String(c))
       const rawRows = resolve(tableNode.rows)
       const rows = Array.isArray(rawRows) ? rawRows : []
-      const head = cols.map((c) => ({ text: c, options: { bold: true, color: 'FFFFFF', fill: { color: titleC } } }))
+      // Header fill is the ACCENT, with a foreground picked to contrast against
+      // it. `titleC` was wrong: on a dark theme it resolves to FFFFFF, so the
+      // header was white text on a white fill — an invisible band above the table.
+      const headFg = pptxHex(readableTextOn(theme?.accent || '#2563EB'), 'FFFFFF')
+      const head = cols.map((c) => ({
+        text: c, options: { bold: true, color: headFg, fill: { color: accentC } },
+      }))
       const bodyRows = rows.map((r) =>
         (Array.isArray(r) ? r : []).map((cell) => ({ text: String(cell ?? ''), options: { color: bodyC } })),
       )
@@ -555,11 +561,53 @@ export async function downloadPptx(
       // pages) gets a band beneath it. Without this the table took the full area
       // and `continue`d, dropping the notes from the download entirely.
       const noteLines = lines.slice(0, 6)
-      const noteH = noteLines.length ? Math.min(1.6, 0.3 + noteLines.length * 0.24) : 0
-      const tableH = Math.max(areaH - noteH - (noteH ? 0.2 : 0), 1)
+      // Provisional: what the notes would LIKE. Revised down after the table is
+      // measured, because the table carries the substance on these pages and a
+      // fixed half-and-half split drove both to ~7pt — technically fitting and
+      // unreadable at slide distance.
+      let noteH = noteLines.length ? Math.min(1.6, 0.3 + noteLines.length * 0.24) : 0
+      // `h` on addTable is a MINIMUM, not a clamp: pptxgenjs sets the row heights
+      // and PowerPoint grows a row whose cell wraps, so a table with long cells
+      // runs past `tableH` and prints over the notes band below it. So estimate
+      // the height the rows will actually take, shrink the font until that fits,
+      // and place the notes below the ESTIMATE rather than below the request.
+      const colW = 12.1 / Math.max(cols.length, 1)
+      const rowCount = rows.length + (head.length ? 1 : 0)
+      const cellLines = (size: number) => {
+        const perLine = Math.max(Math.floor((colW - 0.2) * 72 / (size * AVG_CHAR_W)), 6)
+        // A row is as tall as its TALLEST cell.
+        const heads = head.length ? [cols] : []
+        return [...heads, ...rows.map((r) => (Array.isArray(r) ? r : []).map((c) => String(c ?? '')))]
+          .reduce((total, r) => total + Math.max(...r.map((c) => Math.ceil(c.length / perLine)), 1), 0)
+      }
+      // MIN_TABLE_PT is the floor for a table nobody has to lean in to read; below
+      // it the slide is overloaded and the fix is fewer rows, not smaller type.
+      const MIN_TABLE_PT = 10
+      let tFont = rows.length > 6 || cols.length > 5 ? 11 : 13
+      let tableH = 0
+      const measure = (size: number) =>
+        (cellLines(size) * size * LINE_H * LINE_PAD) / 72 + rowCount * 0.16
+      for (; tFont > MIN_TABLE_PT; tFont -= 0.5) {
+        tableH = measure(tFont)
+        if (tableH <= areaH - noteH - (noteH ? 0.2 : 0)) break
+      }
+      tableH = measure(tFont)
+      // Whatever the table genuinely needs, the notes take the remainder — but a
+      // floor is reserved first so they are never dropped ENTIRELY. Silently
+      // losing every note is data loss the reader cannot detect; losing the tail
+      // of a list is visible. Two lines is the floor.
+      if (noteLines.length) {
+        const floor = Math.min(0.3 + 2 * 0.24, areaH * 0.3)
+        const leftForNotes = Math.max(areaH - tableH - 0.2, floor)
+        if (noteH > leftForNotes) {
+          noteH = leftForNotes
+          while (noteLines.length > 1 && 0.3 + noteLines.length * 0.24 > noteH) noteLines.pop()
+        }
+      }
+      tableH = Math.min(Math.max(tableH, 1), Math.max(areaH - noteH - (noteH ? 0.2 : 0), 1))
       slide.addTable(head.length ? [head, ...bodyRows] : bodyRows, {
         x: 0.6, y: areaY, w: 12.1, h: tableH,
-        fontSize: rows.length > 6 || cols.length > 5 ? 11 : 13,
+        fontSize: tFont,
         color: bodyC, valign: 'middle',
         border: { type: 'solid', color: panelBorderC, pt: 1 },
         autoPage: false,
