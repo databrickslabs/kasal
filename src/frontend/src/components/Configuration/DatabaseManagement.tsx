@@ -798,15 +798,25 @@ const DatabaseManagement: React.FC = () => {
                 <Grid item xs={12}>
                   <Alert severity={
                     databaseInfo.database_type === 'lakebase'
-                      ? (databaseInfo.connection_error ? 'warning' : 'success')
+                      ? (databaseInfo.connection_error ? 'error' : 'success')
                       : 'info'
                   }>
+                    {/* connection_error means Lakebase is CONFIGURED but the
+                        connection failed, so the app is really serving requests
+                        from the fallback database. Reporting the configured
+                        backend as the current one told the user they were on
+                        Lakebase when they were not — and every read they then
+                        did (crews, agents) came from somewhere else entirely. */}
                     <Typography variant="body2" fontWeight="bold">
-                      Current Database Backend: {databaseInfo.database_type?.toUpperCase()}
+                      {databaseInfo.connection_error
+                        ? `Current Database Backend: FALLBACK (${databaseInfo.database_type?.toUpperCase()} configured but unreachable)`
+                        : `Current Database Backend: ${databaseInfo.database_type?.toUpperCase()}`}
                     </Typography>
                     {databaseInfo.database_type === 'lakebase' && databaseInfo.lakebase_instance && (
                       <Typography variant="caption" display="block">
-                        Connected to Lakebase instance: {databaseInfo.lakebase_instance}
+                        {databaseInfo.connection_error
+                          ? `Configured Lakebase instance (NOT in use): ${databaseInfo.lakebase_instance}`
+                          : `Connected to Lakebase instance: ${databaseInfo.lakebase_instance}`}
                       </Typography>
                     )}
                     {databaseInfo.connection_error && (
@@ -1542,9 +1552,24 @@ const DatabaseManagement: React.FC = () => {
                                   expand_schema: expandSchema
                                 });
                                 if (response.data.success) {
-                                  setSuccess(expandSchema
-                                    ? `Connected to Lakebase. Existing schema expanded (missing tables/columns created); existing data preserved.`
-                                    : `Connected to Lakebase. Using existing schema with ${testResponse.data.table_count} table(s).`);
+                                  // `success` only means the config was saved — the
+                                  // schema reconcile is best-effort and reports
+                                  // itself separately. Claiming "schema expanded"
+                                  // from `success` alone told the user everything
+                                  // was fine while a reconcile had partly or wholly
+                                  // failed, which is how a missing column stayed
+                                  // hidden until a later request 500'd.
+                                  const reconcile = response.data.schema_reconcile;
+                                  if (!expandSchema) {
+                                    setSuccess(`Connected to Lakebase. Using existing schema with ${testResponse.data.table_count} table(s). No tables or columns were created — choose "Use & Expand" if this instance is missing any.`);
+                                  } else if (reconcile === 'reconciled') {
+                                    setSuccess('Connected to Lakebase. Existing schema expanded (missing tables/columns created); existing data preserved.');
+                                  } else {
+                                    // partial | skipped — connected, but the schema
+                                    // is NOT known to match the models. Say so here
+                                    // rather than let it surface later as a 500.
+                                    setError(`Connected to Lakebase, but the schema could not be fully reconciled (${reconcile ?? 'unknown'}). Some tables or columns may be missing — check the app logs. Features that use them will fail until this is resolved.`);
+                                  }
                                   // Refresh config and info in background — don't block the button
                                   loadLakebaseConfig().catch(() => {});
                                   loadDatabaseInfo().catch(() => {});

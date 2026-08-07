@@ -26,7 +26,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.db.session import _VECTOR_EMBEDDING_TABLES, _ensure_pgvector_embedding_columns
+# Registering EVERY model matters here: workflow_recipes lives in a module that
+# nothing else in this file imports, and an unregistered model is invisible to the
+# metadata-derived table list — which would make this suite pass while the real
+# app still missed the column.
+import src.db.all_models  # noqa: F401
+
+from src.db.session import _ensure_pgvector_embedding_columns, _vector_embedding_tables
 
 
 def _conn(dialect: str = "postgresql", pgvector: bool = True) -> MagicMock:
@@ -54,12 +60,32 @@ class TestWithPgvectorAvailable:
         conn = _conn()
         await _ensure_pgvector_embedding_columns(conn)
         sql = " ".join(_statements(conn))
-        for table in _VECTOR_EMBEDDING_TABLES:
+        for table in _vector_embedding_tables():
             assert f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS embedding" in sql
 
-    async def test_knowledge_embeddings_is_covered(self):
-        """The specific table whose missing column broke upload."""
-        assert "knowledge_embeddings" in _VECTOR_EMBEDDING_TABLES
+    async def test_every_model_with_a_vector_column_is_covered(self):
+        """DERIVED from the models, so a new vector column needs no edit here.
+
+        The first version hardcoded two table names and missed workflow_recipes —
+        the deployed app then failed every recipe lookup with "column
+        workflow_recipes.embedding does not exist". Third time a hand-maintained
+        list of models has drifted in this codebase.
+        """
+        from src.db.base import Base
+        from src.models.documentation_embedding import Vector
+
+        expected = {
+            table.name
+            for table in Base.metadata.sorted_tables
+            if any(isinstance(column.type, Vector) for column in table.columns)
+        }
+        assert set(_vector_embedding_tables()) == expected
+        # The three that exist today, named so a silent shrink is caught.
+        assert expected >= {
+            "documentation_embeddings",
+            "knowledge_embeddings",
+            "workflow_recipes",
+        }
 
     async def test_the_column_type_matches_the_model(self):
         conn = _conn()
@@ -85,7 +111,7 @@ class TestWithPgvectorAvailable:
         """An orphaned-owner table (42501) must not abort the whole self-heal."""
         conn = _conn()
         await _ensure_pgvector_embedding_columns(conn)
-        assert conn.begin_nested.call_count >= 2 * len(_VECTOR_EMBEDDING_TABLES)
+        assert conn.begin_nested.call_count >= 2 * len(_vector_embedding_tables())
 
     async def test_one_failing_table_does_not_stop_the_other(self):
         conn = _conn()

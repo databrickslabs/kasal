@@ -236,7 +236,13 @@ describe('DatabaseManagement', () => {
       expect(screen.getByText('lakebase-endpoint.example.com')).toBeInTheDocument();
     });
 
-    it('renders lakebase database info with warning alert when connection_error is set', async () => {
+    it('does NOT claim to be on Lakebase when the connection failed', async () => {
+      // connection_error means Lakebase is CONFIGURED but unreachable, so requests
+      // are really being served by the fallback database. This previously rendered
+      // "Current Database Backend: LAKEBASE" and "Connected to Lakebase instance:
+      // ..." regardless — so the user believed they were on Lakebase while every
+      // read (crews, agents) came from somewhere else. This test asserted that
+      // wording, which is how the behaviour survived.
       setMockDatabaseInfo({
         success: true,
         database_type: 'lakebase',
@@ -251,12 +257,23 @@ describe('DatabaseManagement', () => {
       renderWithProviders(<DatabaseManagement />);
 
       await waitFor(() => {
-        expect(screen.getByText(/Current Database Backend: LAKEBASE/)).toBeInTheDocument();
+        expect(screen.getByText(/FALLBACK/)).toBeInTheDocument();
       });
 
-      // Lakebase with connection_error should show 'warning' severity
+      // It must say the configured backend is NOT the one in use.
+      expect(screen.getByText(/LAKEBASE configured but unreachable/)).toBeInTheDocument();
+      expect(
+        screen.getByText(/Configured Lakebase instance \(NOT in use\): my-lakebase-instance/)
+      ).toBeInTheDocument();
+      // And must NOT claim a working connection.
+      expect(
+        screen.queryByText(/Connected to Lakebase instance: my-lakebase-instance/)
+      ).not.toBeInTheDocument();
+
+      // An unreachable backend is an ERROR, not a warning: the data on screen is
+      // not the data the user thinks they are looking at.
       const alert = screen.getByRole('alert');
-      expect(alert).toHaveClass('MuiAlert-standardWarning');
+      expect(alert).toHaveClass('MuiAlert-standardError');
     });
 
     it('displays the connection error message text', async () => {
@@ -435,7 +452,9 @@ describe('DatabaseManagement', () => {
       });
     });
 
-    it('uses warning severity for lakebase with connection error', async () => {
+    it('uses error severity for lakebase with connection error', async () => {
+      // ERROR, not warning: an unreachable configured backend means the rows on
+      // screen came from the fallback database, not the one the user selected.
       setMockDatabaseInfo({
         success: true,
         database_type: 'lakebase',
@@ -447,7 +466,7 @@ describe('DatabaseManagement', () => {
 
       await waitFor(() => {
         const alert = screen.getByRole('alert');
-        expect(alert).toHaveClass('MuiAlert-standardWarning');
+        expect(alert).toHaveClass('MuiAlert-standardError');
       });
     });
   });
@@ -633,8 +652,11 @@ describe('DatabaseManagement', () => {
       renderWithProviders(<DatabaseManagement />);
 
       await waitFor(() => {
-        // Both instance name and error should be visible
-        expect(screen.getByText(/Connected to Lakebase instance: my-failing-instance/)).toBeInTheDocument();
+        // The instance is named, but explicitly as NOT in use — it is configured
+        // and unreachable, so calling it "Connected" was the misleading part.
+        expect(
+          screen.getByText(/Configured Lakebase instance \(NOT in use\): my-failing-instance/)
+        ).toBeInTheDocument();
         expect(screen.getByText('Connection refused')).toBeInTheDocument();
       });
     });

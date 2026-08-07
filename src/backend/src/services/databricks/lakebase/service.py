@@ -2023,9 +2023,21 @@ class LakebaseService(BaseService):
                 f"Lakebase schema expand on enable skipped (non-fatal): {reconcile_err}"
             )
 
-        result["message"] = (
-            "Lakebase enabled and existing schema expanded (missing tables/columns "
-            "created). Next request will use Lakebase."
-        )
+        # The message must match what actually happened. It previously claimed
+        # "schema expanded" unconditionally, including when the reconcile was
+        # partial or skipped entirely — so the UI showed success while a table or
+        # column was missing, and the gap only surfaced later as a 500 on whatever
+        # first needed it.
+        if reconcile_status == "reconciled":
+            result["message"] = (
+                "Lakebase enabled and existing schema expanded (missing "
+                "tables/columns created). Next request will use Lakebase."
+            )
+        else:
+            result["message"] = (
+                "Lakebase enabled, but the schema could not be fully reconciled "
+                f"({reconcile_status}). Some tables or columns may be missing — see "
+                "the app logs. Features that use them will fail until resolved."
+            )
         result["schema_reconcile"] = reconcile_status
         return result

@@ -875,9 +875,33 @@ async def _ensure_documentation_embeddings_columns(conn) -> None:
     await _ensure_pgvector_embedding_columns(conn)
 
 
-#: Tables whose ``embedding vector(1024)`` column has to be added AFTER the table,
-#: with the HNSW index that makes similarity search usable.
-_VECTOR_EMBEDDING_TABLES = ("documentation_embeddings", "knowledge_embeddings")
+def _vector_embedding_tables() -> tuple[str, ...]:
+    """Tables whose ``embedding vector(1024)`` column is added AFTER the table.
+
+    DERIVED from the models, not listed. The first version of this helper hardcoded
+    ``("documentation_embeddings", "knowledge_embeddings")`` and so missed
+    ``workflow_recipes``, which carries the same ``Vector(1024)`` column — the
+    deployed app then failed every recipe lookup with
+
+        column workflow_recipes.embedding does not exist
+
+    That is the third time a hand-maintained list of models has drifted from
+    reality here. Asking the metadata covers a new vector column on the day it is
+    added.
+
+    Computed locally rather than importing the equivalent helper from
+    ``services/databricks/lakebase/schema.py``: ``db`` sits below ``services`` and
+    must not reach up into it.
+    """
+    from src.models.documentation_embedding import Vector
+
+    return tuple(
+        sorted(
+            table.name
+            for table in Base.metadata.sorted_tables
+            if any(isinstance(column.type, Vector) for column in table.columns)
+        )
+    )
 
 
 async def _ensure_pgvector_embedding_columns(conn) -> None:
@@ -927,7 +951,7 @@ async def _ensure_pgvector_embedding_columns(conn) -> None:
         return
 
     applied = True
-    for table in _VECTOR_EMBEDDING_TABLES:
+    for table in _vector_embedding_tables():
         # Each statement in its own SAVEPOINT: an orphaned-owner table (42501)
         # must not abort the surrounding self-heal transaction.
         for stmt in (
@@ -1353,7 +1377,9 @@ async def _ensure_ui_config_columns(conn) -> None:
                 await conn.exec_driver_sql(
                     f"ALTER TABLE ui_config ADD COLUMN IF NOT EXISTS {col} TEXT"
                 )
-            logger.info("Ensured ui_config catalog_json/style_json/disabled_components columns")
+            logger.info(
+                "Ensured ui_config catalog_json/style_json/disabled_components columns"
+            )
     except Exception as e:
         logger.warning(f"Could not ensure ui_config columns: {e}")
 

@@ -151,6 +151,56 @@ class TestEnableWithExpandSchema:
             await svc.enable_lakebase("inst", "h.example.com", expand_schema=True)
         engine.dispose.assert_awaited()
 
+    async def test_a_partial_reconcile_is_not_reported_as_success(self):
+        """The message must match what happened.
+
+        It previously claimed "existing schema expanded (missing tables/columns
+        created)" unconditionally — including when the reconcile was partial or
+        skipped. So the UI showed success while a table or column was missing, and
+        the gap only surfaced later as a 500 on whatever first needed it. That is
+        exactly what happened with workflow_recipes.embedding.
+        """
+        svc = _make_service()
+        engine, _ = _engine_stub()
+        svc.connection_service.create_lakebase_engine_async = AsyncMock(
+            return_value=engine
+        )
+        svc.schema_service.create_tables_async = AsyncMock(
+            side_effect=Exception('type "vector" does not exist')
+        )
+        with patch("src.db.session.run_schema_self_heal", AsyncMock()):
+            result = await svc.enable_lakebase(
+                "inst", "h.example.com", expand_schema=True
+            )
+
+        assert result["schema_reconcile"] == "partial"
+        assert "could not be fully reconciled" in result["message"]
+        assert "expanded (missing tables/columns created)" not in result["message"]
+
+    async def test_a_skipped_reconcile_is_not_reported_as_success(self):
+        svc = _make_service()
+        svc.connection_service.create_lakebase_engine_async = AsyncMock(
+            side_effect=Exception("could not connect")
+        )
+        result = await svc.enable_lakebase("inst", "h.example.com", expand_schema=True)
+
+        assert result["schema_reconcile"] == "skipped"
+        assert "could not be fully reconciled" in result["message"]
+
+    async def test_a_clean_reconcile_still_reports_success(self):
+        svc = _make_service()
+        engine, _ = _engine_stub()
+        svc.connection_service.create_lakebase_engine_async = AsyncMock(
+            return_value=engine
+        )
+        with patch("src.db.session.run_schema_self_heal", AsyncMock()):
+            result = await svc.enable_lakebase(
+                "inst", "h.example.com", expand_schema=True
+            )
+
+        assert result["schema_reconcile"] == "reconciled"
+        assert "expanded" in result["message"]
+
 
 @pytest.mark.asyncio
 class TestMigrateStreamReconcilesColumns:
