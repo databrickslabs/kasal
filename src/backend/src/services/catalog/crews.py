@@ -41,18 +41,74 @@ class CrewService:
         """
         Decrypt sensitive fields in crew's tool_configs after retrieval.
 
+        SYNC on purpose — it is called from 13 places, several of them right after a
+        write. That makes plain attribute access unsafe: if the ORM considers the
+        instance EXPIRED, ``crew.tool_configs`` is not a dict read but a lazy
+        refresh, i.e. database IO from a sync frame. On the deployed app that
+        raised, and every crew save returned 500:
+
+            POST /api/v1/crews  500
+            greenlet_spawn has not been called; can't call await_only() here
+              crews.py:50  if crew and crew.tool_configs:
+              sqlalchemy/orm/attributes.py  state._load_expired(...)
+
+        ``expire_on_commit=False`` is set on every sessionmaker here, so expiry is
+        not coming from a commit — which is exactly why this reads the attribute
+        DEFENSIVELY rather than chasing whichever operation expired it. Asking the
+        instance's own state first means the outcome no longer depends on knowing
+        that.
+
+        A loaded value is decrypted as before. An unloaded one is left alone: the
+        caller gets the crew with its stored (encrypted) value rather than a 500,
+        and decryption is a display convenience, not a correctness requirement.
+
         Args:
             crew: Crew with potentially encrypted tool_configs
 
         Returns:
             Crew with decrypted tool_configs (in-memory only)
         """
-        if crew and crew.tool_configs:
+        if crew is None:
+            return crew
+
+        configs = self._loaded_tool_configs(crew)
+        if configs:
+            # Not crew.id — on an expired instance that read is itself a lazy load,
+            # so logging the failure would raise from the except block.
+            crew_id = getattr(crew, "__dict__", {}).get("id", "<unloaded>")
             try:
-                crew.tool_configs = decrypt_sensitive_fields(crew.tool_configs)
+                crew.tool_configs = decrypt_sensitive_fields(configs)
             except Exception as e:
-                logger.error(f"Failed to decrypt tool_configs for crew {crew.id}: {e}")
+                logger.error(f"Failed to decrypt tool_configs for crew {crew_id}: {e}")
         return crew
+
+    @staticmethod
+    def _loaded_tool_configs(crew: Crew) -> Optional[Any]:
+        """``crew.tool_configs`` only if it is already in memory, else None.
+
+        ``inspect(crew).dict`` is the instance's loaded attribute dict: a key is
+        present only when the value is in memory. Absent means touching the
+        attribute would emit a SELECT — the lazy refresh that raised MissingGreenlet
+        from this sync frame. Checking membership turns that into a cheap miss.
+
+        ``state.expired`` is deliberately NOT the test: an expired instance can
+        still hold some attributes, and only the ones actually missing from
+        ``dict`` would do IO.
+        """
+        try:
+            from sqlalchemy import inspect as sa_inspect
+
+            state = sa_inspect(crew)
+            if "tool_configs" not in state.dict:
+                logger.debug(
+                    "tool_configs not loaded for crew %s; skipping decrypt rather "
+                    "than triggering a lazy refresh",
+                    state.dict.get("id", "<unknown>"),
+                )
+                return None
+        except Exception:  # noqa: BLE001 — a non-ORM object (or a test double)
+            pass
+        return crew.tool_configs
 
     def _encrypt_tool_configs_in_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
