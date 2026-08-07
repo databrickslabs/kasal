@@ -309,30 +309,37 @@ def pytest_collection_modifyitems(config, items):
 
 # Guardrail test fixtures
 @pytest.fixture
-def mock_uow(monkeypatch):
-    """Patch SyncUnitOfWork in guardrail modules and return the mock class.
-    The returned object can be configured in tests (e.g., get_instance.return_value).
+def mock_sync_session(monkeypatch):
+    """Patch ``sync_session_factory`` in the demo guardrail modules.
+
+    Returns the SESSION that ``with sync_session_factory() as session:`` yields,
+    which is what a test wants to assert on — it is passed to
+    ``DataProcessingRepository(sync_session=...)`` and is where ``commit()``
+    lands.
+
+    Replaces the old ``mock_uow`` fixture: the guardrails used to reach the
+    session through the ``SyncUnitOfWork`` singleton, which no longer exists.
+    ``raising=False`` is deliberate — a module that stops using the factory
+    should not fail here, it should fail on its own assertions.
     """
     from unittest.mock import MagicMock
 
-    mock_cls = MagicMock()
-    # Patch in all guardrail modules that may reference SyncUnitOfWork
-    monkeypatch.setattr(
-        "src.services.guardrails.demo.empty_data_processing_guardrail.SyncUnitOfWork",
-        mock_cls,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        "src.services.guardrails.demo.data_processing_guardrail.SyncUnitOfWork",
-        mock_cls,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        "src.services.guardrails.demo.data_processing_count_guardrail.SyncUnitOfWork",
-        mock_cls,
-        raising=False,
-    )
-    return mock_cls
+    session = MagicMock()
+    factory = MagicMock()
+    factory.return_value.__enter__.return_value = session
+    factory.return_value.__exit__.return_value = False
+
+    for module in (
+        "empty_data_processing_guardrail",
+        "data_processing_guardrail",
+        "data_processing_count_guardrail",
+    ):
+        monkeypatch.setattr(
+            f"src.services.guardrails.demo.{module}.sync_session_factory",
+            factory,
+            raising=False,
+        )
+    return session
 
 
 @pytest.fixture
@@ -388,39 +395,36 @@ def pytest_runtest_setup(item):
                 )
             mock_cls.return_value = default_repo
 
-            # Also patch SyncUnitOfWork so guardrails don't touch real DB/session
-            uow_mock_cls = MagicMock(name="SyncUnitOfWork")
-            uow_instance = MagicMock(name="SyncUnitOfWorkInstance")
-            uow_instance._initialized = True
-            uow_instance._session = MagicMock(name="Session")
-            uow_mock_cls.get_instance.return_value = uow_instance
+            # Also stub sync_session_factory so guardrails don't touch a real DB.
+            # This replaces a SyncUnitOfWork stub: that class is gone, and leaving
+            # the attribute injected here let `@patch(...SyncUnitOfWork)` in the
+            # guardrail tests keep resolving against a name the source no longer
+            # has — i.e. those tests passed without exercising anything.
+            session_mock = MagicMock(name="SyncSession")
+            factory_mock = MagicMock(name="sync_session_factory")
+            factory_mock.return_value.__enter__.return_value = session_mock
+            factory_mock.return_value.__exit__.return_value = False
 
             # Patch guardrail modules to use these mocks
-            try:
-                import src.services.guardrails.demo.data_processing_count_guardrail as m1
+            for module_name in (
+                "data_processing_count_guardrail",
+                "data_processing_guardrail",
+                "empty_data_processing_guardrail",
+            ):
+                try:
+                    import importlib
 
-                m1.DataProcessingRepository = mock_cls
-                m1.SyncUnitOfWork = uow_mock_cls
-            except Exception:
-                pass
-            try:
-                import src.services.guardrails.demo.data_processing_guardrail as m2
-
-                m2.DataProcessingRepository = mock_cls
-                m2.SyncUnitOfWork = uow_mock_cls
-            except Exception:
-                pass
-            try:
-                import src.services.guardrails.demo.empty_data_processing_guardrail as m3
-
-                m3.DataProcessingRepository = mock_cls
-                m3.SyncUnitOfWork = uow_mock_cls
-            except Exception:
-                pass
+                    m = importlib.import_module(
+                        f"src.services.guardrails.demo.{module_name}"
+                    )
+                    m.DataProcessingRepository = mock_cls
+                    m.sync_session_factory = factory_mock
+                except Exception:
+                    pass
 
             # Expose mocks in module namespace for tests that reference them as bare names
             setattr(mod, "mock_repo_class", mock_cls)
-            setattr(mod, "mock_uow", uow_mock_cls)
+            setattr(mod, "mock_sync_session", session_mock)
     except Exception:
         # Never block test collection on setup utilities
         pass

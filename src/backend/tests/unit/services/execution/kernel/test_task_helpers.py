@@ -63,44 +63,40 @@ class TestGetPydanticClassFromName:
     """Test cases for get_pydantic_class_from_name function."""
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_get_pydantic_class_schema_not_found(self, mock_uow_class):
         """Test when schema is not found in database."""
         # Create async context manager mock
         mock_uow = AsyncMock()
-        mock_uow.schema_repository.find_by_name.return_value = None
+        mock_uow.get_schema_by_name.return_value = None
 
         # Mock the context manager
-        mock_uow_class.return_value.__aenter__.return_value = mock_uow
-        mock_uow_class.return_value.__aexit__.return_value = None
+        mock_uow_class.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("NonExistentSchema")
 
         assert result is None
-        mock_uow.schema_repository.find_by_name.assert_called_once_with(
-            "NonExistentSchema"
-        )
+        mock_uow.get_schema_by_name.assert_called_once_with("NonExistentSchema")
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_get_pydantic_class_invalid_schema_definition(self, mock_uow_class):
         """Test when schema has invalid definition."""
         # Create async context manager mock
         mock_uow = AsyncMock()
         mock_schema = Mock()
         mock_schema.schema_definition = None
-        mock_uow.schema_repository.find_by_name.return_value = mock_schema
+        mock_uow.get_schema_by_name.return_value = mock_schema
 
         # Mock the context manager
-        mock_uow_class.return_value.__aenter__.return_value = mock_uow
-        mock_uow_class.return_value.__aexit__.return_value = None
+        mock_uow_class.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("InvalidSchema")
 
         assert result is None
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_get_pydantic_class_simple_types(self, mock_uow_class):
         """Test creating Pydantic model with simple field types."""
         # Create async context manager mock
@@ -116,11 +112,10 @@ class TestGetPydanticClassFromName:
             "required": ["name", "age"],
             "description": "Test model",
         }
-        mock_uow.schema_repository.find_by_name.return_value = mock_schema
+        mock_uow.get_schema_by_name.return_value = mock_schema
 
         # Mock the context manager
-        mock_uow_class.return_value.__aenter__.return_value = mock_uow
-        mock_uow_class.return_value.__aexit__.return_value = None
+        mock_uow_class.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("SimpleSchema")
 
@@ -137,7 +132,7 @@ class TestGetPydanticClassFromName:
         assert "is_active" in fields
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_get_pydantic_class_array_types(self, mock_uow_class):
         """Test creating Pydantic model with array field types."""
         # Create async context manager mock
@@ -153,11 +148,10 @@ class TestGetPydanticClassFromName:
             },
             "required": [],
         }
-        mock_uow.schema_repository.find_by_name.return_value = mock_schema
+        mock_uow.get_schema_by_name.return_value = mock_schema
 
         # Mock the context manager
-        mock_uow_class.return_value.__aenter__.return_value = mock_uow
-        mock_uow_class.return_value.__aexit__.return_value = None
+        mock_uow_class.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("ArraySchema")
 
@@ -165,7 +159,7 @@ class TestGetPydanticClassFromName:
         assert issubclass(result, BaseModel)
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_get_pydantic_class_object_and_any_types(self, mock_uow_class):
         """Test creating Pydantic model with object and any types."""
         # Create async context manager mock
@@ -175,11 +169,10 @@ class TestGetPydanticClassFromName:
             "properties": {"metadata": {"type": "object"}, "data": {"type": "unknown"}},
             "required": [],
         }
-        mock_uow.schema_repository.find_by_name.return_value = mock_schema
+        mock_uow.get_schema_by_name.return_value = mock_schema
 
         # Mock the context manager
-        mock_uow_class.return_value.__aenter__.return_value = mock_uow
-        mock_uow_class.return_value.__aexit__.return_value = None
+        mock_uow_class.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("ObjectSchema")
 
@@ -187,7 +180,7 @@ class TestGetPydanticClassFromName:
         assert issubclass(result, BaseModel)
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_get_pydantic_class_nullable_fields(self, mock_uow_class):
         """Test creating Pydantic model with nullable fields."""
         # Create async context manager mock
@@ -200,11 +193,10 @@ class TestGetPydanticClassFromName:
             },
             "required": ["age"],
         }
-        mock_uow.schema_repository.find_by_name.return_value = mock_schema
+        mock_uow.get_schema_by_name.return_value = mock_schema
 
         # Mock the context manager
-        mock_uow_class.return_value.__aenter__.return_value = mock_uow
-        mock_uow_class.return_value.__aexit__.return_value = None
+        mock_uow_class.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("NullableSchema")
 
@@ -212,7 +204,7 @@ class TestGetPydanticClassFromName:
         assert issubclass(result, BaseModel)
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_get_pydantic_class_creation_error(self, mock_uow_class):
         """Test when Pydantic model creation fails."""
         # Create async context manager mock
@@ -222,11 +214,10 @@ class TestGetPydanticClassFromName:
             "properties": {"name": {"type": "string"}},
             "required": ["name"],
         }
-        mock_uow.schema_repository.find_by_name.return_value = mock_schema
+        mock_uow.get_schema_by_name.return_value = mock_schema
 
         # Mock the context manager
-        mock_uow_class.return_value.__aenter__.return_value = mock_uow
-        mock_uow_class.return_value.__aexit__.return_value = None
+        mock_uow_class.return_value = mock_uow
 
         with patch(
             "src.services.agent_builder.schema_converter.create_model",
@@ -237,9 +228,9 @@ class TestGetPydanticClassFromName:
         assert result is None
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_get_pydantic_class_uow_not_initialized(self, mock_uow_class):
-        """Test when UnitOfWork is not initialized."""
+        """Test when the schema lookup returns nothing."""
         # Create async context manager mock
         mock_uow = AsyncMock()
         mock_schema = Mock()
@@ -247,18 +238,17 @@ class TestGetPydanticClassFromName:
             "properties": {"name": {"type": "string"}},
             "required": ["name"],
         }
-        mock_uow.schema_repository.find_by_name.return_value = mock_schema
+        mock_uow.get_schema_by_name.return_value = mock_schema
 
         # Mock the context manager
-        mock_uow_class.return_value.__aenter__.return_value = mock_uow
-        mock_uow_class.return_value.__aexit__.return_value = None
+        mock_uow_class.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("TestSchema")
 
         # Note: With async context manager, initialization is handled differently
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_get_pydantic_class_field_definition_error(self, mock_uow_class):
         """Test when field definition causes an error."""
         # Create async context manager mock
@@ -268,11 +258,10 @@ class TestGetPydanticClassFromName:
             "properties": {"bad_field": {"type": "invalid_type_that_causes_error"}},
             "required": ["bad_field"],
         }
-        mock_uow.schema_repository.find_by_name.return_value = mock_schema
+        mock_uow.get_schema_by_name.return_value = mock_schema
 
         # Mock the context manager
-        mock_uow_class.return_value.__aenter__.return_value = mock_uow
-        mock_uow_class.return_value.__aexit__.return_value = None
+        mock_uow_class.return_value = mock_uow
 
         # This should not crash and should create a model with Any type for the problematic field
         result = await get_pydantic_class_from_name("ErrorFieldSchema")
@@ -281,7 +270,7 @@ class TestGetPydanticClassFromName:
         assert issubclass(result, BaseModel)
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_get_pydantic_class_general_exception(self, mock_uow_class):
         """Test when a general exception occurs during schema lookup."""
         # Make the context manager creation itself fail
@@ -294,25 +283,24 @@ class TestGetPydanticClassFromName:
         assert result is None
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_get_pydantic_class_schema_definition_not_dict(self, mock_uow_class):
         """Test when schema definition is not a dictionary."""
         # Create async context manager mock
         mock_uow = AsyncMock()
         mock_schema = Mock()
         mock_schema.schema_definition = "not a dict"  # Invalid format
-        mock_uow.schema_repository.find_by_name.return_value = mock_schema
+        mock_uow.get_schema_by_name.return_value = mock_schema
 
         # Mock the context manager
-        mock_uow_class.return_value.__aenter__.return_value = mock_uow
-        mock_uow_class.return_value.__aexit__.return_value = None
+        mock_uow_class.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("InvalidFormatSchema")
 
         assert result is None
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_get_pydantic_class_empty_properties(self, mock_uow_class):
         """Test creating Pydantic model with empty properties."""
         # Create async context manager mock
@@ -323,11 +311,10 @@ class TestGetPydanticClassFromName:
             "required": [],
             "description": "Empty model",
         }
-        mock_uow.schema_repository.find_by_name.return_value = mock_schema
+        mock_uow.get_schema_by_name.return_value = mock_schema
 
         # Mock the context manager
-        mock_uow_class.return_value.__aenter__.return_value = mock_uow
-        mock_uow_class.return_value.__aexit__.return_value = None
+        mock_uow_class.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("EmptySchema")
 
@@ -337,7 +324,7 @@ class TestGetPydanticClassFromName:
         assert result.__doc__ == "Empty model"
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_get_pydantic_class_no_description(self, mock_uow_class):
         """Test creating Pydantic model without description."""
         # Create async context manager mock
@@ -348,11 +335,10 @@ class TestGetPydanticClassFromName:
             "required": ["name"],
             # No description field
         }
-        mock_uow.schema_repository.find_by_name.return_value = mock_schema
+        mock_uow.get_schema_by_name.return_value = mock_schema
 
         # Mock the context manager
-        mock_uow_class.return_value.__aenter__.return_value = mock_uow
-        mock_uow_class.return_value.__aexit__.return_value = None
+        mock_uow_class.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("NoDescSchema")
 
@@ -361,7 +347,7 @@ class TestGetPydanticClassFromName:
         assert result.__doc__ == "Model for NoDescSchema"  # Default description
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     @patch("src.services.agent_builder.task_adapter.List")
     async def test_get_pydantic_class_field_definition_exception(
         self, mock_list, mock_uow_class
@@ -378,11 +364,10 @@ class TestGetPydanticClassFromName:
             "properties": {"items": {"type": "array", "items": {"type": "string"}}},
             "required": [],
         }
-        mock_uow.schema_repository.find_by_name.return_value = mock_schema
+        mock_uow.get_schema_by_name.return_value = mock_schema
 
         # Mock the context manager
-        mock_uow_class.return_value.__aenter__.return_value = mock_uow
-        mock_uow_class.return_value.__aexit__.return_value = None
+        mock_uow_class.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("ExceptionFieldSchema")
 
@@ -391,7 +376,7 @@ class TestGetPydanticClassFromName:
         assert issubclass(result, BaseModel)
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_get_pydantic_class_field_assignment_exception(self, mock_uow_class):
         """Test direct field assignment exception to cover lines 126-128."""
         # Create async context manager mock
@@ -409,11 +394,10 @@ class TestGetPydanticClassFromName:
             },
             "required": [],
         }
-        mock_uow.schema_repository.find_by_name.return_value = mock_schema
+        mock_uow.get_schema_by_name.return_value = mock_schema
 
         # Mock the context manager
-        mock_uow_class.return_value.__aenter__.return_value = mock_uow
-        mock_uow_class.return_value.__aexit__.return_value = None
+        mock_uow_class.return_value = mock_uow
 
         # Create a custom List type that will fail during field assignment
         class FailingList:
@@ -455,7 +439,6 @@ class TestCreateTask:
         )
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             # Mock MCP service to return no enabled servers
@@ -488,7 +471,6 @@ class TestCreateTask:
         )
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -517,7 +499,6 @@ class TestCreateTask:
         )
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -544,7 +525,6 @@ class TestCreateTask:
         )
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -575,7 +555,6 @@ class TestCreateTask:
         mock_guardrail.validate.return_value = {"valid": True}
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
@@ -619,7 +598,6 @@ class TestCreateTask:
         }
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
@@ -660,7 +638,6 @@ class TestCreateTask:
         mock_guardrail.validate.side_effect = Exception("Validation error occurred")
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
@@ -702,7 +679,6 @@ class TestCreateTask:
         TestModel = create_model("TestModel", name=(str, ...))
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.agent_builder.task_adapter.get_pydantic_class_from_name"
@@ -737,7 +713,6 @@ class TestCreateTask:
         )
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.agent_builder.task_adapter.get_pydantic_class_from_name"
@@ -790,7 +765,6 @@ class TestCreateTask:
         tool2_instance.description = "Tool 2 description"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -849,7 +823,6 @@ class TestCreateTask:
         wrapped_tool.description = "Test tool description"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch("src.services.tools.mcp_adapter.MCPAdapter") as mock_adapter_class,
             patch(
@@ -935,7 +908,6 @@ class TestCreateTask:
         wrapped_tool.description = "Test tool description"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch("src.services.tools.mcp_adapter.MCPAdapter") as mock_adapter_class,
             patch(
@@ -1029,7 +1001,6 @@ class TestCreateTask:
         wrapped_tool.description = "Test tool description"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.tools.mcp_handler.get_or_create_mcp_adapter"
@@ -1126,7 +1097,6 @@ class TestCreateTask:
         wrapped_tool.description = "Test tool description"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch("src.services.tools.mcp_adapter.MCPAdapter") as mock_adapter_class,
             patch("mcp.StdioServerParameters") as mock_stdio_params,
@@ -1186,7 +1156,6 @@ class TestCreateTask:
         )
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -1213,7 +1182,6 @@ class TestCreateTask:
         )
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.agent_builder.task_adapter.Task",
@@ -1244,7 +1212,6 @@ class TestCreateTask:
         )
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -1273,7 +1240,6 @@ class TestCreateTask:
         )
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
@@ -1305,7 +1271,6 @@ class TestCreateTask:
         )
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             # Simulate MCP service throwing an exception
@@ -1345,7 +1310,6 @@ class TestCreateTask:
         wrapped_tool.description = "Test tool description"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch("src.services.tools.mcp_adapter.MCPAdapter") as mock_adapter_class,
             patch("src.utils.databricks_auth.get_mcp_auth_headers") as mock_auth,
@@ -1409,7 +1373,6 @@ class TestCreateTask:
         mock_server.api_key = "test-key"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch("src.services.tools.mcp_adapter.MCPAdapter") as mock_adapter_class,
         ):
@@ -1461,7 +1424,6 @@ class TestCreateTask:
         mock_server.additional_config = None
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch("src.services.tools.mcp_adapter.MCPAdapter") as mock_adapter_class,
             patch("mcp.StdioServerParameters"),
@@ -1512,7 +1474,6 @@ class TestCreateTask:
         mock_server.api_key = "test-key"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch("src.services.tools.mcp_adapter.MCPAdapter") as mock_adapter_class,
         ):
@@ -1558,7 +1519,6 @@ class TestCreateTask:
         mock_tool_factory.create_tool.side_effect = Exception("Tool creation error")
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
@@ -1600,7 +1560,6 @@ class TestCreateTask:
         mock_tool_service = Mock()
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -1641,7 +1600,6 @@ class TestCreateTask:
         mock_tool_factory = Mock()
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
@@ -1692,7 +1650,6 @@ class TestCreateTask:
         mock_server.api_key = "test-key"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
@@ -1737,7 +1694,6 @@ class TestCreateTask:
         mock_server.api_key = "test-key"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
@@ -1779,7 +1735,6 @@ class TestCreateTask:
         mock_server.server_type = "WEBSOCKET"  # Unsupported type
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
@@ -1820,7 +1775,6 @@ class TestCreateTask:
         mock_server.name = "TestServer"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
@@ -1862,7 +1816,6 @@ class TestCreateTask:
         mock_tool_factory = Mock()
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -1906,7 +1859,6 @@ class TestCreateTask:
         mock_tool_factory = Mock()
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -1959,7 +1911,6 @@ class TestCreateTask:
         mock_mcp_tool2.name = "mcp_tool2"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -2008,7 +1959,6 @@ class TestCreateTask:
         mock_tool_factory = Mock()
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -2052,7 +2002,6 @@ class TestCreateTask:
         mock_tool_factory = Mock()
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -2095,7 +2044,6 @@ class TestCreateTask:
         mock_server.name = "TestServer"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
@@ -2139,7 +2087,6 @@ class TestCreateTask:
         mock_server.api_key = "test-key"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
@@ -2186,7 +2133,6 @@ class TestCreateTask:
         mock_server.api_key = "test-key"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
@@ -2249,7 +2195,6 @@ class TestCreateTask:
         wrapped_tool.name = "StdioServer_test_tool"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch("src.services.tools.mcp_adapter.MCPAdapter") as mock_adapter_class,
             patch("mcp.StdioServerParameters") as mock_stdio_params,
@@ -2315,7 +2260,6 @@ class TestCreateTask:
         mock_server.server_type = "WEBSOCKET"  # Unsupported type
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
@@ -2364,7 +2308,6 @@ class TestCreateTask:
         mock_tool_factory = Mock()
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
@@ -2424,7 +2367,6 @@ class TestCreateTask:
         mock_tool_factory = Mock()
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
@@ -2479,7 +2421,6 @@ class TestCreateTask:
         mock_tool_factory = Mock()
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
@@ -2536,7 +2477,6 @@ class TestCreateTask:
         mock_tool2.name = "mcp_tool2"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -2580,7 +2520,6 @@ class TestCreateTask:
         mock_tool_factory = Mock()
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
@@ -2630,7 +2569,6 @@ class TestCreateTask:
         mock_tool_factory = Mock()
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -2670,7 +2608,6 @@ class TestCreateTask:
         mock_tool_factory = Mock()
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
@@ -2722,7 +2659,6 @@ class TestCreateTask:
         )
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -2759,7 +2695,6 @@ class TestCreateTask:
         mock_tool_factory = Mock()
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
@@ -2804,7 +2739,6 @@ class TestCreateTask:
         mock_tool_factory = Mock()
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
@@ -2849,7 +2783,6 @@ class TestCreateTask:
         )
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -2877,7 +2810,6 @@ class TestCreateTask:
         )
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -2913,7 +2845,6 @@ class TestCreateTask:
         TestModel = create_model("TestModel", name=(str, ...))
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.agent_builder.task_adapter.get_pydantic_class_from_name"
@@ -2965,7 +2896,6 @@ class TestCreateTask:
                 return '{"name": "test"}'
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.agent_builder.task_adapter.get_pydantic_class_from_name"
@@ -3010,7 +2940,6 @@ class TestCreateTask:
         TestModel = create_model("TestModel", name=(str, ...))
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.agent_builder.task_adapter.get_pydantic_class_from_name"
@@ -3059,7 +2988,6 @@ class TestCreateTask:
         )
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -3100,7 +3028,6 @@ class TestCreateTask:
         mock_tool_instance.name = "tool1"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -3147,7 +3074,6 @@ class TestCreateTask:
         mock_server.api_key = "test-key"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
@@ -3188,7 +3114,6 @@ class TestCreateTask:
         )
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -3228,7 +3153,6 @@ class TestCreateTask:
         mock_server.api_key = "test-api-key"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch("src.services.tools.mcp_adapter.MCPAdapter") as mock_adapter_class,
             patch("src.utils.databricks_auth.get_mcp_auth_headers") as mock_auth,
@@ -3288,7 +3212,6 @@ class TestCreateTask:
         mock_server.api_key = "regular-key"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch("src.services.tools.mcp_adapter.MCPAdapter") as mock_adapter_class,
             patch("src.services.tools.mcp_handler.create_kasal_tool_from_mcp"),
@@ -3347,7 +3270,6 @@ class TestCreateTask:
         wrapped_tool.description = "Test tool description"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.tools.mcp_handler.get_or_create_mcp_adapter"
@@ -3422,7 +3344,6 @@ class TestCreateTask:
         mock_server.api_key = None  # No API key
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
@@ -3478,7 +3399,6 @@ class TestCreateTask:
         )
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -3520,7 +3440,6 @@ class TestCreateTask:
         mock_server.additional_config = None
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch("src.services.tools.mcp_adapter.MCPAdapter") as mock_adapter_class,
         ):
@@ -3550,7 +3469,7 @@ class TestCreateTask:
 
     @pytest.mark.asyncio
     async def test_create_task_uow_initialize_path_coverage(self):
-        """Test coverage of UnitOfWork initialization in UnitOfWork path."""
+        """Test that output_pydantic resolves through SchemaService."""
         task_key = "uow_init_task"
         task_config = {
             "description": "Task description",
@@ -3569,11 +3488,8 @@ class TestCreateTask:
         }
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
-            patch(
-                "src.services.agent_builder.task_adapter.UnitOfWork"
-            ) as mock_task_uow,
+            patch("src.services.catalog.schemas.SchemaService") as mock_task_uow,
         ):
 
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -3582,11 +3498,10 @@ class TestCreateTask:
                 )
             )
 
-            # Create async context manager mock for task_helpers.UnitOfWork
-            mock_uow = AsyncMock()
-            mock_uow.schema_repository.find_by_name.return_value = mock_schema
-            mock_task_uow.return_value.__aenter__.return_value = mock_uow
-            mock_task_uow.return_value.__aexit__.return_value = None
+            # SchemaService is a plain class, not an async context manager
+            mock_service = AsyncMock()
+            mock_service.get_schema_by_name.return_value = mock_schema
+            mock_task_uow.return_value = mock_service
 
             task = await create_task(task_key, task_config, agent)
 
@@ -3620,11 +3535,8 @@ class TestCreateTask:
         }
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
-            patch(
-                "src.services.agent_builder.task_adapter.UnitOfWork"
-            ) as mock_task_uow,
+            patch("src.services.catalog.schemas.SchemaService") as mock_task_uow,
         ):
 
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -3633,11 +3545,10 @@ class TestCreateTask:
                 )
             )
 
-            # Create async context manager mock for task_helpers.UnitOfWork
-            mock_uow = AsyncMock()
-            mock_uow.schema_repository.find_by_name.return_value = mock_schema
-            mock_task_uow.return_value.__aenter__.return_value = mock_uow
-            mock_task_uow.return_value.__aexit__.return_value = None
+            # SchemaService is a plain class, not an async context manager
+            mock_service = AsyncMock()
+            mock_service.get_schema_by_name.return_value = mock_schema
+            mock_task_uow.return_value = mock_service
 
             task = await create_task(task_key, task_config, agent)
 
@@ -3657,7 +3568,6 @@ class TestCreateTask:
         )
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
@@ -3698,7 +3608,6 @@ class TestCreateTask:
         mock_tool_service.get_tool_by_id = AsyncMock(return_value=mock_tool_obj)
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
@@ -3739,7 +3648,6 @@ class TestCreateTask:
         mock_tool_service.get_tool_by_id = AsyncMock(return_value=mock_tool_obj)
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
@@ -3780,7 +3688,6 @@ class TestCreateTask:
         mock_tool_service.get_tool_by_id = AsyncMock(return_value=mock_tool_obj)
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
@@ -3834,7 +3741,6 @@ class TestCreateTask:
         )
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
@@ -3873,7 +3779,6 @@ class TestCreateTask:
         )
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
@@ -3910,11 +3815,8 @@ class TestCreateTask:
         }
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
-            patch(
-                "src.services.agent_builder.task_adapter.UnitOfWork"
-            ) as mock_sync_uow,
+            patch("src.services.catalog.schemas.SchemaService") as mock_sync_uow,
         ):
 
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -3925,7 +3827,7 @@ class TestCreateTask:
 
             mock_uow = Mock()
             mock_uow._initialized = True
-            mock_uow.schema_repository.find_by_name_sync.return_value = mock_schema
+            mock_uow.get_schema_by_name_sync.return_value = mock_schema
             mock_sync_uow.get_instance.return_value = mock_uow
 
             task = await create_task(task_key, task_config, agent)
@@ -3965,7 +3867,6 @@ class TestCreateTask:
         wrapped_tool.description = "Test tool description"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.tools.mcp_handler.get_or_create_mcp_adapter"
@@ -4046,7 +3947,6 @@ class TestCreateTask:
         wrapped_tool.description = "Test tool description"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.tools.mcp_handler.get_or_create_mcp_adapter"
@@ -4127,7 +4027,6 @@ class TestCreateTask:
         wrapped_tool.description = "Test tool description"
 
         with (
-            patch("src.core.unit_of_work.UnitOfWork"),
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.tools.mcp_handler.get_or_create_mcp_adapter"

@@ -51,14 +51,14 @@ sequenceDiagram
     participant C as Client
     participant R as FastAPI Router
     participant S as Service
-    participant U as UnitOfWork
+    participant U as Session (routed)
     participant Repo as Repository
     participant DB as Database
     participant L as LLM Manager
 
     C->>R: HTTP Request
     R->>S: Validate and delegate
-    S->>U: Begin transaction
+    S->>U: Use injected session (router owns the transaction)
     S->>Repo: Query/Command
     Repo->>DB: SQLAlchemy operation
     DB-->>Repo: Rows/Status
@@ -66,7 +66,7 @@ sequenceDiagram
         S->>L: Generate/Score
         L-->>S: LLM Result
     end
-    S->>U: Commit
+    S->>U: Router commits at end of request
     S-->>R: DTO/Schema
     R-->>C: HTTP Response
 ```

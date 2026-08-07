@@ -46,7 +46,7 @@ class TestGetPydanticClassFromName:
     """Test the get_pydantic_class_from_name function"""
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_get_pydantic_class_from_name_success(self, mock_uow_class):
         """Test successful class retrieval"""
         # Setup mock schema
@@ -58,9 +58,8 @@ class TestGetPydanticClassFromName:
 
         # Setup UoW mock with async context manager
         mock_uow = AsyncMock()
-        mock_uow_class.return_value.__aenter__.return_value = mock_uow
-        mock_uow_class.return_value.__aexit__.return_value = None
-        mock_uow.schema_repository.find_by_name.return_value = mock_schema
+        mock_uow_class.return_value = mock_uow
+        mock_uow.get_schema_by_name.return_value = mock_schema
 
         result = await get_pydantic_class_from_name("TestSchema")
 
@@ -68,23 +67,22 @@ class TestGetPydanticClassFromName:
         assert result.__name__ == "TestSchema"
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_get_pydantic_class_from_name_not_found(self, mock_uow_class):
         """Test when schema is not found"""
         # Setup UoW mock with async context manager
         mock_uow = AsyncMock()
-        mock_uow_class.return_value.__aenter__.return_value = mock_uow
-        mock_uow_class.return_value.__aexit__.return_value = None
-        mock_uow.schema_repository.find_by_name.return_value = None
+        mock_uow_class.return_value = mock_uow
+        mock_uow.get_schema_by_name.return_value = None
 
         result = await get_pydantic_class_from_name("NonExistentSchema")
 
         assert result is None
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_get_pydantic_class_from_name_with_schema(self, mock_uow_class):
-        """Test when UnitOfWork returns a valid schema"""
+        """Test when SchemaService returns a valid schema"""
         # Setup schema mock
         mock_schema = MagicMock()
         mock_schema.schema_definition = {
@@ -94,9 +92,8 @@ class TestGetPydanticClassFromName:
 
         # Setup UoW mock with async context manager
         mock_uow = AsyncMock()
-        mock_uow_class.return_value.__aenter__.return_value = mock_uow
-        mock_uow_class.return_value.__aexit__.return_value = None
-        mock_uow.schema_repository.find_by_name.return_value = mock_schema
+        mock_uow_class.return_value = mock_uow
+        mock_uow.get_schema_by_name.return_value = mock_schema
 
         result = await get_pydantic_class_from_name("TestSchema")
 
@@ -104,7 +101,7 @@ class TestGetPydanticClassFromName:
         assert result.__name__ == "TestSchema"
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_get_pydantic_class_from_name_invalid_schema_definition(
         self, mock_uow_class
     ):
@@ -115,16 +112,15 @@ class TestGetPydanticClassFromName:
 
         # Setup UoW mock with async context manager
         mock_uow = AsyncMock()
-        mock_uow_class.return_value.__aenter__.return_value = mock_uow
-        mock_uow_class.return_value.__aexit__.return_value = None
-        mock_uow.schema_repository.find_by_name.return_value = mock_schema
+        mock_uow_class.return_value = mock_uow
+        mock_uow.get_schema_by_name.return_value = mock_schema
 
         result = await get_pydantic_class_from_name("TestSchema")
 
         assert result is None
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_get_pydantic_class_from_name_none_schema_definition(
         self, mock_uow_class
     ):
@@ -135,16 +131,15 @@ class TestGetPydanticClassFromName:
 
         # Setup UoW mock with async context manager
         mock_uow = AsyncMock()
-        mock_uow_class.return_value.__aenter__.return_value = mock_uow
-        mock_uow_class.return_value.__aexit__.return_value = None
-        mock_uow.schema_repository.find_by_name.return_value = mock_schema
+        mock_uow_class.return_value = mock_uow
+        mock_uow.get_schema_by_name.return_value = mock_schema
 
         result = await get_pydantic_class_from_name("TestSchema")
 
         assert result is None
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_get_pydantic_class_from_name_complex_types(self, mock_uow_class):
         """Test schema with complex field types"""
         # Setup schema with complex types
@@ -164,9 +159,8 @@ class TestGetPydanticClassFromName:
 
         # Setup UoW mock with async context manager
         mock_uow = AsyncMock()
-        mock_uow_class.return_value.__aenter__.return_value = mock_uow
-        mock_uow_class.return_value.__aexit__.return_value = None
-        mock_uow.schema_repository.find_by_name.return_value = mock_schema
+        mock_uow_class.return_value = mock_uow
+        mock_uow.get_schema_by_name.return_value = mock_schema
 
         result = await get_pydantic_class_from_name("ComplexSchema")
 
@@ -174,7 +168,7 @@ class TestGetPydanticClassFromName:
         assert result.__name__ == "ComplexSchema"
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_get_pydantic_class_from_name_field_error(self, mock_uow_class):
         """Test when field definition causes an error"""
         # Setup schema with problematic field
@@ -186,9 +180,8 @@ class TestGetPydanticClassFromName:
 
         # Setup UoW mock with async context manager
         mock_uow = AsyncMock()
-        mock_uow_class.return_value.__aenter__.return_value = mock_uow
-        mock_uow_class.return_value.__aexit__.return_value = None
-        mock_uow.schema_repository.find_by_name.return_value = mock_schema
+        mock_uow_class.return_value = mock_uow
+        mock_uow.get_schema_by_name.return_value = mock_schema
 
         # Mock create_model to raise an exception
         with patch(
@@ -201,7 +194,7 @@ class TestGetPydanticClassFromName:
             assert result is None
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_get_pydantic_class_from_name_general_exception(self, mock_uow_class):
         """Test when a general exception occurs"""
         # Setup UoW mock to raise exception when entering context
@@ -247,13 +240,8 @@ class TestCreateTask:
         """Test basic task creation"""
         with (
             patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
-            patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
         ):
-
-            # Setup UoW to return empty MCP servers
-            mock_uow_instance = AsyncMock()
-            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
 
             mock_mcp_service = AsyncMock()
             mock_mcp.from_unit_of_work.return_value = mock_mcp_service
@@ -292,16 +280,11 @@ class TestCreateTask:
 
         with (
             patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
-            patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.agent_builder.task_adapter.get_pydantic_class_from_name"
             ) as mock_get_class,
         ):
-
-            # Setup UoW to return empty MCP servers
-            mock_uow_instance = AsyncMock()
-            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
 
             mock_mcp_service = AsyncMock()
             mock_mcp.from_unit_of_work.return_value = mock_mcp_service
@@ -342,13 +325,8 @@ class TestCreateTask:
 
         with (
             patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
-            patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
         ):
-
-            # Setup UoW to return empty MCP servers
-            mock_uow_instance = AsyncMock()
-            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
 
             mock_mcp_service = AsyncMock()
             mock_mcp.from_unit_of_work.return_value = mock_mcp_service
@@ -381,13 +359,8 @@ class TestCreateTask:
 
         with (
             patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
-            patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
         ):
-
-            # Setup UoW to return empty MCP servers
-            mock_uow_instance = AsyncMock()
-            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
 
             mock_mcp_service = AsyncMock()
             mock_mcp.from_unit_of_work.return_value = mock_mcp_service
@@ -431,13 +404,8 @@ class TestCreateTask:
 
         with (
             patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
-            patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
         ):
-
-            # Setup UoW to return empty MCP servers
-            mock_uow_instance = AsyncMock()
-            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
 
             mock_mcp_service = AsyncMock()
             mock_mcp.from_unit_of_work.return_value = mock_mcp_service
@@ -477,13 +445,8 @@ class TestCreateTask:
 
         with (
             patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
-            patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
         ):
-
-            # Setup UoW to return empty MCP servers
-            mock_uow_instance = AsyncMock()
-            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
 
             mock_mcp_service = AsyncMock()
             mock_mcp.from_unit_of_work.return_value = mock_mcp_service
@@ -514,13 +477,10 @@ class TestCreateTask:
 
         with (
             patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
-            patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
         ):
 
             # Setup UoW
-            mock_uow_instance = AsyncMock()
-            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
 
             # Setup MCP service with empty servers list
             mock_mcp_service = AsyncMock()
@@ -555,17 +515,12 @@ class TestCreateTask:
 
         with (
             patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
-            patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
             ) as mock_factory,
             patch("src.core.logger.LoggerManager") as mock_logger_manager,
         ):
-
-            # Setup UoW to return empty MCP servers
-            mock_uow_instance = AsyncMock()
-            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
 
             mock_mcp_service = AsyncMock()
             mock_mcp.from_unit_of_work.return_value = mock_mcp_service
@@ -618,17 +573,12 @@ class TestCreateTask:
 
         with (
             patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
-            patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
             ) as mock_factory,
             patch("src.core.logger.LoggerManager") as mock_logger_manager,
         ):
-
-            # Setup UoW to return empty MCP servers
-            mock_uow_instance = AsyncMock()
-            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
 
             mock_mcp_service = AsyncMock()
             mock_mcp.from_unit_of_work.return_value = mock_mcp_service
@@ -681,17 +631,12 @@ class TestCreateTask:
 
         with (
             patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
-            patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
             ) as mock_factory,
             patch("src.core.logger.LoggerManager") as mock_logger_manager,
         ):
-
-            # Setup UoW to return empty MCP servers
-            mock_uow_instance = AsyncMock()
-            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
 
             mock_mcp_service = AsyncMock()
             mock_mcp.from_unit_of_work.return_value = mock_mcp_service
@@ -745,16 +690,11 @@ class TestCreateTask:
 
         with (
             patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
-            patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
             ) as mock_resolve,
         ):
-
-            # Setup UoW to return empty MCP servers
-            mock_uow_instance = AsyncMock()
-            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
 
             mock_mcp_service = AsyncMock()
             mock_mcp.from_unit_of_work.return_value = mock_mcp_service
@@ -805,16 +745,11 @@ class TestCreateTask:
 
         with (
             patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
-            patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
             ) as mock_resolve,
         ):
-
-            # Setup UoW to return empty MCP servers
-            mock_uow_instance = AsyncMock()
-            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
 
             mock_mcp_service = AsyncMock()
             mock_mcp.from_unit_of_work.return_value = mock_mcp_service
@@ -855,16 +790,11 @@ class TestCreateTask:
 
         with (
             patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
-            patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
             ) as mock_resolve,
         ):
-
-            # Setup UoW to return empty MCP servers
-            mock_uow_instance = AsyncMock()
-            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
 
             mock_mcp_service = AsyncMock()
             mock_mcp.from_unit_of_work.return_value = mock_mcp_service
@@ -905,16 +835,11 @@ class TestCreateTask:
 
         with (
             patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
-            patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
             ) as mock_resolve,
         ):
-
-            # Setup UoW to return empty MCP servers
-            mock_uow_instance = AsyncMock()
-            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
 
             mock_mcp_service = AsyncMock()
             mock_mcp.from_unit_of_work.return_value = mock_mcp_service
@@ -955,16 +880,11 @@ class TestCreateTask:
 
         with (
             patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
-            patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
             ) as mock_resolve,
         ):
-
-            # Setup UoW to return empty MCP servers
-            mock_uow_instance = AsyncMock()
-            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
 
             mock_mcp_service = AsyncMock()
             mock_mcp.from_unit_of_work.return_value = mock_mcp_service
@@ -1006,16 +926,11 @@ class TestCreateTask:
 
         with (
             patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
-            patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
             ) as mock_resolve,
         ):
-
-            # Setup UoW to return empty MCP servers
-            mock_uow_instance = AsyncMock()
-            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
 
             mock_mcp_service = AsyncMock()
             mock_mcp.from_unit_of_work.return_value = mock_mcp_service
@@ -1053,16 +968,11 @@ class TestCreateTask:
 
         with (
             patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
-            patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
             ) as mock_resolve,
         ):
-
-            # Setup UoW to return empty MCP servers
-            mock_uow_instance = AsyncMock()
-            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
 
             mock_mcp_service = AsyncMock()
             mock_mcp.from_unit_of_work.return_value = mock_mcp_service
@@ -1088,16 +998,23 @@ class TestCreateTask:
     @pytest.mark.asyncio
     async def test_create_task_mcp_exception(self, mock_agent, mock_tools_list):
         """Test task creation when MCP setup raises exception"""
-        task_config = {"description": "Test task", "expected_output": "Test output"}
+        # MCP_SERVERS is what gates the block: without it create_task never builds
+        # MCPService at all, so the exception path would never be reached and this
+        # test would pass without exercising anything.
+        task_config = {
+            "description": "Test task",
+            "expected_output": "Test output",
+            "tool_configs": {"MCP_SERVERS": {"servers": ["some-server"]}},
+        }
 
         with (
             patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
-            patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
-            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
+            patch(
+                "src.services.mcp.mcp_client.service.MCPService",
+                side_effect=Exception("MCP setup failed"),
+            ),
+            patch("src.services.agent_builder.task_adapter.logger") as mock_logger,
         ):
-
-            # Setup UoW to raise exception
-            mock_uow.side_effect = Exception("MCP setup failed")
 
             mock_task_instance = MagicMock()
             mock_task_class.return_value = mock_task_instance
@@ -1109,7 +1026,13 @@ class TestCreateTask:
                 tools=mock_tools_list,
             )
 
+            # The task is still built — an MCP failure is swallowed, not fatal.
             assert result == mock_task_instance
+            # Prove the MCP block was actually entered and its failure handled.
+            assert any(
+                "Error processing MCP servers" in str(c[0][0])
+                for c in mock_logger.error.call_args_list
+            ), "create_task never reached the MCP block"
 
     @pytest.mark.asyncio
     async def test_create_task_with_output_pydantic_model_conversion(
@@ -1124,7 +1047,6 @@ class TestCreateTask:
 
         with (
             patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
-            patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.agent_builder.task_adapter.get_pydantic_class_from_name"
@@ -1136,10 +1058,6 @@ class TestCreateTask:
                 "src.services.execution.kernel.model_conversion_handler.configure_output_json_approach"
             ) as mock_configure_json,
         ):
-
-            # Setup UoW to return empty MCP servers
-            mock_uow_instance = AsyncMock()
-            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
 
             mock_mcp_service = AsyncMock()
             mock_mcp.from_unit_of_work.return_value = mock_mcp_service
@@ -1193,7 +1111,6 @@ class TestCreateTask:
 
         with (
             patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
-            patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.agent_builder.task_adapter.get_pydantic_class_from_name"
@@ -1202,10 +1119,6 @@ class TestCreateTask:
                 "src.services.execution.kernel.model_conversion_handler.get_compatible_converter_for_model"
             ) as mock_get_converter,
         ):
-
-            # Setup UoW to return empty MCP servers
-            mock_uow_instance = AsyncMock()
-            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
 
             mock_mcp_service = AsyncMock()
             mock_mcp.from_unit_of_work.return_value = mock_mcp_service
@@ -1259,7 +1172,6 @@ class TestCreateTask:
 
         with (
             patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
-            patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.agent_builder.task_adapter.get_pydantic_class_from_name"
@@ -1268,10 +1180,6 @@ class TestCreateTask:
                 "src.services.execution.kernel.model_conversion_handler.get_compatible_converter_for_model"
             ) as mock_get_converter,
         ):
-
-            # Setup UoW to return empty MCP servers
-            mock_uow_instance = AsyncMock()
-            mock_uow.return_value.__aenter__.return_value = mock_uow_instance
 
             mock_mcp_service = AsyncMock()
             mock_mcp.from_unit_of_work.return_value = mock_mcp_service

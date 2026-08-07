@@ -66,14 +66,14 @@ ACQUIRING_NAMES = {
 ALLOWED = {
     # ---- the session/routing machinery itself -----------------------------
     "db/": "this IS the session layer — it builds the engines everyone else receives",
-    "core/unit_of_work.py": (
-        "the UoW opens the session it owns. Slated for removal: async UnitOfWork "
-        "has 4 call sites and none of them spans more than ONE repository (the 3 "
-        "in databricks_jobs_tool use no repository at all), so it buys no "
-        "cross-repository atomicity — only ceremony. SyncUnitOfWork's 3 callers "
-        "(the demo guardrails, which run in sync callbacks) go with it. Do not add "
-        "callers to either"
-    ),
+    # `core/unit_of_work.py` was here — it opened the session it owned. It has
+    # been DELETED rather than kept exempt: async UnitOfWork had 4 call sites and
+    # none spanned more than ONE repository (the 3 in databricks_jobs_tool used no
+    # repository at all), so it bought no cross-repository atomicity, only a second
+    # way to acquire a session — the bug class this file exists to prevent. Its
+    # callers now use the injected session or routed_scoped_session; the 3
+    # SyncUnitOfWork callers (demo guardrails, sync callbacks) open a scoped
+    # sync session instead.
     "utils/asyncio_utils.py": (
         "execute_db_operation_with_fresh_engine — binds a sessionmaker to the "
         "EXISTING global engine and disposes nothing. Disposing a StaticPool "

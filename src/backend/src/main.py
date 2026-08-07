@@ -383,7 +383,7 @@ async def lifespan(app: FastAPI):
 
     # ── Activate Lakebase session factory if Lakebase is the configured DB ──
     # This swaps the global async_session_factory so that ALL existing callers
-    # (background tasks, services, UnitOfWork) automatically use Lakebase.
+    # (background tasks, services, tools) automatically use Lakebase.
     if db_initialized:
         try:
             from src.db.database_router import (

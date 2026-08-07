@@ -14,7 +14,8 @@ repository enforces on it — group scoping, encryption of sensitive fields,
 cascade behaviour. Every one of those has been a real bug in this codebase.
 
 A service may still hold a session for TRANSACTION control (`commit`,
-`rollback`) or use `UnitOfWork`. That is not what this checks.
+`rollback`). That is not what this checks. There is no `UnitOfWork` to reach for —
+`src.core.unit_of_work` was deleted; the session IS the unit of work.
 """
 
 import ast

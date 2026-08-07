@@ -59,7 +59,7 @@ Visual Workflow Designer (React) → FastAPI → Agentic Engine → Database
 ├── engines/crewai/  # AI agent implementation
 ├── models/          # SQLAlchemy database models
 ├── schemas/         # Pydantic validation schemas
-└── core/            # Dependencies, logging, Unit of Work
+└── core/            # Dependencies, logging, base service/repository
 ```
 
 ### Frontend (`src/frontend/src/`)

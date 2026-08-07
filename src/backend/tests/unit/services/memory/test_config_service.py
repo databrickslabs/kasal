@@ -10,7 +10,6 @@ from uuid import uuid4
 
 import pytest
 
-from src.core.unit_of_work import UnitOfWork
 from src.models.memory_backend import MemoryBackend
 from src.schemas.memory_backend import (
     DatabricksMemoryConfig,
@@ -23,7 +22,7 @@ from src.services.memory.config_service import MemoryConfigService
 @pytest.fixture
 def mock_uow():
     """Create a mock Unit of Work."""
-    uow = AsyncMock(spec=UnitOfWork)
+    uow = AsyncMock()
     uow.memory_backend_repository = AsyncMock()
     return uow
 

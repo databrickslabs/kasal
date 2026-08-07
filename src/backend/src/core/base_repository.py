@@ -1,3 +1,18 @@
+"""
+The base every repository inherits, and the whole of what it inherits.
+
+`BaseRepository` provides exactly six methods: ``get``, ``list``, ``create``,
+``add``, ``update`` and ``delete``. It does NOT provide ``insert``, ``remove``,
+``save`` or ``insert_raw`` — those are a per-repository CONVENTION, hand-written
+in 10 of the 52 repositories with signatures that differ between them (see
+"Naming the write methods" in `src/repositories/CLAUDE.md`). Subclassing does not
+give you one, so check the repository before calling it.
+
+A repository RECEIVES its session and never opens one; that rule has no allowlist
+and is enforced by
+`tests/unit/architecture/test_sessions_go_through_the_router.py`.
+"""
+
 import uuid
 from typing import Generic, List, Optional, Type, TypeVar, Union
 

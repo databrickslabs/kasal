@@ -11,7 +11,7 @@ import traceback
 from typing import Any, Dict, List, Union
 
 from src.core.logger import LoggerManager
-from src.core.unit_of_work import SyncUnitOfWork
+from src.db.session import sync_session_factory
 from src.repositories.data_processing_repository import DataProcessingRepository
 from src.services.guardrails.base_guardrail import BaseGuardrail
 
@@ -73,18 +73,14 @@ class DataProcessingGuardrail(BaseGuardrail):
         logger.info("Validating data processing status for all records")
 
         try:
-            # Initialize UnitOfWork and repository (sync context)
-            uow = SyncUnitOfWork.get_instance()
-            if not getattr(uow, "_initialized", False):
-                uow.initialize()
-                logger.debug(
-                    "SyncUnitOfWork initialized for data processing status check"
-                )
-            repo = DataProcessingRepository(sync_session=getattr(uow, "_session", None))
+            # Sync callback: open a sync session scoped to this check and close it
+            # again. This used to go through the SyncUnitOfWork singleton, which
+            # held one session open for the process and built 15 repositories to
+            # hand back the one used here.
+            with sync_session_factory() as session:
+                repo = DataProcessingRepository(sync_session=session)
 
-            # First ensure the table exists and has test data
-            if uow._session:
-                # Check if table exists by trying to count records
+                # First ensure the table exists and has test data
                 try:
                     total_count = repo.count_total_records_sync()
                     logger.info(
@@ -97,7 +93,7 @@ class DataProcessingGuardrail(BaseGuardrail):
                         logger.info("No records found, creating test data")
                         repo.create_record_sync(che_number="CHE12345", processed=False)
                         repo.create_record_sync(che_number="CHE67890", processed=True)
-                        uow._session.commit()
+                        session.commit()
                         logger.info("Created test records via repository")
                 except Exception as e:
                     # Table likely doesn't exist, create it through repository
@@ -111,34 +107,34 @@ class DataProcessingGuardrail(BaseGuardrail):
                     # Insert test data properly through repository
                     repo.create_record_sync(che_number="CHE12345", processed=False)
                     repo.create_record_sync(che_number="CHE67890", processed=True)
-                    uow._session.commit()
+                    session.commit()
                     logger.info("Created table and test records via repository")
 
-            # Check if any records exist at all
-            total_count = repo.count_total_records_sync()
-            if total_count == 0:
-                logger.warning("No records found in the data_processing table")
+                # Check if any records exist at all
+                total_count = repo.count_total_records_sync()
+                if total_count == 0:
+                    logger.warning("No records found in the data_processing table")
+                    return {
+                        "valid": False,
+                        "feedback": "No records found in the database. Please ensure data is loaded.",
+                    }
+
+                # Check if any unprocessed records exist
+                unprocessed_count = repo.count_unprocessed_records_sync()
+                logger.info(f"Unprocessed records count: {unprocessed_count}")
+
+                if unprocessed_count > 0:
+                    logger.warning(f"Found {unprocessed_count} unprocessed records")
+                    return {
+                        "valid": False,
+                        "feedback": f"There are still {unprocessed_count} unprocessed records in the database. Please try again later.",
+                    }
+
+                logger.info("All records have been processed successfully")
                 return {
-                    "valid": False,
-                    "feedback": "No records found in the database. Please ensure data is loaded.",
+                    "valid": True,
+                    "feedback": "All data records have been processed successfully.",
                 }
-
-            # Check if any unprocessed records exist
-            unprocessed_count = repo.count_unprocessed_records_sync()
-            logger.info(f"Unprocessed records count: {unprocessed_count}")
-
-            if unprocessed_count > 0:
-                logger.warning(f"Found {unprocessed_count} unprocessed records")
-                return {
-                    "valid": False,
-                    "feedback": f"There are still {unprocessed_count} unprocessed records in the database. Please try again later.",
-                }
-
-            logger.info("All records have been processed successfully")
-            return {
-                "valid": True,
-                "feedback": "All data records have been processed successfully.",
-            }
 
         except Exception as e:
             # Capture detailed validation error

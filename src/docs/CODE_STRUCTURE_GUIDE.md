@@ -32,7 +32,7 @@ A fast, skimmable map of the repository to help you find the right place quickly
 - schemas/: Pydantic request/response DTOs
 - db/: Sessions and Alembic integration (session.py, all_models.py)
 - config/: Settings & logging (settings.py, logging.py)
-- core/: Cross-cutting utilities (llm_manager.py, logger.py, permissions.py, unit_of_work.py)
+- core/: Cross-cutting utilities (base_service.py, base_repository.py, logger.py, permissions.py, llm/)
 - engines/: AI engine integration (CrewAI prep/runner, memory, tools, guardrails)
 - utils/: Helpers (user_context.py, databricks_url_utils.py, etc.)
 - seeds/, scripts/, dependencies/: Seeders, scripts, DI helpers
@@ -98,10 +98,15 @@ Common examples under src/backend/src/api/:
 - Routers return explicit response models (response_model=...) where practical
 - Prefer DTOs over ORM entities at boundaries
 
-### Transactions & Unit of Work
+### Transactions
 - Encapsulate write operations inside service methods
-- Use the UnitOfWork pattern for multi-repository transactions (core/unit_of_work.py)
-- Repositories should not commit; services decide transactional scope
+- The SESSION is the unit of work — there is no UnitOfWork class. `core/unit_of_work.py`
+  was deleted: nothing spanned more than one repository, so it bought no atomicity,
+  only a second way to acquire a session
+- Inside a request use the injected session; outside one use `routed_scoped_session()`.
+  A service that opens its own session fails CI
+- Repositories should not commit, and never acquire a session; services decide
+  transactional scope
 
 ### Error handling
 - Raise HTTPException in routers for user input errors

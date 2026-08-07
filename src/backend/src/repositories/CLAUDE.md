@@ -48,9 +48,13 @@ repositories** — there is no legitimate case.
 
 ## Naming the write methods
 
-The persistence surface added when services stopped calling `session.add` directly
-is deliberately boring and consistent, so a caller does not have to read the
-repository to guess:
+**These are a CONVENTION, not an inherited contract.** `BaseRepository` gives you
+`get`, `list`, `create`, `add`, `update`, `delete` — and nothing below. The four
+names here are hand-written per repository, currently in **10 of 52**, and you do
+not get them by subclassing. Check the repository before calling one.
+
+When you add one, use these names and these semantics rather than inventing a
+third spelling of "write this row":
 
 | Method | Does |
 |---|---|
@@ -64,6 +68,25 @@ skill create also writes its files; publishing also claims a name), and committi
 inside the repository would take that choice away. Where a caller genuinely owns
 its session and needs durability before handing off — the scheduler, which spawns a
 run that must see the row — the method takes an explicit `commit: bool`.
+
+**The table above is the intent; the tree has drifted from it.** Do not assume a
+signature — the current exceptions are:
+
+- `execution_history_repository.insert(run, commit: bool = False)` and
+  `.remove(run, commit: bool = True)` — note the defaults DISAGREE, deliberately
+  (insert leaves the commit to the router; remove's callers own their session and
+  expect the row gone on return). This is the repository most likely to surprise
+  you, and it also has `reload` and `save`.
+- `chat_history_repository` has ONLY `save`.
+- `documentation_embedding_repository` has `insert_raw(row: Dict)`, not `insert` —
+  it takes a mapping rather than a model.
+- `ui_config_repository` and `workflow_recipe_repository` have only `reload`;
+  `user_repository` only `insert`.
+
+Lifting these onto `BaseRepository` would need one signature for all of them, and
+the disagreeing `commit` defaults above encode real caller expectations — so that
+is a behavior change, not a refactor. Until someone makes that call deliberately,
+this stays a per-repository convention and this section is the record of it.
 
 ## Who may construct you
 

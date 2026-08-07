@@ -45,8 +45,8 @@ Backend-specific instructions for Claude Code when working in the backend direct
 ```
 src/
 ├── api/             # FastAPI route handlers (see api/CLAUDE.md)
-├── core/            # Dependencies, base repo/service, permissions, UoW, exceptions
-├── models/          # SQLAlchemy database models (see models/CLAUDE.md)
+├── core/            # Dependencies, base repo/service, permissions, exceptions
+├── models/          # SQLAlchemy database models
 ├── schemas/         # Pydantic validation schemas
 ├── services/        # Business logic layer (see services/CLAUDE.md)
 ├── repositories/    # Data access layer (see repositories/CLAUDE.md)

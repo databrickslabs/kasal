@@ -71,7 +71,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         }
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_string_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"name": {"type": "string"}}, required=["name"]
@@ -80,10 +80,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         mock_schema.schema_definition = schema_def
 
         mock_uow = AsyncMock()
-        mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
-        mock_uow.__aexit__ = AsyncMock(return_value=None)
-        mock_uow.schema_repository = MagicMock()
-        mock_uow.schema_repository.find_by_name = AsyncMock(return_value=mock_schema)
+        mock_uow.get_schema_by_name = AsyncMock(return_value=mock_schema)
         mock_uow_cls.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("TestSchema")
@@ -92,7 +89,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         assert instance.name == "Alice"
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_integer_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"count": {"type": "integer"}}, required=["count"]
@@ -101,10 +98,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         mock_schema.schema_definition = schema_def
 
         mock_uow = AsyncMock()
-        mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
-        mock_uow.__aexit__ = AsyncMock(return_value=None)
-        mock_uow.schema_repository = MagicMock()
-        mock_uow.schema_repository.find_by_name = AsyncMock(return_value=mock_schema)
+        mock_uow.get_schema_by_name = AsyncMock(return_value=mock_schema)
         mock_uow_cls.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("IntSchema")
@@ -113,7 +107,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         assert instance.count == 5
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_number_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"value": {"type": "number"}}, required=["value"]
@@ -122,10 +116,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         mock_schema.schema_definition = schema_def
 
         mock_uow = AsyncMock()
-        mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
-        mock_uow.__aexit__ = AsyncMock(return_value=None)
-        mock_uow.schema_repository = MagicMock()
-        mock_uow.schema_repository.find_by_name = AsyncMock(return_value=mock_schema)
+        mock_uow.get_schema_by_name = AsyncMock(return_value=mock_schema)
         mock_uow_cls.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("NumSchema")
@@ -134,7 +125,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         assert instance.value == pytest.approx(3.14)
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_boolean_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"active": {"type": "boolean"}}, required=["active"]
@@ -143,10 +134,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         mock_schema.schema_definition = schema_def
 
         mock_uow = AsyncMock()
-        mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
-        mock_uow.__aexit__ = AsyncMock(return_value=None)
-        mock_uow.schema_repository = MagicMock()
-        mock_uow.schema_repository.find_by_name = AsyncMock(return_value=mock_schema)
+        mock_uow.get_schema_by_name = AsyncMock(return_value=mock_schema)
         mock_uow_cls.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("BoolSchema")
@@ -155,7 +143,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         assert instance.active is True
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_array_of_strings_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"tags": {"type": "array", "items": {"type": "string"}}}, required=["tags"]
@@ -164,10 +152,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         mock_schema.schema_definition = schema_def
 
         mock_uow = AsyncMock()
-        mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
-        mock_uow.__aexit__ = AsyncMock(return_value=None)
-        mock_uow.schema_repository = MagicMock()
-        mock_uow.schema_repository.find_by_name = AsyncMock(return_value=mock_schema)
+        mock_uow.get_schema_by_name = AsyncMock(return_value=mock_schema)
         mock_uow_cls.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("ArrayStringSchema")
@@ -176,7 +161,7 @@ class TestGetPydanticClassFromNameFieldTypes:
         assert instance.tags == ["a", "b"]
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_array_of_integers_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"scores": {"type": "array", "items": {"type": "integer"}}},
@@ -186,17 +171,14 @@ class TestGetPydanticClassFromNameFieldTypes:
         mock_schema.schema_definition = schema_def
 
         mock_uow = AsyncMock()
-        mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
-        mock_uow.__aexit__ = AsyncMock(return_value=None)
-        mock_uow.schema_repository = MagicMock()
-        mock_uow.schema_repository.find_by_name = AsyncMock(return_value=mock_schema)
+        mock_uow.get_schema_by_name = AsyncMock(return_value=mock_schema)
         mock_uow_cls.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("ArrayIntSchema")
         assert result is not None
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_array_of_numbers_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"values": {"type": "array", "items": {"type": "number"}}},
@@ -206,17 +188,14 @@ class TestGetPydanticClassFromNameFieldTypes:
         mock_schema.schema_definition = schema_def
 
         mock_uow = AsyncMock()
-        mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
-        mock_uow.__aexit__ = AsyncMock(return_value=None)
-        mock_uow.schema_repository = MagicMock()
-        mock_uow.schema_repository.find_by_name = AsyncMock(return_value=mock_schema)
+        mock_uow.get_schema_by_name = AsyncMock(return_value=mock_schema)
         mock_uow_cls.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("ArrayNumSchema")
         assert result is not None
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_array_of_booleans_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"flags": {"type": "array", "items": {"type": "boolean"}}},
@@ -225,17 +204,14 @@ class TestGetPydanticClassFromNameFieldTypes:
         mock_schema.schema_definition = schema_def
 
         mock_uow = AsyncMock()
-        mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
-        mock_uow.__aexit__ = AsyncMock(return_value=None)
-        mock_uow.schema_repository = MagicMock()
-        mock_uow.schema_repository.find_by_name = AsyncMock(return_value=mock_schema)
+        mock_uow.get_schema_by_name = AsyncMock(return_value=mock_schema)
         mock_uow_cls.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("ArrayBoolSchema")
         assert result is not None
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_array_of_unknown_type_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"items": {"type": "array", "items": {"type": "object"}}},
@@ -244,17 +220,14 @@ class TestGetPydanticClassFromNameFieldTypes:
         mock_schema.schema_definition = schema_def
 
         mock_uow = AsyncMock()
-        mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
-        mock_uow.__aexit__ = AsyncMock(return_value=None)
-        mock_uow.schema_repository = MagicMock()
-        mock_uow.schema_repository.find_by_name = AsyncMock(return_value=mock_schema)
+        mock_uow.get_schema_by_name = AsyncMock(return_value=mock_schema)
         mock_uow_cls.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("ArrayAnySchema")
         assert result is not None
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_object_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"meta": {"type": "object"}},
@@ -263,17 +236,14 @@ class TestGetPydanticClassFromNameFieldTypes:
         mock_schema.schema_definition = schema_def
 
         mock_uow = AsyncMock()
-        mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
-        mock_uow.__aexit__ = AsyncMock(return_value=None)
-        mock_uow.schema_repository = MagicMock()
-        mock_uow.schema_repository.find_by_name = AsyncMock(return_value=mock_schema)
+        mock_uow.get_schema_by_name = AsyncMock(return_value=mock_schema)
         mock_uow_cls.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("ObjectSchema")
         assert result is not None
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_unknown_field_type_falls_back_to_any(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"data": {"type": "unknown_type"}},
@@ -282,17 +252,14 @@ class TestGetPydanticClassFromNameFieldTypes:
         mock_schema.schema_definition = schema_def
 
         mock_uow = AsyncMock()
-        mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
-        mock_uow.__aexit__ = AsyncMock(return_value=None)
-        mock_uow.schema_repository = MagicMock()
-        mock_uow.schema_repository.find_by_name = AsyncMock(return_value=mock_schema)
+        mock_uow.get_schema_by_name = AsyncMock(return_value=mock_schema)
         mock_uow_cls.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("UnknownTypeSchema")
         assert result is not None
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_nullable_optional_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"note": {"type": "string", "nullable": True}},
@@ -302,46 +269,37 @@ class TestGetPydanticClassFromNameFieldTypes:
         mock_schema.schema_definition = schema_def
 
         mock_uow = AsyncMock()
-        mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
-        mock_uow.__aexit__ = AsyncMock(return_value=None)
-        mock_uow.schema_repository = MagicMock()
-        mock_uow.schema_repository.find_by_name = AsyncMock(return_value=mock_schema)
+        mock_uow.get_schema_by_name = AsyncMock(return_value=mock_schema)
         mock_uow_cls.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("NullableSchema")
         assert result is not None
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_schema_not_found_returns_none(self, mock_uow_cls):
         mock_uow = AsyncMock()
-        mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
-        mock_uow.__aexit__ = AsyncMock(return_value=None)
-        mock_uow.schema_repository = MagicMock()
-        mock_uow.schema_repository.find_by_name = AsyncMock(return_value=None)
+        mock_uow.get_schema_by_name = AsyncMock(return_value=None)
         mock_uow_cls.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("NonExistentSchema")
         assert result is None
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_invalid_schema_definition_returns_none(self, mock_uow_cls):
         mock_schema = MagicMock()
         mock_schema.schema_definition = None
 
         mock_uow = AsyncMock()
-        mock_uow.__aenter__ = AsyncMock(return_value=mock_uow)
-        mock_uow.__aexit__ = AsyncMock(return_value=None)
-        mock_uow.schema_repository = MagicMock()
-        mock_uow.schema_repository.find_by_name = AsyncMock(return_value=mock_schema)
+        mock_uow.get_schema_by_name = AsyncMock(return_value=mock_schema)
         mock_uow_cls.return_value = mock_uow
 
         result = await get_pydantic_class_from_name("BadSchema")
         assert result is None
 
     @pytest.mark.asyncio
-    @patch("src.services.agent_builder.task_adapter.UnitOfWork")
+    @patch("src.services.catalog.schemas.SchemaService")
     async def test_exception_returns_none(self, mock_uow_cls):
         mock_uow_cls.side_effect = Exception("DB error")
         result = await get_pydantic_class_from_name("ErrorSchema")

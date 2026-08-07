@@ -1,5 +1,12 @@
 # Kasal Development Best Practices
 
+> **ARCHIVED — pre-2026 architecture. Do not follow this as current guidance.**
+> Notably, the `UnitOfWork` pattern referenced below no longer exists:
+> `src/backend/src/core/unit_of_work.py` has been deleted, and the session IS
+> the unit of work. For the rules CI actually enforces see
+> `src/backend/src/services/CLAUDE.md`.
+
+
 This document outlines the best practices for developing and maintaining the Kasal AI agent workflow orchestration platform. Following these guidelines will help maintain code quality, performance, and maintainability across the full stack application.
 
 ## Project Structure

@@ -551,7 +551,7 @@ class ApiKeysService(BaseService):
             ApiKeysService.setup_provider_api_key_sync(db, "DEEPSEEK_API_KEY")
             ApiKeysService.setup_provider_api_key_sync(db, "GEMINI_API_KEY")
         else:
-            # Use the async methods that now use UnitOfWork
+            # Use the async methods, which take a routed session
             await cls.setup_openai_api_key(group_id=group_id)
             await cls.setup_anthropic_api_key(group_id=group_id)
             await cls.setup_deepseek_api_key(group_id=group_id)

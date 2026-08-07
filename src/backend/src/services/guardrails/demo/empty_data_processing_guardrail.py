@@ -11,7 +11,7 @@ import traceback
 from typing import Any, Dict, Union
 
 from src.core.logger import LoggerManager
-from src.core.unit_of_work import SyncUnitOfWork
+from src.db.session import sync_session_factory
 from src.repositories.data_processing_repository import DataProcessingRepository
 from src.services.guardrails.base_guardrail import BaseGuardrail
 
@@ -75,17 +75,13 @@ class EmptyDataProcessingGuardrail(BaseGuardrail):
         logger.info("Validating data_processing table is empty")
 
         try:
-            # Initialize UnitOfWork and repository (sync context)
-            uow = SyncUnitOfWork.get_instance()
-            if not getattr(uow, "_initialized", False):
-                uow.initialize()
-                logger.debug("SyncUnitOfWork initialized for empty table check")
-                logger.info("Initialized UnitOfWork for empty table check")
-            logger.info(f"Got UnitOfWork instance: {uow}")
-            repo = DataProcessingRepository(sync_session=getattr(uow, "_session", None))
-            logger.info(f"Created DataProcessingRepository with sync_session: {repo}")
-
-            total = repo.count_total_records_sync()
+            # Sync callback: open a sync session scoped to this check and close it
+            # again. This used to go through the SyncUnitOfWork singleton, which
+            # held one session open for the process and built 15 repositories to
+            # hand back the one used here.
+            with sync_session_factory() as session:
+                repo = DataProcessingRepository(sync_session=session)
+                total = repo.count_total_records_sync()
             logger.info(f"Found {total} total records in data_processing table")
             if total == 0:
                 logger.info("Data_processing table is empty as required")

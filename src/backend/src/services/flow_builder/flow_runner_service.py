@@ -873,7 +873,7 @@ class FlowRunnerService:
                 continue
 
             try:
-                # Use the existing session instead of creating a new UnitOfWork
+                # Use the existing session rather than acquiring another
                 model_service = ModelConfigService(session, group_id=group_id)
                 model_config = await model_service.get_model_config(model_name)
 

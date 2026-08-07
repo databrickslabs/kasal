@@ -12,8 +12,8 @@ from typing import Any, Callable, Dict, List, Optional, Type
 
 from pydantic import BaseModel
 
+from src.core.exceptions import NotFoundError
 from src.core.logger import LoggerManager
-from src.core.unit_of_work import UnitOfWork
 from src.services.agent_builder.schema_converter import build_model_from_schema
 from src.services.execution.kernel.task_builder import build_task_args
 from src.services.execution.kernel.tool_helpers import resolve_tool_ids_to_names
@@ -69,9 +69,16 @@ async def get_pydantic_class_from_name(schema_name: str) -> Optional[Type[BaseMo
     logger.info(f"Looking up schema '{schema_name}' in the database")
 
     try:
-        async with UnitOfWork() as uow:
-            schema = await uow.schema_repository.find_by_name(schema_name)
-        if not schema:
+        # Schemas are the catalog domain's data, so go through its SERVICE rather
+        # than building SchemaRepository here — agent_builder does not own that
+        # repository (see tests/unit/architecture/test_service_repository_ownership.py).
+        from src.db.session import routed_scoped_session
+        from src.services.catalog.schemas import SchemaService
+
+        try:
+            async with routed_scoped_session() as session:
+                schema = await SchemaService(session).get_schema_by_name(schema_name)
+        except NotFoundError:
             logger.warning(f"Schema '{schema_name}' not found in database")
             return None
 

@@ -379,24 +379,22 @@ class DatabricksJobsTool(BaseTool):
                         "Attempting to get Databricks API key from API Keys Service..."
                     )
                     try:
-                        from src.core.unit_of_work import UnitOfWork
                         from src.services.settings.api_keys import ApiKeysService
 
                         async def get_databricks_token():
-                            async with UnitOfWork() as uow:
-                                # SECURITY: Try both possible key names with group_id for multi-tenant isolation
-                                token = (
-                                    await ApiKeysService.get_provider_api_key(
-                                        "databricks", group_id=self._group_id
-                                    )
-                                    or await ApiKeysService.get_provider_api_key(
-                                        "DATABRICKS_API_KEY", group_id=self._group_id
-                                    )
-                                    or await ApiKeysService.get_provider_api_key(
-                                        "DATABRICKS_TOKEN", group_id=self._group_id
-                                    )
+                            # SECURITY: Try both possible key names with group_id for multi-tenant isolation
+                            token = (
+                                await ApiKeysService.get_provider_api_key(
+                                    "databricks", group_id=self._group_id
                                 )
-                                return token
+                                or await ApiKeysService.get_provider_api_key(
+                                    "DATABRICKS_API_KEY", group_id=self._group_id
+                                )
+                                or await ApiKeysService.get_provider_api_key(
+                                    "DATABRICKS_TOKEN", group_id=self._group_id
+                                )
+                            )
+                            return token
 
                         # Use _run_async_in_sync_context which safely handles both async and sync contexts
                         self._token = _run_async_in_sync_context(get_databricks_token())
@@ -419,24 +417,22 @@ class DatabricksJobsTool(BaseTool):
                 if not self._token:
                     logger.info("Trying API Keys Service without enhanced auth...")
                     try:
-                        from src.core.unit_of_work import UnitOfWork
                         from src.services.settings.api_keys import ApiKeysService
 
                         async def get_databricks_token_fallback():
-                            async with UnitOfWork() as uow:
-                                # SECURITY: Try with group_id for multi-tenant isolation
-                                token = (
-                                    await ApiKeysService.get_provider_api_key(
-                                        "databricks", group_id=self._group_id
-                                    )
-                                    or await ApiKeysService.get_provider_api_key(
-                                        "DATABRICKS_API_KEY", group_id=self._group_id
-                                    )
-                                    or await ApiKeysService.get_provider_api_key(
-                                        "DATABRICKS_TOKEN", group_id=self._group_id
-                                    )
+                            # SECURITY: Try with group_id for multi-tenant isolation
+                            token = (
+                                await ApiKeysService.get_provider_api_key(
+                                    "databricks", group_id=self._group_id
                                 )
-                                return token
+                                or await ApiKeysService.get_provider_api_key(
+                                    "DATABRICKS_API_KEY", group_id=self._group_id
+                                )
+                                or await ApiKeysService.get_provider_api_key(
+                                    "DATABRICKS_TOKEN", group_id=self._group_id
+                                )
+                            )
+                            return token
 
                         # Use _run_async_in_sync_context which safely handles both async and sync contexts
                         self._token = _run_async_in_sync_context(
@@ -554,22 +550,20 @@ class DatabricksJobsTool(BaseTool):
                 "🚨 No authentication token available, attempting runtime API key retrieval"
             )
             try:
-                from src.core.unit_of_work import UnitOfWork
                 from src.services.settings.api_keys import ApiKeysService
 
-                async with UnitOfWork() as uow:
-                    # SECURITY: Runtime retrieval with group_id for multi-tenant isolation
-                    runtime_token = (
-                        await ApiKeysService.get_provider_api_key(
-                            "databricks", group_id=self._group_id
-                        )
-                        or await ApiKeysService.get_provider_api_key(
-                            "DATABRICKS_API_KEY", group_id=self._group_id
-                        )
-                        or await ApiKeysService.get_provider_api_key(
-                            "DATABRICKS_TOKEN", group_id=self._group_id
-                        )
+                # SECURITY: Runtime retrieval with group_id for multi-tenant isolation
+                runtime_token = (
+                    await ApiKeysService.get_provider_api_key(
+                        "databricks", group_id=self._group_id
                     )
+                    or await ApiKeysService.get_provider_api_key(
+                        "DATABRICKS_API_KEY", group_id=self._group_id
+                    )
+                    or await ApiKeysService.get_provider_api_key(
+                        "DATABRICKS_TOKEN", group_id=self._group_id
+                    )
+                )
 
                 if runtime_token:
                     logger.info(

@@ -11,7 +11,7 @@ import traceback
 from typing import Any, Dict, Union
 
 from src.core.logger import LoggerManager
-from src.core.unit_of_work import SyncUnitOfWork
+from src.db.session import sync_session_factory
 from src.repositories.data_processing_repository import DataProcessingRepository
 from src.services.guardrails.base_guardrail import BaseGuardrail
 
@@ -88,38 +88,33 @@ class DataProcessingCountGuardrail(BaseGuardrail):
         )
 
         try:
-            # Initialize UnitOfWork and repository (sync context)
-            uow = SyncUnitOfWork.get_instance()
-            if not getattr(uow, "_initialized", False):
-                uow.initialize()
-                logger.debug(
-                    "SyncUnitOfWork initialized for data processing count check"
-                )
-                logger.info("Initialized UnitOfWork for data processing count check")
-            logger.info(f"Got UnitOfWork instance: {uow}")
-            repo = DataProcessingRepository(sync_session=getattr(uow, "_session", None))
-            logger.info(f"Created DataProcessingRepository with sync_session: {repo}")
+            # Sync callback: open a sync session scoped to this check and close it
+            # again. This used to go through the SyncUnitOfWork singleton, which
+            # held one session open for the process and built 15 repositories to
+            # hand back the one used here.
+            with sync_session_factory() as session:
+                repo = DataProcessingRepository(sync_session=session)
 
-            # Try to count records; if table is missing, create it and seed minimal data
-            try:
-                total_count = repo.count_total_records_sync()
-                logger.info(
-                    f"Found {total_count} total records in data_processing table"
-                )
-            except Exception as e:
-                logger.warning(f"Error checking records, table may not exist: {str(e)}")
-                repo.create_table_if_not_exists_sync()
-                # Seed two records expected by tests
-                repo.create_record_sync(che_number="CHE12345", processed=False)
-                repo.create_record_sync(che_number="CHE67890", processed=True)
-                # Commit if session exists
+                # Try to count records; if table is missing, create it and seed minimal data
                 try:
-                    if getattr(uow, "_session", None) is not None:
-                        uow._session.commit()
-                except Exception:
-                    pass
-                total_count = repo.count_total_records_sync()
-                logger.info("Created table and test records via repository")
+                    total_count = repo.count_total_records_sync()
+                    logger.info(
+                        f"Found {total_count} total records in data_processing table"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Error checking records, table may not exist: {str(e)}"
+                    )
+                    repo.create_table_if_not_exists_sync()
+                    # Seed two records expected by tests
+                    repo.create_record_sync(che_number="CHE12345", processed=False)
+                    repo.create_record_sync(che_number="CHE67890", processed=True)
+                    try:
+                        session.commit()
+                    except Exception:
+                        pass
+                    total_count = repo.count_total_records_sync()
+                    logger.info("Created table and test records via repository")
 
             # If minimum is zero or negative, treat as pass but still report the actual count
             if self.minimum_count <= 0:

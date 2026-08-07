@@ -453,7 +453,8 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             logger.error(f"Database error deleting all traces: {str(e)}")
             raise
 
-    # Public methods that manage their own session lifecycle
+    # Public methods. They use self.session — the one handed to the constructor —
+    # and never acquire their own; the caller owns the transaction.
 
     async def create(
         self,

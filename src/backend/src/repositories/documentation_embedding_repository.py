@@ -145,7 +145,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
         db_embedding = await self.get_by_id(embedding_id)
         if db_embedding:
             await self.db.delete(db_embedding)
-            # Don't commit here, let UnitOfWork handle it
+            # Don't commit here — the caller owns the transaction
             return True
         return False
 

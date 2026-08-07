@@ -9,18 +9,16 @@ you are editing wins on specifics:
 - **This file**: Project-wide patterns and rules
 - **src/backend/CLAUDE.md**: Backend-specific instructions
 - **src/frontend/CLAUDE.md**: Frontend-specific instructions
-- **Per-layer files** (added for precision):
+- **Per-layer files** (added for precision). This list is exhaustive — if a layer
+  is not named here it has no CLAUDE.md, so do not go looking for one:
   - `src/backend/src/api/CLAUDE.md` — FastAPI routers
   - `src/backend/src/services/CLAUDE.md` — business logic
   - `src/backend/src/repositories/CLAUDE.md` — data access
-  - `src/backend/src/models/CLAUDE.md` — SQLAlchemy models + migrations
   - `src/backend/src/services/execution/CLAUDE.md` — the three execution paths
     (Chat / Agent Builder / Flow Builder) and the machinery they share
   - `src/backend/src/services/` — capabilities usable without a crew run:
     `tools/`, `memory/`, `guardrails/`, `security/`, `knowledge/`, `export/`,
     `trace/`
-  - `src/frontend/src/api/CLAUDE.md` — frontend service layer
-  - `src/frontend/src/components/CLAUDE.md` — React components
   - `src/frontend/src/shared/a2ui/CLAUDE.md` — the A2UI generative-UI system
     (renderer + composer + catalog + UIConfigurator + exported-app vendoring).
     **Read before adding/editing an A2UI component** — the touchpoints span
@@ -190,7 +188,13 @@ src/
 
 For detailed backend instructions, see: **src/backend/CLAUDE.md**
 For detailed frontend instructions, see: **src/frontend/CLAUDE.md**
-- always make sure whenever you develop anything you need to stick to service architecture pattern, and unit of work architecture pattern and repository architecture pattern.
+- always make sure whenever you develop anything you stick to the service and
+  repository architecture patterns. **Not** the unit-of-work pattern —
+  `src.core.unit_of_work` has been deleted, and a second way to acquire a session
+  is the bug class the architecture tests exist to prevent. The three rules CI
+  enforces are in `src/backend/src/services/CLAUDE.md`: a service never builds
+  queries or persists rows, never opens a session, and reaches another domain's
+  data through that domain's *service* rather than its repository.
 
 ## graphify
 

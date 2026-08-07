@@ -6,9 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.base_repository import BaseRepository
 from src.models.task import Task
 
-# Session import removed - use AsyncSession only
-
-# SessionLocal removed - use async_session_factory instead
+# This repository RECEIVES its session and never opens one. Naming any session
+# factory or engine here is a hard failure — NEVER_ACQUIRE_PREFIXES in
+# tests/unit/architecture/test_sessions_go_through_the_router.py covers
+# repositories/ with no allowlist. See src/repositories/CLAUDE.md.
 
 
 class TaskRepository(BaseRepository[Task]):

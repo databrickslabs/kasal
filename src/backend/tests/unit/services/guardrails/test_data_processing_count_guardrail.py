@@ -129,18 +129,11 @@ class TestDataProcessingCountGuardrail:
     @patch(
         "src.services.guardrails.demo.data_processing_count_guardrail.DataProcessingRepository"
     )
-    @patch(
-        "src.services.guardrails.demo.data_processing_count_guardrail.SyncUnitOfWork"
-    )
     @patch("src.services.guardrails.demo.data_processing_count_guardrail.logger")
     def test_validate_success_with_sufficient_records(
-        self, mock_logger, mock_uow, mock_repo_class
+        self, mock_logger, mock_repo_class
     ):
         """Test validate returns valid=True when the record count meets the minimum."""
-        uow_inst = MagicMock()
-        uow_inst._initialized = True
-        uow_inst._session = MagicMock()
-        mock_uow.get_instance.return_value = uow_inst
 
         mock_repo = MagicMock()
         mock_repo.count_total_records_sync.return_value = 7
@@ -156,9 +149,9 @@ class TestDataProcessingCountGuardrail:
     def test_validate_failure_with_insufficient_records(self, mock_logger):
         """Test validate method with insufficient records."""
         # Setup mocks
-        mock_uow = MagicMock()
-        mock_uow._initialized = True
-        mock_uow._session = MagicMock()
+        mock_sync_session = MagicMock()
+        mock_sync_session._initialized = True
+        mock_sync_session._session = MagicMock()
         pass  # Database operations disabled
 
         mock_repo = MagicMock()
@@ -178,37 +171,11 @@ class TestDataProcessingCountGuardrail:
         )
 
     @patch("src.services.guardrails.demo.data_processing_count_guardrail.logger")
-    def test_validate_with_uninitialized_uow(
-        self, mock_logger, mock_uow, mock_repo_class
+    def test_validate_with_table_creation(
+        self, mock_logger, mock_sync_session, mock_repo_class
     ):
-        """Test validate method with uninitialized UnitOfWork."""
-        # Setup mocks
-        uow_inst = MagicMock()
-        uow_inst._initialized = False
-        uow_inst._session = MagicMock()
-        mock_uow.get_instance.return_value = uow_inst
-
-        mock_repo = MagicMock()
-        mock_repo.count_total_records_sync.return_value = 10
-        mock_repo_class.return_value = mock_repo
-
-        guardrail = DataProcessingCountGuardrail({"minimum_count": 5})
-        result = guardrail.validate("test_output")
-
-        assert result["valid"] is True
-        uow_inst.initialize.assert_called_once()
-        mock_logger.info.assert_any_call(
-            "Initialized UnitOfWork for data processing count check"
-        )
-
-    @patch("src.services.guardrails.demo.data_processing_count_guardrail.logger")
-    def test_validate_with_table_creation(self, mock_logger, mock_uow, mock_repo_class):
         """Test validate method when table doesn't exist and needs to be created."""
         # Setup mocks
-        uow_inst = MagicMock()
-        uow_inst._initialized = True
-        uow_inst._session = MagicMock()
-        mock_uow.get_instance.return_value = uow_inst
 
         mock_repo = MagicMock()
         # First call to count_total_records_sync raises exception (table doesn't exist)
@@ -232,7 +199,6 @@ class TestDataProcessingCountGuardrail:
         mock_repo.create_record_sync.assert_any_call(
             che_number="CHE67890", processed=True
         )
-        uow_inst._session.commit.assert_called_once()
         mock_logger.warning.assert_any_call(
             "Error checking records, table may not exist: Table doesn't exist"
         )
@@ -244,9 +210,9 @@ class TestDataProcessingCountGuardrail:
     def test_validate_with_none_session(self, mock_logger):
         """Test validate method when session is None."""
         # Setup mocks
-        mock_uow = MagicMock()
-        mock_uow._initialized = True
-        mock_uow._session = None
+        mock_sync_session = MagicMock()
+        mock_sync_session._initialized = True
+        mock_sync_session._session = None
         pass  # Database operations disabled
 
         mock_repo = MagicMock()
@@ -291,9 +257,9 @@ class TestDataProcessingCountGuardrail:
     def test_validate_equal_counts(self, mock_logger):
         """Test validate method when actual count equals minimum count."""
         # Setup mocks
-        mock_uow = MagicMock()
-        mock_uow._initialized = True
-        mock_uow._session = MagicMock()
+        mock_sync_session = MagicMock()
+        mock_sync_session._initialized = True
+        mock_sync_session._session = MagicMock()
         pass  # Database operations disabled
 
         mock_repo = MagicMock()
@@ -348,9 +314,9 @@ class TestDataProcessingCountGuardrail:
     def test_validate_with_zero_actual_count(self, mock_logger):
         """Test validate method with zero actual count."""
         # Setup mocks
-        mock_uow = MagicMock()
-        mock_uow._initialized = True
-        mock_uow._session = MagicMock()
+        mock_sync_session = MagicMock()
+        mock_sync_session._initialized = True
+        mock_sync_session._session = MagicMock()
         pass  # Database operations disabled
 
         mock_repo = MagicMock()
@@ -370,9 +336,9 @@ class TestDataProcessingCountGuardrail:
     def test_validate_with_negative_minimum_count_validation(self, mock_logger):
         """Test validate method with negative minimum count."""
         # Setup mocks
-        mock_uow = MagicMock()
-        mock_uow._initialized = True
-        mock_uow._session = MagicMock()
+        mock_sync_session = MagicMock()
+        mock_sync_session._initialized = True
+        mock_sync_session._session = MagicMock()
         pass  # Database operations disabled
 
         mock_repo = MagicMock()
@@ -440,13 +406,11 @@ class TestDataProcessingCountGuardrail:
         assert "Error validating data processing count" in error_call
 
     @patch("src.services.guardrails.demo.data_processing_count_guardrail.logger")
-    def test_validate_logs_all_steps(self, mock_logger, mock_uow, mock_repo_class):
+    def test_validate_logs_all_steps(
+        self, mock_logger, mock_sync_session, mock_repo_class
+    ):
         """Test that validate method logs all important steps."""
         # Setup mocks
-        uow_inst = MagicMock()
-        uow_inst._initialized = True
-        uow_inst._session = MagicMock()
-        mock_uow.get_instance.return_value = uow_inst
 
         mock_repo = MagicMock()
         mock_repo.count_total_records_sync.return_value = 10
@@ -458,10 +422,6 @@ class TestDataProcessingCountGuardrail:
         # Verify all expected log calls are made
         mock_logger.info.assert_any_call(
             "Validating data processing count against minimum count: 5"
-        )
-        mock_logger.info.assert_any_call(f"Got UnitOfWork instance: {uow_inst}")
-        mock_logger.info.assert_any_call(
-            f"Created DataProcessingRepository with sync_session: {mock_repo}"
         )
         mock_logger.info.assert_any_call(
             "Found 10 total records in data_processing table"

@@ -929,7 +929,7 @@ class ToolFactory:
 
                 # Update the tool using the service instance
                 result = await tool_service.update_tool(tool_id, update_data)
-                logger.info(f"Updated tool {tool_id} configuration using UnitOfWork")
+                logger.info(f"Updated tool {tool_id} configuration via ToolService")
 
                 # Refresh available tools
                 await self._load_available_tools_async()
@@ -941,7 +941,7 @@ class ToolFactory:
                 result = await tool_service.update_tool_configuration_by_title(
                     title, config_update
                 )
-                logger.info(f"Updated tool '{title}' configuration using UnitOfWork")
+                logger.info(f"Updated tool '{title}' configuration via ToolService")
 
                 # Refresh available tools
                 await self._load_available_tools_async()

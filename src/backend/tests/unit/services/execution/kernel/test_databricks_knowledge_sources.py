@@ -226,8 +226,7 @@ class TestCreateAgentWithKnowledgeSources:
     @patch('src.services.execution.kernel.agent_builder.Agent')
     @patch('src.services.agent_builder.agent_adapter.process_knowledge_sources')
     @patch('src.services.llm.manager.LLMManager.configure_kasal_llm')
-    @patch('src.core.unit_of_work.UnitOfWork')
-    async def test_create_agent_with_knowledge_sources(self, mock_uow, mock_configure_llm, mock_process_ks, mock_agent_class):
+    async def test_create_agent_with_knowledge_sources(self, mock_configure_llm, mock_process_ks, mock_agent_class):
         """Test creating an agent with knowledge sources."""
         # Setup mocks
         mock_processed_sources = [MagicMock(), MagicMock()]
@@ -258,8 +257,6 @@ class TestCreateAgentWithKnowledgeSources:
         mock_llm = MagicMock()
         mock_configure_llm.return_value = mock_llm
         
-        # Setup UnitOfWork mock
-        mock_uow_instance = AsyncMock()
         mock_uow_instance.__aenter__ = AsyncMock(return_value=mock_uow_instance)
         mock_uow_instance.__aexit__ = AsyncMock(return_value=False)
         mock_uow.return_value = mock_uow_instance
@@ -293,8 +290,7 @@ class TestCreateAgentWithKnowledgeSources:
     @pytest.mark.asyncio
     @patch('src.services.execution.kernel.agent_builder.Agent')
     @patch('src.services.llm.manager.LLMManager.configure_kasal_llm')
-    @patch('src.core.unit_of_work.UnitOfWork')
-    async def test_create_agent_without_knowledge_sources(self, mock_uow, mock_configure_llm, mock_agent_class):
+    async def test_create_agent_without_knowledge_sources(self, mock_configure_llm, mock_agent_class):
         """Test creating an agent without knowledge sources."""
         mock_agent_instance = MagicMock()
         mock_agent_class.return_value = mock_agent_instance
@@ -312,8 +308,6 @@ class TestCreateAgentWithKnowledgeSources:
         mock_llm = MagicMock()
         mock_configure_llm.return_value = mock_llm
         
-        # Setup UnitOfWork mock
-        mock_uow_instance = AsyncMock()
         mock_uow_instance.__aenter__ = AsyncMock(return_value=mock_uow_instance)
         mock_uow_instance.__aexit__ = AsyncMock(return_value=False)
         mock_uow.return_value = mock_uow_instance

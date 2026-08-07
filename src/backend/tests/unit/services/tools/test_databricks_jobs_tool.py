@@ -486,17 +486,13 @@ class TestDatabricksJobsTool(unittest.TestCase):
         "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
         new_callable=AsyncMock,
     )
-    @patch("src.core.unit_of_work.UnitOfWork")
-    def test_get_auth_headers_no_token_error(
-        self, mock_uow, mock_get_api_key, mock_session
-    ):
+    def test_get_auth_headers_no_token_error(self, mock_get_api_key, mock_session):
         """Test _get_auth_headers with no token raises error"""
         tool = DatabricksJobsTool()
         tool._token = None
 
         # Mock the API Keys Service to return None (no API key found)
         mock_get_api_key.return_value = None
-        mock_uow.return_value.__aenter__.return_value = MagicMock()
 
         # Run async method and expect exception
         loop = asyncio.new_event_loop()

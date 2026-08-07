@@ -460,7 +460,7 @@ class ExecutionHistoryRepository:
             await session.flush()
             logger.debug("[DELETE] Flushed delete operations to database")
 
-            # Only commit if we created our own session
+            # Commit only when the caller asked for it; this repository never owns a session
             if commit:
                 logger.debug(
                     f"[DELETE] Committing transaction for session {id(session)}"
@@ -546,7 +546,7 @@ class ExecutionHistoryRepository:
             # Flush to ensure operations are sent to database
             await session.flush()
 
-            # Only commit if we created our own session
+            # Commit only when the caller asked for it; this repository never owns a session
             if commit:
                 await session.commit()
 
@@ -745,7 +745,7 @@ class ExecutionHistoryRepository:
             # Flush to ensure operations are sent to database
             await session.flush()
 
-            # Only commit if we created our own session
+            # Commit only when the caller asked for it; this repository never owns a session
             if commit:
                 await session.commit()
 

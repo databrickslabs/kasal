@@ -160,13 +160,8 @@ class TestEmptyDataProcessingGuardrail:
         assert hasattr(guardrail, "validate")
         assert callable(guardrail.validate)
 
-    def test_validate_empty_table_success(self, mock_repo_class, mock_uow):
+    def test_validate_empty_table_success(self, mock_repo_class, mock_sync_session):
         """Test successful validation when table is empty."""
-        # Setup UOW
-        mock_uow_instance = MagicMock()
-        mock_uow_instance._initialized = True
-        mock_uow_instance._session = MagicMock()
-        mock_uow.get_instance.return_value = mock_uow_instance
 
         # Setup repository to return 0 records
         mock_repo = MagicMock()
@@ -195,13 +190,8 @@ class TestEmptyDataProcessingGuardrail:
                 "Data_processing table is empty as required"
             )
 
-    def test_validate_non_empty_table_failure(self, mock_repo_class, mock_uow):
+    def test_validate_non_empty_table_failure(self, mock_repo_class, mock_sync_session):
         """Test validation failure when table is not empty."""
-        # Setup UOW
-        mock_uow_instance = MagicMock()
-        mock_uow_instance._initialized = True
-        mock_uow_instance._session = MagicMock()
-        mock_uow.get_instance.return_value = mock_uow_instance
 
         # Setup repository to return 5 records
         mock_repo = MagicMock()
@@ -226,58 +216,8 @@ class TestEmptyDataProcessingGuardrail:
                 "Found 5 total records in data_processing table"
             )
 
-    def test_validate_uow_initialization(self, mock_uow):
-        """Test that UOW is initialized if not already initialized."""
-        # Setup UOW as not initialized
-        mock_uow_instance = MagicMock()
-        mock_uow_instance._initialized = False
-        mock_uow_instance._session = MagicMock()
-        mock_uow.get_instance.return_value = mock_uow_instance
-
-        with patch(
-            "src.services.guardrails.demo.empty_data_processing_guardrail.logger"
-        ) as mock_logger:
-            guardrail = EmptyDataProcessingGuardrail({})
-
-            try:
-                guardrail.validate("test_output")
-            except Exception:
-                # Expected since repository isn't fully mocked
-                pass
-
-            # Should initialize UOW
-            mock_uow_instance.initialize.assert_called_once()
-            mock_logger.info.assert_any_call(
-                "Initialized UnitOfWork for empty table check"
-            )
-
-    def test_validate_uow_already_initialized(self, mock_uow):
-        """Test that UOW is not initialized if already initialized."""
-        # Setup UOW as already initialized
-        mock_uow_instance = MagicMock()
-        mock_uow_instance._initialized = True
-        mock_uow_instance._session = MagicMock()
-        mock_uow.get_instance.return_value = mock_uow_instance
-
-        guardrail = EmptyDataProcessingGuardrail({})
-
-        try:
-            guardrail.validate("test_output")
-        except Exception:
-            # Expected since repository isn't fully mocked
-            pass
-
-        # Should NOT initialize UOW again
-        mock_uow_instance.initialize.assert_not_called()
-
-    def test_validate_repository_creation(self, mock_repo_class, mock_uow):
+    def test_validate_repository_creation(self, mock_repo_class, mock_sync_session):
         """Test that repository is created with correct session."""
-        # Setup UOW
-        mock_uow_instance = MagicMock()
-        mock_uow_instance._initialized = True
-        mock_session = MagicMock()
-        mock_uow_instance._session = mock_session
-        mock_uow.get_instance.return_value = mock_uow_instance
 
         # Setup repository
         mock_repo = MagicMock()
@@ -290,21 +230,20 @@ class TestEmptyDataProcessingGuardrail:
             guardrail = EmptyDataProcessingGuardrail({})
             guardrail.validate("test_output")
 
-            # Verify repository was created with sync_session
-            mock_repo_class.assert_called_once_with(sync_session=mock_session)
-            # Should log repository creation
-            mock_logger.info.assert_any_call(
-                f"Created DataProcessingRepository with sync_session: {mock_repo}"
-            )
+            # Verify the repository was built on the session the factory yielded
+            mock_repo_class.assert_called_once_with(sync_session=mock_sync_session)
 
-    def test_validate_exception_handling(self, mock_uow):
-        """Test validation exception handling."""
-        # Setup UOW to throw exception
-        mock_uow.get_instance.side_effect = Exception("Database connection failed")
-
-        with patch(
-            "src.services.guardrails.demo.empty_data_processing_guardrail.logger"
-        ) as mock_logger:
+    def test_validate_exception_handling(self):
+        """Test validation exception handling when the session cannot be opened."""
+        with (
+            patch(
+                "src.services.guardrails.demo.empty_data_processing_guardrail.sync_session_factory",
+                side_effect=Exception("Database connection failed"),
+            ),
+            patch(
+                "src.services.guardrails.demo.empty_data_processing_guardrail.logger"
+            ) as mock_logger,
+        ):
             with patch(
                 "src.services.guardrails.demo.empty_data_processing_guardrail.traceback"
             ) as mock_traceback:
@@ -326,13 +265,10 @@ class TestEmptyDataProcessingGuardrail:
                 assert "Error validating empty table status" in error_call
                 mock_traceback.format_exc.assert_called_once()
 
-    def test_validate_repository_exception_handling(self, mock_repo_class, mock_uow):
+    def test_validate_repository_exception_handling(
+        self, mock_repo_class, mock_sync_session
+    ):
         """Test validation exception handling when repository fails."""
-        # Setup UOW
-        mock_uow_instance = MagicMock()
-        mock_uow_instance._initialized = True
-        mock_uow_instance._session = MagicMock()
-        mock_uow.get_instance.return_value = mock_uow_instance
 
         # Setup repository to throw exception
         mock_repo = MagicMock()
@@ -351,13 +287,9 @@ class TestEmptyDataProcessingGuardrail:
             )
             assert "Repository error" in result["feedback"]
 
-    def test_validate_different_output_types(self, mock_repo_class, mock_uow):
+    def test_validate_different_output_types(self, mock_repo_class, mock_sync_session):
         """Test validation with different output parameter types."""
         # Setup
-        mock_uow_instance = MagicMock()
-        mock_uow_instance._initialized = True
-        mock_uow_instance._session = MagicMock()
-        mock_uow.get_instance.return_value = mock_uow_instance
 
         mock_repo = MagicMock()
         mock_repo.count_total_records_sync.return_value = 0
@@ -448,37 +380,8 @@ class TestEmptyDataProcessingGuardrail:
         assert guardrail.config["validation_criteria"]["expected_count"] == 0
         assert guardrail.config["logging_settings"]["log_level"] == "INFO"
 
-    def test_validate_logs_uow_instance(self, mock_repo_class, mock_uow):
-        """Test that validation logs UOW instance information."""
-        # Setup UOW
-        mock_uow_instance = MagicMock()
-        mock_uow_instance._initialized = True
-        mock_uow_instance._session = MagicMock()
-        mock_uow.get_instance.return_value = mock_uow_instance
-
-        # Setup repository
-        mock_repo = MagicMock()
-        mock_repo.count_total_records_sync.return_value = 0
-        mock_repo_class.return_value = mock_repo
-
-        with patch(
-            "src.services.guardrails.demo.empty_data_processing_guardrail.logger"
-        ) as mock_logger:
-            guardrail = EmptyDataProcessingGuardrail({})
-            guardrail.validate("test_output")
-
-            # Should log UOW instance
-            mock_logger.info.assert_any_call(
-                f"Got UnitOfWork instance: {mock_uow_instance}"
-            )
-
-    def test_validate_with_large_record_count(self, mock_repo_class, mock_uow):
+    def test_validate_with_large_record_count(self, mock_repo_class, mock_sync_session):
         """Test validation with large number of records."""
-        # Setup UOW
-        mock_uow_instance = MagicMock()
-        mock_uow_instance._initialized = True
-        mock_uow_instance._session = MagicMock()
-        mock_uow.get_instance.return_value = mock_uow_instance
 
         # Setup repository to return large number of records
         mock_repo = MagicMock()
@@ -500,13 +403,10 @@ class TestEmptyDataProcessingGuardrail:
                 "Found 1000000 records in the data_processing table"
             )
 
-    def test_validate_edge_case_exactly_one_record(self, mock_repo_class, mock_uow):
+    def test_validate_edge_case_exactly_one_record(
+        self, mock_repo_class, mock_sync_session
+    ):
         """Test validation with exactly one record."""
-        # Setup UOW
-        mock_uow_instance = MagicMock()
-        mock_uow_instance._initialized = True
-        mock_uow_instance._session = MagicMock()
-        mock_uow.get_instance.return_value = mock_uow_instance
 
         # Setup repository to return exactly 1 record
         mock_repo = MagicMock()
@@ -529,31 +429,25 @@ class TestEmptyDataProcessingGuardrail:
         """Test that the output parameter is not used in validation logic."""
         # This test confirms that the output parameter is ignored as per the docstring
         with patch(
-            "src.services.guardrails.demo.empty_data_processing_guardrail.SyncUnitOfWork"
-        ) as mock_uow:
-            with patch(
-                "src.services.guardrails.demo.empty_data_processing_guardrail.DataProcessingRepository"
-            ) as mock_repo_class:
-                # Setup minimal mocks
-                mock_uow_instance = MagicMock()
-                mock_uow_instance._initialized = True
-                mock_uow_instance._session = MagicMock()
-                mock_uow.get_instance.return_value = mock_uow_instance
+            "src.services.guardrails.demo.empty_data_processing_guardrail.DataProcessingRepository"
+        ) as mock_repo_class:
 
-                mock_repo = MagicMock()
-                mock_repo.count_total_records_sync.return_value = 0
-                mock_repo_class.return_value = mock_repo
+            # Setup minimal mocks
 
-                guardrail = EmptyDataProcessingGuardrail({})
+            mock_repo = MagicMock()
+            mock_repo.count_total_records_sync.return_value = 0
+            mock_repo_class.return_value = mock_repo
 
-                # The output parameter should not affect the validation logic
-                # All these calls should behave identically
-                result1 = guardrail.validate("any_string")
-                result2 = guardrail.validate({"any": "dict"})
-                result3 = guardrail.validate(None)
+            guardrail = EmptyDataProcessingGuardrail({})
 
-                assert result1 == result2 == result3
-                assert all(r["valid"] is True for r in [result1, result2, result3])
+            # The output parameter should not affect the validation logic
+            # All these calls should behave identically
+            result1 = guardrail.validate("any_string")
+            result2 = guardrail.validate({"any": "dict"})
+            result3 = guardrail.validate(None)
+
+            assert result1 == result2 == result3
+            assert all(r["valid"] is True for r in [result1, result2, result3])
 
     def test_json_decode_error_different_types(self):
         """Test JSON decode error handling with different invalid inputs."""
@@ -579,28 +473,3 @@ class TestEmptyDataProcessingGuardrail:
                 assert "Failed to parse guardrail config" in str(
                     mock_logger.error.call_args[0][0]
                 )
-
-    def test_getattr_with_fallback(self):
-        """Test getattr usage with fallback for _initialized attribute."""
-        with patch(
-            "src.services.guardrails.demo.empty_data_processing_guardrail.SyncUnitOfWork"
-        ) as mock_uow:
-            # Setup UOW without _initialized attribute
-            mock_uow_instance = MagicMock()
-            # Explicitly delete the _initialized attribute to test getattr fallback
-            if hasattr(mock_uow_instance, "_initialized"):
-                delattr(mock_uow_instance, "_initialized")
-            mock_uow_instance._session = MagicMock()
-            mock_uow.get_instance.return_value = mock_uow_instance
-
-            # This should trigger the getattr fallback to False
-            guardrail = EmptyDataProcessingGuardrail({})
-
-            try:
-                guardrail.validate("test_output")
-            except Exception:
-                # Expected since repository isn't fully mocked
-                pass
-
-            # Should initialize UOW when _initialized is not present (getattr fallback)
-            mock_uow_instance.initialize.assert_called_once()

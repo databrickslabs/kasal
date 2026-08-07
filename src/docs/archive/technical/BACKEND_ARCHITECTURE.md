@@ -1,5 +1,12 @@
 # Kasal Backend Architecture Visualization
 
+> **ARCHIVED — pre-2026 architecture. Do not follow this as current guidance.**
+> Notably, the `UnitOfWork` pattern referenced below no longer exists:
+> `src/backend/src/core/unit_of_work.py` has been deleted, and the session IS
+> the unit of work. For the rules CI actually enforces see
+> `src/backend/src/services/CLAUDE.md`.
+
+
 This document provides a comprehensive visualization of the Kasal backend architecture using Mermaid diagrams.
 
 ## Overall Architecture

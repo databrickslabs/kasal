@@ -333,14 +333,29 @@ The service instantiates them on the session it was given — the DI session ins
 a request (committed by the router at the end of it), or the one
 `routed_scoped_session()` yielded outside a request. That is the whole pattern.
 
-**`UnitOfWork` (`src.core.unit_of_work`) is on the way out — do not add callers.**
-It exists for multi-repository atomic work, and nothing here does that: of its 4
-async call sites, 3 (`tools/databricks_jobs_tool.py`) open a UoW and then use no
-repository at all, and the 4th (`agent_builder/task_adapter.py`) uses exactly one.
-A single repository needs no unit of work — the session already is one. What the
-ceremony does buy is a second way to acquire a session, which is the bug class
-this document is mostly about. `SyncUnitOfWork` (a singleton, for the sync
-guardrail callbacks) goes with it.
+**`UnitOfWork` is GONE — `src.core.unit_of_work` no longer exists.** Do not
+reintroduce it, and treat any doc or comment still describing it as stale.
+
+It existed for multi-repository atomic work, and nothing here did that: of its 4
+async call sites, 3 (`tools/databricks_jobs_tool.py`) opened a UoW and then used
+no repository at all, and the 4th (`agent_builder/task_adapter.py`) used exactly
+one. A single repository needs no unit of work — the session already is one. What
+the ceremony did buy is a second way to acquire a session, which is the bug class
+this document is mostly about.
+
+Where its callers went, in case you are following an old example:
+
+- the three no-op blocks in `databricks_jobs_tool` simply lost the wrapper — they
+  call `ApiKeysService` static methods, which route their own session
+- `agent_builder/task_adapter.get_pydantic_class_from_name` now reads the schema
+  through `SchemaService` over `routed_scoped_session()`. Note it does NOT build
+  `SchemaRepository`: `schema` belongs to the `catalog` domain, so going direct
+  would break the ownership rule above
+- `SyncUnitOfWork` (a singleton, for the sync guardrail callbacks) went with it.
+  The three demo guardrails under `services/guardrails/demo/` open a scoped
+  `sync_session_factory()` for the life of one check instead of sharing one
+  process-wide session — the singleton was also constructing 15 repositories to
+  hand back the single one that was used
 
 ## Group isolation (required)
 
