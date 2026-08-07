@@ -353,6 +353,16 @@ class LakebaseService(BaseService):
             if not config.get("enabled", False):
                 logger.info("Lakebase disabled - deleting configuration from database")
                 await self.config_repository.delete_by_key("lakebase")
+
+                # Deleting the row only switches ROUTED sessions — they re-read
+                # is_lakebase_enabled() per call. The globally hot-swapped
+                # async_session_factory keeps handing out Lakebase sessions until
+                # it is reverted, which is why disabling used to require a restart
+                # before auth and background reads came back to the local DB.
+                from src.db.database_router import deactivate_lakebase_in_process
+
+                await deactivate_lakebase_in_process()
+
                 logger.info(
                     "Lakebase configuration deleted. System will use PostgreSQL/SQLite."
                 )

@@ -157,6 +157,47 @@ async def activate_lakebase_in_subprocess() -> bool:
         return False
 
 
+async def deactivate_lakebase_in_process() -> None:
+    """Point this process's GLOBAL session factory back at the local database.
+
+    Deleting the config row is already enough for ROUTED sessions: both
+    ``get_smart_db_session`` (``SessionDep``) and ``routed_scoped_session``
+    re-read :func:`is_lakebase_enabled` on every call, so new requests go local
+    the moment the row is gone.
+
+    It is NOT enough for the raw ``async_session_factory``. That global is
+    hot-swapped to Lakebase by ``main.py``'s lifespan (and by
+    :func:`activate_lakebase_in_subprocess`) and nothing ever swapped it back, so
+    every holder of the raw factory — ``utils/databricks_auth`` and, through it,
+    ``routed_scoped_session``'s reentrant ``_RESOLVING_AUTH`` branch — kept
+    producing Lakebase sessions until the process restarted. That split is what
+    made "disable" look like it had not taken effect, and it is what this closes.
+
+    Deliberately disposes ONLY the Lakebase factory. ``dispose_engines()`` also
+    disposes the local SQLite/PG engines, and those are the backend being
+    switched TO.
+
+    Safe to call when Lakebase was never active: ``deactivate_lakebase`` is a
+    no-op that skips its swap callbacks unless the state actually changed, and
+    ``dispose_lakebase_factory`` returns immediately when no factory was built.
+    """
+    from src.db.lakebase_session import dispose_lakebase_factory
+    from src.db.lakebase_state import mark_lakebase_deactivated
+
+    # Reverts the global factory AND fires the registered on-swap callbacks, which
+    # is how caches keyed to the old backend (e.g. ExecutionService's in-memory
+    # cache) get cleared. Doing this by hand would miss them.
+    async_session_factory.deactivate_lakebase()
+
+    await dispose_lakebase_factory()
+
+    # Only correct because this is a deliberate disable — see the docstring on
+    # mark_lakebase_deactivated before reusing it anywhere else.
+    mark_lakebase_deactivated()
+
+    logger.info("Lakebase deactivated — session factory reverted to the local database")
+
+
 async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
     """
     Database router that automatically selects between regular DB and Lakebase.

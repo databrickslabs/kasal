@@ -23,6 +23,25 @@ def mark_lakebase_activated() -> None:
     logger.info("Lakebase marked as activated — silent fallback is now disabled")
 
 
+def mark_lakebase_deactivated() -> None:
+    """Call ONLY on a deliberate, operator-initiated disable.
+
+    Never call this from an error, timeout or connection-failure path. The flag
+    exists to FORBID silent fallback: once writes have gone to Lakebase, quietly
+    reading the local database returns stale or missing rows, which is the data
+    loss ``is_fallback_allowed`` was added to prevent.
+
+    A deliberate disable is the one case where that reasoning inverts — the
+    operator has asked for the local database, so it is authoritative again and
+    startup-mode fallback is correct. Nowhere else.
+    """
+    global _lakebase_ever_activated
+    _lakebase_ever_activated = False
+    logger.info(
+        "Lakebase marked as deactivated — local database is authoritative again"
+    )
+
+
 def record_successful_connection() -> None:
     """Call after each successful Lakebase session creation."""
     global _last_successful_connection
