@@ -120,19 +120,36 @@ export function useChatRunStream({ pendingActionsRef }: UseChatRunStreamArgs) {
     // pings like "Calling tools.", or echoed task descriptions) clutters the
     // chat; the real content lives in the preview pane.
     const chatBody = summarizeTaskOutput(displayContent, preview, taskName);
-    if (chatBody !== null) {
+    // This task's tokens already streamed into a bubble on screen, so the trace
+    // body would be a SECOND copy of the same answer. Skip it and let the bubble
+    // stand — completeExecution finalizes it in place (see `streamBubbleId`
+    // there). When nothing streamed this is false and the body posts as before,
+    // which is the only copy: streaming off, a non-streaming model, or the owner
+    // session off screen.
+    const alreadyStreamed = Boolean(jobId) && execState.hasStreamedTaskText(jobId!);
+    // The run already finalized, so this trace's output has been superseded by
+    // the final answer that is already on screen. `_relay_task_events` broadcasts
+    // task_completed from its own queue with NO DB id, so it escapes the trace
+    // de-dupe and routinely lands after completion — which printed the answer a
+    // second time, below the copy the reader had been reading.
+    const runFinalized = Boolean(jobId) && execState.isRunFinalized(jobId!);
+    if (chatBody !== null && !alreadyStreamed && !runFinalized) {
       // No label prefix: task_started already posted a header above this task's
       // streamed tokens. Repeating it here is what produced
       // "**<80 chars of prompt>** — <the same prompt again>".
       const alreadyHeaded = headedTasksRef.current.has(taskName);
-      const msg = alreadyHeaded ? chatBody : `**${cleanTaskLabel(taskName)}** — ${chatBody}`;
-      // Carry the uncapped text when this line is a PREVIEW. Only one message
-      // per run is ever expanded — the final answer, swapped in at completion —
-      // so every intermediate crew kept its preview permanently and its work
-      // could not be read at all. `chatBody` is what summarizeTaskOutput kept;
-      // when they differ, this line is a preview of something longer.
+      const withHeader = (text: string) =>
+        alreadyHeaded ? text : `**${cleanTaskLabel(taskName)}** — ${text}`;
+      const msg = withHeader(chatBody);
+      // Carry the uncapped text when this line is a PREVIEW. `chatBody` is what
+      // summarizeTaskOutput kept; when they differ, this line is a preview of
+      // something longer, and ChatMessage renders the uncapped text directly.
+      // It gets the SAME header as the preview — without that, showing the full
+      // text dropped the "**Task** — " prefix off every un-headed line.
       const capped = chatBody !== displayContent.trim();
-      const extra = capped ? { fullContent: displayContent } : undefined;
+      const extra = capped
+        ? { fullContent: withHeader(displayContent.trim()) }
+        : undefined;
       const messageId = ownerSession
         ? sessionStore.addMessageToTargetSession(ownerSession, 'assistant', msg, extra)
         : sessionStore.addMessage('assistant', msg, extra);

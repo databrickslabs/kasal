@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import ChatMessageComponent from './ChatMessage';
 
 vi.mock('../../store/executionStore', () => ({
@@ -10,10 +10,13 @@ vi.mock('../../store/sessionStore', () => ({
 }));
 
 /**
- * A run posts each crew's output as a capped preview, and exactly ONE message
- * per run is ever expanded — the final answer, swapped in at completion. So an
- * intermediate crew's work stayed at 2000 characters permanently, unreadable,
- * with nothing offering to open it.
+ * A run posts each crew's output as a capped preview, carrying the uncapped
+ * text alongside it as `fullContent`.
+ *
+ * That used to sit behind a "Show the full output" button, so a verbose step
+ * read as a truncated stub until someone thought to click. The full text now
+ * renders directly — `content` is only the fallback for messages that were
+ * never capped.
  */
 const base = {
   id: 'm1',
@@ -22,27 +25,39 @@ const base = {
   timestamp: new Date(),
 };
 
-describe('ChatMessage — opening a capped step preview', () => {
-  it('offers to open a preview and shows the uncapped text', () => {
+describe('ChatMessage — a capped step preview', () => {
+  it('renders the uncapped text with no interaction', () => {
     render(
       <ChatMessageComponent
         message={{ ...base, fullContent: 'THE WHOLE OUTPUT of the step' }}
       />,
     );
 
-    const toggle = screen.getByRole('button', { name: /full output/i });
-    expect(screen.queryByText(/THE WHOLE OUTPUT/)).not.toBeInTheDocument();
-
-    fireEvent.click(toggle);
-
     expect(screen.getByText(/THE WHOLE OUTPUT/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /show less/i })).toBeInTheDocument();
   });
 
-  it('offers nothing when the message is already complete', () => {
-    // The final answer is swapped in whole; it must not grow a pointless toggle.
+  it('never asks the reader to click for the rest', () => {
+    render(
+      <ChatMessageComponent
+        message={{ ...base, fullContent: 'THE WHOLE OUTPUT of the step' }}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('button', { name: /full output/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /show less/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows the capped preview only when nothing longer exists', () => {
+    // The final answer is swapped in whole and carries no fullContent.
     render(<ChatMessageComponent message={base} />);
 
-    expect(screen.queryByRole('button', { name: /full output/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/Catalog of Agentic AI Frameworks/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /full output/i }),
+    ).not.toBeInTheDocument();
   });
 });

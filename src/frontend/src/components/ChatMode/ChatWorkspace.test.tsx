@@ -58,6 +58,13 @@ const h = vi.hoisted(() => {
       activeExecution: null as unknown,
       selectedMcpServers: [] as string[],
       hasActiveExecution: vi.fn(() => false),
+      // False = nothing streamed, so a task_completed trace still posts its body.
+      // That is what these tests assert; when tokens HAVE streamed the body is
+      // skipped as a duplicate (see useChatRunStream).
+      hasStreamedTaskText: vi.fn(() => false),
+      // False = the run is still live, so a task_completed trace still posts its
+      // body. Once finalized the body is stale and is dropped (useChatRunStream).
+      isRunFinalized: vi.fn(() => false),
       setIsLoading: vi.fn(),
       setExecutionContext: vi.fn(),
       // Records which published capability a routed run used, so the answer

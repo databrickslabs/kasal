@@ -71,8 +71,6 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
 }) => {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
-  // Whether a capped step preview is showing its uncapped text.
-  const [expanded, setExpanded] = useState(false);
   // When THIS message's surface is open in the side pane, its inline copy hides
   // (it shows a compact "opened in panel" note instead) so it isn't visible twice.
   // ONE boolean selector scoped to this message: subscribing every bubble to the
@@ -352,7 +350,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
 
   if (isSystem) {
     return (
-      <div className="flex justify-center my-4 animate-fade-in">
+      <div className="flex justify-center my-4">
         <span
           className="text-[11px] px-3 py-1.5 rounded-full font-medium"
           style={{
@@ -369,7 +367,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
   if (isUser) {
     const attachments = message.attachments || [];
     return (
-      <div className="flex justify-end mb-5 px-4 animate-fade-in">
+      <div className="flex justify-end mb-5 px-4">
         <div className="max-w-[75%] flex flex-col items-end gap-1.5">
           <div
             className="rounded-3xl rounded-br-lg px-5 py-3"
@@ -403,7 +401,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
 
   // Assistant message
   return (
-    <div className="mb-5 px-4 animate-fade-in">
+    <div className="mb-5 px-4">
       <div className="max-w-[85%]">
         {/* Loading indicator */}
         {message.isStreaming && (
@@ -425,21 +423,12 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
 
         {message.content && (
           <div className="text-[15px] leading-[1.7]" style={{ color: 'var(--text-primary)' }}>
-            <MessageContent content={expanded && message.fullContent ? message.fullContent : message.content} />
-            {message.fullContent && (
-              // A step's output is posted as a preview so several verbose crews
-              // cannot bury the conversation — but only ONE message per run is
-              // ever expanded (the final answer), so an intermediate crew's work
-              // was unreadable with no way to open it.
-              <button
-                type="button"
-                onClick={() => setExpanded((v) => !v)}
-                className="mt-1 text-[13px] underline underline-offset-2"
-                style={{ color: 'var(--text-muted)' }}
-              >
-                {expanded ? 'Show less' : 'Show the full output'}
-              </button>
-            )}
+            {/* A step's output is posted CAPPED, with the uncapped text carried
+                alongside it as `fullContent`. It used to sit behind a "Show the
+                full output" button; now the full text renders directly, so a
+                verbose step is readable without a click. `content` is the capped
+                preview and is only used when nothing longer exists. */}
+            <MessageContent content={message.fullContent ?? message.content} />
           </div>
         )}
 
@@ -820,7 +809,7 @@ const TraceMessage: React.FC<{ data: TraceEntryData }> = ({ data }) => {
       : undefined;
   if (Inline) {
     return (
-      <div className="px-4 my-1 animate-fade-in">
+      <div className="px-4 my-1">
         <Inline
           detail={data.detail as string}
           label={data.label}
@@ -840,7 +829,7 @@ const TraceMessage: React.FC<{ data: TraceEntryData }> = ({ data }) => {
       : null;
 
   return (
-    <div className="px-4 my-1 animate-fade-in">
+    <div className="px-4 my-1">
       <button
         type="button"
         onClick={() => hasDetail && setOpen((v) => !v)}
@@ -973,7 +962,7 @@ export const TraceGroupMessage: React.FC<{ label: string; traces: TraceEntryData
   const anyPending = traces.some((t) => t.kind === 'tool_call' && t.durationMs === undefined);
 
   return (
-    <div className="px-4 my-1 animate-fade-in">
+    <div className="px-4 my-1">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

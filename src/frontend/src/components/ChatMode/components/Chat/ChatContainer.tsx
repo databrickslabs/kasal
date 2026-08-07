@@ -145,7 +145,7 @@ const RunProgress: React.FC<{
         : 'Run activity';
 
   return (
-    <div className="px-4 my-2 max-w-3xl animate-fade-in">
+    <div className="px-4 my-2 max-w-3xl">
       {/* No `overflow-hidden`: the crew card's Genie-space dropdown is an
           absolutely-positioned popover that must escape the container's bounds.
           The rounded border + bg already round the corners without clipping. */}

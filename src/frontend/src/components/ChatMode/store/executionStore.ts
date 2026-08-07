@@ -217,6 +217,27 @@ interface ExecutionActions {
    * every task's headers piled up after it.
    */
   closeStreamBubble: (jobId: string) => void;
+  /**
+   * Whether the CURRENT task's tokens are already on screen for this job —
+   * an open stream bubble, or text still queued in the pacer for one.
+   *
+   * A crew announces each task's answer twice: live as ``llm_chunk`` tokens,
+   * then again in the ``task_completed`` trace that carries the finished text.
+   * While the subprocess event pipe was broken only the second ever arrived, so
+   * rendering both looked correct. With streaming working, posting the trace
+   * body too prints every answer twice.
+   *
+   * False when nothing streamed — streaming off, a model that cannot stream, or
+   * the owner session off screen (``appendStreamChunk`` returns before opening a
+   * bubble). In all of those the trace body is the ONLY copy and must still post.
+   */
+  hasStreamedTaskText: (jobId: string) => boolean;
+  /**
+   * Whether this run already reached a terminal state. A `task_completed` trace
+   * that arrives afterwards carries output the final answer has superseded, so
+   * rendering it prints the answer twice.
+   */
+  isRunFinalized: (jobId: string) => boolean;
   // jobId routes the completion to the session that OWNS that job, so a run
   // finishing in a backgrounded session (parallel sessions) lands in the right
   // place instead of the single global slot. Omitting it keeps the legacy
@@ -294,6 +315,45 @@ const jobOwners = new Map<string, string>();
 // jobId -> message id of the live token-streaming bubble (SSE `llm_chunk`).
 // Same lifecycle discipline as jobOwners: entries die when the job finalizes.
 const streamBubbles = new Map<string, string>();
+
+// jobId -> the LAST bubble this job painted, kept across task boundaries.
+//
+// `streamBubbles` is emptied by closeStreamBubble at every boundary, so a run
+// whose final task had already closed its bubble reached completion with no
+// bubble to finalize — and posted the answer as a NEW message underneath the
+// streamed copy the reader was already looking at. `supersedeTruncatedTail`
+// could not save it either: that scan looks for a CAPPED tail, and a streamed
+// bubble holds the full text.
+//
+// Same reasoning as `streamBubbleSeq`, which already survives closes for the
+// same reason. Cleared wherever streamBubbles is cleared on a terminal path.
+const lastStreamBubble = new Map<string, string>();
+
+// jobIds that reached a TERMINAL state (completed or failed).
+//
+// `_relay_task_events` (agent_builder's process executor) broadcasts
+// `task_completed` — carrying the task's full output — from its own queue-driven
+// relay, with no DB id, so the frontend's trace de-dupe (which keys on the DB id)
+// cannot collapse it. It routinely lands AFTER the run has completed, and a task
+// body arriving then is stale by definition: the final answer is already on
+// screen. Posting it printed the answer a second time under the copy the reader
+// had been watching.
+//
+// Deliberately NOT "did this job ever stream": a later task that produced no
+// tokens still needs its body while the run is live. Bounded, and cleared on
+// abandon.
+const finalizedJobs = new Set<string>();
+const _MAX_FINALIZED_JOBS = 200;
+
+function markRunFinalized(jobId?: string): void {
+  if (!jobId) return;
+  finalizedJobs.add(jobId);
+  while (finalizedJobs.size > _MAX_FINALIZED_JOBS) {
+    const oldest = finalizedJobs.values().next().value;
+    if (oldest === undefined) break;
+    finalizedJobs.delete(oldest);
+  }
+}
 
 // jobId -> message id of the last TASK-OUTPUT line this run posted.
 //
@@ -495,6 +555,7 @@ function paintStreamText(jobId: string, text: string): void {
   streamBubbleSeq.set(jobId, seq);
   const bubbleId = `stream-${jobId}-${seq}`;
   streamBubbles.set(jobId, bubbleId);
+  lastStreamBubble.set(jobId, bubbleId);
   sessionStore.addMessage('assistant', text, { id: bubbleId, isStreaming: true });
 }
 
@@ -858,6 +919,13 @@ export const useExecutionStore = create<ExecutionStore>()(
     enqueueStreamText(jobId, chunk);
   },
 
+  isRunFinalized: (jobId) => Boolean(jobId) && finalizedJobs.has(jobId),
+
+  hasStreamedTaskText: (jobId) => {
+    if (!jobId) return false;
+    return Boolean(streamBubbles.get(jobId) || streamBuffers.get(jobId));
+  },
+
   closeStreamBubble: (jobId) => {
     if (!jobId) return;
     // Flush whatever is still buffered into the bubble before letting go of it,
@@ -866,6 +934,8 @@ export const useExecutionStore = create<ExecutionStore>()(
     const bubbleId = streamBubbles.get(jobId);
     if (!bubbleId) return;
     streamBubbles.delete(jobId);
+    // lastStreamBubble deliberately KEPT: completion folds the final answer into
+    // this bubble, and a boundary close must not hide it.
     useSessionStore.getState().updateMessage(bubbleId, { isStreaming: false });
   },
 
@@ -954,8 +1024,18 @@ export const useExecutionStore = create<ExecutionStore>()(
       jobId && ((streamBubbleSeq.get(jobId) ?? 0) > 0 || streamBuffers.get(jobId)),
     );
     if (jobId) discardStreamPacing(jobId, true);
-    const streamBubbleId = jobId ? streamBubbles.get(jobId) : undefined;
-    if (jobId) streamBubbles.delete(jobId);
+    // The live bubble, or the last one this job painted if a task boundary
+    // already closed it — otherwise the answer posts a second time below the
+    // streamed copy the reader has been watching.
+    const streamBubbleId = jobId
+      ? (streamBubbles.get(jobId) ?? lastStreamBubble.get(jobId))
+      : undefined;
+    if (jobId) {
+      streamBubbles.delete(jobId);
+      lastStreamBubble.delete(jobId);
+      // Terminal: a task_completed trace arriving after this is stale.
+      markRunFinalized(jobId);
+    }
     const currentSessionId = useSessionStore.getState().currentSessionId;
     const isViewingOwner = currentSessionId === ownerSession;
     const sessionStore = useSessionStore.getState();
@@ -1213,8 +1293,15 @@ export const useExecutionStore = create<ExecutionStore>()(
     }
     // Keep whatever streamed before the failure — it is often the only clue.
     if (jobId) discardStreamPacing(jobId, true);
-    const failStreamBubbleId = jobId ? streamBubbles.get(jobId) : undefined;
-    if (jobId) streamBubbles.delete(jobId);
+    const failStreamBubbleId = jobId
+      ? (streamBubbles.get(jobId) ?? lastStreamBubble.get(jobId))
+      : undefined;
+    if (jobId) {
+      streamBubbles.delete(jobId);
+      lastStreamBubble.delete(jobId);
+      // Terminal: a task_completed trace arriving after this is stale.
+      markRunFinalized(jobId);
+    }
     const currentSessionId = useSessionStore.getState().currentSessionId;
     const isViewingOwner = currentSessionId === ownerSession;
     const sessionStore = useSessionStore.getState();
@@ -1285,6 +1372,8 @@ export const useExecutionStore = create<ExecutionStore>()(
     // Abandoned: the run is gone, so queued text has nowhere to land.
     discardStreamPacing(jobId, false);
     streamBubbles.delete(jobId);
+    lastStreamBubble.delete(jobId);
+    finalizedJobs.delete(jobId);
     const ownerSession = jobOwners.get(jobId)!;
     jobOwners.delete(jobId);
 
@@ -1416,6 +1505,7 @@ export const useExecutionStore = create<ExecutionStore>()(
     jobOwners.delete(jobId);
     discardStreamPacing(jobId, false);
     streamBubbles.delete(jobId);
+    lastStreamBubble.delete(jobId);
   },
 
   stashSessionPreview: (sessionId: string, preview: PreviewContent) => {

@@ -186,3 +186,154 @@ describe('stream pacing', () => {
     expect(() => useExecutionStore.getState().closeStreamBubble('never-started')).not.toThrow();
   });
 });
+
+/**
+ * A crew announces each task's answer TWICE: live as `llm_chunk` tokens, then
+ * again in the `task_completed` trace carrying the finished text. While the
+ * subprocess event pipe was broken only the second arrived, so rendering both
+ * looked right — once streaming worked, every research answer printed twice.
+ *
+ * `hasStreamedTaskText` is the signal useChatRunStream uses to drop the trace
+ * body when the tokens are already on screen.
+ */
+describe('hasStreamedTaskText — the duplicate-answer guard', () => {
+  it('is false before anything streams', () => {
+    const { jobId } = startOwnedJob('job-dup-1');
+
+    expect(useExecutionStore.getState().hasStreamedTaskText(jobId)).toBe(false);
+  });
+
+  it('is true while the current task is streaming', () => {
+    const { jobId } = startOwnedJob('job-dup-2');
+
+    useExecutionStore.getState().appendStreamChunk(jobId, 'the answer');
+    drainFrames();
+
+    expect(useExecutionStore.getState().hasStreamedTaskText(jobId)).toBe(true);
+  });
+
+  it('is true for text still queued in the pacer, before it is painted', () => {
+    // The trace can land before the pacer has flushed. Reporting false there
+    // would post the body and THEN paint the same text under it.
+    const { jobId } = startOwnedJob('job-dup-3');
+
+    useExecutionStore.getState().appendStreamChunk(jobId, 'word '.repeat(200));
+
+    expect(useExecutionStore.getState().hasStreamedTaskText(jobId)).toBe(true);
+  });
+
+  it('goes false again once the bubble closes at a task boundary', () => {
+    // The NEXT task has not streamed yet, so its trace body must still post.
+    const { jobId } = startOwnedJob('job-dup-4');
+    useExecutionStore.getState().appendStreamChunk(jobId, 'task one output');
+    drainFrames();
+
+    useExecutionStore.getState().closeStreamBubble(jobId);
+
+    expect(useExecutionStore.getState().hasStreamedTaskText(jobId)).toBe(false);
+  });
+
+  it('is false for a job that never started', () => {
+    expect(useExecutionStore.getState().hasStreamedTaskText('never-started')).toBe(false);
+  });
+
+  it('marks the run finalized so a late task_completed is dropped', () => {
+    // `_relay_task_events` broadcasts task_completed — carrying the task's full
+    // output — from its own queue-driven relay with no DB id, so the frontend's
+    // trace de-dupe cannot collapse it, and it routinely lands after the run has
+    // completed. Completion clears both bubble maps, so a guard reading only
+    // those said "nothing streamed" and posted the answer a SECOND time under
+    // the copy the reader had been watching.
+    const { jobId } = startOwnedJob('job-late-1');
+    useExecutionStore.getState().appendStreamChunk(jobId, 'the answer');
+    drainFrames();
+    useExecutionStore.getState().completeExecution('the answer', jobId);
+    drainFrames();
+
+    // Not hasStreamedTaskText — that is per-TASK and correctly goes false at a
+    // boundary, so a later non-streaming task still gets its body while live.
+    expect(useExecutionStore.getState().isRunFinalized(jobId)).toBe(true);
+  });
+
+  it('is not finalized while the run is still going', () => {
+    const { jobId } = startOwnedJob('job-late-3');
+    useExecutionStore.getState().appendStreamChunk(jobId, 'partial');
+    drainFrames();
+
+    expect(useExecutionStore.getState().isRunFinalized(jobId)).toBe(false);
+  });
+
+  it('forgets a job that was abandoned', () => {
+    const { jobId } = startOwnedJob('job-late-2');
+    useExecutionStore.getState().appendStreamChunk(jobId, 'text');
+    drainFrames();
+
+    useExecutionStore.getState().abandonExecution(jobId);
+
+    expect(useExecutionStore.getState().isRunFinalized(jobId)).toBe(false);
+  });
+});
+
+/**
+ * The answer must appear ONCE.
+ *
+ * completeExecution finalizes the live stream bubble in place — but
+ * `closeStreamBubble` empties `streamBubbles` at every task boundary, so a run
+ * whose last task had already closed its bubble arrived at completion with none
+ * to finalize and posted the answer as a NEW message, directly beneath the
+ * streamed copy the reader had been watching.
+ *
+ * `supersedeTruncatedTail` could not cover it: that scan looks for a CAPPED
+ * tail, and a streamed bubble holds the full text. Hence `lastStreamBubble`,
+ * which survives boundary closes the way `streamBubbleSeq` already did.
+ */
+describe('completion folds into the streamed bubble', () => {
+  const ANSWER = "I'm doing well, thanks for asking!";
+  const copiesOf = (jobId: string) =>
+    paintedMessages().filter(
+      (m) => m.content.includes(ANSWER) && (m.id.includes(jobId) || !m.id.startsWith('stream-')),
+    );
+
+  it('prints once when the bubble is still open', () => {
+    const { jobId } = startOwnedJob('job-fold-1');
+    useExecutionStore.getState().appendStreamChunk(jobId, ANSWER);
+    drainFrames();
+
+    useExecutionStore.getState().completeExecution(ANSWER, jobId);
+    drainFrames();
+
+    expect(copiesOf(jobId)).toHaveLength(1);
+  });
+
+  it('prints once when a task boundary already closed the bubble', () => {
+    // The regression: this printed the answer twice.
+    const { jobId } = startOwnedJob('job-fold-2');
+    useExecutionStore.getState().appendStreamChunk(jobId, ANSWER);
+    drainFrames();
+    useExecutionStore.getState().closeStreamBubble(jobId);
+
+    useExecutionStore.getState().completeExecution(ANSWER, jobId);
+    drainFrames();
+
+    expect(copiesOf(jobId)).toHaveLength(1);
+  });
+
+  it('still posts the answer when nothing streamed at all', () => {
+    // Streaming off / non-streaming model: the terminal text is the ONLY copy,
+    // so the fold must not swallow it. Asserted on the target-session mock,
+    // which is where a message with an owner lands in this harness.
+    const { jobId } = startOwnedJob('job-fold-3');
+    const posted = (
+      useSessionStore as unknown as {
+        getState: () => { addMessageToTargetSession: { mock: { calls: unknown[][] } } };
+      }
+    ).getState().addMessageToTargetSession;
+    const before = posted.mock.calls.length;
+
+    useExecutionStore.getState().completeExecution(ANSWER, jobId);
+    drainFrames();
+
+    const added = posted.mock.calls.slice(before);
+    expect(added.some((c) => String(c[2] ?? '').includes(ANSWER))).toBe(true);
+  });
+});
