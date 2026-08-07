@@ -731,13 +731,13 @@ class TestFlowServiceNameUniqueness:
             MockRepository.return_value = mock_repo
             mock_repo.find_by_name_and_group.return_value = None  # No duplicate
             mock_repo.create.return_value = mock_flow
-            # Mock crew validation
-            with patch(
-                "src.repositories.crew_repository.CrewRepository"
-            ) as MockCrewRepo:
-                mock_crew_repo = AsyncMock()
-                MockCrewRepo.return_value = mock_crew_repo
-                mock_crew_repo.get.return_value = None
+            # Crews are CrewService's domain — flow_service goes through the
+            # SERVICE, so patch that. Patching CrewRepository at its definition
+            # site only worked while catalog.crews had not been imported yet.
+            with patch("src.services.catalog.crews.CrewService") as MockCrewService:
+                mock_crew_service = AsyncMock()
+                MockCrewService.return_value = mock_crew_service
+                mock_crew_service.get.return_value = None
 
                 flow_create = FlowCreate(**flow_create_data)
                 result = await flow_service.create_flow_with_group(

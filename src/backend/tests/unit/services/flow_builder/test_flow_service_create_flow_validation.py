@@ -143,12 +143,14 @@ async def test_create_flow_with_group_crew_not_found():
     svc = make_service()
     group_ctx = make_group_context()
 
-    import src.repositories.crew_repository as crew_repo_mod
-
-    orig_crew_repo = crew_repo_mod.CrewRepository
-
-    mock_crew_repo_instance = AsyncMock()
-    mock_crew_repo_instance.get = AsyncMock(return_value=None)
+    # Crews are CrewService's domain — flow_service goes through the SERVICE, so
+    # patch that, not CrewRepository. Patching the repository at its definition
+    # site only worked while catalog.crews had not been imported yet: that module
+    # binds CrewRepository at import time, so once anything else in the suite
+    # imported it first the patch missed, a real repository was built on the mock
+    # session, and result.scalars() came back a coroutine.
+    mock_crew_service = AsyncMock()
+    mock_crew_service.get = AsyncMock(return_value=None)
 
     with patch("src.services.flow_builder.flow_service.FlowRepository") as MockFlowRepo:
         flow_repo = AsyncMock()
@@ -156,14 +158,14 @@ async def test_create_flow_with_group_crew_not_found():
         flow_repo.create = AsyncMock(return_value=make_flow())
         MockFlowRepo.return_value = flow_repo
 
-        crew_repo_mod.CrewRepository = lambda s: mock_crew_repo_instance
-        try:
+        with patch(
+            "src.services.catalog.crews.CrewService", return_value=mock_crew_service
+        ):
             flow_in = make_flow_create(crew_id=str(uuid.uuid4()))
             result = await svc.create_flow_with_group(flow_in, group_ctx)
-        finally:
-            crew_repo_mod.CrewRepository = orig_crew_repo
 
     assert result is not None
+    mock_crew_service.get.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -172,13 +174,10 @@ async def test_create_flow_with_group_crew_found():
     group_ctx = make_group_context()
     crew_id = str(uuid.uuid4())
 
-    import src.repositories.crew_repository as crew_repo_mod
-
-    orig_crew_repo = crew_repo_mod.CrewRepository
-
+    # See the note above: patch the SERVICE flow_service calls, not the repository.
     mock_crew = MagicMock()
-    mock_crew_repo_instance = AsyncMock()
-    mock_crew_repo_instance.get = AsyncMock(return_value=mock_crew)
+    mock_crew_service = AsyncMock()
+    mock_crew_service.get = AsyncMock(return_value=mock_crew)
 
     with patch("src.services.flow_builder.flow_service.FlowRepository") as MockFlowRepo:
         flow_repo = AsyncMock()
@@ -186,14 +185,15 @@ async def test_create_flow_with_group_crew_found():
         flow_repo.create = AsyncMock(return_value=make_flow(crew_id=crew_id))
         MockFlowRepo.return_value = flow_repo
 
-        crew_repo_mod.CrewRepository = lambda s: mock_crew_repo_instance
-        try:
+        with patch(
+            "src.services.catalog.crews.CrewService", return_value=mock_crew_service
+        ):
             flow_in = make_flow_create(crew_id=crew_id)
             result = await svc.create_flow_with_group(flow_in, group_ctx)
-        finally:
-            crew_repo_mod.CrewRepository = orig_crew_repo
 
     assert result is not None
+    # FlowCreate coerces crew_id to a UUID, so that is what reaches the service.
+    mock_crew_service.get.assert_awaited_once_with(uuid.UUID(crew_id))
 
 
 @pytest.mark.asyncio
