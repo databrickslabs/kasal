@@ -168,9 +168,6 @@ def _deep_run_extended(
     )
     all_patches.append(patch("src.utils.user_context.UserContext", mock_uc))
     all_patches.append(
-        patch("src.db.session.safe_async_session", return_value=mock_session_cm)
-    )
-    all_patches.append(
         patch("src.db.session.async_session_factory", return_value=mock_session_cm)
     )
     all_patches.append(

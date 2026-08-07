@@ -281,6 +281,58 @@ class TestTheIndirectSnapshotPathIsGone:
         )
 
 
+class TestTheSafeWrapperIsGone:
+    """``safe_async_session`` no longer exists, and must not come back.
+
+    The third helper, and the same shape as ``request_scoped_session``: a name
+    that reads as the careful option (it swallowed the stale-connection error
+    from ``session.close()`` in crew/flow subprocess teardown) wrapped around
+    the raw per-process SNAPSHOT factory. So every caller it ever had was an
+    unrouted read wearing a reassuring name.
+
+    It reached zero callers in ``src/`` without anyone noticing, because eleven
+    ``patch("src.db.session.safe_async_session", ...)`` in the flow-executor
+    tests kept it LOOKING alive while patching a name the code under test no
+    longer touched. Those patches went with it. That is the failure mode this
+    file exists to catch: a session helper whose tests pass and whose product
+    code is gone.
+    """
+
+    def test_the_helper_is_not_reintroduced(self):
+        from src.db import session as session_module
+
+        assert not hasattr(session_module, "safe_async_session"), (
+            "safe_async_session is back. It wrapped the snapshot factory, so "
+            "outside a request every caller read the wrong database after a "
+            "runtime /lakebase/enable — silently. Use routed_scoped_session(), "
+            "or get_isolated_db_session() if the work needs a private "
+            "connection on SQLite."
+        )
+
+    def test_nothing_calls_or_patches_it(self):
+        """Including TESTS. A patch on a dead name is an assertion about nothing.
+
+        Widened past ``test_nothing_calls_or_imports_it`` on purpose: the src
+        callers had already gone, and it was the surviving test patches alone
+        that made the helper look load-bearing.
+        """
+        tests_root = BACKEND_SRC.parent / "tests"
+        offenders = []
+        for path in [*_source_files(), *sorted(tests_root.rglob("*.py"))]:
+            if "__pycache__" in path.parts or path.name == pathlib.Path(__file__).name:
+                continue
+            for i, line in enumerate(path.read_text().splitlines(), 1):
+                if "safe_async_session" not in line:
+                    continue
+                if line.lstrip().startswith("#"):
+                    continue  # history in a comment, fine
+                offenders.append(f"{path.name}:{i}")
+        assert not offenders, (
+            f"{offenders} call, import or patch safe_async_session, which no "
+            "longer exists — these fail at import, or silently patch nothing."
+        )
+
+
 class TestTheListItselfStaysHonest:
     """An allowlist rots two ways: stale entries, and entries that stop routing."""
 

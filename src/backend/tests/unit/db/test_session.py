@@ -2,7 +2,7 @@
 Unit tests for database session module.
 
 Tests session factory configuration, engine creation helpers,
-identifier validation, safe_async_session, and get_db.
+identifier validation, and get_db.
 """
 
 import os
@@ -126,69 +126,6 @@ class TestGetSqliteConnectArgs:
         """Test that non-SQLite URIs return empty dict."""
         args = get_sqlite_connect_args("postgresql+asyncpg://user" ":pass@host/db")
         assert args == {}
-
-
-# ---------------------------------------------------------------------------
-# safe_async_session tests
-# ---------------------------------------------------------------------------
-class TestSafeAsyncSession:
-    """Tests for the safe_async_session context manager."""
-
-    @pytest.mark.asyncio
-    async def test_yields_session_and_closes(self):
-        """Test that safe_async_session yields a session and closes it."""
-        mock_session = AsyncMock()
-        mock_factory = MagicMock(return_value=mock_session)
-
-        with patch("src.db.session.async_session_factory", mock_factory):
-            from src.db.session import safe_async_session
-
-            async with safe_async_session() as session:
-                assert session is mock_session
-
-            mock_session.close.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_suppresses_close_errors(self):
-        """Test that close errors are suppressed (stale connections)."""
-        mock_session = AsyncMock()
-        mock_session.close.side_effect = Exception("no active connection")
-        mock_factory = MagicMock(return_value=mock_session)
-
-        with patch("src.db.session.async_session_factory", mock_factory):
-            from src.db.session import safe_async_session
-
-            async with safe_async_session() as session:
-                assert session is mock_session
-
-    @pytest.mark.asyncio
-    async def test_propagates_body_exceptions(self):
-        """Test that exceptions inside the with-block propagate normally."""
-        mock_session = AsyncMock()
-        mock_factory = MagicMock(return_value=mock_session)
-
-        with patch("src.db.session.async_session_factory", mock_factory):
-            from src.db.session import safe_async_session
-
-            with pytest.raises(ValueError, match="test error"):
-                async with safe_async_session():
-                    raise ValueError("test error")
-
-            mock_session.close.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_close_error_during_body_exception(self):
-        """Test body exception propagates even when close also fails."""
-        mock_session = AsyncMock()
-        mock_session.close.side_effect = Exception("stale connection")
-        mock_factory = MagicMock(return_value=mock_session)
-
-        with patch("src.db.session.async_session_factory", mock_factory):
-            from src.db.session import safe_async_session
-
-            with pytest.raises(RuntimeError, match="body error"):
-                async with safe_async_session():
-                    raise RuntimeError("body error")
 
 
 # ---------------------------------------------------------------------------

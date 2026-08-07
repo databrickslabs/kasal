@@ -644,25 +644,18 @@ if not str(settings.DATABASE_URI).startswith("sqlite"):
     )
 
 
-@asynccontextmanager
-async def safe_async_session():
-    """Create an async session that suppresses cleanup errors.
-
-    Use this in long-running subprocess operations (crew/flow execution)
-    where SQLite connections may go stale after the greenlet context is lost
-    during long-running CrewAI operations. The normal ``async with
-    async_session_factory() as session:`` pattern raises
-    ``sqlite3.OperationalError: no active connection`` in ``__aexit__``
-    when the underlying connection has become invalid.
-    """
-    session = async_session_factory()
-    try:
-        yield session
-    finally:
-        try:
-            await session.close()
-        except Exception:
-            pass
+# (was: ``safe_async_session`` — a third session helper, now DELETED.)
+# It wrapped the raw ``async_session_factory`` and swallowed errors from
+# ``session.close()``, for crew/flow subprocess work where a SQLite connection
+# went stale after the greenlet context was lost. It had no caller left in
+# ``src/`` — only its own tests, plus eleven ``patch("src.db.session.
+# safe_async_session", ...)`` in the flow-executor tests that were patching a
+# name the code under test no longer touched, i.e. asserting nothing. That is
+# the same failure mode ``request_scoped_session`` had: a helper that reads as
+# the careful option, keeps a per-process SNAPSHOT of the factory underneath,
+# and stays alive because its tests still pass. Two helpers remain by design —
+# ``routed_scoped_session`` (the default) and ``get_isolated_db_session``
+# (connection isolation on SQLite). Do not add a third.
 
 
 # ── Isolated DB session on a PRIVATE connection ───────────────────────────
