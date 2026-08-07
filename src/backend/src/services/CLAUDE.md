@@ -102,9 +102,11 @@ each has an AST check in `tests/unit/architecture/`:
 - **A service should not build queries, and should not persist rows.**
   Repositories own both; a service holds a session only for transaction control
   (`commit`/`rollback`). `test_service_query_construction.py` checks two things:
-  - *queries* (`session.execute`, `select(...)`) — a RATCHET, down to **2** files,
-    both of which are the DEAD post-subprocess log writers and should be deleted
-    rather than refactored.
+  - *queries* (`session.execute`, `select(...)`) — **zero, no baseline.** This was
+    a ratchet; it is now a hard ban. Four offenders moved their SQL into a
+    repository, and the last two — the DEAD post-subprocess log writers — were
+    DELETED rather than refactored, since neither was reachable from `src/`.
+    Keep `_BASELINE` empty.
   - *ORM writes* (`session.add/add_all/delete/merge`) — **zero, no baseline.** This
     is the half a query check cannot see: ten services were persisting rows with no
     SQL in sight while the query ratchet reported six offenders. It skips modules
@@ -311,9 +313,16 @@ than merely entrenched:
   database is their job
 - **`services/databricks/lakebase/`** — connects TO Lakebase to test and migrate
   it, so it cannot ask the router for a session to the thing it is setting up
-- **the post-subprocess log flush** (`execution/logs/db_handler`,
-  `flow_builder/process_executor`) — runs after the subprocess event loop is gone,
-  with no router context left to borrow
+
+The **post-subprocess log flush** (`execution/logs/db_handler`,
+`flow_builder/process_executor._write_logs_postgres_async`) used to be on that
+list, justified as running after the subprocess event loop is gone. It is not
+there any more, because neither was reachable: the handler was never instantiated
+in `src/` and the writer had no caller outside tests, while both built an engine
+against the LOCAL database with no Lakebase awareness — i.e. each was a latent
+split of exactly the kind this check exists to catch, not an exception to it.
+Both have been DELETED. The live logs path is queue -> writer, and `writer.py`
+routes through `get_smart_db_session`.
 
 Adding to that list needs a reason in review. The whole value of the check is that
 it fails on a new one.
