@@ -6,6 +6,7 @@ import type { DeckTheme } from './deckThemes'
 import { readableTextOn, seriesFromAccent } from './deckThemes'
 import { resolveValue } from '../resolve'
 import { normSlideSources } from './slideSources'
+import { addDiagramToSlide, pptxHex } from './pptxDiagram'
 
 function triggerDownload(href: string, filename: string) {
   const a = document.createElement('a')
@@ -138,207 +139,60 @@ function chartSpec(node: ComponentNode, resolve: (v: unknown) => unknown) {
   return { kind, series }
 }
 
-// ---- Diagram → native PowerPoint shapes ------------------------------------
-// Mirrors the renderer's archetype layouts with editable pptxgenjs shapes, so
-// exported decks keep their diagrams instead of silently dropping them.
-type PptxSlide = { addText: (...a: any[]) => unknown; addShape: (...a: any[]) => unknown }
+// PowerPoint's own "shrink text on overflow", the exported counterpart to the
+// renderer's `FitBox`. A slide box here has a FIXED height in inches, so a body
+// that needs more lines than fit would otherwise spill over the next element (or
+// the sources footer) in the opened .pptx.
+//
+// `fit` ONLY — do NOT also pass the deprecated `shrinkText: true`. Both emit
+// `<a:normAutofit/>`, and two of them inside one `<a:bodyPr>` violates the schema:
+// PowerPoint then refuses the whole file with "found a problem with content …
+// attempt to repair", which is indistinguishable from a corrupt download.
+const SHRINK_TO_FIT = { fit: 'shrink' as const }
 
-interface DiagramExportItem {
-  label: string
-  detail?: string
-  value?: string
-  points: string[]
-  children: DiagramExportItem[]
-}
-
-function normDiagramExportItems(v: unknown): DiagramExportItem[] {
-  const arr = Array.isArray(v) ? v : []
-  return arr
-    .map((it): DiagramExportItem => {
-      if (it && typeof it === 'object') {
-        const o = it as Record<string, any>
-        const points = (Array.isArray(o.points) ? o.points : Array.isArray(o.bullets) ? o.bullets : Array.isArray(o.items) ? o.items : [])
-          .map((p: unknown) => String(p ?? '').trim())
-          .filter(Boolean)
-        return {
-          label: String(o.label ?? o.title ?? o.name ?? o.step ?? o.text ?? '').trim(),
-          detail: String(o.detail ?? o.description ?? o.subtitle ?? o.date ?? '').trim() || undefined,
-          value: String(o.value ?? '').trim() || undefined,
-          points,
-          children: normDiagramExportItems(o.children),
-        }
-      }
-      return { label: String(it ?? '').trim(), points: [], children: [] }
-    })
-    .filter((it) => it.label)
-}
-
-// PPTX wants "RRGGBB"; series colors come from seriesFromAccent (always hex).
-const pptxHex = (c: string, fallback: string) => {
-  const m = /^#?([0-9a-fA-F]{6})$/.exec((c || '').trim())
-  return m ? m[1] : fallback
-}
-
-function addDiagramToSlide(
-  slide: PptxSlide,
-  node: ComponentNode,
-  resolve: (v: unknown) => unknown,
-  theme: { accent: string; bodyC: string; mutedC: string; panelBorderC: string },
-  area: { x: number; y: number; w: number; h: number },
-) {
-  const raw = String(node.archetype ?? 'process').toLowerCase().replace(/[\s_-]/g, '')
-  const archetype =
-    raw === 'matrix' || raw === 'quadrant' ? 'matrix2x2'
-    : raw === 'org' || raw === 'orgchart' || raw === 'tree' ? 'hierarchy'
-    : raw === 'versus' || raw === 'vs' ? 'comparison'
-    : raw === 'loop' ? 'cycle'
-    : raw === 'flow' || raw === 'flowchart' || raw === 'steps' ? 'process'
-    : raw === 'milestones' || raw === 'roadmap' ? 'timeline'
-    : raw === 'pipeline' ? 'funnel'
-    : raw
-  const items = normDiagramExportItems(resolve(node.items))
-  if (!items.length) return
-  const colors = seriesFromAccent(theme.accent, Math.max(items.length, 2))
-  const colorAt = (i: number) => pptxHex(colors[i % colors.length], '2563EB')
-  const onColor = (i: number) => pptxHex(readableTextOn(colors[i % colors.length]), 'FFFFFF')
-  const { x, y, w, h } = area
-  const n = items.length
-
-  if (archetype === 'timeline') {
-    const midY = y + h * 0.45
-    const colW = w / n
-    slide.addShape('line', { x, y: midY, w, h: 0, line: { color: theme.panelBorderC, width: 1.5 } })
-    items.forEach((it, i) => {
-      const cx = x + colW * (i + 0.5)
-      slide.addShape('ellipse', { x: cx - 0.09, y: midY - 0.09, w: 0.18, h: 0.18, fill: { color: colorAt(i) } })
-      slide.addText(it.label, { x: cx - colW / 2 + 0.05, y: midY + 0.2, w: colW - 0.1, h: 0.4, fontSize: 13, bold: true, color: theme.bodyC, align: 'center' })
-      if (it.detail) slide.addText(it.detail, { x: cx - colW / 2 + 0.05, y: midY + 0.62, w: colW - 0.1, h: 0.6, fontSize: 10, color: theme.mutedC, align: 'center', valign: 'top' })
-    })
-    return
-  }
-
-  if (archetype === 'funnel' || archetype === 'pyramid') {
-    const rowH = Math.min(0.7, (h - 0.1 * (n - 1)) / n)
-    items.forEach((it, i) => {
-      const pct = archetype === 'funnel' ? 1 - (i * 0.55) / Math.max(n - 1, 1) : 0.42 + (i * 0.58) / Math.max(n - 1, 1)
-      const rw = w * pct
-      const rx = x + (w - rw) / 2
-      const ry = y + i * (rowH + 0.1)
-      slide.addShape('roundRect', { x: rx, y: ry, w: rw, h: rowH, fill: { color: colorAt(i) }, rectRadius: 0.05 })
-      const label = it.value ? `${it.label} — ${it.value}` : it.label
-      slide.addText(label, { x: rx, y: ry, w: rw, h: rowH, fontSize: 13, bold: true, color: onColor(i), align: 'center', valign: 'middle' })
-    })
-    return
-  }
-
-  if (archetype === 'comparison') {
-    const cols = items.slice(0, 3)
-    const gap = 0.4
-    const colW = (w - gap * (cols.length - 1)) / cols.length
-    cols.forEach((it, i) => {
-      const cx = x + i * (colW + gap)
-      slide.addShape('roundRect', { x: cx, y, w: colW, h: 0.55, fill: { color: colorAt(i) }, rectRadius: 0.04 })
-      slide.addText(it.label, { x: cx, y, w: colW, h: 0.55, fontSize: 14, bold: true, color: onColor(i), align: 'center', valign: 'middle' })
-      slide.addShape('roundRect', { x: cx, y: y + 0.65, w: colW, h: Math.max(h - 0.75, 0.6), fill: { color: 'FFFFFF', transparency: 100 }, line: { color: theme.panelBorderC, width: 1 }, rectRadius: 0.04 })
-      if (it.points.length) {
-        slide.addText(
-          it.points.map((p) => ({ text: p, options: { bullet: { code: '2022', indent: 12 }, breakLine: true, paraSpaceAfter: 6 } })),
-          { x: cx + 0.15, y: y + 0.8, w: colW - 0.3, h: Math.max(h - 1.0, 0.5), fontSize: 12, color: theme.bodyC, valign: 'top' },
-        )
-      }
-    })
-    return
-  }
-
-  if (archetype === 'matrix2x2') {
-    const quads = items.slice(0, 4)
-    const gap = 0.15
-    const qw = (w - gap) / 2
-    const qh = (h - gap - 0.4) / 2
-    quads.forEach((it, i) => {
-      const qx = x + (i % 2) * (qw + gap)
-      const qy = y + Math.floor(i / 2) * (qh + gap)
-      slide.addShape('roundRect', { x: qx, y: qy, w: qw, h: qh, fill: { color: 'FFFFFF', transparency: 100 }, line: { color: colorAt(i), width: 1.75 }, rectRadius: 0.04 })
-      slide.addText(
-        [
-          { text: it.label, options: { bold: true, fontSize: 13, breakLine: true } },
-          ...(it.detail ? [{ text: it.detail, options: { fontSize: 10.5, color: theme.mutedC } }] : []),
-        ],
-        { x: qx + 0.12, y: qy + 0.1, w: qw - 0.24, h: qh - 0.2, color: theme.bodyC, valign: 'top' },
-      )
-    })
-    const xLabel = String(node.xLabel ?? '').trim()
-    if (xLabel) slide.addText(`${xLabel} →`, { x, y: y + h - 0.35, w, h: 0.3, fontSize: 10, bold: true, color: theme.mutedC, align: 'center' })
-    const yLabel = String(node.yLabel ?? '').trim()
-    if (yLabel) slide.addText(`${yLabel} →`, { x: x - 0.4, y: y + h / 2 - 0.15, w: 1.4, h: 0.3, fontSize: 10, bold: true, color: theme.mutedC, align: 'center', rotate: 270 })
-    return
-  }
-
-  if (archetype === 'hierarchy') {
-    const root = items[0]
-    const children = root.children.length ? root.children : items.slice(1)
-    const rw = Math.min(3.2, w * 0.4)
-    const rx = x + (w - rw) / 2
-    slide.addShape('roundRect', { x: rx, y, w: rw, h: 0.55, fill: { color: pptxHex(theme.accent, '2563EB') }, rectRadius: 0.05 })
-    slide.addText(root.label, { x: rx, y, w: rw, h: 0.55, fontSize: 14, bold: true, color: pptxHex(readableTextOn(theme.accent), 'FFFFFF'), align: 'center', valign: 'middle' })
-    if (children.length) {
-      const gap = 0.25
-      const cw = (w - gap * (children.length - 1)) / children.length
-      const cy = y + 1.1
-      children.forEach((ch, i) => {
-        const cx = x + i * (cw + gap)
-        slide.addShape('line', { x: cx + cw / 2, y: y + 0.55, w: 0, h: cy - y - 0.55, line: { color: theme.panelBorderC, width: 1 } })
-        slide.addShape('roundRect', { x: cx, y: cy, w: cw, h: 0.5, fill: { color: 'FFFFFF', transparency: 100 }, line: { color: colorAt(i), width: 1.5 }, rectRadius: 0.04 })
-        slide.addText(ch.label, { x: cx, y: cy, w: cw, h: 0.5, fontSize: 12, bold: true, color: theme.bodyC, align: 'center', valign: 'middle' })
-        if (ch.children.length) {
-          slide.addText(
-            ch.children.map((g) => ({ text: g.label, options: { bullet: { code: '2022', indent: 10 }, breakLine: true, paraSpaceAfter: 4 } })),
-            { x: cx + 0.08, y: cy + 0.6, w: cw - 0.16, h: Math.max(y + h - (cy + 0.65), 0.4), fontSize: 10.5, color: theme.mutedC, valign: 'top' },
-          )
-        }
-      })
-    }
-    return
-  }
-
-  if (archetype === 'cycle') {
-    const cx = x + w / 2
-    const cy = y + h / 2
-    const rx = w * 0.38
-    const ry = h * 0.36
-    const bw = 1.9
-    const bh = 0.5
-    items.forEach((it, i) => {
-      const a = (2 * Math.PI * i) / n - Math.PI / 2
-      const px = cx + rx * Math.cos(a) - bw / 2
-      const py = cy + ry * Math.sin(a) - bh / 2
-      slide.addShape('roundRect', { x: px, y: py, w: bw, h: bh, fill: { color: 'FFFFFF', transparency: 100 }, line: { color: colorAt(i), width: 1.5 }, rectRadius: 0.25 })
-      slide.addText(`${i + 1}. ${it.label}`, { x: px, y: py, w: bw, h: bh, fontSize: 11.5, bold: true, color: theme.bodyC, align: 'center', valign: 'middle' })
-    })
-    slide.addText('⟳', { x: cx - 0.4, y: cy - 0.4, w: 0.8, h: 0.8, fontSize: 40, color: theme.mutedC, align: 'center', valign: 'middle' })
-    return
-  }
-
-  // process (default): a chevron ribbon with the label inside each step.
-  const gap = 0.06
-  const stepW = (w - gap * (n - 1)) / n
-  const stepH = Math.min(1.1, h * 0.55)
-  const sy = y + (h - stepH) / 2 - 0.2
-  items.forEach((it, i) => {
-    const sx = x + i * (stepW + gap)
-    slide.addShape('chevron', { x: sx, y: sy, w: stepW, h: stepH, fill: { color: colorAt(i) } })
-    slide.addText(
-      [
-        { text: `STEP ${i + 1}`, options: { fontSize: 8.5, bold: true, breakLine: true } },
-        { text: it.label, options: { fontSize: 12, bold: true } },
-      ],
-      { x: sx + 0.08, y: sy, w: stepW - 0.16, h: stepH, color: onColor(i), align: 'center', valign: 'middle' },
+// …and `fit` alone is NOT enough for a body that is already too long. A bare
+// `<a:normAutofit/>` records the INTENT to shrink but carries no fontScale, and
+// PowerPoint only computes one when the text is next edited — so on first open the
+// box renders at full size and, with `valign: 'middle'`, overflows BOTH ends: over
+// the title above and the sources footer below. That is the "text on top of the
+// title" in the exported deck.
+//
+// So size the text here, from the geometry we already know. Deliberately crude —
+// average character width and line height as fractions of the point size — because
+// the alternative is measuring text in a DOM this export path does not have. It
+// only ever shrinks, so a slide that already fits is untouched.
+//
+// The constants are tuned to OVER-estimate. Under-estimating puts text through the
+// sources footer, which is the visible bug; over-estimating just leaves a slide
+// slightly roomier than it had to be. An earlier pass used 0.5/1.42 and forgot
+// paragraph spacing entirely, so it chose 19pt where 16pt was the real limit and
+// the body still ran off the box.
+const AVG_CHAR_W = 0.55  // mean glyph advance ÷ font size, for a humanist sans
+const LINE_H = 1.3       // the `lineSpacingMultiple` used on these bodies
+const LINE_PAD = 1.2     // ascent/descent slack the line box adds on top of that
+export function fitFontSize(
+  lines: string[],
+  boxW: number,
+  boxH: number,
+  desired: number,
+  min = 8,
+  /** Per-paragraph spacing in POINTS — `paraSpaceAfter`, which also costs height. */
+  paraSpace = 12,
+): number {
+  const heightAt = (size: number) => {
+    const perLine = Math.max(Math.floor((boxW * 72) / (size * AVG_CHAR_W)), 8)
+    const wrapped = lines.reduce(
+      (total, t) => total + Math.max(Math.ceil(t.length / perLine), 1),
+      0,
     )
-    if (it.detail) {
-      slide.addText(it.detail, { x: sx, y: sy + stepH + 0.08, w: stepW, h: 0.55, fontSize: 9.5, color: theme.mutedC, align: 'center', valign: 'top' })
-    }
-  })
+    return (wrapped * size * LINE_H * LINE_PAD + lines.length * paraSpace) / 72
+  }
+  for (let size = desired; size > min; size -= 0.5) {
+    if (heightAt(size) <= boxH) return size
+  }
+  return min
 }
+
 
 export async function downloadPptx(
   surface: Surface,
@@ -356,6 +210,11 @@ export async function downloadPptx(
   const kickerC = hex(theme?.kicker, '2563EB')
   const accentC = hex(theme?.accent, '2563EB')
   const mutedC = hex(theme?.muted, dark ? '9AA4B2' : '6B7280')
+  // Panel fill for the 'boxes' grid, matching the renderer's themed panels. The
+  // theme's `panel` is often an rgba()/gradient the PPTX color parser cannot take,
+  // so `hex` falls back to a flat tone that reads correctly on either background.
+  const panelC = hex(theme?.panel, dark ? '1B2430' : 'F3F5F7')
+  const panelBorderC = dark ? '333C45' : 'E2E6EA'
 
   const byId = Object.fromEntries((surface.components || []).map((c) => [c.id, c]))
   const resolve = (v: unknown) => resolveValue(v, surface.dataModel ?? {})
@@ -377,6 +236,8 @@ export async function downloadPptx(
     if (notes) slide.addNotes(notes)
     // Citations as a footer band, mirroring the on-screen sources footer.
     const srcs = normSlideSources(resolve(node?.sources))
+    // Body layouts below must stop above this band; see `areaBottom`.
+    const hasSources = srcs.length > 0
     if (srcs.length) {
       slide.addText(
         `Sources — ${srcs.map((s, i) => `${i + 1}. ${s.label}`).join('    ')}`,
@@ -387,10 +248,10 @@ export async function downloadPptx(
     // Centered title / section divider (mirrors the renderer's centered layout).
     if (variant === 'title' || variant === 'section') {
       if (kicker) slide.addText(kicker.toUpperCase(), { x: 0.6, y: 2.0, w: 12.1, h: 0.4, fontSize: 14, bold: true, color: kickerC, align: 'center', charSpacing: 3 })
-      if (title) slide.addText(title, { x: 0.8, y: 2.5, w: 11.7, h: 1.8, fontSize: 44, bold: true, color: titleC, align: 'center' })
+      if (title) slide.addText(title, { x: 0.8, y: 2.5, w: 11.7, h: 1.8, fontSize: 44, bold: true, color: titleC, align: 'center', ...SHRINK_TO_FIT })
       slide.addShape('rect', { x: 5.92, y: 4.55, w: 1.5, h: 0.06, fill: { color: accentC } })
       const sub = String(resolve(node?.subtitle) ?? '').trim()
-      if (sub) slide.addText(sub, { x: 1.5, y: 4.85, w: 10.3, h: 1.2, fontSize: 20, color: mutedC, align: 'center' })
+      if (sub) slide.addText(sub, { x: 1.5, y: 4.85, w: 10.3, h: 1.2, fontSize: 20, color: mutedC, align: 'center', ...SHRINK_TO_FIT })
       continue
     }
 
@@ -402,7 +263,7 @@ export async function downloadPptx(
       y += 0.45
     }
     if (title) {
-      slide.addText(title, { x: 0.6, y, w: 12.1, h: 0.95, fontSize: 32, bold: true, color: titleC })
+      slide.addText(title, { x: 0.6, y, w: 12.1, h: 0.95, fontSize: 32, bold: true, color: titleC, ...SHRINK_TO_FIT })
       y += 1.0
     }
     slide.addShape('rect', { x: 0.62, y: y - 0.1, w: 0.9, h: 0.06, fill: { color: accentC } })
@@ -414,13 +275,31 @@ export async function downloadPptx(
     if (variant === 'kpi-split') {
       const kvs = (node?.children || []).map((id) => byId[id]).filter((n) => n && n.component === 'KeyValue')
       if (kvs.length) {
-        const tileW = 12.1 / kvs.length
+        // Panels with the label pinned to the BOTTOM, mirroring the renderer. The
+        // old version was bare text at a fixed 26pt, so a long value
+        // ("0.168 toe per 000 USD (PPP, 2023)") wrapped over its neighbour and
+        // dragged its label down out of line with the rest of the row.
+        const gap = 0.18
+        const bandH = 1.15
+        const tileW = (12.1 - gap * (kvs.length - 1)) / kvs.length
         kvs.forEach((kv, i) => {
-          const vx = 0.6 + i * tileW
-          slide.addText(String(resolve(kv.value) ?? ''), { x: vx, y, w: tileW - 0.2, h: 0.6, fontSize: 26, bold: true, color: accentC })
-          slide.addText(String(resolve(kv.label) ?? ''), { x: vx, y: y + 0.6, w: tileW - 0.2, h: 0.45, fontSize: 11, color: bodyC })
+          const vx = 0.6 + i * (tileW + gap)
+          const value = String(resolve(kv.value) ?? '')
+          slide.addShape('roundRect', {
+            x: vx, y, w: tileW, h: bandH,
+            fill: { color: panelC }, line: { color: panelBorderC, width: 1 }, rectRadius: 0.06,
+          })
+          slide.addText(value, {
+            x: vx + 0.14, y: y + 0.1, w: tileW - 0.28, h: bandH - 0.48,
+            fontSize: fitFontSize([value], tileW - 0.28, bandH - 0.48, 22, 11, 0),
+            bold: true, color: accentC, valign: 'middle', ...SHRINK_TO_FIT,
+          })
+          slide.addText(String(resolve(kv.label) ?? ''), {
+            x: vx + 0.14, y: y + bandH - 0.4, w: tileW - 0.28, h: 0.32,
+            fontSize: 10, color: bodyC, valign: 'middle', ...SHRINK_TO_FIT,
+          })
         })
-        y += 1.25
+        y += bandH + 0.25
       }
     }
 
@@ -439,19 +318,21 @@ export async function downloadPptx(
     // Optional subtitle lead-in under the title (matches the renderer).
     const sub = String(resolve(node?.subtitle) ?? '').trim()
     if (sub) {
-      slide.addText(sub, { x: 0.6, y, w: 12.1, h: 0.7, fontSize: 18, color: mutedC, valign: 'top', lineSpacingMultiple: 1.1 })
+      slide.addText(sub, { x: 0.6, y, w: 12.1, h: 0.7, fontSize: 18, color: mutedC, valign: 'top', lineSpacingMultiple: 1.1, ...SHRINK_TO_FIT })
       y += 0.75
     }
 
     const areaY = y + 0.05
-    const areaH = Math.max(7.2 - areaY, 1)
+    // Stop ABOVE the sources footer (drawn at y = 6.75) when there is one, instead
+    // of always running to 7.2 and printing the body straight through it.
+    const areaBottom = hasSources ? 6.65 : 7.2
+    const areaH = Math.max(areaBottom - areaY, 1)
 
     // A chart / diagram / table slide renders the actual visual (PowerPoint-
     // native), not blank — the previous text-only export dropped them entirely.
     const chartNode = findNode(sid, byId, (n) => n.component === 'Chart')
     const tableNode = findNode(sid, byId, (n) => n.component === 'Table')
     const diagramNode = findNode(sid, byId, (n) => n.component === 'Diagram')
-    const panelBorderC = dark ? '333C45' : 'E2E6EA'
 
     const addChartAt = (cx: number, cw: number) => {
       const { kind, series } = chartSpec(chartNode as ComponentNode, resolve)
@@ -482,9 +363,113 @@ export async function downloadPptx(
       )
     }
 
+    // 'agenda' is the CONTENTS page: a number tile, a bold section title and an
+    // italic descriptor, flowed into `columns` columns column-first. Mirrors the
+    // renderer exactly, so the downloaded deck matches what Kasal shows.
+    if (variant === 'agenda') {
+      const kids = node?.children || []
+      const rowsText = kids.map((cid) => {
+        const acc: string[] = []
+        collectText(cid, byId, resolve, acc)
+        const flat = deMarkdown(acc.join('\n')).split('\n').filter(Boolean).join(' ')
+        // Authors write "Name — descriptor" (and sometimes a leading "01 — ", which
+        // the tile already shows). Split on the em-dash, drop the number.
+        const parts = flat.replace(/^•\s*/, '').split(/\s+[—–]\s+/)
+        if (/^\d{1,2}$/.test(parts[0] || '')) parts.shift()
+        return { title: parts.shift() || '', desc: parts.join(' · ') }
+      }).filter((r) => r.title)
+      const cols = Math.min(Math.max(Number(node?.columns) || 1, 1), 3)
+      const perCol = Math.ceil(rowsText.length / cols) || 1
+      const colW = (12.1 - 0.5 * (cols - 1)) / cols
+      const rowH = Math.min(Math.max((areaBottom - areaY) / perCol, 0.5), 1.1)
+      const tileW = 0.5
+      const tileH = Math.min(rowH * 0.55, 0.42)
+      rowsText.forEach((r, i) => {
+        const ci = Math.floor(i / perCol)
+        const ri = i % perCol
+        const rx = 0.6 + ci * (colW + 0.5)
+        const ry = areaY + ri * rowH
+        slide.addShape('roundRect', {
+          x: rx, y: ry, w: tileW, h: tileH,
+          fill: { color: accentC }, line: { color: accentC, width: 0 }, rectRadius: 0.03,
+        })
+        slide.addText(String(i + 1).padStart(2, '0'), {
+          x: rx, y: ry, w: tileW, h: tileH,
+          fontSize: 12, bold: true, color: pptxHex(readableTextOn(theme?.accent || '#2563EB'), 'FFFFFF'),
+          align: 'center', valign: 'middle',
+        })
+        const tx = rx + tileW + 0.18
+        const tw = colW - tileW - 0.18
+        slide.addText(r.title, {
+          x: tx, y: ry - 0.02, w: tw, h: tileH + 0.04,
+          fontSize: cols > 1 ? 13 : 16, bold: true, color: titleC, valign: 'middle', ...SHRINK_TO_FIT,
+        })
+        if (r.desc) {
+          slide.addText(r.desc, {
+            x: tx, y: ry + tileH + 0.02, w: tw, h: Math.max(rowH - tileH - 0.1, 0.22),
+            fontSize: cols > 1 ? 10 : 12, italic: true, color: mutedC, valign: 'top', ...SHRINK_TO_FIT,
+          })
+        }
+      })
+      continue
+    }
+
+    // 'boxes' is a GRID of titled panels. Without this it fell through to the
+    // generic body path, which concatenated every panel into one bullet list —
+    // four panels of six bullets became a 24-line stream running off the slide.
+    if (variant === 'boxes') {
+      const kids = node?.children || []
+      const cols = Math.min(Math.max(Number(node?.columns) || (kids.length <= 2 ? kids.length || 1 : kids.length <= 4 ? 2 : kids.length <= 6 ? 3 : 4), 1), 4)
+      const rows = Math.ceil(kids.length / cols) || 1
+      const gap = 0.22
+      const gridW = 12.1
+      const gridH = Math.max(areaBottom - areaY, 1)
+      const cellW = (gridW - gap * (cols - 1)) / cols
+      const cellH = (gridH - gap * (rows - 1)) / rows
+      kids.forEach((cid, i) => {
+        const cx = 0.6 + (i % cols) * (cellW + gap)
+        const cy = areaY + Math.floor(i / cols) * (cellH + gap)
+        slide.addShape('roundRect', {
+          x: cx, y: cy, w: cellW, h: cellH,
+          fill: { color: panelC }, line: { color: panelBorderC, width: 1 }, rectRadius: 0.06,
+        })
+        // First line of the panel is its heading (the specs write it as a bold
+        // Markdown heading); the rest is the panel body.
+        const panel: string[] = []
+        collectText(cid, byId, resolve, panel)
+        const plines = deMarkdown(panel.join('\n')).split('\n').filter(Boolean)
+        const head = plines.shift() || ''
+        slide.addText(head, {
+          x: cx + 0.16, y: cy + 0.12, w: cellW - 0.32, h: 0.34,
+          fontSize: 13, bold: true, color: titleC, valign: 'top', ...SHRINK_TO_FIT,
+        })
+        if (plines.length) {
+          slide.addText(
+            plines.map((t) => ({
+              text: t.replace(/^•\s*/, ''),
+              options: { breakLine: true, paraSpaceAfter: 4, bullet: /^•\s*/.test(t) ? { code: '2022', indent: 14 } : false },
+            })),
+            {
+              x: cx + 0.16, y: cy + 0.5, w: cellW - 0.32, h: Math.max(cellH - 0.64, 0.3),
+              fontSize: fitFontSize(plines, cellW - 0.32, Math.max(cellH - 0.64, 0.3), 10.5, 6, 4),
+              color: bodyC, valign: 'top', lineSpacingMultiple: 1.1, ...SHRINK_TO_FIT,
+            },
+          )
+        }
+      })
+      continue
+    }
+
     // Text lines from the slide body (visual components are not text-extracted).
+    // On 'kpi-split' the KeyValue children were ALREADY drawn as the tile band
+    // above, so skip them here — collecting them again printed every tile a second
+    // time as a "Label: value" bullet, and those extra lines overflowed the body
+    // box and landed on top of the title.
     const out: string[] = []
-    ;(node?.children || []).forEach((c) => collectText(c, byId, resolve, out))
+    const bodyKids = (node?.children || []).filter(
+      (c) => !(variant === 'kpi-split' && byId[c]?.component === 'KeyValue'),
+    )
+    bodyKids.forEach((c) => collectText(c, byId, resolve, out))
     // Graph / Sequence have no native-shape export — extract their content as
     // text lines so those slides don't export blank.
     const graphNode = findNode(sid, byId, (n) => n.component === 'Graph')
@@ -513,22 +498,38 @@ export async function downloadPptx(
     }
     const lines = deMarkdown(out.join('\n')).split('\n').filter(Boolean)
 
-    // Two-column: text on the left half, the visual on the right half — mirrors
-    // the renderer's variant='two-column' layout.
+    // PROSE BESIDE A VISUAL — text on the left, the visual on the right. This is
+    // NOT just 'two-column': every split-body variant needs it. Gating it on
+    // 'two-column' alone meant a 'kpi-split' slide carrying bullets AND a chart
+    // fell through to `if (chartNode)` below, which drew the chart full-width and
+    // `continue`d — so the bullets were silently DROPPED from the download while
+    // the on-screen slide showed them fine.
     const primaryVisual = chartNode ? 'chart' : diagramNode ? 'diagram' : null
-    const twoCol = variant.replace(/[_\s]/g, '-') === 'two-column' && primaryVisual && lines.length > 0
+    const splitBody = ['two-column', 'kpi-split', 'split', 'visual', 'content'].includes(
+      variant.replace(/[_\s]/g, '-'),
+    )
+    const sideBySide = splitBody && primaryVisual && lines.length > 0
 
-    if (twoCol) {
+    if (sideBySide) {
+      // `ratio` mirrors the renderer's body columns, so a chart-led 60/40 slide
+      // exports chart-led rather than always splitting down the middle.
+      const ratio = String(node?.ratio ?? '').trim()
+      const textW = ratio === '40/60' ? 4.7 : ratio === '60/40' ? 7.1 : 5.85
+      const gap = 0.4
+      const visX = 0.7 + textW + gap
+      const visW = 12.6 - visX
       const paras = lines.map((t) => ({
         text: t.replace(/^•\s*/, ''),
         options: { breakLine: true, paraSpaceAfter: 10, bullet: /^•\s*/.test(t) ? { code: '2022', indent: 16 } : false },
       }))
       slide.addText(paras, {
-        x: 0.7, y: areaY, w: 5.6, h: areaH,
-        fontSize: 16, color: bodyC, valign: 'middle', align: 'left', lineSpacingMultiple: 1.25,
+        x: 0.7, y: areaY, w: textW, h: areaH,
+        fontSize: fitFontSize(paras.map((p) => p.text), textW, areaH, 16, 8, 10),
+        color: bodyC, valign: 'top', align: 'left', lineSpacingMultiple: 1.25,
+        ...SHRINK_TO_FIT,
       })
-      if (primaryVisual === 'chart') addChartAt(6.6, 6.0)
-      else addDiagramAt(6.6, 6.0)
+      if (primaryVisual === 'chart') addChartAt(visX, visW)
+      else addDiagramAt(visX, visW)
       continue
     }
 
@@ -550,12 +551,32 @@ export async function downloadPptx(
       const bodyRows = rows.map((r) =>
         (Array.isArray(r) ? r : []).map((cell) => ({ text: String(cell ?? ''), options: { color: bodyC } })),
       )
+      // Prose accompanying a table (the template's "table above, notes below"
+      // pages) gets a band beneath it. Without this the table took the full area
+      // and `continue`d, dropping the notes from the download entirely.
+      const noteLines = lines.slice(0, 6)
+      const noteH = noteLines.length ? Math.min(1.6, 0.3 + noteLines.length * 0.24) : 0
+      const tableH = Math.max(areaH - noteH - (noteH ? 0.2 : 0), 1)
       slide.addTable(head.length ? [head, ...bodyRows] : bodyRows, {
-        x: 0.6, y: areaY, w: 12.1,
-        fontSize: 13, color: bodyC, valign: 'middle',
+        x: 0.6, y: areaY, w: 12.1, h: tableH,
+        fontSize: rows.length > 6 || cols.length > 5 ? 11 : 13,
+        color: bodyC, valign: 'middle',
         border: { type: 'solid', color: panelBorderC, pt: 1 },
         autoPage: false,
       })
+      if (noteLines.length) {
+        slide.addText(
+          noteLines.map((t) => ({
+            text: t.replace(/^•\s*/, ''),
+            options: { breakLine: true, paraSpaceAfter: 4, bullet: /^•\s*/.test(t) ? { code: '2022', indent: 14 } : false },
+          })),
+          {
+            x: 0.7, y: areaY + tableH + 0.15, w: 11.9, h: noteH,
+            fontSize: fitFontSize(noteLines, 11.9, noteH, 12, 8, 4),
+            color: bodyC, valign: 'top', lineSpacingMultiple: 1.15, ...SHRINK_TO_FIT,
+          },
+        )
+      }
       continue
     }
 
@@ -566,8 +587,13 @@ export async function downloadPptx(
       const agenda = variant === 'agenda'
       const paras = lines.map((t) => {
         const isBullet = /^•\s*/.test(t)
+        // On an agenda, PowerPoint supplies the number, so strip a leading "01 — "
+        // the author wrote: keeping both produced "1. 01 — Country Overview".
+        const text = agenda
+          ? t.replace(/^•\s*/, '').replace(/^\d{1,2}\s*[—–-]\s*/, '')
+          : t.replace(/^•\s*/, '')
         return {
-          text: t.replace(/^•\s*/, ''),
+          text,
           options: {
             breakLine: true,
             paraSpaceAfter: 12,
@@ -575,9 +601,14 @@ export async function downloadPptx(
           },
         }
       })
+      // `valign: 'top'`, not 'middle': a box that still overflows grows DOWNWARD
+      // only, so the worst case clips at the bottom instead of printing over the
+      // title. Centering is what put body text above the title.
       slide.addText(paras, {
         x: 0.7, y: areaY, w: 11.9, h: areaH,
-        fontSize: 20, color: bodyC, valign: 'middle', align: 'left', lineSpacingMultiple: 1.3,
+        fontSize: fitFontSize(paras.map((p) => p.text), 11.9, areaH, 20),
+        color: bodyC, valign: 'top', align: 'left', lineSpacingMultiple: 1.3,
+        ...SHRINK_TO_FIT,
       })
     }
   }

@@ -186,6 +186,11 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
   // would just leave a tall empty band below it; there we render the deck
   // WIDTH-driven (natural 16:9 height) and let the dialog size to it.
   const fitDeck = isDeck && !embedded;
+  // The pane's Download lives in the header, which `embedded` hides (the host
+  // dialog — Jobs "Show result" — provides its own title bar). So when embedded,
+  // let the SURFACE show its own download menu instead; suppressing both is what
+  // left the embedded viewer with no way to export a deck at all.
+  const hideSurfaceDownloads = !embedded;
 
   // What this deliverable is (presentation, dashboard, …) drives the "Customize"
   // panel: a friendly title + the matching per-type content controls.
@@ -569,14 +574,25 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
           // other surfaces render naturally inside the scrolling content area.
           fitDeck ? (
             <div className="flex-1 min-h-0 flex p-3">
-              <A2uiSurface key={`ui-${index ?? 0}-${displayData.length}`} surface={uiSurface} hideDownloads fit />
+              <A2uiSurface
+                key={`ui-${index ?? 0}-${displayData.length}`}
+                surface={uiSurface}
+                hideDownloads={hideSurfaceDownloads}
+                onDownloadPdf={() => void runDownload('pdf')}
+                fit
+              />
             </div>
           ) : (
             // Non-deck surfaces (dashboard, document, quiz) scroll naturally. Center
             // them in a padded, max-width column so they don't glue to the top-left
             // edge and leave a vast empty band when the pane is wide (fullscreen).
             <div className="mx-auto w-full max-w-6xl p-4 sm:p-6">
-              <A2uiSurface key={`ui-${index ?? 0}-${displayData.length}`} surface={uiSurface} hideDownloads />
+              <A2uiSurface
+                key={`ui-${index ?? 0}-${displayData.length}`}
+                surface={uiSurface}
+                hideDownloads={hideSurfaceDownloads}
+                onDownloadPdf={() => void runDownload('pdf')}
+              />
             </div>
           )
         )}

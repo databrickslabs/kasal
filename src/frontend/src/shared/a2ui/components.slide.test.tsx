@@ -73,7 +73,11 @@ describe('SlideDeck — empty content slides degrade gracefully', () => {
     };
     render(<A2UIRenderer payload={twoCol} />);
     const slide = screen.getByText('Split').closest('.a2-slide') as HTMLElement;
-    expect(slide.querySelector('.grid-cols-2')).toBeTruthy();
+    // The column count is an inline style now, not a `grid-cols-2` class: the body
+    // collapses to a single column when there is no visual, so the track list is
+    // computed rather than fixed. Two children (text + Diagram) → two columns.
+    const bodyGrid = slide.querySelector<HTMLElement>('div[style*="grid-template-columns"]');
+    expect(bodyGrid?.style.gridTemplateColumns).toBe('1fr 1fr');
     expect(screen.getByText('A supporting bullet')).toBeInTheDocument();
     expect(screen.getByText('Plan')).toBeInTheDocument();
   });
@@ -90,8 +94,9 @@ describe('SlideDeck — empty content slides degrade gracefully', () => {
       ],
     };
     render(<A2UIRenderer payload={agenda} />);
-    expect(screen.getByText('1')).toBeInTheDocument();
-    expect(screen.getByText('2')).toBeInTheDocument();
+    // Badges are zero-padded, as the printed contents page draws them.
+    expect(screen.getByText('01')).toBeInTheDocument();
+    expect(screen.getByText('02')).toBeInTheDocument();
     expect(screen.getByText('Where we are')).toBeInTheDocument();
     expect(screen.getByText('Where we go')).toBeInTheDocument();
   });

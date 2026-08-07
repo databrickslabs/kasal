@@ -995,7 +995,19 @@ def a2ui_system_prompt(
         "slide, and NEVER invent a source or a URL the answer does not contain. Write the "
         "presenter's script for each body slide into 'notes' (2-4 sentences: what to say, "
         "the context behind the bullets, the transition to the next slide) — 'notes' is "
-        "never displayed on the slide itself. Keep ONE consistent theme — the "
+        "never displayed on the slide itself. "
+        # A slide is a fixed frame that gets exported to PDF and PowerPoint, where
+        # there is no scrollbar: content past the bottom is simply absent from the
+        # artefact. The renderer shrinks an overfull slide so nothing is LOST, but
+        # text shrunk to 60% is unreadable at slide distance — so cap it here.
+        "FIT THE FRAME: a slide does not scroll, and it is exported to PDF and "
+        "PowerPoint where anything past the bottom edge is lost. Keep any one "
+        "Markdown to AT MOST 7 bullets of ONE line each (~90 characters, no "
+        "parenthetical asides, no second sentence), a Table to AT MOST 7 rows and 6 "
+        "columns, and a KeyValue 'value' to a bare figure with its unit ('1.4 TWh', "
+        "'34%') — appending a year or qualifier ('34% (2022)') wraps the tile onto "
+        "three lines and pushes its label out. Split a crowded slide into two rather "
+        "than overfilling one. Keep ONE consistent theme — the "
         "app styles it, so do not specify colors.\n"
         "7. For a quiz/assessment build ONE Quiz component whose 'questions' is a list of "
         "REAL, answerable questions — each {question, options:[4 distinct strings], "

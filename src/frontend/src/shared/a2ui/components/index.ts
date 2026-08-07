@@ -43,7 +43,10 @@ export { Album, GeoMap } from './media'
 // RegionHeatmap shades a GRID of regions, not real geography — see ./geo.tsx.
 export { RegionHeatmap, Sankey } from './geo'
 
-export { Slide, SlideDeck, SurfaceDownloadMenu } from './slides'
+export { Slide, SlideDeck } from './slides'
+// Re-exported here so the public import path stays `components` even though the
+// menu now lives in its own module.
+export { SurfaceDownloadMenu } from './surfaceDownload'
 
 export { Quiz, Flashcards } from './interactive'
 

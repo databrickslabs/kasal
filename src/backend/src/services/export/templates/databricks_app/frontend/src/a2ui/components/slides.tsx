@@ -10,10 +10,12 @@ import type { ComponentNode, NodeProps } from '../types'
 import { ChevronDown, Download, FileText, Presentation, StickyNote } from 'lucide-react'
 import { Button } from '../ui/button'
 import { downloadPptx } from '../lib/download'
-import { DeckThemeContext } from '../lib/deckThemes'
+import { DeckThemeContext, readableTextOn } from '../lib/deckThemes'
 import { SurfaceContext, SurfaceChromeContext } from '../lib/surfaceContext'
 import { cn } from '../lib/utils'
 import { SlideCtx } from './slideContext'
+import { FitBox } from './slideFit'
+import { SurfaceDownloadMenu } from './surfaceDownload'
 import { asNum, asStr } from './values'
 import { normSlideSources } from '../lib/slideSources'
 
@@ -165,7 +167,7 @@ export function Slide({ node, render, resolve }: NodeProps) {
     // the child count, still bounded so 12 tiles cannot render unreadably.
     const cols = Math.min(Math.max(asNum(node.columns) || children.length, 1), 6)
     return (
-      <div className="a2-slide relative flex h-full flex-col p-10" style={stageStyle}>
+      <div className="a2-slide relative flex h-full flex-col overflow-hidden p-10" style={stageStyle}>
         {chrome}
         {eyebrow}
         {node.title != null && (
@@ -252,15 +254,22 @@ export function Slide({ node, render, resolve }: NodeProps) {
     const left = visualIds.length && textIds.length ? textIds : children.slice(0, mid)
     const right = visualIds.length && textIds.length ? visualIds : children.slice(mid)
     return (
-      <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={stageStyle}>
+      <div className="a2-slide relative flex h-full flex-col overflow-hidden px-14 py-12" style={stageStyle}>
         {header}
-        <div className="mt-6 grid min-h-0 flex-1 grid-cols-2 items-center gap-10">
-          <div className="flex min-w-0 flex-col justify-center space-y-4 text-pretty text-[1.35rem] leading-relaxed [&_ul]:space-y-3 [&_ol]:space-y-3">
+        {/* One column when there is no visual — `grid-cols-2` reserved an empty
+            media column and left the slide looking half-finished. */}
+        <div
+          className="mt-6 grid min-h-0 flex-1 items-stretch gap-10"
+          style={{ gridTemplateColumns: right.length ? '1fr 1fr' : '1fr' }}
+        >
+          <FitBox className="flex flex-col justify-center space-y-4 text-pretty text-[1.35rem] leading-relaxed [&_ul]:space-y-3 [&_ol]:space-y-3">
             {left.map((id) => render(id))}
-          </div>
-          <div className="flex min-w-0 flex-col justify-center gap-4">
-            {right.map((id) => render(id))}
-          </div>
+          </FitBox>
+          {right.length > 0 && (
+            <FitBox className="flex flex-col justify-center gap-4">
+              {right.map((id) => render(id))}
+            </FitBox>
+          )}
         </div>
       </div>
     )
@@ -270,9 +279,14 @@ export function Slide({ node, render, resolve }: NodeProps) {
     // One dominant visual (Chart/Diagram/Table) with an optional caption — the
     // body fills the stage below the title instead of using content text sizes.
     return (
-      <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={stageStyle}>
+      <div className="a2-slide relative flex h-full flex-col overflow-hidden px-14 py-12" style={stageStyle}>
         {header}
-        <div className="mt-6 flex min-h-0 flex-1 flex-col justify-center gap-4 text-base">{body}</div>
+        <FitBox
+          outerClassName="relative mt-6 min-h-0 min-w-0 flex-1 overflow-hidden"
+          className="flex flex-col justify-center gap-4 text-base"
+        >
+          {body}
+        </FitBox>
       </div>
     )
   }
@@ -292,34 +306,73 @@ export function Slide({ node, render, resolve }: NodeProps) {
       agendaCols === 1
         ? [children]
         : Array.from({ length: agendaCols }, (_, c) => children.slice(c * perCol, (c + 1) * perCol))
-    const rowSize = agendaCols > 1 ? 'text-[1.15rem]' : 'text-[1.45rem]'
-    const badgeSize = agendaCols > 1 ? 'size-8 text-sm' : 'size-10 text-lg'
+    const byId: Record<string, ComponentNode> = Object.fromEntries((surface?.components || []).map((c) => [c.id, c]))
+    const titleSize = agendaCols > 1 ? 'text-[1.15rem]' : 'text-[1.4rem]'
+    const descSize = agendaCols > 1 ? 'text-[0.92rem]' : 'text-[1.1rem]'
+    const badgeSize = agendaCols > 1 ? 'h-9 w-11 text-base' : 'h-11 w-14 text-xl'
     return (
-      <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={stageStyle}>
+      <div className="a2-slide relative flex h-full flex-col overflow-hidden px-14 py-12" style={stageStyle}>
         {header}
-        <div
-          className="mt-6 grid min-h-0 flex-1 content-center gap-x-10"
+        <FitBox
+          outerClassName="relative mt-6 min-h-0 min-w-0 flex-1 overflow-hidden"
+          className="grid content-center gap-x-12"
           style={{ gridTemplateColumns: `repeat(${agendaCols}, minmax(0, 1fr))` }}
         >
           {columns.map((col, ci) => (
-            <div key={ci} className={cn('flex flex-col justify-center', agendaCols > 1 ? 'gap-3' : 'gap-5')}>
-              {col.map((id, i) => (
-                <div key={id} className="flex items-center gap-4">
-                  <span
-                    className={cn(
-                      'flex shrink-0 items-center justify-center rounded-full font-extrabold',
-                      badgeSize,
-                    )}
-                    style={{ background: theme.panel, border: `1px solid ${theme.panelBorder}`, color: theme.accent }}
-                  >
-                    {ci * perCol + i + 1}
-                  </span>
-                  <div className={cn('min-w-0 flex-1 text-pretty leading-snug', rowSize)}>{render(id)}</div>
-                </div>
-              ))}
+            <div key={ci} className={cn('flex flex-col justify-center', agendaCols > 1 ? 'gap-4' : 'gap-5')}>
+              {col.map((id, i) => {
+                const n = ci * perCol + i + 1
+                // A contents row is a TITLE plus an optional descriptor, not one
+                // run-on line. Written as "01 — Name — descriptor" (the natural way
+                // to author it, and what the deck's task spec asks for), it wrapped
+                // to three lines per row and repeated the number the badge already
+                // shows. Split on the em-dashes so the row reads as a heading with a
+                // caption under it, and drop a leading number that duplicates the
+                // badge. Falls back to rendering the child untouched when there is
+                // nothing to split — a plain agenda row still works.
+                // ONLY a single-line Text/Heading row. A Markdown child is a
+                // bullet list whose "\n- " separators this split would tear apart,
+                // turning one panel into a title plus a mangled caption.
+                const kind = byId[id]?.component
+                const raw =
+                  kind === 'Text' || kind === 'Heading' ? asStr(byId[id]?.text).trim() : ''
+                const parts = raw && !raw.includes('\n') ? raw.split(/\s+[—–]\s+|\s+-\s+/) : []
+                if (/^\d+$/.test((parts[0] || '').replace(/^0+/, '') || 'x')) parts.shift()
+                const rowTitle = parts.shift() || ''
+                const rowDesc = parts.join(' · ')
+                return (
+                  <div key={id} className="flex items-start gap-4">
+                    {/* Square-ish accent tile with the zero-padded number, as the
+                        template draws it — a filled tile anchors the row far better
+                        than an outlined circle at slide distance. */}
+                    <span
+                      className={cn('flex shrink-0 items-center justify-center rounded font-extrabold tabular-nums', badgeSize)}
+                      style={{ background: theme.accent, color: readableTextOn(theme.accent) }}
+                    >
+                      {String(n).padStart(2, '0')}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      {rowTitle ? (
+                        <>
+                          <div className={cn('text-balance font-bold leading-tight', titleSize)} style={{ color: theme.title }}>
+                            {rowTitle}
+                          </div>
+                          {rowDesc && (
+                            <div className={cn('mt-1 text-pretty italic leading-snug', descSize)} style={{ color: theme.muted }}>
+                              {rowDesc}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className={cn('text-pretty leading-snug', titleSize)}>{render(id)}</div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           ))}
-        </div>
+        </FitBox>
       </div>
     )
   }
@@ -347,10 +400,16 @@ export function Slide({ node, render, resolve }: NodeProps) {
     const left = mixed ? textIds : rest.slice(0, mid)
     const right = mixed ? visualIds : rest.slice(mid)
     const ratio = asStr(node.ratio) || '50/50'
-    const bodyCols =
-      ratio === '60/40' ? '3fr 2fr' : ratio === '40/60' ? '2fr 3fr' : '1fr 1fr'
+    // With nothing on the right, the body spans the FULL width. Keeping the two
+    // columns reserved would squeeze the text into `ratio`'s share and leave the
+    // rest of the slide blank — which is what happened whenever a spec asked for
+    // "Markdown plus a Chart" and the facts did not support the chart, so the
+    // agent (correctly) omitted it.
+    const bodyCols = !right.length
+      ? '1fr'
+      : ratio === '60/40' ? '3fr 2fr' : ratio === '40/60' ? '2fr 3fr' : '1fr 1fr'
     return (
-      <div className="a2-slide relative flex h-full flex-col p-10" style={stageStyle}>
+      <div className="a2-slide relative flex h-full flex-col overflow-hidden p-10" style={stageStyle}>
         {chrome}
         {eyebrow}
         {node.title != null && (
@@ -368,11 +427,14 @@ export function Slide({ node, render, resolve }: NodeProps) {
         )}
         {rest.length > 0 && (
           <div className="mt-6 grid min-h-0 flex-1 gap-8" style={{ gridTemplateColumns: bodyCols }}>
-            <div className="flex min-w-0 flex-col justify-center space-y-3 text-pretty text-[1.15rem] leading-relaxed [&_ul]:space-y-2 [&_ol]:space-y-2">
+            {/* Fit PER COLUMN, not on the grid: the two columns overflow by
+                different amounts (a long bullet list beside a chart that fits), and
+                one shared factor would shrink the chart for the list's sake. */}
+            <FitBox className="flex flex-col justify-center space-y-3 pr-1 text-pretty text-[1.15rem] leading-relaxed [&_ul]:space-y-2 [&_ol]:space-y-2">
               {left.map((id) => render(id))}
-            </div>
+            </FitBox>
             {right.length > 0 && (
-              <div className="flex min-w-0 flex-col justify-center gap-3">{right.map((id) => render(id))}</div>
+              <FitBox className="flex flex-col justify-center gap-3">{right.map((id) => render(id))}</FitBox>
             )}
           </div>
         )}
@@ -395,7 +457,7 @@ export function Slide({ node, render, resolve }: NodeProps) {
       4,
     )
     return (
-      <div className="a2-slide relative flex h-full flex-col p-10" style={stageStyle}>
+      <div className="a2-slide relative flex h-full flex-col overflow-hidden p-10" style={stageStyle}>
         {chrome}
         {eyebrow}
         {node.title != null && (
@@ -407,16 +469,22 @@ export function Slide({ node, render, resolve }: NodeProps) {
             does not collapse next to a box with six — the template's panels are
             visually equal regardless of content length. */}
         <div
-          className="mt-6 grid min-h-0 flex-1 auto-rows-fr gap-4"
+          className="mt-6 grid min-h-0 flex-1 auto-rows-fr gap-4 overflow-hidden"
           style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
         >
           {children.map((id) => (
             <div
               key={id}
-              className="min-w-0 overflow-hidden rounded-lg border p-4 text-pretty text-[1.05rem] leading-snug [&_ul]:space-y-1.5 [&_ol]:space-y-1.5"
+              className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border p-4"
               style={{ background: theme.panel, borderColor: theme.panelBorder }}
             >
-              {render(id)}
+              {/* Fit per CELL: `auto-rows-fr` gives every panel the same height, so
+                  the panel with six bullets is the only one that needs shrinking and
+                  the one-line panel keeps full size. Fitting the grid instead would
+                  shrink all of them to the worst case. */}
+              <FitBox className="flex flex-col text-pretty text-[1.05rem] leading-snug [&_ul]:space-y-1.5 [&_ol]:space-y-1.5">
+                {render(id)}
+              </FitBox>
             </div>
           ))}
         </div>
@@ -432,22 +500,26 @@ export function Slide({ node, render, resolve }: NodeProps) {
     // the map-left/table-right and diagram-left/notes-right pages, where the
     // visual leads and the ratio is the whole point.
     const ratio = asStr(node.ratio) || '60/40'
-    const cols =
-      ratio === '50/50' ? '1fr 1fr' : ratio === '40/60' ? '2fr 3fr' : ratio === '70/30' ? '7fr 3fr' : '3fr 2fr'
     const mid = Math.ceil(children.length / 2)
     const left = children.slice(0, mid)
     const right = children.slice(mid)
+    // Full width when there is no right-hand region — a spec that says "LEFT a
+    // Sankey, RIGHT notes" yields ONE child whenever the facts do not support the
+    // Sankey, and reserving its column leaves half the slide blank.
+    const cols = !right.length
+      ? '1fr'
+      : ratio === '50/50' ? '1fr 1fr' : ratio === '40/60' ? '2fr 3fr' : ratio === '70/30' ? '7fr 3fr' : '3fr 2fr'
     return (
-      <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={stageStyle}>
+      <div className="a2-slide relative flex h-full flex-col overflow-hidden px-14 py-12" style={stageStyle}>
         {header}
-        <div className="mt-6 grid min-h-0 flex-1 items-center gap-8" style={{ gridTemplateColumns: cols }}>
-          <div className="flex min-w-0 flex-col justify-center gap-4 text-pretty text-[1.2rem] leading-relaxed [&_ul]:space-y-2 [&_ol]:space-y-2">
+        <div className="mt-6 grid min-h-0 flex-1 items-stretch gap-8" style={{ gridTemplateColumns: cols }}>
+          <FitBox className="flex flex-col justify-center gap-4 pr-1 text-pretty text-[1.2rem] leading-relaxed [&_ul]:space-y-2 [&_ol]:space-y-2">
             {left.map((id) => render(id))}
-          </div>
+          </FitBox>
           {right.length > 0 && (
-            <div className="flex min-w-0 flex-col justify-center gap-4 text-pretty text-[1.2rem] leading-relaxed [&_ul]:space-y-2 [&_ol]:space-y-2">
+            <FitBox className="flex flex-col justify-center gap-4 pr-1 text-pretty text-[1.2rem] leading-relaxed [&_ul]:space-y-2 [&_ol]:space-y-2">
               {right.map((id) => render(id))}
-            </div>
+            </FitBox>
           )}
         </div>
       </div>
@@ -463,13 +535,13 @@ export function Slide({ node, render, resolve }: NodeProps) {
     const mid = Math.ceil(children.length / 2)
     const columns = [children.slice(0, mid), children.slice(mid)]
     return (
-      <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={stageStyle}>
+      <div className="a2-slide relative flex h-full flex-col overflow-hidden px-14 py-12" style={stageStyle}>
         {header}
         <div className="mt-6 grid min-h-0 flex-1 grid-cols-2 items-stretch gap-8">
           {columns.map((col, side) => (
             <div
               key={side}
-              className="flex min-w-0 flex-col rounded-2xl border p-6"
+              className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border p-6"
               style={{ background: theme.panel, borderColor: theme.panelBorder }}
             >
               {labels[side] && (
@@ -480,9 +552,9 @@ export function Slide({ node, render, resolve }: NodeProps) {
                   {labels[side]}
                 </div>
               )}
-              <div className="flex min-w-0 flex-1 flex-col justify-center space-y-3 text-pretty text-[1.25rem] leading-relaxed [&_ul]:space-y-2 [&_ol]:space-y-2">
+              <FitBox className="flex flex-col justify-center space-y-3 text-pretty text-[1.25rem] leading-relaxed [&_ul]:space-y-2 [&_ol]:space-y-2">
                 {col.map((id) => render(id))}
-              </div>
+              </FitBox>
             </div>
           ))}
         </div>
@@ -511,8 +583,15 @@ export function Slide({ node, render, resolve }: NodeProps) {
       )}
       {/* Body: vertically centred, uses the full slide width (a measure cap made
           short lines wrap early and leave the right half empty), pretty wrapping to
-          avoid orphan words, and roomier inter-item rhythm. */}
-      <div className="mt-6 flex-1 flex flex-col justify-center overflow-auto pr-1 text-pretty text-[1.55rem] leading-relaxed space-y-5 [&_ul]:space-y-3 [&_ol]:space-y-3 [&_li]:pl-1">{body}</div>
+          avoid orphan words, and roomier inter-item rhythm. Wrapped in FitBox so a
+          long bullet list SHRINKS to the stage instead of scrolling — a scrollbar
+          is invisible in the downloaded PDF/PPTX, which silently loses the tail. */}
+      <FitBox
+        outerClassName="relative mt-6 min-h-0 min-w-0 flex-1 overflow-hidden"
+        className="flex flex-col justify-center pr-1 text-pretty text-[1.55rem] leading-relaxed space-y-5 [&_ul]:space-y-3 [&_ol]:space-y-3 [&_li]:pl-1"
+      >
+        {body}
+      </FitBox>
     </div>
   )
 }
@@ -561,84 +640,6 @@ function SlideStage({ children }: { children: React.ReactNode }) {
   )
 }
 
-// ---- SurfaceDownloadMenu (shared download chrome) --------------------------
-// One elegant "Download" dropdown reused by every surface. Self-detects what the
-// surface can export: PDF (any surface, when the host wires `onDownloadPdf`) and
-// PowerPoint (decks only, via the shared DOM-free pptxgenjs export). Renders
-// nothing when downloads are suppressed or there's nothing to offer — so it's
-// safe to drop into the renderer for ALL surfaces.
-export function SurfaceDownloadMenu({ className }: { className?: string }) {
-  const surface = useContext(SurfaceContext)
-  const theme = useContext(DeckThemeContext)
-  const { downloads: showDownloads, onDownloadPdf } = useContext(SurfaceChromeContext)
-  const [open, setOpen] = useState(false)
-  const [exporting, setExporting] = useState(false)
-  const isDeck = !!surface?.components?.some((c) => c.id === surface.root && c.component === 'SlideDeck')
-  // Export the WHOLE deck (from the surface in context) to PowerPoint. pptxgenjs
-  // is loaded lazily inside downloadPptx, themed to match the on-screen deck.
-  const onPptx = useCallback(async () => {
-    if (!surface || exporting) return
-    setExporting(true)
-    try {
-      await downloadPptx(surface, theme)
-    } catch (err) {
-      console.error('[a2ui] PPTX export failed', err)
-    } finally {
-      setExporting(false)
-    }
-  }, [surface, theme, exporting])
-
-  if (!showDownloads) return null
-  const options: { key: string; label: string; sub: string; icon: JSX.Element; onClick: () => void }[] = []
-  if (onDownloadPdf) options.push({ key: 'pdf', label: 'PDF', sub: 'Portable document', icon: <FileText className="size-4" />, onClick: onDownloadPdf })
-  if (isDeck) options.push({ key: 'pptx', label: 'PowerPoint', sub: 'Editable slides', icon: <Presentation className="size-4" />, onClick: () => void onPptx() })
-  if (!options.length) return null
-
-  return (
-    <div className={cn('relative flex shrink-0 justify-start', className)}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        disabled={!surface || exporting}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        <Download className="size-3.5" /> {exporting ? 'Preparing…' : 'Download'}
-        <ChevronDown className={cn('size-3 transition-transform', open && 'rotate-180')} />
-      </button>
-      {open && (
-        <>
-          {/* click-away catcher */}
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} aria-hidden="true" />
-          <div
-            role="menu"
-            className="absolute left-0 top-9 z-20 min-w-[12rem] overflow-hidden rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-lg"
-          >
-            {options.map((opt) => (
-              <button
-                key={opt.key}
-                type="button"
-                role="menuitem"
-                className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground"
-                onClick={() => {
-                  setOpen(false)
-                  opt.onClick()
-                }}
-              >
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">{opt.icon}</span>
-                <span className="flex min-w-0 flex-col">
-                  <span className="text-xs font-semibold">{opt.label}</span>
-                  <span className="text-[11px] text-muted-foreground">{opt.sub}</span>
-                </span>
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
 
 export function SlideDeck({ node, render, resolve }: NodeProps) {
   const slides = Array.isArray(node.children) ? node.children : []
