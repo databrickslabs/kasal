@@ -15,7 +15,6 @@ from src.services.execution.logs.context import (
     ExecutionContextFormatter,
     set_execution_context,
 )
-from src.services.execution.logs.db_handler import ExecutionLogsDatabaseHandler
 
 
 def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):

@@ -2079,41 +2079,6 @@ class ProcessFlowExecutor:
                     f"[ProcessFlowExecutor] Successfully wrote {count} logs to SQLite execution_logs table"
                 )
 
-    async def _write_logs_postgres_async(self, logs_to_write: list, settings):
-        """Write logs to PostgreSQL using async with NullPool."""
-        from sqlalchemy import text
-        from sqlalchemy.ext.asyncio import create_async_engine
-        from sqlalchemy.pool import NullPool
-
-        postgres_user = settings.POSTGRES_USER or "postgres"
-        postgres_password = settings.POSTGRES_PASSWORD
-        postgres_server = settings.POSTGRES_SERVER or "localhost"
-        postgres_port = settings.POSTGRES_PORT or "5432"
-        postgres_db = settings.POSTGRES_DB or "kasal"
-        db_url = f"postgresql+asyncpg://{postgres_user}:{postgres_password}@{postgres_server}:{postgres_port}/{postgres_db}"
-        logger.info(
-            f"[ProcessFlowExecutor] Using PostgreSQL database: {postgres_server}:{postgres_port}/{postgres_db}"
-        )
-
-        # Use NullPool to avoid connection pooling issues in post-subprocess context
-        engine = create_async_engine(db_url, poolclass=NullPool)
-
-        try:
-            async with engine.begin() as conn:
-                for log_data in logs_to_write:
-                    await conn.execute(
-                        text("""
-                        INSERT INTO execution_logs (execution_id, content, timestamp, group_id, group_email)
-                        VALUES (:execution_id, :content, :timestamp, :group_id, :group_email)
-                    """),
-                        log_data,
-                    )
-            logger.info(
-                f"[ProcessFlowExecutor] Successfully wrote {len(logs_to_write)} logs to PostgreSQL execution_logs table"
-            )
-        finally:
-            await engine.dispose()
-
     def get_execution_info(self, execution_id: str) -> Optional[Dict[str, Any]]:
         """Get information about a running execution."""
         process = self._running_processes.get(execution_id)

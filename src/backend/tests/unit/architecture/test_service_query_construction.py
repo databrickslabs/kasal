@@ -52,20 +52,18 @@ _EXEMPT = (
 
 #: Files that already build queries. Shrink this; never add to it.
 #:
-#: Down from 6 to 2. The four that left moved their SQL into a repositories file:
-#: `flow_service` (the flow cascade-delete, now on FlowRepository), the two PowerBI
-#: /UCMV tools and `flow_execution_runner` (latest-trace and checkpoint lookups, now
-#: on ExecutionTraceRepository / ExecutionHistoryRepository). Three of those queries
+#: Down from 6 to 0. Four moved their SQL into a repositories file: `flow_service`
+#: (the flow cascade-delete, now on FlowRepository), the two PowerBI/UCMV tools and
+#: `flow_execution_runner` (latest-trace and checkpoint lookups, now on
+#: ExecutionTraceRepository / ExecutionHistoryRepository). Three of those queries
 #: also used Postgres-only casts (`output::text`, `result::text`) that silently
 #: matched nothing on SQLite; the repository versions are dialect-neutral.
 #:
-#: The two left are the DEAD post-subprocess log writers — raw DBAPI against
-#: `execution_logs`, neither reachable from src/ (see the allowlist in
-#: test_sessions_go_through_the_router.py). They should be DELETED, not refactored.
-_BASELINE = {
-    "services/execution/logs/db_handler.py",
-    "services/flow_builder/process_executor.py",
-}
+#: The last two were the DEAD post-subprocess log writers — raw DBAPI against
+#: `execution_logs`, neither reachable from src/ — and were DELETED rather than
+#: refactored, which is why this is now empty. Keep it that way: an empty baseline
+#: makes this a hard ban, not a ratchet.
+_BASELINE = set()
 
 _SERVICES = pathlib.Path(__file__).resolve().parents[3] / "src" / "services"
 

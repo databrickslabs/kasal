@@ -106,31 +106,16 @@ ALLOWED = {
         "connects TO Lakebase to test/migrate/seed it — it cannot ask the router "
         "for a session to the thing it is still setting up"
     ),
-    # ---- DEAD CODE, allowlisted only so this check can land ---------------
-    # Both build an engine from settings.DATABASE_URI, i.e. the LOCAL database,
-    # with no Lakebase awareness at all — so if either were live it would be the
-    # bug this file exists to catch, not an exception to it. Neither is reachable:
-    #
-    #   * db_handler.ExecutionLogsDatabaseHandler is never INSTANTIATED in src/
-    #     (subprocess_bootstrap imports the name and never uses it). The live path
-    #     is db_handler -> queue -> writer, and writer.py already routes through
-    #     get_smart_db_session.
-    #   * process_executor._write_logs_postgres_async has no caller outside tests.
-    #
-    # They belong deleted rather than exempted. Not done here because
-    # subprocess_bootstrap is on the crew/flow SUBPROCESS import path, where a
-    # drive-by removal can pass in-process tests and still break the spawned
-    # interpreter (see services/execution/CLAUDE.md). Remove them in a change
-    # scoped to that, and delete these two entries with them.
-    "services/execution/logs/db_handler.py": (
-        "DEAD: never instantiated in src/; the live logs path is queue -> writer, "
-        "which routes. Builds a LOCAL engine, so this is a latent split, not an "
-        "exception — delete rather than keep exempting"
-    ),
-    "services/flow_builder/process_executor.py": (
-        "DEAD: _write_logs_postgres_async has no caller outside tests, and builds "
-        "a LOCAL NullPool engine. Same story — delete rather than keep exempting"
-    ),
+    # ---- (was: two DEAD post-subprocess log writers) ----------------------
+    # `execution/logs/db_handler.py` and
+    # `flow_builder/process_executor._write_logs_postgres_async` were exempted here
+    # because both built an engine from settings.DATABASE_URI — the LOCAL database,
+    # with no Lakebase awareness — so each was a latent split rather than a genuine
+    # exception. Neither was reachable: the handler was never instantiated in src/
+    # (subprocess_bootstrap imported the name and never used it) and the writer had
+    # no caller outside tests. Both have now been DELETED, along with the tests that
+    # were keeping them looking alive. The live logs path is queue -> writer, and
+    # writer.py routes through get_smart_db_session.
 }
 
 #: Layers that must NEVER acquire, whatever the reason. A repository has no
