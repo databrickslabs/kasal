@@ -146,8 +146,14 @@ class EventPipeWriter:
         self._closed = False
 
     def register(self, bus: Any) -> "EventPipeWriter":
-        from kasal_engine import events as engine_events
-
+        # ``src.core.events``, NOT ``kasal_engine.events``: that package was
+        # flattened into the tree and no longer exists. This import was missed,
+        # and because it is the FIRST statement here it raised ImportError before
+        # a single handler was attached — so the subprocess pipe registered
+        # nothing and crew/flow runs never streamed. The caller catches it as
+        # "(non-fatal)", so the only symptom was a WARNING and a UI that stopped
+        # live-typing for everything except the in-process chat path.
+        from src.core import events as engine_events
         from src.core.events import (
             LLMCallCompletedEvent,
             LLMStreamChunkEvent,
