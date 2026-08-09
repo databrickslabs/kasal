@@ -122,7 +122,15 @@ class Flow(Generic[T]):
         self._method_outputs: list[Any] = []
         self._completed: set[str] = set()
         self._scheduled: set[str] = set()
-        self._and_progress: dict[str, set[str]] = {}
+        # signal -> the output it carried. A SET of names was enough to know
+        # an AND was satisfied, but not to hand the joining method what the
+        # branches produced: only the last-arriving output was forwarded and
+        # every earlier branch's work was discarded.
+        self._and_progress: dict[str, dict[str, Any]] = {}
+        # Signals that cannot arrive this turn — routes a router declared but
+        # did not take. Without these an AND join over route listeners waits
+        # forever whenever only a subset of routes matched.
+        self._unreachable: set[str] = set()
         self._last_output: Any = None
         # Which methods this run is allowed to execute. Empty means "all of
         # them", which is every run that has not asked for a goal — so the
@@ -228,6 +236,7 @@ class Flow(Generic[T]):
         self._completed.clear()
         self._scheduled.clear()
         self._and_progress.clear()
+        self._unreachable.clear()
         self._method_outputs.clear()
         self._required.clear()
 
@@ -266,7 +275,7 @@ class Flow(Generic[T]):
         try:
             await asyncio.gather(
                 *(
-                    self._execute_method(name, None)
+                    self._execute_method(name, [])
                     for name in self._start_methods
                     if self._may_run(name)
                 )
@@ -369,14 +378,35 @@ class Flow(Generic[T]):
             if hasattr(self._state, "id"):
                 self._state.id = restore_id
 
-    async def _execute_method(self, name: str, previous_output: Any) -> None:
+    async def _execute_method(self, name: str, previous_outputs: list[Any]) -> None:
+        """Run ``name``, handing it what the methods it listened to produced.
+
+        Takes a LIST because an AND join has several upstreams and the joining
+        method is meant to see all of them — the flow builder generates
+        ``async def listener_method(self, *results)`` and loops over ``results``,
+        storing ``previous_output_0``, ``previous_output_1``, … Passing a single
+        value meant only the last-arriving branch survived, so a crew joining a
+        politics and a sports branch drafted from one of them.
+
+        VAR_POSITIONAL also has to COUNT as a parameter. Excluding it meant
+        ``*results`` methods were called with no arguments at all, so every
+        listener node logged "No previous outputs received" and ran with none of
+        its upstream crew's work. Route listeners took a NAMED parameter, which
+        is why only the plain listener nodes were starved.
+        """
         method = getattr(self, name)
         parameters = [
             p
             for p in inspect.signature(method).parameters.values()
-            if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+            if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.VAR_POSITIONAL)
         ]
-        args = (previous_output,) if parameters else ()
+        if not parameters:
+            args: tuple[Any, ...] = ()
+        elif any(p.kind is p.VAR_POSITIONAL for p in parameters):
+            args = tuple(previous_outputs)
+        else:
+            # A single named parameter can only hold one; give it the first.
+            args = (previous_outputs[0] if previous_outputs else None,)
         result = method(*args)
         if inspect.isawaitable(result):
             result = await result
@@ -387,10 +417,64 @@ class Flow(Generic[T]):
         self._save_state(name)
 
         emitted = [name]
-        if name in self._routers and isinstance(result, str):
-            emitted.append(result)
-        for signal in emitted:
-            await self._fire_listeners(signal, result)
+        if name in self._routers:
+            taken = (
+                [result]
+                if isinstance(result, str)
+                else [r for r in (result or []) if isinstance(r, str)]
+            )
+            # Every route this router could have taken but did not can never
+            # signal, so an AND join over its route listeners must stop waiting
+            # for it. The builder records the full set on the method.
+            declared = getattr(getattr(self, name), "_kasal_routes", None) or []
+            self._unreachable.update(set(declared) - set(taken))
+            self._spread_unreachable()
+            # A router's return value is a SIGNAL: route listeners register as
+            # @listen(<route name>), so emitting the name it chose is what runs
+            # that branch.
+            #
+            # A LIST of names emits several, so every route whose condition held
+            # runs. Returning one name could only ever fire one branch, and on a
+            # batch that genuinely contains both politics and sports the loser
+            # was decided by dict ordering — silently, and never revisited.
+            # Prior art agrees this should be plural: LangGraph conditional edges
+            # return a Sequence, Airflow's branch operator returns a list of
+            # task_ids, n8n's Switch has "send to all matching outputs".
+            if isinstance(result, str):
+                emitted.append(result)
+            elif isinstance(result, (list, tuple)):
+                emitted.extend(route for route in result if isinstance(route, str))
+        # Concurrently, not one after another. Awaiting each signal in turn ran
+        # a whole branch — crew and all — before the next route was even
+        # emitted, so two matching routes executed SEQUENTIALLY and anything
+        # joining on them with OR fired after the first finished, while the
+        # second had not started. Branches are independent by construction; the
+        # only ordering between them was an artefact of this loop.
+        await asyncio.gather(
+            *(self._fire_listeners(signal, result) for signal in emitted)
+        )
+
+    def _spread_unreachable(self) -> None:
+        """Close the unreachable set over the listener graph.
+
+        A router marks the ROUTES it did not take, but a join waits on METHOD
+        names — the route listeners themselves. A listener none of whose
+        triggers can arrive can never run, so its own name is unreachable too,
+        and that propagates down the chain behind it. Without this the join
+        still waited for a branch that had already been ruled out.
+        """
+        changed = True
+        while changed:
+            changed = False
+            for listener, trigger in self._listeners.items():
+                if listener in self._unreachable or listener in self._completed:
+                    continue
+                methods = set(trigger["methods"])
+                # Dead only when NOTHING it listens to can arrive. An AND with
+                # some reachable members is still satisfiable over those.
+                if methods and methods <= self._unreachable:
+                    self._unreachable.add(listener)
+                    changed = True
 
     async def _fire_listeners(self, signal: str, output: Any) -> None:
         ready: list[str] = []
@@ -404,15 +488,24 @@ class Flow(Generic[T]):
             if signal not in trigger["methods"]:
                 continue
             if trigger["type"] == _OR:
-                ready.append(listener)
+                ready.append((listener, [output]))
             else:
-                seen = self._and_progress.setdefault(listener, set())
-                seen.add(signal)
-                if seen >= set(trigger["methods"]):
-                    ready.append(listener)
-        self._scheduled.update(ready)
+                seen = self._and_progress.setdefault(listener, {})
+                seen[signal] = output
+                awaited = set(trigger["methods"]) - self._unreachable
+                if set(seen) >= awaited:
+                    # In trigger order, so the joining method sees its inputs in
+                    # the order the flow declares them rather than whichever
+                    # branch happened to finish first.
+                    ready.append(
+                        (
+                            listener,
+                            [seen[m] for m in trigger["methods"] if m in seen],
+                        )
+                    )
+        self._scheduled.update(name for name, _ in ready)
         await asyncio.gather(
-            *(self._execute_method(listener, output) for listener in ready)
+            *(self._execute_method(listener, outputs) for listener, outputs in ready)
         )
 
     def save_checkpoint(self, label: str = "turn_end") -> None:
