@@ -12,6 +12,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ThemeProvider, createTheme } from '@mui/material';
 import CrewNode from './CrewNode';
+import { openCrewInAgentBuilder } from '../../utils/openCrewInAgentBuilder';
+
+vi.mock('../../utils/openCrewInAgentBuilder', () => ({
+  openCrewInAgentBuilder: vi.fn(),
+}));
 
 // Mock ReactFlow
 vi.mock('reactflow', () => ({
@@ -81,6 +86,38 @@ const renderCrewNode = (props = {}) => {
 describe('CrewNode', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  describe('Opening the crew in the Agent Builder', () => {
+    it('opens on double-click', () => {
+      renderCrewNode();
+
+      fireEvent.doubleClick(screen.getByText('Test Crew'));
+
+      expect(openCrewInAgentBuilder).toHaveBeenCalledWith('123', 'test_crew');
+    });
+
+    it('opens from the button revealed on hover', () => {
+      renderCrewNode({ selected: true });
+
+      fireEvent.click(screen.getByRole('button', { name: /open in the agent builder/i }));
+
+      expect(openCrewInAgentBuilder).toHaveBeenCalledWith('123', 'test_crew');
+    });
+
+    it('offers nothing when the node points at no crew', () => {
+      renderCrewNode({
+        selected: true,
+        data: { ...defaultProps.data, crewId: undefined },
+      });
+
+      expect(
+        screen.queryByRole('button', { name: /open in the agent builder/i })
+      ).not.toBeInTheDocument();
+
+      fireEvent.doubleClick(screen.getByText('Test Crew'));
+      expect(openCrewInAgentBuilder).not.toHaveBeenCalled();
+    });
   });
 
   describe('Basic Rendering', () => {
@@ -186,7 +223,7 @@ describe('CrewNode', () => {
     it('should not show delete button when not hovered and not selected', () => {
       renderCrewNode({ selected: false });
       // Delete button should not be visible initially
-      const deleteButtons = screen.queryAllByRole('button');
+      const deleteButtons = screen.queryAllByRole('button', { name: /delete crew node/i });
       expect(deleteButtons.length).toBe(0);
     });
   });
@@ -199,7 +236,7 @@ describe('CrewNode', () => {
       if (box) {
         fireEvent.mouseEnter(box);
         // After hover, delete button should appear
-        const deleteButton = screen.queryByRole('button');
+        const deleteButton = screen.queryByRole('button', { name: /delete crew node/i });
         expect(deleteButton).toBeInTheDocument();
       }
     });
@@ -212,7 +249,7 @@ describe('CrewNode', () => {
         fireEvent.mouseEnter(box);
         fireEvent.mouseLeave(box);
         // After leaving, delete button should be hidden
-        const deleteButtons = screen.queryAllByRole('button');
+        const deleteButtons = screen.queryAllByRole('button', { name: /delete crew node/i });
         expect(deleteButtons.length).toBe(0);
       }
     });
@@ -370,7 +407,7 @@ describe('CrewNode - Delete Functionality', () => {
       // Hover to show delete button
       fireEvent.mouseEnter(box);
 
-      const deleteButton = screen.queryByRole('button');
+      const deleteButton = screen.queryByRole('button', { name: /delete crew node/i });
       expect(deleteButton).toBeInTheDocument();
     }
   });
@@ -383,7 +420,7 @@ describe('CrewNode - Delete Functionality', () => {
       // Hover to show delete button
       fireEvent.mouseEnter(box);
 
-      const deleteButton = screen.queryByRole('button');
+      const deleteButton = screen.queryByRole('button', { name: /delete crew node/i });
       if (deleteButton) {
         fireEvent.click(deleteButton);
         // Delete handler should be called
@@ -621,7 +658,7 @@ describe('CrewNode - Delete Handler', () => {
       // Hover to show delete button
       fireEvent.mouseEnter(box);
 
-      const deleteButton = screen.queryByRole('button');
+      const deleteButton = screen.queryByRole('button', { name: /delete crew node/i });
       if (deleteButton) {
         // Click delete button - event handler includes stopPropagation
         fireEvent.click(deleteButton);
@@ -640,7 +677,7 @@ describe('CrewNode - Delete Handler', () => {
       // Hover to show delete button
       fireEvent.mouseEnter(box);
 
-      const deleteButton = screen.queryByRole('button');
+      const deleteButton = screen.queryByRole('button', { name: /delete crew node/i });
       if (deleteButton) {
         // Click should trigger delete with the node id
         fireEvent.click(deleteButton);
@@ -659,7 +696,7 @@ describe('CrewNode - Delete Handler', () => {
       // Hover to show delete button
       fireEvent.mouseEnter(box);
 
-      const deleteButton = screen.queryByRole('button');
+      const deleteButton = screen.queryByRole('button', { name: /delete crew node/i });
       if (deleteButton) {
         // The stopPropagation in the handler prevents bubbling
         fireEvent.click(deleteButton);

@@ -5,9 +5,11 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { FlowConfiguration } from '../../types/workflow/flow';
 import { useUILayoutStore } from '../../store/uiLayout';
 import { useFlowExecutionStore } from '../../store/flowExecutionStore';
+import { openCrewInAgentBuilder } from '../../utils/openCrewInAgentBuilder';
 
 interface Task {
   id: string;
@@ -122,17 +124,31 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
   const taskTooltip = selectedTasks.length > 0
     ? `Selected tasks:\n${selectedTasks.map(t => `• ${t.name}`).join('\n')}`
     : crewName;
+  const tooltip = data.crewId
+    ? `${taskTooltip}\n\nDouble-click to open in the Agent Builder`
+    : taskTooltip;
   
   const handleDelete = (event: React.MouseEvent) => {
     event.stopPropagation(); // Prevent node selection
     deleteElements({ nodes: [{ id }] });
   };
 
+  // Open the crew this node points at, on the Agent Builder canvas.
+  //
+  // Bound to the button and to DOUBLE-click, not to a plain click: on a canvas
+  // a single click already selects — and precedes every drag — so opening a
+  // different view on it would make the node impossible to move or delete.
+  const handleOpenCrew = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (!data.crewId) return;
+    void openCrewInAgentBuilder(data.crewId, crewName || data.label);
+  };
+
   const statusStyles = getStatusStyles();
   const statusIcon = getStatusIcon();
 
   return (
-    <Tooltip title={taskTooltip} placement="top" arrow>
+    <Tooltip title={tooltip} placement="top" arrow>
       <Box
         sx={{
           width: '100%',
@@ -166,6 +182,7 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
         }}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
+        onDoubleClick={data.crewId ? handleOpenCrew : undefined}
       >
         {/* Target handles - for incoming connections */}
         {/* Top handle - for vertical layout */}
@@ -287,8 +304,28 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
               gap: 0.5,
             }}
           >
+            {data.crewId && (
+              <Tooltip title="Open in the Agent Builder" placement="top" arrow>
+                <IconButton
+                  size="small"
+                  onClick={handleOpenCrew}
+                  sx={{
+                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                    '&:hover': {
+                      backgroundColor: '#e3f2fd',
+                    },
+                    boxShadow: '0 0 4px rgba(0,0,0,0.2)',
+                    width: 24,
+                    height: 24,
+                  }}
+                >
+                  <OpenInNewIcon fontSize="small" color="primary" />
+                </IconButton>
+              </Tooltip>
+            )}
             <IconButton
               size="small"
+              aria-label="Delete crew node"
               onClick={handleDelete}
               sx={{
                 backgroundColor: 'rgba(255, 255, 255, 0.9)',
