@@ -20,41 +20,6 @@ interface StateMapping {
 export const DEFAULT_ROUTE_NAME = 'default';
 
 /**
- * The index the backend will have given this crew's generated method.
- *
- * Both `listener_N` and `starting_point_N` are named per CREW: the backend
- * groups its input array by `crewId` and numbers the groups in first-appearance
- * order (flow_processors.py:103-123 for starting points, :600-653 for
- * listeners). The arrays built here hold one entry per EDGE and per TASK
- * respectively, so a crew appearing twice pushes every later crew's raw index
- * up, and indexing the raw array names a method the backend never created.
- *
- * That produced a router wired to a `listener_2` in a flow whose backend made
- * only listener_0 and listener_1: it never fired, and the run reported
- * COMPLETED having done half its work. The starting-point side has the same
- * defect whenever a start crew contributes more than one task.
- *
- * One helper for both, because two copies of one rule is how the halves drifted
- * apart in the first place.
- *
- * Returns -1 when the crew is not in the array.
- */
-export function crewGroupIndex(
-  entries: Array<{ crewId?: string; conditionType?: string }>,
-  crewId: string
-): number {
-  const crewsInOrder: string[] = [];
-  entries.forEach((entry) => {
-    if (!entry.crewId) return;
-    // The backend skips ROUTER-typed listeners before grouping; starting points
-    // carry no conditionType, so this is a no-op for them.
-    if (entry.conditionType === 'ROUTER') return;
-    if (!crewsInOrder.includes(entry.crewId)) crewsInOrder.push(entry.crewId);
-  });
-  return crewsInOrder.indexOf(crewId);
-}
-
-/**
  * Build FlowConfiguration from nodes and edges
  * This utility is used by both SaveFlow (when saving) and JobExecutionService (when executing without saving)
  */
@@ -195,52 +160,16 @@ export const buildFlowConfiguration = (
 
     if (!sourceNode) return;
 
-    // Determine which method to listen to (first selected task from first edge)
-    // IMPORTANT: Must match backend method names in flow_builder.py
-    // The router's source node can be either:
-    // 1. A starting point (no incoming edges) -> use 'starting_point_X'
-    // 2. A listener (has incoming edges) -> use 'listener_X'
-    const firstTaskId = firstEdge.data.listenToTaskIds[0];
-    const sourceNodeId = sourceNode.id;
-
-    // First check if source node is a starting point
-    const startingPoint = startingPoints.find(sp => sp.taskId === firstTaskId);
-    const sourceTaskIndex = startingPoint
-      ? crewGroupIndex(startingPoints, startingPoint.crewId)
-      : -1;
-
-    let listenTo: string;
-    if (sourceTaskIndex >= 0) {
-      // Source is a starting point — indexed by CREW, as the backend names them
-      listenTo = `starting_point_${sourceTaskIndex}`;
-    } else {
-      // Source is a listener - find which listener index it corresponds to
-      // The listener's crewId should match the source node's crewId
-      const sourceCrewId = sourceNode.data?.crewId || sourceNode.id;
-      const listenerIndex = crewGroupIndex(listeners, sourceCrewId);
-
-      if (listenerIndex >= 0) {
-        listenTo = `listener_${listenerIndex}`;
-      } else {
-        // Fallback: check if any of the source node's tasks are in a listener's tasks
-        // This handles cases where the crewId doesn't match exactly
-        const sourceTaskIds = sourceNode.data?.allTasks?.map((t: FlowTask) => t.id) || [];
-        const listenerByTask = listeners.find(l =>
-          l.tasks?.some((t: FlowTask) => sourceTaskIds.includes(t.id))
-        );
-        const byTaskIndex = listenerByTask
-          ? crewGroupIndex(listeners, listenerByTask.crewId)
-          : -1;
-
-        if (byTaskIndex >= 0) {
-          listenTo = `listener_${byTaskIndex}`;
-        } else {
-          // Final fallback to starting_point_0 (legacy behavior)
-          console.warn(`Router source node ${sourceNodeId} is neither a starting point nor a listener, defaulting to starting_point_0`);
-          listenTo = 'starting_point_0';
-        }
-      }
-    }
+    // The crew this router waits for. Identity, not a method name.
+    //
+    // This used to emit `listener_N` / `starting_point_N` — names the BACKEND
+    // generates — which meant predicting them from these arrays. The arrays
+    // hold one entry per edge and per task while methods are named per crew, so
+    // any crew with two incoming edges shifted every later index and the router
+    // named a method that was never created: it never fired, and the run
+    // reported COMPLETED having done half its work. The backend resolves the
+    // crew id against the methods it actually built.
+    const listenToCrewId = sourceNode.data?.crewId || sourceNode.id;
 
     // Collect all state mappings from all edges in this group
     // State mappings extract task outputs → state variables for condition evaluation
@@ -324,7 +253,7 @@ export const buildFlowConfiguration = (
 
     const router: Router = {
       name: `router_${groupKey.replace(/[^a-zA-Z0-9_]/g, '_')}`,
-      listenTo,
+      listenToCrewId,
       stateMappings: allStateMappings,  // State mappings to extract task outputs → state variables
       routes,
       routeConditions  // Map of route name to its condition (evaluates state variables)

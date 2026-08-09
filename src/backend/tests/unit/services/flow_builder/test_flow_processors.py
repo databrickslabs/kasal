@@ -742,7 +742,7 @@ class TestProcessRouters:
 
         flow_config = {
             "routers": [
-                {"name": "router-1", "listenTo": "starting_point_0", "routes": {}}
+                {"name": "router-1", "listenToCrewId": "starting_point_0", "routes": {}}
             ]
         }
         all_tasks = {}
@@ -765,7 +765,7 @@ class TestProcessRouters:
             "routers": [
                 {
                     "name": "router-1",
-                    "listenTo": "starting_point_0",
+                    "listenToCrewId": "starting_point_0",
                     "routes": {"success": [{"id": task_id}]},  # No crewId
                     "routeConditions": {},
                 }
@@ -792,7 +792,7 @@ class TestProcessRouters:
             "routers": [
                 {
                     "name": "router-1",
-                    "listenTo": "starting_point_0",
+                    "listenToCrewId": "starting_point_0",
                     "routes": {"success": [{"id": task_id, "crewId": crew_id}]},
                     "routeConditions": {},
                 }
@@ -823,7 +823,7 @@ class TestProcessRouters:
             "routers": [
                 {
                     "name": "router-1",
-                    "listenTo": "starting_point_0",
+                    "listenToCrewId": "starting_point_0",
                     "routes": {"success": [{"id": task_id, "crewId": crew_id}]},
                     "routeConditions": {"success": 'state.get("result") == True'},
                 }
@@ -893,7 +893,7 @@ class TestProcessRouters:
             "routers": [
                 {
                     "name": "router-1",
-                    "listenTo": "starting_point_0",
+                    "listenToCrewId": "starting_point_0",
                     "routes": {
                         "success": [{"id": task_id_1, "crewId": crew_id}],
                         "failure": [{"id": task_id_2, "crewId": crew_id}],
@@ -970,7 +970,7 @@ class TestProcessRouters:
             "routers": [
                 {
                     "name": "router-1",
-                    "listenTo": "starting_point_0",
+                    "listenToCrewId": "starting_point_0",
                     "routes": {"success": [{"id": task_id, "crewId": crew_id}]},
                     "routeConditions": {},
                 }
@@ -1002,7 +1002,7 @@ class TestProcessRouters:
             "routers": [
                 {
                     "name": "router-1",
-                    "listenTo": "starting_point_0",
+                    "listenToCrewId": "starting_point_0",
                     "routes": {"success": [{"id": task_id, "crewId": crew_id}]},
                     "routeConditions": {},
                 }

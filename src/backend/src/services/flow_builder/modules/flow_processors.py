@@ -1030,7 +1030,7 @@ class FlowProcessorManager:
 
         for idx, router_config in enumerate(flow_config.get("routers", [])):
             router_method_name = f"router_{idx}"
-            listen_to = router_config.get("listenTo")
+            listen_to_crew_id = router_config.get("listenToCrewId")
             routes = router_config.get(
                 "routes", {}
             )  # Dict format: {route_name: [task_configs]}
@@ -1038,8 +1038,10 @@ class FlowProcessorManager:
                 "routeConditions", {}
             )  # Dict format: {route_name: condition_expr}
 
-            if not listen_to:
-                logger.warning(f"Router {idx} missing listenTo")
+            if not listen_to_crew_id:
+                # Skipping here also skips the task registration below, so this
+                # guard decides whether a route's tasks reach `all_tasks` at all.
+                logger.warning(f"Router {idx} missing listenToCrewId")
                 continue
 
             # Debug: Log the routes and conditions structure

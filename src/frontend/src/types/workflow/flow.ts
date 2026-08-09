@@ -130,7 +130,9 @@ export interface RouterStateMapping {
 
 export interface Router {
   name: string;
-  listenTo: string;  // Method name to listen to
+  /** The crew this router waits for. Identity, not a generated method
+   *  name — the backend resolves it against the methods it built. */
+  listenToCrewId: string;
   conditionField?: string;  // Field to evaluate for routing (optional, deprecated)
   stateMappings?: RouterStateMapping[];  // State mappings to extract task outputs → state variables
   routes: Record<string, RouterTaskConfig[]>;  // Route name -> array of task configs

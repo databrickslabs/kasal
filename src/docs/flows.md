@@ -100,7 +100,7 @@ by `buildFlowConfiguration(nodes, edges, name, declaredState)` in
 {
   "listeners":      [ { "crewId": "...", "listenToTaskIds": [...], "tasks": [...], "conditionType": "AND" } ],
   "startingPoints": [ { "crewId": "...", "taskId": "...", "isStartPoint": true } ],
-  "routers":        [ { "name": "router_crew_1", "listenTo": "starting_point_0",
+  "routers":        [ { "name": "router_crew_1", "listenToCrewId": "...",
                         "routes": {"found": [...], "empty": [...]},
                         "routeConditions": {"found": "state.get(\"has_results\") == True"},
                         "stateMappings": [...] } ],
@@ -273,6 +273,13 @@ A router is where a flow makes a decision. When its trigger completes:
 4. **The matching route names are returned** — one name, or a list of them —
    which fires the `@listen("<route>")` method holding each route's crews. The
    branches run concurrently.
+
+   A router says which crew it waits for by `listenToCrewId`, and the backend
+   resolves that against the methods it generated. It used to be sent as a
+   METHOD NAME, which meant the frontend predicting a name only the backend
+   knows: it predicted by array position while methods are named per crew, so a
+   crew with two incoming edges shifted every later index and the router waited
+   on a method that was never created.
 5. **If nothing matches**, a route named `default` is taken if one exists;
    otherwise the flow stops there, and the router logs one consolidated error
    naming each route, its condition, what it evaluated to, and the state paths

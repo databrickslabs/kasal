@@ -1301,10 +1301,38 @@ class FlowBuilder:
 
         logger.info(f"Processed {len(hitl_gates)} HITL gate nodes")
 
+        # crew id -> the method this backend actually generated for it.
+        #
+        # A router says what it waits for, and it used to say it by METHOD NAME,
+        # which meant the frontend had to PREDICT a name only this side knows.
+        # It predicted by indexing its own arrays, which hold one entry per edge
+        # and per task, while methods are named per CREW — so any crew with two
+        # incoming edges shifted every later index and the router named a method
+        # that was never created. It then never fired, and the run reported
+        # COMPLETED having done half its work. Twice, on the same flow.
+        #
+        # So the frontend now sends the crew ID and this resolves it, from the
+        # tuples the naming actually came from rather than from a second copy of
+        # the rule.
+        crew_to_method: Dict[str, str] = {}
+        for listener_info in listener_crews:
+            listener_method_name, listener_crew_id = listener_info[0], listener_info[1]
+            if listener_crew_id:
+                crew_to_method.setdefault(str(listener_crew_id), listener_method_name)
+        for sp_method_name, sp_task_ids, _objs, _name, _data in starting_points:
+            sp_ids = {str(t) for t in sp_task_ids}
+            for sp_config in frontend_starting_points:
+                if str(sp_config.get("taskId")) in sp_ids:
+                    sp_crew_id = sp_config.get("crewId")
+                    if sp_crew_id:
+                        crew_to_method.setdefault(str(sp_crew_id), sp_method_name)
+                    break
+        logger.info(f"Crew -> method map for routers: {crew_to_method}")
+
         # Add router methods for conditional routing
         for i, router_config in enumerate(routers):
             router_name = router_config.get("name", f"router_{i}")
-            listen_to = router_config.get("listenTo")  # Method name to listen to
+            listen_to_crew_id = router_config.get("listenToCrewId")
             routes = router_config.get(
                 "routes", {}
             )  # Dict of route_name -> task configs
@@ -1316,21 +1344,21 @@ class FlowBuilder:
             )  # New: per-route conditions
             condition_field = router_config.get("conditionField", "success")
 
-            # Find the method to listen to
-            # Default to the first starting point method if not specified
+            # Resolve the crew the router waits for into the method built for it.
             default_method = (
                 starting_points[0][0] if starting_points else "starting_point_0"
             )
-            listen_to_method = listen_to or default_method
+            listen_to_method = (
+                crew_to_method.get(str(listen_to_crew_id))
+                if listen_to_crew_id
+                else None
+            ) or default_method
 
-            # A router wired to a method that does not exist never fires, and
-            # said NOTHING about it: the flow ran its first half, took no route,
-            # and reported COMPLETED. Seen twice on the same flow — the frontend
-            # indexed `listener_N` over its RAW listeners array (one entry per
-            # incoming edge) while the backend names them by GROUPED crew
-            # (flow_processors.py:600-653), so a crew with two incoming edges
-            # shifted every later index by one and the router asked for a
-            # `listener_2` that was never created.
+            # A router wired to a method that does not exist never fires and
+            # says NOTHING about it. Resolution from the crew id removes the way
+            # that used to happen, but an unknown crew id (a node deleted from
+            # the canvas, a config hand-edited) would land in the same place, so
+            # the check stays.
             if listen_to_method not in class_methods:
                 available = sorted(
                     name
@@ -1338,10 +1366,13 @@ class FlowBuilder:
                     if name.startswith(("listener_", "starting_point_", "route_"))
                 )
                 logger.error(
-                    "Router %r listens to %r, which this flow does not have. It "
-                    "cannot fire, so its routes will never run. Available: %s",
+                    "Router %r waits on crew %r, which resolved to %r — a method "
+                    "this flow does not have. It cannot fire, so its routes will "
+                    "never run. Known crews: %s. Available methods: %s",
                     router_name,
+                    listen_to_crew_id,
                     listen_to_method,
+                    sorted(crew_to_method),
                     available,
                 )
 
@@ -1580,7 +1611,10 @@ class FlowBuilder:
                 f"[ROUTER DEBUG]   route_conditions (full dict): {route_conditions}"
             )
             logger.info(f"[ROUTER DEBUG]   condition_expr (legacy): {condition_expr}")
-            logger.info(f"[ROUTER DEBUG]   listen_to_method: {listen_to_method}")
+            logger.info(
+                f"[ROUTER DEBUG]   listenToCrewId: {listen_to_crew_id} "
+                f"-> {listen_to_method}"
+            )
             bound_router = router_factory(
                 routes,
                 condition_expr,

@@ -1066,7 +1066,7 @@ class TestProcessRouters:
 
     @pytest.mark.asyncio
     async def test_no_task_repo_returns_empty(self):
-        flow_config = {"routers": [{"listenTo": "sp0", "routes": {}}]}
+        flow_config = {"routers": [{"listenToCrewId": "sp0", "routes": {}}]}
         result = await FlowProcessorManager.process_routers(
             flow_config=flow_config, all_tasks={}, repositories={}
         )
@@ -1089,7 +1089,7 @@ class TestProcessRouters:
         flow_config = {
             "routers": [
                 {
-                    "listenTo": "sp0",
+                    "listenToCrewId": "sp0",
                     "routes": {"route_a": []},  # Empty list
                     "routeConditions": {"route_a": "condition_a"},
                 }
@@ -1111,7 +1111,7 @@ class TestProcessRouters:
         flow_config = {
             "routers": [
                 {
-                    "listenTo": "sp0",
+                    "listenToCrewId": "sp0",
                     "routes": {"route_a": [{"id": task_id, "crewId": crew_id}]},
                     "routeConditions": {},
                 }
@@ -1135,7 +1135,7 @@ class TestProcessRouters:
         flow_config = {
             "routers": [
                 {
-                    "listenTo": "sp0",
+                    "listenToCrewId": "sp0",
                     "routes": {"route_a": [{"id": task_id}]},  # No crewId
                     "routeConditions": {},
                 }
@@ -1160,7 +1160,7 @@ class TestProcessRouters:
         flow_config = {
             "routers": [
                 {
-                    "listenTo": "starting_point_0",
+                    "listenToCrewId": "starting_point_0",
                     "routes": {"route_a": [{"id": task_id, "crewId": crew_id}]},
                     "routeConditions": {"route_a": "result == 'A'"},
                 }
