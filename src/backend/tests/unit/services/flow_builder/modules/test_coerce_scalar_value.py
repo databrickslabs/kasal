@@ -7,7 +7,7 @@ dead-ends non-deterministically. coerce_scalar_value maps boolean/numeric string
 to their natural types so both forms compare equal.
 """
 
-from src.services.flow_builder.modules.flow_builder import coerce_scalar_value
+from src.services.flow_builder.modules.flow_eval_context import coerce_scalar_value
 
 
 def test_true_strings_become_python_true():

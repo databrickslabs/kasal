@@ -14,6 +14,7 @@ from src.core.logger import LoggerManager
 from src.services.execution.runtime import Crew, Process, Task
 from src.services.flow_builder.runtime import and_, listen, or_, router, start
 
+from .flow_conditions import state_snapshot
 from .flow_state import FlowStateManager
 
 # Initialize logger - use flow logger for flow execution
@@ -381,28 +382,18 @@ def crew_inputs_from_state(flow: Any) -> Dict[str, Any]:
     Best-effort — a flow with no state, or a state that is not a mapping, simply
     passes nothing, exactly as before.
     """
-    state = getattr(flow, "state", None)
-    if isinstance(state, dict):
-        return {k: v for k, v in state.items() if k != "id"}
-    if state is None:
-        return {}
-
-    # A typed state dumps itself. `vars()` would work for the declared fields
-    # but miss everything written at runtime — pydantic keeps extras off
-    # `__dict__` — and those are exactly the values a downstream task
-    # interpolates: a state operation's output variable is written, never
-    # declared. `model_dump` includes them.
-    dump = getattr(state, "model_dump", None)
-    if callable(dump):
-        try:
-            return {k: v for k, v in dump().items() if k != "id"}
-        except Exception as exc:  # noqa: BLE001 — inputs must not fail a kickoff
-            logger.debug(f"could not dump flow state for crew inputs: {exc}")
-    if hasattr(state, "__dict__"):
-        return {
-            k: v for k, v in vars(state).items() if k != "id" and not k.startswith("_")
-        }
-    return {}
+    # `state_snapshot` takes the UNION of model_dump, __pydantic_extra__ and
+    # vars() rather than the first that works, and that difference is load
+    # bearing. Pydantic only routes an undeclared name into __pydantic_extra__
+    # when `getattr` RAISES; `items` is a live method on DictLikeState, so
+    # `state["items"] = [...]` — what merge_parsed_json writes whenever a crew
+    # emits a top-level JSON array — lands in plain __dict__ and model_dump
+    # never sees it. A crew interpolating `{items}` then got nothing.
+    return {
+        key: value
+        for key, value in state_snapshot(getattr(flow, "state", None)).items()
+        if key != "id"  # the checkpoint handle, never something a task reads
+    }
 
 
 def attach_memory_seams(crew: Any, crew_label: str, request: str | None = None) -> None:
@@ -2248,16 +2239,12 @@ class FlowMethodFactory:
                 else:
                     previous_crew_output = str(previous_output)
 
-            # Get flow state snapshot
-            flow_state_snapshot = {}
-            if hasattr(self, "state"):
-                try:
-                    if hasattr(self.state, "model_dump"):
-                        flow_state_snapshot = self.state.model_dump()
-                    elif isinstance(self.state, dict):
-                        flow_state_snapshot = dict(self.state)
-                except Exception as e:
-                    logger.warning(f"Could not serialize flow state: {e}")
+            # Get flow state snapshot. Through `state_snapshot` so the human
+            # approving this sees everything the flow holds, including channels
+            # written at runtime that `model_dump` alone does not return.
+            flow_state_snapshot = (
+                state_snapshot(self.state) if hasattr(self, "state") else {}
+            )
 
             # Get flow_uuid for checkpoint
             flow_uuid = None

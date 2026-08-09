@@ -142,9 +142,11 @@ class TestRouterEvaluatesWithoutArgs:
     def test_the_helpers_are_defined_before_the_args_branch(self):
         import inspect
 
-        from src.services.flow_builder.modules import flow_builder
+        # build_eval_context and its helpers now live in flow_eval_context;
+        # the invariant is unchanged, only its address.
+        from src.services.flow_builder.modules import flow_eval_context
 
-        source = inspect.getsource(flow_builder)
+        source = inspect.getsource(flow_eval_context)
         # Position, not behaviour: the failure was purely one of definition
         # order, and only the order can prevent it recurring.
         helpers = [

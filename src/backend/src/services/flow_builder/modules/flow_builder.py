@@ -14,7 +14,7 @@ The FlowBuilder class coordinates these modules to construct complete CrewAI flo
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Final, List, Optional, Union
 
 from pydantic import BaseModel
 
@@ -31,9 +31,18 @@ from src.services.flow_builder.conversation.turn import (
 )
 from src.services.flow_builder.exceptions import FlowPausedForApprovalException
 from src.services.flow_builder.modules.agent_adapter import AgentConfig
+from src.services.flow_builder.modules.flow_conditions import (
+    ConditionState,
+    report_no_route,
+    state_snapshot,
+)
 
 # Import new modular components
 from src.services.flow_builder.modules.flow_config import FlowConfigManager
+from src.services.flow_builder.modules.flow_eval_context import (
+    build_eval_context,
+    coerce_scalar_value,
+)
 from src.services.flow_builder.modules.flow_methods import (
     FlowMethodFactory,
     collect_task_agents,
@@ -56,32 +65,6 @@ from src.utils.safe_eval import safe_eval
 logger = LoggerManager.get_instance().flow
 
 
-def coerce_scalar_value(val):
-    """Coerce a string scalar to its natural type for reliable router comparisons.
-
-    Booleans first: a crew may return ``has_results: true`` (JSON bool → Python
-    True) on one run and ``"true"``/``"True"`` (string) on another, so a router
-    condition like ``has_results == True`` would silently be False for the string
-    form. Map "true"/"false" (case-insensitive) to Python bool; numeric strings to
-    int/float; everything else is returned unchanged.
-    """
-    if isinstance(val, str):
-        low = val.strip().lower()
-        if low == "true":
-            return True
-        if low == "false":
-            return False
-        try:
-            return int(val)
-        except ValueError:
-            pass
-        try:
-            return float(val)
-        except ValueError:
-            pass
-    return val
-
-
 def pick_legacy_route(condition_value, route_names):
     """Select a route by value when a router has no condition expression.
 
@@ -102,49 +85,14 @@ def pick_legacy_route(condition_value, route_names):
     return names[0] if names else "default"
 
 
-def extract_embedded_json(text):
-    """Extract a JSON object/array embedded in prose.
-
-    Models on the soft output_json path commonly wrap their structured answer in
-    a ```json ... ``` block surrounded by prose ("Based on my research… ```json
-    {…} ``` ## Summary …"). The router's direct-JSON check requires the whole
-    string to be JSON, so it misses these and routing silently stops. This pulls
-    the JSON out: first a ```json/``` fenced block, then the first balanced
-    ``{...}`` object. Returns the parsed value, or None.
-    """
-    if not isinstance(text, str):
-        return None
-    import json as _json
-    import re as _re
-
-    # 1) Fenced code block (```json ... ``` or ``` ... ```).
-    for m in _re.finditer(r"```(?:json)?\s*(.*?)```", text, _re.DOTALL):
-        try:
-            return _json.loads(m.group(1).strip())
-        except Exception:
-            continue
-
-    # 2) First balanced {...} object (brace counting; json.loads validates).
-    start = text.find("{")
-    while start != -1:
-        depth = 0
-        for i in range(start, len(text)):
-            if text[i] == "{":
-                depth += 1
-            elif text[i] == "}":
-                depth -= 1
-                if depth == 0:
-                    try:
-                        return _json.loads(text[start : i + 1])
-                    except Exception:
-                        break
-        start = text.find("{", start + 1)
-    return None
-
-
 # Bare names that user-authored flow router/state expressions may call. These
 # mirror the safe numeric/string helpers injected into the evaluation context;
 # everything else is rejected by safe_eval (no dunder/introspection access).
+#: The one route name that means "when nothing else matched". A wire value
+#: shared with the frontend (flowConfigBuilder.DEFAULT_ROUTE_NAME); it was four
+#: bare literals here, two of which mean something different.
+DEFAULT_ROUTE: Final[str] = "default"
+
 _FLOW_CONDITION_CALLS = frozenset(
     {"int", "float", "str", "bool", "len", "abs", "min", "max"}
 )
@@ -1375,6 +1323,28 @@ class FlowBuilder:
             )
             listen_to_method = listen_to or default_method
 
+            # A router wired to a method that does not exist never fires, and
+            # said NOTHING about it: the flow ran its first half, took no route,
+            # and reported COMPLETED. Seen twice on the same flow — the frontend
+            # indexed `listener_N` over its RAW listeners array (one entry per
+            # incoming edge) while the backend names them by GROUPED crew
+            # (flow_processors.py:600-653), so a crew with two incoming edges
+            # shifted every later index by one and the router asked for a
+            # `listener_2` that was never created.
+            if listen_to_method not in class_methods:
+                available = sorted(
+                    name
+                    for name in class_methods
+                    if name.startswith(("listener_", "starting_point_", "route_"))
+                )
+                logger.error(
+                    "Router %r listens to %r, which this flow does not have. It "
+                    "cannot fire, so its routes will never run. Available: %s",
+                    router_name,
+                    listen_to_method,
+                    available,
+                )
+
             # Create router method
             def router_factory(
                 router_routes,
@@ -1388,206 +1358,11 @@ class FlowBuilder:
                     logger.info(f"Router {router_method_name} evaluating condition")
 
                     # Build evaluation context for condition evaluation
-                    def build_eval_context():
-                        import json
-
-                        eval_context = {}
-
-                        # Convert string scalars (bool/int/float) so router conditions
-                        # compare reliably — see module-level coerce_scalar_value.
-                        def auto_convert_value(val):
-                            return coerce_scalar_value(val)
-
-                        # Helper function to convert all string numerics in a dict
-                        def auto_convert_dict(d):
-                            """Recursively convert string numerics in a dict."""
-                            if not isinstance(d, dict):
-                                return auto_convert_value(d)
-                            return {k: auto_convert_dict(v) for k, v in d.items()}
-
-                        # Safe helper functions for condition evaluation
-                        def safe_int(val, default=0):
-                            """Safely convert value to int."""
-                            try:
-                                return int(val)
-                            except (ValueError, TypeError):
-                                return default
-
-                        def safe_float(val, default=0.0):
-                            """Safely convert value to float."""
-                            try:
-                                return float(val)
-                            except (ValueError, TypeError):
-                                return default
-
-                        # Add helper functions to context for use in conditions
-                        eval_context["int"] = safe_int
-                        eval_context["float"] = safe_float
-                        eval_context["str"] = str
-                        eval_context["len"] = len
-                        eval_context["bool"] = bool
-                        eval_context["abs"] = abs
-                        eval_context["min"] = min
-                        eval_context["max"] = max
-
-                        # Add state to context if available
-                        if hasattr(self, "state"):
-                            eval_context["state"] = self.state
-                        else:
-                            eval_context["state"] = {}
-
-                        # Add result from args
-                        # Defined BEFORE `if args:`, deliberately.
-                        #
-                        # All three are also used by the state scan below, which runs whether
-                        # or not this router was called with args. A router listening to a
-                        # STARTING POINT receives none — so `if args:` was skipped, the helpers
-                        # were never defined, and the scan raised UnboundLocalError. The
-                        # handler swallowed it and abandoned the whole route evaluation, so a
-                        # route whose condition was true simply never ran. Observed on a real
-                        # flow as "cannot access local variable 'strip_code_fences'".
-                        def merge_parsed_json(parsed_data, source_label):
-                            if isinstance(parsed_data, dict):
-                                parsed_data = auto_convert_dict(parsed_data)
-                                eval_context["state"].update(parsed_data)
-                                eval_context.update(parsed_data)
-                                logger.info(
-                                    f"Parsed {source_label} JSON object and merged into state: {list(parsed_data.keys())}"
-                                )
-                            elif isinstance(parsed_data, list) and parsed_data:
-                                # For JSON arrays, extract keys from the first dict item
-                                first_item = parsed_data[0]
-                                if isinstance(first_item, dict):
-                                    first_item = auto_convert_dict(first_item)
-                                    eval_context["state"].update(first_item)
-                                    eval_context.update(first_item)
-                                    logger.info(
-                                        f"Parsed {source_label} JSON array (first item) and merged into state: {list(first_item.keys())}"
-                                    )
-                                # Also store the full array for advanced conditions
-                                eval_context["items"] = parsed_data
-                                eval_context["state"]["items"] = parsed_data
-                                logger.info(
-                                    f"Stored {source_label} JSON array with {len(parsed_data)} items in context['items']"
-                                )
-
-                        def strip_code_fences(s):
-                            """Strip markdown code fences (```json ... ```) from a string."""
-                            s = s.strip()
-                            if s.startswith("```"):
-                                first_newline = s.find("\n")
-                                if first_newline != -1:
-                                    s = s[first_newline + 1 :]
-                                if s.rstrip().endswith("```"):
-                                    s = s.rstrip()[:-3].rstrip()
-                            return s
-
-                        def looks_like_json(s):
-                            s = s.strip()
-                            return (s.startswith("{") and s.endswith("}")) or (
-                                s.startswith("[") and s.endswith("]")
-                            )
-
-                        if args:
-                            eval_context["result"] = args[0]
-
-                            # Try to extract values from CrewOutput
-                            result_obj = args[0]
-
-                            # Helper to merge parsed JSON into eval context and state
-
-                            # Prefer the declared structured output (output_pydantic /
-                            # output_json) when present: a task with a declared schema yields a
-                            # CrewOutput whose .pydantic / .json_dict holds typed fields. Routing
-                            # on these is deterministic, so router conditions resolve reliably
-                            # instead of depending on ad-hoc raw-text JSON parsing below.
-                            if getattr(result_obj, "pydantic", None) is not None:
-                                try:
-                                    merge_parsed_json(
-                                        result_obj.pydantic.model_dump(),
-                                        "crew output (pydantic)",
-                                    )
-                                except (AttributeError, Exception) as parse_err:
-                                    logger.debug(
-                                        f"Could not read pydantic crew output: {parse_err}"
-                                    )
-
-                            elif getattr(result_obj, "json_dict", None):
-                                merge_parsed_json(
-                                    result_obj.json_dict, "crew output (json_dict)"
-                                )
-
-                            # If result has a 'raw' attribute (CrewOutput), try to parse it as JSON
-                            elif hasattr(result_obj, "raw"):
-                                try:
-                                    raw_str = strip_code_fences(str(result_obj.raw))
-                                    if looks_like_json(raw_str):
-                                        parsed_data = json.loads(raw_str)
-                                        merge_parsed_json(parsed_data, "crew output")
-                                except (json.JSONDecodeError, Exception) as parse_err:
-                                    logger.debug(
-                                        f"Could not parse crew output as JSON: {parse_err}"
-                                    )
-
-                            # If result is a string that looks like JSON, parse it
-                            elif isinstance(result_obj, str):
-                                try:
-                                    raw_str = strip_code_fences(result_obj)
-                                    if looks_like_json(raw_str):
-                                        parsed_data = json.loads(raw_str)
-                                        merge_parsed_json(parsed_data, "string result")
-                                except (json.JSONDecodeError, Exception) as parse_err:
-                                    logger.debug(
-                                        f"Could not parse string result as JSON: {parse_err}"
-                                    )
-
-                            # Also add common fields from result
-                            if isinstance(args[0], dict):
-                                eval_context.update(args[0])
-                            elif hasattr(args[0], "__dict__"):
-                                eval_context.update(vars(args[0]))
-
-                        # Parse JSON strings in state values and add them to top-level context
-                        # This makes values like state["Random Number"] = '{"number": 43}' accessible as eval_context["number"] = 43
-                        if eval_context.get("state"):
-                            for key, value in list(eval_context["state"].items()):
-                                if isinstance(value, str):
-                                    # Strip markdown code fences if present (e.g., ```json\n...\n```)
-                                    json_value = strip_code_fences(value)
-
-                                    # Now check if it looks like JSON (object or array)
-                                    if looks_like_json(json_value):
-                                        try:
-                                            parsed_value = json.loads(json_value)
-                                            merge_parsed_json(
-                                                parsed_value, f"state['{key}']"
-                                            )
-                                        except (json.JSONDecodeError, Exception) as e:
-                                            logger.debug(
-                                                f"Could not parse state['{key}'] as JSON: {e}"
-                                            )
-                                            pass  # Not JSON, leave as-is
-                                    else:
-                                        # Prose-wrapped JSON (```json ... ``` inside a summary) —
-                                        # extract the embedded object so router fields resolve.
-                                        embedded = extract_embedded_json(value)
-                                        if isinstance(embedded, (dict, list)):
-                                            merge_parsed_json(
-                                                embedded,
-                                                f"state['{key}'] (embedded json)",
-                                            )
-
-                        # Add kwargs (coerce string scalars so e.g. has_results
-                        # passed as a bare "true"/"True" kwarg compares correctly).
-                        eval_context.update(
-                            {k: coerce_scalar_value(v) for k, v in kwargs.items()}
-                        )
-                        return eval_context
 
                     # If we have per-route conditions (routeConditions), evaluate each route's condition
                     if router_route_conditions:
                         try:
-                            eval_context = build_eval_context()
+                            eval_context = build_eval_context(self, args, kwargs)
                             logger.info(
                                 f"Evaluating per-route conditions for routes: {list(router_route_conditions.keys())}"
                             )
@@ -1596,7 +1371,16 @@ class FlowBuilder:
                                 f"State contents: {eval_context.get('state', {})}"
                             )
 
-                            # Evaluate each route's condition and return the first matching route
+                            # Evaluate EVERY route and return all that matched.
+                            #
+                            # This used to return on the first true condition, so
+                            # a batch containing both politics and sports ran only
+                            # whichever route happened to come first in the dict —
+                            # a silent, ordering-dependent coin flip the author
+                            # never chose. The runtime emits each returned name as
+                            # its own signal, so a list runs every matching branch.
+                            outcomes = []
+                            matched: list[str] = []
                             for (
                                 route_name,
                                 route_condition,
@@ -1614,28 +1398,65 @@ class FlowBuilder:
                                         logger.info(
                                             f"Route '{route_name}' condition evaluated to: {condition_result}"
                                         )
+                                        outcomes.append(
+                                            (
+                                                route_name,
+                                                route_condition,
+                                                condition_result,
+                                            )
+                                        )
                                         if condition_result:
                                             logger.info(
                                                 f"Router {router_method_name} taking route: {route_name}"
                                             )
-                                            return route_name
+                                            matched.append(route_name)
                                     except Exception as route_err:
                                         logger.warning(
                                             f"Error evaluating condition for route '{route_name}': {route_err}"
                                         )
+                                        outcomes.append(
+                                            (
+                                                route_name,
+                                                route_condition,
+                                                f"ERROR {type(route_err).__name__}: {route_err}",
+                                            )
+                                        )
                                         continue
 
-                            # No route matched - take 'default' route if exists, otherwise None
-                            if "default" in router_routes:
+                            if matched:
                                 logger.info(
-                                    f"Router {router_method_name} no condition matched, taking 'default' route"
+                                    "Router %s taking %d route(s): %s",
+                                    router_method_name,
+                                    len(matched),
+                                    matched,
                                 )
-                                return "default"
-                            else:
-                                logger.info(
-                                    f"Router {router_method_name} no condition matched and no 'default' route, flow stops"
-                                )
-                                return None
+                                # ONE match returns the bare name, exactly as
+                                # before — that is the overwhelmingly common case
+                                # and everything downstream (checkpoints, method
+                                # outputs, logs) already reads that shape. Only a
+                                # genuine multi-match returns a list, which is the
+                                # behaviour that did not exist at all before.
+                                return matched[0] if len(matched) == 1 else matched
+
+                            # Nothing matched. Say so ONCE, loudly, with what the
+                            # state actually held.
+                            #
+                            # Whoever wrote these conditions could not see state
+                            # while writing them, and this is the only moment they
+                            # can. Previously both arms logged at INFO — a router
+                            # that quietly took 'default', or quietly stopped the
+                            # flow, was indistinguishable from one that never ran.
+                            report_no_route(
+                                router_method_name,
+                                outcomes,
+                                eval_context.get("state"),
+                                has_default=DEFAULT_ROUTE in router_routes,
+                            )
+                            return (
+                                DEFAULT_ROUTE
+                                if DEFAULT_ROUTE in router_routes
+                                else None
+                            )
 
                         except Exception as e:
                             logger.error(
@@ -1647,7 +1468,7 @@ class FlowBuilder:
                     # Legacy: single condition expression (deprecated but still supported)
                     elif router_condition_expr:
                         try:
-                            eval_context = build_eval_context()
+                            eval_context = build_eval_context(self, args, kwargs)
 
                             logger.info(
                                 f"Evaluating legacy condition: {router_condition_expr}"
@@ -1738,6 +1559,11 @@ class FlowBuilder:
 
                 route_method.__name__ = router_method_name
                 route_method.__qualname__ = router_method_name
+                # Every route this router COULD emit. The runtime subtracts the
+                # ones it actually took to work out which route listeners can
+                # never fire this turn, so an AND join downstream stops waiting
+                # for branches that were not chosen instead of hanging forever.
+                route_method._kasal_routes = list(router_routes)
                 # Also set the inner function's __name__ so that FlowMethod.__get__
                 # creates bound copies with the correct name (it re-wraps _meth,
                 # picking up __name__ from _meth, not from the wrapper's __dict__)
@@ -1794,6 +1620,7 @@ class FlowBuilder:
                         group_ctx,
                         expected_route,
                         route_crew_name_param,
+                        upstream_method,
                     ):
                         @listen(expected_route)
                         async def route_listener_method(self, previous_output):
@@ -1804,6 +1631,40 @@ class FlowBuilder:
                             logger.info(
                                 f"Executing route listener for route: {expected_route}"
                             )
+
+                            # A @listen(route_name) method is handed the ROUTER'S
+                            # RETURN VALUE, which is the route name — not the
+                            # upstream crew's output. Injecting that verbatim gave
+                            # the routed crew "Context from previous step:
+                            # route_to_politics_presentation" and none of the
+                            # classification it was supposed to work from: the
+                            # branch ran, on nothing.
+                            #
+                            # The real output is in state under the method the
+                            # router listens to, stored as state[<method>] and
+                            # state[<crew name>] when that crew finished.
+                            routed_from = state_snapshot(self.state).get(
+                                upstream_method
+                            )
+                            if routed_from:
+                                logger.info(
+                                    "Route %s: taking upstream output from "
+                                    "state[%r] (%d chars) instead of the router's "
+                                    "return value %r",
+                                    expected_route,
+                                    upstream_method,
+                                    len(str(routed_from)),
+                                    str(previous_output)[:60],
+                                )
+                                previous_output = routed_from
+                            else:
+                                logger.warning(
+                                    "Route %s: state has no %r, so the routed crew "
+                                    "gets only the router's return value. It will "
+                                    "run without the upstream crew's output.",
+                                    expected_route,
+                                    upstream_method,
+                                )
 
                             # Log and store previous output from router
                             if previous_output:
@@ -2055,6 +1916,7 @@ class FlowBuilder:
                         group_context,
                         route_name,
                         route_crew_name,
+                        listen_to_method,
                     )
                     class_methods[route_listener_name] = bound_route_listener
                     logger.info(
