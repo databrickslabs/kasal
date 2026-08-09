@@ -267,18 +267,33 @@ A router is where a flow makes a decision. When its trigger completes:
    `{"has_results": true, "count": 6}` makes both readable.
 2. **Values are coerced.** `"true"` becomes `True`, `"6"` becomes `6`, so a
    condition comparing to `True` or to a number behaves as written.
-3. **Each route's condition is evaluated** in order; the first that holds wins.
-4. **The route name is returned**, which fires the `@listen("<route>")` method
-   holding that route's crews.
+3. **Every route's condition is evaluated**, and ALL that hold are taken. A
+   result containing both politics and sports runs both branches. Returning on
+   the first match meant the loser was decided by declaration order — silently.
+4. **The matching route names are returned** — one name, or a list of them —
+   which fires the `@listen("<route>")` method holding each route's crews. The
+   branches run concurrently.
 5. **If nothing matches**, a route named `default` is taken if one exists;
-   otherwise the flow stops there.
+   otherwise the flow stops there, and the router logs one consolidated error
+   naming each route, its condition, what it evaluated to, and the state paths
+   that WERE addressable.
 
-Conditions are evaluated by `FlowStateManager.evaluate_condition` over
-`safe_eval`, an AST evaluator — not `eval`. A condition that cannot be evaluated
-at all (unknown name, bad syntax) raises `ConditionEvaluationError` rather than
-returning `False`. The distinction matters: "the condition is false" and "the
-condition is broken" used to look identical, and a broken one silently sent
-every run down the same branch.
+A field is resolved by `ConditionState` (`modules/flow_conditions.py`): the exact
+top-level key first, then an explicit path (`classification.category`,
+`articles[].category`), then a bounded search for a uniquely-named leaf. Values
+gathered across a list compare as *any element matches*, which is what lets a
+condition ask "does any article have category politics". String comparison folds
+case, because the label is one the model chose.
+
+Conditions are evaluated by `safe_eval`, an AST evaluator — not `eval`. The
+context is assembled by `build_eval_context` (`modules/flow_eval_context.py`).
+
+> `FlowStateManager.evaluate_condition` raises `ConditionEvaluationError` rather
+> than returning `False` for a condition that cannot be evaluated at all, and
+> that is the right policy — but the ROUTER path does not use it. It is imported
+> and never called. The router catches an evaluation error per route and
+> continues, so a broken condition still reads as "no" rather than "unanswered";
+> what it no longer does is stay quiet about it.
 
 `stateMappings` on a router edge are the declarative alternative to JSON
 parsing: they map a named output field of a source task onto a state variable.
