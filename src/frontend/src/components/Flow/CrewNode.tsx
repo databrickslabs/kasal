@@ -124,9 +124,6 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
   const taskTooltip = selectedTasks.length > 0
     ? `Selected tasks:\n${selectedTasks.map(t => `• ${t.name}`).join('\n')}`
     : crewName;
-  const tooltip = data.crewId
-    ? `${taskTooltip}\n\nDouble-click to open in the Agent Builder`
-    : taskTooltip;
   
   const handleDelete = (event: React.MouseEvent) => {
     event.stopPropagation(); // Prevent node selection
@@ -148,7 +145,7 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
   const statusIcon = getStatusIcon();
 
   return (
-    <Tooltip title={tooltip} placement="top" arrow>
+    <Tooltip title={taskTooltip} placement="top" arrow>
       <Box
         sx={{
           width: '100%',
@@ -305,23 +302,22 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
             }}
           >
             {data.crewId && (
-              <Tooltip title="Open in the Agent Builder" placement="top" arrow>
-                <IconButton
-                  size="small"
-                  onClick={handleOpenCrew}
-                  sx={{
-                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-                    '&:hover': {
-                      backgroundColor: '#e3f2fd',
-                    },
-                    boxShadow: '0 0 4px rgba(0,0,0,0.2)',
-                    width: 24,
-                    height: 24,
-                  }}
-                >
-                  <OpenInNewIcon fontSize="small" color="primary" />
-                </IconButton>
-              </Tooltip>
+              <IconButton
+                size="small"
+                aria-label="Open in the Agent Builder"
+                onClick={handleOpenCrew}
+                sx={{
+                  backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                  '&:hover': {
+                    backgroundColor: '#e3f2fd',
+                  },
+                  boxShadow: '0 0 4px rgba(0,0,0,0.2)',
+                  width: 24,
+                  height: 24,
+                }}
+              >
+                <OpenInNewIcon fontSize="small" color="primary" />
+              </IconButton>
             )}
             <IconButton
               size="small"
