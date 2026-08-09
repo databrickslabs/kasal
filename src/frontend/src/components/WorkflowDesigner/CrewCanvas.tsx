@@ -35,6 +35,7 @@ import { useCanvasHandlers } from '../../hooks/workflow/useCanvasHandlers';
 import { useDialogHandlers } from '../../hooks/workflow/useDialogHandlers';
 import ManagerNodeController from './ManagerNodeController';
 import RightSidebar from './RightSidebar';
+import FlowBackLink from './FlowBackLink';
 
 // Node and edge types are imported from flow-config
 
@@ -678,6 +679,10 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
 
         </ReactFlow>
       )}
+
+      {/* Back to the flow this crew belongs to. Renders nothing when it does
+          not apply, which is most of the time. */}
+      <FlowBackLink />
 
       <Snackbar 
         open={showSuccess} 
