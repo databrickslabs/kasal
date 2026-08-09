@@ -2,7 +2,8 @@ import { vi, beforeEach, describe, it, expect } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import SchemaQuickCreateDialog from './SchemaQuickCreateDialog';
+import SchemaDialog from './SchemaDialog';
+import { SchemaService } from '../../api/workflow/SchemaService';
 
 const mockCreateSchema = vi.fn();
 
@@ -10,10 +11,10 @@ vi.mock('../../api/workflow/SchemaService', () => ({
   SchemaService: { getInstance: () => ({ createSchema: mockCreateSchema }) },
 }));
 
-const setup = (overrides: Partial<React.ComponentProps<typeof SchemaQuickCreateDialog>> = {}) => {
+const setup = (overrides: Partial<React.ComponentProps<typeof SchemaDialog>> = {}) => {
   const onClose = vi.fn();
   const onCreated = vi.fn();
-  render(<SchemaQuickCreateDialog open onClose={onClose} onCreated={onCreated} {...overrides} />);
+  render(<SchemaDialog open onClose={onClose} onSaved={onCreated} {...overrides} />);
   return { onClose, onCreated };
 };
 
@@ -23,9 +24,9 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe('SchemaQuickCreateDialog', () => {
+describe('SchemaDialog', () => {
   it('renders nothing visible when closed', () => {
-    render(<SchemaQuickCreateDialog open={false} onClose={vi.fn()} onCreated={vi.fn()} />);
+    render(<SchemaDialog open={false} onClose={vi.fn()} onSaved={vi.fn()} />);
     expect(screen.queryByText('New Output Schema')).not.toBeInTheDocument();
   });
 
@@ -51,12 +52,8 @@ describe('SchemaQuickCreateDialog', () => {
     expect(mockCreateSchema).not.toHaveBeenCalled();
   });
 
-  it('adds and removes fields (remove disabled at one field)', () => {
+  it('adds and removes fields', () => {
     setup();
-    // remove button disabled with a single field
-    const removeButtons = screen.getAllByTestId('DeleteIcon').map((i) => i.closest('button'));
-    expect(removeButtons[0]).toBeDisabled();
-
     fireEvent.click(screen.getByText('Add field'));
     expect(screen.getAllByPlaceholderText('field name')).toHaveLength(2);
 
@@ -78,9 +75,47 @@ describe('SchemaQuickCreateDialog', () => {
   it('changes a field type via the select', () => {
     setup();
     fireEvent.mouseDown(screen.getByRole('combobox'));
-    fireEvent.click(screen.getByRole('option', { name: 'number' }));
-    // The selected value is now reflected in the combobox
-    expect(screen.getByRole('combobox')).toHaveTextContent('number');
+    fireEvent.click(screen.getByRole('option', { name: 'Number' }));
+    expect(screen.getByRole('combobox')).toHaveTextContent('Number');
+  });
+
+  it('expands a list field so one item can be described', () => {
+    setup();
+    fireEvent.mouseDown(screen.getByRole('combobox'));
+    fireEvent.click(screen.getByRole('option', { name: 'List of items' }));
+
+    expect(screen.getByText('Each item has:')).toBeInTheDocument();
+    expect(screen.getByText('Add field to item')).toBeInTheDocument();
+  });
+
+  it('writes a list of items the router can address', async () => {
+    mockCreateSchema.mockResolvedValue({ id: '9', name: 'News' });
+    const { onCreated } = setup();
+
+    typeInto(screen.getByLabelText('Schema name'), 'News');
+    const names = () => screen.getAllByPlaceholderText('field name') as HTMLInputElement[];
+    typeInto(names()[0], 'articles');
+    fireEvent.mouseDown(screen.getAllByRole('combobox')[0]);
+    fireEvent.click(screen.getByRole('option', { name: 'List of items' }));
+    typeInto(names()[1], 'category');
+
+    fireEvent.click(screen.getByText('Create & use'));
+    await waitFor(() => expect(onCreated).toHaveBeenCalled());
+
+    expect(onCreated.mock.calls[0][0].schema_definition).toEqual({
+      type: 'object',
+      properties: {
+        articles: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { category: { type: 'string' } },
+            required: ['category'],
+          },
+        },
+      },
+      required: ['articles'],
+    });
   });
 
   it('creates a schema and calls onCreated with a normalized definition', async () => {
@@ -156,5 +191,61 @@ describe('SchemaQuickCreateDialog', () => {
     typeInto(screen.getByLabelText('Schema name'), 'temp');
     fireEvent.click(screen.getByText('Cancel'));
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe('SchemaDialog in edit mode', () => {
+  const existing = {
+    name: 'Classification',
+    description: 'Output schema for Classification',
+    schema_type: 'data_model',
+    schema_definition: {
+      type: 'object',
+      properties: {
+        classification: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { category: { type: 'string' } },
+            required: ['category'],
+          },
+        },
+      },
+      required: ['classification'],
+    },
+  } as never;
+
+  it('titles itself after the schema and loads its fields', () => {
+    render(<SchemaDialog open onClose={vi.fn()} schema={existing} onSaved={vi.fn()} />);
+
+    expect(screen.getByText('Edit: Classification')).toBeInTheDocument();
+    expect(screen.getByText('Each item has:')).toBeInTheDocument();
+    const names = screen.getAllByPlaceholderText('field name') as HTMLInputElement[];
+    expect(names.map((i) => i.value)).toEqual(['classification', 'category']);
+  });
+
+  it('will not let the name change — the API identifies a schema by it', () => {
+    render(<SchemaDialog open onClose={vi.fn()} schema={existing} onSaved={vi.fn()} />);
+
+    expect(screen.getByLabelText('Schema name')).toBeDisabled();
+  });
+
+  it('updates rather than creates, preserving the nesting', async () => {
+    const mockUpdate = vi.fn().mockResolvedValue({ ...existing });
+    (SchemaService.getInstance as unknown as ReturnType<typeof vi.fn>) = vi.fn(() => ({
+      createSchema: mockCreateSchema,
+      updateSchema: mockUpdate,
+    })) as never;
+    const onSaved = vi.fn();
+
+    render(<SchemaDialog open onClose={vi.fn()} schema={existing} onSaved={onSaved} />);
+    fireEvent.click(screen.getByText('Save'));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(mockCreateSchema).not.toHaveBeenCalled();
+    expect(mockUpdate.mock.calls[0][0]).toBe('Classification');
+    expect(mockUpdate.mock.calls[0][1].schema_definition).toEqual(
+      existing.schema_definition
+    );
   });
 });
