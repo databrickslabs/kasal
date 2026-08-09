@@ -379,3 +379,110 @@ class TestCaseInsensitiveComparison:
 
         assert MatchStr("Politics") == "politics"
         assert hash(MatchStr("Politics")) == hash(MatchStr("politics"))
+
+
+class TestWhereMatchesOneItem:
+    """`where` answers what a projection cannot: is there a SINGLE item that
+    satisfies all of these at once.
+
+    `articles[].category` and `articles[].score` are gathered independently, so
+    `A and B` over them is satisfied by *some* article being politics and *some
+    other* article scoring over 5. Element identity is lost.
+    """
+
+    ARTICLES = {
+        "articles": [
+            {"category": "Politics", "score": 3},
+            {"category": "Sports", "score": 9},
+            {"category": "Politics", "score": 7},
+        ]
+    }
+
+    def _where(self):
+        from src.services.flow_builder.modules.flow_conditions import (
+            ConditionState,
+            make_where,
+        )
+
+        return make_where(ConditionState(self.ARTICLES))
+
+    def test_the_case_independent_projection_gets_wrong(self):
+        """No politics article scores over 8 — Sports does."""
+        assert evaluate(
+            self.ARTICLES,
+            'state.get("articles[].category", "") == "politics" '
+            'and state.get("articles[].score", 0) > 8',
+        ), "projection is satisfied by two DIFFERENT articles"
+
+        assert not self._where()("articles", category="politics", score__gt=8)
+
+    def test_it_matches_when_one_item_satisfies_everything(self):
+        assert self._where()("articles", category="politics", score__gt=5)
+
+    def test_it_returns_the_matching_items(self):
+        matched = self._where()("articles", category="politics")
+
+        assert [m["score"] for m in matched] == [3, 7]
+
+    @pytest.mark.parametrize(
+        "terms,expected",
+        [
+            ({"category": "politics"}, True),
+            ({"category": "POLITICS"}, True),  # folds case, like == does
+            ({"category": "weather"}, False),
+            ({"score__gt": 8}, True),
+            ({"score__gte": 9}, True),
+            ({"score__lt": 4}, True),
+            ({"score__lte": 3}, True),
+            ({"category__ne": "politics"}, True),
+            ({"category__contains": "olit"}, True),
+            ({"category__startswith": "pol"}, True),
+            ({"category__endswith": "ics"}, True),
+        ],
+    )
+    def test_each_comparison(self, terms, expected):
+        assert bool(self._where()("articles", **terms)) is expected
+
+    def test_a_term_naming_a_field_no_item_has_matches_nothing(self):
+        assert not self._where()("articles", nonexistent="x")
+
+    def test_comparisons_are_total(self):
+        """A raising comparison would propagate out of safe_eval and be
+        swallowed into a silently skipped route."""
+        state = {"rows": [{"n": None}, {"n": "text"}, {"n": 12}]}
+        from src.services.flow_builder.modules.flow_conditions import (
+            ConditionState,
+            make_where,
+        )
+
+        assert make_where(ConditionState(state))("rows", n__gt=5)
+
+    def test_a_missing_list_matches_nothing_rather_than_raising(self):
+        from src.services.flow_builder.modules.flow_conditions import (
+            ConditionState,
+            make_where,
+        )
+
+        assert not make_where(ConditionState({}))("nope", a="b")
+
+    def test_a_lone_object_is_treated_as_one_item(self):
+        from src.services.flow_builder.modules.flow_conditions import (
+            ConditionState,
+            make_where,
+        )
+
+        state = {"classification": {"category": "Politics", "score": 9}}
+        assert make_where(ConditionState(state))(
+            "classification", category="politics", score__gt=5
+        )
+
+    def test_a_nested_path_works_as_the_list(self):
+        from src.services.flow_builder.modules.flow_conditions import (
+            ConditionState,
+            make_where,
+        )
+
+        state = {"report": {"articles": [{"category": "Politics", "score": 9}]}}
+        assert make_where(ConditionState(state))(
+            "report.articles", category="politics", score__gt=5
+        )

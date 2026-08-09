@@ -17,6 +17,7 @@ from typing import Any, Dict
 
 from src.services.flow_builder.modules.flow_conditions import (
     ConditionState,
+    make_where,
     state_snapshot,
 )
 
@@ -154,6 +155,9 @@ def build_eval_context(flow: Any, args: tuple, kwargs: dict) -> Dict[str, Any]:
         eval_context["state"] = ConditionState(flow.state)
     else:
         eval_context["state"] = ConditionState({})
+    # Bound to THIS state, so a condition can ask about ONE item rather than
+    # about each field independently. See make_where.
+    eval_context["where"] = make_where(eval_context["state"])
 
     # Add result from args
     # Defined BEFORE `if args:`, deliberately.

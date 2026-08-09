@@ -580,6 +580,87 @@ class ConditionState:
         return repr(self._snap())
 
 
+#: Suffixes a `where(...)` term may carry, and what each means. A bare field name
+#: is equality. Chosen over free-text sub-expressions because the UI GENERATES
+#: these strings — keyword arguments need no nested quoting and round-trip
+#: through the condition builder unchanged.
+_WHERE_OPS: Final = {
+    "": lambda a, b: _casefold(a) == _casefold(b) if isinstance(a, str) else a == b,
+    "ne": lambda a, b: not (
+        _casefold(a) == _casefold(b) if isinstance(a, str) else a == b
+    ),
+    "gt": lambda a, b: a > b,
+    "gte": lambda a, b: a >= b,
+    "lt": lambda a, b: a < b,
+    "lte": lambda a, b: a <= b,
+    "contains": lambda a, b: (
+        _casefold(b) in _casefold(a) if isinstance(a, str) else b in a
+    ),
+    "startswith": lambda a, b: isinstance(a, str)
+    and _casefold(a).startswith(_casefold(b)),
+    "endswith": lambda a, b: isinstance(a, str) and _casefold(a).endswith(_casefold(b)),
+}
+
+
+def _term(name: str) -> Tuple[str, Any]:
+    """Split ``score__gt`` into the field and its comparison."""
+    field, _, suffix = name.rpartition("__")
+    if field and suffix in _WHERE_OPS:
+        return field, _WHERE_OPS[suffix]
+    return name, _WHERE_OPS[""]
+
+
+def make_where(state: "ConditionState"):
+    """Build the ``where`` a router condition may call.
+
+    Answers the one question a projection cannot: "is there a SINGLE item that
+    satisfies all of these at once". ``articles[].category`` and
+    ``articles[].score`` are gathered independently, so ``A and B`` over them is
+    satisfied by *some* article being politics and *some other* article scoring
+    over 5 — element identity is lost. This keeps it.
+
+    Returns the matching items, so the call is the condition: a non-empty list
+    is truthy, and ``not where(...)`` reads as "no item matches".
+
+    Bounded by the list it is given and by the number of terms; there is no
+    nesting construct, so nothing compounds.
+    """
+
+    def where(path: str, **terms: Any) -> MatchList:
+        items = state.get(path, None)
+        if isinstance(items, str) or not isinstance(items, (list, tuple)):
+            # A single object is a list of one — asking "any item where…" of a
+            # lone mapping should answer about that mapping, not nothing.
+            items = [items] if isinstance(items, Mapping) else []
+
+        matched = MatchList()
+        for item in items:
+            if not isinstance(item, Mapping):
+                continue
+            if all(_matches(item, name, expected) for name, expected in terms.items()):
+                matched.append(item)
+        return matched
+
+    return where
+
+
+def _matches(item: Mapping, name: str, expected: Any) -> bool:
+    field, compare = _term(name)
+    if field not in item:
+        return False
+    try:
+        return bool(compare(item[field], expected))
+    except TypeError:
+        # Total, like MatchList: a raising comparison would propagate out of
+        # safe_eval and be swallowed into a silent skipped route.
+        return False
+
+
+def _casefold(value: Any) -> Any:
+    """Case-folded when it is a string, so `where` matches what `==` matches."""
+    return value.casefold() if isinstance(value, str) else value
+
+
 def report_no_route(
     router_name: str,
     outcomes: Iterable[Tuple[str, str, Any]],

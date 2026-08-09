@@ -94,7 +94,7 @@ def pick_legacy_route(condition_value, route_names):
 DEFAULT_ROUTE: Final[str] = "default"
 
 _FLOW_CONDITION_CALLS = frozenset(
-    {"int", "float", "str", "bool", "len", "abs", "min", "max"}
+    {"int", "float", "str", "bool", "len", "abs", "min", "max", "where"}
 )
 
 
