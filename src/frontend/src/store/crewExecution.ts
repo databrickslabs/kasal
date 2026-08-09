@@ -8,6 +8,7 @@ import { Tool } from '../types/workflow/tool';
 import { FlowService, FlowCheckpoint } from '../api/workflow/FlowService';
 import { assessTrifecta, TrifectaAssessment } from '../utils/toolCapabilityManifest';
 import { ToolService } from '../api/tools/ToolService';
+import { placeholdersInFlowNodes } from '../utils/flowInputs';
 
 interface RunHistoryItem {
   id: string;
@@ -121,7 +122,13 @@ interface CrewExecutionState {
   userActive: boolean;
   inputVariables: Record<string, string>;
   showInputVariablesDialog: boolean;
-  pendingExecutionType: string | null;
+  /**
+   * The run the input dialog is collecting for. Carries its own nodes/edges
+   * because the store's `nodes` holds whichever canvas was last synced, and
+   * only the CREW canvas syncs — running a flow from `state.nodes` would send
+   * agent/task nodes and fail with "requires at least one crew node".
+   */
+  pendingVariableExecution: { nodes: Node[]; edges: Edge[]; type: 'crew' | 'flow' } | null;
 
   // UI state
   errorMessage: string;
@@ -230,7 +237,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   userActive: false,
   inputVariables: {},
   showInputVariablesDialog: false,
-  pendingExecutionType: null,
+  pendingVariableExecution: null,
   errorMessage: '',
   showError: false,
   successMessage: '',
@@ -632,7 +639,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     console.log('[CrewExecution] executeFlow - savedFlowId:', savedFlowId);
     console.log('[CrewExecution] executeFlow - resumeFromCrewSequence:', resumeFromCrewSequence);
 
-    const { selectedModel, reasoningEnabled, reasoningLLM, reasoningConfig, schemaDetectionEnabled } = get();
+    const { selectedModel, reasoningEnabled, reasoningLLM, reasoningConfig, schemaDetectionEnabled, inputVariables } = get();
     set({ isExecuting: true });
 
     try {
@@ -665,8 +672,11 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         }))
       );
 
-      // Prepare additionalInputs with reasoning_llm if enabled
-      const additionalInputs: Record<string, unknown> = {};
+      // Prepare additionalInputs with reasoning_llm if enabled.
+      // The collected values lead: they become the flow's kickoff inputs, get
+      // merged into flow state, and are handed to each crew's kickoff, which is
+      // what interpolates `{topic}` in its task text.
+      const additionalInputs: Record<string, unknown> = { ...inputVariables };
       if (reasoningEnabled && reasoningLLM) {
         additionalInputs.reasoning_llm = reasoningLLM;
       }
@@ -1041,9 +1051,17 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     // Check if we need to show input variables dialog
     // Only check for variables in the nodes relevant to the execution type
     const variablePattern = /\{([a-zA-Z_][a-zA-Z0-9_-]*)\}/g;
-    const hasVariables = resolvedNodes.some(node => {
+    // A flow's placeholders are not where a crew's are. Its canvas holds
+    // `crewNode`s, so the scan below skips every node on type alone, and the
+    // text that carries `{topic}` sits nested under the referenced crew's
+    // `allTasks[].description` rather than on the node itself. The deep walk in
+    // utils/flowInputs is the one that reaches it, and is already what the
+    // publish dialog and ChatMode use — so a flow asks for the same values
+    // however it is started.
+    const hasVariables = type === 'flow'
+      ? placeholdersInFlowNodes(resolvedNodes).length > 0
+      : resolvedNodes.some(node => {
       // For crew execution, check agent and task nodes
-      // For flow execution, we don't check for input variables (flows use crew configurations)
       if (type === 'crew' && (node.type === 'agentNode' || node.type === 'taskNode')) {
         const data = node.data as Record<string, unknown>;
         const fieldsToCheck = [
@@ -1105,7 +1123,14 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     if (hasVariables) {
       if (state.inputMode === 'dialog') {
         // Show the input variables dialog instead of executing immediately
-        set({ showInputVariablesDialog: true, pendingExecutionType: type });
+        set({
+          showInputVariablesDialog: true,
+          pendingVariableExecution: {
+            nodes: resolvedNodes,
+            edges: resolvedEdges,
+            type: type as 'crew' | 'flow',
+          },
+        });
       } else {
         // Chat mode: Will be handled by chat interface
         console.log('[CrewExecution] Chat mode selected - variables will be collected via chat');
@@ -1214,18 +1239,22 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     });
 
     try {
-      // Get the pending execution type from store state
-      const executionType = state.pendingExecutionType || 'crew';
-      set({ pendingExecutionType: null });
+      // Run exactly what the dialog was opened for. Falling back to the
+      // store's nodes only when nothing is pending keeps older callers working.
+      const pending = state.pendingVariableExecution;
+      const executionType = pending?.type ?? 'crew';
+      const nodes = pending?.nodes ?? state.nodes;
+      const edges = pending?.edges ?? state.edges;
+      set({ pendingVariableExecution: null });
 
       if (executionType === 'crew') {
-        await state.executeCrew(state.nodes, state.edges);
+        await state.executeCrew(nodes, edges);
       } else {
         // Get savedFlowId from tab manager for flow executions
         const tabManagerState = useTabManagerStore.getState();
         const activeTab = tabManagerState.tabs.find(tab => tab.id === tabManagerState.activeTabId);
         const savedFlowId = activeTab?.savedFlowId || undefined;
-        await state.executeFlow(state.nodes, state.edges, undefined, undefined, savedFlowId);
+        await state.executeFlow(nodes, edges, undefined, undefined, savedFlowId);
       }
     } catch (error) {
       set({

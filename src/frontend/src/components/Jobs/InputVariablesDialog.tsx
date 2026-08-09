@@ -29,6 +29,7 @@ import {
   VisibilityOff as VisibilityOffIcon,
 } from '@mui/icons-material';
 import { Node } from 'reactflow';
+import { placeholdersInFlowNodes } from '../../utils/flowInputs';
 
 interface InputVariable {
   name: string;
@@ -96,6 +97,14 @@ export const InputVariablesDialog: React.FC<InputVariablesDialogProps> = ({
         }
       }
     };
+
+    // A flow's crew nodes carry the referenced crew's text nested inside them,
+    // so the field-by-field scan below cannot reach it. Same deep walk the run
+    // gate uses, so the dialog offers exactly what that gate detected.
+    const flowNodes = nodes.filter(node => node.type === 'crewNode');
+    if (flowNodes.length > 0) {
+      placeholdersInFlowNodes(flowNodes).forEach(name => foundVariables.add(name));
+    }
 
     nodes.forEach(node => {
       if (node.type === 'agentNode' || node.type === 'taskNode') {

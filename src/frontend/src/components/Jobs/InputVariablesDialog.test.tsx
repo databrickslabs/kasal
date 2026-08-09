@@ -210,14 +210,15 @@ describe('InputVariablesDialog', () => {
       expect(screen.getByDisplayValue('client')).toBeInTheDocument();
     });
 
-    it('ignores non-agent/non-task node types', () => {
+    it('ignores node types that carry no crew', () => {
+      // `crewNode` USED to be listed here. It is now scanned deliberately: a
+      // flow canvas is made of crew nodes, and skipping them is what left the
+      // dialog empty — and then unopened — for every flow with an input.
       const nodes = [
-        createOtherNode('c1', 'crewNode', { label: 'Crew for {project}' }),
         createOtherNode('f1', 'flowNode', { description: 'Flow with {variable}' }),
       ];
       render(<InputVariablesDialog {...defaultProps} nodes={nodes} />);
 
-      expect(screen.queryByDisplayValue('project')).not.toBeInTheDocument();
       expect(screen.queryByDisplayValue('variable')).not.toBeInTheDocument();
     });
 
@@ -234,6 +235,56 @@ describe('InputVariablesDialog', () => {
 
       // No variables should be detected, so we check via the chip count
       expect(screen.getByText('0 Required')).toBeInTheDocument();
+    });
+  });
+
+  describe('Flow crew nodes', () => {
+    // The shape a saved flow actually has: the placeholder is not on the node,
+    // it is nested inside the referenced crew's task text. Without the deep
+    // walk the dialog opened empty and the run went ahead with `{topic}`
+    // unreplaced.
+    const crewNode = (id: string, description: string): Node => ({
+      id,
+      type: 'crewNode',
+      position: { x: 0, y: 0 },
+      data: {
+        label: 'Gather News',
+        crewName: 'Gather News',
+        allTasks: [{ id: 't1', name: 'Gather News by Topic', description }],
+        selectedTasks: [],
+      },
+    });
+
+    it('finds a placeholder nested in the referenced crew task', () => {
+      render(
+        <InputVariablesDialog
+          {...defaultProps}
+          nodes={[crewNode('crew-1', 'Collect news about a specified {topic}.')]}
+        />
+      );
+
+      expect(screen.getByDisplayValue('topic')).toBeInTheDocument();
+    });
+
+    it('passes the collected value back on confirm', async () => {
+      const onConfirm = vi.fn();
+      render(
+        <InputVariablesDialog
+          {...defaultProps}
+          onConfirm={onConfirm}
+          nodes={[crewNode('crew-1', 'Collect news about a specified {topic}.')]}
+        />
+      );
+
+      const value = screen.getAllByLabelText(/Value/i)[0];
+      await act(async () => {
+        fireEvent.change(value, { target: { value: 'swiss news' } });
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText('Execute with Variables'));
+      });
+
+      expect(onConfirm).toHaveBeenCalledWith({ topic: 'swiss news' });
     });
   });
 

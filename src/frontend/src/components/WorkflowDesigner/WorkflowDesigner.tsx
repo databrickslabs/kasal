@@ -570,6 +570,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     showInputVariablesDialog,
     setShowInputVariablesDialog,
     executeWithVariables,
+    pendingVariableExecution,
     // Checkpoint dialog state
     showCheckpointDialog,
     setShowCheckpointDialog,
@@ -1761,7 +1762,9 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           open={showInputVariablesDialog}
           onClose={() => setShowInputVariablesDialog(false)}
           onConfirm={executeWithVariables}
-          nodes={nodes}
+          /* The pending run's own nodes: `nodes` here is the CREW canvas, so a
+             flow run would otherwise be offered the wrong canvas's variables. */
+          nodes={pendingVariableExecution?.nodes ?? nodes}
         />
 
         {/* Error handling */}

@@ -46,6 +46,7 @@ from src.services.flow_builder.modules.flow_eval_context import (
 from src.services.flow_builder.modules.flow_methods import (
     FlowMethodFactory,
     collect_task_agents,
+    crew_inputs_from_state,
     extract_final_answer,
     get_model_context_limits,
 )
@@ -1915,7 +1916,19 @@ class FlowBuilder:
                                     "No job_id available for route listener, skipping execution callbacks setup"
                                 )
 
-                            result = await crew.kickoff_async()
+                            # The third crew call site, and the one that was
+                            # still passing nothing. A routed crew whose task
+                            # reads "{topic}" got the literal braces while the
+                            # start and listener crews got the value, so the same
+                            # placeholder resolved or not depending on which
+                            # branch reached it.
+                            crew_inputs = crew_inputs_from_state(self)
+                            if crew_inputs:
+                                logger.info(
+                                    f"Passing {sorted(crew_inputs)} from flow state "
+                                    f"into route listener crew '{route_crew_name_param}'"
+                                )
+                            result = await crew.kickoff_async(inputs=crew_inputs)
                             logger.info(
                                 f"Route listener kickoff_async completed, result type: {type(result)}"
                             )
