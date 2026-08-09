@@ -120,10 +120,12 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
     }
   };
 
-  // Generate tooltip content showing selected tasks
+  // Only worth a tooltip when it says something the node does not. The node
+  // already renders the crew's name, so a tooltip repeating it is the same word
+  // twice; the task list is not on the node anywhere.
   const taskTooltip = selectedTasks.length > 0
     ? `Selected tasks:\n${selectedTasks.map(t => `• ${t.name}`).join('\n')}`
-    : crewName;
+    : '';
   
   const handleDelete = (event: React.MouseEvent) => {
     event.stopPropagation(); // Prevent node selection

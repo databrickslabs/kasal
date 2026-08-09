@@ -451,7 +451,9 @@ describe('CrewNode - Tooltip Content', () => {
     expect(screen.getByText('Test Crew')).toBeInTheDocument();
   });
 
-  it('should use crew name as tooltip when no tasks selected', () => {
+  it('shows no tooltip at all when there are no tasks to list', async () => {
+    // The node already renders the crew's name, so a tooltip repeating it put
+    // the same word on screen twice.
     renderCrewNode({
       data: {
         ...defaultProps.data,
@@ -460,8 +462,10 @@ describe('CrewNode - Tooltip Content', () => {
       }
     });
 
-    // Tooltip falls back to crew name
-    expect(screen.getByText('Test Crew')).toBeInTheDocument();
+    fireEvent.mouseOver(screen.getByText('Test Crew'));
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
   });
 
   it('should format tooltip with multiple tasks', () => {
