@@ -15,6 +15,8 @@ sites: a Chat Completions object carries ``choices[0].message``, a Responses
 object carries a flat ``output`` list. ``function_calls`` reads either.
 """
 
+import json
+import re
 from typing import Any
 
 #: Sentinel used as the reasoning value when the model DID reason but the
@@ -95,10 +97,14 @@ def function_calls(response: Any) -> list[dict[str, Any]]:
 
 def reasoning_items(response: Any) -> list[Any]:
     """The raw reasoning items, for chaining them into the next request."""
+    # Through _block_field, not getattr: this module does not trust the item
+    # shape (a Responses item may arrive as a dict), and having two selectors
+    # for "is this a reasoning item" meant a provider shape change had to be
+    # fixed in both.
     return [
         item
         for item in (getattr(response, "output", None) or [])
-        if getattr(item, "type", None) == "reasoning"
+        if _block_field(item, "type") == "reasoning"
     ]
 
 
@@ -107,6 +113,38 @@ def _block_field(block: Any, key: str) -> Any:
     if isinstance(block, dict):
         return block.get(key)
     return getattr(block, key, None)
+
+
+def responses_reasoning_text(response: Any) -> str:
+    """Reasoning text from a Responses object's ``reasoning`` output items.
+
+    The chat path collects reasoning through ``split_message_content``; the
+    Responses path had no equivalent, so ``_reasoning_text`` stayed empty there
+    and the reasoning never reached the trace, the UI panel, or the empty-answer
+    recovery. Two shapes carry it (openai 2.32.0 ``ResponseReasoningItem``):
+    ``summary[].text`` (``summary_text`` blocks) and ``content[].text``
+    (``reasoning_text`` blocks).
+
+    An item with ``encrypted_content`` and no readable text is the REDACTED
+    case, same as Anthropic's signature-only blocks on the chat path — the model
+    reasoned and the provider withheld it, which is not the same as not
+    reasoning.
+    """
+    parts: list[str] = []
+    encrypted = False
+    for item in reasoning_items(response):
+        if _block_field(item, "encrypted_content"):
+            encrypted = True
+        blocks = list(_block_field(item, "summary") or []) + list(
+            _block_field(item, "content") or []
+        )
+        for block in blocks:
+            text = _block_field(block, "text")
+            if text:
+                parts.append(str(text))
+    if parts:
+        return "".join(parts)
+    return REDACTED_REASONING if encrypted else ""
 
 
 def split_content_blocks(content: Any) -> tuple[str, str]:
@@ -235,6 +273,122 @@ def split_message_content(message: Any) -> tuple[str, str]:
         # than leaving the UI to imply the model did no reasoning at all.
         return text, REDACTED_REASONING
     return text, reasoning
+
+
+#: A fenced block, optionally tagged. The body is what a model treats as its
+#: deliverable when it writes one inside its thinking.
+_FENCE_RE = re.compile(r"```(?:[a-zA-Z0-9_+-]*)\s*\n(.*?)```", re.DOTALL)
+
+
+def _last_balanced_json(text: str) -> str:
+    """The last top-level ``{...}`` or ``[...]`` span in *text*, or ``""``.
+
+    Quote-aware, so a brace inside a string cannot unbalance the scan.
+    """
+    best = ""
+    index = 0
+    length = len(text)
+    while index < length:
+        char = text[index]
+        if char not in "{[":
+            index += 1
+            continue
+        closer = "}" if char == "{" else "]"
+        depth = 0
+        in_string = False
+        escaped = False
+        cursor = index
+        while cursor < length:
+            current = text[cursor]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif current == "\\":
+                    escaped = True
+                elif current == '"':
+                    in_string = False
+            elif current == '"':
+                in_string = True
+            elif current == char:
+                depth += 1
+            elif current == closer:
+                depth -= 1
+                if depth == 0:
+                    best = text[index : cursor + 1]
+                    break
+            cursor += 1
+        if depth != 0:
+            break  # unterminated: nothing usable after this point
+        index = cursor + 1
+    return best
+
+
+def _parses_as_json(candidate: str) -> bool:
+    """Whether *candidate* is a JSON object/array a caller could actually bind.
+
+    The shape check matters as much as the parse: a bare ``[1]`` scraped out of
+    a citation marker parses fine, and a Python repr with single quotes does
+    not — neither is an answer.
+    """
+    if not candidate or candidate[0] not in "{[":
+        return False
+    try:
+        json.loads(candidate)
+    except ValueError:
+        return False
+    return True
+
+
+def answer_from_reasoning(reasoning: str) -> str:
+    """Salvage a final answer a model wrote into its REASONING channel.
+
+    Some endpoints return ``content=None`` with the whole deliverable inside
+    ``reasoning_content`` — the model never closed its thinking block. The task
+    then received an empty string and reported success, which downstream is
+    indistinguishable from "the model had nothing to say". Observed on a
+    self-hosted vLLM endpoint: 1,255 completion tokens, empty content, and a
+    complete, valid JSON answer sitting in the reasoning.
+
+    Deliberately CONSERVATIVE. It recovers only a clearly delimited payload —
+    the last fenced block, or failing that the last balanced JSON value. Raw
+    thinking prose is not an answer, and passing it off as one would replace a
+    visible empty result with a plausible wrong one.
+    """
+    if not reasoning or reasoning == REDACTED_REASONING:
+        return ""
+
+    # An ODD number of fence markers means the last block was never closed, so
+    # `findall` silently returns an EARLIER one — an example the model was
+    # considering, not its answer. Distrust all of them in that case.
+    fenced: list[str] = []
+    if reasoning.count("```") % 2 == 0:
+        fenced = [
+            block.strip() for block in _FENCE_RE.findall(reasoning) if block.strip()
+        ]
+        for candidate in reversed(fenced):
+            if _parses_as_json(candidate):
+                return candidate
+
+    span = _last_balanced_json(reasoning).strip()
+    # END-ANCHORED. A payload the model kept talking past was not its
+    # deliverable: it is a schema it was echoing, a draft it went on to reject,
+    # or the input quoted back. Recovering one of those is worse than
+    # recovering nothing — it has the right shape, so it validates, reaches
+    # state, and routes on placeholder data.
+    #
+    # Trailing fence markers do NOT count as "talking past it". The observed
+    # failure is a model that never opened its block and left a lone ``` after
+    # the payload; anchoring naively against that dropped the very answer this
+    # function exists to recover.
+    tail = reasoning.rstrip()
+    while tail.endswith("`"):
+        tail = tail[:-1].rstrip()
+    if _parses_as_json(span) and tail.endswith(span):
+        return span
+
+    # A lone fenced block that is not JSON is still a deliverable — a model
+    # asked for prose fences its prose.
+    return fenced[-1] if fenced else ""
 
 
 def builtin_tool_outputs(response: Any) -> list[dict[str, Any]]:

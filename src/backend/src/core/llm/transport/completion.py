@@ -47,12 +47,14 @@ from .exceptions import (
 # loops, and a module-level import of the same name would shadow confusingly.
 from .response_parsing import (
     REDACTED_REASONING,
+    answer_from_reasoning,
     builtin_tool_outputs,
     chat_token_usage,
 )
 from .response_parsing import function_calls as parse_function_calls
 from .response_parsing import (
     reasoning_items,
+    responses_reasoning_text,
     responses_token_usage,
     split_message_content,
 )
@@ -863,6 +865,12 @@ class OpenAICompletion(BaseLLM):
             self._check_deadline(deadline, _round, conversation)
             throttle(from_agent)
             self._trim_conversation_to_window(conversation, from_agent)
+            # Where THIS round's thinking starts. _reasoning_text is reset per
+            # CALL (above) but appended per ROUND, so salvaging from the whole
+            # buffer let an empty final round reach back into an earlier round's
+            # deliberation and return the model's own tool ARGUMENTS as the
+            # answer. Verified against a two-round tool call.
+            reasoning_mark = len(self._reasoning_text)
             params = self._prepare_completion_params(conversation, tools)
             if self.stream:
                 content, usage, function_calls = self._stream_chat_completion(params)
@@ -902,10 +910,76 @@ class OpenAICompletion(BaseLLM):
                         usage,
                     )
                 continue
-            return content or "", usage, call_type
+            return (
+                self._answer_or_recover(
+                    content, usage, self._reasoning_text[reasoning_mark:]
+                ),
+                usage,
+                call_type,
+            )
         return self._answer_within_budget(
             rounds_exhausted(rounds, self.model, conversation), conversation, usage
         )
+
+    def _answer_or_recover(self, content: str, usage: Any, reasoning: str) -> str:
+        """The answer, salvaged from the reasoning channel if it went there.
+
+        An endpoint that returns ``content=None`` while writing the deliverable
+        into ``reasoning_content`` used to yield an empty string that travelled
+        all the way to a task result and reported SUCCESS. Downstream that is
+        indistinguishable from "the model had nothing to say": the structured
+        output failed to parse, no field reached flow state, and a router
+        condition over it evaluated False with nothing anywhere saying why.
+
+        Observed on a self-hosted vLLM endpoint — 1,255 completion tokens, empty
+        content, and a complete valid JSON answer sitting in the reasoning.
+
+        Recovery is conservative (see ``answer_from_reasoning``): only a clearly
+        delimited payload counts. When there is nothing to salvage the answer
+        stays empty, but says so loudly rather than passing silently.
+        """
+        if content:
+            return content
+
+        recovered = answer_from_reasoning(reasoning)
+        if recovered:
+            logger.warning(
+                "[llm] %s returned empty content; recovered %d chars of answer "
+                "from the reasoning channel. The model did not close its "
+                "thinking block.",
+                self.model,
+                len(recovered),
+            )
+            return recovered
+
+        produced = (usage or {}).get("completion_tokens") or 0
+        if self._finish_reason == "length":
+            # A DIFFERENT failure, and the only one the caller can act on:
+            # generation stopped because the output allowance ran out, not
+            # because the model had nothing to say. Reasoning tokens count
+            # against max_output_tokens, so a thinking model can spend the whole
+            # budget deliberating and be cut off mid-sentence before writing a
+            # word of answer. Observed at 8,192 completion tokens against an
+            # 8,192 cap with 35,606 chars of reasoning and no content.
+            logger.error(
+                "[llm] %s ran out of output budget: stopped at %s completion "
+                "tokens (finish_reason=length) with %d chars of reasoning and "
+                "no answer. Raise this model's max_output_tokens, or give it "
+                "less to do. Note that reasoning counts against that budget.",
+                self.model,
+                produced,
+                len(reasoning),
+            )
+        elif produced or reasoning:
+            logger.error(
+                "[llm] %s produced NO answer: content empty, %s completion "
+                "tokens, %d chars of reasoning, and nothing salvageable in it. "
+                "Callers will see an empty result.",
+                self.model,
+                produced,
+                len(reasoning),
+            )
+        return ""
 
     def _stream_chat_completion(
         self, params: dict[str, Any]
@@ -1120,6 +1194,9 @@ class OpenAICompletion(BaseLLM):
             self._check_deadline(deadline, _round, conversation)
             throttle(from_agent)
             self._trim_conversation_to_window(conversation, from_agent)
+            # Where THIS round's thinking starts — same reason as the chat
+            # path: _reasoning_text is reset per CALL but appended per ROUND.
+            reasoning_mark = len(self._reasoning_text)
             response = self.client.responses.create(
                 **self._prepare_responses_params(conversation, tools)
             )
@@ -1144,7 +1221,13 @@ class OpenAICompletion(BaseLLM):
                         usage,
                     )
                 continue
-            return text, usage, call_type
+            return (
+                self._answer_or_recover(
+                    text, usage, self._reasoning_text[reasoning_mark:]
+                ),
+                usage,
+                call_type,
+            )
         return self._answer_within_budget(
             rounds_exhausted(rounds, self.model, conversation), conversation, usage
         )
@@ -1162,8 +1245,20 @@ class OpenAICompletion(BaseLLM):
         self._last_response_id = getattr(response, "id", None)
         if self.auto_chain_reasoning:
             self._last_reasoning_items = self._extract_reasoning_items(response)
+        reasoning = responses_reasoning_text(response)
+        if reasoning:
+            self._add_reasoning(reasoning)
+            event_bus.emit(
+                self,
+                LLMReasoningChunkEvent(model=self.model, reasoning=reasoning),
+            )
+        # `output_text` is an SDK PROPERTY that joins the `output_text` blocks
+        # and returns "" when there are none (openai 2.32.0) — it is never None.
+        # Testing `is None` therefore made this fallback dead code for every real
+        # SDK object, so a response whose text sat somewhere other than a
+        # `message`/`output_text` block read as empty.
         text = getattr(response, "output_text", None)
-        if text is None:
+        if not text:
             chunks = []
             for item in getattr(response, "output", None) or []:
                 for part in getattr(item, "content", None) or []:
