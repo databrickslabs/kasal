@@ -26,7 +26,8 @@ import {
 } from '@mui/icons-material';
 import { Edge, Node } from 'reactflow';
 import ConditionBuilder, { Condition, conditionsToPython, pythonToConditions } from './ConditionBuilder';
-import SchemaQuickCreateDialog from './SchemaQuickCreateDialog';
+import { schemaToRoutableFields } from '../../utils/schemaFields';
+import SchemaDialog from '../Common/SchemaDialog';
 import { SchemaService } from '../../api/workflow/SchemaService';
 import { TaskService } from '../../api/workflow/TaskService';
 import { Schema } from '../../types/workflow/schema';
@@ -73,6 +74,7 @@ export interface HITLConfig {
 export interface EdgeConfig {
   logicType: FlowLogicType;
   routerCondition?: string;       // Evaluated against state variables (e.g., "state.confidence > 0.8")
+  isDefaultRoute?: boolean;       // The "otherwise" branch: taken when no other route matched
   routerSchema?: string;          // Name of the output schema the router routes on (set on source crew's final task)
   description?: string;
   listenToTaskIds?: string[];     // Tasks from source crew to wait for
@@ -94,6 +96,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
 }) => {
   const [logicType, setLogicType] = useState<FlowLogicType>('NONE');
   const [routerConditions, setRouterConditions] = useState<Condition[]>([]);
+  const [isDefaultRoute, setIsDefaultRoute] = useState<boolean>(false);
   const [description, setDescription] = useState('');
   const [listenToTaskIds, setListenToTaskIds] = useState<string[]>([]);
   const [targetTaskIds, setTargetTaskIds] = useState<string[]>([]);
@@ -138,6 +141,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
       // Parse router condition from string to conditions array
       const routerCondStr = edge.data.routerCondition || '';
       setRouterConditions(routerCondStr ? pythonToConditions(routerCondStr) : []);
+      setIsDefaultRoute(edge.data.isDefaultRoute === true);
 
       setDescription(edge.data.description || '');
       setListenToTaskIds(edge.data.listenToTaskIds || []);
@@ -168,6 +172,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
       // Reset to defaults
       setLogicType('NONE');
       setRouterConditions([]);
+      setIsDefaultRoute(false);
       setDescription('');
       setListenToTaskIds([]);
       setTargetTaskIds([]);
@@ -223,15 +228,11 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
   // Only scalar fields (string / number / integer / boolean) are routable, since
   // the condition operators compare single values; arrays/objects are excluded.
   const selectedSchema = schemas.find(s => s.name === routerSchema);
-  const schemaProperties = (selectedSchema?.schema_definition as { properties?: Record<string, { type?: string }> } | undefined)?.properties;
-  const ROUTABLE_TYPES = ['string', 'number', 'integer', 'boolean'];
-  const routableSchemaFields = schemaProperties
-    ? Object.entries(schemaProperties).filter(([, def]) => ROUTABLE_TYPES.includes(def?.type ?? ''))
-    : [];
-  const schemaFieldOptions = routableSchemaFields.map(([key]) => key);
-  const schemaFieldTypes: Record<string, string> = Object.fromEntries(
-    routableSchemaFields.map(([key, def]) => [key, def?.type ?? 'string'])
-  );
+  // Every value the schema can be routed on, including those nested in an
+  // object or repeated across a list. This used to be the schema's TOP-LEVEL
+  // scalar properties only, which meant a schema shaped like real model output
+  // offered nothing at all and Save stayed disabled.
+  const schemaFields = schemaToRoutableFields(selectedSchema?.schema_definition);
 
   // Load schemas for the router picker whenever the dialog opens.
   useEffect(() => {
@@ -286,7 +287,10 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
     };
 
     if (logicType === 'ROUTER') {
-      if (routerConditionStr) config.routerCondition = routerConditionStr;
+      config.isDefaultRoute = isDefaultRoute;
+      // The fallback runs precisely when nothing else matched, so it carries no
+      // condition of its own.
+      if (routerConditionStr && !isDefaultRoute) config.routerCondition = routerConditionStr;
       if (routerSchema) config.routerSchema = routerSchema;
 
       // Apply the chosen schema to the source crew's final task so it produces the
@@ -490,6 +494,24 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
 
           {/* Router Configuration (only shown when ROUTER is selected) */}
           {logicType === 'ROUTER' && (
+            <FormControlLabel
+              sx={{ ml: 0 }}
+              control={
+                <Checkbox
+                  size="small"
+                  checked={isDefaultRoute}
+                  onChange={(e) => setIsDefaultRoute(e.target.checked)}
+                />
+              }
+              label={
+                <Typography variant="caption">
+                  Run this branch when no other route matches
+                </Typography>
+              }
+            />
+          )}
+
+          {logicType === 'ROUTER' && !isDefaultRoute && (
             <Box sx={{ mt: 1, p: 2, bgcolor: 'action.hover', borderRadius: 1 }}>
               <Typography variant="subtitle2" sx={{ mb: 0.5, fontWeight: 600, color: 'primary.main' }}>
                 Router Configuration
@@ -522,6 +544,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
                       setRouterSchema(value);
                       // Existing conditions reference the previous schema's fields — start fresh.
                       setRouterConditions([]);
+      setIsDefaultRoute(false);
                     }
                   }}
                 >
@@ -546,21 +569,20 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
                 <Alert severity="warning" sx={{ fontSize: '0.75rem', py: 0.5 }}>
                   Schema &ldquo;{routerSchema}&rdquo; isn&apos;t available anymore — pick another above.
                 </Alert>
-              ) : schemaFieldOptions.length === 0 ? (
+              ) : schemaFields.length === 0 ? (
                 <Alert severity="warning" sx={{ fontSize: '0.75rem', py: 0.5 }}>
                   This schema has no scalar fields to route on.
                 </Alert>
               ) : (
                 <Box>
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                    <strong>Variables:</strong> {schemaFieldOptions.join(', ')}
+                    <strong>You can route on:</strong> {schemaFields.map((f) => f.label).join(', ')}
                   </Typography>
                   <ConditionBuilder
                     conditions={routerConditions}
                     onChange={setRouterConditions}
                     label=""
-                    fieldOptions={schemaFieldOptions}
-                    fieldTypes={schemaFieldTypes}
+                    fields={schemaFields}
                     helperText="If TRUE → this route activates. If FALSE → route is skipped."
                   />
                 </Box>
@@ -726,19 +748,20 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
           onClick={handleSave}
           variant="contained"
           size="small"
-          disabled={logicType === 'ROUTER' && (!routerSchema || routerConditions.length === 0)}
+          disabled={logicType === 'ROUTER' && !isDefaultRoute && (!routerSchema || routerConditions.length === 0)}
         >
           Save
         </Button>
       </DialogActions>
 
-      <SchemaQuickCreateDialog
+      <SchemaDialog
         open={schemaCreateOpen}
         onClose={() => setSchemaCreateOpen(false)}
-        onCreated={(schema) => {
-          setSchemas((prev) => [...prev.filter(s => s.name !== schema.name), schema]);
+        onSaved={(schema) => {
+          setSchemas((prev) => [...prev.filter((s) => s.name !== schema.name), schema]);
           setRouterSchema(schema.name);
           setRouterConditions([]);
+          setIsDefaultRoute(false);
           setSchemaCreateOpen(false);
         }}
       />

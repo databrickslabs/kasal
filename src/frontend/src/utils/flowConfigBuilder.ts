@@ -16,6 +16,44 @@ interface StateMapping {
   stateVariable: string;
 }
 
+/** The one route name the engine treats as "when nothing else matched". */
+export const DEFAULT_ROUTE_NAME = 'default';
+
+/**
+ * The index the backend will have given this crew's generated method.
+ *
+ * Both `listener_N` and `starting_point_N` are named per CREW: the backend
+ * groups its input array by `crewId` and numbers the groups in first-appearance
+ * order (flow_processors.py:103-123 for starting points, :600-653 for
+ * listeners). The arrays built here hold one entry per EDGE and per TASK
+ * respectively, so a crew appearing twice pushes every later crew's raw index
+ * up, and indexing the raw array names a method the backend never created.
+ *
+ * That produced a router wired to a `listener_2` in a flow whose backend made
+ * only listener_0 and listener_1: it never fired, and the run reported
+ * COMPLETED having done half its work. The starting-point side has the same
+ * defect whenever a start crew contributes more than one task.
+ *
+ * One helper for both, because two copies of one rule is how the halves drifted
+ * apart in the first place.
+ *
+ * Returns -1 when the crew is not in the array.
+ */
+export function crewGroupIndex(
+  entries: Array<{ crewId?: string; conditionType?: string }>,
+  crewId: string
+): number {
+  const crewsInOrder: string[] = [];
+  entries.forEach((entry) => {
+    if (!entry.crewId) return;
+    // The backend skips ROUTER-typed listeners before grouping; starting points
+    // carry no conditionType, so this is a no-op for them.
+    if (entry.conditionType === 'ROUTER') return;
+    if (!crewsInOrder.includes(entry.crewId)) crewsInOrder.push(entry.crewId);
+  });
+  return crewsInOrder.indexOf(crewId);
+}
+
 /**
  * Build FlowConfiguration from nodes and edges
  * This utility is used by both SaveFlow (when saving) and JobExecutionService (when executing without saving)
@@ -166,17 +204,20 @@ export const buildFlowConfiguration = (
     const sourceNodeId = sourceNode.id;
 
     // First check if source node is a starting point
-    const sourceTaskIndex = startingPoints.findIndex(sp => sp.taskId === firstTaskId);
+    const startingPoint = startingPoints.find(sp => sp.taskId === firstTaskId);
+    const sourceTaskIndex = startingPoint
+      ? crewGroupIndex(startingPoints, startingPoint.crewId)
+      : -1;
 
     let listenTo: string;
     if (sourceTaskIndex >= 0) {
-      // Source is a starting point
+      // Source is a starting point — indexed by CREW, as the backend names them
       listenTo = `starting_point_${sourceTaskIndex}`;
     } else {
       // Source is a listener - find which listener index it corresponds to
       // The listener's crewId should match the source node's crewId
       const sourceCrewId = sourceNode.data?.crewId || sourceNode.id;
-      const listenerIndex = listeners.findIndex(l => l.crewId === sourceCrewId);
+      const listenerIndex = crewGroupIndex(listeners, sourceCrewId);
 
       if (listenerIndex >= 0) {
         listenTo = `listener_${listenerIndex}`;
@@ -184,12 +225,15 @@ export const buildFlowConfiguration = (
         // Fallback: check if any of the source node's tasks are in a listener's tasks
         // This handles cases where the crewId doesn't match exactly
         const sourceTaskIds = sourceNode.data?.allTasks?.map((t: FlowTask) => t.id) || [];
-        const listenerByTask = listeners.findIndex(l =>
+        const listenerByTask = listeners.find(l =>
           l.tasks?.some((t: FlowTask) => sourceTaskIds.includes(t.id))
         );
+        const byTaskIndex = listenerByTask
+          ? crewGroupIndex(listeners, listenerByTask.crewId)
+          : -1;
 
-        if (listenerByTask >= 0) {
-          listenTo = `listener_${listenerByTask}`;
+        if (byTaskIndex >= 0) {
+          listenTo = `listener_${byTaskIndex}`;
         } else {
           // Final fallback to starting_point_0 (legacy behavior)
           console.warn(`Router source node ${sourceNodeId} is neither a starting point nor a listener, defaulting to starting_point_0`);
@@ -232,9 +276,17 @@ export const buildFlowConfiguration = (
         });
       }
 
-      // Auto-generate route name from target crew name (sanitized to valid identifier)
+      // Auto-generate route name from target crew name (sanitized to valid identifier).
+      //
+      // An edge marked `isDefaultRoute` is named `default` instead. The engine
+      // has always honoured a route with that exact name — it takes it when no
+      // condition matches (flow_builder: `return "default" if "default" in
+      // router_routes else None`) — but the name was unreachable from here, so
+      // the fallback was dead and a batch matching nothing just ended the flow.
       const targetCrewName = targetNode.data?.crewName || targetNode.data?.label || 'target';
-      const routeName = `route_to_${targetCrewName.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}`;
+      const routeName = edge.data?.isDefaultRoute
+        ? DEFAULT_ROUTE_NAME
+        : `route_to_${targetCrewName.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}`;
 
       // Get target tasks for this route
       const targetTasks = edge.data.targetTaskIds
@@ -256,8 +308,13 @@ export const buildFlowConfiguration = (
       }
 
       // Store condition for this route (first condition wins if duplicates)
-      // Conditions now reference state variables (e.g., "state.confidence > 0.8")
-      if (edge.data?.routerCondition && !routeConditions[routeName]) {
+      // Conditions now reference state variables (e.g., "state.confidence > 0.8").
+      // The default route deliberately carries NO condition — it is what runs
+      // when every other condition was false, so giving it one would put it in
+      // the running alongside them.
+      if (edge.data?.isDefaultRoute) {
+        // nothing to store
+      } else if (edge.data?.routerCondition && !routeConditions[routeName]) {
         routeConditions[routeName] = edge.data.routerCondition;
       }
     });

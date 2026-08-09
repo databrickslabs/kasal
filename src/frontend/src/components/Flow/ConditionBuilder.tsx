@@ -9,6 +9,7 @@ import {
   Typography
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
+import { RoutableField, findFieldByPath } from '../../utils/schemaFields';
 import AddIcon from '@mui/icons-material/Add';
 
 export interface Condition {
@@ -24,38 +25,52 @@ interface ConditionBuilderProps {
   label?: string;
   helperText?: string;
   /**
-   * When provided, the condition "field" becomes a dropdown of these variable names
-   * (e.g. the properties of a declared output schema) instead of a free-text input.
+   * The values a condition may be built on, derived from the declared output
+   * schema by `schemaToRoutableFields`. Each carries the `path` that is written
+   * into the condition and the human `label` that is the only thing shown.
+   * When omitted the field becomes a free-text input.
    */
-  fieldOptions?: string[];
-  /**
-   * Optional map of variable name → JSON-schema type (string/number/integer/boolean).
-   * Used to tailor the value input — e.g. boolean fields get a true/false dropdown.
-   */
-  fieldTypes?: Record<string, string>;
+  fields?: RoutableField[];
 }
 
-const operators = [
-  { value: '=', label: 'equals' },
-  { value: '!=', label: 'not equals' },
-  { value: '>', label: 'greater than' },
-  { value: '<', label: 'less than' },
-  { value: '>=', label: 'greater or equal' },
-  { value: '<=', label: 'less or equal' },
+/**
+ * Operator wording. Only `!=` differs between a single value and a list.
+ *
+ * On a list the field already reads "Any article → category", so "is" correctly
+ * means "at least one is". But "is not" would read as "some item differs", when
+ * it actually means NO item matches — the one genuinely counter-intuitive part
+ * of any-match semantics. "is never" says what it does.
+ */
+const BASE_OPERATORS = [
+  { value: '=', label: 'is' },
+  { value: '>', label: 'is more than' },
+  { value: '<', label: 'is less than' },
+  { value: '>=', label: 'is at least' },
+  { value: '<=', label: 'is at most' },
   { value: 'contains', label: 'contains' },
   { value: 'starts_with', label: 'starts with' },
   { value: 'ends_with', label: 'ends with' }
 ];
+
+function operatorsFor(isList: boolean) {
+  const negation = isList
+    ? { value: '!=', label: 'is never' }
+    : { value: '!=', label: 'is not' };
+  return [BASE_OPERATORS[0], negation, ...BASE_OPERATORS.slice(1)];
+}
+
+function operatorLabel(operator: string, isList: boolean): string {
+  return operatorsFor(isList).find((o) => o.value === operator)?.label ?? operator;
+}
 
 const ConditionBuilder: React.FC<ConditionBuilderProps> = ({
   conditions,
   onChange,
   label = 'Conditions',
   helperText,
-  fieldOptions,
-  fieldTypes
+  fields
 }) => {
-  const hasFieldOptions = Array.isArray(fieldOptions) && fieldOptions.length > 0;
+  const hasFieldOptions = Array.isArray(fields) && fields.length > 0;
   const handleAddCondition = () => {
     onChange([
       ...conditions,
@@ -104,7 +119,11 @@ const ConditionBuilder: React.FC<ConditionBuilderProps> = ({
         </Box>
       ) : (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-          {conditions.map((condition, index) => (
+          {conditions.map((condition, index) => {
+            const selected = hasFieldOptions
+              ? findFieldByPath(fields!, condition.field)
+              : undefined;
+            return (
             <Box key={index}>
               {/* Connector (AND/OR) - only show for conditions after the first */}
               {index > 0 && condition.connector && (
@@ -133,17 +152,17 @@ const ConditionBuilder: React.FC<ConditionBuilderProps> = ({
                       // Only show the schema's routable fields. If a stored field is no
                       // longer in the schema, fall back to the empty placeholder rather
                       // than surfacing a stale/bogus option.
-                      value={fieldOptions!.includes(condition.field) ? condition.field : ''}
+                      value={findFieldByPath(fields!, condition.field) ? condition.field : ''}
                       displayEmpty
                       onChange={(e) => handleUpdateCondition(index, { field: e.target.value })}
                       sx={{ fontSize: '0.85rem' }}
                     >
                       <MenuItem value="" disabled sx={{ fontSize: '0.85rem' }}>
-                        <em>Variable</em>
+                        <em>Choose a value</em>
                       </MenuItem>
-                      {fieldOptions!.map((opt) => (
-                        <MenuItem key={opt} value={opt} sx={{ fontSize: '0.85rem' }}>
-                          {opt}
+                      {fields!.map((opt) => (
+                        <MenuItem key={opt.path} value={opt.path} sx={{ fontSize: '0.85rem' }}>
+                          {opt.label}
                         </MenuItem>
                       ))}
                     </Select>
@@ -167,7 +186,7 @@ const ConditionBuilder: React.FC<ConditionBuilderProps> = ({
                     }
                     sx={{ fontSize: '0.85rem' }}
                   >
-                    {operators.map((op) => (
+                    {operatorsFor(selected?.isList ?? false).map((op) => (
                       <MenuItem key={op.value} value={op.value} sx={{ fontSize: '0.85rem' }}>
                         {op.label}
                       </MenuItem>
@@ -176,7 +195,7 @@ const ConditionBuilder: React.FC<ConditionBuilderProps> = ({
                 </FormControl>
 
                 {/* Value — boolean fields get a true/false dropdown, others free text */}
-                {fieldTypes?.[condition.field] === 'boolean' ? (
+                {selected?.type === 'boolean' ? (
                   <FormControl size="small" sx={{ flex: 1 }}>
                     <Select
                       value={['true', 'false'].includes((condition.value || '').toLowerCase())
@@ -212,8 +231,24 @@ const ConditionBuilder: React.FC<ConditionBuilderProps> = ({
                   <DeleteIcon fontSize="small" />
                 </IconButton>
               </Box>
+
+              {/* Plain-language echo of what this row will do. The condition is
+                  generated, never typed, so this is the only place the author
+                  can check they picked what they meant. */}
+              {condition.field && condition.value !== '' && (
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ mt: 0.5, display: 'block', fontSize: '0.75rem', fontStyle: 'italic' }}
+                >
+                  {selected?.label ?? condition.field}{' '}
+                  {operatorLabel(condition.operator, selected?.isList ?? false)}{' '}
+                  {condition.value}
+                </Typography>
+              )}
             </Box>
-          ))}
+            );
+          })}
 
           {/* Add Condition Button */}
           <Box
@@ -303,15 +338,27 @@ export function conditionsToPython(conditions: Condition[]): string {
     .join('');
 }
 
+const unquote = (raw: string): string => {
+  const trimmed = raw.trim();
+  // An UNQUOTED True/False is the Python boolean conditionsToPython emits; the
+  // builder stores booleans lowercase, so send it back the way it was stored.
+  // A quoted "True" is a string value and is left alone.
+  if (trimmed === 'True' || trimmed === 'False') return trimmed.toLowerCase();
+  return trimmed.replace(/^["']|["']$/g, '');
+};
+
 /**
- * Helper function to parse Python expression back to conditions
- * Basic parser for simple conditions
+ * Parse a stored condition back into rows for the builder.
+ *
+ * Must round-trip EVERY form `conditionsToPython` emits. It previously matched
+ * only `[><=!]+`, so the builder's own `contains` / `starts with` / `ends with`
+ * output failed to re-parse: reopening that edge produced zero rows, which
+ * disabled Save and left the whole edge — description, checkpoint, HITL —
+ * uneditable.
  */
 export function pythonToConditions(expression: string): Condition[] {
   if (!expression.trim()) return [];
 
-  // This is a simplified parser - handles basic cases
-  // For complex expressions, we'll just return empty and let users rebuild
   try {
     const conditions: Condition[] = [];
 
@@ -320,21 +367,46 @@ export function pythonToConditions(expression: string): Condition[] {
 
     for (let i = 0; i < parts.length; i += 2) {
       const part = parts[i].trim();
-      const connector = parts[i + 1] ? (parts[i + 1].toUpperCase() as 'AND' | 'OR') : undefined;
+      // The connector at parts[n-1] sits BEFORE the condition at parts[n], which
+      // is where conditionsToPython puts it back. Reading parts[i + 1] attached
+      // each connector to the condition before it, so three-row conditions
+      // round-tripped with their AND/OR shifted by one.
+      const connector = i > 0 ? (parts[i - 1].toUpperCase() as 'AND' | 'OR') : undefined;
 
-      // Try to parse the condition
-      // Pattern: state.get("field", ...) operator value
-      const match = part.match(/state\.get\("([^"]+)",\s*[^)]*\)\s*([><=!]+)\s*(.+)/);
-
-      if (match) {
-        const [, field, operator, value] = match;
-        // Normalize '==' back to '=' for UI (Python uses ==, but UI uses =)
-        const normalizedOperator = operator === '==' ? '=' : operator;
+      // state.get("field", ...) == value
+      const comparison = part.match(
+        /^state\.get\("([^"]+)",\s*[^)]*\)\s*(==|!=|>=|<=|>|<)\s*(.+)$/
+      );
+      if (comparison) {
+        const [, field, operator, value] = comparison;
         conditions.push({
           field,
-          operator: normalizedOperator as Condition['operator'],
-          value: value.replace(/['"]/g, '').trim(),
-          connector: i > 0 ? connector : undefined
+          operator: (operator === '==' ? '=' : operator) as Condition['operator'],
+          value: unquote(value),
+          connector
+        });
+        continue;
+      }
+
+      // value in state.get("field", ...)
+      const contains = part.match(/^(.+?)\s+in\s+state\.get\("([^"]+)",\s*[^)]*\)$/);
+      if (contains) {
+        const [, value, field] = contains;
+        conditions.push({ field, operator: 'contains', value: unquote(value), connector });
+        continue;
+      }
+
+      // state.get("field", ...).startswith(value)
+      const method = part.match(
+        /^state\.get\("([^"]+)",\s*[^)]*\)\.(startswith|endswith)\((.+)\)$/
+      );
+      if (method) {
+        const [, field, name, value] = method;
+        conditions.push({
+          field,
+          operator: name === 'startswith' ? 'starts_with' : 'ends_with',
+          value: unquote(value),
+          connector
         });
       }
     }
