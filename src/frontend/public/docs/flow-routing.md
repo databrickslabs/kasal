@@ -89,6 +89,42 @@ mean *"at least one item"*:
 > is no politics article at all. For list values the builder shows `is never`
 > rather than `is not`, precisely so this reads the way it behaves.
 
+## Saying which thing you mean
+
+A condition is built as one or more boxes. Each box names **what you are talking
+about** — the result as a whole, or one item of a list — and everything inside
+that box is asked of that same thing.
+
+```text
+Route when
+
+  ┌ Any article ── where, all on the same one ────────┐
+  │   category      is              politics          │
+  │   and score     is more than    5                 │
+  └───────────────────────────────────────────────────┘
+```
+
+That box is true only if **one** article is politics *and* scores over 5.
+
+Two boxes are independent, which is how you say "the batch contains both":
+
+```text
+  ┌ Any article ┐        ┌ Any article ┐
+  │ category is │  AND   │ category is │
+  │  politics   │        │   sports    │
+  └─────────────┘        └─────────────┘
+```
+
+That is true when there is a politics article and a sports article — different
+ones. Both readings are things people mean, which is why the subject is chosen
+before the values rather than guessed afterwards.
+
+A schema with no lists has only one possible subject, so the picker is hidden
+and the box is just a list of conditions. Subjects appear only for a list whose
+items have their own fields; a list of plain values ("Any tag") and a value two
+lists deep ("Any order → Any line → sku") stay on the result, where they keep
+the any-element meaning described above.
+
 ## Capitalisation does not matter
 
 String comparisons ignore case. A model may write `Politics` on one run and

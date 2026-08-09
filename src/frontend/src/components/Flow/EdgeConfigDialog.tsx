@@ -25,7 +25,12 @@ import {
   HelpOutline as HelpOutlineIcon,
 } from '@mui/icons-material';
 import { Edge, Node } from 'reactflow';
-import ConditionBuilder, { Condition, conditionsToPython, pythonToConditions } from './ConditionBuilder';
+import ConditionBuilder from './ConditionBuilder';
+import {
+  ConditionGroup,
+  groupsToPython,
+  pythonToGroups,
+} from '../../utils/conditionGroups';
 import { schemaToRoutableFields } from '../../utils/schemaFields';
 import SchemaDialog from '../Common/SchemaDialog';
 import { SchemaService } from '../../api/workflow/SchemaService';
@@ -95,7 +100,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
   aggregatedSourceTasks = []
 }) => {
   const [logicType, setLogicType] = useState<FlowLogicType>('NONE');
-  const [routerConditions, setRouterConditions] = useState<Condition[]>([]);
+  const [routerConditions, setRouterConditions] = useState<ConditionGroup[]>([]);
   const [isDefaultRoute, setIsDefaultRoute] = useState<boolean>(false);
   const [description, setDescription] = useState('');
   const [listenToTaskIds, setListenToTaskIds] = useState<string[]>([]);
@@ -140,7 +145,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
 
       // Parse router condition from string to conditions array
       const routerCondStr = edge.data.routerCondition || '';
-      setRouterConditions(routerCondStr ? pythonToConditions(routerCondStr) : []);
+      setRouterConditions(routerCondStr ? pythonToGroups(routerCondStr) : []);
       setIsDefaultRoute(edge.data.isDefaultRoute === true);
 
       setDescription(edge.data.description || '');
@@ -261,7 +266,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
     if (!edge) return;
     setSaveError(null);
 
-    const routerConditionStr = conditionsToPython(routerConditions);
+    const routerConditionStr = groupsToPython(routerConditions);
 
     const config: EdgeConfig = {
       logicType,
@@ -579,7 +584,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
                     <strong>You can route on:</strong> {schemaFields.map((f) => f.label).join(', ')}
                   </Typography>
                   <ConditionBuilder
-                    conditions={routerConditions}
+                    groups={routerConditions}
                     onChange={setRouterConditions}
                     label=""
                     fields={schemaFields}
