@@ -59,6 +59,11 @@ interface TabManagerState {
   updateTabFlowNodes: (tabId: string, flowNodes: Node[]) => void;
   updateTabFlowEdges: (tabId: string, flowEdges: Edge[]) => void;
   updateTabViewMode: (tabId: string, viewMode: 'crew' | 'flow') => void;
+  /**
+   * Activate a tab that already holds this kind of work, if one exists.
+   * Returns false when none does, leaving the caller to convert the current tab.
+   */
+  activateTabForViewMode: (viewMode: 'crew' | 'flow') => boolean;
   markTabDirty: (tabId: string) => void;
   markTabClean: (tabId: string) => void;
   duplicateTab: (tabId: string) => string;
@@ -227,6 +232,35 @@ export const useTabManagerStore = create<TabManagerState>()(
             activeTabId: newActiveTabId
           };
         });
+      },
+
+      // Switching workspace mode should take you to the work of that kind, not
+      // relabel whatever tab you happen to be on. A tab holds a crew canvas AND
+      // a flow canvas, but only one of them has anything in it — so turning a
+      // crew tab into a flow tab shows an empty canvas and reads as "my flow is
+      // gone", while the flow sits on the tab you came from.
+      //
+      // Prefers the most recently touched matching tab, and reports false when
+      // there is none so the caller can keep the old convert-in-place behaviour
+      // — which is what makes "switch to Flow Builder to start one" still work.
+      activateTabForViewMode: (viewMode: 'crew' | 'flow') => {
+        const currentGroupId = localStorage.getItem('selectedGroupId') || '';
+        const { tabs, activeTabId } = get();
+        const inGroup = tabs.filter(tab => tab.group_id === currentGroupId);
+
+        const active = inGroup.find(tab => tab.id === activeTabId);
+        if (active?.viewMode === viewMode) return true;
+
+        const candidates = inGroup.filter(tab => tab.viewMode === viewMode);
+        if (candidates.length === 0) return false;
+
+        const target = candidates.reduce((newest, tab) =>
+          new Date(tab.lastModified).getTime() >= new Date(newest.lastModified).getTime()
+            ? tab
+            : newest
+        );
+        get().setActiveTab(target.id);
+        return true;
       },
 
       setActiveTab: (tabId: string) => {

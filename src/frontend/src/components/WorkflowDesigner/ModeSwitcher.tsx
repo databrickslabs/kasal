@@ -18,6 +18,7 @@ import {
 } from '@mui/icons-material';
 import { useUILayoutStore, AppMode } from '../../store/uiLayout';
 import { useFlowConfigStore } from '../../store/flowConfig';
+import { useTabManagerStore } from '../../store/tabManager';
 
 interface ModeOption {
   mode: AppMode;
@@ -76,6 +77,11 @@ const ModeSwitcher: React.FC = () => {
   };
 
   const handleSelect = (mode: AppMode) => {
+    // Land on a tab that holds this kind of work when there is one. Chat is not
+    // a tab view mode, so it keeps the plain behaviour.
+    if (mode === 'crew' || mode === 'flow') {
+      useTabManagerStore.getState().activateTabForViewMode(mode);
+    }
     setAppMode(mode);
     handleClose();
   };

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 // `within` is used in the menu-content assertions below.
 import ModeSwitcher from './ModeSwitcher';
+import { useTabManagerStore } from '../../store/tabManager';
 
 // --- Mock the stores the component depends on ---
 const setAppMode = vi.fn();
@@ -62,6 +63,38 @@ describe('ModeSwitcher', () => {
     render(<ModeSwitcher />);
     fireEvent.click(screen.getByRole('button', { name: /Workspace mode/i }));
     fireEvent.click(screen.getByText('Flow Builder'));
+    expect(setAppMode).toHaveBeenCalledWith('flow');
+  });
+
+  it('selecting Flow also lands on a tab that holds a flow', () => {
+    // Otherwise the switch relabels whatever tab you are on — which, right
+    // after opening a crew from a flow node, is a crew tab whose flow canvas is
+    // empty. The flow looks lost; it is on the tab you came from.
+    localStorage.setItem('selectedGroupId', 'g1');
+    const base = {
+      name: 't',
+      nodes: [],
+      edges: [],
+      flowNodes: [],
+      flowEdges: [],
+      isDirty: false,
+      createdAt: new Date(0),
+      lastModified: new Date(0),
+      group_id: 'g1',
+    };
+    useTabManagerStore.setState({
+      tabs: [
+        { ...base, id: 'flow-tab', viewMode: 'flow', isActive: false },
+        { ...base, id: 'crew-tab', viewMode: 'crew', isActive: true },
+      ],
+      activeTabId: 'crew-tab',
+    });
+
+    render(<ModeSwitcher />);
+    fireEvent.click(screen.getByRole('button', { name: /Workspace mode/i }));
+    fireEvent.click(screen.getByText('Flow Builder'));
+
+    expect(useTabManagerStore.getState().activeTabId).toBe('flow-tab');
     expect(setAppMode).toHaveBeenCalledWith('flow');
   });
 
