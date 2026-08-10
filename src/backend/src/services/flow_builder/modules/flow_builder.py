@@ -94,43 +94,11 @@ def pick_legacy_route(condition_value, route_names):
 #: bare literals here, two of which mean something different.
 DEFAULT_ROUTE: Final[str] = "default"
 
+from src.services.flow_builder.checkpoint_skip import CrewSkipPolicy
+
 _FLOW_CONDITION_CALLS = frozenset(
     {"int", "float", "str", "bool", "len", "abs", "min", "max", "where"}
 )
-
-
-def _crew_may_be_skipped(crew_name, crew_tasks, checkpoint_identities) -> bool:
-    """Whether a crew's stored output may stand in for running it.
-
-    Verified identical -> skip. Verified different -> re-run, because replaying
-    the old output would silently discard the edit. No identity on either side
-    (a checkpoint written before identities existed, or a trace-derived one) ->
-    skip as it always did, but say that nothing was checked.
-    """
-    from src.services.flow_builder.checkpoint_identity import (
-        CHANGED,
-        MATCH,
-        compute_crew_identity,
-        verify_crew_identity,
-    )
-
-    verdict = verify_crew_identity(
-        compute_crew_identity(crew_name, crew_tasks),
-        (checkpoint_identities or {}).get(crew_name),
-    )
-
-    if verdict == CHANGED:
-        logger.warning(
-            f"  🔄 RE-RUNNING crew '{crew_name}': it has changed since the "
-            f"checkpoint was written, so its stored output is stale"
-        )
-        return False
-    if verdict != MATCH:
-        logger.warning(
-            f"  ⚠️  Skipping crew '{crew_name}' UNVERIFIED — the checkpoint "
-            f"carries no identity, so an edit to this crew cannot be detected"
-        )
-    return True
 
 
 def _identity_of(crew_name: str, tasks: Any) -> Optional[str]:
@@ -687,6 +655,16 @@ class FlowBuilder:
         # When resume_from_crew_sequence is provided, crews with sequence < that value will be skipped
         # (The resume_from value is the sequence of the crew TO RUN, not the last completed)
         crew_sequence_counter = 0  # Will be incremented to 1 for first crew
+        # Decided ONCE for the whole flow, before any crew is built: a crew's
+        # verdict depends on crews that may be built after it (declaration
+        # order is not dependency order), so it cannot be answered lazily.
+        skip_policy = CrewSkipPolicy.decide(
+            resume_from_crew_sequence,
+            checkpoint_identities,
+            starting_points=starting_points,
+            listener_crews=listener_crews,
+            flow_config=flow_config,
+        )
         if resume_from_crew_sequence is not None:
             logger.info("=" * 100)
             logger.info(
@@ -740,20 +718,12 @@ class FlowBuilder:
             logger.info(f"  Task IDs: {task_ids}")
             logger.info(f"  Number of tasks: {len(crew_tasks)}")
 
-            # Check if this crew should be skipped for checkpoint resume
-            # Use < (not <=) because resume_from is the sequence of the crew TO RUN, not the last completed
-            should_skip_crew = (
-                resume_from_crew_sequence is not None
-                and current_crew_sequence < resume_from_crew_sequence
+            # May this crew's stored output stand in for running it? Both the
+            # resume point and what has changed since decide that — see
+            # flow_builder/checkpoint_skip.py.
+            should_skip_crew = skip_policy.may_skip(
+                crew_name, crew_tasks, current_crew_sequence
             )
-
-            # ...but only if the crew is still the crew that produced the
-            # stored output. Skipping an EDITED crew replays a stale result and
-            # makes the edit look like it did nothing.
-            if should_skip_crew:
-                should_skip_crew = _crew_may_be_skipped(
-                    crew_name, crew_tasks, checkpoint_identities
-                )
 
             if should_skip_crew:
                 logger.info(
@@ -1109,20 +1079,11 @@ class FlowBuilder:
                 )
                 logger.info(f"  Using simple condition: {method_condition}")
 
-            # Check if this crew should be skipped for checkpoint resume
-            # Use < (not <=) because resume_from is the sequence of the crew TO RUN, not the last completed
-            should_skip_crew = (
-                resume_from_crew_sequence is not None
-                and current_crew_sequence < resume_from_crew_sequence
+            # Same decision as the starting points, asked in build order so a
+            # crew after an edited one inherits the re-run.
+            should_skip_crew = skip_policy.may_skip(
+                crew_name, listener_tasks, current_crew_sequence
             )
-
-            # ...but only if the crew is still the crew that produced the
-            # stored output. Skipping an EDITED crew replays a stale result and
-            # makes the edit look like it did nothing.
-            if should_skip_crew:
-                should_skip_crew = _crew_may_be_skipped(
-                    crew_name, listener_tasks, checkpoint_identities
-                )
 
             if should_skip_crew:
                 logger.info(

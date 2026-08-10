@@ -24,6 +24,7 @@ from typing import Any, Iterable, Optional, Tuple
 from src.core.events.types import CrewKickoffCompletedEvent
 from src.services.execution.checkpointing.record import KIND_FLOW, build_unit
 from src.services.execution.checkpointing.recorder import CheckpointRecorder
+from src.services.execution.runtime.identity import crew_content_key
 from src.services.flow_builder.checkpoint_identity import compute_crew_identity
 
 logger = logging.getLogger(__name__)
@@ -92,6 +93,11 @@ class FlowCrewCheckpointRecorder(CheckpointRecorder):
                     output_raw=getattr(output, "raw", None) or "",
                     output_json=getattr(output, "json_dict", None),
                     identity=identity,
+                    # The text half, recomputable from the saved flow by a
+                    # reader that is not running anything.
+                    content_key=crew_content_key(
+                        crew_name, getattr(source, "tasks", None)
+                    ),
                 )
             )
         except Exception as e:  # noqa: BLE001 — checkpointing must never break a run

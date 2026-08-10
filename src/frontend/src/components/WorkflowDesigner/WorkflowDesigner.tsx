@@ -71,7 +71,6 @@ import ToolForm from '../Tools/ToolForm';
 import { CrewFlowSelectionDialog } from '../Crew/CrewFlowDialog';
 import SaveCrew from '../Crew/SaveCrew';
 import SaveFlow from '../Flow/SaveFlow';
-import CheckpointResumeDialog from '../Flow/CheckpointResumeDialog';
 import TrifectaWarningDialog from '../Crew/TrifectaWarningDialog';
 
 // Services & Utilities
@@ -571,17 +570,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     setShowInputVariablesDialog,
     executeWithVariables,
     pendingVariableExecution,
-    // Checkpoint dialog state
-    showCheckpointDialog,
-    setShowCheckpointDialog,
-    checkpoints,
-    checkpointsLoading,
-    checkpointsError,
-    pendingFlowExecution,
-    handleCheckpointStartFresh,
-    handleCheckpointResume,
-    handleCheckpointDelete,
-    refreshCheckpoints,
     // Trifecta warning dialog state
     showTrifectaDialog,
     trifectaAssessment,
@@ -1835,20 +1823,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           assessment={trifectaAssessment}
           onProceed={handleTrifectaProceed}
           onCancel={handleTrifectaCancel}
-        />
-
-        {/* Checkpoint Resume Dialog */}
-        <CheckpointResumeDialog
-          open={showCheckpointDialog}
-          onClose={() => setShowCheckpointDialog(false)}
-          checkpoints={checkpoints}
-          loading={checkpointsLoading}
-          error={checkpointsError}
-          flowName={pendingFlowExecution?.savedFlowName}
-          onStartFresh={handleCheckpointStartFresh}
-          onResumeFromCheckpoint={handleCheckpointResume}
-          onDeleteCheckpoint={handleCheckpointDelete}
-          onRefresh={refreshCheckpoints}
         />
 
         {/* Right Sidebar — hidden in chat mode */}

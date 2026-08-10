@@ -11,6 +11,7 @@ from src.core.events.bus import EventsBus
 from src.core.events.types import CrewKickoffCompletedEvent, TaskCompletedEvent
 from src.services.agent_builder.checkpoint_adapter import CrewTaskCheckpointRecorder
 from src.services.execution.checkpointing.record import KIND_CREW, KIND_FLOW
+from src.services.execution.runtime.identity import task_identity
 from src.services.execution.runtime.types import Process, TaskOutput
 from src.services.flow_builder.checkpoint_adapter import FlowCrewCheckpointRecorder
 
@@ -63,9 +64,13 @@ class TestCrewRecorder:
         assert len(persisted) == 1
         unit = persisted[0]
         assert unit["key"] == "1"
-        # The content-addressed task key rides along so the runtime can refuse
-        # a checkpoint whose inputs changed.
-        assert unit["identity"] == "key-task-1"
+        # A content-addressed identity rides along so a resume can tell which
+        # restored units are still valid. Asserted against the shared function
+        # rather than a literal: the recorder and the runtime's prefix check
+        # agreeing is the actual guarantee, and a literal here would pass while
+        # the two drifted apart.
+        assert unit["identity"] == task_identity(crew.tasks[1])
+        assert unit["identity"] != task_identity(crew.tasks[0])
         assert unit["output_raw"] == "the output"
         assert unit["output_json"] == {"k": "v"}
         assert unit["agent"] == "worker"

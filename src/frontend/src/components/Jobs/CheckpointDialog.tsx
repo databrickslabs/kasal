@@ -107,6 +107,15 @@ const CheckpointDialog: React.FC<CheckpointDialogProps> = ({
   // whole of the path-specific behaviour here.
   const unitNoun = checkpoint?.kind === 'flow' ? 'crew' : 'task';
 
+  // Where the run will actually pick up, given what has been edited since. The
+  // backend computes this by comparing the checkpoint against the SAVED
+  // definition; null means either nothing changed or there was nothing to
+  // compare against, and the two are deliberately not distinguished here — in
+  // both cases the picker below is the answer.
+  const changedFrom = checkpoint?.changed_from_index ?? null;
+  const changedName =
+    changedFrom !== null ? checkpoint?.units[changedFrom]?.name ?? null : null;
+
   const renderBody = () => {
     if (loading) {
       return (
@@ -172,6 +181,20 @@ const CheckpointDialog: React.FC<CheckpointDialogProps> = ({
 
         <Divider sx={{ mb: 2 }} />
 
+        {changedFrom !== null && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            <strong>
+              {changedName
+                ? `"${changedName}" has changed since this run.`
+                : `${unitNoun} ${changedFrom + 1} has changed since this run.`}
+            </strong>{' '}
+            Resuming keeps the first {checkpoint.restorable_count} {unitNoun}
+            {checkpoint.restorable_count === 1 ? '' : 's'} and re-runs from
+            there. Everything after a change re-runs too — its input is what
+            changed, even where its own wording did not.
+          </Alert>
+        )}
+
         <Typography variant="body2" sx={{ mb: 1.5, fontWeight: 500 }}>
           Where should the run pick up?
         </Typography>
@@ -182,10 +205,17 @@ const CheckpointDialog: React.FC<CheckpointDialogProps> = ({
             name: unit.name,
             outputPreview: unit.output_preview,
             truncated: unit.truncated,
+            willRestore: unit.will_restore,
           }))}
           value={fromUnit}
           onChange={setFromUnit}
-          defaultOptionLabel={`Continue from the first incomplete ${unitNoun} (keep all ${checkpoint.completed_count} completed)`}
+          defaultOptionLabel={
+            changedFrom !== null
+              ? `Resume as computed — keep ${checkpoint.restorable_count} of ` +
+                `${checkpoint.completed_count} ${unitNoun}s, re-run the rest`
+              : `Continue from the first incomplete ${unitNoun} (keep all ` +
+                `${checkpoint.completed_count} completed)`
+          }
           renderUnitLabel={(unit) =>
             `Redo from "${unit.name || `${unitNoun} ${unit.key}`}"`
           }
@@ -194,7 +224,10 @@ const CheckpointDialog: React.FC<CheckpointDialogProps> = ({
         <Alert severity="info" sx={{ mt: 2 }}>
           Resuming starts a <strong>new run</strong> linked to this one. This run
           stays as it is, so its history, traces and token costs are preserved
-          separately.
+          separately. It rebuilds from the saved {unitNoun === 'crew' ? 'flow' : 'crew'},
+          so edits you have saved since are picked up — and a {unitNoun} whose
+          model or tools changed is re-run at launch even where it reads as
+          unchanged above.
         </Alert>
       </>
     );

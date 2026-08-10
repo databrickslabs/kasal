@@ -59,6 +59,7 @@ def build_unit(
     agent: Optional[str] = None,
     summary: Optional[str] = None,
     identity: Optional[str] = None,
+    content_key: Optional[str] = None,
     completed_at: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build one completed-unit entry, bounding the output.
@@ -71,8 +72,16 @@ def build_unit(
         output_json: Structured output, when the unit produced one.
         agent: Agent that produced the output, when known.
         summary: Short summary, when the runtime produced one.
-        identity: Content-addressed identity (e.g. a crew task's ``key``) used
-            to detect that inputs changed since the checkpoint was written.
+        identity: Content-addressed identity used at RUN time to decide what
+            may be replayed. Computed from built runtime objects, which is what
+            makes it authoritative and also what makes it uncomputable outside
+            a run.
+        content_key: The TEXT half of that identity — a hash of description and
+            expected output only. Stored separately because it is the part a
+            reader can recompute from the saved definition alone, which is how
+            the UI can say "task 4 changed" before anything is built. It is
+            deliberately weaker than ``identity``: a re-modelled or re-tooled
+            unit has the same content key, and is caught at run time instead.
         completed_at: Override the completion timestamp (tests, backfill).
 
     Returns:
@@ -91,6 +100,7 @@ def build_unit(
         "agent": agent,
         "summary": summary,
         "identity": identity,
+        "content_key": content_key,
         "output_raw": raw[:MAX_OUTPUT_CHARS],
         "output_json": output_json,
         "completed_at": completed_at or _now(),

@@ -194,6 +194,17 @@ class CheckpointUnitInfo(BaseModel):
         ),
     )
     completed_at: Optional[str] = Field(None, description="ISO completion timestamp")
+    will_restore: Optional[bool] = Field(
+        None,
+        description=(
+            "Whether a resume would replay this unit rather than re-run it. "
+            "THREE-valued: null means 'cannot tell' — a checkpoint written "
+            "before content keys existed, or a run with no saved definition to "
+            "compare against. Null is not 'yes'. Even a true here is a floor "
+            "rather than a promise: it compares task TEXT only, and run time "
+            "additionally re-runs a unit whose model or tools changed."
+        ),
+    )
 
 
 class CheckpointUnitDetail(CheckpointUnitInfo):
@@ -230,6 +241,22 @@ class ExecutionCheckpointResponse(BaseModel):
         description=(
             "Reconstructed from a pre-unification payload rather than written "
             "by the recorder — fidelity is not guaranteed."
+        ),
+    )
+    changed_from_index: Optional[int] = Field(
+        None,
+        description=(
+            "Index of the earliest unit that changed since this run, or null "
+            "when nothing detectable changed. A resume re-runs from here — "
+            "including units that did not themselves change, because their "
+            "input did."
+        ),
+    )
+    restorable_count: int = Field(
+        0,
+        description=(
+            "Units expected to be replayed rather than re-run. A FLOOR: it "
+            "compares task text only, so the run may restore fewer."
         ),
     )
     resumable: bool = Field(description="Whether this checkpoint can be resumed now")

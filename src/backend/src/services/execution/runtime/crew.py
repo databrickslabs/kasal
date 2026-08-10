@@ -37,6 +37,7 @@ from src.core.llm.transport.rpm import RPMController
 
 from .agent import Agent, BaseAgent
 from .executor import delegation_tools, interpolate_text
+from .identity import legacy_task_identity, task_identity
 from .task import Task
 from .types import CrewOutput, Process, TaskOutput, UsageMetrics
 
@@ -323,10 +324,26 @@ class Crew(BaseModel):
 
         Expected shape: ``{"completed": [{"index": int, "task_key": str,
         "output_raw": str, ...}, ...], "task_count": int}`` (``completed`` may
-        also be a dict keyed by stringified index). Only the contiguous prefix
-        of completed tasks is restored so context chaining ("all prior
-        outputs") is byte-identical to an uninterrupted run. Any validation
-        failure logs and returns None — the crew then runs from scratch.
+        also be a dict keyed by stringified index).
+
+        Restores the longest contiguous PREFIX whose task identities still
+        match, and stops at the first that does not. Two properties follow, and
+        both are the point:
+
+        - context chaining ("all prior outputs") is byte-identical to an
+          uninterrupted run, because a restored task's inputs are exactly the
+          restored tasks before it;
+        - editing task 4 of 5 keeps 1-3 and re-runs 4 onward, while editing
+          task 1 keeps nothing. A task after an edit has stale context even
+          when its own text is untouched, so restoring it would be the
+          silent-wrong-answer case.
+
+        This used to discard the WHOLE checkpoint on any mismatch, which was
+        defensible only while the definition being resumed was the same frozen
+        snapshot that produced the checkpoint — nothing could mismatch except a
+        genuine inconsistency. Now that a resume rebuilds from the current
+        definition, mismatches are the normal case and "start over" would make
+        every edit cost a full re-run.
         """
         if not from_checkpoint:
             return None
@@ -358,43 +375,38 @@ class Crew(BaseModel):
             )
             return None
 
+        # ``task_count`` is recorded for diagnostics, not as a gate. It used to
+        # abort the whole resume when it differed, which meant appending one
+        # task at the END invalidated every completed task before it — the
+        # count changing says nothing about whether task 1 is still task 1.
         task_count = from_checkpoint.get("task_count")
         if task_count is not None and int(task_count) != len(self.tasks):
-            logger.warning(
-                "crew %r: checkpoint task_count %s != current %d; running from scratch",
+            logger.info(
+                "crew %r: task count changed since the checkpoint (%s -> %d); "
+                "restoring whatever prefix still matches",
                 self.name,
                 task_count,
                 len(self.tasks),
             )
-            return None
 
         by_index: dict[int, dict[str, Any]] = {}
         for entry in entries:
             try:
                 index = int(entry["index"])
             except (KeyError, TypeError, ValueError):
+                # Skipped, not fatal: the prefix walk below stops at the first
+                # gap anyway, so a malformed entry costs exactly the tasks from
+                # it onward instead of the whole checkpoint.
                 logger.warning(
-                    "crew %r: malformed checkpoint entry %r; running from scratch",
+                    "crew %r: malformed checkpoint entry %r; ignoring it",
                     self.name,
                     entry,
                 )
-                return None
+                continue
             if not 0 <= index < len(self.tasks):
-                logger.warning(
-                    "crew %r: checkpoint index %d out of range; running from scratch",
-                    self.name,
-                    index,
-                )
-                return None
-            entry_key = entry.get("task_key")
-            if entry_key and entry_key != self.tasks[index].key:
-                logger.warning(
-                    "crew %r: checkpoint task_key mismatch at index %d "
-                    "(task list or inputs changed); running from scratch",
-                    self.name,
-                    index,
-                )
-                return None
+                # The task list shrank past this entry; there is nothing to
+                # restore it onto.
+                continue
             by_index[index] = entry
 
         seeded: dict[int, TaskOutput] = {}
@@ -402,16 +414,50 @@ class Crew(BaseModel):
             entry = by_index.get(index)
             if entry is None:
                 break
+            if not self._entry_matches(index, entry):
+                break
             seeded[index] = self._restore_output(self.tasks[index], entry)
         if not seeded:
             return None
         logger.info(
-            "crew %r: resuming from checkpoint — %d/%d task(s) restored",
+            "crew %r: resuming from checkpoint — %d/%d task(s) restored, "
+            "re-running from task %d",
             self.name,
             len(seeded),
             len(self.tasks),
+            len(seeded),
         )
         return seeded
+
+    def _entry_matches(self, index: int, entry: dict[str, Any]) -> bool:
+        """Whether a stored unit still describes the task now at ``index``.
+
+        A stored identity is accepted against EITHER the current identity or
+        the legacy ``Task.key`` it replaced. Rejecting the legacy form would
+        invalidate every checkpoint written before tools and model joined the
+        hash — worthless overnight, for exactly the workflow checkpoints exist
+        to protect. The two are hashes of different inputs, so a legacy match
+        is unambiguously a legacy value rather than a collision.
+
+        An entry with NO stored identity is accepted, as it always was: that is
+        every pre-identity checkpoint, and refusing them has the same cost.
+        """
+        stored = entry.get("task_key")
+        if not stored:
+            return True
+
+        task = self.tasks[index]
+        if stored in (task_identity(task), legacy_task_identity(task)):
+            return True
+
+        logger.info(
+            "crew %r: task %d (%r) changed since the checkpoint — it and every "
+            "task after it will re-run",
+            self.name,
+            index,
+            getattr(task, "name", None) or index,
+        )
+        return False
 
     @staticmethod
     def _restore_output(task: Task, entry: dict[str, Any]) -> TaskOutput:

@@ -8,6 +8,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
+import ChangeCircleIcon from '@mui/icons-material/ChangeCircle';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 
@@ -25,6 +26,14 @@ export interface PickableUnit {
   outputPreview?: string | null;
   /** The stored output was capped. Shown so reduced fidelity is never silent. */
   truncated?: boolean;
+  /**
+   * Whether a resume would replay this unit rather than re-run it.
+   *
+   * `undefined`/`null` is "cannot tell" and renders as neither — an old
+   * checkpoint has no basis for the claim, and showing it as "will be reused"
+   * would promise something run time may refuse.
+   */
+  willRestore?: boolean | null;
 }
 
 interface CheckpointUnitPickerProps {
@@ -74,8 +83,28 @@ const CheckpointUnitPicker: React.FC<CheckpointUnitPickerProps> = ({
         control={<Radio size="small" />}
         label={
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <CheckCircleIcon color="success" sx={{ fontSize: 16 }} />
-            <Typography variant="body2">{renderUnitLabel(unit)}</Typography>
+            {unit.willRestore === false ? (
+              <Tooltip title="This unit changed since the run, or comes after one that did — it will re-run">
+                <ChangeCircleIcon color="warning" sx={{ fontSize: 16 }} />
+              </Tooltip>
+            ) : (
+              <CheckCircleIcon color="success" sx={{ fontSize: 16 }} />
+            )}
+            <Typography
+              variant="body2"
+              color={unit.willRestore === false ? 'text.secondary' : undefined}
+            >
+              {renderUnitLabel(unit)}
+            </Typography>
+            {unit.willRestore === false && (
+              <Chip
+                label="will re-run"
+                size="small"
+                color="warning"
+                variant="outlined"
+                sx={{ height: 20, fontSize: '0.7rem' }}
+              />
+            )}
             <Chip
               label={`#${unit.key}`}
               size="small"

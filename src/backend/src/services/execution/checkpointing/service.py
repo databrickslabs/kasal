@@ -58,6 +58,9 @@ class CheckpointService:
             execution.status, execution.checkpoint_status
         )
 
+        current_keys = await self._current_content_keys(execution, group_context)
+        changed_at = self._first_changed(units, current_keys)
+
         return {
             "job_id": job_id,
             "execution_id": execution.id,
@@ -75,8 +78,185 @@ class CheckpointService:
             "derived": bool(record.get("migrated_from_version") is not None),
             "resumable": blocker is None,
             "blocked_reason": blocker,
-            "units": [self._summarise(unit) for unit in units],
+            # Where a resume would actually pick up, given what has been edited
+            # since. None when nothing detectable changed, in which case the
+            # whole recorded prefix is replayable.
+            "changed_from_index": changed_at,
+            "restorable_count": len(units) if changed_at is None else changed_at,
+            "units": [
+                self._summarise(unit, current_keys, changed_at, index)
+                for index, unit in enumerate(units)
+            ],
         }
+
+    async def _current_content_keys(
+        self, execution: Any, group_context: Optional[GroupContext]
+    ) -> Optional[List[str]]:
+        """Content keys of the saved definition, IN ORDER.
+
+        A list, not a mapping by name: crew units record ``name=None`` (the
+        recorder reads it off the runtime Task, which canvas-built tasks do not
+        carry), so a by-name lookup missed every unit and reported the whole
+        checkpoint as changed. Position is what the run itself matches on
+        anyway — ``_load_checkpoint`` walks index by index — so comparing by
+        position is both correct here and the same question the run asks.
+
+        None means "cannot tell" — no saved definition to compare against, or
+        reading it failed. That is reported as unknown rather than as unchanged:
+        claiming a unit will be restored and then re-running it is the mistake
+        this whole surface exists to stop.
+
+        Only the TEXT half is comparable here. The full identity hashes built
+        tool objects and a resolved LLM, which do not exist outside a run — so a
+        re-modelled or re-tooled unit looks unchanged to this and is caught at
+        run time instead. Everything downstream of that phrases the answer as a
+        floor, never as a promise.
+        """
+        if (execution.execution_type or "").lower() == "flow":
+            return await self._flow_content_keys(execution, group_context)
+
+        crew_id = getattr(execution, "crew_id", None)
+        if not crew_id:
+            return None
+
+        try:
+            from src.services.catalog.crew_config import (
+                build_crew_execution_config_by_id,
+            )
+            from src.services.execution.runtime.identity import content_key
+
+            projected = await build_crew_execution_config_by_id(
+                self.session, crew_id, group_context
+            )
+        except Exception as exc:  # noqa: BLE001 — a preview may never break a read
+            logger.warning(
+                "Could not read crew %s to compare against its checkpoint: %s",
+                crew_id,
+                exc,
+            )
+            return None
+
+        if not projected:
+            return None
+
+        _, tasks_yaml = projected
+        return [
+            content_key(entry.get("description"), entry.get("expected_output"))
+            for entry in tasks_yaml.values()
+        ]
+
+    async def _flow_content_keys(
+        self, execution: Any, group_context: Optional[GroupContext]
+    ) -> Optional[Dict[str, str]]:
+        """Content keys of a flow's crews, by crew NAME.
+
+        By name rather than by position because a flow records units in
+        COMPLETION order (the recorder increments a counter per crew that
+        finishes), so unit 2 is not the second crew declared. Flow units do
+        carry their crew name, which crew units do not — so each side matches
+        on the identifier it actually has.
+
+        Rebuilt from the run's own ``flow_config`` (crew names and their task
+        id lists) plus the current task rows, which is exactly what
+        ``crew_content_key`` hashes. No crew is built: the text is all this
+        needs, and building one here would mean resolving tools and an LLM in
+        the middle of a GET.
+        """
+        from types import SimpleNamespace
+
+        from src.services.catalog.tasks import TaskService
+        from src.services.execution.runtime.identity import (
+            content_key,
+            crew_content_key,
+        )
+
+        flow_config = (getattr(execution, "inputs", None) or {}).get("flow_config")
+        if not isinstance(flow_config, dict):
+            return None
+
+        crews: List[tuple] = []
+        for point in flow_config.get("startingPoints") or []:
+            name = point.get("crewName") or point.get("name")
+            task_id = point.get("taskId")
+            if name and task_id:
+                crews.append((name, [task_id]))
+        for listener in flow_config.get("listeners") or []:
+            name = listener.get("name") or listener.get("crewName")
+            raw = listener.get("tasks") or listener.get("taskIds") or []
+            # Listener tasks arrive either as ids or as objects carrying one.
+            ids = [t.get("id") if isinstance(t, dict) else t for t in raw]
+            ids = [i for i in ids if i]
+            if name and ids:
+                crews.append((name, ids))
+
+        if not crews:
+            return None
+
+        service = TaskService(self.session)
+        keys: Dict[str, str] = {}
+        try:
+            for name, task_ids in crews:
+                stand_ins = []
+                for task_id in task_ids:
+                    row = (
+                        await service.get_with_group_check(str(task_id), group_context)
+                        if group_context is not None
+                        else await service.get(str(task_id))
+                    )
+                    if row is None:
+                        stand_ins = []
+                        break
+                    stand_ins.append(
+                        SimpleNamespace(
+                            key=content_key(row.description, row.expected_output)
+                        )
+                    )
+                if not stand_ins:
+                    continue  # a crew we cannot judge, rather than a false verdict
+                crew_key = crew_content_key(name, stand_ins)
+                if crew_key:
+                    keys[name] = crew_key
+        except Exception as exc:  # noqa: BLE001 — a preview may never break a read
+            logger.warning("Could not rebuild flow crew keys for comparison: %s", exc)
+            return None
+
+        return keys or None
+
+    @staticmethod
+    def _first_changed(units: List[Dict[str, Any]], current_keys: Any) -> Optional[int]:
+        """Index of the earliest unit whose text no longer matches.
+
+        The rule the run applies is a PREFIX — everything from the first change
+        re-runs, including units that did not themselves change, because their
+        input did. So one index describes the whole answer.
+        """
+        if not current_keys:
+            return None
+
+        by_name = isinstance(current_keys, dict)
+
+        for index, unit in enumerate(units):
+            stored = unit.get("content_key")
+            if not stored:
+                continue  # written before content keys existed
+
+            if by_name:
+                # Flow units: matched on the crew name they carry.
+                current = current_keys.get(unit.get("name"))
+                if current is None:
+                    continue  # a crew this reader cannot judge
+            else:
+                if index >= len(current_keys):
+                    # A unit past the end of the definition. The engine appends
+                    # synthetic tasks in some configurations (a parallel crew
+                    # gets a completion task), so this is not evidence of an
+                    # edit and must not be reported as one.
+                    continue
+                current = current_keys[index]
+
+            if current != stored:
+                return index
+        return None
 
     async def get_unit(
         self,
@@ -133,7 +313,23 @@ class CheckpointService:
         return summaries
 
     @staticmethod
-    def _summarise(unit: Dict[str, Any]) -> Dict[str, Any]:
+    def _summarise(
+        unit: Dict[str, Any],
+        current_keys: Optional[Dict[str, str]] = None,
+        changed_at: Optional[int] = None,
+        index: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """One unit, with what a resume would do to it.
+
+        ``will_restore`` is three-valued on purpose. True and False are
+        verdicts; None is "unknown", which is what an old checkpoint or a run
+        with no saved definition honestly gets. Collapsing None into True would
+        promise a restore that run time may refuse.
+        """
+        will_restore: Optional[bool] = None
+        if current_keys is not None and index is not None:
+            will_restore = changed_at is None or index < changed_at
+
         return {
             "key": unit.get("key"),
             "name": unit.get("name"),
@@ -141,4 +337,5 @@ class CheckpointService:
             "output_preview": unit_preview(unit),
             "truncated": bool(unit.get("truncated")),
             "completed_at": unit.get("completed_at"),
+            "will_restore": will_restore,
         }

@@ -107,6 +107,15 @@ class CrewConfig(BaseModel):
     flow_id: Optional[str] = Field(
         None, description="ID of the saved flow (for checkpoint tracking)"
     )
+    crew_id: Optional[str] = Field(
+        None,
+        description=(
+            "ID of the saved crew this run was built from. The crew half of "
+            "flow_id: it is what lets a resume rebuild from the current "
+            "definition rather than the stored inputs snapshot. Absent for a "
+            "run started from an unsaved canvas."
+        ),
+    )
     # Flow configuration fields (for flow scheduling)
     nodes: Optional[List[Dict[str, Any]]] = Field(
         None, description="Flow nodes configuration"
@@ -232,8 +241,13 @@ class ExecutionResponse(BaseModel):
     flow_id: Optional[str] = Field(
         None, description="UUID of the flow used (if execution_type is flow)"
     )
-    crew_id: Optional[int] = Field(
-        None, description="ID of the crew used (if execution_type is crew)"
+    crew_id: Optional[str] = Field(
+        None,
+        description=(
+            "UUID of the saved crew used (if execution_type is crew). Typed int "
+            "until the backing column existed, which no value could ever have "
+            "satisfied — crews are keyed by UUID, like flow_id above."
+        ),
     )
     execution_type: Optional[str] = Field(
         None, description="Type of execution (crew or flow)"

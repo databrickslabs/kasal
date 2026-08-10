@@ -146,6 +146,15 @@ class ExecutionHistory(Base):
     flow_id = Column(
         UUID(as_uuid=True), nullable=True, index=True
     )  # Optional reference to saved flow
+    # The saved crew this run was built from, when it had one.
+    #
+    # The crew equivalent of ``flow_id``, and it exists for the same reason
+    # resume needs one: without a link back to a definition, a resume can only
+    # replay the frozen ``inputs`` snapshot, so a task edited after the run was
+    # invisible to it. An ad-hoc run from an unsaved canvas has no row to point
+    # at and leaves this null, which is what makes the snapshot the fallback
+    # rather than the source.
+    crew_id = Column(UUID(as_uuid=True), nullable=True, index=True)
 
     # Checkpoint/Persistence fields for CrewAI Flow state management
     flow_uuid = Column(

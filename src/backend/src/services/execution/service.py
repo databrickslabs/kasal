@@ -1703,6 +1703,28 @@ class ExecutionService:
                     f"[ExecutionService.create_execution] Setting flow_id {flow_id} in execution_data for flow execution"
                 )
 
+            # The crew equivalent: which saved crew this run was built from, so a
+            # later resume can rebuild from the current definition instead of the
+            # snapshot stored above. Malformed ids are dropped rather than
+            # raised on — the run itself does not need the link, and failing a
+            # kickoff over a bad optional reference would be a worse trade.
+            crew_id = getattr(config, "crew_id", None)
+            if execution_type != "flow" and crew_id:
+                import uuid as uuid_module
+
+                try:
+                    execution_data["crew_id"] = (
+                        uuid_module.UUID(crew_id)
+                        if isinstance(crew_id, str)
+                        else crew_id
+                    )
+                except (TypeError, ValueError):
+                    logger.warning(
+                        f"[ExecutionService.create_execution] Ignoring unparseable "
+                        f"crew_id {crew_id!r}; this run will resume from its "
+                        f"stored inputs instead of the saved crew"
+                    )
+
             # A flow resume has always created a new execution; it just never
             # recorded WHICH run it came from. Stamping the same link the crew
             # path uses means one resume chain shape for both, so the run detail
@@ -1931,64 +1953,6 @@ class ExecutionService:
     # services/execution/checkpointing/lifecycle.py, so the endpoint, the UI's
     # "why is resume disabled" message and this method cannot disagree.
 
-    @staticmethod
-    def _build_flow_resume_config(source, stored_inputs, record, from_unit):
-        """Build the config and restored-unit count for resuming a FLOW.
-
-        A flow resumes by rebuilding itself from its saved nodes and edges and
-        SKIPPING the crews it already completed, replaying their stored output.
-        Which crews get skipped is driven by ``resume_from_crew_sequence``,
-        which names the crew to RUN (crews with a lower sequence are skipped).
-
-        Args:
-            source: The execution being resumed from
-            stored_inputs: Its stored inputs (nodes/edges/flow_config)
-            record: Its normalized checkpoint record, if any
-            from_unit: Optional crew sequence to resume AT
-
-        Returns:
-            ``(CrewConfig, restored_crew_count)``
-        """
-        from src.services.execution.checkpointing import ordered_units
-
-        units = ordered_units(record)
-
-        if from_unit not in (None, ""):
-            try:
-                resume_at = int(from_unit)
-            except (TypeError, ValueError):
-                raise ValueError(f"Invalid resume point '{from_unit}'")
-        elif units:
-            # Continue after everything recorded: the first crew that did not
-            # complete is one past the highest sequence stored.
-            resume_at = max(int(u["key"]) for u in units) + 1
-        else:
-            resume_at = None  # nothing recorded — run the whole flow
-
-        restored = sum(
-            1 for u in units if resume_at is None or int(u["key"]) < resume_at
-        )
-
-        return (
-            CrewConfig(
-                agents_yaml={},
-                tasks_yaml={},
-                inputs=stored_inputs.get("inputs") or {},
-                model=stored_inputs.get("model"),
-                execution_type="flow",
-                flow_id=stored_inputs.get("flow_id"),
-                nodes=stored_inputs.get("nodes"),
-                edges=stored_inputs.get("edges"),
-                flow_config=stored_inputs.get("flow_config"),
-                # The flow builder resolves this with get_execution_by_job_id,
-                # so it is the SOURCE run's job_id, not the integer row id.
-                resume_from_execution_id=source.job_id,
-                resume_from_flow_uuid=source.flow_uuid,
-                resume_from_crew_sequence=resume_at,
-            ),
-            restored,
-        )
-
     async def resume_execution(
         self,
         execution_id: str,
@@ -2029,11 +1993,14 @@ class ExecutionService:
             ExecutionHistoryRepository,
         )
         from src.services.execution.checkpointing import (
-            build_crew_payload,
             lifecycle,
             normalize,
             ordered_units,
             store,
+        )
+        from src.services.execution.checkpointing.resume_config import (
+            build_crew_resume_config,
+            build_flow_resume_config,
         )
 
         if not self.session:
@@ -2064,39 +2031,22 @@ class ExecutionService:
         stored_inputs = source.inputs or {}
         record = normalize(source.checkpoint_data)
 
-        # The two paths store completely different things and restart in
-        # completely different ways. A flow keeps nodes/edges/flow_config and
-        # replays completed CREWS; a crew keeps agents_yaml/tasks_yaml and
-        # replays completed TASKS. Running one through the other's config was a
-        # 409 on every flow resume, because a flow has no agents_yaml.
+        # The two paths restart in completely different ways — a flow rebuilds
+        # from nodes/edges/flow_config and replays completed CREWS, a crew from
+        # agents_yaml/tasks_yaml and replays completed TASKS — which is why
+        # each has its own builder. (Running one through the other's config was
+        # a 409 on every flow resume, because a flow has no agents_yaml.)
+        #
+        # Both prefer the SAVED definition over the stored snapshot, so a
+        # resume picks up edits made since the original run; see
+        # checkpointing/resume_config.py.
         if execution_type == "flow":
-            config, restored_units = self._build_flow_resume_config(
-                source, stored_inputs, record, from_unit
+            config, restored_units, resume_inputs = await build_flow_resume_config(
+                self.session, source, stored_inputs, record, from_unit, group_context
             )
         else:
-            if not stored_inputs.get("agents_yaml") or not stored_inputs.get(
-                "tasks_yaml"
-            ):
-                raise ValueError(
-                    f"Execution {execution_id} has no stored crew configuration to resume from"
-                )
-
-            checkpoint = build_crew_payload(record, from_unit=from_unit)
-            restored_units = len(checkpoint.get("completed") or []) if checkpoint else 0
-
-            config = CrewConfig(
-                agents_yaml=stored_inputs.get("agents_yaml") or {},
-                tasks_yaml=stored_inputs.get("tasks_yaml") or {},
-                inputs=stored_inputs.get("inputs") or {},
-                # Legacy executions may still carry a stored "planning" key; it
-                # is ignored on resume because CrewConfig no longer models it.
-                reasoning=bool(stored_inputs.get("reasoning", False)),
-                model=stored_inputs.get("model"),
-                execution_type="crew",
-                schema_detection_enabled=stored_inputs.get(
-                    "schema_detection_enabled", True
-                ),
-                resume_checkpoint=checkpoint,
+            config, restored_units, resume_inputs = await build_crew_resume_config(
+                self.session, source, stored_inputs, record, from_unit, group_context
             )
 
         new_execution_id = str(uuid.uuid4())
@@ -2110,8 +2060,12 @@ class ExecutionService:
         execution_data = {
             "job_id": new_execution_id,
             "status": ExecutionStatus.RUNNING.value,
+            # The definition that will actually RUN, which is the rebuilt one
+            # when there was a saved crew/flow to rebuild from. Storing the old
+            # snapshot here would make the new run's record describe work it
+            # did not do, and send a second resume back to the stale text.
             "inputs": ExecutionService.sanitize_for_database(
-                self._mask_inputs_sensitive_data(stored_inputs)
+                self._mask_inputs_sensitive_data(resume_inputs)
             ),
             "run_name": run_name,
             "created_at": datetime.now(),
@@ -2122,6 +2076,12 @@ class ExecutionService:
             execution_data["flow_id"] = source.flow_id
         if source.flow_uuid:
             execution_data["flow_uuid"] = source.flow_uuid
+        # Carry the crew link down the resume chain. Without it the SECOND
+        # resume of a run would have nothing to rebuild from and would fall
+        # back to a snapshot — which is not stale here, but would freeze at the
+        # first resume and stop picking up later edits.
+        if getattr(source, "crew_id", None):
+            execution_data["crew_id"] = source.crew_id
 
         created = await ExecutionStatusService.create_execution(
             execution_data, group_context=group_context
@@ -2142,6 +2102,13 @@ class ExecutionService:
                 {
                     **record,
                     "units": {unit["key"]: unit for unit in seeded_units},
+                    # The SOURCE's unit count does not describe this run — the
+                    # definition may have gained or lost tasks since, and the
+                    # engine appends synthetic ones in some configurations.
+                    # Cleared so the recorder's own count wins on first write
+                    # rather than the seed advertising a number that was never
+                    # true here (it is what made the log read "6 -> 7").
+                    "unit_count": None,
                 },
                 checkpoint_status=lifecycle.CheckpointStatus.ACTIVE,
             )

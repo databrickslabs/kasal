@@ -700,6 +700,7 @@ class TestExecutionResponse:
         started = datetime(2023, 1, 1, 10, 0, 0)
         completed = datetime(2023, 1, 1, 10, 30, 0)
         flow_id_str = str(uuid4())
+        crew_id_str = str(uuid4())
 
         response_data = {
             "execution_id": "exec_full_456",
@@ -710,7 +711,9 @@ class TestExecutionResponse:
             "run_name": "Quarterly Analysis",
             "id": 789,
             "flow_id": flow_id_str,
-            "crew_id": 202,
+            # A UUID, like flow_id: crews are keyed by UUID, so the int this
+            # once asserted was a value the field could never hold.
+            "crew_id": crew_id_str,
             "execution_key": "quarterly_2023_q4",
             "started_at": started,
             "completed_at": completed,
@@ -725,7 +728,7 @@ class TestExecutionResponse:
         assert response.execution_id == "exec_full_456"
         assert response.id == 789
         assert response.flow_id == flow_id_str
-        assert response.crew_id == 202
+        assert response.crew_id == crew_id_str
         assert response.execution_key == "quarterly_2023_q4"
         assert response.started_at == started
         assert response.completed_at == completed
@@ -985,13 +988,14 @@ class TestSchemaIntegration:
 
         # Final execution response
         now = datetime.now()
+        crew_id_str = str(uuid4())
         execution_response = ExecutionResponse(
             execution_id=create_response.execution_id,
             status="completed",
             created_at=now,
             result={"analysis_complete": True, "insights": ["insight1", "insight2"]},
             run_name=create_response.run_name,
-            crew_id=123,
+            crew_id=crew_id_str,
             execution_inputs=crew_config.inputs,
             execution_config={
                 "model": crew_config.model,
@@ -1006,7 +1010,7 @@ class TestSchemaIntegration:
         assert name_request.model == crew_config.model
         assert name_response.name == create_response.run_name
         assert create_response.execution_id == execution_response.execution_id
-        assert execution_response.crew_id == 123
+        assert execution_response.crew_id == crew_id_str
         assert execution_response.execution_inputs == {
             "sales_data": "q4_sales.csv",
             "year": 2023,

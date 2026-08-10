@@ -64,6 +64,7 @@ def make_execution_row(
     # Concrete, not MagicMock: these are pydantic-validated on the flow path.
     row.flow_uuid = None
     row.flow_id = None
+    row.crew_id = None
     row.inputs = (
         inputs
         if inputs is not None
@@ -436,3 +437,36 @@ class TestResumeCreatesNewExecution:
                 await service.resume_execution("job-1", group_context)
 
         run_bg.assert_not_awaited()
+
+
+class TestTheResumeChain:
+    @pytest.mark.asyncio
+    async def test_the_crew_link_is_carried_forward(self, service, group_context):
+        """Otherwise the SECOND resume of a run has nothing to rebuild from.
+
+        It would fall back to the snapshot — which the first resume made
+        current, so nothing is stale, but the chain would freeze there and stop
+        picking up later edits.
+        """
+        row = make_execution_row(status="FAILED", checkpoint_data=LEGACY_CHECKPOINT)
+        row.crew_id = "crew-uuid"
+        patcher, _ = patch_repo(row)
+        run_bg_p, create_p, uuid_p = resume_patches()
+
+        with patcher, run_bg_p, create_p as create_exec, uuid_p:
+            await service.resume_execution("job-1", group_context)
+            await asyncio.sleep(0)
+
+        assert create_exec.await_args.args[0]["crew_id"] == "crew-uuid"
+
+    @pytest.mark.asyncio
+    async def test_a_run_with_no_crew_link_records_none(self, service, group_context):
+        row = make_execution_row(status="FAILED", checkpoint_data=LEGACY_CHECKPOINT)
+        patcher, _ = patch_repo(row)
+        run_bg_p, create_p, uuid_p = resume_patches()
+
+        with patcher, run_bg_p, create_p as create_exec, uuid_p:
+            await service.resume_execution("job-1", group_context)
+            await asyncio.sleep(0)
+
+        assert "crew_id" not in create_exec.await_args.args[0]

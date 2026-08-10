@@ -6,9 +6,11 @@ the resume path restores the completed prefix and continues from the first
 incomplete task.
 
 Task identity is POSITION in the crew's task list, which is what makes writes
-idempotent — recording task 3 twice overwrites rather than appends. The task's
-content-addressed ``key`` rides along as ``identity`` so the runtime can refuse
-to restore a checkpoint whose inputs have since changed.
+idempotent — recording task 3 twice overwrites rather than appends. A
+content-addressed identity (``runtime.identity.task_identity``) rides along so
+the runtime can tell which restored units are still valid — and, since the
+positions shift the moment a task is inserted, so a resume can match on CONTENT
+rather than trusting the index it was stored under.
 """
 
 import logging
@@ -17,6 +19,7 @@ from typing import Any, Dict, Iterable, Tuple
 from src.core.events.types import CrewKickoffCompletedEvent, TaskCompletedEvent
 from src.services.execution.checkpointing.record import KIND_CREW, build_unit
 from src.services.execution.checkpointing.recorder import CheckpointRecorder
+from src.services.execution.runtime.identity import task_identity
 
 logger = logging.getLogger(__name__)
 
@@ -91,8 +94,17 @@ class CrewTaskCheckpointRecorder(CheckpointRecorder):
             output_json=getattr(output, "json_dict", None),
             agent=getattr(output, "agent", None),
             summary=getattr(output, "summary", None),
-            # Content-addressed task identity: the runtime refuses to restore a
-            # unit whose key no longer matches, so changed inputs re-run rather
-            # than resuming against stale context.
-            identity=getattr(task, "key", None),
+            # Content-addressed task identity: the runtime restores only the
+            # prefix whose identities still match, so an edited task re-runs
+            # rather than resuming against stale context.
+            #
+            # Wider than ``Task.key`` (description + expected output) because
+            # that missed the two edits people most often make while tuning —
+            # swapping the agent's model and changing the task's tools. Both
+            # change the output; neither moved the old hash.
+            identity=task_identity(task),
+            # The text half, stored separately so a READER can recompute it
+            # from the saved definition — `identity` hashes built tool objects
+            # and cannot be recomputed outside a run.
+            content_key=getattr(task, "key", None),
         )

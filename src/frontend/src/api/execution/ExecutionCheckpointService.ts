@@ -18,6 +18,16 @@ export interface CheckpointUnit {
    */
   truncated: boolean;
   completed_at: string | null;
+  /**
+   * Whether a resume would replay this unit rather than re-run it.
+   *
+   * THREE-valued. `null` is "cannot tell" — a checkpoint written before
+   * content keys existed, or a run with no saved crew to compare against — and
+   * must never be rendered as "yes". Even `true` is a floor: it compares task
+   * TEXT only, so the run additionally re-runs a unit whose model or tools
+   * changed.
+   */
+  will_restore: boolean | null;
 }
 
 export interface CheckpointUnitDetail extends CheckpointUnit {
@@ -41,6 +51,10 @@ export interface ExecutionCheckpoint {
   derived: boolean;
   resumable: boolean;
   blocked_reason: string | null;
+  /** Earliest unit that changed since this run; null when nothing did. */
+  changed_from_index: number | null;
+  /** Units expected to be replayed. A floor — see `will_restore`. */
+  restorable_count: number;
   units: CheckpointUnit[];
   flow_uuid?: string | null;
   checkpoint_method?: string | null;

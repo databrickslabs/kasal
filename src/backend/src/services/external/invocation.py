@@ -415,55 +415,14 @@ async def cancel_run(
 async def _crew_to_yaml(crew: Any, session: Any) -> tuple:
     """A saved crew -> the agents_yaml/tasks_yaml the engine takes.
 
-    Resolved from ``agent_ids``/``task_ids`` rather than from the canvas
-    ``nodes``: nodes are presentation data (positions, edges, UI state) and a
-    crew can be perfectly valid with none, while the id lists are what the crew
-    actually IS.
-
-    The browser builds this same projection client-side before calling
-    /executions. Doing it here rather than in the adapters means an
-    externally-started run is assembled the same way whichever protocol asked —
-    a second copy is a second way for an external run to differ from a UI one.
+    Delegates to ``catalog/crew_config.py``, which owns the projection because
+    the crews domain owns the data. Resume needs the same one — it rebuilds a
+    run from the crew as it is now — and two copies is two ways for an
+    externally-started run to differ from a resumed or a UI one.
     """
-    from src.services.catalog.agents import AgentService
-    from src.services.catalog.tasks import TaskService
+    from src.services.catalog.crew_config import build_crew_execution_config
 
-    agent_service = AgentService(session)
-    task_service = TaskService(session)
-
-    agents_yaml: Dict[str, Any] = {}
-    agent_key_by_id: Dict[str, str] = {}
-    for agent_id in getattr(crew, "agent_ids", None) or []:
-        agent = await agent_service.get(str(agent_id))
-        if agent is None:
-            continue
-        key = agent.name or agent.role or str(agent_id)
-        agent_key_by_id[str(agent_id)] = key
-        agents_yaml[key] = {
-            "role": agent.role,
-            "goal": agent.goal,
-            "backstory": agent.backstory,
-            "llm": agent.llm,
-            "tools": getattr(agent, "tools", None) or [],
-        }
-
-    tasks_yaml: Dict[str, Any] = {}
-    for task_id in getattr(crew, "task_ids", None) or []:
-        task = await task_service.get(str(task_id))
-        if task is None:
-            continue
-        key = task.name or str(task_id)
-        entry: Dict[str, Any] = {
-            "description": task.description,
-            "expected_output": task.expected_output,
-            "tools": getattr(task, "tools", None) or [],
-        }
-        assigned = agent_key_by_id.get(str(getattr(task, "agent_id", "") or ""))
-        if assigned:
-            entry["agent"] = assigned
-        tasks_yaml[key] = entry
-
-    return agents_yaml, tasks_yaml
+    return await build_crew_execution_config(session, crew)
 
 
 async def _start_flow(

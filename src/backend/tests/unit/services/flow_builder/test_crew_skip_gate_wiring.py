@@ -1,8 +1,8 @@
 """Guards on how the resume skip gate is WIRED, not on what it decides.
 
-`_crew_may_be_skipped` is unit-tested directly, which means every test passes
-even when the call sites feeding it are wrong. Two real bugs got in that way
-and neither turned a test red:
+``CrewSkipPolicy.may_skip`` is unit-tested directly, which means every test
+passes even when the call sites feeding it are wrong. Two real bugs got in that
+way and neither turned a test red:
 
 1. ``checkpoint_identities`` was read inside ``_create_dynamic_flow`` but only
    assigned in its caller — a NameError on every flow resume.
@@ -123,10 +123,10 @@ class TestEachSiteHashesItsOwnTasks:
         for node in ast.walk(_function("_create_dynamic_flow")):
             if (
                 isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "_crew_may_be_skipped"
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "may_skip"
             ):
-                # (crew_name, <tasks>, checkpoint_identities)
+                # (crew_name, <tasks>, sequence)
                 assert len(node.args) == 3, "unexpected skip-gate signature"
                 calls.append(
                     (node, node.args[1].id, cls._enclosing_loop(node, parents))

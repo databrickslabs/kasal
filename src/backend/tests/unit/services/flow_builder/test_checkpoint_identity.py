@@ -17,10 +17,18 @@ from src.services.flow_builder.checkpoint_identity import (
 
 
 def make_agent(role="researcher", goal="find", backstory="expert", model="gpt-x"):
-    # Agent.key is a hash of role|goal|backstory; the model sits outside it,
-    # which is why the fingerprint has to reach for llm.model separately.
+    # The fingerprint reads role, model and tools DIRECTLY rather than through
+    # Agent.key — key hashes role|goal|backstory together, and goal/backstory
+    # are deliberately outside the identity now (see agent_fingerprint).
     key = f"{role}|{goal}|{backstory}"
-    return SimpleNamespace(key=key, llm=SimpleNamespace(model=model))
+    return SimpleNamespace(
+        key=key,
+        role=role,
+        goal=goal,
+        backstory=backstory,
+        llm=SimpleNamespace(model=model),
+        tools=[],
+    )
 
 
 def make_task(description="do it", expected="a result", agent=None):
@@ -52,6 +60,23 @@ class TestComputeCrewIdentity:
             "research", [make_task(agent=make_agent(role="analyst"))]
         )
         assert before != after
+
+    def test_rewording_the_goal_does_NOT_change_the_identity(self):
+        """The deliberate limit on how sensitive this is.
+
+        Regenerating a crew re-words goals and backstories while the roles and
+        the work stay the same, and hashing them meant every regeneration threw
+        away every checkpoint the crew had. A checkpoint that dies on each save
+        protects nothing, so prose about who the agent IS is out; what it can
+        DO — role, model, tools — is in.
+        """
+        before = compute_crew_identity(
+            "research", [make_task(agent=make_agent(goal="find things"))]
+        )
+        after = compute_crew_identity(
+            "research", [make_task(agent=make_agent(goal="find things, precisely"))]
+        )
+        assert before == after
 
     def test_changing_the_model_changes_the_identity(self):
         """The most common tuning edit, and the one Agent.key alone misses."""

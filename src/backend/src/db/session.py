@@ -1255,41 +1255,57 @@ async def _ensure_agent_columns(conn) -> None:
 
 
 async def _ensure_execution_history_columns(conn) -> None:
-    """Idempotently add executionhistory.resumed_from_execution_id.
+    """Idempotently add the executionhistory columns added after it shipped.
 
-    Resuming a run creates a NEW execution pointing at the one it came from.
     ``create_all`` never ALTERs an existing table, so a database created before
-    that column existed keeps a schema the model no longer matches — and because
-    SQLAlchemy selects every mapped column, EVERY read of executionhistory fails
-    with "no such column", not just the resume path. There is an Alembic
-    migration for this too; this covers dev databases that were built from the
-    models and have no alembic_version at all.
+    a column existed keeps a schema the model no longer matches — and because
+    SQLAlchemy selects every mapped column, EVERY read of executionhistory then
+    fails with "no such column", not just the path that wanted the new field.
+    There are Alembic migrations for these too; this covers dev databases built
+    from the models with no alembic_version at all.
     """
     is_sqlite = _conn_is_sqlite(conn)
+    # (name, sqlite type, postgres type)
+    columns = [
+        # Resuming a run creates a NEW execution pointing at the one it came from.
+        ("resumed_from_execution_id", "INTEGER", "INTEGER"),
+        # The saved crew a run was built from — the crew half of flow_id, and
+        # what lets a resume rebuild from the current definition instead of
+        # replaying the frozen inputs snapshot.
+        ("crew_id", "TEXT", "UUID"),
+    ]
     try:
         if is_sqlite:
             res = await conn.exec_driver_sql("PRAGMA table_info(executionhistory)")
             existing = {row[1] for row in res.fetchall()}
             if not existing:
                 return  # table not created yet (create_all handles fresh DBs)
-            if "resumed_from_execution_id" not in existing:
-                await conn.exec_driver_sql(
-                    "ALTER TABLE executionhistory "
-                    "ADD COLUMN resumed_from_execution_id INTEGER"
-                )
-                logger.info(
-                    "Added executionhistory.resumed_from_execution_id (SQLite self-heal)"
-                )
+            for name, sqlite_type, _pg_type in columns:
+                if name not in existing:
+                    await conn.exec_driver_sql(
+                        f"ALTER TABLE executionhistory ADD COLUMN {name} {sqlite_type}"
+                    )
+                    logger.info(
+                        f"Added executionhistory.{name} column (SQLite self-heal)"
+                    )
         else:
-            await conn.exec_driver_sql(
-                "ALTER TABLE executionhistory "
-                "ADD COLUMN IF NOT EXISTS resumed_from_execution_id INTEGER"
-            )
-            logger.info("Ensured executionhistory.resumed_from_execution_id column")
+            # Read the catalogue first — see _pg_columns: an ALTER on a table
+            # this role does not own raises "must be owner" even when the column
+            # is already present, and that error aborts the whole self-heal
+            # transaction.
+            existing = await _pg_columns(conn, "executionhistory")
+            if not existing:
+                return  # table not created yet
+            for name, _sqlite_type, pg_type in columns:
+                if name not in existing:
+                    await conn.exec_driver_sql(
+                        f"ALTER TABLE executionhistory "
+                        f"ADD COLUMN IF NOT EXISTS {name} {pg_type}"
+                    )
+                    logger.info(f"Added executionhistory.{name} column")
+            logger.info("Ensured executionhistory columns")
     except Exception as e:
-        logger.warning(
-            f"Could not ensure executionhistory.resumed_from_execution_id: {e}"
-        )
+        logger.warning(f"Could not ensure executionhistory columns: {e}")
 
 
 async def _ensure_crew_columns(conn) -> None:

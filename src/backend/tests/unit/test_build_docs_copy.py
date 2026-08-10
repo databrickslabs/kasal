@@ -19,6 +19,7 @@ backend package), so it is loaded here via importlib from its absolute path.
 """
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 from unittest import mock
@@ -86,7 +87,19 @@ def _run_build_frontend(build_module, tmp_path, docs_dir):
     """
     Run the real Builder.build_frontend with the path attributes redirected to
     temp dirs and subprocess.run mocked out. Returns (builder, return_value).
+
+    The process CWD is captured and restored around the call. ``build_frontend``
+    chdirs into ``frontend_dir`` and back to ``builder.root_dir`` — which these
+    tests point at a TEMP directory, so without this the worker is left sitting
+    in tmp for every test that follows it. That is not cosmetic: any later test
+    spawning ``python -c "import src..."`` then dies with "No module named
+    'src'", because that import resolves through the CWD. It made the spawned-
+    interpreter guard in test_event_pipe_registers.py fail at random under
+    xdist, depending on which worker happened to pick up this file — i.e. it
+    was intermittently disabling the one check that catches subprocess import
+    breakage.
     """
+    original_cwd = os.getcwd()
     root_dir = tmp_path / "root"
     frontend_dir = root_dir / "frontend"
     frontend_dir.mkdir(parents=True)
@@ -105,9 +118,12 @@ def _run_build_frontend(build_module, tmp_path, docs_dir):
     builder.frontend_dir = frontend_dir
     builder.docs_dir = docs_dir
 
-    with mock.patch.object(build_module.subprocess, "run") as mock_run:
-        mock_run.return_value = None  # npm install / npm run build -> no-op
-        result = builder.build_frontend()
+    try:
+        with mock.patch.object(build_module.subprocess, "run") as mock_run:
+            mock_run.return_value = None  # npm install / npm run build -> no-op
+            result = builder.build_frontend()
+    finally:
+        os.chdir(original_cwd)
 
     return builder, result, mock_run
 
