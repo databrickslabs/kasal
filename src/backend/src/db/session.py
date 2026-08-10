@@ -1684,6 +1684,26 @@ async def run_schema_self_heal(conn) -> None:
     does not exist``. Rolling back to a savepoint makes each step independently
     skippable, which is what the per-helper try/except was always meant to give.
     """
+    # On Lakebase, act as the shared ``databricks_superuser`` role for the whole
+    # heal. Every identity on the instance (each app's SPN + the admins) is a
+    # member of it, so this bypasses table-ownership checks — without it, a table
+    # created by a DIFFERENT principal makes ADD COLUMN fail with "must be owner",
+    # and because that abort poisons the transaction it took EVERY later step
+    # with it (crew_id included). It also lets us install pgvector below. Both are
+    # best-effort: on a plain Postgres with no such role they no-op and the heal
+    # proceeds as the connecting role, exactly as before. Skipped on SQLite.
+    if not _conn_is_sqlite(conn):
+        from src.services.databricks.lakebase.superuser import (
+            enable_pgvector_async,
+            enter_superuser_async,
+        )
+
+        await enter_superuser_async(conn)
+        # Enable pgvector up front so the vector-column heals (documentation_
+        # embeddings / knowledge_embeddings / workflow_recipes) can add their
+        # embedding columns instead of falling back to the vector-free schema.
+        await enable_pgvector_async(conn)
+
     steps = (
         _ensure_documentation_embeddings_columns,
         _ensure_databricks_config_columns,

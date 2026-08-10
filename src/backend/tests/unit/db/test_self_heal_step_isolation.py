@@ -141,6 +141,47 @@ class TestTheWholePassSurvivesTheFirstStepFailing:
         assert "_ensure_agent_columns" in ran
         assert "_ensure_modelconfig_columns" in ran
 
+    async def test_elevates_to_superuser_and_enables_pgvector_on_postgres(self):
+        """Before the steps, the pass acts as databricks_superuser (so ALTERs on
+        tables owned by another principal succeed) and enables pgvector."""
+        conn = _conn()
+        conn.engine.dialect.name = "postgresql"
+
+        with (
+            patch(
+                "src.services.databricks.lakebase.superuser.enter_superuser_async",
+                new=AsyncMock(return_value=True),
+            ) as enter,
+            patch(
+                "src.services.databricks.lakebase.superuser.enable_pgvector_async",
+                new=AsyncMock(return_value=True),
+            ) as pgvector,
+        ):
+            await run_schema_self_heal(conn)
+
+        enter.assert_awaited_once()
+        pgvector.assert_awaited_once()
+
+    async def test_does_not_set_role_on_sqlite(self):
+        """SET ROLE / CREATE EXTENSION are PostgreSQL-only; SQLite must skip them."""
+        conn = _conn()
+        conn.engine.dialect.name = "sqlite"
+
+        with (
+            patch(
+                "src.services.databricks.lakebase.superuser.enter_superuser_async",
+                new=AsyncMock(return_value=True),
+            ) as enter,
+            patch(
+                "src.services.databricks.lakebase.superuser.enable_pgvector_async",
+                new=AsyncMock(return_value=True),
+            ) as pgvector,
+        ):
+            await run_schema_self_heal(conn)
+
+        enter.assert_not_awaited()
+        pgvector.assert_not_awaited()
+
     async def test_every_step_runs_even_if_all_of_them_fail(self):
         """A totally unhealable database still attempts each step exactly once."""
         conn = _conn()

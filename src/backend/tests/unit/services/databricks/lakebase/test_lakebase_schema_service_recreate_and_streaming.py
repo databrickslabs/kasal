@@ -317,9 +317,19 @@ class TestCreateTablesAsyncDetailed:
 
         # vector_column_tables() reads Base.metadata, which is patched here, so
         # patch the derived set too — otherwise the table is unrecognised and the
-        # test silently checks the NORMAL path.
+        # test silently checks the NORMAL path. Force pgvector UNAVAILABLE so the
+        # vector-free fallback (the scenario under test) runs — create_tables now
+        # enables the extension and would otherwise build the table in full.
         with (
             patch("src.services.databricks.lakebase.schema.Base") as mock_base,
+            patch(
+                "src.services.databricks.lakebase.superuser.enter_superuser_async",
+                new=AsyncMock(return_value=False),
+            ),
+            patch(
+                "src.services.databricks.lakebase.superuser.enable_pgvector_async",
+                new=AsyncMock(return_value=False),
+            ),
             patch(
                 "src.services.databricks.lakebase.schema.vector_column_tables",
                 return_value={"documentation_embeddings"},

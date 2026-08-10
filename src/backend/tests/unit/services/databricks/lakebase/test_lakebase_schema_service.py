@@ -260,8 +260,19 @@ class TestCreateTablesAsync:
         # The vector-table set and its DDL are DERIVED from Base.metadata now, so
         # patching Base alone would make the table unrecognised. Patch both, which
         # is also what keeps this test about routing rather than about SQL text.
+        # Force pgvector UNAVAILABLE so the vector-free fallback is exercised (the
+        # scenario this test is about) — otherwise create_tables now enables the
+        # extension and creates the table in full.
         with (
             patch("src.services.databricks.lakebase.schema.Base") as mock_base,
+            patch(
+                "src.services.databricks.lakebase.superuser.enter_superuser_async",
+                new=AsyncMock(return_value=False),
+            ),
+            patch(
+                "src.services.databricks.lakebase.superuser.enable_pgvector_async",
+                new=AsyncMock(return_value=False),
+            ),
             patch(
                 "src.services.databricks.lakebase.schema.vector_column_tables",
                 return_value={"documentation_embeddings"},

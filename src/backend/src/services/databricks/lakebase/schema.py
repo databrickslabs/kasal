@@ -327,12 +327,28 @@ class LakebaseSchemaService(BaseService):
         """
         try:
             async with engine.begin() as conn:
+                # Act as the shared owner role and enable pgvector BEFORE creating
+                # tables. As databricks_superuser we (a) own what we create, so
+                # every app on this instance can ALTER it later, and (b) can
+                # install pgvector — which lets vector tables be created WITH their
+                # embedding column instead of the vector-free fallback. Both are
+                # best-effort; on a plain Postgres they no-op (see superuser.py).
+                from src.services.databricks.lakebase.superuser import (
+                    enable_pgvector_async,
+                    enter_superuser_async,
+                )
+
+                await enter_superuser_async(conn)
+                pgvector_ready = await enable_pgvector_async(conn)
+
                 # Set kasal as the default schema for this connection
                 await conn.execute(text("SET search_path TO kasal, public"))
                 logger.info("Set kasal schema as default search path")
 
-                # Tables with vector columns that need special handling
-                tables_to_skip = vector_column_tables()
+                # Tables with vector columns that need special handling. When
+                # pgvector is now available we can create them in full; only skip
+                # the vector column when the extension could not be enabled.
+                tables_to_skip = vector_column_tables() if not pgvector_ready else set()
 
                 # Get all table objects from metadata
                 for table in Base.metadata.sorted_tables:
