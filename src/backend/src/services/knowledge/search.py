@@ -64,9 +64,19 @@ class KnowledgeSearch:
         from src.utils.user_context import GroupContext, UserContext
 
         if self.group_id:
-            # The embedding call resolves a PAT through the group, so the
-            # context has to be set before the search, not alongside it.
-            UserContext.set_group_context(GroupContext(group_ids=[self.group_id]))
+            # The embedding call resolves auth through the context, so it has to
+            # be set before the search, not alongside it. This runs in a worker
+            # thread with a fresh event loop (DatabricksKnowledgeSearchTool.
+            # _search_in_thread), where the parent thread's ContextVars did NOT
+            # propagate — so we re-establish BOTH the group and the OBO token
+            # here. Without the token, get_embedding() falls through to PAT/SPN,
+            # which a deployed (OBO-only) App does not have, and the query
+            # embedding fails silently → every search returns nothing.
+            UserContext.set_group_context(
+                GroupContext(group_ids=[self.group_id], access_token=self.user_token)
+            )
+            if self.user_token:
+                UserContext.set_user_token(self.user_token)
 
         async with ToolSessionProvider.knowledge_service(
             group_id=self.group_id or "default",

@@ -392,6 +392,9 @@ class DatabricksKnowledgeService:
             logger.info(f"Extracted {len(text_content)} chars from PDF")
             return {"status": "success", "content": text_content}
 
+        if lower_name.endswith((".xlsx", ".xls")):
+            return self._extract_spreadsheet_text(filename, content)
+
         # For non-PDF files, decode as text
         if isinstance(content, bytes):
             try:
@@ -400,6 +403,91 @@ class DatabricksKnowledgeService:
                 logger.warning(f"Failed to decode {filename} as UTF-8")
                 content = content.decode("utf-8", errors="ignore")
         return {"status": "success", "content": content}
+
+    def _extract_spreadsheet_text(self, filename: str, content: Any) -> Dict[str, Any]:
+        """Extract embeddable text from an Excel workbook (.xlsx / .xls).
+
+        Each sheet is rendered as CSV-like rows (``Sheet: <name>`` header, then
+        one comma-joined line per row) so the existing text chunker treats it
+        exactly like an uploaded CSV. Binary workbooks would otherwise reach the
+        UTF-8 branch and embed as garbage. openpyxl (already a dependency) reads
+        .xlsx; legacy .xls needs xlrd, which we report clearly if absent.
+        """
+        raw = content if isinstance(content, bytes) else str(content).encode("utf-8")
+        lower_name = (filename or "").lower()
+
+        if lower_name.endswith(".xls"):
+            # Legacy binary .xls — openpyxl cannot read it.
+            try:
+                import xlrd  # type: ignore
+            except ImportError:
+                logger.error("xlrd not installed — cannot extract legacy .xls text")
+                return {
+                    "status": "error",
+                    "message": (
+                        f"Reading legacy '.xls' files ('{filename}') requires the "
+                        "'xlrd' package. Install it (pip install xlrd) or re-save "
+                        "the file as .xlsx and re-upload."
+                    ),
+                }
+            try:
+                book = xlrd.open_workbook(file_contents=raw)
+            except Exception as xls_err:  # noqa: BLE001
+                logger.error(f"Error reading .xls '{filename}': {xls_err}")
+                return {
+                    "status": "error",
+                    "message": f"Could not read Excel file '{filename}': {xls_err}",
+                }
+            sections: List[str] = []
+            for sheet in book.sheets():
+                lines = [f"Sheet: {sheet.name}"]
+                for row_idx in range(sheet.nrows):
+                    values = [
+                        "" if cell.value is None else str(cell.value)
+                        for cell in sheet.row(row_idx)
+                    ]
+                    if any(v.strip() for v in values):
+                        lines.append(",".join(values))
+                if len(lines) > 1:
+                    sections.append("\n".join(lines))
+            text_content = "\n\n".join(sections)
+        else:
+            # .xlsx via openpyxl (read_only + values_only keeps large sheets cheap)
+            try:
+                import io as _io
+
+                from openpyxl import load_workbook
+
+                workbook = load_workbook(
+                    _io.BytesIO(raw), read_only=True, data_only=True
+                )
+            except Exception as xlsx_err:  # noqa: BLE001
+                logger.error(f"Error reading .xlsx '{filename}': {xlsx_err}")
+                return {
+                    "status": "error",
+                    "message": f"Could not read Excel file '{filename}': {xlsx_err}",
+                }
+            sections = []
+            for worksheet in workbook.worksheets:
+                lines = [f"Sheet: {worksheet.title}"]
+                for row in worksheet.iter_rows(values_only=True):
+                    values = ["" if v is None else str(v) for v in row]
+                    if any(v.strip() for v in values):
+                        lines.append(",".join(values))
+                if len(lines) > 1:
+                    sections.append("\n".join(lines))
+            workbook.close()
+            text_content = "\n\n".join(sections)
+
+        if not text_content.strip():
+            logger.warning(f"No extractable rows found in spreadsheet: {filename}")
+            return {
+                "status": "error",
+                "message": f"No data rows found in '{filename}'.",
+            }
+
+        logger.info(f"Extracted {len(text_content)} chars from spreadsheet: {filename}")
+        return {"status": "success", "content": text_content}
 
     async def read_knowledge_file(
         self, file_path: str, group_id: str, user_token: Optional[str] = None
@@ -674,6 +762,8 @@ class DatabricksKnowledgeService:
             ".csv": "csv",
             ".doc": "word",
             ".docx": "word",
+            ".xlsx": "excel",
+            ".xls": "excel",
             ".py": "python",
             ".js": "javascript",
             ".ts": "typescript",

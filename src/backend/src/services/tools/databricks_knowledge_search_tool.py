@@ -109,6 +109,34 @@ class DatabricksKnowledgeSearchTool(BaseTool):
 
         self._group_id = group_id
         self._execution_id = execution_id
+        # Capture the OBO token NOW, on the thread that constructs the tool.
+        #
+        # Both entry points set it on UserContext before building tools — chat
+        # (chat/service.py) and the crew subprocess (agent_builder/
+        # process_executor.py) — but the caller does not always thread it into
+        # the constructor. More importantly, the search itself runs in a WORKER
+        # thread with a fresh event loop (see _search_in_thread), and
+        # UserContext is a ContextVar that does NOT propagate across that thread
+        # hop — so reading it at search time is too late. We grab it here, while
+        # the ContextVar is still live, and re-establish it in the worker thread.
+        #
+        # This is the whole reason knowledge search worked locally but not when
+        # deployed: locally a group-scoped PAT in the DB rescued the tokenless
+        # embedding call; a deployed App is OBO-only, so a lost token means the
+        # query embedding fails and EVERY search returns nothing.
+        if not user_token:
+            try:
+                from src.utils.user_context import UserContext
+
+                user_token = UserContext.get_user_token()
+                if not user_token:
+                    group_context = UserContext.get_group_context()
+                    if group_context and getattr(group_context, "access_token", None):
+                        user_token = group_context.access_token
+            except Exception as ctx_err:  # noqa: BLE001
+                logger.warning(
+                    f"Could not recover OBO token from context for knowledge search: {ctx_err}"
+                )
         self._user_token = user_token
         self._user_email = user_email  # Per-user knowledge isolation
         self._configured_file_paths = (

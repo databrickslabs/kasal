@@ -79,7 +79,7 @@ interface KnowledgeFileUploadProps {
   hasTasks?: boolean;
 }
 
-const ACCEPTED = '.pdf,.txt,.json,.csv,.doc,.docx,.md';
+const ACCEPTED = '.pdf,.txt,.json,.csv,.doc,.docx,.xlsx,.xls,.md';
 
 /** Same shape and lifetime rule as Chat mode's composer, keyed per session. */
 const attachmentsKey = (executionId: string) =>

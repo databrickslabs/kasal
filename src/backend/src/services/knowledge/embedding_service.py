@@ -547,6 +547,8 @@ class KnowledgeEmbeddingService:
             "md": "Markdown Document",
             "doc": "Word Document",
             "docx": "Word Document",
+            "xlsx": "Excel Spreadsheet",
+            "xls": "Excel Spreadsheet",
             "csv": "CSV Data",
             "json": "JSON Data",
             "xml": "XML Data",

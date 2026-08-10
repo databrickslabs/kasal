@@ -92,6 +92,44 @@ class TestDatabricksKnowledgeSearchToolInit:
         tool = DatabricksKnowledgeSearchTool()
         assert tool.name == "DatabricksKnowledgeSearchTool"
 
+    def test_explicit_token_wins_over_context(self):
+        """An explicitly passed token is never overridden by context recovery."""
+        from src.utils.user_context import UserContext
+
+        UserContext.set_user_token("ctx-tok")
+        try:
+            tool = DatabricksKnowledgeSearchTool(group_id="g1", user_token="explicit")
+            assert tool._user_token == "explicit"
+        finally:
+            UserContext.clear_context()
+
+    def test_token_recovered_from_user_context(self):
+        """The crux of the deployed-App fix: when the caller does not thread the
+        OBO token in, the tool recovers it from UserContext on THIS (parent)
+        thread — because the search later runs in a worker thread where the
+        ContextVar no longer carries it."""
+        from src.utils.user_context import UserContext
+
+        UserContext.set_user_token("recovered-tok")
+        try:
+            tool = DatabricksKnowledgeSearchTool(group_id="g1")
+            assert tool._user_token == "recovered-tok"
+        finally:
+            UserContext.clear_context()
+
+    def test_token_recovered_from_group_context_access_token(self):
+        """Falls back to the group context's access_token when no user token."""
+        from src.utils.user_context import GroupContext, UserContext
+
+        UserContext.set_group_context(
+            GroupContext(group_ids=["g1"], access_token="grp-tok")
+        )
+        try:
+            tool = DatabricksKnowledgeSearchTool(group_id="g1")
+            assert tool._user_token == "grp-tok"
+        finally:
+            UserContext.clear_context()
+
 
 # ---------------------------------------------------------------------------
 # _resolve_file_paths

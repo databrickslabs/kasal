@@ -129,6 +129,9 @@ describe('KnowledgeFileUpload', () => {
 
     expect(input.multiple).toBe(true);
     expect(input.accept).toContain('.pdf');
+    // Excel workbooks are accepted (parsed to text server-side).
+    expect(input.accept).toContain('.xlsx');
+    expect(input.accept).toContain('.xls');
   });
 
   it('disables upload when disabled prop is true', () => {

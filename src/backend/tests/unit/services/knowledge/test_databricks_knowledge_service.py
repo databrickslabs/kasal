@@ -103,6 +103,92 @@ class TestDatabricksKnowledgeServiceGetFileType:
         result = self.service._get_file_type("file.xyz")
         assert result == "file"
 
+    def test_get_file_type_xlsx(self):
+        """Excel workbooks are recognised (not treated as opaque files)."""
+        assert self.service._get_file_type("report.xlsx") == "excel"
+
+    def test_get_file_type_xls(self):
+        """Legacy Excel files are recognised too."""
+        assert self.service._get_file_type("legacy.xls") == "excel"
+
+
+class TestDatabricksKnowledgeServiceExtractSpreadsheet:
+    """Excel (.xlsx / .xls) upload extraction: binary workbooks must be parsed
+    to CSV-like text, not UTF-8 decoded into garbage."""
+
+    def setup_method(self):
+        self.service = DatabricksKnowledgeService(Mock(), "g1")
+
+    def _xlsx_bytes(self, rows, sheet_title="Sheet1"):
+        import io
+
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = sheet_title
+        for row in rows:
+            ws.append(row)
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
+
+    def test_xlsx_routes_through_spreadsheet_extractor(self):
+        raw = self._xlsx_bytes(
+            [["name", "url"], ["India Energy", "https://example.com/e"]]
+        )
+        result = self.service._extract_text_content("sources.xlsx", raw)
+        assert result["status"] == "success"
+        assert "Sheet: Sheet1" in result["content"]
+        assert "name,url" in result["content"]
+        assert "India Energy,https://example.com/e" in result["content"]
+
+    def test_xlsx_multiple_sheets(self):
+        import io
+
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        wb.active.title = "First"
+        wb.active.append(["a", "b"])
+        second = wb.create_sheet("Second")
+        second.append(["c", "d"])
+        buf = io.BytesIO()
+        wb.save(buf)
+
+        result = self.service._extract_text_content("multi.xlsx", buf.getvalue())
+        assert result["status"] == "success"
+        assert "Sheet: First" in result["content"]
+        assert "Sheet: Second" in result["content"]
+
+    def test_empty_xlsx_reports_error(self):
+        raw = self._xlsx_bytes([])
+        result = self.service._extract_text_content("empty.xlsx", raw)
+        assert result["status"] == "error"
+        assert "No data rows" in result["message"]
+
+    def test_corrupt_xlsx_reports_error_not_raises(self):
+        result = self.service._extract_text_content("bad.xlsx", b"not a workbook")
+        assert result["status"] == "error"
+        assert "Could not read Excel file" in result["message"]
+
+    def test_xls_without_xlrd_reports_clear_error(self):
+        # xlrd is not a dependency; the legacy-.xls path must fail with a clear,
+        # actionable message rather than a decode of binary garbage.
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _no_xlrd(name, *args, **kwargs):
+            if name == "xlrd":
+                raise ImportError("No module named 'xlrd'")
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=_no_xlrd):
+            result = self.service._extract_text_content("legacy.xls", b"\xd0\xcf")
+        assert result["status"] == "error"
+        assert "xlrd" in result["message"]
+
 
 class TestDatabricksKnowledgeServiceUploadKnowledgeFile:
     """Test DatabricksKnowledgeService upload_knowledge_file method"""
