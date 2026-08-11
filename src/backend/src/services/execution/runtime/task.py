@@ -31,6 +31,7 @@ from src.core.events.types import (
 from src.services.tools.base import BaseTool
 
 from .agent import BaseAgent
+from .plan import reset_plan
 from .executor import (
     interpolate_text,
     json_schema_instruction,
@@ -145,6 +146,10 @@ class Task(BaseModel):
         # both ask "did THIS task's tools work?", and a previous task's 503s
         # would otherwise be held against an answer they had nothing to do with.
         reset_tool_ledger()
+        # Same scope, same reason. The plan describes HOW THIS TASK gets done,
+        # so it starts empty; carrying the previous task's items forward would
+        # have the agent reporting work it never did here.
+        reset_plan()
         event_bus.emit(self, TaskStartedEvent(context=context, task=self))
         try:
             return self._execute_core(executing_agent, context, tools)

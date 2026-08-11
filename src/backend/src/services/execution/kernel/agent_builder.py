@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 from src.core.llm.output_cap import output_cap
 from src.core.logger import LoggerManager
 from src.services.execution.kernel.agent_security import inject_security_preamble
+from src.services.execution.kernel.agent_plan import add_plan_tool
 from src.services.execution.kernel.agent_skills import inject_skills
 from src.services.execution.runtime import Agent
 
@@ -460,6 +461,10 @@ async def build_agent(
         f"[skills] agent '{label}': requested={spec.get('skills') or []} "
         f"attached={attached} tools={[getattr(t, 'name', '?') for t in agent_kwargs.get('tools') or []]}"
     )
+
+    # The agent's own plan for whatever task it is given. Engine machinery, so
+    # it is attached here rather than selected — see kernel/agent_plan.py.
+    add_plan_tool(agent_kwargs, label=label)
 
     if extra_kwargs:
         agent_kwargs.update(extra_kwargs)

@@ -31,6 +31,7 @@ import SaveIcon from '@mui/icons-material/Save';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import StorageIcon from '@mui/icons-material/Storage';
+import TracePlanView, { extractPlanItems } from './TracePlanView';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import PersonIcon from '@mui/icons-material/Person';
 import BuildIcon from '@mui/icons-material/Build';
@@ -964,6 +965,14 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
             </DialogTitle>
             <DialogContent dividers>
               <Box sx={{ position: 'relative' }}>
+                {/* The agent's own plan for the task, when this event carries
+                    one — either the engine's plan_updated event or a `todo`
+                    tool call. Raw JSON cannot answer "how far along is it". */}
+                {(() => {
+                  const planItems = extractPlanItems(selectedEvent.output);
+                  return planItems ? <TracePlanView items={planItems} /> : null;
+                })()}
+
                 {/* Special formatting for memory operations */}
                 {selectedEvent.type === 'memory_operation' || selectedEvent.type === 'memory_write' || selectedEvent.type === 'memory_retrieval' || selectedEvent.type.includes('memory') ? (
                   <Box sx={{ mb: 2 }}>

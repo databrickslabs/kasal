@@ -309,7 +309,10 @@ class TestBuildAgent:
         MockLM.configure_kasal_llm.assert_awaited_once_with("m", "g1", 0.5)
         kwargs = MockAgent.call_args[1]
         assert kwargs["llm"] == "LLM-OBJ"
-        assert kwargs["tools"] == ["t"]
+        # The engine appends its own always-available plan tool; the SELECTED
+        # tools are what this assertion is about.
+        selected = [t for t in kwargs["tools"] if getattr(t, "name", "") != "todo"]
+        assert selected == ["t"]
         assert kwargs["config"] == {"x": 1}  # extra_kwargs merged before construction
         assert "SECURITY INSTRUCTION" in kwargs["backstory"]  # preamble injected
         assert agent._kasal_memory_disabled is True  # custom attr set

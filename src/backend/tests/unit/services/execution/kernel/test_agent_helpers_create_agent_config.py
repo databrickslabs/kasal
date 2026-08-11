@@ -644,13 +644,11 @@ class TestToolResolution:
                 tool_factory=mock_tool_factory,
             )
 
-        # No tools from factory since it returned None
-        factory_tools = [
-            t
-            for t in captured["tools"]
-            if not isinstance(t, MagicMock) or t.name == "SomeTool"
-        ]
-        assert len(captured["tools"]) == 0
+        # No tools from the FACTORY, since it returned None. The engine still
+        # equips its own machinery (the plan tool), which is not a resolved
+        # tool and must not be counted as one.
+        resolved = [t for t in captured["tools"] if getattr(t, "name", "") != "todo"]
+        assert resolved == []
 
 
 # ============================================================================

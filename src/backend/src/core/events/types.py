@@ -178,6 +178,28 @@ class CheckpointUnitSavedEvent(BaseEvent):
     type: Literal["checkpoint_unit_saved"] = "checkpoint_unit_saved"
 
 
+class PlanUpdatedEvent(BaseEvent):
+    """The agent rewrote the plan for the task it is currently executing.
+
+    This is the INNER plan — how this task gets done — not the crew's task
+    graph, which is fixed before the run. Emitted on every write so the trace
+    can show progress ("2 of 5, stuck on the metric view") instead of leaving it
+    to be inferred from a wall of tool_usage rows.
+
+    Carries the counts alongside the items because the common consumer wants
+    "how far along" and should not have to re-tally a list on every event.
+    """
+
+    items: list[dict[str, Any]] = Field(default_factory=list)
+    rendered: str = ""
+    total: int = 0
+    pending: int = 0
+    in_progress: int = 0
+    completed: int = 0
+    cancelled: int = 0
+    type: Literal["plan_updated"] = "plan_updated"
+
+
 class FlowFinishedEvent(FlowBaseEvent):
     """Emitted once when a Flow's kickoff finishes (success or failure).
 

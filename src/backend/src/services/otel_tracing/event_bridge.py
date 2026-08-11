@@ -55,6 +55,10 @@ _EVENT_SPAN_MAP = {
         "kasal.flow.checkpoint_saved",
         "flow_checkpoint_saved",
     ),
+    # The agent's INNER plan for the task it is executing — how this task gets
+    # done, as opposed to the task graph, which is fixed before the run. On the
+    # trace so progress is legible while a long task is still running.
+    "PlanUpdatedEvent": ("kasal.task.plan_updated", "plan_updated"),
     # One completed UNIT written to the run's checkpoint — a task for a crew, a
     # crew for a flow. Emitted from the shared recorder, so a crew run finally
     # shows its checkpoint writes; previously only the flow path showed any.
@@ -352,6 +356,7 @@ _EVENT_CLASSES = [
     ("src.core.events", "CrewCheckpointRestoredEvent"),
     ("src.core.events", "FlowCheckpointSavedEvent"),
     ("src.core.events", "CheckpointUnitSavedEvent"),
+    ("src.core.events", "PlanUpdatedEvent"),
     # Agent execution
     ("src.core.events", "AgentExecutionStartedEvent"),
     ("src.core.events", "AgentExecutionCompletedEvent"),
@@ -984,6 +989,37 @@ class OTelEventBridge:
                     span.set_attribute(
                         "kasal.extra.frontend_task_id", str(kasal_task_id)
                     )
+
+            # ── The agent's plan for this task ──
+            # Written explicitly because this method carries a FIXED set of
+            # fields rather than copying the event: without this the
+            # plan_updated span reached the trace with only the generic
+            # agent/task identity and none of the plan, which reads to a user
+            # as "the plan feature does nothing".
+            if getattr(event, "type", None) == "plan_updated":
+                span.set_attribute(
+                    "kasal.extra.plan_rendered",
+                    _safe_str(getattr(event, "rendered", ""), 4000),
+                )
+                for field in (
+                    "total",
+                    "pending",
+                    "in_progress",
+                    "completed",
+                    "cancelled",
+                ):
+                    span.set_attribute(
+                        f"kasal.extra.plan_{field}", int(getattr(event, field, 0) or 0)
+                    )
+                try:
+                    import json as _json
+
+                    span.set_attribute(
+                        "kasal.extra.plan_items",
+                        _safe_str(_json.dumps(getattr(event, "items", []) or []), 8000),
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
 
             # ── Agent identification (BaseEvent fields) ──
             agent_role = getattr(event, "agent_role", None)

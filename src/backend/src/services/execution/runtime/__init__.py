@@ -17,6 +17,15 @@ from .executor import (
 from .guardrail import (
     LLMGuardrail,
 )
+from .plan import (
+    PlanItem,
+    plan,
+    plan_scope,
+    plan_summary,
+    reset_plan,
+    unfinished_plan_items,
+    write_plan,
+)
 from .task import (
     NOT_SPECIFIED,
     Task,
@@ -42,10 +51,17 @@ __all__ = [
     "OutputFormat",
     "PlanningConfig",
     "Process",
+    "PlanItem",
     "Task",
     "TaskOutput",
     "ToolExecutionBlockedError",
     "UsageMetrics",
+    "plan",
+    "plan_scope",
+    "plan_summary",
     "register_tool_hooks",
+    "reset_plan",
+    "unfinished_plan_items",
     "unregister_tool_hooks",
+    "write_plan",
 ]

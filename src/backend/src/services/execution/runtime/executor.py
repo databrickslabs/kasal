@@ -500,6 +500,7 @@ class DelegateWorkTool(BaseTool):
     task_tools: list[Any] = Field(default_factory=list, exclude=True)
 
     def _run(self, task: str, context: str, coworker: str) -> str:
+        from .plan import plan_scope
         from .task import Task
 
         agent = _find_coworker(self.agents, coworker)
@@ -510,7 +511,13 @@ class DelegateWorkTool(BaseTool):
             agent=agent,
             tools=tools,
         )
-        return delegated.execute_sync(agent=agent, context=context, tools=tools).raw
+        # The coworker's task runs on THIS thread and context, so its
+        # ``reset_plan()`` would otherwise wipe the manager's plan and hand the
+        # manager the coworker's leftovers when control returns.
+        with plan_scope():
+            return delegated.execute_sync(
+                agent=agent, context=context, tools=tools
+            ).raw
 
 
 class AskQuestionToolSchema(BaseModel):
@@ -529,6 +536,7 @@ class AskQuestionTool(BaseTool):
     task_tools: list[Any] = Field(default_factory=list, exclude=True)
 
     def _run(self, question: str, context: str, coworker: str) -> str:
+        from .plan import plan_scope
         from .task import Task
 
         agent = _find_coworker(self.agents, coworker)
@@ -539,7 +547,12 @@ class AskQuestionTool(BaseTool):
             agent=agent,
             tools=tools,
         )
-        return question_task.execute_sync(agent=agent, context=context, tools=tools).raw
+        # Scoped for the same reason as DelegateWorkTool: the answering agent's
+        # task must not overwrite the asker's plan.
+        with plan_scope():
+            return question_task.execute_sync(
+                agent=agent, context=context, tools=tools
+            ).raw
 
 
 def delegation_tools(
