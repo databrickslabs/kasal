@@ -86,6 +86,44 @@ describe('extractPlanItems', () => {
       extractPlanItems({ extra_data: { tool_args: "{'todos': [ this is not parseable" } }),
     ).toBeNull();
   });
+
+  // Python quotes each string independently: single quotes normally, double
+  // quotes the moment the content holds an apostrophe. A regex matching '...'
+  // read that apostrophe as a delimiter and produced unparseable JSON, so a
+  // plan rendered as a checklist or as raw JSON depending on nothing more than
+  // whether the model wrote a possessive.
+  test('an apostrophe in the content still parses', () => {
+    const items = extractPlanItems({
+      extra_data: {
+        tool_args:
+          "{'todos': [{'id': '1', 'content': 'Research the market', 'status': 'completed'}, " +
+          '{\'id\': \'2\', \'content\': "Research Databricks\' role in banking", \'status\': \'pending\'}]}',
+      },
+    });
+    expect(items).toHaveLength(2);
+    expect(items?.[1].content).toBe("Research Databricks' role in banking");
+  });
+
+  test('a double quote inside a single-quoted string survives', () => {
+    const items = extractPlanItems({
+      extra_data: {
+        tool_args: "{'todos': [{'id': '1', 'content': 'He said \"go\" then left', 'status': 'pending'}]}",
+      },
+    });
+    expect(items?.[0].content).toBe('He said "go" then left');
+  });
+
+  test('a short label is kept when the model writes one', () => {
+    const items = extractPlanItems({
+      extra_data: {
+        tool_args:
+          "{'todos': [{'id': '1', 'content': 'Research business drivers and market need', " +
+          "'status': 'in_progress', 'label': 'Research why agentic banking'}]}",
+      },
+    });
+    expect(items?.[0].label).toBe('Research why agentic banking');
+    expect(items?.[0].content).toBe('Research business drivers and market need');
+  });
 });
 
 describe('TracePlanView', () => {
@@ -117,5 +155,27 @@ describe('TracePlanView', () => {
   test('a fully completed plan reads as done', () => {
     show([{ id: '1', content: 'only step', status: 'completed' }]);
     expect(screen.getByText('1/1 done')).toBeInTheDocument();
+  });
+
+  test('a short label becomes the headline, the sentence the detail', () => {
+    show([
+      {
+        id: '1',
+        content: 'Research business drivers and market need for agentic banking',
+        status: 'in_progress',
+        label: 'Research why agentic banking',
+      },
+    ]);
+    expect(screen.getByText('Research why agentic banking')).toBeInTheDocument();
+    expect(
+      screen.getByText('Research business drivers and market need for agentic banking'),
+    ).toBeInTheDocument();
+    // The label is what "Currently:" names — the sentence is too long for it.
+    expect(screen.getByText(/Currently: Research why agentic banking/)).toBeInTheDocument();
+  });
+
+  test('an item without a label still renders its content once', () => {
+    show([{ id: '1', content: 'Plain step', status: 'pending' }]);
+    expect(screen.getAllByText('Plain step')).toHaveLength(1);
   });
 });

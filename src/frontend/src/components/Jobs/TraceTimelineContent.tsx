@@ -151,6 +151,10 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
   truncateTaskName,
 }) => {
   const [runConfigOpen, setRunConfigOpen] = useState(false);
+  // When a plan renders as a checklist the JSON underneath is the same content
+  // twice, and the checklist is the answer to the question being asked. Kept,
+  // but folded away — it is still the debug payload when something looks wrong.
+  const [showRawPlanJson, setShowRawPlanJson] = useState(false);
 
   // Use runConfig from prop or from processedTraces
   const runConfig = runConfigProp ?? processedTraces?.runConfig;
@@ -944,6 +948,10 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
         onClose={() => setSelectedEvent(null)}
         maxWidth="md"
         fullWidth
+        // Remount per event: without this the raw-JSON toggle stays open from
+        // whichever event was inspected last, so the next plan opens expanded.
+        key={selectedEvent ? `${selectedEvent.type}-${selectedEvent.traceId ?? selectedEvent.description}` : 'none'}
+        TransitionProps={{ onExited: () => setShowRawPlanJson(false) }}
       >
         {selectedEvent && (
           <>
@@ -1153,16 +1161,40 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
 
                 {isLlmEvent(selectedEvent.type) ? (
                   <LlmEventDetails event={selectedEvent} />
-                ) : (
-                  <PaginatedOutput
-                    content={selectedEvent.output}
-                    pageSize={10000}
-                    enableMarkdown={true}
-                    showCopyButton={true}
-                    maxHeight="55vh"
-                    eventType={selectedEvent.type}
-                  />
-                )}
+                ) : (() => {
+                  // A plan already rendered as a checklist above, so the JSON
+                  // is the same content a second time — and it is the taller
+                  // half, which pushes the readable part off the screen. Folded
+                  // behind a toggle rather than dropped: it is still the payload
+                  // you want the moment the checklist looks wrong.
+                  const hasPlanView = extractPlanItems(selectedEvent.output) !== null;
+                  const output = (
+                    <PaginatedOutput
+                      content={selectedEvent.output}
+                      pageSize={10000}
+                      enableMarkdown={true}
+                      showCopyButton={true}
+                      maxHeight="55vh"
+                      eventType={selectedEvent.type}
+                    />
+                  );
+                  if (!hasPlanView) return output;
+                  return (
+                    <Box>
+                      <Button
+                        size="small"
+                        onClick={() => setShowRawPlanJson((open) => !open)}
+                        startIcon={showRawPlanJson ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                        sx={{ textTransform: 'none' }}
+                      >
+                        {showRawPlanJson ? 'Hide raw event data' : 'Show raw event data'}
+                      </Button>
+                      <Collapse in={showRawPlanJson} unmountOnExit>
+                        <Box sx={{ mt: 1 }}>{output}</Box>
+                      </Collapse>
+                    </Box>
+                  );
+                })()}
               </Box>
             </DialogContent>
             <DialogActions>

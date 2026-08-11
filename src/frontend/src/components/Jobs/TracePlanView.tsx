@@ -9,6 +9,15 @@ export interface PlanItem {
   id: string;
   content: string;
   status: 'pending' | 'in_progress' | 'completed' | 'cancelled' | string;
+  /**
+   * A short title for the step, when the model wrote one.
+   *
+   * Not part of the tool's schema — models emit it unprompted alongside
+   * `content`, and it is exactly what a checklist wants: "Research Databricks
+   * in agentic banking" instead of the full sentence. Kept optional and
+   * display-only; `content` remains the source of truth.
+   */
+  label?: string;
 }
 
 /**
@@ -51,14 +60,57 @@ export function extractPlanItems(output: unknown): PlanItem[] | null {
   return null;
 }
 
-/** Python repr → JSON. Display-only, and deliberately conservative. */
+/**
+ * Python repr → JSON. Display-only, and deliberately conservative.
+ *
+ * Scanned character by character rather than regex-replaced, because a regex
+ * cannot know which quote opened the string it is inside. Python picks the
+ * delimiter per string: `'Research the market'`, but `"Research Databricks'
+ * role"` the moment the content holds an apostrophe. A pattern matching
+ * `'...'` treats that apostrophe as an opening delimiter, swallows the rest of
+ * the line and produces JSON that will not parse — so one plan rendered as a
+ * checklist and the next fell back to raw JSON, decided by nothing more than
+ * whether the model happened to write a possessive.
+ */
 function pythonReprToJson(input: string): string {
-  return input
+  let out = '';
+  let quote: "'" | '"' | null = null;
+
+  for (let i = 0; i < input.length; i += 1) {
+    const char = input[i];
+
+    if (quote) {
+      if (char === '\\') {
+        // Preserve the escape pair as-is; the next char cannot close anything.
+        out += char + (input[i + 1] ?? '');
+        i += 1;
+      } else if (char === quote) {
+        out += '"';
+        quote = null;
+      } else if (char === '"') {
+        // A double quote inside a single-quoted string has to be escaped once
+        // the delimiter becomes a double quote.
+        out += '\\"';
+      } else {
+        out += char;
+      }
+      continue;
+    }
+
+    if (char === "'" || char === '"') {
+      quote = char;
+      out += '"';
+      continue;
+    }
+
+    out += char;
+  }
+
+  // Bare Python literals, only ever outside a string now.
+  return out
     .replace(/\bNone\b/g, 'null')
     .replace(/\bTrue\b/g, 'true')
-    .replace(/\bFalse\b/g, 'false')
-    // Single-quoted strings → double-quoted, preserving any embedded doubles.
-    .replace(/'((?:[^'\\]|\\.)*)'/g, (_m, body: string) => `"${body.replace(/"/g, '\\"')}"`);
+    .replace(/\bFalse\b/g, 'false');
 }
 
 function tryParse(text: string): PlanItem[] | null {
@@ -84,11 +136,15 @@ function tryParseObject(text: string): Record<string, unknown> | null {
 function normalise(rows: unknown[]): PlanItem[] | null {
   const items = rows
     .filter((row): row is Record<string, unknown> => typeof row === 'object' && row !== null)
-    .map((row) => ({
-      id: String(row.id ?? ''),
-      content: String(row.content ?? ''),
-      status: String(row.status ?? 'pending'),
-    }))
+    .map((row) => {
+      const label = row.label == null ? '' : String(row.label).trim();
+      return {
+        id: String(row.id ?? ''),
+        content: String(row.content ?? ''),
+        status: String(row.status ?? 'pending'),
+        ...(label ? { label } : {}),
+      };
+    })
     .filter((item) => item.content);
   return items.length ? items : null;
 }
@@ -147,26 +203,44 @@ const TracePlanView: React.FC<{ items: PlanItem[] }> = ({ items }) => {
 
       {active && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
-          Currently: {active.content}
+          Currently: {active.label || active.content}
         </Typography>
       )}
 
       <Stack spacing={0.75}>
         {items.map((item) => {
           const meta = STATUS_META[item.status] ?? STATUS_META.pending;
+          // When the model wrote a short label, that is the headline and the
+          // full sentence goes underneath — a checklist is scanned, not read.
+          const headline = item.label || item.content;
+          const detail = item.label && item.label !== item.content ? item.content : '';
           return (
             <Stack key={`${item.id}-${item.content}`} direction="row" spacing={1} alignItems="flex-start">
               <Box sx={{ mt: '2px', flexShrink: 0 }}>{meta.icon}</Box>
-              <Typography
-                variant="body2"
-                sx={{
-                  color: meta.color,
-                  textDecoration: item.status === 'cancelled' ? 'line-through' : 'none',
-                  fontWeight: item.status === 'in_progress' ? 600 : 400,
-                }}
-              >
-                {item.content}
-              </Typography>
+              <Box sx={{ minWidth: 0 }}>
+                <Typography
+                  variant="body2"
+                  sx={{
+                    color: meta.color,
+                    textDecoration: item.status === 'cancelled' ? 'line-through' : 'none',
+                    fontWeight: item.status === 'in_progress' ? 600 : 400,
+                  }}
+                >
+                  {headline}
+                </Typography>
+                {detail && (
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{
+                      display: 'block',
+                      textDecoration: item.status === 'cancelled' ? 'line-through' : 'none',
+                    }}
+                  >
+                    {detail}
+                  </Typography>
+                )}
+              </Box>
             </Stack>
           );
         })}
