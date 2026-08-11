@@ -303,6 +303,62 @@ describe('processTraceEvent', () => {
 });
 
 // ============================================================================
+// plan_updated
+// ============================================================================
+
+describe('plan_updated', () => {
+  const planTrace = (extra: Record<string, unknown>): Trace =>
+    makeTrace({ event_type: 'plan_updated', output: { extra_data: extra } });
+
+  it('reports progress instead of the generic Title-Case label', () => {
+    const event = processTraceEvent(
+      planTrace({ plan_total: 5, plan_completed: 2 }),
+    );
+
+    expect(event?.type).toBe('plan_updated');
+    expect(event?.description).toBe('Plan — 2/5 done');
+  });
+
+  it('names the step running now', () => {
+    const event = processTraceEvent(
+      planTrace({
+        plan_total: 3,
+        plan_completed: 1,
+        plan_items: JSON.stringify([
+          { id: '1', content: 'Read the schema', status: 'completed' },
+          { id: '2', content: 'Scrape the articles', status: 'in_progress' },
+          { id: '3', content: 'Write the rows', status: 'pending' },
+        ]),
+      }),
+    );
+
+    expect(event?.description).toBe('Plan — 1/3 done · now: Scrape the articles');
+  });
+
+  it('derives the counts when only the items arrived', () => {
+    const event = processTraceEvent(
+      planTrace({
+        plan_items: [
+          { id: '1', content: 'a', status: 'completed' },
+          { id: '2', content: 'b', status: 'pending' },
+        ],
+      }),
+    );
+
+    expect(event?.description).toBe('Plan — 1/2 done');
+  });
+
+  it('falls back to the plain label when the event carries no plan', () => {
+    expect(processTraceEvent(planTrace({}))?.description).toBe('Plan Updated');
+  });
+
+  it('opens the checklist — the row is clickable and has its own icon', () => {
+    expect(isEventClickable('plan_updated', true)).toBe(true);
+    expect(getEventIcon('plan_updated').Component).not.toBeNull();
+  });
+});
+
+// ============================================================================
 // getEventIcon
 // ============================================================================
 

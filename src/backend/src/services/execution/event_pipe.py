@@ -209,6 +209,7 @@ class EventPipeWriter:
         """
         from src.services.otel_tracing.event_bridge import (
             _MEMORY_WRAPPER_TOOLS,
+            _PLAN_TOOL,
             _get_agent_name,
             _get_output,
             _get_task_name,
@@ -222,6 +223,11 @@ class EventPipeWriter:
         # The bridge absorbs memory-wrapper tool spans (the Memory* events
         # cover them); no DB row exists, so a live pill would be an orphan.
         if tool_name in _MEMORY_WRAPPER_TOOLS and event_type.startswith("tool"):
+            return None
+        # Same for the plan tool: the row is ``plan_updated``, which this pipe
+        # does not carry, so it reaches the live view through the DB poller
+        # (it is absent from PIPED_TRACE_EVENT_TYPES, so nothing suppresses it).
+        if tool_name == _PLAN_TOOL and event_type == "tool_usage":
             return None
         output = _safe_str(_get_output(event), 500)
 

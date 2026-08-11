@@ -190,6 +190,18 @@ _MLFLOW_TOOL_END_SPANS = {"CrewAI.tool.complete", "CrewAI.tool.error"}
 # logical memory operation, not three.
 _MEMORY_WRAPPER_TOOLS = {"search_memory", "save_to_memory"}
 
+# The plan tool, absorbed for the same reason. Every write it makes emits
+# ``PlanUpdatedEvent``, which carries the plan as structured JSON plus its
+# counts — so one plan change was reaching the trace as THREE rows: the tool
+# start, the plan, and the tool finish. Both tool rows are labelled "todo" and
+# neither says anything the plan row does not (the tool's arguments ARE the
+# plan, as a Python repr; its return value is an acknowledgement string).
+#
+# Absorbed for ``tool_usage`` only. A FAILING todo call still gets its
+# ``tool_error`` row, because that is the one case ``PlanUpdatedEvent`` never
+# fires for — absorbing it would make the failure invisible.
+_PLAN_TOOL = "todo"
+
 
 #: Ceiling for the one untruncated task description recorded per task span.
 #: Generous enough for real task prompts, bounded so a runaway description
@@ -703,6 +715,11 @@ class OTelEventBridge:
                     tool_args = getattr(event, "tool_args", None)
                     if tool_args:
                         self._pending_save_content = _safe_str(tool_args, 4000)
+                return
+
+            # Same absorption for the plan tool — ``PlanUpdatedEvent`` is the
+            # row (see _PLAN_TOOL). Errors keep theirs.
+            if tool_name == _PLAN_TOOL and event_type == "tool_usage":
                 return
 
             # Capture crew_name from crew lifecycle events so it can be

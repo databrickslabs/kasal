@@ -18,10 +18,12 @@ import StorageIcon from '@mui/icons-material/Storage';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import CompressIcon from '@mui/icons-material/Compress';
 import DashboardIcon from '@mui/icons-material/Dashboard';
+import ChecklistIcon from '@mui/icons-material/Checklist';
 
 // Import Trace type from the store
 import { Trace } from '../../store/runStatus';
 import { isRedactedReasoning } from '../Common/ReasoningPanel';
+import { extractPlanItems } from './TracePlanView';
 
 // ============================================================================
 // Shared Extraction Helpers
@@ -666,6 +668,34 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
     };
   },
 
+  // The agent's plan for the task. The engine emits one of these beside every
+  // `todo` tool call, so the row has to earn its place: "Plan Updated" (the
+  // generic Title-Case fallback) says nothing the `todo` row above it does not,
+  // which is why it read as noise. Progress is the one thing only this row
+  // knows — how far along the plan is, and which step is running now.
+  plan_updated: (trace: Trace): ProcessedEvent => {
+    const extra = extractExtraData(trace);
+    const num = (name: string): number | undefined =>
+      typeof extra?.[name] === 'number' ? (extra[name] as number) : undefined;
+
+    // Counts come off the event when the bridge stamped them; deriving from the
+    // items keeps the row honest for a plan that arrived as JSON only.
+    const items = extractPlanItems(trace.output) ?? [];
+    const total = num('plan_total') ?? items.length;
+    const completed =
+      num('plan_completed') ?? items.filter((i) => i.status === 'completed').length;
+
+    if (!total) return { type: 'plan_updated', description: 'Plan Updated' };
+
+    let description = `Plan — ${completed}/${total} done`;
+    const current = items.find((i) => i.status === 'in_progress');
+    if (current) {
+      const step = current.label || current.content;
+      description += ` · now: ${step.length > 60 ? `${step.slice(0, 59)}…` : step}`;
+    }
+    return { type: 'plan_updated', description };
+  },
+
   // Crew Execution (instrumentor root span) — skip, bridge handles crew_started/completed
   crew_execution: (): ProcessedEvent | null => {
     return null;
@@ -784,6 +814,9 @@ export const ICON_CONFIG: Record<string, IconConfig> = {
   // fault — muted rather than warning-coloured.
   a2ui_surface: { Component: DashboardIcon, color: 'success' },
   a2ui_skipped: { Component: DashboardIcon, color: 'action' },
+  // Progress, not an outcome — muted, so a plan row never reads as a step that
+  // succeeded or failed.
+  plan_updated: { Component: ChecklistIcon, color: 'action' },
 };
 
 /**
@@ -828,6 +861,11 @@ export const CLICKABLE_TYPES = new Set([
   'context_compaction',
   'a2ui_surface',
   'a2ui_skipped',
+  // Opens the checklist (TracePlanView). It was NOT clickable before, so the
+  // full plan was reachable only through the `todo` tool row's Python-repr
+  // arguments — the one place the plan is already clean JSON was the one place
+  // you could not open.
+  'plan_updated',
 ]);
 
 /**
