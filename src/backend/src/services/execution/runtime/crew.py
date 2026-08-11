@@ -549,9 +549,14 @@ class Crew(BaseModel):
 
     def _run_hierarchical(self) -> list[TaskOutput]:
         manager = self._manager()
-        tools = delegation_tools(list(self.agents))
         completed: list[tuple[Task, TaskOutput]] = []
         for task in self.tasks:
+            # Rebuild the delegation tools per task so THIS task's tools (regular
+            # and MCP alike) travel to whichever coworker the manager delegates
+            # to. The manager itself only ever gets the delegate/ask tools —
+            # giving it the task tools directly would let it answer without
+            # delegating, defeating the hierarchical process.
+            tools = delegation_tools(list(self.agents), list(task.tools or []))
             context = self._context_for(task, completed, {})
             output = task.execute_sync(manager, context, tools)
             completed.append((task, output))

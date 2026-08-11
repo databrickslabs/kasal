@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
-import { Handle, Position } from 'reactflow';
+import React, { useState, useCallback } from 'react';
+import { Handle, Position, useReactFlow } from 'reactflow';
 import { Box, Typography, Theme } from '@mui/material';
 import SupervisorAccountIcon from '@mui/icons-material/SupervisorAccount';
 import { useUILayoutStore } from '../../store/uiLayout';
+import { useCrewExecutionStore } from '../../store/crewExecution';
+import { useTabDirtyState } from '../../hooks/workflow/useTabDirtyState';
+import LLMSelectionDialog from './LLMSelectionDialog';
 
 interface ManagerNodeData {
   label: string;
@@ -13,14 +16,44 @@ interface ManagerNodeData {
 
 const ManagerNode: React.FC<{ data: ManagerNodeData; id: string }> = ({ data, id }) => {
   const [isSelected, setIsSelected] = useState(false);
-  
+  const [isLLMDialogOpen, setIsLLMDialogOpen] = useState(false);
+
   // Get current layout orientation
   const layoutOrientation = useUILayoutStore(state => state.layoutOrientation);
+  const { setNodes } = useReactFlow();
+  const setManagerLLM = useCrewExecutionStore(state => state.setManagerLLM);
+  const { markCurrentTabDirty } = useTabDirtyState();
 
+  // Open the model picker on a left-click anywhere on the node body, mirroring
+  // the AgentNode. Ignore clicks on the ReactFlow connection handles.
   const handleNodeClick = (event: React.MouseEvent) => {
     event.stopPropagation();
+    // Ignore clicks that bubbled from a Portal (e.g., the LLM dialog backdrop).
+    // React synthetic events bubble through Portals in the component tree, but
+    // the DOM target won't be inside the node element.
+    if (!event.currentTarget.contains(event.target as HTMLElement)) {
+      return;
+    }
     setIsSelected(true);
+    const target = event.target as HTMLElement;
+    if (target.closest('.react-flow__handle')) {
+      return;
+    }
+    setIsLLMDialogOpen(true);
   };
+
+  // Persist the chosen manager model to the node data AND the crew-execution
+  // store, which is what SaveCrew serializes into `manager_llm`.
+  const handleLLMSelect = useCallback((selectedLLM: string) => {
+    setNodes(nodes => nodes.map(node =>
+      node.id === id
+        ? { ...node, data: { ...node.data, llm: selectedLLM } }
+        : node
+    ));
+    setManagerLLM(selectedLLM);
+    markCurrentTabDirty();
+    setIsLLMDialogOpen(false);
+  }, [id, setNodes, setManagerLLM, markCurrentTabDirty]);
 
   const getManagerNodeStyles = () => ({
     width: 160,
@@ -149,9 +182,16 @@ const ManagerNode: React.FC<{ data: ManagerNodeData; id: string }> = ({ data, id
         Manager Agent
       </Typography>
 
-      {/* LLM Display */}
+      {/* LLM Display — click to change the manager's model */}
       {data.llm && (
-        <Box sx={{
+        <Box
+          title="Click to change the manager model"
+          onClick={(event) => {
+            event.stopPropagation();
+            setIsLLMDialogOpen(true);
+          }}
+          sx={{
+          cursor: 'pointer',
           background: (theme: Theme) => `linear-gradient(135deg, ${theme.palette.primary.main}15, ${theme.palette.primary.main}30)`,
           borderRadius: '4px',
           padding: '2px 6px',
@@ -213,6 +253,15 @@ const ManagerNode: React.FC<{ data: ManagerNodeData; id: string }> = ({ data, id
           backgroundColor: (theme: Theme) => theme.palette.success.main,
         }} />
       )}
+
+      {/* Quick LLM Selection Dialog — lets the user pick the manager's model,
+          just like the AgentNode LLM badge. */}
+      <LLMSelectionDialog
+        open={isLLMDialogOpen}
+        onClose={() => setIsLLMDialogOpen(false)}
+        onSelectLLM={handleLLMSelect}
+        currentLLM={data.llm}
+      />
     </Box>
   );
 };

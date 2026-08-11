@@ -461,6 +461,29 @@ def _find_coworker(agents: list[Any], coworker: str) -> Any:
     )
 
 
+def _tools_for_delegate(task_tools: list[Any], agent: Any) -> list[Any]:
+    """Tools a delegated coworker may use: the ORIGINATING task's tools plus the
+    coworker's own, de-duplicated.
+
+    In the hierarchical process the manager holds only the delegate/ask tools and
+    executes each task by delegating it. The task's own tools (regular tools AND
+    MCP tools — both are ``BaseTool`` instances that land in ``task.tools``) are
+    attached to the task, not to any agent, so without this they never reach the
+    coworker and the tool is silently unusable. Merging keeps whatever the
+    coworker was independently given as well.
+    """
+    combined = list(task_tools or [])
+    seen_ids = {id(tool) for tool in combined}
+    seen_names = {getattr(tool, "name", None) for tool in combined}
+    for tool in getattr(agent, "tools", None) or []:
+        if id(tool) in seen_ids or getattr(tool, "name", None) in seen_names:
+            continue
+        combined.append(tool)
+        seen_ids.add(id(tool))
+        seen_names.add(getattr(tool, "name", None))
+    return combined
+
+
 class DelegateWorkToolSchema(BaseModel):
     task: str = Field(description="The task to delegate")
     context: str = Field(description="The context for the task")
@@ -472,17 +495,22 @@ class DelegateWorkTool(BaseTool):
     description: str = "Delegate a specific task to one of your coworkers."
     args_schema: type[BaseModel] = DelegateWorkToolSchema
     agents: list[Any] = Field(default_factory=list, exclude=True)
+    #: Tools of the task the manager is currently executing; handed to whichever
+    #: coworker the manager delegates to (see ``_tools_for_delegate``).
+    task_tools: list[Any] = Field(default_factory=list, exclude=True)
 
     def _run(self, task: str, context: str, coworker: str) -> str:
         from .task import Task
 
         agent = _find_coworker(self.agents, coworker)
+        tools = _tools_for_delegate(self.task_tools, agent)
         delegated = Task(
             description=task,
             expected_output="Your best complete final answer to the task.",
             agent=agent,
+            tools=tools,
         )
-        return delegated.execute_sync(agent=agent, context=context).raw
+        return delegated.execute_sync(agent=agent, context=context, tools=tools).raw
 
 
 class AskQuestionToolSchema(BaseModel):
@@ -496,26 +524,40 @@ class AskQuestionTool(BaseTool):
     description: str = "Ask a specific question to one of your coworkers."
     args_schema: type[BaseModel] = AskQuestionToolSchema
     agents: list[Any] = Field(default_factory=list, exclude=True)
+    #: See ``DelegateWorkTool.task_tools`` — a coworker may need the task's tools
+    #: to answer.
+    task_tools: list[Any] = Field(default_factory=list, exclude=True)
 
     def _run(self, question: str, context: str, coworker: str) -> str:
         from .task import Task
 
         agent = _find_coworker(self.agents, coworker)
+        tools = _tools_for_delegate(self.task_tools, agent)
         question_task = Task(
             description=question,
             expected_output="Your best complete answer to the question.",
             agent=agent,
+            tools=tools,
         )
-        return question_task.execute_sync(agent=agent, context=context).raw
+        return question_task.execute_sync(agent=agent, context=context, tools=tools).raw
 
 
-def delegation_tools(agents: list[Any]) -> list[BaseTool]:
+def delegation_tools(
+    agents: list[Any], task_tools: list[Any] | None = None
+) -> list[BaseTool]:
+    """Build the manager's delegate/ask tools.
+
+    ``task_tools`` are the tools of the task the manager is about to execute; they
+    travel to whichever coworker the manager delegates to so per-task tool
+    selection (including MCP tools) survives the hierarchical hop.
+    """
     roles = ", ".join(a.role for a in agents)
-    delegate = DelegateWorkTool(agents=list(agents))
+    shared_tools = list(task_tools or [])
+    delegate = DelegateWorkTool(agents=list(agents), task_tools=shared_tools)
     delegate.description = (
         "Delegate a specific task to one of the following coworkers: " + roles
     )
-    ask = AskQuestionTool(agents=list(agents))
+    ask = AskQuestionTool(agents=list(agents), task_tools=shared_tools)
     ask.description = (
         "Ask a specific question to one of the following coworkers: " + roles
     )
