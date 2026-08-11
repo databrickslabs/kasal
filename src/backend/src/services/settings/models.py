@@ -492,6 +492,10 @@ class ModelConfigService:
             if provider == "vllm":
                 return config
 
+            # Custom is self-hosted; api_key is baked into llm_manager via env var
+            if provider == "custom":
+                return config
+
             # For non-Databricks providers, get API key
             # SECURITY: group_id is REQUIRED for API key operations (multi-tenant isolation)
             if not self.group_id:

@@ -557,6 +557,16 @@ DEFAULT_MODELS = {
         # higher value 400s on real crew runs.
         "max_output_tokens": 10000,
     },
+    # --- Custom (self-hosted, OpenAI-compatible) ---
+    "KAT-Coder-V2.5-Dev": {
+        # Self-hosted via custom provider — endpoint from KAT_BASE_URL,
+        # key = KAT_API_KEY in the API Keys service.
+        "name": "KAT-Coder-V2.5-Dev",
+        "temperature": 0.6,
+        "provider": "custom",
+        "context_window": 131072,
+        "max_output_tokens": 8192,
+    },
 }
 
 # Alias for backwards compatibility - some modules import MODEL_CONFIGS

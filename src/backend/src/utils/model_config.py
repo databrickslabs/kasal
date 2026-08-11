@@ -285,6 +285,8 @@ def get_max_rpm_for_model(model_key: str) -> int:
         "gemini-3.6-flash": 10,  # Standard rate limit for Gemini Flash
         "gemini-3.5-flash": 10,
         "gemini-3.5-flash-lite": 20,  # Lite tier tolerates more requests
+        # Custom models
+        "KAT-Coder-V2.5-Dev": 10,
     }
 
     # Return the RPM limit if it exists, otherwise return a default
@@ -310,6 +312,8 @@ def get_max_rpm_for_model(model_key: str) -> int:
         return 5
     elif "gemini" in model_key:
         return 10  # Default for Gemini models
+    elif "kat" in model_key:
+        return 10  # Custom KAT models
 
     # Most conservative default for unknown models
     logger.warning(

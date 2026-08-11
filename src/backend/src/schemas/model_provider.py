@@ -20,6 +20,7 @@ class ModelProvider(str, Enum):
     GEMINI = "gemini"
     VLLM = "vllm"
     KIMI = "kimi"
+    CUSTOM = "custom"
 
 
 def _supported_models() -> Dict[ModelProvider, List[str]]:

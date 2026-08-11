@@ -152,6 +152,7 @@ try:
         "gemini": "gemini/",
         "deepseek": "deepseek/",
         "ollama": "ollama/",
+        "custom": "",
     }
 
     registered_count = 0
@@ -993,6 +994,11 @@ class LLMManager:
             # provider unset, which is what every other OpenAI-protocol endpoint
             # here does; the one consumer (instructor._extract_provider) already
             # defaults to "openai" for the protocol.
+            prefixed_model = model_name_value
+        elif provider == ModelProvider.CUSTOM:
+            # Custom self-hosted OpenAI-compatible endpoint.
+            api_base = os.getenv("KAT_BASE_URL", "http://127.0.0.1:8082/v1")
+            api_key = os.getenv("KAT_API_KEY", "local-no-auth")
             prefixed_model = model_name_value
         elif provider == ModelProvider.KIMI:
             # Kimi (Moonshot AI) — OpenAI-compatible endpoint. litellm 1.74.x has no
