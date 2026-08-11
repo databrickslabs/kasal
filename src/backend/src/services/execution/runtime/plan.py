@@ -43,7 +43,6 @@ from pydantic import BaseModel, Field
 
 from src.core.events.bus import event_bus
 from src.core.events.types import PlanUpdatedEvent
-
 from src.services.tools.base import BaseTool
 
 logger = logging.getLogger(__name__)
@@ -238,6 +237,55 @@ def plan_summary() -> str:
         )
         summary += f" — still open: {still_open}"
     return summary
+
+
+def abandoned_plan_reason() -> str | None:
+    """Why this task's answer is suspect, or ``None`` when it is not.
+
+    The plan was write-only until this existed. Every read helper here had
+    exactly two callers — the tests and the ``runtime`` re-export — so an agent
+    could write five items, finish three and stop, and nothing in the engine
+    noticed. That is the same failure the tool ledger's
+    ``wholly_failed_tools()`` was added to catch, and it is caught the same way:
+    the plan the model wrote is a statement of what the task requires, so
+    finishing with items still open is the model's own evidence that it stopped
+    early.
+
+    Deliberately narrow, because a false positive here trains people to ignore
+    the flag:
+
+    - **No plan at all is not a failure.** Short tasks are not required to
+      write one, and treating an empty plan as incomplete would flag most of
+      them.
+    - **Cancelled is not open.** Abandoning an approach on evidence is the
+      adaptive behaviour the tool exists to encourage; penalising it would push
+      the model toward leaving dead items pending instead.
+    - **Nothing completed at all** reads as a plan written and then ignored,
+      which is a different fault from stopping partway, and says so.
+    """
+    rows = plan()
+    if not rows:
+        return None
+    open_items = unfinished_plan_items(rows)
+    if not open_items:
+        return None
+
+    counts = plan_counts(rows)
+    named = "; ".join(f"{item.id} ({item.content[:60]})" for item in open_items[:5])
+    more = len(open_items) - 5
+    if more > 0:
+        named += f"; and {more} more"
+
+    if counts["completed"] == 0:
+        return (
+            f"the agent wrote a {len(rows)}-item plan and completed none of it, "
+            f"so this answer does not reflect the work the task was broken into "
+            f"— still open: {named}"
+        )
+    return (
+        f"the agent's own plan has {len(open_items)} of {len(rows)} items still "
+        f"unfinished, so this answer is partial — still open: {named}"
+    )
 
 
 # ------------------------------------------------------------------ the tool

@@ -11,6 +11,7 @@ import pytest
 from src.services.execution.runtime.plan import (
     MAX_CONTENT_CHARS,
     MAX_ITEMS,
+    abandoned_plan_reason,
     build_plan_tool,
     plan,
     plan_counts,
@@ -290,3 +291,69 @@ class TestThePromptAsksForIt:
         add_plan_tool(kwargs, label="a")
         assert [t.name for t in kwargs["tools"]] == ["todo"]
         assert kwargs["backstory"].count("PLANNING:") == 1
+
+
+class TestTheCompletionCheck:
+    """The wire that stops the plan being write-only.
+
+    Every read helper here used to have exactly two callers — the tests and the
+    package re-export — so an agent could finish a task with half its plan
+    outstanding and nothing in the engine would notice.
+    """
+
+    def test_open_items_are_reported(self):
+        write_plan(
+            _items(
+                ("1", "pull the data", "completed"),
+                ("2", "publish the dashboard", "pending"),
+            )
+        )
+        reason = abandoned_plan_reason()
+        assert reason is not None
+        assert "1 of 2" in reason
+        assert "publish the dashboard" in reason
+
+    def test_a_finished_plan_is_not_flagged(self):
+        write_plan(_items(("1", "a", "completed"), ("2", "b", "completed")))
+        assert abandoned_plan_reason() is None
+
+    def test_no_plan_is_not_a_failure(self):
+        """Short tasks are not required to plan; flagging them would make the
+        warning meaningless."""
+        assert abandoned_plan_reason() is None
+
+    def test_cancelled_alone_does_not_flag(self):
+        """Abandoning an approach on evidence is the adaptive behaviour the tool
+        exists to encourage — penalising it pushes the model toward leaving dead
+        items pending instead."""
+        write_plan(
+            _items(("1", "a", "completed"), ("2", "wrong approach", "cancelled"))
+        )
+        assert abandoned_plan_reason() is None
+
+    def test_in_progress_counts_as_unfinished(self):
+        write_plan(_items(("1", "still going", "in_progress")))
+        assert abandoned_plan_reason() is not None
+
+    def test_a_plan_written_and_ignored_says_so(self):
+        """Distinct from stopping partway: nothing was completed at all."""
+        write_plan(_items(("1", "a", "pending"), ("2", "b", "pending")))
+        reason = abandoned_plan_reason()
+        assert reason is not None
+        assert "completed none of it" in reason
+
+    def test_long_lists_are_truncated_not_dumped(self):
+        """The reason lands in task output; it must not paste forty items."""
+        write_plan(_items(*[(str(n), f"step {n}", "pending") for n in range(1, 13)]))
+        reason = abandoned_plan_reason()
+        assert reason is not None
+        assert "and 7 more" in reason
+
+    def test_a_delegated_scope_does_not_flag_the_managers_plan(self):
+        """plan_scope() gives the coworker its own plan; the manager's open
+        items must not be attributed to the coworker's task."""
+        write_plan(_items(("1", "manager work", "pending")))
+        with plan_scope():
+            write_plan(_items(("a", "coworker work", "completed")))
+            assert abandoned_plan_reason() is None
+        assert abandoned_plan_reason() is not None

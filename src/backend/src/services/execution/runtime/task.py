@@ -31,7 +31,6 @@ from src.core.events.types import (
 from src.services.tools.base import BaseTool
 
 from .agent import BaseAgent
-from .plan import reset_plan
 from .executor import (
     interpolate_text,
     json_schema_instruction,
@@ -40,6 +39,7 @@ from .executor import (
     tool_failure_summary,
     wholly_failed_tools,
 )
+from .plan import abandoned_plan_reason, plan_summary, reset_plan
 from .types import OutputFormat, TaskOutput
 
 logger = logging.getLogger(__name__)
@@ -197,6 +197,7 @@ class Task(BaseModel):
             output, executing_agent, context, tools, structured_model
         )
         output = self._flag_unavailable_sources(output)
+        output = self._flag_unfinished_plan(output)
         self.output = output
         self.end_time = datetime.datetime.now(datetime.timezone.utc)
 
@@ -374,6 +375,45 @@ class Task(BaseModel):
         return output.model_copy(
             update={
                 "raw": f"{output.raw}\n\n> ⚠️ Unverified: {cause}",
+                "degraded": True,
+                "degradation_reason": cause,
+            }
+        )
+
+    def _flag_unfinished_plan(self, output: TaskOutput) -> TaskOutput:
+        """Mark an output the agent's own plan says is incomplete.
+
+        The sibling of :meth:`_flag_unavailable_sources`, for the other way a
+        task produces a confident answer that should not be trusted: the tools
+        all worked, and the agent simply stopped before finishing what it said
+        the task required.
+
+        The plan is unusually good evidence for this because the model wrote it
+        itself — this is not the engine second-guessing the decomposition, it is
+        holding the agent to its own. Left unchecked the plan was write-only,
+        which made it useless for the one job it was added to do: a long run
+        that quietly did three of five things looked exactly like one that did
+        all five.
+
+        FLAGGED, not raised, for the same reason as unavailable sources: the
+        engine cannot know an open item was essential. An agent may plan five
+        steps, find the answer in two and never tidy up. Marking it degraded
+        tells the next task, the UI and recipe mining what happened and lets
+        each decide.
+        """
+        if output.degraded:
+            return output  # an earlier check already said so, with more detail
+        cause = abandoned_plan_reason()
+        if not cause:
+            return output
+        logger.warning(
+            "task %r completed with an unfinished plan: %s",
+            self.name or self.description[:40],
+            plan_summary(),
+        )
+        return output.model_copy(
+            update={
+                "raw": f"{output.raw}\n\n> ⚠️ Incomplete: {cause}",
                 "degraded": True,
                 "degradation_reason": cause,
             }

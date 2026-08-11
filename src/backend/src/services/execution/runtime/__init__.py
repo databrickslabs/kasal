@@ -19,6 +19,7 @@ from .guardrail import (
 )
 from .plan import (
     PlanItem,
+    abandoned_plan_reason,
     plan,
     plan_scope,
     plan_summary,
@@ -59,6 +60,7 @@ __all__ = [
     "plan",
     "plan_scope",
     "plan_summary",
+    "abandoned_plan_reason",
     "register_tool_hooks",
     "reset_plan",
     "unfinished_plan_items",
