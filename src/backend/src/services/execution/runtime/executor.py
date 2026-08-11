@@ -515,9 +515,7 @@ class DelegateWorkTool(BaseTool):
         # ``reset_plan()`` would otherwise wipe the manager's plan and hand the
         # manager the coworker's leftovers when control returns.
         with plan_scope():
-            return delegated.execute_sync(
-                agent=agent, context=context, tools=tools
-            ).raw
+            return delegated.execute_sync(agent=agent, context=context, tools=tools).raw
 
 
 class AskQuestionToolSchema(BaseModel):
