@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "graphify": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@dreamtree-org/graphify",
+        "--mcp"
+      ]
+    }
+  }
+}

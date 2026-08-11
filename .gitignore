@@ -210,3 +210,5 @@ graphify-out/
 .claude/settings.local.json
 .claude/settings.json
 .claude/scheduled_tasks.lock
+# Checked-out worktrees, not content: each is a live git working directory.
+.claude/worktrees/
