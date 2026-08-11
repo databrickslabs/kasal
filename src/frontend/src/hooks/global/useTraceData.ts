@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { CrewSection, ProcessedTraces, RunConfig, RunConfigAgent, RunConfigTask, SelectedTraceEvent, TimelineItem } from '../../types/execution/trace';
 import {
   processTraceEvent,
@@ -645,6 +645,27 @@ const truncateTaskName = (name: string, maxLength = 80): string => {
   return name.substring(0, maxLength) + '...';
 };
 
+// A live run streams trace events in bursts of tens per second, and each one
+// used to trigger a full `processTraces` pass (several O(n) walks + a sort) over
+// the ENTIRE accumulated array, plus a rebuild of the expanded-agents/tasks
+// sets. As the array grew into the thousands the main thread could not keep up
+// and the tab froze — reloading (which drops the in-memory array) was the only
+// way out. We coalesce reprocessing to at most one pass per this interval.
+const REPROCESS_THROTTLE_MS = 400;
+
+/** All agent indices, for expand-all. */
+const allAgentIndices = (processed: ProcessedTraces): number[] =>
+  processed.agents.map((_, idx) => idx);
+
+/** All `${agentIdx}-${taskIdx}` task keys, for expand-all. */
+const allTaskKeys = (processed: ProcessedTraces): string[] => {
+  const keys: string[] = [];
+  processed.agents.forEach((agent, agentIdx) => {
+    agent.tasks.forEach((_, taskIdx) => keys.push(`${agentIdx}-${taskIdx}`));
+  });
+  return keys;
+};
+
 export function useTraceData({
   runId,
   jobId,
@@ -672,6 +693,22 @@ export function useTraceData({
     fullDescription?: string;
     isLoading: boolean;
   } | null>(null);
+
+  // Throttle bookkeeping for the reprocess effect below.
+  const lastReprocessRef = useRef<number>(0);
+  const reprocessTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Whether we've done the one-time "expand everything" for this run. After it,
+  // new agents/tasks are added to the expanded sets but existing entries are
+  // left as the user set them — a live update must not silently re-open panels
+  // the user collapsed, and must not rebuild the sets on every event.
+  const didInitialExpandRef = useRef<boolean>(false);
+  // Which agent indices / task keys we've ALREADY auto-expanded. Needed to tell
+  // "genuinely new, auto-expand it" apart from "the user just collapsed it":
+  // both look absent from expandedAgents/expandedTasks, so absence alone can't
+  // decide, and re-adding a collapsed entry is exactly the silent re-open we're
+  // avoiding.
+  const seenAgentIdxRef = useRef<Set<number>>(new Set());
+  const seenTaskKeyRef = useRef<Set<string>>(new Set());
 
   const fetchTraceData = useCallback(async (isInitialLoad = true) => {
     if (!runId) return;
@@ -718,14 +755,15 @@ export function useTraceData({
         setProcessedData(processed);
 
         if (isInitialLoad) {
-          setExpandedAgents(new Set(processed.agents.map((_, idx) => idx)));
-          const allTaskKeys = new Set<string>();
-          processed.agents.forEach((agent, agentIdx) => {
-            agent.tasks.forEach((_, taskIdx) => {
-              allTaskKeys.add(`${agentIdx}-${taskIdx}`);
-            });
-          });
-          setExpandedTasks(allTaskKeys);
+          const agentIdxs = allAgentIndices(processed);
+          const taskKeys = allTaskKeys(processed);
+          setExpandedAgents(new Set(agentIdxs));
+          setExpandedTasks(new Set(taskKeys));
+          seenAgentIdxRef.current = new Set(agentIdxs);
+          seenTaskKeyRef.current = new Set(taskKeys);
+          // The reprocess effect below shares this latch, so it won't redo the
+          // expand-all when the store update it just triggered flows back in.
+          didInitialExpandRef.current = true;
         }
         setError(null);
       }
@@ -744,29 +782,94 @@ export function useTraceData({
     }
   }, [isActive, fetchTraceData]);
 
-  // Reprocess when store traces change
+  // Reprocess when store traces change — coalesced to at most one pass per
+  // REPROCESS_THROTTLE_MS. A trailing run always fires, so the final state is
+  // correct even if the last burst arrived inside the throttle window.
   useEffect(() => {
     if (!isActive) return;
 
-    if (_traces && _traces.length > 0) {
+    const runReprocess = () => {
+      lastReprocessRef.current = Date.now();
+
+      if (!_traces || _traces.length === 0) {
+        setProcessedData(processTraces([]));
+        return;
+      }
+
       const processed = processTraces(_traces);
       setProcessedData(processed);
       setError(null);
       setLoading(false);
 
-      setExpandedAgents(new Set(processed.agents.map((_, idx) => idx)));
-      const allTaskKeys = new Set<string>();
-      processed.agents.forEach((agent, agentIdx) => {
-        agent.tasks.forEach((_, taskIdx) => {
-          allTaskKeys.add(`${agentIdx}-${taskIdx}`);
-        });
-      });
-      setExpandedTasks(allTaskKeys);
+      const agentIdxs = allAgentIndices(processed);
+      const taskKeys = allTaskKeys(processed);
+
+      if (!didInitialExpandRef.current) {
+        // First data for this run: expand all, once.
+        setExpandedAgents(new Set(agentIdxs));
+        setExpandedTasks(new Set(taskKeys));
+        seenAgentIdxRef.current = new Set(agentIdxs);
+        seenTaskKeyRef.current = new Set(taskKeys);
+        didInitialExpandRef.current = true;
+      } else {
+        // Subsequent updates: only auto-expand entries we have NEVER seen before
+        // (genuinely new agents/tasks). An entry that is absent but already seen
+        // was collapsed by the user — leave it alone.
+        const newAgents = agentIdxs.filter(idx => !seenAgentIdxRef.current.has(idx));
+        const newTasks = taskKeys.filter(key => !seenTaskKeyRef.current.has(key));
+        if (newAgents.length > 0) {
+          newAgents.forEach(idx => seenAgentIdxRef.current.add(idx));
+          setExpandedAgents(prev => {
+            const next = new Set(prev);
+            newAgents.forEach(idx => next.add(idx));
+            return next;
+          });
+        }
+        if (newTasks.length > 0) {
+          newTasks.forEach(key => seenTaskKeyRef.current.add(key));
+          setExpandedTasks(prev => {
+            const next = new Set(prev);
+            newTasks.forEach(key => next.add(key));
+            return next;
+          });
+        }
+      }
+    };
+
+    const elapsed = Date.now() - lastReprocessRef.current;
+    if (elapsed >= REPROCESS_THROTTLE_MS) {
+      // Enough time since the last pass — run immediately (also the first call).
+      if (reprocessTimerRef.current) {
+        clearTimeout(reprocessTimerRef.current);
+        reprocessTimerRef.current = null;
+      }
+      runReprocess();
     } else {
-      const processed = processTraces([]);
-      setProcessedData(processed);
+      // Inside the window — schedule/replace a trailing pass with the freshest
+      // data so a burst collapses into a single reprocess.
+      if (reprocessTimerRef.current) clearTimeout(reprocessTimerRef.current);
+      reprocessTimerRef.current = setTimeout(() => {
+        reprocessTimerRef.current = null;
+        runReprocess();
+      }, REPROCESS_THROTTLE_MS - elapsed);
     }
+
+    return () => {
+      if (reprocessTimerRef.current) {
+        clearTimeout(reprocessTimerRef.current);
+        reprocessTimerRef.current = null;
+      }
+    };
   }, [_traces, isActive]);
+
+  // Reset the one-time-expand latch (and the seen-entry tracking) when the run
+  // changes, so a new run gets its own expand-all rather than inheriting the
+  // previous run's collapsed state.
+  useEffect(() => {
+    didInitialExpandRef.current = false;
+    seenAgentIdxRef.current = new Set();
+    seenTaskKeyRef.current = new Set();
+  }, [jobId, runId]);
 
   const toggleAgent = useCallback((index: number) => {
     setExpandedAgents(prev => {
