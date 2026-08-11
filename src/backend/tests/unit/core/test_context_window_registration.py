@@ -36,6 +36,9 @@ PREFIXES = {
     "gemini": "gemini/",
     "deepseek": "deepseek/",
     "ollama": "ollama/",
+    # Self-hosted OpenAI-compatible endpoint: the model name is passed through
+    # unchanged, since the box answers for whatever name it was deployed under.
+    "custom": "",
 }
 
 
