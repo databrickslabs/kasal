@@ -12,6 +12,7 @@ from src.services.tools.base import BaseTool
 from src.services.tools.image_generation import ImageGenerationTool
 from src.services.tools.scrape_website import ScrapeWebsiteTool
 from src.services.tools.serper_search import SerperDevTool
+from src.services.tools.tool_policies import extract_tool_policies, stamp_tool_policies
 
 # SECURITY: mask decrypted secrets (PATs, client_secret, api_key, password,
 # access_token, ...) before they are written to logs / the volume log sink.
@@ -964,24 +965,15 @@ class ToolFactory:
         Returns:
             Tool instance if successfully created, None otherwise
         """
-        # _create_tool_impl pops any approval policy out of the merged config
-        # (it must not reach `tool_class(**tool_config)`) and stashes it here;
-        # stamp it on the instance(s) so the engine's tool-approval hook can
-        # read a single attribute regardless of which branch built the tool.
-        self._pending_approval_policy = None
+        # _create_tool_impl pops the policy keys out of the merged config (they
+        # must not reach `tool_class(**tool_config)`) and stashes them here;
+        # stamp them on the instance(s) so the engine hooks read one attribute
+        # regardless of which branch built the tool.
+        self._pending_policies = {}
         result = self._create_tool_impl(
             tool_identifier, result_as_answer, tool_config_override
         )
-        policy = getattr(self, "_pending_approval_policy", None)
-        if result is not None and policy is not None:
-            for instance in (result if isinstance(result, list) else [result]):
-                try:
-                    object.__setattr__(instance, "_approval_policy", dict(policy))
-                except Exception as stamp_err:
-                    logger.warning(
-                        f"[ToolFactory] could not stamp approval policy on "
-                        f"{type(instance).__name__}: {stamp_err}"
-                    )
+        stamp_tool_policies(result, getattr(self, "_pending_policies", {}))
         return result
 
     def _group_ids_for_tools(self) -> list:
@@ -1055,19 +1047,12 @@ class ToolFactory:
             # The override takes precedence over base_config
             tool_config = {**base_config, **(tool_config_override or {})}
 
-            # Approval policy is NOT a constructor kwarg — pop it before the
-            # per-tool `tool_class(**tool_config)` branches (some splat into
-            # non-pydantic clients) and stamp it on the instance afterwards
-            # (see _stamp_approval_policy at the end of this method). Accepted
-            # shapes: requires_approval: true, or approval: {timeout_seconds,
-            # timeout_action}.
-            approval_policy = None
-            if tool_config.pop("requires_approval", False):
-                approval_policy = {}
-            approval_cfg = tool_config.pop("approval", None)
-            if isinstance(approval_cfg, dict):
-                approval_policy = {**(approval_policy or {}), **approval_cfg}
-            self._pending_approval_policy = approval_policy
+            # Policies (human approval, the replay cassette) are NOT constructor
+            # kwargs — popped here, before the per-tool `tool_class(**tool_config)`
+            # branches (some splat into non-pydantic clients), and stamped on the
+            # instance by `create_tool` once it exists. See tool_policies.py for
+            # the accepted shapes.
+            self._pending_policies = extract_tool_policies(tool_config)
 
             # Inject execution inputs if available in the main config (for dynamic parameter resolution)
             # Handle both direct inputs and nested inputs structure

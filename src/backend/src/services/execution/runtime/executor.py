@@ -172,14 +172,33 @@ _TOOL_PRE_HOOKS: list[Callable[..., Any]] = []
 _TOOL_POST_HOOKS: list[Callable[..., Any]] = []
 
 
+@dataclass(frozen=True)
+class ToolCallAnswered:
+    """A pre-hook's answer: this call already has a result, do not run it.
+
+    The third thing a pre-hook can do. Rewriting arguments and blocking were
+    both expressible before; "here is the result, skip the tool" was not, and
+    without it a cache or a replay cassette has no way to speak — which is why
+    ``wrap_tool``'s comment promised caching that nothing could implement.
+
+    A dict return still REPLACES the kwargs, so the two cannot be confused.
+    """
+
+    output: Any
+    #: Why the call was answered, for the log line. The trace instead carries
+    #: ``from_cache`` on the finished event, which is what the UI renders.
+    source: str = "replay"
+
+
 def register_tool_hooks(
     pre: Callable[..., Any] | None = None,
     post: Callable[..., Any] | None = None,
 ) -> None:
     """Register tool hooks.
 
-    pre(tool, kwargs, agent, task) -> dict | None — return a dict to REPLACE
-    the tool kwargs; raise ToolExecutionBlockedError to block the call.
+    pre(tool, kwargs, agent, task) -> dict | ToolCallAnswered | None — return a
+    dict to REPLACE the tool kwargs, a ToolCallAnswered to supply the result
+    without running the tool, or raise ToolExecutionBlockedError to block it.
     post(tool, kwargs, result, agent, task) -> Any | None — return non-None
     to replace the tool result.
     """
@@ -216,6 +235,7 @@ def wrap_tool(
         }
         started_at = datetime.now(timezone.utc)
         event_bus.emit(tool, ToolUsageStartedEvent(**common))
+        answered: ToolCallAnswered | None = None
         try:
             for pre_hook in list(_TOOL_PRE_HOOKS):
                 try:
@@ -225,10 +245,22 @@ def wrap_tool(
                 except Exception:
                     logger.exception("tool pre-hook %r failed (ignored)", pre_hook)
                 else:
+                    if isinstance(replacement, ToolCallAnswered):
+                        # First answer wins, and no later hook may override it:
+                        # the call is settled, and running the rest would let a
+                        # second hook silently re-answer with something else.
+                        answered = replacement
+                        break
                     if isinstance(replacement, dict):
                         kwargs = replacement
                         common["tool_args"] = kwargs
-            output = tool.run(**kwargs)
+            if answered is not None:
+                logger.info(
+                    "tool %s answered from %s, not called", tool.name, answered.source
+                )
+                output = answered.output
+            else:
+                output = tool.run(**kwargs)
             for post_hook in list(_TOOL_POST_HOOKS):
                 try:
                     replaced = post_hook(tool, kwargs, output, agent, task)
@@ -257,6 +289,10 @@ def wrap_tool(
                 started_at=started_at,
                 finished_at=datetime.now(timezone.utc),
                 output=output,
+                # The trace has carried this flag end to end since the engine
+                # was vendored — bridge to span attribute to a "[cached]" badge
+                # in the timeline — and nothing had ever set it True.
+                from_cache=answered is not None,
                 **common,
             ),
         )

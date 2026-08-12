@@ -55,6 +55,68 @@ function KeyReadinessChip({ ready, onClick }: { ready: boolean; onClick?: () => 
   );
 }
 
+/**
+ * A policy switch that lives INSIDE the teamspace config JSON.
+ *
+ * Approval and replay are both `<key>: true` in the same document the textarea
+ * below edits, so the checkbox is a view onto that JSON rather than separate
+ * state — tick it and the key appears in the box, delete the key by hand and
+ * the tick clears. Unchecking removes the key rather than writing `false`, so
+ * a config carries only what was actually asked for.
+ */
+function ConfigFlagCheckbox({
+  flag,
+  label,
+  configText,
+  setConfigText,
+  setConfigError,
+}: {
+  flag: string;
+  label: string;
+  configText: string;
+  setConfigText: (value: string) => void;
+  setConfigError: (value: string | null) => void;
+}) {
+  const checked = (() => {
+    try {
+      return Boolean(
+        configText.trim() &&
+          (JSON.parse(configText) as Record<string, unknown>)[flag],
+      );
+    } catch {
+      return false;
+    }
+  })();
+
+  return (
+    <FormControlLabel
+      sx={{ mt: 1, alignItems: 'flex-start' }}
+      control={
+        <Checkbox
+          checked={checked}
+          onChange={(e) => {
+            try {
+              const parsed = configText.trim()
+                ? (JSON.parse(configText) as Record<string, unknown>)
+                : {};
+              if (e.target.checked) {
+                parsed[flag] = true;
+              } else {
+                delete parsed[flag];
+              }
+              setConfigText(JSON.stringify(parsed, null, 2));
+              setConfigError(null);
+            } catch {
+              setConfigError(`Fix the JSON below before toggling ${flag}`);
+            }
+          }}
+        />
+      }
+      label={label}
+    />
+  );
+}
+
 const convertToolToUITool = (tool: Tool): UITool => ({
   id: String(tool.id),
   title: tool.title,
@@ -474,42 +536,19 @@ export default function ToolsConfiguration({ mode = 'auto' }: { mode?: 'system' 
               <Alert severity="error">{configError}</Alert>
             </Box>
           )}
-          <FormControlLabel
-            sx={{ mt: 1 }}
-            control={
-              <Checkbox
-                checked={(() => {
-                  try {
-                    return Boolean(
-                      configText.trim() &&
-                        (JSON.parse(configText) as Record<string, unknown>)
-                          .requires_approval,
-                    );
-                  } catch {
-                    return false;
-                  }
-                })()}
-                onChange={(e) => {
-                  try {
-                    const parsed = configText.trim()
-                      ? (JSON.parse(configText) as Record<string, unknown>)
-                      : {};
-                    if (e.target.checked) {
-                      parsed.requires_approval = true;
-                    } else {
-                      delete parsed.requires_approval;
-                    }
-                    setConfigText(JSON.stringify(parsed, null, 2));
-                    setConfigError(null);
-                  } catch {
-                    setConfigError(
-                      'Fix the JSON below before toggling approval',
-                    );
-                  }
-                }}
-              />
-            }
+          <ConfigFlagCheckbox
+            flag="requires_approval"
             label="Requires human approval — every use of this tool pauses until someone approves it (chat shows an inline card; runs show the approval dialog)"
+            configText={configText}
+            setConfigText={setConfigText}
+            setConfigError={setConfigError}
+          />
+          <ConfigFlagCheckbox
+            flag="replayable"
+            label="Replayable: an identical call may be served from a recording of an earlier run instead of calling out again, so re-running a workload to test the steps after it does not re-pay for this one. Only for reads whose answer need not be fresh, never a tool that writes, that is gated on approval, or whose answer is scoped to the caller. Add {&quot;replay&quot;: {&quot;ttl_seconds&quot;: 3600, &quot;scope&quot;: &quot;group&quot;}} below to tune how long a recording lasts and whose runs it may come from."
+            configText={configText}
+            setConfigText={setConfigText}
+            setConfigError={setConfigError}
           />
           <TextField
             label="Teamspace Configuration (JSON)"

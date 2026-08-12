@@ -512,6 +512,21 @@ def run_flow_in_process(
                             f"[FLOW_SUBPROCESS] Tool approval hook not installed (non-fatal): {approval_err}"
                         )
 
+                    # Replay cassette (same machinery as the crew path).
+                    try:
+                        from src.services.execution.kernel.tool_replay import (
+                            install_tool_replay_hook,
+                        )
+
+                        if install_tool_replay_hook(execution_id, group_context):
+                            async_logger.info(
+                                f"[FLOW_SUBPROCESS] Tool replay hook installed for {execution_id}"
+                            )
+                    except Exception as replay_err:
+                        async_logger.warning(
+                            f"[FLOW_SUBPROCESS] Tool replay hook not installed (non-fatal): {replay_err}"
+                        )
+
                     # Route OTel tracing loggers to flow.log for visibility
                     for otel_logger_name in [
                         "src.services.otel_tracing",

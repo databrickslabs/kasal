@@ -56,6 +56,39 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         )
         return [row[0] for row in result.all()]
 
+    async def tool_recordings(
+        self,
+        group_ids: List[str],
+        *,
+        since: datetime,
+        exclude_job_id: str,
+        limit: int = 500,
+    ) -> List[ExecutionTrace]:
+        """Completed tool calls from EARLIER runs — the replay cassette.
+
+        Only ``kasal.tool.complete`` rows: the start row repeats the arguments
+        but has no result, and a recording without a result is not one. Scoped
+        to the caller's groups because a recording is workspace data like any
+        other, and excludes the run doing the asking so a run cannot replay
+        itself.
+
+        Newest first, bounded — the caller keeps the newest run's worth and
+        drops the rest, so this is a page of candidates, not a full history.
+        """
+        result = await self.session.execute(
+            select(ExecutionTrace)
+            .where(
+                ExecutionTrace.group_id.in_(group_ids),
+                ExecutionTrace.event_type == "tool_usage",
+                ExecutionTrace.span_name == "kasal.tool.complete",
+                ExecutionTrace.created_at >= since,
+                ExecutionTrace.job_id != exclude_job_id,
+            )
+            .order_by(ExecutionTrace.id.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
     async def latest_output_for_span_prefix(self, prefix: str) -> Optional[str]:
         """The most recent trace ``output`` whose ``span_name`` starts with ``prefix``.
 

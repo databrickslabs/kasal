@@ -970,3 +970,66 @@ class TestScrapeWebsiteToolCreation:
 
         result = f.create_tool("ScrapeWebsiteTool")
         assert result is None
+
+
+class TestCreateToolStampsPolicies:
+    """Approval and replay travel in the tool CONFIG and must be popped out of
+    it before construction — a policy key splatted into a tool that does not
+    take one is a TypeError, and into one that does is a silently wrong kwarg.
+    """
+
+    def _factory_with(self, base_config):
+        f = _make_factory()
+        info = _make_tool_info("ScrapeWebsiteTool", 50, config=base_config)
+        f._available_tools["ScrapeWebsiteTool"] = info
+        mock_cls = MagicMock(return_value=MagicMock())
+        f._tool_implementations["ScrapeWebsiteTool"] = mock_cls
+        return f, mock_cls
+
+    def test_policy_keys_never_reach_the_constructor(self):
+        f, mock_cls = self._factory_with(
+            {
+                "website_url": "https://example.com",
+                "requires_approval": True,
+                "replayable": True,
+                "replay": {"ttl_seconds": 120},
+            }
+        )
+
+        f.create_tool("ScrapeWebsiteTool")
+
+        call_kwargs = mock_cls.call_args[1]
+        assert call_kwargs.get("website_url") == "https://example.com"
+        for key in ("requires_approval", "replayable", "replay", "approval"):
+            assert key not in call_kwargs
+
+    def test_both_policies_land_on_the_instance(self):
+        f, _ = self._factory_with(
+            {"requires_approval": True, "replay": {"ttl_seconds": 120}}
+        )
+
+        tool = f.create_tool("ScrapeWebsiteTool")
+
+        assert tool._approval_policy == {}
+        assert tool._replay_policy["ttl_seconds"] == 120
+        assert tool._replay_policy["scope"] == "group"
+
+    def test_a_plain_tool_is_stamped_with_neither(self):
+        """Built on a real class, not a MagicMock: a mock invents every
+        attribute you ask it for, so it cannot tell "stamped" from "absent"."""
+        from src.services.tools.tool_policies import replay_policy
+
+        class _RealTool:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+        f = _make_factory()
+        f._available_tools["ScrapeWebsiteTool"] = _make_tool_info(
+            "ScrapeWebsiteTool", 50, config={"website_url": "https://example.com"}
+        )
+        f._tool_implementations["ScrapeWebsiteTool"] = _RealTool
+
+        tool = f.create_tool("ScrapeWebsiteTool")
+
+        assert replay_policy(tool) is None
+        assert not hasattr(tool, "_approval_policy")

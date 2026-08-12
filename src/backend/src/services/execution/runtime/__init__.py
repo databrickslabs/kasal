@@ -10,6 +10,7 @@ from .crew import (
     Crew,
 )
 from .executor import (
+    ToolCallAnswered,
     ToolExecutionBlockedError,
     register_tool_hooks,
     unregister_tool_hooks,
@@ -61,6 +62,7 @@ __all__ = [
     "plan_scope",
     "plan_summary",
     "abandoned_plan_reason",
+    "ToolCallAnswered",
     "register_tool_hooks",
     "reset_plan",
     "unfinished_plan_items",

@@ -1081,6 +1081,22 @@ def run_crew_in_process(
                             f"[SUBPROCESS] Tool approval hook not installed (non-fatal): {approval_err}"
                         )
 
+                    # Replay cassette: a tool marked replayable is answered from
+                    # an earlier run's recording instead of being called again.
+                    try:
+                        from src.services.execution.kernel.tool_replay import (
+                            install_tool_replay_hook,
+                        )
+
+                        if install_tool_replay_hook(execution_id, group_context):
+                            async_logger.info(
+                                f"[SUBPROCESS] Tool replay hook installed for {execution_id}"
+                            )
+                    except Exception as replay_err:
+                        async_logger.warning(
+                            f"[SUBPROCESS] Tool replay hook not installed (non-fatal): {replay_err}"
+                        )
+
                     # Debug: Print that we're about to configure logging
                     import sys  # Import sys for stderr debugging
 

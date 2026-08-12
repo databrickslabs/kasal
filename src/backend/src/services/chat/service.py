@@ -1055,6 +1055,24 @@ class LightAgentService:
                         f"[light_agent] approval hook not installed: {approval_err}"
                     )
 
+                # Replay cassette: a tool marked replayable is answered from an
+                # earlier run's recording rather than called again. In-process
+                # here, so the uninstall in `finally` matters — the hook list is
+                # global and a leaked hook would replay the NEXT chat turn too.
+                _uninstall_replay_hook = None
+                try:
+                    from src.services.execution.kernel.tool_replay import (
+                        install_tool_replay_hook,
+                    )
+
+                    _uninstall_replay_hook = install_tool_replay_hook(
+                        execution_id, group_context
+                    )
+                except Exception as replay_err:  # noqa: BLE001
+                    logger.warning(
+                        f"[light_agent] replay hook not installed: {replay_err}"
+                    )
+
                 logger.info(
                     f"[light_agent] Kicking off single agent for execution {execution_id}"
                 )
@@ -1112,6 +1130,11 @@ class LightAgentService:
                     if _uninstall_approval_hook is not None:
                         try:
                             _uninstall_approval_hook()
+                        except Exception:  # noqa: BLE001
+                            pass
+                    if _uninstall_replay_hook is not None:
+                        try:
+                            _uninstall_replay_hook()
                         except Exception:  # noqa: BLE001
                             pass
                     # Always unregister so handlers never leak on the global bus.
