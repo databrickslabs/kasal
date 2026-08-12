@@ -628,6 +628,17 @@ class LightAgentService:
                             "tool_name": tool_name,
                             "input": _args_str(event),
                             "content": content,
+                            # Whether this answer came from an earlier run's
+                            # recording. The crew path gets it for free via the
+                            # OTel bridge; this path builds its own row, so
+                            # without it a replayed chat call renders exactly
+                            # like a live one — which is how replay looked
+                            # broken here while it was working. Not inferable
+                            # from the duration either: wrap_tool stamps
+                            # started_at before the pre-hooks, so an approval
+                            # gate's wait is counted whether or not the tool
+                            # ever ran.
+                            "from_cache": bool(getattr(event, "from_cache", False)),
                         }
                         try:
                             sa = getattr(event, "started_at", None)
@@ -1083,6 +1094,19 @@ class LightAgentService:
                     # has no Task, so this is the only bucket position can use.
                     _uninstall_replay_hook = install_tool_replay_hook(
                         execution_id, group_context, turn_key=turn_key
+                    )
+                    # Say so either way. "Was the cassette even loaded?" is the
+                    # first question asked of a run that did not replay, and
+                    # answering it from the ABSENCE of a line costs a round of
+                    # guessing — the subprocess paths already log this.
+                    logger.info(
+                        "[light_agent] replay hook %s (turn %s)",
+                        (
+                            "installed"
+                            if _uninstall_replay_hook
+                            else ("not installed: nothing to replay")
+                        ),
+                        turn_key,
                     )
                 except Exception as replay_err:  # noqa: BLE001
                     logger.warning(
