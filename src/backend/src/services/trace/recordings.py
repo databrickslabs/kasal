@@ -134,15 +134,17 @@ def _recording(row: Any) -> Optional[ToolRecording]:
       top level, arguments as JSON, and no task, because a chat turn has no
       Task object.
 
-    A chat recording is filed under its own RUN rather than under anything
-    describing the turn, which makes it unreachable by positional matching and
-    leaves it to exact arguments. That is deliberate. The obvious bucket,
-    ``event_context``, is the same constant on every chat row in this database
-    — "Respond directly and helpfully to the user's request." — because the
-    light agent's prompt is the generated task, not the user's question. Keying
-    on it would let any chat turn be answered with the second search of an
-    unrelated one, which is a plausible-looking wrong answer rather than a
-    missing one.
+    A chat recording is filed under its ``turn_key`` — a hash of the prompt,
+    which carries the user's question verbatim — so "the second search of THIS
+    question" can match while another question's second search cannot. The
+    obvious bucket, ``event_context``, does not work: it is the same constant
+    on every chat row ever written ("Respond directly and helpfully to the
+    user's request."), because it is the generated task's first line.
+
+    Rows written before ``turn_key`` existed fall back to their own run, which
+    no live call can name — so they stay reachable by exact arguments and
+    unreachable by position, which is the safe direction for a bucket we can no
+    longer identify.
     """
     output = _row_json(getattr(row, "output", None))
     if not isinstance(output, dict):
@@ -166,7 +168,9 @@ def _recording(row: Any) -> Optional[ToolRecording]:
     return ToolRecording(
         job_id=job_id,
         tool_name=str(tool_name),
-        task_name=str(extra.get("task_name") or f"run:{job_id}"),
+        task_name=str(
+            extra.get("task_name") or metadata.get("turn_key") or f"run:{job_id}"
+        ),
         args_key=canonical_args(args),
         output=str(content),
         recorded_at=getattr(row, "created_at", None),

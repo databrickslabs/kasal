@@ -15,6 +15,7 @@ refactor, so existing callers/tests keep working.
 """
 
 import asyncio
+import hashlib
 import logging
 import os
 from typing import Any, Dict, Optional
@@ -277,6 +278,15 @@ class LightAgentService:
             trace_context = (
                 prompt.strip().splitlines()[0] if prompt.strip() else "chat"
             )[:120]
+            # A stable identity for THIS question, stamped on every row this
+            # turn writes. The replay cassette needs both sides to name the
+            # same bucket before it can match a call by position, and nothing
+            # else here can serve: event_context is the generated task's first
+            # line, which is the same sentence for every chat turn ever run.
+            # The full prompt is not — it carries the user's request verbatim.
+            # Hashed rather than stored: the description runs to kilobytes and
+            # would otherwise be repeated on every tool row.
+            turn_key = hashlib.sha256(prompt.strip().encode()).hexdigest()[:16]
 
             # Prior turns of THIS chat session. Each light-agent turn runs as an
             # isolated kickoff with no built-in history, so without this the agent
@@ -376,7 +386,11 @@ class LightAgentService:
                     "event_type": event_type,
                     "created_at": datetime.now(UTC).replace(tzinfo=None),
                     "output": output,
-                    "trace_metadata": {"agent_role": role, "tool_name": tool_name},
+                    "trace_metadata": {
+                        "agent_role": role,
+                        "tool_name": tool_name,
+                        "turn_key": turn_key,
+                    },
                 }
                 if group_id and group_id != "default":
                     td["group_id"] = group_id
@@ -1065,8 +1079,10 @@ class LightAgentService:
                         install_tool_replay_hook,
                     )
 
+                    # Same key the rows above are stamped with — a chat call
+                    # has no Task, so this is the only bucket position can use.
                     _uninstall_replay_hook = install_tool_replay_hook(
-                        execution_id, group_context
+                        execution_id, group_context, turn_key=turn_key
                     )
                 except Exception as replay_err:  # noqa: BLE001
                     logger.warning(

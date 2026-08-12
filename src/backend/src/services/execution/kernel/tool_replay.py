@@ -119,6 +119,7 @@ def install_tool_replay_hook(
     execution_id: str,
     group_context: Optional[GroupContext],
     *,
+    turn_key: str = "",
     load: Optional[Callable[..., Any]] = None,
 ) -> Optional[Callable[[], None]]:
     """Install the replay pre-hook for this run. Returns an uninstall callable.
@@ -126,6 +127,11 @@ def install_tool_replay_hook(
     Returns None when there is nothing to replay — no group, no replayable
     tool with recordings, or the read failed. The run then behaves exactly as
     it did before this module existed.
+
+    ``turn_key`` is the bucket positional matching uses when a call has no
+    Task, which is every call on the chat path — ``Agent.kickoff_async`` runs
+    the agent directly, so there is no Task to name. Chat passes the hash of
+    its prompt, the same value its rows are stamped with.
 
     The cassette is loaded ONCE here, not per call: a tool call runs on a
     worker thread deep inside the LLM loop, and reaching for a database session
@@ -155,7 +161,7 @@ def install_tool_replay_hook(
         match = cassette.take(
             tool_name=getattr(tool, "name", ""),
             args_key=canonical_args(kwargs),
-            task_name=task_key(task),
+            task_name=task_key(task) or turn_key,
         )
         if match is None:
             return None
