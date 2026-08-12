@@ -207,6 +207,14 @@ _MEMORY_WRAPPER_TOOLS = {"search_memory", "save_to_memory"}
 # fires for — absorbing it would make the failure invisible.
 _PLAN_TOOL = "todo"
 
+# The two halves of a tool call, by event type. The frontend reads this to
+# label a row "(input)" / "(output)"; see the operation block in
+# _set_extra_attributes for what its absence looked like.
+_TOOL_OPERATIONS = {
+    "tool_usage_started": "tool_started",
+    "tool_usage_finished": "tool_finished",
+}
+
 
 #: Ceiling for the one untruncated task description recorded per task span.
 #: Generous enough for real task prompts, bounded so a runaway description
@@ -1421,5 +1429,14 @@ class OTelEventBridge:
 
         # ── Generic operation type ──
         operation = getattr(event, "operation", None)
+        if not operation:
+            # Which HALF of a tool call this row is. Both halves map to the
+            # event_type "tool_usage", and the timeline labels them "(input)"
+            # and "(output)" from this attribute — which nothing had ever set,
+            # so every tool call rendered as two identical rows with the same
+            # name and no way to tell the call from its result. It also decided
+            # where "[cached]" could appear: the badge rides on `from_cache`,
+            # which only the finished event carries.
+            operation = _TOOL_OPERATIONS.get(getattr(event, "type", None))
         if operation:
             span.set_attribute("kasal.extra.operation", str(operation))

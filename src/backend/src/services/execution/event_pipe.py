@@ -210,6 +210,7 @@ class EventPipeWriter:
         from src.services.otel_tracing.event_bridge import (
             _MEMORY_WRAPPER_TOOLS,
             _PLAN_TOOL,
+            _TOOL_OPERATIONS,
             _get_agent_name,
             _get_output,
             _get_task_name,
@@ -239,7 +240,18 @@ class EventPipeWriter:
             "tool_name": tool_name,
             "model": _safe_str(getattr(event, "model", None), 200),
             "error": _safe_str(getattr(event, "error", None), 500),
+            # The SAME two fields the OTel bridge stamps, because a row has two
+            # producers — this pipe live, the database on reload — and a field
+            # only one of them sets is a row that changes when you refresh.
+            # That is what "PerplexityTool (input) / PerplexityTool /
+            # PerplexityTool (output) [cached]" was: the bare middle row is a
+            # piped frame, the labelled ones are DB rows.
+            "operation": _TOOL_OPERATIONS.get(getattr(event, "type", None)),
+            # And without this a replayed call only earns its [cached] badge
+            # after a refresh.
+            "from_cache": getattr(event, "from_cache", None),
         }
+        metadata = {k: v for k, v in metadata.items() if v is not None}
 
         if event_type in ("crew_started", "crew_completed"):
             event_source = "crew"

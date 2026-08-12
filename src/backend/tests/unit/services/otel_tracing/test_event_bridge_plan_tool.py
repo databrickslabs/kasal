@@ -117,3 +117,52 @@ class TestLivePipeAgrees:
 
         assert frame is not None
         assert frame["trace_metadata"]["tool_name"] == "PerplexityTool"
+
+
+class TestToolRowsSayWhichHalfTheyAre:
+    """Both halves of a tool call carry event_type "tool_usage", so without an
+    operation the timeline shows two identical rows per call — which is what a
+    user saw as "three PerplexityTool events" for one live call and one
+    replayed one."""
+
+    def test_the_start_row_is_marked_as_input(self):
+        bridge, _, span = _bridge_with_tracer()
+
+        bridge._emit_span(
+            "kasal.tool.execute",
+            "tool_usage",
+            SimpleNamespace(type="tool_usage_started", tool_name="PerplexityTool"),
+        )
+
+        attrs = {c[0][0]: c[0][1] for c in span.set_attribute.call_args_list}
+        assert attrs["kasal.extra.operation"] == "tool_started"
+
+    def test_the_finish_row_is_marked_as_output(self):
+        bridge, _, span = _bridge_with_tracer()
+
+        bridge._emit_span(
+            "kasal.tool.complete",
+            "tool_usage",
+            SimpleNamespace(
+                type="tool_usage_finished",
+                tool_name="PerplexityTool",
+                from_cache=True,
+            ),
+        )
+
+        attrs = {c[0][0]: c[0][1] for c in span.set_attribute.call_args_list}
+        assert attrs["kasal.extra.operation"] == "tool_finished"
+        # The badge rides on this, and only the finished event carries it.
+        assert attrs["kasal.extra.from_cache"] is True
+
+    def test_an_event_that_sets_its_own_operation_keeps_it(self):
+        bridge, _, span = _bridge_with_tracer()
+
+        bridge._emit_span(
+            "kasal.memory.save_completed",
+            "memory_write",
+            SimpleNamespace(type="memory_save_completed", operation="save"),
+        )
+
+        attrs = {c[0][0]: c[0][1] for c in span.set_attribute.call_args_list}
+        assert attrs["kasal.extra.operation"] == "save"
