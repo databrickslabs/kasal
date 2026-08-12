@@ -1282,33 +1282,12 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                       }}
                     />
                   </Grid>
-                  <Grid item xs={12} md={6}>
-                    <FormControlLabel
-                      control={
-                        <Switch
-                          checked={formData.cache}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            e.preventDefault();
-                            handleInputChange('cache', !formData.cache);
-                          }}
-                          onChange={(e) => {
-                            e.stopPropagation();
-                          }}
-                          onMouseDown={(e) => {
-                            e.stopPropagation();
-                          }}
-                          onTouchStart={(e) => {
-                            e.stopPropagation();
-                          }}
-                        />
-                      }
-                      label="Enable Cache"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                      }}
-                    />
-                  </Grid>
+                  {/* "Enable Cache" was here. It set agent.cache, which reaches
+                      the runtime Agent and is read by NOBODY — there is no tool
+                      cache in the engine, so the switch promised a saving it
+                      could not make. The column and the field stay (a cache is
+                      designed, not built); the control comes back when there is
+                      something behind it. */}
                   {/* TODO: Re-enable code execution in the future */}
                   {/* <Grid item xs={12} md={6}>
                     <FormControlLabel
