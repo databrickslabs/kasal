@@ -25,7 +25,7 @@ class TestPlanToolSpansAreAbsorbed:
         bridge, tracer, _ = _bridge_with_tracer()
 
         bridge._emit_span(
-            "CrewAI.tool.execute",
+            "kasal.tool.execute",
             "tool_usage",
             SimpleNamespace(tool_name="todo", tool_args="{'todos': []}"),
         )
@@ -36,7 +36,7 @@ class TestPlanToolSpansAreAbsorbed:
         bridge, tracer, _ = _bridge_with_tracer()
 
         bridge._emit_span(
-            "CrewAI.tool.complete",
+            "kasal.tool.complete",
             "tool_usage",
             SimpleNamespace(tool_name="todo", output="Plan updated."),
         )
@@ -48,7 +48,7 @@ class TestPlanToolSpansAreAbsorbed:
         bridge, tracer, _ = _bridge_with_tracer()
 
         bridge._emit_span(
-            "CrewAI.tool.error",
+            "kasal.tool.error",
             "tool_error",
             SimpleNamespace(tool_name="todo", error="'todos' must be a list"),
         )
@@ -59,7 +59,7 @@ class TestPlanToolSpansAreAbsorbed:
         bridge, tracer, _ = _bridge_with_tracer()
 
         bridge._emit_span(
-            "CrewAI.tool.execute",
+            "kasal.tool.execute",
             "tool_usage",
             SimpleNamespace(tool_name="PerplexityTool"),
         )

@@ -17,31 +17,37 @@ from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
 logger = logging.getLogger(__name__)
 
-# Map OTel span names (from CrewAIInstrumentor) to Kasal event_type strings.
-# The instrumentor creates spans named like "CrewAI.crew.kickoff",
-# "CrewAI.task.execute", "CrewAI.agent.execute", etc.
+# Map OTel span names to Kasal event_type strings.
+#
+# Spans are named ``kasal.<subject>.<verb>``. The ``CrewAI.*`` aliases below are
+# the names this codebase emitted while the engine was a vendored copy of
+# crewAI; there is no CrewAIInstrumentor any more, and nothing writes those
+# names today. They stay because the trace table is HISTORY: every row written
+# before the rename carries the old name, and dropping the alias would blank
+# out every past run in the timeline and hide those calls from the replay
+# cassette. Read both, write one.
 SPAN_NAME_MAP: Dict[str, str] = {
     # Crew lifecycle
-    "CrewAI.crew.kickoff": "crew_started",
-    "CrewAI.crew.complete": "crew_completed",
+    "kasal.crew.kickoff": "crew_started",
+    "kasal.crew.complete": "crew_completed",
     "kasal.crew.checkpoint_restored": "crew_checkpoint_restored",
     "kasal.flow.checkpoint_saved": "flow_checkpoint_saved",
     "kasal.checkpoint.unit_saved": "checkpoint_unit_saved",
     # Task lifecycle
-    "CrewAI.task.execute": "task_started",
-    "CrewAI.task.complete": "task_completed",
+    "kasal.task.execute": "task_started",
+    "kasal.task.complete": "task_completed",
     "kasal.task.checkpoint_restored": "task_checkpoint_restored",
-    "CrewAI.task.fail": "task_failed",
+    "kasal.task.fail": "task_failed",
     # Agent execution
-    "CrewAI.agent.execute": "agent_execution",
-    "CrewAI.agent.complete": "llm_response",
+    "kasal.agent.execute": "agent_execution",
+    "kasal.agent.complete": "llm_response",
     # Tool usage
-    "CrewAI.tool.execute": "tool_usage",
-    "CrewAI.tool.complete": "tool_usage",
-    "CrewAI.tool.error": "tool_error",
+    "kasal.tool.execute": "tool_usage",
+    "kasal.tool.complete": "tool_usage",
+    "kasal.tool.error": "tool_error",
     # LLM calls
-    "CrewAI.llm.call": "llm_call",
-    "CrewAI.llm.complete": "llm_response",
+    "kasal.llm.call": "llm_call",
+    "kasal.llm.complete": "llm_response",
     # Event bridge spans (kasal.* prefix) — event_types aligned with frontend
     "kasal.llm.call_started": "llm_call",
     "kasal.llm.call_completed": "llm_response",
@@ -98,10 +104,20 @@ def _extract_event_type(span: ReadableSpan) -> str:
     if explicit:
         return str(explicit)
 
-    # Map from span name
+    # Map from span name. EXACT match first, and that ordering is load-bearing:
+    # the prefix pass below matches whatever comes first in the map, and
+    # ``kasal.llm.call`` is a prefix of ``kasal.llm.call_completed``. Under the
+    # old ``CrewAI.llm.call`` name the two could not collide; the moment both
+    # moved to the same namespace, a prefix-first lookup labelled every LLM
+    # response row "llm_call" instead of "llm_response".
     name = span.name or ""
+    exact = SPAN_NAME_MAP.get(name)
+    if exact:
+        return exact
+    # Prefix pass: instrumentor spans append a suffix to the span they belong
+    # to ("kasal.crew.kickoff.extra"), and those still have to map.
     for prefix, event_type in SPAN_NAME_MAP.items():
-        if name.startswith(prefix) or name == prefix:
+        if name.startswith(prefix):
             return event_type
 
     # Handle instrumentor spans like "AgentName._execute_core", "AgentName.execute_task"

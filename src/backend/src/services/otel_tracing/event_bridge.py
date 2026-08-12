@@ -1,9 +1,14 @@
-"""OTel Event Bridge — subscribes to CrewAI event bus and emits OTel spans.
+"""OTel Event Bridge — subscribes to the engine event bus and emits OTel spans.
 
-Bridges CrewAI's event system to the OTel pipeline so each event becomes a
-span that flows through SimpleSpanProcessor -> KasalDBSpanExporter -> DB.
-This gives 35+ event types in the trace timeline instead of the 2 that
-the openinference CrewAI instrumentor provides.
+Bridges the run event bus (``src.core.events``) to the OTel pipeline so each
+event becomes a span that flows through SimpleSpanProcessor ->
+KasalDBSpanExporter -> DB. That is where the trace timeline's 35+ event types
+come from.
+
+Spans are named ``kasal.<subject>.<verb>``. They were once named ``CrewAI.*``,
+from the vendored library the engine grew out of; the names were renamed with
+the rows that carried them (see the migration that rewrites
+``execution_trace.span_name``), so nothing in this codebase speaks CrewAI now.
 """
 
 import logging
@@ -44,8 +49,8 @@ _RUN_LEVEL_EVENTS = frozenset(
 # span_name maps to SPAN_NAME_MAP in db_exporter.py
 _EVENT_SPAN_MAP = {
     # Crew lifecycle
-    "CrewKickoffStartedEvent": ("CrewAI.crew.kickoff", "crew_started"),
-    "CrewKickoffCompletedEvent": ("CrewAI.crew.complete", "crew_completed"),
+    "CrewKickoffStartedEvent": ("kasal.crew.kickoff", "crew_started"),
+    "CrewKickoffCompletedEvent": ("kasal.crew.complete", "crew_completed"),
     # A crew restored from a checkpoint rather than executed. Its own
     # event_type so the timeline can show it as restored instead of passing it
     # off as a run that happened.
@@ -71,21 +76,21 @@ _EVENT_SPAN_MAP = {
         "crew_checkpoint_restored",
     ),
     # Task lifecycle
-    "TaskStartedEvent": ("CrewAI.task.execute", "task_started"),
-    "TaskCompletedEvent": ("CrewAI.task.complete", "task_completed"),
+    "TaskStartedEvent": ("kasal.task.execute", "task_started"),
+    "TaskCompletedEvent": ("kasal.task.complete", "task_completed"),
     # A task restored from a checkpoint rather than executed.
     "TaskCheckpointRestoredEvent": (
         "kasal.task.checkpoint_restored",
         "task_checkpoint_restored",
     ),
-    "TaskFailedEvent": ("CrewAI.task.fail", "task_failed"),
+    "TaskFailedEvent": ("kasal.task.fail", "task_failed"),
     # Agent execution
-    "AgentExecutionStartedEvent": ("CrewAI.agent.execute", "agent_execution"),
-    "AgentExecutionCompletedEvent": ("CrewAI.agent.complete", "llm_response"),
+    "AgentExecutionStartedEvent": ("kasal.agent.execute", "agent_execution"),
+    "AgentExecutionCompletedEvent": ("kasal.agent.complete", "llm_response"),
     # Tool usage
-    "ToolUsageStartedEvent": ("CrewAI.tool.execute", "tool_usage"),
-    "ToolUsageFinishedEvent": ("CrewAI.tool.complete", "tool_usage"),
-    "ToolUsageErrorEvent": ("CrewAI.tool.error", "tool_error"),
+    "ToolUsageStartedEvent": ("kasal.tool.execute", "tool_usage"),
+    "ToolUsageFinishedEvent": ("kasal.tool.complete", "tool_usage"),
+    "ToolUsageErrorEvent": ("kasal.tool.error", "tool_error"),
     # Memory events — map to frontend-expected event_type names
     "MemorySaveStartedEvent": ("kasal.memory.save_started", "memory_write_started"),
     "MemorySaveCompletedEvent": ("kasal.memory.save_completed", "memory_write"),
@@ -182,8 +187,8 @@ _SKIP_EVENTS = {
 # fire for every tool — built-in, custom, and MCP (Genie) — so coverage is
 # uniform. The MCP-specific events stay in the Kasal UI trace only (bridging
 # them too would double-count, since MCP tools also fire ToolUsage events).
-_MLFLOW_TOOL_START_SPANS = {"CrewAI.tool.execute"}
-_MLFLOW_TOOL_END_SPANS = {"CrewAI.tool.complete", "CrewAI.tool.error"}
+_MLFLOW_TOOL_START_SPANS = {"kasal.tool.execute"}
+_MLFLOW_TOOL_END_SPANS = {"kasal.tool.complete", "kasal.tool.error"}
 
 # Tools whose spans are redundant with the richer ``Memory*`` events emitted
 # by CrewAI's unified Memory class. We absorb them to show one span per
@@ -898,7 +903,7 @@ class OTelEventBridge:
                 end_kwargs = {
                     "trace_id": span.trace_id,
                     "span_id": span.span_id,
-                    "status": "ERROR" if span_name == "CrewAI.tool.error" else "OK",
+                    "status": "ERROR" if span_name == "kasal.tool.error" else "OK",
                 }
                 if output:
                     end_kwargs["outputs"] = {"result": _safe_str(output, 8000)}

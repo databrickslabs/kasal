@@ -236,7 +236,7 @@ class TestLinking:
                     # to put it in ``output``, which is where the reader looked,
                     # so both agreed and both were wrong: against real traces
                     # every recipe recorded tool_names=[] and tool_call_count=0.
-                    span_name="CrewAI.tool.execute",
+                    span_name="kasal.tool.execute",
                     trace_metadata={"tool_name": "GenieTool", "tool_args": {}},
                     output={"duration_ms": 1.0, "extra_data": {}},
                 )

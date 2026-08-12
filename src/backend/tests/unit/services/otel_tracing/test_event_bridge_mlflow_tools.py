@@ -54,7 +54,7 @@ class TestBridgeToolToMlflow:
         m, tracking_mod, client = _mock_mlflow(active=True)
         with _patch(m, tracking_mod):
             b._bridge_tool_to_mlflow(
-                "CrewAI.tool.execute",
+                "kasal.tool.execute",
                 "genie_query",
                 "",
                 SimpleNamespace(tool_args={"q": "x"}),
@@ -73,7 +73,7 @@ class TestBridgeToolToMlflow:
         m, tracking_mod, client = _mock_mlflow(active=False)
         with _patch(m, tracking_mod):
             b._bridge_tool_to_mlflow(
-                "CrewAI.tool.execute", "genie_query", "", SimpleNamespace()
+                "kasal.tool.execute", "genie_query", "", SimpleNamespace()
             )
         assert b._mlflow_tool_spans == []
         client.start_span.assert_not_called()
@@ -83,10 +83,10 @@ class TestBridgeToolToMlflow:
         m, tracking_mod, client = _mock_mlflow(active=True)
         with _patch(m, tracking_mod):
             b._bridge_tool_to_mlflow(
-                "CrewAI.tool.execute", "genie", "", SimpleNamespace()
+                "kasal.tool.execute", "genie", "", SimpleNamespace()
             )
             b._bridge_tool_to_mlflow(
-                "CrewAI.tool.complete", "genie", "RESULT", SimpleNamespace()
+                "kasal.tool.complete", "genie", "RESULT", SimpleNamespace()
             )
         assert b._mlflow_tool_spans == []
         client.end_span.assert_called_once()
@@ -100,11 +100,9 @@ class TestBridgeToolToMlflow:
         m, tracking_mod, client = _mock_mlflow(active=True)
         with _patch(m, tracking_mod):
             b._bridge_tool_to_mlflow(
-                "CrewAI.tool.execute", "genie", "", SimpleNamespace()
+                "kasal.tool.execute", "genie", "", SimpleNamespace()
             )
-            b._bridge_tool_to_mlflow(
-                "CrewAI.tool.error", "genie", "", SimpleNamespace()
-            )
+            b._bridge_tool_to_mlflow("kasal.tool.error", "genie", "", SimpleNamespace())
         assert client.end_span.call_args.kwargs["status"] == "ERROR"
         assert b._mlflow_tool_spans == []
 
@@ -112,7 +110,7 @@ class TestBridgeToolToMlflow:
         b = _tool_bridge()
         m, tracking_mod, client = _mock_mlflow(active=True)
         with _patch(m, tracking_mod):
-            b._bridge_tool_to_mlflow("CrewAI.crew.kickoff", "", "", SimpleNamespace())
+            b._bridge_tool_to_mlflow("kasal.crew.kickoff", "", "", SimpleNamespace())
         client.start_span.assert_not_called()
         assert b._mlflow_tool_spans == []
 
@@ -121,7 +119,7 @@ class TestBridgeToolToMlflow:
         m, tracking_mod, client = _mock_mlflow(active=True)
         with _patch(m, tracking_mod):
             b._bridge_tool_to_mlflow(
-                "CrewAI.tool.complete", "genie", "r", SimpleNamespace()
+                "kasal.tool.complete", "genie", "r", SimpleNamespace()
             )
         client.end_span.assert_not_called()  # nothing to close
 
@@ -130,17 +128,17 @@ class TestBridgeToolToMlflow:
         m, tracking_mod, client = _mock_mlflow(active=True)
         with _patch(m, tracking_mod):
             b._bridge_tool_to_mlflow(
-                "CrewAI.tool.execute", "outer", "", SimpleNamespace()
+                "kasal.tool.execute", "outer", "", SimpleNamespace()
             )
             b._bridge_tool_to_mlflow(
-                "CrewAI.tool.execute", "inner", "", SimpleNamespace()
+                "kasal.tool.execute", "inner", "", SimpleNamespace()
             )
             assert len(b._mlflow_tool_spans) == 2
             b._bridge_tool_to_mlflow(
-                "CrewAI.tool.complete", "inner", "ri", SimpleNamespace()
+                "kasal.tool.complete", "inner", "ri", SimpleNamespace()
             )
             b._bridge_tool_to_mlflow(
-                "CrewAI.tool.complete", "outer", "ro", SimpleNamespace()
+                "kasal.tool.complete", "outer", "ro", SimpleNamespace()
             )
         assert b._mlflow_tool_spans == []
         assert client.end_span.call_count == 2

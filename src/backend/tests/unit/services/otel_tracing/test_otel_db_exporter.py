@@ -180,7 +180,7 @@ class TestExtractEventType:
 
     def test_span_name_startswith_match(self):
         """A span name that starts with a map key should match."""
-        span = _make_readable_span(name="CrewAI.crew.kickoff.extra_suffix")
+        span = _make_readable_span(name="kasal.crew.kickoff.extra_suffix")
         assert _extract_event_type(span) == "crew_started"
 
     def test_execute_core_pattern(self):
@@ -209,12 +209,12 @@ class TestExtractEventType:
         assert _extract_event_type(span) == "unknown"
 
     def test_no_attributes(self):
-        span = _make_readable_span(name="CrewAI.tool.execute", attributes=None)
+        span = _make_readable_span(name="kasal.tool.execute", attributes=None)
         assert _extract_event_type(span) == "tool_usage"
 
     def test_explicit_event_type_takes_priority_over_span_name(self):
         span = _make_readable_span(
-            name="CrewAI.crew.kickoff",
+            name="kasal.crew.kickoff",
             attributes={"kasal.event_type": "override"},
         )
         assert _extract_event_type(span) == "override"
@@ -245,7 +245,7 @@ class TestExtractEventSource:
         assert _extract_event_source(span) == "node-42"
 
     def test_crew_in_name(self):
-        span = _make_readable_span(name="CrewAI.crew.kickoff", attributes={})
+        span = _make_readable_span(name="kasal.crew.kickoff", attributes={})
         assert _extract_event_source(span) == "crew"
 
     def test_flow_in_name(self):
@@ -729,7 +729,7 @@ class TestKasalDBSpanExporterExport:
     def test_successful_export_single_span(self):
         exporter = self._make_exporter()
         span = _make_readable_span(
-            name="CrewAI.crew.kickoff",
+            name="kasal.crew.kickoff",
             attributes={},
         )
         result = exporter.export([span])
@@ -741,9 +741,9 @@ class TestKasalDBSpanExporterExport:
     def test_successful_export_multiple_spans(self):
         exporter = self._make_exporter()
         spans = [
-            _make_readable_span(name="CrewAI.crew.kickoff", attributes={}),
-            _make_readable_span(name="CrewAI.task.execute", attributes={}),
-            _make_readable_span(name="CrewAI.llm.call", attributes={}),
+            _make_readable_span(name="kasal.crew.kickoff", attributes={}),
+            _make_readable_span(name="kasal.task.execute", attributes={}),
+            _make_readable_span(name="kasal.llm.call", attributes={}),
         ]
         result = exporter.export(spans)
 
@@ -778,8 +778,8 @@ class TestKasalDBSpanExporterExport:
 
     def test_export_increments_total_exported(self):
         exporter = self._make_exporter()
-        span1 = _make_readable_span(name="CrewAI.llm.call", attributes={})
-        span2 = _make_readable_span(name="CrewAI.llm.complete", attributes={})
+        span1 = _make_readable_span(name="kasal.llm.call", attributes={})
+        span2 = _make_readable_span(name="kasal.llm.complete", attributes={})
 
         exporter.export([span1])
         assert exporter._total_exported == 1
@@ -819,7 +819,7 @@ class TestSpanToRecord:
     def test_all_fields_populated(self):
         exporter = self._make_exporter()
         span = _make_readable_span(
-            name="CrewAI.task.execute",
+            name="kasal.task.execute",
             attributes={
                 "crewai.agent.role": "Researcher",
                 "crewai.task.description": "Do research",
@@ -841,7 +841,7 @@ class TestSpanToRecord:
         assert record["span_id"] == "000000000000abcd"
         assert record["trace_id"] == "0000000000001234"
         assert record["parent_span_id"] == "0000000000005678"
-        assert record["span_name"] == "CrewAI.task.execute"
+        assert record["span_name"] == "kasal.task.execute"
         assert record["status_code"] == "OK"
         assert record["duration_ms"] == 2000
         assert "output" in record
@@ -1362,7 +1362,7 @@ class TestSpanNameMap:
             assert isinstance(val, str), f"Value {val} for key {key} is not a string"
 
     def test_known_entries(self):
-        assert SPAN_NAME_MAP["CrewAI.crew.kickoff"] == "crew_started"
+        assert SPAN_NAME_MAP["kasal.crew.kickoff"] == "crew_started"
         assert SPAN_NAME_MAP["kasal.flow.started"] == "flow_started"
         assert (
             SPAN_NAME_MAP["kasal.hitl.feedback_requested"] == "hitl_feedback_requested"
@@ -1370,18 +1370,18 @@ class TestSpanNameMap:
 
     def test_all_crewai_entries_present(self):
         expected_crewai = [
-            "CrewAI.crew.kickoff",
-            "CrewAI.crew.complete",
-            "CrewAI.task.execute",
-            "CrewAI.task.complete",
-            "CrewAI.task.fail",
-            "CrewAI.agent.execute",
-            "CrewAI.agent.complete",
-            "CrewAI.tool.execute",
-            "CrewAI.tool.complete",
-            "CrewAI.tool.error",
-            "CrewAI.llm.call",
-            "CrewAI.llm.complete",
+            "kasal.crew.kickoff",
+            "kasal.crew.complete",
+            "kasal.task.execute",
+            "kasal.task.complete",
+            "kasal.task.fail",
+            "kasal.agent.execute",
+            "kasal.agent.complete",
+            "kasal.tool.execute",
+            "kasal.tool.complete",
+            "kasal.tool.error",
+            "kasal.llm.call",
+            "kasal.llm.complete",
         ]
         for key in expected_crewai:
             assert key in SPAN_NAME_MAP
@@ -1607,7 +1607,7 @@ class TestExportIntegration:
     def test_full_pipeline_crew_kickoff(self):
         exporter = self._make_exporter()
         span = _make_readable_span(
-            name="CrewAI.crew.kickoff",
+            name="kasal.crew.kickoff",
             attributes={
                 "crewai.agent.role": "Orchestrator",
                 "crewai.task.description": "Manage the crew",
@@ -1653,7 +1653,7 @@ class TestExportIntegration:
     def test_full_pipeline_tool_span(self):
         exporter = self._make_exporter()
         span = _make_readable_span(
-            name="CrewAI.tool.execute",
+            name="kasal.tool.execute",
             attributes={
                 "tool.name": "WebSearch",
                 "tool.description": "Searches the web",

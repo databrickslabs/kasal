@@ -817,7 +817,7 @@ class TestGuardrailRejectedRunsAreNotMined:
                     event_source="agent",
                     event_context="Analyst",
                     event_type="tool_usage",
-                    span_name="CrewAI.tool.complete",
+                    span_name="kasal.tool.complete",
                     trace_metadata={"tool_name": "Parse", "tool_args": {}},
                     output={"content": 'Tool error: {"ok": false}'},
                 )

@@ -207,7 +207,7 @@ class TestEmitSpanNullGuards:
         bridge = OTelEventBridge(tracer=mock_tracer, job_id="job-1")
 
         event = SimpleNamespace(crew_name="My Crew")
-        bridge._emit_span("CrewAI.crew.kickoff", "crew_started", event)
+        bridge._emit_span("kasal.crew.kickoff", "crew_started", event)
 
         assert bridge._current_crew_name == "My Crew"
 

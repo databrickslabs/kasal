@@ -628,7 +628,7 @@ class TestOTelEventBridgeRegisterHandler:
         handlers[known_cls]("source", fake_event)
 
         bridge._emit_span.assert_called_once_with(
-            "CrewAI.task.execute", "task_started", fake_event
+            "kasal.task.execute", "task_started", fake_event
         )
 
 
@@ -652,11 +652,11 @@ class TestOTelEventBridgeEmitSpan:
             output="Found results",
         )
 
-        bridge._emit_span("CrewAI.task.execute", "task_started", event)
+        bridge._emit_span("kasal.task.execute", "task_started", event)
 
         # context=None -> fall back to the ambient context; see _dag_parent_context.
         tracer.start_as_current_span.assert_called_once_with(
-            "CrewAI.task.execute", context=None
+            "kasal.task.execute", context=None
         )
         span.set_attribute.assert_any_call("kasal.event_type", "task_started")
         span.set_attribute.assert_any_call("kasal.agent_name", "Researcher")
@@ -671,7 +671,7 @@ class TestOTelEventBridgeEmitSpan:
         long_description = "d" * 900
 
         bridge._emit_span(
-            "CrewAI.task.execute",
+            "kasal.task.execute",
             "task_started",
             _make_event(task=SimpleNamespace(description=long_description, name="t")),
         )
@@ -688,7 +688,7 @@ class TestOTelEventBridgeEmitSpan:
         bridge = OTelEventBridge(tracer, "job-full-desc-once")
 
         bridge._emit_span(
-            "CrewAI.agent.execute",
+            "kasal.agent.execute",
             "agent_execution",
             _make_event(task=SimpleNamespace(description="d" * 900, name="t")),
         )
@@ -740,7 +740,7 @@ class TestOTelEventBridgeEmitSpan:
 
         # Agent/task event establishes the current agent/task.
         bridge._emit_span(
-            "CrewAI.agent.execute",
+            "kasal.agent.execute",
             "agent_execution",
             _make_event(agent_role="Researcher", task_name="Gather data"),
         )
@@ -762,7 +762,7 @@ class TestOTelEventBridgeEmitSpan:
         bridge._current_agent_name = "Researcher"
 
         bridge._emit_span(
-            "CrewAI.tool.execute", "tool_usage", _make_event(tool_name="t")
+            "kasal.tool.execute", "tool_usage", _make_event(tool_name="t")
         )
 
         agent_calls = [
@@ -780,7 +780,7 @@ class TestOTelEventBridgeEmitSpan:
 
         # A task event carries the task_id → tracked on the bridge.
         bridge._emit_span(
-            "CrewAI.task.execute",
+            "kasal.task.execute",
             "task_started",
             _make_event(agent_role="A", task_name="T", task_id="task-123"),
         )
@@ -815,7 +815,7 @@ class TestOTelEventBridgeEmitSpan:
 
         # Running task establishes the owner agent/task/task_id.
         bridge._emit_span(
-            "CrewAI.task.execute",
+            "kasal.task.execute",
             "task_started",
             _make_event(agent_role="Researcher", task_name="Gather", task_id="task-7"),
         )
@@ -826,7 +826,7 @@ class TestOTelEventBridgeEmitSpan:
         # and NO task of its own.
         span.set_attribute.reset_mock()
         bridge._emit_span(
-            "CrewAI.llm.call", "llm_call", _make_event(agent_role="Guardrail Agent")
+            "kasal.llm.call", "llm_call", _make_event(agent_role="Guardrail Agent")
         )
 
         span.set_attribute.assert_any_call("kasal.agent_name", "Researcher")
@@ -842,7 +842,7 @@ class TestOTelEventBridgeEmitSpan:
         tracer, span = _make_tracer()
         bridge = OTelEventBridge(tracer, "job-gr2")
         bridge._emit_span(
-            "CrewAI.task.execute",
+            "kasal.task.execute",
             "task_started",
             _make_event(agent_role="Researcher", task_name="Gather", task_id="task-7"),
         )
@@ -851,7 +851,7 @@ class TestOTelEventBridgeEmitSpan:
 
         span.set_attribute.reset_mock()
         bridge._emit_span(
-            "CrewAI.llm.call", "llm_call", _make_event(agent_role="Guardrail Agent")
+            "kasal.llm.call", "llm_call", _make_event(agent_role="Guardrail Agent")
         )
 
         marked = [
@@ -869,7 +869,7 @@ class TestOTelEventBridgeEmitSpan:
 
         # Task 1 active; its agent kicks off a save.
         bridge._emit_span(
-            "CrewAI.task.execute",
+            "kasal.task.execute",
             "task_started",
             _make_event(task_id="t1", task_name="T1", agent_role="A"),
         )
@@ -879,7 +879,7 @@ class TestOTelEventBridgeEmitSpan:
 
         # Task 2 starts → current task moves on while the save is still running.
         bridge._emit_span(
-            "CrewAI.task.execute",
+            "kasal.task.execute",
             "task_started",
             _make_event(task_id="t2", task_name="T2", agent_role="A"),
         )
@@ -895,7 +895,7 @@ class TestOTelEventBridgeEmitSpan:
         bridge = OTelEventBridge(tracer, "job-empty")
 
         event = _make_event()
-        bridge._emit_span("CrewAI.task.execute", "task_started", event)
+        bridge._emit_span("kasal.task.execute", "task_started", event)
 
         span.set_attribute.assert_any_call("kasal.event_type", "task_started")
         # Verify optional attributes were NOT set
@@ -913,7 +913,7 @@ class TestOTelEventBridgeEmitSpan:
         bridge = OTelEventBridge(tracer, "job-fail")
 
         event = _make_event(error="Something went wrong")
-        bridge._emit_span("CrewAI.task.fail", "task_failed", event)
+        bridge._emit_span("kasal.task.fail", "task_failed", event)
 
         from opentelemetry.trace import StatusCode
 
@@ -927,7 +927,7 @@ class TestOTelEventBridgeEmitSpan:
         bridge = OTelEventBridge(tracer, "job-err")
 
         event = _make_event(error=None, message="Tool error occurred")
-        bridge._emit_span("CrewAI.tool.error", "tool_error", event)
+        bridge._emit_span("kasal.tool.error", "tool_error", event)
 
         from opentelemetry.trace import StatusCode
 
@@ -939,7 +939,7 @@ class TestOTelEventBridgeEmitSpan:
         bridge = OTelEventBridge(tracer, "job-no-msg")
 
         event = _make_event()
-        bridge._emit_span("CrewAI.task.fail", "task_failed", event)
+        bridge._emit_span("kasal.task.fail", "task_failed", event)
 
         from opentelemetry.trace import StatusCode
 
@@ -962,7 +962,7 @@ class TestOTelEventBridgeEmitSpan:
 
         long_task = "z" * 700
         event = _make_event(task_name=long_task)
-        bridge._emit_span("CrewAI.task.execute", "task_started", event)
+        bridge._emit_span("kasal.task.execute", "task_started", event)
 
         # _get_task_name applies _safe_str (500) and then span code does [:500]
         task_calls = [
@@ -977,7 +977,7 @@ class TestOTelEventBridgeEmitSpan:
         bridge = OTelEventBridge(tracer, "job-ok-status")
 
         event = _make_event()
-        bridge._emit_span("CrewAI.task.execute", "task_started", event)
+        bridge._emit_span("kasal.task.execute", "task_started", event)
 
         span.set_status.assert_not_called()
 
@@ -2623,7 +2623,7 @@ class TestIntegrationRegisterAndTrigger:
         # Verify span was created
         # context=None -> fall back to the ambient context; see _dag_parent_context.
         tracer.start_as_current_span.assert_called_once_with(
-            "CrewAI.task.execute", context=None
+            "kasal.task.execute", context=None
         )
         span.set_attribute.assert_any_call("kasal.event_type", "task_started")
         span.set_attribute.assert_any_call("kasal.agent_name", "Coder")

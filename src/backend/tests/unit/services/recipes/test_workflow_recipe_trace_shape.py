@@ -11,7 +11,7 @@ So the fixtures here are shaped like real spans, verified against
 ``execution_trace`` rows from live runs:
 
     event_type      'tool_usage'                      (start AND completion)
-    span_name       'CrewAI.tool.execute' | '.complete' | 'kasal.guardrail.failed'
+    span_name       'kasal.tool.execute' | '.complete' | 'kasal.guardrail.failed'
     trace_metadata  {'tool_name': ..., 'tool_args': {...}}
     output          {'content': '...', 'duration_ms': ..., 'extra_data': {...}}
 
@@ -42,7 +42,7 @@ def _tool_span(job, name, args=None, *, complete=False, content="ok"):
         event_source="agent",
         event_context="Analyst",
         event_type="tool_usage",
-        span_name="CrewAI.tool.complete" if complete else "CrewAI.tool.execute",
+        span_name="kasal.tool.complete" if complete else "kasal.tool.execute",
         trace_metadata={"tool_name": name, "tool_args": args or {}},
         output={"content": content, "duration_ms": 1.0, "extra_data": {}},
     )

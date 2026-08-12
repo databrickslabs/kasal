@@ -36,7 +36,7 @@ class ExecutionTrace(Base):
     # OTel-native fields
     span_name = Column(
         String(200), nullable=True
-    )  # Raw OTel span name (e.g. "CrewAI.task.execute")
+    )  # Raw OTel span name (e.g. "kasal.task.execute")
     status_code = Column(
         String(10), nullable=True
     )  # OTel status: "OK", "ERROR", "UNSET"
