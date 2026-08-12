@@ -19,13 +19,11 @@ logger = logging.getLogger(__name__)
 
 # Map OTel span names to Kasal event_type strings.
 #
-# Spans are named ``kasal.<subject>.<verb>``. The ``CrewAI.*`` aliases below are
-# the names this codebase emitted while the engine was a vendored copy of
-# crewAI; there is no CrewAIInstrumentor any more, and nothing writes those
-# names today. They stay because the trace table is HISTORY: every row written
-# before the rename carries the old name, and dropping the alias would blank
-# out every past run in the timeline and hide those calls from the replay
-# cassette. Read both, write one.
+# Spans are named ``kasal.<subject>.<verb>``. Twelve of them were once named
+# ``CrewAI.*``, from the vendored library the engine grew out of; no alias for
+# those is kept here, because the rows that carried them were renamed with the
+# code (see the migration that rewrites execution_trace.span_name). An
+# unmigrated database is the one case where an old row no longer maps.
 SPAN_NAME_MAP: Dict[str, str] = {
     # Crew lifecycle
     "kasal.crew.kickoff": "crew_started",
