@@ -50,7 +50,12 @@ logger = logging.getLogger(__name__)
 
 
 class _Cassette:
-    """Recordings for one run, matched by arguments then by position.
+    """Recordings from earlier runs, matched by arguments then by position.
+
+    Position is scoped to ONE run's ONE bucket — "the second search of this
+    task", or of this chat question. Recordings arrive newest-run-first, so the
+    first group holding the bucket a call names is the most recent recording of
+    that same work, whatever else ran in between.
 
     Not thread-safe by accident: tool calls run on LLM worker threads, and two
     agents calling the same tool at once must not be handed the same recording.
@@ -59,12 +64,21 @@ class _Cassette:
     def __init__(self, recordings: List[Any]) -> None:
         self._lock = threading.Lock()
         self._by_args: Dict[str, List[Any]] = {}
+        # (tool, bucket, run) -> that run's calls, in order. Keyed by run as
+        # well because a position only counts within the run that made it:
+        # merging two runs' searches would answer the second search of one
+        # with the third of another.
         self._by_position: Dict[tuple, List[Any]] = {}
+        self._runs: List[str] = []
         for rec in recordings:
             self._by_args.setdefault(
                 _args_bucket(rec.tool_name, rec.args_key), []
             ).append(rec)
-            self._by_position.setdefault((rec.tool_name, rec.task_name), []).append(rec)
+            self._by_position.setdefault(
+                (rec.tool_name, rec.task_name, rec.job_id), []
+            ).append(rec)
+            if rec.job_id not in self._runs:
+                self._runs.append(rec.job_id)
         self._spent: set = set()
         self.hits = 0
         self.misses = 0
@@ -76,13 +90,25 @@ class _Cassette:
         with self._lock:
             match = self._first_unspent(
                 self._by_args.get(_args_bucket(tool_name, args_key))
-            ) or self._first_unspent(self._by_position.get((tool_name, task_name)))
+            ) or self._by_position_match(tool_name, task_name)
             if match is None:
                 self.misses += 1
                 return None
             self._spent.add(id(match))
             self.hits += 1
             return match
+
+    def _by_position_match(self, tool_name: str, task_name: str) -> Optional[Any]:
+        """The next unused call of this tool in this bucket, most recent run first."""
+        if not task_name:
+            return None
+        for job_id in self._runs:
+            match = self._first_unspent(
+                self._by_position.get((tool_name, task_name, job_id))
+            )
+            if match is not None:
+                return match
+        return None
 
     def _first_unspent(self, candidates: Optional[List[Any]]) -> Optional[Any]:
         for candidate in candidates or []:

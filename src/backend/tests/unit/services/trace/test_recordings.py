@@ -51,8 +51,11 @@ async def test_the_since_bound_is_naive():
 
 
 @pytest.mark.asyncio
-async def test_only_the_most_recent_run_is_used():
-    """Position only means something inside one run."""
+async def test_every_run_in_the_window_is_returned_newest_first():
+    """Keeping only the latest run made replay depend on what happened to run
+    last: one crew run between two chat turns and the chat turn's source was a
+    run it shares no bucket with. Position stays scoped to a single run — the
+    cassette enforces that — but the choice of run is no longer adjacency."""
     service = _service([_row(job_id="newest"), _row(job_id="older")])
 
     cassette = await service.cassette_for(
@@ -61,7 +64,7 @@ async def test_only_the_most_recent_run_is_used():
         max_age_seconds=3600,
     )
 
-    assert {r.job_id for r in cassette} == {"newest"}
+    assert [r.job_id for r in cassette] == ["newest", "older"]
 
 
 @pytest.mark.asyncio

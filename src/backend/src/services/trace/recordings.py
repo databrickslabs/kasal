@@ -50,15 +50,16 @@ class ToolRecordingsService:
         max_age_seconds: int,
         limit: int = 500,
     ) -> List[ToolRecording]:
-        """Every tool call from the most recent earlier run.
+        """Earlier runs' tool calls, newest run first, chronological within each.
 
-        ONE source run, not a pool of every matching call ever made: replay
-        falls back to position ("the second search this task ran") when the
-        arguments do not match, and a position is only meaningful within a
-        single run. Mixing runs would answer the second search of one workload
-        with the second search of another.
-
-        Chronological within that run, which is the order the positions mean.
+        Every run in the window, not just the latest one. It used to keep only
+        the most recent run's worth, which made replay depend on what happened
+        to run last: one crew run between two chat turns and the chat turn's
+        source became a crew run it shares no bucket with, so nothing matched
+        and the calls went out again. The caller groups by (run, bucket) and
+        picks the newest group whose bucket the live call actually names —
+        position stays meaningful within one run's one task, which is the
+        constraint that mattered, without tying it to adjacency.
 
         Deliberately NOT filtered by tool. It used to take the replayable
         tools' names and filter on them, which quietly dropped most of the
@@ -97,12 +98,20 @@ class ToolRecordingsService:
         if not parsed:
             return []
 
-        # Rows arrive newest-first, so the first job_id seen is the latest run
-        # that used one of these tools.
-        source_job = parsed[0].job_id
-        take = [r for r in parsed if r.job_id == source_job]
-        take.reverse()
-        return take
+        # Rows arrive newest-first, ordered by id. That IS the run order — no
+        # timestamp arithmetic, which ties whenever two rows share a second and
+        # would silently reorder runs. First job_id seen is the newest run.
+        order: List[str] = []
+        by_run: Dict[str, List[ToolRecording]] = {}
+        for recording in parsed:
+            if recording.job_id not in by_run:
+                by_run[recording.job_id] = []
+                order.append(recording.job_id)
+            by_run[recording.job_id].append(recording)
+
+        # Runs newest-first; each run's own calls chronological, because that
+        # is the order a position counts in.
+        return [r for job_id in order for r in reversed(by_run[job_id])]
 
 
 def canonical_args(args: Any) -> str:
