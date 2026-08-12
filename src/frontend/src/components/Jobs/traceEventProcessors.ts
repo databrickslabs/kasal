@@ -115,6 +115,26 @@ export function extractToolName(trace: Trace): string {
 }
 
 /**
+ * Was this call answered from an earlier run's recording?
+ *
+ * Three places to look, because the two paths write the row differently: the
+ * crew and flow paths go through the OTel bridge, which lands the flag in
+ * `trace_metadata` and `extra_data`; the chat path builds its own row and puts
+ * it at the top level of `output`. Missing that last case is why a chat call
+ * that WAS replayed — `from_cache: true`, 0 ms, no API call — still rendered
+ * as an ordinary tool row.
+ */
+export function isFromCache(trace: Trace): boolean {
+  if (getField(trace, 'from_cache')) return true;
+  const output = trace.output;
+  return Boolean(
+    output &&
+      typeof output === 'object' &&
+      (output as Record<string, unknown>).from_cache,
+  );
+}
+
+/**
  * Get a field from trace_metadata, falling back to extra_data
  */
 export function getField(trace: Trace, field: string): unknown {
@@ -229,8 +249,7 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
     const toolName = extractToolName(trace);
     const metadata = parseTraceMetadata(trace);
     const operation = metadata?.operation as string | undefined;
-    const fromCache = metadata?.from_cache as boolean | undefined;
-    const cacheSuffix = fromCache ? ' [cached]' : '';
+    const cacheSuffix = isFromCache(trace) ? ' [cached]' : '';
 
     if (operation === 'tool_started') {
       return { type: 'tool', description: `${toolName} (input)` };
@@ -736,7 +755,13 @@ export function processTraceEvent(trace: Trace): ProcessedEvent | null {
       return null;
     }
     const toolName = extractToolName(trace);
-    return { type: 'tool_result', description: `${toolName} (output)` };
+    // The badge belongs here too. These are the CHAT path's tool rows, and
+    // chat is where replay pays off most (re-asking the same question), so a
+    // branch that could not render "[cached]" made a working feature look
+    // broken — the row said nothing while the record behind it said
+    // from_cache: true, 0 ms.
+    const cacheSuffix = isFromCache(trace) ? ' [cached]' : '';
+    return { type: 'tool_result', description: `${toolName} (output)${cacheSuffix}` };
   }
 
   // Default: convert event_type to Title Case
