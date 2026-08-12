@@ -122,24 +122,52 @@ def canonical_args(args: Any) -> str:
 
 
 def _recording(row: Any) -> Optional[ToolRecording]:
+    """One row → one recording, in either shape a finished call is written.
+
+    The two paths record the same call differently, and neither is going to
+    change to suit this reader:
+
+    - crew and flow, via the OTel bridge — arguments and identity live under
+      ``output.extra_data``, and the arguments arrive as a Python repr because
+      that is how tool kwargs are stringified on the way to a span.
+    - chat, which writes its own rows — ``{tool_name, input, content}`` at the
+      top level, arguments as JSON, and no task, because a chat turn has no
+      Task object.
+
+    A chat recording is filed under its own RUN rather than under anything
+    describing the turn, which makes it unreachable by positional matching and
+    leaves it to exact arguments. That is deliberate. The obvious bucket,
+    ``event_context``, is the same constant on every chat row in this database
+    — "Respond directly and helpfully to the user's request." — because the
+    light agent's prompt is the generated task, not the user's question. Keying
+    on it would let any chat turn be answered with the second search of an
+    unrelated one, which is a plausible-looking wrong answer rather than a
+    missing one.
+    """
     output = _row_json(getattr(row, "output", None))
     if not isinstance(output, dict):
         return None
+    metadata = _row_json(getattr(row, "trace_metadata", None))
     extra = output.get("extra_data")
     extra = extra if isinstance(extra, dict) else {}
 
-    tool_name = extra.get("tool_name") or _row_json(
-        getattr(row, "trace_metadata", None)
-    ).get("tool_name")
+    tool_name = (
+        extra.get("tool_name") or output.get("tool_name") or metadata.get("tool_name")
+    )
     content = output.get("content")
     if not tool_name or content is None:
         return None
 
+    # `input` is the chat path's name for the same thing `tool_args` is in a
+    # span; canonical_args parses either notation.
+    args = extra.get("tool_args") if "tool_args" in extra else output.get("input")
+    job_id = str(getattr(row, "job_id", "") or "")
+
     return ToolRecording(
-        job_id=str(getattr(row, "job_id", "") or ""),
+        job_id=job_id,
         tool_name=str(tool_name),
-        task_name=str(extra.get("task_name") or ""),
-        args_key=canonical_args(extra.get("tool_args")),
+        task_name=str(extra.get("task_name") or f"run:{job_id}"),
+        args_key=canonical_args(args),
         output=str(content),
         recorded_at=getattr(row, "created_at", None),
     )

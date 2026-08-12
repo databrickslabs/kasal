@@ -9,7 +9,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import Text, cast, delete, func, update
+from sqlalchemy import Text, and_, cast, delete, func, or_, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -66,21 +66,39 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
     ) -> List[ExecutionTrace]:
         """Completed tool calls from EARLIER runs — the replay cassette.
 
-        Only ``kasal.tool.complete`` rows: the start row repeats the arguments
-        but has no result, and a recording without a result is not one. Scoped
-        to the caller's groups because a recording is workspace data like any
-        other, and excludes the run doing the asking so a run cannot replay
-        itself.
+        FINISHED calls only, in either of the two shapes this codebase writes
+        them: ``kasal.tool.complete`` spans from the OTel bridge (crew and
+        flow), and ``<tool>_run`` rows written directly by the chat path, which
+        does not run the bridge. A start row repeats the arguments but has no
+        result, and a recording without a result is not one; an error row is
+        excluded for the stronger reason that a failure must never be served as
+        an answer.
+
+        ``response_run`` is the chat path's final ANSWER, not a tool call, and
+        is excluded by name.
+
+        Scoped to the caller's groups because a recording is workspace data
+        like any other, and excludes the run doing the asking so a run cannot
+        replay itself.
 
         Newest first, bounded — the caller keeps the newest run's worth and
         drops the rest, so this is a page of candidates, not a full history.
         """
+        bridge_rows = and_(
+            ExecutionTrace.event_type == "tool_usage",
+            ExecutionTrace.span_name == "kasal.tool.complete",
+        )
+        # autoescape, because `_` is a single-character wildcard in LIKE: the
+        # unescaped pattern also matches anything ending in "run".
+        chat_rows = and_(
+            ExecutionTrace.event_type.endswith("_run", autoescape=True),
+            ExecutionTrace.event_type != "response_run",
+        )
         result = await self.session.execute(
             select(ExecutionTrace)
             .where(
                 ExecutionTrace.group_id.in_(group_ids),
-                ExecutionTrace.event_type == "tool_usage",
-                ExecutionTrace.span_name == "kasal.tool.complete",
+                or_(bridge_rows, chat_rows),
                 ExecutionTrace.created_at >= since,
                 ExecutionTrace.job_id != exclude_job_id,
             )

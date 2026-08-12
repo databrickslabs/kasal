@@ -109,3 +109,80 @@ async def test_a_read_failure_is_no_cassette_rather_than_a_failed_run():
         )
         == []
     )
+
+
+# ---------------------------------------------------------------------------
+# The chat path records too, in its own shape
+# ---------------------------------------------------------------------------
+
+
+def _chat_row(
+    job_id="chat-1", tool="PerplexityTool", args='{"query": "a"}', content="out"
+):
+    """What services/chat/service.py writes: no span, no extra_data, args as
+    JSON under `input`, and an event_context that describes the generated task
+    rather than the user's question."""
+    return SimpleNamespace(
+        job_id=job_id,
+        created_at=datetime(2026, 8, 12, 9, 0),
+        event_context="Respond directly and helpfully to the user's request.",
+        output={
+            "tool_name": tool,
+            "input": args,
+            "content": content,
+            "duration_ms": 12,
+        },
+        trace_metadata={"agent_role": "Assistant", "tool_name": tool},
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_chat_row_is_a_recording():
+    """Chat does not run the OTel bridge, so its calls are written directly —
+    they are still finished calls with arguments and a result."""
+    service = _service([_chat_row()])
+
+    cassette = await service.cassette_for(
+        group_ids=["g"], exclude_job_id="run-2", max_age_seconds=3600
+    )
+
+    assert len(cassette) == 1
+    assert cassette[0].tool_name == "PerplexityTool"
+    assert cassette[0].output == "out"
+
+
+@pytest.mark.asyncio
+async def test_json_args_and_repr_args_produce_the_same_key():
+    """The two paths stringify arguments differently; a recording from one must
+    be findable by a call made on the other."""
+    from src.services.trace.recordings import canonical_args
+
+    chat = await _service([_chat_row(args='{"query": "a", "n": 1}')]).cassette_for(
+        group_ids=["g"], exclude_job_id="x", max_age_seconds=3600
+    )
+
+    assert chat[0].args_key == canonical_args("{'n': 1, 'query': 'a'}")
+
+
+@pytest.mark.asyncio
+async def test_a_chat_recording_is_filed_under_its_own_run():
+    """So position cannot cross turns. event_context is the SAME constant on
+    every chat row ("Respond directly and helpfully to the user's request."),
+    so keying position on it would answer one question with another question's
+    second search."""
+    cassette = await _service([_chat_row(job_id="chat-9")]).cassette_for(
+        group_ids=["g"], exclude_job_id="x", max_age_seconds=3600
+    )
+
+    assert cassette[0].task_name == "run:chat-9"
+    assert "Respond directly" not in cassette[0].task_name
+
+
+@pytest.mark.asyncio
+async def test_a_crew_recording_still_uses_its_task():
+    """The crew path has a real task, and position within it is meaningful."""
+    cassette = await _service([_row(task="Research the market")]).cassette_for(
+        group_ids=["g"], exclude_job_id="x", max_age_seconds=3600
+    )
+
+    assert cassette[0].task_name == "Research the market"
