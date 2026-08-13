@@ -22,13 +22,33 @@ def run_async(coro):
     except RuntimeError:
         loop = None
 
+    async def _run_and_dispose():
+        # Dispose any Lakebase engine bound to THIS throwaway loop before it
+        # closes. get_lakebase_session binds a thread-local asyncpg engine (and a
+        # token-refresh task) to the loop that first opens it; asyncio.run closes
+        # the loop without disposing it, orphaning the connection so the next
+        # Lakebase op on this thread (e.g. the flow HITL gate) fails with
+        # "This transaction is closed". Disposing here, on the same loop, prevents
+        # that. Import lazily so this bridge stays usable without a Lakebase build.
+        try:
+            return await coro
+        finally:
+            try:
+                from src.db.lakebase_session import (
+                    dispose_thread_local_lakebase_factory,
+                )
+
+                await dispose_thread_local_lakebase_factory()
+            except Exception:
+                pass
+
     if loop and loop.is_running():
         ctx = contextvars.copy_context()
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(ctx.run, asyncio.run, coro)
+            future = pool.submit(ctx.run, asyncio.run, _run_and_dispose())
             return future.result(timeout=300)
     else:
-        return asyncio.run(coro)
+        return asyncio.run(_run_and_dispose())
 
 
 def to_snake_case(name: str) -> str:

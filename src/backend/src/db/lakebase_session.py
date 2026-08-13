@@ -689,6 +689,30 @@ async def dispose_lakebase_factory() -> None:
         logger.debug("No Lakebase factory to dispose")
 
 
+async def dispose_thread_local_lakebase_factory() -> None:
+    """Dispose the CURRENT thread's Lakebase factory, if any.
+
+    Call this on the SAME event loop the factory's engine was created on, right
+    before that loop closes. A crew/tool sync->async bridge (``run_async``) spins
+    up a fresh loop per call; ``get_lakebase_session`` binds a thread-local engine
+    (and its token-refresh task) to that loop. ``asyncio.run`` then closes the loop
+    WITHOUT disposing the engine, so the asyncpg connection and refresh task are
+    orphaned on a dead loop — and the next Lakebase op on that thread-local factory
+    (e.g. the flow HITL gate creating its approval row) fails with
+    "This transaction is closed" / "Event loop is closed". Disposing here, inside
+    the bridge's own loop, means nothing is left dangling for the next caller.
+    """
+    factory = getattr(_thread_local, "factory", None)
+    if factory is None:
+        return
+    try:
+        await factory.dispose()
+    except Exception as e:  # noqa: BLE001 — teardown must never raise
+        logger.warning(f"Error disposing thread-local Lakebase factory: {e}")
+    finally:
+        _thread_local.factory = None
+
+
 def _is_crew_thread() -> bool:
     """Check if we're running in a crew thread (USE_NULLPOOL indicates sync-async bridge)."""
     return os.environ.get("USE_NULLPOOL", "").lower() == "true"
