@@ -478,33 +478,65 @@ export const useExecutionMonitoring = (
   // the completion message still arrives via polling exactly as before. The
   // bubble is transient — the terminal result message is authoritative, so
   // the cleanup drops it when the run ends (or the session/tab switches).
+  //
+  // Chunks are COALESCED per animation frame, never painted per SSE frame. A
+  // hierarchical crew with large outputs emits llm_chunk at ~30/sec, and each
+  // token used to trigger a store set() + a re-render of a markdown bubble that
+  // grows to tens of KB — O(n²) work that froze the tab ("Page Unresponsive").
+  // Buffering into one append per frame caps the work at the display refresh
+  // rate regardless of token rate. (ChatMode paces the same way — see
+  // enqueueStreamText in ChatMode/store/executionStore.ts.)
   const streamBubbleRef = useRef<string | null>(null);
   useEffect(() => {
     if (!executingJobId) return;
     const jobId = executingJobId;
     const bubbleId = `stream-${jobId}`;
     streamBubbleRef.current = null;
-    const close = streamExecution(jobId, (event) => {
-      if (event.event !== 'llm_chunk') return;
-      const chunk = (event.data.chunk as string) || '';
-      if (!chunk) return;
+
+    let pending = '';
+    let rafId: number | null = null;
+
+    const paint = (text: string) => {
       const store = useChatMessagesStore.getState();
       if (streamBubbleRef.current !== bubbleId) {
         streamBubbleRef.current = bubbleId;
         store.addMessage(sessionId, {
           id: bubbleId,
           type: 'assistant',
-          content: chunk,
+          content: text,
           timestamp: new Date(),
           isIntermediate: true,
           jobId,
         } as ChatMessage);
       } else {
-        store.appendToMessage(sessionId, bubbleId, chunk);
+        store.appendToMessage(sessionId, bubbleId, text);
+      }
+    };
+
+    const flush = () => {
+      rafId = null;
+      if (!pending) return;
+      const text = pending;
+      pending = '';
+      paint(text);
+    };
+
+    const close = streamExecution(jobId, (event) => {
+      if (event.event !== 'llm_chunk') return;
+      const chunk = (event.data.chunk as string) || '';
+      if (!chunk) return;
+      pending += chunk;
+      if (rafId === null) {
+        rafId = requestAnimationFrame(flush);
       }
     });
     return () => {
       close();
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      pending = '';
       if (streamBubbleRef.current) {
         useChatMessagesStore.getState().removeMessage(sessionId, streamBubbleRef.current);
         streamBubbleRef.current = null;
