@@ -63,6 +63,23 @@ def _run_async(coro_factory: Callable[[], Any]) -> Any:
         except BaseException as exc:  # noqa: BLE001 - re-raised on the caller thread
             box["error"] = exc
         finally:
+            # Dispose any Lakebase engine bound to THIS loop before closing it.
+            # get_isolated_db_session -> get_lakebase_session binds a thread-local
+            # asyncpg engine (+ token-refresh task) to this throwaway loop; closing
+            # the loop without disposing orphans the connection. On the crew worker
+            # thread that runs @persist's save_state, the very next Lakebase op —
+            # the flow HITL gate creating its approval row — then reuses that dead
+            # thread-local factory and fails with "This transaction is closed" /
+            # "Event loop is closed". Disposing here, on the same loop, leaves a
+            # clean thread-local for the gate.
+            try:
+                from src.db.lakebase_session import (
+                    dispose_thread_local_lakebase_factory,
+                )
+
+                loop.run_until_complete(dispose_thread_local_lakebase_factory())
+            except Exception:
+                pass
             try:
                 loop.run_until_complete(loop.shutdown_asyncgens())
             finally:
