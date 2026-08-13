@@ -80,7 +80,7 @@ class ConverterService:
         history_dict = history_data.model_dump()
         if self.group_context:
             history_dict["group_id"] = self.group_context.primary_group_id
-            history_dict["created_by_email"] = self.group_context.user_email
+            history_dict["created_by_email"] = self.group_context.group_email
 
         # Create history
         history = await self.history_repo.create(history_dict)
@@ -221,7 +221,7 @@ class ConverterService:
         job_dict["status"] = "pending"
         if self.group_context:
             job_dict["group_id"] = self.group_context.primary_group_id
-            job_dict["created_by_email"] = self.group_context.user_email
+            job_dict["created_by_email"] = self.group_context.group_email
 
         # Create job
         job = await self.job_repo.create(job_dict)
@@ -375,7 +375,7 @@ class ConverterService:
         Raises:
             HTTPException: If user not authenticated
         """
-        if not self.group_context or not self.group_context.user_email:
+        if not self.group_context or not self.group_context.group_email:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Authentication required to save configurations",
@@ -384,7 +384,7 @@ class ConverterService:
         # Add group context
         config_dict = config_data.model_dump()
         config_dict["group_id"] = self.group_context.primary_group_id
-        config_dict["created_by_email"] = self.group_context.user_email
+        config_dict["created_by_email"] = self.group_context.group_email
 
         # Create configuration
         config = await self.config_repo.create(config_dict)
@@ -437,7 +437,7 @@ class ConverterService:
         # Check ownership (unless admin)
         if (
             self.group_context
-            and config.created_by_email != self.group_context.user_email
+            and config.created_by_email != self.group_context.group_email
         ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -472,7 +472,7 @@ class ConverterService:
         # Check ownership (unless admin)
         if (
             self.group_context
-            and config.created_by_email != self.group_context.user_email
+            and config.created_by_email != self.group_context.group_email
         ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -497,7 +497,7 @@ class ConverterService:
         filter_params = filter_params or SavedConfigurationFilter()
 
         group_id = self.group_context.primary_group_id if self.group_context else None
-        user_email = self.group_context.user_email if self.group_context else None
+        user_email = self.group_context.group_email if self.group_context else None
 
         # Apply filters
         if filter_params.is_template:
