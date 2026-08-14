@@ -50,6 +50,15 @@ _KASAL_CONTEXT_LIMIT_PHRASES: Final[tuple[str, ...]] = (
     "context window",
     "context_length",
     "tokens > ",
+    # llama.cpp / self-hosted OpenAI-compatible servers:
+    #   "request (139516 tokens) exceeds the available context size (131072
+    #    tokens), try increasing it"  — type: exceed_context_size_error
+    # None of the phrases above appear in that sentence, so the overflow was not
+    # recognised, the retry handler logged "Non-retryable error", and the run
+    # died on a 400 instead of compacting. Both the prose and the error type are
+    # listed: the type survives rewording of the message.
+    "available context size",
+    "exceed_context_size_error",
 )
 
 
