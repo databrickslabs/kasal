@@ -68,6 +68,7 @@ from src.services.llm.handlers.vllm import VLLMFunctionCallingLLM
 from src.services.llm.params import resolve as resolve_llm_params
 from src.services.settings.api_keys import ApiKeysService
 from src.services.settings.models import ModelConfigService
+from src.utils.coercion import positive_int
 from src.utils.databricks_url_utils import DatabricksURLUtils
 
 # The former crewai_memory_patch / crewai_instructor_patch side-effect
@@ -125,6 +126,46 @@ def _refused_params(
 # module to get at it. Re-exported here for the existing call sites.
 from src.core.llm.subprocess_token import set_subprocess_user_token
 
+
+def _register_context_window(
+    model_name: str, context_window: Any, *, keys: tuple[str, ...] = ()
+) -> None:
+    """Teach the transport one model's context window.
+
+    The single writer for LLM_CONTEXT_WINDOW_SIZES. Three places used to write
+    it inline — the seeded-catalogue loop below, the crew subprocess bootstrap
+    (``agent_builder/process_executor``), and the per-model registration that
+    covers models a user created, which live only in the database. They agreed
+    on the hard part (which key spellings a lookup might use) and differed on
+    everything else: only one validated the value, none were idempotent, and a
+    missing window silently became 128,000.
+
+    ``keys`` are the spellings to register in addition to the bare name — the
+    lookup is by exact key and callers differ on which prefix they carry. When
+    omitted, the "openai/" routing prefix is assumed, which is what the custom
+    and self-hosted OpenAI-compatible endpoints are called with.
+
+    Never raises: a window that cannot be registered leaves the model unknown,
+    which routes through the transport's cautious fallbacks. A WRONG window
+    would be worse, so a value that is not a positive int is refused rather
+    than defaulted.
+    """
+    window = positive_int(context_window)
+    if window is None or not model_name:
+        return
+    try:
+        from src.core.llm.transport import LLM_CONTEXT_WINDOW_SIZES
+
+        for key in (model_name, *(keys or (f"openai/{model_name}",))):
+            if LLM_CONTEXT_WINDOW_SIZES.get(key) != window:
+                LLM_CONTEXT_WINDOW_SIZES[key] = window
+                logger.debug("Registered context window for %s: %d tokens", key, window)
+    except Exception as reg_err:  # noqa: BLE001 - never fail a run over this
+        logger.debug(
+            "Could not register context window for %s: %s", model_name, reg_err
+        )
+
+
 # Register Databricks model context windows with CrewAI
 # This is CRITICAL for CrewAI's respect_context_window to work correctly.
 # CrewAI has a hardcoded LLM_CONTEXT_WINDOW_SIZES dictionary that it uses to determine
@@ -172,14 +213,13 @@ try:
             )
             continue
         prefix = _PROVIDER_PREFIXES[provider]
-        # Register the bare name too: an agent config may carry it unprefixed,
-        # and the lookup is by exact key.
-        keys = [f"{prefix}{model_name}", model_name] if prefix else [model_name]
-        # Ollama ids are normalized hyphen→colon before the call.
+        # The bare name is always registered by the writer; these are the extra
+        # spellings this provider's callers use. Ollama ids are normalized
+        # hyphen→colon before the call.
+        keys = [f"{prefix}{model_name}"] if prefix else []
         if provider == "ollama" and "-" in model_name:
             keys.append(f"{prefix}{model_name.replace('-', ':')}")
-        for key in keys:
-            LLM_CONTEXT_WINDOW_SIZES[key] = context_window
+        _register_context_window(model_name, context_window, keys=tuple(keys))
         registered_count += 1
         logger.debug(
             f"Registered {keys} with context_window={context_window} in CrewAI"
@@ -722,6 +762,22 @@ class LLMManager:
         # Extract provider and model name
         provider = model_config_dict["provider"]
         model_name_value = model_config_dict["name"]
+
+        # Teach the transport THIS model's window, from the row we just read.
+        #
+        # The module-level loop above registers the SEEDED catalogue. A model a
+        # user added exists only in the `modelconfig` table, so it stays unknown
+        # to LLM_CONTEXT_WINDOW_SIZES — and "unknown" is not a small thing:
+        # `_raw_context_window()` returns 0, which switches the output clamp off
+        # entirely (it no-ops without a window) and drops the input budget onto
+        # a fallback that guesses from the agent instead of the model.
+        #
+        # Observed on a custom 131,072-token model: no clamp, a budget derived
+        # from the agent's own figure, and a 139,516-token request that the
+        # server refused.
+        _register_context_window(
+            model_name_value, model_config_dict.get("context_window")
+        )
 
         # The catalogue's own temperature, used when the caller states none.
         #
