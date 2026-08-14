@@ -36,6 +36,8 @@ added to it, per the file-size rule in CLAUDE.md.
 import logging
 from typing import Any, Dict, Optional
 
+from src.utils.coercion import positive_int
+
 logger = logging.getLogger(__name__)
 
 #: How long a recording stays usable, when the policy does not say. An hour is
@@ -74,7 +76,7 @@ def extract_tool_policies(tool_config: Dict[str, Any]) -> Dict[str, Dict[str, An
     replay = _pop_policy(tool_config, flag="replayable", options="replay")
     if replay is not None:
         policies[REPLAY_ATTR] = {
-            "ttl_seconds": _positive_int(
+            "ttl_seconds": positive_int(
                 replay.get("ttl_seconds"), DEFAULT_REPLAY_TTL_SECONDS
             ),
             "scope": (
@@ -132,13 +134,3 @@ def _pop_policy(
     if isinstance(options_value, dict):
         return {**options_value}
     return {} if enabled else None
-
-
-def _positive_int(value: Any, default: int) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError, OverflowError):
-        # OverflowError is not paranoia: JSON has no infinity, but Python's
-        # decoder accepts `Infinity` and hands back a float that int() refuses.
-        return default
-    return parsed if parsed > 0 else default
