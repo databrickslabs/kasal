@@ -2128,7 +2128,19 @@ class FlowMethodFactory:
         @listen(previous_method_name)
         async def hitl_gate_method(self, previous_output=None):
             """HITL gate method - pauses flow for human approval."""
-            from src.db.session import routed_scoped_session
+            # get_isolated_db_session, NOT routed_scoped_session: the gate runs
+            # inside kickoff_async's concurrent asyncio.gather fan-out, and
+            # routed_scoped_session reuses whatever session is in _request_session
+            # for this branch — one an outer block already committed/closed, or
+            # (on SQLite) the shared StaticPool connection another concurrent
+            # branch is mid-operation on. Reusing it makes create_approval_request's
+            # flush land on a closed transaction ("This transaction is closed") or a
+            # cross-loop connection ("MissingGreenlet"). The isolated helper gives
+            # the gate a PRIVATE connection of its own (NullPool on SQLite; a fresh
+            # pooled checkout on Lakebase), independent of _request_session — which
+            # is exactly why the crew tool-approval path, which opens its own
+            # session, never hit this. Backend-agnostic: reproduced on both.
+            from src.db.session import get_isolated_db_session
             from src.models.hitl_approval import HITLApprovalStatus
             from src.services.flow_builder.exceptions import (
                 FlowPausedForApprovalException,
@@ -2176,7 +2188,7 @@ class FlowMethodFactory:
 
             # Check if there's already an APPROVED approval for this gate
             # This happens when resuming after approval
-            async with routed_scoped_session() as session:
+            async with get_isolated_db_session() as session:
                 # Approvals are HITLService's domain.
                 existing_approvals = await HITLService(
                     session
@@ -2283,7 +2295,7 @@ class FlowMethodFactory:
                         logger.warning(f"   Could not store flow_uuid in state: {e}")
 
             # Create HITL approval request
-            async with routed_scoped_session() as session:
+            async with get_isolated_db_session() as session:
                 hitl_service = HITLService(session)
                 webhook_service = HITLWebhookService(session)
 
