@@ -81,6 +81,22 @@ _CHARS_PER_TOKEN = 3.4
 #: rather than to cover a large error.
 _WINDOW_SAFETY_TOKENS = 128
 
+#: How much of the input budget the trim will actually fill.
+#:
+#: Not a second derate of the window — a discount on our own ESTIMATE, which
+#: undercounts whenever the content is denser than ``_CHARS_PER_TOKEN`` assumes
+#: (German compounds, CJK, base64, minified JSON). The output clamp already
+#: reserves 15% for the same drift; this is that reservation applied to the
+#: other half of the same budget.
+#:
+#: 0.8 rather than the clamp's 0.85, and the difference is load-bearing. Work
+#: the failing run's numbers with a REGISTERED window: 131,072 - 8,192 output
+#: - 128 scaffolding = 122,752, and 122,752 estimated tokens is ~131,389 real
+#: ones at the 2.7 chars/token that content actually measured — still over the
+#: server's 131,072, so 0.85 would have kept the bug for any model whose window
+#: is known. 0.8 gives ~123,700, which fits.
+_TRIM_ESTIMATE_MARGIN = 0.8
+
 # OpenAI's GPT-5.6 line refuses `reasoning_effort` on /v1/chat/completions when
 # the request also carries function tools:
 #
@@ -762,8 +778,35 @@ class OpenAICompletion(BaseLLM):
         # every tool result and still be over".
         return max(budget, int(raw * 0.25))
 
+    def _trim_budget(self, from_agent: Any = None) -> int:
+        """``_input_budget`` with room for the estimator being wrong.
+
+        The estimate is chars/``_CHARS_PER_TOKEN``, and it is a GUESS. The output
+        clamp has always allowed for that with a 15% margin; the trim compared
+        against the raw budget, so the two halves of one budget disagreed by
+        exactly the amount the estimator drifts.
+
+        What that cost, on a run whose whole point was tool output: a German /
+        Swiss job search tokenized nearer 2.7 chars per token than 3.4, so an
+        111,411-token ceiling meant roughly 140,000 real ones. The server's limit
+        was 131,072. Every round the trim decided the conversation fit; the
+        request was rejected; nothing was ever compacted, and the run died with
+        52 tool results (~900,000 characters) it was allowed to stub and never
+        did.
+
+        Erring low costs a little context the agent could have kept. Erring high
+        costs the entire run.
+        """
+        budget = self._input_budget(from_agent)
+        if not budget:
+            return 0
+        return int(budget * _TRIM_ESTIMATE_MARGIN)
+
     def _trim_conversation_to_window(
-        self, conversation: list[dict[str, Any]], from_agent: Any = None
+        self,
+        conversation: list[dict[str, Any]],
+        from_agent: Any = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> None:
         """Best-effort in-place trim so a tool-heavy turn cannot overflow the
         context window (which previously failed the whole run): once the
@@ -775,18 +818,25 @@ class OpenAICompletion(BaseLLM):
         Compaction is lossy, so every trim that actually drops something emits a
         ContextCompactionEvent — it used to happen with no trace at all, which
         made the resulting re-query loop impossible to diagnose from the UI.
+
+        ``tools`` is not optional in spirit: the schemas count toward the
+        server-side prompt, and leaving them out is what let a 139,516-token
+        request reach a 131,072-token server while this method concluded, every
+        round, that the conversation fit. The estimator has always accepted them
+        — the output clamp passes them, this call site did not — which is the
+        exact disagreement ``_estimate_tokens`` documents as the thing to avoid.
         """
         if (
             from_agent is not None
             and getattr(from_agent, "respect_context_window", True) is False
         ):
             return
-        window = self._input_budget(from_agent)
+        window = self._trim_budget(from_agent)
         if not window:
             return
 
         def estimated_tokens() -> int:
-            return self._estimate_tokens(conversation)
+            return self._estimate_tokens(conversation, tools)
 
         tokens_before = estimated_tokens()
         if tokens_before <= window:
@@ -864,7 +914,7 @@ class OpenAICompletion(BaseLLM):
         for _round in range(rounds):
             self._check_deadline(deadline, _round, conversation)
             throttle(from_agent)
-            self._trim_conversation_to_window(conversation, from_agent)
+            self._trim_conversation_to_window(conversation, from_agent, tools)
             # Where THIS round's thinking starts. _reasoning_text is reset per
             # CALL (above) but appended per ROUND, so salvaging from the whole
             # buffer let an empty final round reach back into an earlier round's
@@ -1193,7 +1243,7 @@ class OpenAICompletion(BaseLLM):
         for _round in range(rounds):
             self._check_deadline(deadline, _round, conversation)
             throttle(from_agent)
-            self._trim_conversation_to_window(conversation, from_agent)
+            self._trim_conversation_to_window(conversation, from_agent, tools)
             # Where THIS round's thinking starts — same reason as the chat
             # path: _reasoning_text is reset per CALL but appended per ROUND.
             reasoning_mark = len(self._reasoning_text)
