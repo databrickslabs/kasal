@@ -26,6 +26,8 @@ export async function dispatch(
   // these (session-scoped memory, attached MCP data sources).
   if (runSettings) {
     if (runSettings.auto_execute) request.auto_execute = true;
+    // Empty means "the configured default", which is the absence of the field.
+    if (runSettings.harness) request.harness = runSettings.harness;
     if (runSettings.session_id) request.session_id = runSettings.session_id;
     if (runSettings.memory_workspace_scope !== undefined)
       request.memory_workspace_scope = runSettings.memory_workspace_scope;

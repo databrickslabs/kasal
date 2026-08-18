@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { dispatch } from '../api/dispatcher';
 import { useExecutionStore } from '../store/executionStore';
+import { useAppStore } from '../store/appStore';
 import {
   DispatchResult,
   GeneratedCrew,
@@ -383,6 +384,9 @@ export function useDispatcher(options: UseDispatcherOptions) {
           // ChatMode runs the generated crew on the backend (the crew canvas
           // doesn't — it runs via Play, so it omits this and defaults false).
           auto_execute: true,
+          // The harness the composer picked. The run is created backend-side
+          // from THIS request, so a harness that stops here never reaches it.
+          harness: useAppStore.getState().selectedHarness || undefined,
           session_id: originSessionId || undefined,
           memory_workspace_scope: execState.workspaceMemory,
           disable_memory: !execState.memoryEnabled,

@@ -597,6 +597,10 @@ class CrewGenerationService(
             ),
             "reasoning": _reasoning,
             "model": request.model or None,
+            # Beside the model, and for the same reason: this builder is the
+            # ONLY config path for ChatMode auto-execute, so a field missing
+            # here is a field the run never sees.
+            "harness": getattr(request, "harness", None) or None,
             "execution_type": _execution_type,
             # Read by the crew-config builder to resolve the run-level wall
             # clock from the same budget profile the agent caps came from.

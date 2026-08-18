@@ -1398,6 +1398,10 @@ Please analyze this message and provide your intent classification."""
                         # plan and the user runs it via Play; auto-executing here
                         # too would double-run the crew.
                         auto_execute=request.auto_execute,
+                        # The harness the composer picked. Without it the run is
+                        # created with no harness named and falls back to the
+                        # configured default — the picker moves, the run does not.
+                        harness=request.harness,
                         session_id=request.session_id,
                         memory_workspace_scope=request.memory_workspace_scope,
                         disable_memory=request.disable_memory,
