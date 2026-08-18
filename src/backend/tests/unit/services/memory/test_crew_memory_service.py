@@ -13,6 +13,7 @@ Covers:
 """
 
 import os
+import importlib.util
 import sys
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
@@ -49,8 +50,30 @@ _MODULES_TO_MOCK = {
     "chromadb": MagicMock(),
 }
 
+
+# Stub ONLY what is genuinely missing. `crewai` is a real dependency again — it
+# is the second selectable execution engine — so stubbing it here shadows the
+# installed library for anything that imports it later on the same xdist worker,
+# which is the failure `services/execution/CLAUDE.md` warns about by name. The
+# stubs stay for an environment where the package is absent.
+def _is_installed(_name: str) -> bool:
+    """Is this a real, importable package here?
+
+    Swallows the probe's own failures: a module another file already replaced
+    with a ``MagicMock`` makes ``find_spec`` raise ``ValueError: __spec__ is not
+    set``, and the honest answer to "is the real package usable" is then no.
+    """
+    try:
+        return importlib.util.find_spec(_name) is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
+_installed = {_r for _r in {"crewai", "asyncpg", "chromadb"} if _is_installed(_r)}
 _originals = {}
 for _mod_name, _mock_obj in _MODULES_TO_MOCK.items():
+    if _mod_name.split(".")[0] in _installed:
+        continue
     _originals[_mod_name] = sys.modules.get(_mod_name)
     sys.modules[_mod_name] = _mock_obj
 

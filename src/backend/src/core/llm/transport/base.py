@@ -50,6 +50,25 @@ class BaseLLM(BaseModel):
     base_url: str | None = None
     provider: str | None = None
     is_litellm: bool = False
+    #: Hand a tool-call response BACK to the caller instead of executing it here.
+    #:
+    #: The transport normally owns the whole tool loop: it calls the functions in
+    #: ``available_functions``, appends the results and goes round again, and the
+    #: caller only ever sees final text. That is what the Kasal engine wants.
+    #:
+    #: A caller that owns its OWN loop — the CrewAI engine, whose executor
+    #: applies its reflection prompts, iteration limits and tool-failure policy
+    #: between rounds — needs the model's raw decision instead. Without this it
+    #: got an empty string: a pure tool-call response has no content, no
+    #: functions were supplied to execute, and the answer path returned "".
+    #:
+    #: DECLARED rather than passed as a call kwarg for two reasons. The LLM
+    #: subclasses in ``services/llm/handlers`` do not share one ``call``
+    #: signature, so a new parameter would break the ones without ``**kwargs``.
+    #: And an undeclared constructor kwarg on this class is collected into
+    #: ``additional_params`` and SENT to the endpoint, which is the last place
+    #: a mode flag belongs.
+    delegate_tool_calls: bool = False
     additional_params: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="before")

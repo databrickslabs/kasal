@@ -9,6 +9,7 @@ These tests verify the warning lifecycle:
 4. The warning list is included in COMPLETED result dicts
 """
 
+import importlib.util
 import sys
 from types import ModuleType
 from unittest.mock import MagicMock
@@ -24,6 +25,26 @@ from unittest.mock import MagicMock
 _crewai_mock = MagicMock()
 _crewai_mock.__path__ = []  # Mark it as a package so sub-imports work
 
+
+def _is_importable(name: str) -> bool:
+    """Is this a real, importable module here?"""
+    try:
+        return importlib.util.find_spec(name) is not None
+    except Exception:  # noqa: BLE001 — a broken parent means "not usable"
+        return False
+
+
+# Stub ONLY what is genuinely missing, and remove whatever we installed.
+#
+# Almost everything below is importable today: `crewai` is a real dependency
+# again (the second execution engine), and the `src.*` entries are first-party
+# code. These stubs went in at IMPORT time and were never removed, so they
+# shadowed the real modules for the rest of the xdist worker — which broke 43
+# tests in `services/execution/harnesses/crewai/`, nowhere near this file, with
+# `AttributeError: __spec__`.
+#
+# See `services/execution/CLAUDE.md`: "Never stub these modules into
+# `sys.modules` in a test."
 _STUBS: dict[str, object] = {}
 for _mod_name in [
     "crewai",
@@ -31,23 +52,17 @@ for _mod_name in [
     "crewai.llms",
     "crewai.llms.providers",
     "crewai.llms.providers.openai",
-    "src.core.llm.transport",
     "src.services.tools.base",
     "src.core.events",
     "crewai.events.types",
-    "src.core.events",
     "crewai.flow",
-    "src.services.flow_builder.runtime",
     "src.services.flow_builder.runtime",
     "crewai.utilities",
     "crewai.utilities.exceptions",
-    "src.core.llm.transport",
     "kasal_engine.utils",
     "crewai.utilities.converter",
     "crewai.utilities.evaluators",
     "crewai.utilities.evaluators.task_evaluator",
-    "src.core.llm.transport",
-    "kasal_engine.utils",
     "crewai.project",
     "src.services.memory.engine",
     "crewai.memory.storage",
@@ -55,10 +70,8 @@ for _mod_name in [
     "crewai.memory.storage.ltm_sqlite_storage",
     "crewai.tasks",
     "src.services.execution.runtime",
-    "src.services.execution.runtime",
-    "src.services.tools.base",
 ]:
-    if _mod_name not in sys.modules:
+    if _mod_name not in sys.modules and not _is_importable(_mod_name):
         _mock = MagicMock()
         _mock.__path__ = []
         sys.modules[_mod_name] = _mock
@@ -67,6 +80,11 @@ for _mod_name in [
 import pytest
 
 from src.services.tools.mcp_integration import MCPIntegration
+
+# The stubs existed only to get that import through. Leaving them installed is
+# what made this file everyone else's problem.
+for _mod_name in _STUBS:
+    sys.modules.pop(_mod_name, None)
 
 
 class TestMCPWarningLifecycle:

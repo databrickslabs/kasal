@@ -55,9 +55,31 @@ dependencies = [
     "litellm[caching]==1.74.9",
     "langchain",
     "langchain-text-splitters", # langchain 1.x moved text splitters out of core
-    "mcp>=1.26.0,<1.27.0", # Kasal's own MCP integration
-    # `mcpadapt` was here only because crewai-tools[mcp] imported mcpadapt.core.
-    # crewai is gone and nothing imports it, so it went with it.
+    "mcp>=1.28.1,<1.29.0", # Kasal's own MCP integration. The floor is set by
+    # crewai, which requires ~=1.28.1; this was <1.27.0 and `uv` refused the
+    # resolution outright. Kasal's own use is narrow — the sse / streamable-http
+    # clients, McpError, and the JSON-RPC server side — so the bump is contained,
+    # but it is a shipped feature and gets exercised rather than assumed.
+    # `mcpadapt` is NOT here: it was only ever present because crewai-tools[mcp]
+    # imported mcpadapt.core, and crewai-tools is deliberately not a dependency
+    # (see below).
+    #
+    # The SECOND agent runtime. Kasal's own runtime lives in
+    # services/execution/runtime/; which of the two executes a run is an
+    # operator setting (Configuration -> Engines), resolved once per execution
+    # and stamped on the row so a run — and its resume — sticks to one engine.
+    # See src/docs/dual-engine-plan.md.
+    #
+    # `crewai-tools` is deliberately absent. Kasal has 38 first-party tools and
+    # adapts them onto whichever engine is active; crewai-tools would add
+    # pymupdf, pytube and youtube-transcript-api for nothing.
+    #
+    # NOT `crewai[litellm]`. CrewAI 1.15 made litellm an extra wanting >=1.84,
+    # which this project pins at 1.74.9 above. The CrewAI engine runs on Kasal's
+    # own transport instead (a BaseLLM subclass), so the extra is unnecessary
+    # AND the conflict never arises — and Databricks auth, retry/fallback, the
+    # context-window clamp and every LLM event stay identical across engines.
+    "crewai==1.15.16",
     # Observability
     "mlflow>=3.11,<4", # >=3.11 required for Unity Catalog trace storage (OTel tables)
     "opentelemetry-sdk>=1.27.0,<2.0.0",

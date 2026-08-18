@@ -1,16 +1,44 @@
 """
 conftest.py for the memory test package.
 
-This file is loaded by pytest BEFORE any test modules in this directory are
-collected, ensuring that chromadb and related heavy packages are stubbed out
-regardless of test collection order.
+Loaded by pytest BEFORE any test module in this directory is collected, so the
+heavy packages the memory suite touches are stubbed regardless of collection
+order. The stubs make these modules importable in isolation.
 
-The stubs here make all memory test modules importable in isolation.
+**Every stub here is conditional on the real package being ABSENT, and that is
+load-bearing.** These stubs are process-global and never torn down: nothing
+removes a ``sys.modules`` entry or a ``sys.meta_path`` finder at the end of the
+session. Under xdist, one memory test poisons every later test on the same
+worker.
+
+That was harmless while ``crewai`` was not installed — a stub for an absent
+package shadows nothing. It stopped being harmless when CrewAI came back as a
+selectable engine: an unconditional ``crewai.rag`` finder shadowed the REAL
+library, and every test that imports crewai failed with ``AttributeError:
+__spec__`` — 43 of them, none of which had anything to do with memory.
+
+So: stub only what is genuinely missing. If the real package is importable, use
+it. See ``services/execution/CLAUDE.md`` — "never stub these modules into
+``sys.modules`` in a test" is the same lesson, one directory over.
 """
 
+import importlib.util
 import sys
 import types
 from unittest.mock import MagicMock
+
+
+def _is_installed(name: str) -> bool:
+    """Is ``name`` a real, importable package in this environment?
+
+    ``find_spec`` rather than ``import``: it answers without executing the
+    module, so asking the question costs nothing when the answer is yes.
+    """
+    try:
+        return importlib.util.find_spec(name) is not None
+    except Exception:  # noqa: BLE001 — a broken parent means "not usable"
+        return False
+
 
 # ── chromadb stub ─────────────────────────────────────────────────────────────
 
@@ -18,18 +46,25 @@ _chromadb_stub = MagicMock()
 _chromadb_stub.Settings.return_value = MagicMock()
 _chromadb_stub.PersistentClient.return_value = MagicMock()
 
-for _submod in [
-    "chromadb",
-    "chromadb.config",
-    "chromadb.api",
-    "chromadb.api.types",
-    "chromadb.utils",
-    "chromadb.utils.embedding_functions",
-]:
-    sys.modules.setdefault(_submod, _chromadb_stub)
+# Only when chromadb is genuinely absent. It arrives as a crewai dependency in
+# a normal install, and stubbing an installed package breaks anything that
+# imports it for real — crewai included.
+if not _is_installed("chromadb"):
+    for _submod in [
+        "chromadb",
+        "chromadb.config",
+        "chromadb.api",
+        "chromadb.api.types",
+        "chromadb.utils",
+        "chromadb.utils.embedding_functions",
+    ]:
+        sys.modules.setdefault(_submod, _chromadb_stub)
 
 # ── asyncpg stub ──────────────────────────────────────────────────────────────
-sys.modules.setdefault("asyncpg", MagicMock())
+# Conditional for the same reason as the others: a stub with no ``__spec__``
+# makes ``importlib.util.find_spec("asyncpg")`` raise for everyone afterwards.
+if not _is_installed("asyncpg"):
+    sys.modules.setdefault("asyncpg", MagicMock())
 
 
 # ── crewai.rag comprehensive stub ─────────────────────────────────────────────
@@ -94,14 +129,17 @@ class _RagFinder:
         return None
 
 
-# Install the finder at the FRONT of meta_path so it takes priority
-if not any(isinstance(f, _RagFinder) for f in sys.meta_path):
-    sys.meta_path.insert(0, _RagFinder())
+# Only when crewai is genuinely absent. With crewai installed this finder sits
+# at the FRONT of meta_path forever and hands every `crewai.rag.*` import a stub
+# instead of the real module — process-wide, for the rest of the session.
+if not _is_installed("crewai"):
+    if not any(isinstance(f, _RagFinder) for f in sys.meta_path):
+        sys.meta_path.insert(0, _RagFinder())
 
-# Remove any already-imported crewai.rag modules so our finder takes over
-for _key in list(sys.modules.keys()):
-    if _key == "crewai.rag" or _key.startswith("crewai.rag."):
-        del sys.modules[_key]
+    # Remove any already-imported crewai.rag modules so our finder takes over
+    for _key in list(sys.modules.keys()):
+        if _key == "crewai.rag" or _key.startswith("crewai.rag."):
+            del sys.modules[_key]
 
 
 # ── Lakebase schema self-heal cache ───────────────────────────────────────────

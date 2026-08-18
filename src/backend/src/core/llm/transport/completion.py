@@ -346,6 +346,24 @@ class OpenAICompletion(BaseLLM):
                 raise LLMContextLengthExceededError(str(e)) from e
             raise
 
+        if isinstance(text, list):
+            # Tool calls handed back for the caller to execute
+            # (``delegate_tool_calls``). Not an answer: stop words, structured
+            # output and the empty-answer recovery all describe TEXT. The
+            # completed event still fires, carrying what the model DECIDED, so
+            # the trace shows the round rather than a gap where one happened.
+            self._emit_call_completed_event(
+                f"[tool_calls] {', '.join(c.get('name', '?') for c in text)}",
+                call_type,
+                usage,
+                conversation,
+                from_task,
+                from_agent,
+                finish_reason=self._finish_reason,
+                reasoning=self._reasoning_text or None,
+            )
+            return text
+
         if self.supports_stop_words():
             text = self._apply_stop_words(text)
         self._emit_call_completed_event(
@@ -941,6 +959,12 @@ class OpenAICompletion(BaseLLM):
                 self._finish_reason = getattr(
                     response.choices[0], "finish_reason", None
                 )
+            if function_calls and not available_functions and self.delegate_tool_calls:
+                # The caller runs its own tool loop; give it the decision.
+                # Falling through here returns "" — a tool-call response has no
+                # content — which the caller can only report as "empty response
+                # from the LLM", nowhere near the real cause.
+                return function_calls, usage, LLMCallType.TOOL_CALL
             if function_calls and available_functions:
                 call_type = LLMCallType.TOOL_CALL
                 outcome = run_chat_round(
@@ -1253,6 +1277,9 @@ class OpenAICompletion(BaseLLM):
             usage = self._extract_responses_token_usage(response)
             self._track_token_usage_internal(usage)
             text, function_calls = self._handle_responses(response)
+            if function_calls and not available_functions and self.delegate_tool_calls:
+                # Same contract as the chat path above.
+                return function_calls, usage, LLMCallType.TOOL_CALL
             if function_calls and available_functions:
                 call_type = LLMCallType.TOOL_CALL
                 outcome = run_responses_round(
