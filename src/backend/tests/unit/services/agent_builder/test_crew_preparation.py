@@ -10,6 +10,7 @@ from src.services.agent_builder.crew_preparation import (
     process_crew_output,
     validate_crew_config,
 )
+from tests.unit.helpers.harness_double import patch_build
 
 
 class TestCrewPreparation:
@@ -455,7 +456,9 @@ class TestCrewPreparation:
             side_effect=[mock_task1, mock_task2],
         ) as mock_create:
             # Patch crewai.Task since the code does 'from crewai import Task as CrewAITask'
-            with patch("src.services.execution.runtime.Task") as mock_task_class:
+            with patch_build(
+                "src.services.agent_builder.crew_preparation", "task"
+            ) as mock_task_class:
                 mock_completion_task = MagicMock()
                 mock_task_class.return_value = mock_completion_task
 
@@ -794,8 +797,9 @@ class TestCrewPreparation:
         mock_crew = MagicMock()
 
         with (
-            patch(
-                "src.services.agent_builder.crew_preparation.Crew",
+            patch_build(
+                "src.services.agent_builder.crew_preparation",
+                "crew",
                 return_value=mock_crew,
             ),
             patch(
@@ -820,8 +824,9 @@ class TestCrewPreparation:
         mock_llm = MagicMock()
 
         with (
-            patch(
-                "src.services.agent_builder.crew_preparation.Crew",
+            patch_build(
+                "src.services.agent_builder.crew_preparation",
+                "crew",
                 return_value=mock_crew,
             ),
             patch("src.services.llm.manager.LLMManager.get_llm", return_value=mock_llm),
@@ -856,8 +861,9 @@ class TestCrewPreparation:
         mock_manager_llm = MagicMock()
 
         with (
-            patch(
-                "src.services.agent_builder.crew_preparation.Crew",
+            patch_build(
+                "src.services.agent_builder.crew_preparation",
+                "crew",
                 return_value=mock_crew,
             ) as mock_crew_class,
             patch(
@@ -902,8 +908,9 @@ class TestCrewPreparation:
         mock_crew = MagicMock()
 
         with (
-            patch(
-                "src.services.agent_builder.crew_preparation.Crew",
+            patch_build(
+                "src.services.agent_builder.crew_preparation",
+                "crew",
                 return_value=mock_crew,
             ) as mock_crew_class,
             patch(
@@ -926,8 +933,9 @@ class TestCrewPreparation:
         crew_preparation.tasks = [MagicMock()]
 
         with (
-            patch(
-                "src.services.agent_builder.crew_preparation.Crew",
+            patch_build(
+                "src.services.agent_builder.crew_preparation",
+                "crew",
                 side_effect=Exception("Test error"),
             ),
             patch(
@@ -954,8 +962,9 @@ class TestCrewPreparation:
         mock_crew = MagicMock()
 
         with (
-            patch(
-                "src.services.agent_builder.crew_preparation.Crew",
+            patch_build(
+                "src.services.agent_builder.crew_preparation",
+                "crew",
                 return_value=mock_crew,
             ),
             patch(
@@ -984,8 +993,9 @@ class TestCrewPreparation:
         mock_crew = MagicMock()
 
         with (
-            patch(
-                "src.services.agent_builder.crew_preparation.Crew",
+            patch_build(
+                "src.services.agent_builder.crew_preparation",
+                "crew",
                 return_value=mock_crew,
             ),
             patch(
@@ -1015,8 +1025,9 @@ class TestCrewPreparation:
         mock_fallback_llm = MagicMock()
 
         with (
-            patch(
-                "src.services.agent_builder.crew_preparation.Crew",
+            patch_build(
+                "src.services.agent_builder.crew_preparation",
+                "crew",
                 return_value=mock_crew,
             ),
             patch(
@@ -1051,8 +1062,9 @@ class TestCrewPreparation:
         mock_default_llm = MagicMock()
 
         with (
-            patch(
-                "src.services.agent_builder.crew_preparation.Crew",
+            patch_build(
+                "src.services.agent_builder.crew_preparation",
+                "crew",
                 return_value=mock_crew,
             ),
             patch(
@@ -1085,8 +1097,9 @@ class TestCrewPreparation:
         mock_crew = MagicMock()
 
         with (
-            patch(
-                "src.services.agent_builder.crew_preparation.Crew",
+            patch_build(
+                "src.services.agent_builder.crew_preparation",
+                "crew",
                 return_value=mock_crew,
             ),
             patch(
@@ -1124,8 +1137,9 @@ class TestCrewPreparation:
         mock_crew = MagicMock()
 
         with (
-            patch(
-                "src.services.agent_builder.crew_preparation.Crew",
+            patch_build(
+                "src.services.agent_builder.crew_preparation",
+                "crew",
                 return_value=mock_crew,
             ),
             patch(
@@ -1153,8 +1167,9 @@ class TestCrewPreparation:
         mock_crew = MagicMock()
 
         with (
-            patch(
-                "src.services.agent_builder.crew_preparation.Crew",
+            patch_build(
+                "src.services.agent_builder.crew_preparation",
+                "crew",
                 return_value=mock_crew,
             ),
             patch(
@@ -1186,8 +1201,9 @@ class TestCrewPreparation:
         mock_crew = MagicMock()
 
         with (
-            patch(
-                "src.services.agent_builder.crew_preparation.Crew",
+            patch_build(
+                "src.services.agent_builder.crew_preparation",
+                "crew",
                 return_value=mock_crew,
             ),
             patch(
@@ -1219,8 +1235,9 @@ class TestCrewPreparation:
         mock_crew = MagicMock()
 
         with (
-            patch(
-                "src.services.agent_builder.crew_preparation.Crew",
+            patch_build(
+                "src.services.agent_builder.crew_preparation",
+                "crew",
                 return_value=mock_crew,
             ),
             patch(
@@ -1330,8 +1347,9 @@ class TestCrewPreparation:
         mock_crew = MagicMock()
 
         with (
-            patch(
-                "src.services.agent_builder.crew_preparation.Crew",
+            patch_build(
+                "src.services.agent_builder.crew_preparation",
+                "crew",
                 return_value=mock_crew,
             ) as mock_crew_class,
             patch(
@@ -1392,8 +1410,9 @@ class TestCrewPreparation:
         mock_crew = MagicMock()
 
         with (
-            patch(
-                "src.services.agent_builder.crew_preparation.Crew",
+            patch_build(
+                "src.services.agent_builder.crew_preparation",
+                "crew",
                 return_value=mock_crew,
             ) as mock_crew_class,
             patch(
@@ -1471,8 +1490,9 @@ class TestCrewPreparation:
             return mock_crew
 
         with (
-            patch(
-                "src.services.agent_builder.crew_preparation.Crew",
+            patch_build(
+                "src.services.agent_builder.crew_preparation",
+                "crew",
                 side_effect=crew_side_effect,
             ) as mock_crew_class,
             patch(
@@ -1538,8 +1558,9 @@ class TestCrewPreparation:
             return mock_manager_agent
 
         with (
-            patch(
-                "src.services.agent_builder.crew_preparation.Crew",
+            patch_build(
+                "src.services.agent_builder.crew_preparation",
+                "crew",
                 side_effect=crew_side_effect,
             ) as mock_crew_class,
             patch(

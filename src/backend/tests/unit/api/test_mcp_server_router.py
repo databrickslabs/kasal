@@ -88,7 +88,8 @@ class TestAuthenticationIsRequired:
             ),
         ):
             response = client.post(
-                "/mcp/v1/tools/call", json={"name": "ask_kasal", "arguments": {"question": "hi"}}
+                "/mcp/v1/tools/call",
+                json={"name": "ask_kasal", "arguments": {"question": "hi"}},
             )
         assert response.status_code == 401
 
@@ -215,7 +216,8 @@ class TestResolvedCaller:
             patch("src.api.mcp_server_router.mcp_server.call_tool", new=_spy),
         ):
             response = client.post(
-                "/mcp/v1/tools/call", json={"name": "ask_kasal", "arguments": {"question": "hi"}}
+                "/mcp/v1/tools/call",
+                json={"name": "ask_kasal", "arguments": {"question": "hi"}},
             )
 
         assert response.status_code == 200

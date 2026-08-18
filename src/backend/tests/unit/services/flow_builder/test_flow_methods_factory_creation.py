@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.unit.helpers.harness_double import patch_build
+
 
 class TestExtractFinalAnswer:
     """Tests for extract_final_answer function."""
@@ -571,8 +573,8 @@ class TestCrewMethodExecution:
         mock_flow.state = {}
 
         # Mock Crew to avoid actual execution
-        with patch(
-            "src.services.flow_builder.modules.flow_methods.Crew"
+        with patch_build(
+            "src.services.flow_builder.modules.flow_methods", "crew"
         ) as mock_crew_class:
             mock_crew = MagicMock()
             mock_result = MagicMock()
@@ -623,11 +625,11 @@ class TestCrewMethodExecution:
 
         # Mock dependencies
         with (
-            patch(
-                "src.services.flow_builder.modules.flow_methods.Crew"
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
             ) as mock_crew_class,
-            patch(
-                "src.services.flow_builder.modules.flow_methods.Task"
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "task"
             ) as mock_task_class,
             patch(
                 "src.services.flow_builder.modules.flow_methods.get_model_context_limits"
@@ -680,8 +682,8 @@ class TestCrewMethodExecution:
         mock_flow.state = {}
 
         with (
-            patch(
-                "src.services.flow_builder.modules.flow_methods.Crew"
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
             ) as mock_crew_class,
             patch("asyncio.wait_for") as mock_wait_for,
         ):
@@ -724,8 +726,8 @@ class TestCrewMethodExecution:
         mock_flow = MagicMock()
         mock_flow.state = {}
 
-        with patch(
-            "src.services.flow_builder.modules.flow_methods.Crew"
+        with patch_build(
+            "src.services.flow_builder.modules.flow_methods", "crew"
         ) as mock_crew_class:
             mock_crew = MagicMock()
             mock_crew.kickoff_async = AsyncMock(

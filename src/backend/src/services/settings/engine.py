@@ -324,3 +324,77 @@ class EngineConfigService:
                 f"Error deleting engine config with name {engine_name}: {str(e)}"
             )
             raise
+
+    # ------------------------------------------------------------------
+    # Which harness runs a job, by default
+    # ------------------------------------------------------------------
+
+    async def get_harness(self) -> str:
+        """The configured engine, guaranteed to be one this build can name.
+
+        A stored value that is not a known engine is REPORTED and downgraded to
+        the default rather than raised: this is read at the start of every
+        execution, and a typo in one row must not stop the platform from
+        running. It still has to be visible, or the run silently uses an engine
+        nobody chose — which is the failure this whole layer exists to avoid.
+        """
+        from src.services.execution.harnesses import DEFAULT_HARNESS, coerce
+
+        stored = await self.repository.get_harness()
+        resolved = coerce(stored)
+        if resolved is None:
+            logger.warning(
+                "Configured harness %r is not a known harness; " "falling back to %s",
+                stored,
+                DEFAULT_HARNESS.value,
+            )
+            return DEFAULT_HARNESS.value
+        return resolved.value
+
+    async def set_harness(self, harness: str) -> str:
+        """Switch the engine every subsequent run starts on.
+
+        Refuses an engine that cannot actually run here — CrewAI not installed,
+        say. Storing it anyway would turn one bad configuration change into
+        every later execution failing, each with an error about an import rather
+        than about the setting that caused it.
+        """
+        from src.services.execution.harnesses import (
+            HarnessUnavailableError,
+            binding_for,
+            coerce,
+        )
+
+        resolved = coerce(harness)
+        if resolved is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown harness: {harness!r}",
+            )
+        try:
+            binding_for(resolved)
+        except HarnessUnavailableError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:  # noqa: BLE001 — surface the real reason
+            raise HTTPException(
+                status_code=400,
+                detail=f"Harness {resolved.value!r} cannot run here: {e}",
+            )
+
+        await self.repository.set_harness(resolved.value)
+        logger.info("Default harness set to %s", resolved.value)
+        return resolved.value
+
+    async def get_harnesses(self) -> Dict[str, Any]:
+        """The selection plus every engine's availability and capabilities.
+
+        One call rather than three, because the UI cannot render the choice
+        without all of it: a radio button for an engine that is not installed
+        needs the REASON next to it, not just a disabled state.
+        """
+        from src.services.execution.harnesses import describe_harnesses
+
+        return {
+            "harness": await self.get_harness(),
+            "harnesses": describe_harnesses(),
+        }

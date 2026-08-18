@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.unit.helpers.harness_double import patch_build
+
 
 def _no_session_patch():
     return patch(
@@ -21,8 +23,9 @@ async def test_agent_helper_skips_session_without_mcp_servers():
 
     mock_llm = MagicMock()
     with (
-        patch(
-            "src.services.execution.kernel.agent_builder.Agent",
+        patch_build(
+            "src.services.execution.kernel.agent_builder",
+            "agent",
             return_value=MagicMock(),
         ),
         patch(
@@ -53,7 +56,11 @@ async def test_task_helper_skips_session_without_mcp_servers():
     mock_agent.role = "R"
 
     with (
-        patch.object(task_adapter, "Task", return_value=MagicMock()),
+        patch_build(
+            "src.services.agent_builder.task_adapter",
+            "task",
+            return_value=MagicMock(),
+        ),
         _no_session_patch(),
     ):
         task = await task_adapter.create_task(

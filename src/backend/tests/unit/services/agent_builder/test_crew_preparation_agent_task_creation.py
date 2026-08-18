@@ -15,6 +15,7 @@ from src.services.agent_builder.crew_preparation import (
     process_crew_output,
     validate_crew_config,
 )
+from tests.unit.helpers.harness_double import patch_build
 
 # ---------------------------------------------------------------------------
 # Module-level functions
@@ -955,10 +956,12 @@ class TestCreateTasks:
                 "src.services.agent_builder.task_adapter.create_task",
                 new_callable=AsyncMock,
             ) as mock_ct,
-            patch(
-                "src.services.agent_builder.crew_preparation.Task"
+            patch_build(
+                "src.services.agent_builder.crew_preparation", "task"
             ) as mock_task_cls_module,
-            patch("src.services.execution.runtime.Task") as mock_task_cls_crewai,
+            patch_build(
+                "src.services.agent_builder.crew_preparation", "task"
+            ) as mock_task_cls_crewai,
         ):
             mock_ct.side_effect = [task1, task2]
             completion_task = MagicMock()

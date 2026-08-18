@@ -87,6 +87,16 @@ class CrewConfig(BaseModel):
         False, description="Whether to enable the model's native reasoning budget"
     )
     model: Optional[str] = Field(None, description="LLM model to use")
+    harness: Optional[str] = Field(
+        None,
+        description=(
+            "Which agent runtime runs this job: 'kasal' or 'crewai'. Chosen "
+            "per run, beside the model, because that is the other thing you "
+            "pick when starting one. Omitted means the configured default "
+            "(Configuration -> Engines), which is what scheduled and "
+            "API-triggered runs use since they have no picker."
+        ),
+    )
     llm_provider: Optional[str] = Field(
         None, description="LLM provider to use (openai, anthropic, etc)"
     )
@@ -373,6 +383,16 @@ class FlowConfig(BaseModel):
     crewName: Optional[str] = Field(None, description="Name of the associated crew")
     crewRef: Optional[str] = Field(None, description="Reference to the associated crew")
     model: Optional[str] = Field(None, description="LLM model to use")
+    harness: Optional[str] = Field(
+        None,
+        description=(
+            "Which agent runtime runs this job: 'kasal' or 'crewai'. Chosen "
+            "per run, beside the model, because that is the other thing you "
+            "pick when starting one. Omitted means the configured default "
+            "(Configuration -> Engines), which is what scheduled and "
+            "API-triggered runs use since they have no picker."
+        ),
+    )
     llm_provider: Optional[str] = Field(
         None, description="LLM provider to use (openai, anthropic, etc)"
     )

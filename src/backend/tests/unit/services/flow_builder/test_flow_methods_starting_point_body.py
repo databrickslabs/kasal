@@ -15,6 +15,7 @@ from src.services.flow_builder.modules.flow_methods import (
     FlowMethodFactory,
     extract_final_answer,
 )
+from tests.unit.helpers.harness_double import patch_build
 
 
 def _make_task(role="Agent", has_context=False, has_kasal_memory_disabled=False):
@@ -74,7 +75,9 @@ class TestStartingPointMethodBody:
         mock_flow = _make_flow_instance()
 
         with (
-            patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
+            ) as MockCrew,
             patch(
                 "src.services.flow_builder.modules.flow_methods.asyncio.wait_for"
             ) as mock_wait,
@@ -114,7 +117,9 @@ class TestStartingPointMethodBody:
         mock_flow = _make_flow_instance()
 
         with (
-            patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
+            ) as MockCrew,
             patch(
                 "src.services.flow_builder.modules.flow_methods.asyncio.wait_for"
             ) as mock_wait,
@@ -160,7 +165,9 @@ class TestStartingPointMethodBody:
         mock_flow = _make_flow_instance()
 
         with (
-            patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
+            ) as MockCrew,
             patch(
                 "src.services.flow_builder.modules.flow_methods.asyncio.wait_for"
             ) as mock_wait,
@@ -207,7 +214,9 @@ class TestStartingPointMethodBody:
         mock_flow = _make_flow_instance()
 
         with (
-            patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
+            ) as MockCrew,
             patch(
                 "src.services.flow_builder.modules.flow_methods.asyncio.wait_for"
             ) as mock_wait,
@@ -256,7 +265,9 @@ class TestStartingPointMethodBody:
         mock_flow = _make_flow_instance()
 
         with (
-            patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
+            ) as MockCrew,
             patch(
                 "src.services.flow_builder.modules.flow_methods.asyncio.wait_for"
             ) as mock_wait,
@@ -302,13 +313,12 @@ class TestStartingPointMethodBody:
         mock_flow = _make_flow_instance()
 
         with (
-            patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
+            ) as MockCrew,
             patch(
                 "src.services.flow_builder.modules.flow_methods.asyncio.wait_for"
             ) as mock_wait,
-            patch(
-                "src.services.flow_builder.modules.flow_methods.Process"
-            ) as MockProcess,
         ):
             crew_kwargs_captured = {}
 
@@ -357,7 +367,9 @@ class TestStartingPointMethodBody:
         mock_flow = _make_flow_instance()
 
         with (
-            patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
+            ) as MockCrew,
             patch(
                 "src.services.flow_builder.modules.flow_methods.asyncio.wait_for"
             ) as mock_wait,
@@ -416,7 +428,9 @@ class TestStartingPointMethodBody:
         mock_flow = _make_flow_instance()
 
         with (
-            patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
+            ) as MockCrew,
             patch(
                 "src.services.flow_builder.modules.flow_methods.asyncio.wait_for"
             ) as mock_wait,
@@ -469,7 +483,9 @@ class TestStartingPointMethodBody:
         mock_flow = _make_flow_instance()
 
         with (
-            patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
+            ) as MockCrew,
             patch(
                 "src.services.flow_builder.modules.flow_methods.asyncio.wait_for"
             ) as mock_wait,
@@ -517,7 +533,9 @@ class TestStartingPointMethodBody:
         mock_flow = _make_flow_instance()
 
         with (
-            patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
+            ) as MockCrew,
             patch(
                 "src.services.flow_builder.modules.flow_methods.asyncio.wait_for"
             ) as mock_wait,
@@ -571,7 +589,9 @@ class TestStartingPointMethodBody:
         mock_flow = _make_flow_instance()
 
         with (
-            patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
+            ) as MockCrew,
             patch(
                 "src.services.flow_builder.modules.flow_methods.asyncio.wait_for"
             ) as mock_wait,
@@ -608,7 +628,9 @@ class TestStartingPointMethodBody:
         mock_flow = _make_flow_instance()
 
         with (
-            patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
+            ) as MockCrew,
             patch(
                 "src.services.flow_builder.modules.flow_methods.asyncio.wait_for"
             ) as mock_wait,
@@ -642,7 +664,9 @@ class TestStartingPointMethodBody:
                 return "no raw result"
 
         with (
-            patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
+            ) as MockCrew,
             patch(
                 "src.services.flow_builder.modules.flow_methods.asyncio.wait_for"
             ) as mock_wait,
@@ -673,7 +697,9 @@ class TestStartingPointMethodBody:
         mock_flow = _make_flow_instance(state={})
 
         with (
-            patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
+            ) as MockCrew,
             patch(
                 "src.services.flow_builder.modules.flow_methods.asyncio.wait_for"
             ) as mock_wait,
@@ -707,7 +733,9 @@ class TestStartingPointMethodBody:
         long_result = "x" * 500  # >400 chars
 
         with (
-            patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
+            ) as MockCrew,
             patch(
                 "src.services.flow_builder.modules.flow_methods.asyncio.wait_for"
             ) as mock_wait,
@@ -756,11 +784,15 @@ class TestListenerMethodBody:
         mock_flow = _make_flow_instance()
 
         with (
-            patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
+            ) as MockCrew,
             patch(
                 "src.services.flow_builder.modules.flow_methods.asyncio.wait_for"
             ) as mock_wait,
-            patch("src.services.flow_builder.modules.flow_methods.Task") as MockTask,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "task"
+            ) as MockTask,
         ):
             crew_kwargs_captured = {}
 
@@ -796,11 +828,15 @@ class TestListenerMethodBody:
         mock_flow = _make_flow_instance()
 
         with (
-            patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
+            ) as MockCrew,
             patch(
                 "src.services.flow_builder.modules.flow_methods.asyncio.wait_for"
             ) as mock_wait,
-            patch("src.services.flow_builder.modules.flow_methods.Task") as MockTask,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "task"
+            ) as MockTask,
         ):
             crew_inst = MagicMock()
             MockCrew.return_value = crew_inst
@@ -834,11 +870,15 @@ class TestListenerMethodBody:
         large_output = "x" * 3000  # >2000 chars
 
         with (
-            patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
+            ) as MockCrew,
             patch(
                 "src.services.flow_builder.modules.flow_methods.asyncio.wait_for"
             ) as mock_wait,
-            patch("src.services.flow_builder.modules.flow_methods.Task") as MockTask,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "task"
+            ) as MockTask,
         ):
             crew_inst = MagicMock()
             MockCrew.return_value = crew_inst
@@ -882,12 +922,16 @@ class TestListenerMethodBody:
         mock_flow = _make_flow_instance()
 
         with (
-            patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
+            ) as MockCrew,
             patch(
                 "src.services.flow_builder.modules.flow_methods.asyncio.wait_for"
             ) as mock_wait,
             patch("src.services.llm.manager.LLMManager") as MockLLM,
-            patch("src.services.flow_builder.modules.flow_methods.Task") as MockTask,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "task"
+            ) as MockTask,
         ):
             mock_llm = MagicMock()
             MockLLM.get_llm = AsyncMock(return_value=mock_llm)
@@ -942,11 +986,15 @@ class TestListenerMethodBody:
         mock_flow = _make_flow_instance()
 
         with (
-            patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
+            ) as MockCrew,
             patch(
                 "src.services.flow_builder.modules.flow_methods.asyncio.wait_for"
             ) as mock_wait,
-            patch("src.services.flow_builder.modules.flow_methods.Task") as MockTask,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "task"
+            ) as MockTask,
         ):
             crew_kwargs_captured = {}
 
@@ -1002,11 +1050,15 @@ class TestListenerMethodBody:
         )
 
         with (
-            patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
+            ) as MockCrew,
             patch(
                 "src.services.flow_builder.modules.flow_methods.asyncio.wait_for"
             ) as mock_wait,
-            patch("src.services.flow_builder.modules.flow_methods.Task") as MockTask,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "task"
+            ) as MockTask,
         ):
             crew_inst = MagicMock()
             MockCrew.return_value = crew_inst
@@ -1040,11 +1092,15 @@ class TestListenerMethodBody:
         mock_flow = _make_flow_instance(state=state)
 
         with (
-            patch("src.services.flow_builder.modules.flow_methods.Crew") as MockCrew,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
+            ) as MockCrew,
             patch(
                 "src.services.flow_builder.modules.flow_methods.asyncio.wait_for"
             ) as mock_wait,
-            patch("src.services.flow_builder.modules.flow_methods.Task") as MockTask,
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "task"
+            ) as MockTask,
         ):
             crew_inst = MagicMock()
             MockCrew.return_value = crew_inst

@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from src.core.llm.output_cap import output_cap
 from src.core.logger import LoggerManager
-from src.services.execution.runtime import Crew, Process, Task
+from src.services.execution.harnesses import active_harness
 from src.services.flow_builder.runtime import and_, listen, or_, router, start
 
 from .flow_conditions import state_snapshot
@@ -414,17 +414,16 @@ def attach_memory_seams(crew: Any, crew_label: str, request: str | None = None) 
             make_memory_output_sink,
         )
 
-        crew_memory = getattr(crew, "memory", None)
+        # Through the binding — see crew_preparation for why.
+        engine = active_harness()
+        crew_memory = engine.crew_memory(crew)
         # ``request`` leads the recall query so a saved crew does not match its
         # own history on template text alone. Always None here today: a flow
         # cannot receive inputs at all yet (kickoff_async takes none), so there
         # is nothing carrying the run's request. Wire it when that lands.
         memory_provider = make_memory_context_provider(crew_memory, request)
-        if memory_provider is not None:
-            crew.context_providers.append(memory_provider)
         memory_sink = make_memory_output_sink(crew_memory)
-        if memory_sink is not None:
-            crew.output_sinks.append(memory_sink)
+        engine.wire_memory(crew, provider=memory_provider, sink=memory_sink)
         if memory_provider is not None or memory_sink is not None:
             logger.info(
                 f"Memory recall provider + persist sink attached to {crew_label}"
@@ -759,10 +758,11 @@ class FlowMethodFactory:
                 )
 
             # Determine process type from crew_data
-            process_type = Process.sequential  # Default
+            engine = active_harness()
+            process_type = engine.process("sequential")  # Default
             if crew_data and hasattr(crew_data, "process") and crew_data.process:
                 if crew_data.process.lower() == "hierarchical":
-                    process_type = Process.hierarchical
+                    process_type = engine.process("hierarchical")
                     logger.info("Using hierarchical process from crew configuration")
                 else:
                     logger.info("Using sequential process from crew configuration")
@@ -812,7 +812,7 @@ class FlowMethodFactory:
                 f"📋 Crew configuration: memory={crew_memory}, process={process_type}"
             )
 
-            crew = Crew(**crew_kwargs)
+            crew = active_harness().build_crew(**crew_kwargs)
             logger.info(
                 f"Crew instance '{crew_name}' created successfully with {len(task_list)} tasks, kwargs: {list(crew_kwargs.keys())}"
             )
@@ -1176,7 +1176,7 @@ class FlowMethodFactory:
             # listener (@listen) crews were affected.
             for task in listener_tasks:
                 # Create new task with injected context, preserving execution config.
-                runtime_task = Task(
+                runtime_task = active_harness().build_task(
                     description=f"{task.description}{previous_output_context}",
                     agent=task.agent,
                     expected_output=(
@@ -1292,10 +1292,11 @@ class FlowMethodFactory:
                 )
 
             # Determine process type from crew_data
-            process_type = Process.sequential  # Default
+            engine = active_harness()
+            process_type = engine.process("sequential")  # Default
             if crew_data and hasattr(crew_data, "process") and crew_data.process:
                 if crew_data.process.lower() == "hierarchical":
-                    process_type = Process.hierarchical
+                    process_type = engine.process("hierarchical")
                     logger.info(
                         "Using hierarchical process for listener crew from configuration"
                     )
@@ -1348,7 +1349,7 @@ class FlowMethodFactory:
                 f"Listener crew configuration: memory={crew_memory}, process={process_type}"
             )
 
-            crew = Crew(**crew_kwargs)
+            crew = active_harness().build_crew(**crew_kwargs)
             logger.info(
                 f"Crew instance '{listener_crew_name}' created for listener, kwargs: {list(crew_kwargs.keys())}"
             )

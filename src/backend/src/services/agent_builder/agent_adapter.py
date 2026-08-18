@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger import LoggerManager
 from src.services.execution.kernel.tool_helpers import resolve_tool_ids_to_names
-from src.services.execution.runtime import Agent
 from src.utils.model_config import model_rejects_temperature
 
 # Get logger from the centralized logging system
@@ -48,7 +47,7 @@ async def create_agent(
     tool_service=None,
     tool_factory=None,
     agent_id: Optional[str] = None,
-) -> Agent:
+) -> Any:
     """
     Creates an Agent instance from the provided configuration.
 

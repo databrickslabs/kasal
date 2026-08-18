@@ -139,6 +139,14 @@ def run_crew_in_process(
 
     # Mark that we're in subprocess mode for logging purposes
     os.environ["CREW_SUBPROCESS_MODE"] = "true"
+
+    # Pin the engine for this whole interpreter, from the payload the parent
+    # decided it with. Process-wide rather than a ContextVar because a crew
+    # runs its tasks on a thread pool, which copies neither ContextVars nor
+    # anything else — and this process serves exactly one execution.
+    from src.services.execution.harness_choice import adopt_in_subprocess
+
+    adopt_in_subprocess(crew_config if isinstance(crew_config, dict) else None)
     # CRITICAL: Store execution_id in environment for orphaned process detection
     # This allows us to find and terminate this process even after server reloads
     os.environ["KASAL_EXECUTION_ID"] = execution_id
@@ -310,8 +318,6 @@ def run_crew_in_process(
         # The Databricks context-limit phrases this block used to patch into
         # crewAI's CONTEXT_LIMIT_ERRORS now live in src/core/llm/context_limits.py,
         # which extends the engine's list at import, for every process.
-
-        from src.services.execution.runtime import Crew
 
         # Configure subprocess logging with execution ID
         subprocess_logger = configure_subprocess_logging(execution_id)
@@ -1347,18 +1353,19 @@ def run_crew_in_process(
                         request_from_inputs,
                     )
 
-                    crew_memory = getattr(crew, "memory", None)
+                    from src.services.execution.harnesses import active_harness
+
+                    # Through the binding — see crew_preparation for why.
+                    engine = active_harness()
+                    crew_memory = engine.crew_memory(crew)
                     # The run's own request leads the recall query. Without it a
                     # SAVED crew queries with its fixed task template on every
                     # run and recalls its own history regardless of subject.
                     memory_provider = make_memory_context_provider(
                         crew_memory, request_from_inputs(inputs)
                     )
-                    if memory_provider is not None:
-                        crew.context_providers.append(memory_provider)
                     memory_sink = make_memory_output_sink(crew_memory)
-                    if memory_sink is not None:
-                        crew.output_sinks.append(memory_sink)
+                    engine.wire_memory(crew, provider=memory_provider, sink=memory_sink)
                     if memory_provider is not None or memory_sink is not None:
                         async_logger.info(
                             "Memory recall provider + persist sink attached to crew"
@@ -1394,16 +1401,27 @@ def run_crew_in_process(
                         )
                     return await crew.kickoff_async(from_checkpoint=resume_checkpoint)
 
+                # The active engine's event bridge, for the life of the run.
+                #
+                # Under Kasal this is a no-op. Under CrewAI it is what puts that
+                # runtime's agent/task/crew lifecycle events on the Kasal bus —
+                # and it is NOT optional decoration: the checkpoint recorder
+                # subscribes to TaskCompletedEvent, so without it a CrewAI crew
+                # writes no checkpoints at all, and its timeline shows LLM and
+                # tool rows with no task to group them under.
+                from src.services.execution.harnesses import active_harness
+
                 try:
-                    result = await execute_with_mlflow_trace_async(
-                        kickoff_coro_fn=kickoff_fn,
-                        mlflow_result=mlflow_result,
-                        flow_config=crew_config,
-                        inputs=inputs,
-                        async_logger=async_logger,
-                        trace_label="crew_kickoff",
-                        execution_id=execution_id,
-                    )
+                    with active_harness().event_bridge():
+                        result = await execute_with_mlflow_trace_async(
+                            kickoff_coro_fn=kickoff_fn,
+                            mlflow_result=mlflow_result,
+                            flow_config=crew_config,
+                            inputs=inputs,
+                            async_logger=async_logger,
+                            trace_label="crew_kickoff",
+                            execution_id=execution_id,
+                        )
                 finally:
                     # Drain in-flight memory writes BEFORE this subprocess winds
                     # down: the last task's save is fire-and-forget and would

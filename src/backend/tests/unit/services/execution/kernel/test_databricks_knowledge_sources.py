@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
+
 # Add the backend src directory to the path
 
 # NOTE: process_knowledge_sources removed - using DatabricksKnowledgeSearchTool instead
@@ -26,7 +27,7 @@ class TestDatabricksKnowledgeSources:
         'DATABRICKS_HOST': 'https://test.databricks.com',
         'DATABRICKS_TOKEN': 'test-token-123'
     })
-    @patch('src.engines.kasal.knowledge.databricks_volume_knowledge_source.DatabricksVolumeKnowledgeSource')
+    @patch('src.harnesses.kasal.knowledge.databricks_volume_knowledge_source.DatabricksVolumeKnowledgeSource')
     def test_process_databricks_volume_source(self, mock_databricks_class):
         """Test processing Databricks volume knowledge sources."""
         # Setup mock
@@ -73,7 +74,7 @@ class TestDatabricksKnowledgeSources:
         'DATABRICKS_HOST': 'https://test.databricks.com',
         'DATABRICKS_TOKEN': 'test-token-123'
     })
-    @patch('src.engines.kasal.knowledge.databricks_volume_knowledge_source.DatabricksVolumeKnowledgeSource')
+    @patch('src.harnesses.kasal.knowledge.databricks_volume_knowledge_source.DatabricksVolumeKnowledgeSource')
     def test_process_multiple_databricks_sources(self, mock_databricks_class):
         """Test processing multiple Databricks volume knowledge sources."""
         # Setup mock to return different instances
@@ -129,7 +130,7 @@ class TestDatabricksKnowledgeSources:
         'DATABRICKS_HOST': 'https://test.databricks.com',
         'DATABRICKS_TOKEN': 'test-token-123'
     })
-    @patch('src.engines.kasal.knowledge.databricks_volume_knowledge_source.DatabricksVolumeKnowledgeSource')
+    @patch('src.harnesses.kasal.knowledge.databricks_volume_knowledge_source.DatabricksVolumeKnowledgeSource')
     def test_process_mixed_knowledge_sources(self, mock_databricks_class):
         """Test processing mixed types of knowledge sources."""
         mock_instance = MagicMock()
@@ -179,7 +180,7 @@ class TestDatabricksKnowledgeSources:
         'DATABRICKS_HOST': 'https://test.databricks.com',
         'DATABRICKS_TOKEN': 'test-token-123'
     })
-    @patch('src.engines.kasal.knowledge.databricks_volume_knowledge_source.DatabricksVolumeKnowledgeSource')
+    @patch('src.harnesses.kasal.knowledge.databricks_volume_knowledge_source.DatabricksVolumeKnowledgeSource')
     def test_databricks_source_without_filename(self, mock_databricks_class):
         """Test processing Databricks source without filename in metadata."""
         mock_instance = MagicMock()
@@ -223,7 +224,7 @@ class TestCreateAgentWithKnowledgeSources:
     """Test suite for create_agent function with knowledge sources."""
     
     @pytest.mark.asyncio
-    @patch('src.services.execution.kernel.agent_builder.Agent')
+    @patch_build("src.services.execution.kernel.agent_builder", "agent")
     @patch('src.services.agent_builder.agent_adapter.process_knowledge_sources')
     @patch('src.services.llm.manager.LLMManager.configure_kasal_llm')
     async def test_create_agent_with_knowledge_sources(self, mock_configure_llm, mock_process_ks, mock_agent_class):
@@ -288,7 +289,7 @@ class TestCreateAgentWithKnowledgeSources:
             assert result == mock_agent_instance
     
     @pytest.mark.asyncio
-    @patch('src.services.execution.kernel.agent_builder.Agent')
+    @patch_build("src.services.execution.kernel.agent_builder", "agent")
     @patch('src.services.llm.manager.LLMManager.configure_kasal_llm')
     async def test_create_agent_without_knowledge_sources(self, mock_configure_llm, mock_agent_class):
         """Test creating an agent without knowledge sources."""

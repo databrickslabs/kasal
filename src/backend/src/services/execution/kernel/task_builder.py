@@ -16,6 +16,7 @@ import traceback
 from typing import Any, Dict, List, Optional
 
 from src.core.logger import LoggerManager
+from src.services.execution.harnesses import active_harness
 from src.services.execution.kernel.genie_formatting import apply_genie_mcp_space_id
 from src.services.execution.kernel.guardrail_stack import build_guardrail_stack
 from src.services.execution.kernel.output_contract import (
@@ -269,7 +270,7 @@ async def _apply_llm_guardrail(task_args, task_config, agent, config, task_key):
     )
 
     try:
-        from src.services.execution.runtime import LLMGuardrail
+        engine = active_harness()
 
         if isinstance(llm_guardrail_config, dict):
             description = llm_guardrail_config.get(
@@ -286,7 +287,8 @@ async def _apply_llm_guardrail(task_args, task_config, agent, config, task_key):
         llm_model = resolve_guardrail_model(explicit_model, agent, config)
 
         # Proactively inject validation criteria into the description so the agent
-        # aligns on the first attempt (CrewAI's native guardrail is reactive).
+        # aligns on the first attempt (a native guardrail is reactive: it can only
+        # reject an answer that has already been paid for). True on both engines.
         if description and description != "Validate the task output":
             validation_augmentation = (
                 f"\n\n=== VALIDATION REQUIREMENTS ===\n"
@@ -300,7 +302,6 @@ async def _apply_llm_guardrail(task_args, task_config, agent, config, task_key):
                 f"Augmented task {task_key} description with guardrail criteria for proactive alignment"
             )
 
-        from src.services.llm.manager import LLMManager
         from src.utils.user_context import UserContext
 
         gc = UserContext.get_group_context()
@@ -310,11 +311,9 @@ async def _apply_llm_guardrail(task_args, task_config, agent, config, task_key):
         if not group_id:
             # Mirror agent_adapter: never silently fall back to a shared group.
             raise ValueError("group_id is REQUIRED for LLM guardrail configuration")
-        guardrail_llm = await LLMManager.configure_kasal_llm(llm_model, group_id)
+        guardrail_llm = await engine.build_llm(llm_model, group_id)
 
-        task_args["guardrail"] = LLMGuardrail(
-            description=description, llm=guardrail_llm
-        )
+        task_args["guardrail"] = engine.guardrail(description, guardrail_llm)
         guardrail_logger.info(
             f"Configured LLM guardrail for task {task_key} using model {llm_model}"
         )

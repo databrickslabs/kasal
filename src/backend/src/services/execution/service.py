@@ -468,6 +468,8 @@ class ExecutionService:
             ExecutionHistoryRepository,
         )
 
+        from src.services.execution.harness_choice import resolve_run_harness
+
         run = ExecutionHistory(
             job_id=job_id,
             status=status or ExecutionStatus.PENDING.value,
@@ -477,6 +479,8 @@ class ExecutionService:
             group_id=group_id,
             group_email=group_email,
             created_at=created_at or datetime.utcnow(),
+            # Decided once, here, and read back from the row forever after.
+            harness=(await resolve_run_harness(session)).value,
         )
         if trigger_type:
             run.trigger_type = trigger_type
@@ -1690,6 +1694,33 @@ class ExecutionService:
                     execution_type.lower() if execution_type else "crew"
                 ),  # Track execution type
             }
+
+            # The harness this run asked for, if it named one. Recorded here so
+            # everything downstream keeps working unchanged: the row is the
+            # source of truth, the subprocess inherits it, and a resume reuses
+            # it. A run naming none leaves the key absent, and `_fill_harness`
+            # falls back to the configured default — which is what a scheduled
+            # or API-triggered run gets, having no picker.
+            requested = getattr(config, "harness", None)
+            if requested:
+                from src.services.execution.harnesses import coerce
+
+                chosen = coerce(requested)
+                if chosen is None:
+                    logger.warning(
+                        "[ExecutionService.create_execution] Ignoring unknown "
+                        "harness %r for %s; using the configured default",
+                        requested,
+                        execution_id,
+                    )
+                else:
+                    execution_data["harness"] = chosen.value
+                    logger.info(
+                        "[ExecutionService.create_execution] %s runs on the %s "
+                        "harness (named by the run)",
+                        execution_id,
+                        chosen.value,
+                    )
 
             # Add flow_id for flow executions (flow_id is already a UUID object)
             if execution_type == "flow" and flow_id:

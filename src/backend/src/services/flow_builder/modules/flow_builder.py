@@ -19,8 +19,8 @@ from typing import Any, Dict, Final, List, Optional, Union
 from pydantic import BaseModel
 
 from src.core.logger import LoggerManager
+from src.services.execution.harnesses import active_harness
 from src.services.execution.kernel.execution_callback import create_execution_callbacks
-from src.services.execution.runtime import Crew, Process, Task
 from src.services.flow_builder.conversation.state_model import (
     DictLikeState,
     build_state_model,
@@ -1751,7 +1751,7 @@ class FlowBuilder:
                             # Create new Task objects with modified descriptions
                             for task in route_task_list:
                                 # Create new task with injected context
-                                runtime_task = Task(
+                                runtime_task = active_harness().build_task(
                                     description=f"{task.description}{previous_output_context}",
                                     agent=task.agent,
                                     expected_output=(
@@ -1778,12 +1778,8 @@ class FlowBuilder:
 
                             if len(async_tasks) > 1:
                                 # Auto-create a lightweight completion task that waits for all async tasks
-                                from src.services.execution.runtime import (
-                                    Task as CrewTask,
-                                )
-
                                 completion_agent = async_tasks[-1].agent
-                                completion_task = CrewTask(
+                                completion_task = active_harness().build_task(
                                     description="Aggregate and return results from parallel task executions",
                                     expected_output="Combined results from all parallel tasks",
                                     agent=completion_agent,
@@ -1814,12 +1810,13 @@ class FlowBuilder:
                                 f"Creating route crew with name: {route_crew_name}"
                             )
 
-                            crew = Crew(
+                            engine = active_harness()
+                            crew = engine.build_crew(
                                 name=route_crew_name,  # Set crew name for proper event tracing
                                 agents=agents,
                                 tasks=tasks_to_use,  # Use validated task list
                                 verbose=True,
-                                process=Process.sequential,
+                                process=engine.process("sequential"),
                             )
                             logger.info(
                                 f"Crew instance '{route_crew_name}' created for route"

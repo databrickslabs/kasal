@@ -23,6 +23,7 @@ from src.services.agent_builder.agent_adapter import (
     create_agent,
     inject_security_preamble,
 )
+from tests.unit.helpers.harness_double import patch_build
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -55,7 +56,7 @@ def mock_tools():
 def _patch_create_agent_deps():
     """Return a context manager stack that mocks all external deps of create_agent."""
     return (
-        patch("src.services.execution.kernel.agent_builder.Agent"),
+        patch_build("src.services.execution.kernel.agent_builder", "agent"),
         patch("src.services.llm.manager.LLMManager"),
         patch("src.db.session.routed_scoped_session"),
         patch("src.services.mcp.mcp_client.service.MCPService"),
@@ -69,7 +70,9 @@ async def _run_create_agent(agent_config, mock_config, mock_tools, agent_class_m
     mock_llm.model = "gpt-4o"
 
     with (
-        patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_class,
+        patch_build(
+            "src.services.execution.kernel.agent_builder", "agent"
+        ) as mock_agent_class,
         patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
         patch("src.db.session.routed_scoped_session") as mock_session_factory,
         patch("src.services.mcp.mcp_client.service.MCPService"),

@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 
 from src.core.logger import LoggerManager
 from src.services.agent_builder.agent_adapter import create_agent
-from src.services.execution.runtime import Process
+from src.services.execution.harnesses import active_harness
 from src.services.llm.manager import LLMManager
 
 logger = LoggerManager.get_instance().crew
@@ -40,7 +40,7 @@ class ManagerConfigBuilder:
         self.user_token = user_token
 
     async def configure_manager(
-        self, crew_kwargs: Dict[str, Any], process_type: Process
+        self, crew_kwargs: Dict[str, Any], process_type: Any
     ) -> Dict[str, Any]:
         """
         Configure manager LLM or agent for the crew
@@ -56,7 +56,10 @@ class ManagerConfigBuilder:
         requested_model = self.config.get("model") or crew_config.get("model")
 
         try:
-            if process_type == Process.hierarchical:
+            # Both runtimes model Process as a str-Enum, so this compares equal
+            # across engines; sourcing it from the binding keeps the symmetry with
+            # crew_config_builder, which produced the value.
+            if process_type == active_harness().process("hierarchical"):
                 crew_kwargs = await self._configure_hierarchical_manager(
                     crew_kwargs, crew_config, requested_model
                 )

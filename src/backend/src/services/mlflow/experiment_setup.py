@@ -51,9 +51,7 @@ def create_databricks_experiment(
 
     from src.services.mlflow.sp_auth import single_auth_env
 
-    with single_auth_env(
-        host=auth_context.workspace_url, token=auth_context.token
-    ):
+    with single_auth_env(host=auth_context.workspace_url, token=auth_context.token):
         mlflow.set_tracking_uri("databricks")
 
         trace_location = None
@@ -75,9 +73,7 @@ def create_databricks_experiment(
         # the existing one otherwise — safe to call on every save. With a UC
         # trace_location it links UC trace storage at creation.
         if trace_location is not None:
-            exp = mlflow.set_experiment(
-                experiment_path, trace_location=trace_location
-            )
+            exp = mlflow.set_experiment(experiment_path, trace_location=trace_location)
         else:
             exp = mlflow.set_experiment(experiment_path)
         return {

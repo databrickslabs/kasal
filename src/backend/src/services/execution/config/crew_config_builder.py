@@ -12,7 +12,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from src.core.logger import LoggerManager
-from src.services.execution.runtime import Process
+from src.services.execution.harnesses import active_harness
 
 logger = LoggerManager.get_instance().crew
 
@@ -75,7 +75,7 @@ class CrewConfigBuilder:
 
         return default_crew_memory
 
-    def determine_process_type(self) -> Process:
+    def determine_process_type(self) -> Any:
         """
         Determine process type from configuration
 
@@ -85,9 +85,13 @@ class CrewConfigBuilder:
         crew_config = self.config.get("crew", {})
         process_type = crew_config.get("process", "sequential")
 
+        # The ACTIVE engine's enum, not a fixed import: the value lands in the
+        # crew kwargs that engine's binding will consume.
+        engine = active_harness()
+
         if isinstance(process_type, str):
             if process_type.lower() == "hierarchical":
-                process_type = Process.hierarchical
+                process_type = engine.process("hierarchical")
                 logger.info("Using hierarchical process for crew")
             elif process_type.lower() == "parallel":
                 # The engine has no "parallel" Process — parallelism is per-task
@@ -95,13 +99,13 @@ class CrewConfigBuilder:
                 # context-free task when the crew process is "parallel". The
                 # crew itself still runs the sequential kernel; the async tasks
                 # are dispatched together and a completion task joins them.
-                process_type = Process.sequential
+                process_type = engine.process("sequential")
                 logger.info(
                     "Using parallel process for crew (sequential kernel; "
                     "independent tasks dispatched concurrently)"
                 )
             else:
-                process_type = Process.sequential
+                process_type = engine.process("sequential")
                 logger.info("Using sequential process for crew")
 
         return process_type
@@ -110,7 +114,7 @@ class CrewConfigBuilder:
         self,
         agents: List[Any],
         tasks: List[Any],
-        process_type: Process,
+        process_type: Any,
         default_crew_memory: bool,
     ) -> Dict[str, Any]:
         """

@@ -12,6 +12,7 @@ from src.services.execution.kernel.agent_builder import (
     build_agent_kwargs,
     build_agent_llm,
 )
+from tests.unit.helpers.harness_double import patched_harness
 
 
 class _FakeLLM:
@@ -163,7 +164,7 @@ class TestBuildAgentLlm:
                 {}, group_id="grp", default_model="databricks-llama-4-maverick"
             )
             MockLM.configure_kasal_llm.assert_awaited_once_with(
-                "databricks-llama-4-maverick", "grp"
+                "databricks-llama-4-maverick", "grp", None
             )
 
     @pytest.mark.asyncio
@@ -283,11 +284,11 @@ class TestReasoningEffortReachesTheLLM:
 class TestBuildAgent:
     @pytest.mark.asyncio
     async def test_builds_llm_kwargs_preamble_construction_and_custom_attrs(self):
-        with (
-            patch("src.services.execution.kernel.agent_builder.Agent") as MockAgent,
-            patch("src.services.llm.manager.LLMManager") as MockLM,
-        ):
-            MockLM.configure_kasal_llm = AsyncMock(return_value="LLM-OBJ")
+        # Both the agent and its LLM now come from the binding, so both
+        # assertions are made against the same double.
+        with patched_harness("src.services.execution.kernel.agent_builder") as engine:
+            engine.build_llm = AsyncMock(return_value="LLM-OBJ")
+            MockAgent = engine.build_agent
             MockAgent.return_value = MagicMock()
             spec = {
                 "role": "R",
@@ -306,7 +307,7 @@ class TestBuildAgent:
                 custom_attrs={"_kasal_memory_disabled": True},
             )
         # LLM built the crew way: explicit group + converted temperature
-        MockLM.configure_kasal_llm.assert_awaited_once_with("m", "g1", 0.5)
+        engine.build_llm.assert_awaited_once_with("m", "g1", 0.5)
         kwargs = MockAgent.call_args[1]
         assert kwargs["llm"] == "LLM-OBJ"
         # The engine appends its own always-available plan tool; the SELECTED
@@ -319,12 +320,9 @@ class TestBuildAgent:
 
     @pytest.mark.asyncio
     async def test_no_extra_kwargs_or_custom_attrs(self):
-        with (
-            patch("src.services.execution.kernel.agent_builder.Agent") as MockAgent,
-            patch("src.services.llm.manager.LLMManager") as MockLM,
-        ):
-            MockLM.configure_kasal_llm = AsyncMock(return_value="LLM")
-            MockAgent.return_value = MagicMock()
+        with patched_harness("src.services.execution.kernel.agent_builder") as engine:
+            engine.build_llm = AsyncMock(return_value="LLM")
+            engine.build_agent.return_value = MagicMock()
             await build_agent(
                 {"role": "R", "goal": "G", "backstory": "B"},
                 [],
@@ -332,5 +330,7 @@ class TestBuildAgent:
                 default_model="gpt-4o",
                 label="A",
             )
-        # No llm in spec → default_model, no temperature
-        MockLM.configure_kasal_llm.assert_awaited_once_with("gpt-4o", "g")
+        # No llm in spec → default_model, and no temperature ARGUMENT at all.
+        # The Kasal binding forwards a None third argument to
+        # configure_kasal_llm; that is the binding's business, not this layer's.
+        engine.build_llm.assert_awaited_once_with("gpt-4o", "g")

@@ -146,6 +146,12 @@ def run_flow_in_process(
     os.environ["FLOW_SUBPROCESS_MODE"] = "true"
     # CRITICAL: Set CREW_SUBPROCESS_MODE so the OTel exporter writes directly to the DB
     os.environ["CREW_SUBPROCESS_MODE"] = "true"
+
+    # Pin this interpreter's engine from the payload — same contract as the crew
+    # subprocess; see services/execution/harness_choice.py.
+    from src.services.execution.harness_choice import adopt_in_subprocess
+
+    adopt_in_subprocess(flow_config if isinstance(flow_config, dict) else None)
     # Set debug tracing flag (default to true for comprehensive logging)
     os.environ["CREWAI_DEBUG_TRACING"] = "true"
     # CRITICAL: Store execution_id in environment for orphaned process detection
@@ -692,18 +698,26 @@ def run_flow_in_process(
                         post_execution_mlflow_cleanup,
                     )
 
-                    result = await execute_with_mlflow_trace_async(
-                        kickoff_coro_fn=flow_runner.run_flow,
-                        mlflow_result=mlflow_result,
-                        flow_config=flow_config,
-                        inputs=flow_config.get("inputs"),
-                        async_logger=async_logger,
-                        execution_id=execution_id,
-                        flow_id=flow_id,
-                        job_id=execution_id,
-                        run_name=run_name,
-                        config=flow_config,
-                    )
+                    # The active engine's event bridge — same contract as the
+                    # crew subprocess. A flow's crews run on the selected
+                    # engine, so under CrewAI this is what carries their
+                    # lifecycle events to the Kasal bus (and therefore to the
+                    # checkpoint recorder and the trace).
+                    from src.services.execution.harnesses import active_harness
+
+                    with active_harness().event_bridge():
+                        result = await execute_with_mlflow_trace_async(
+                            kickoff_coro_fn=flow_runner.run_flow,
+                            mlflow_result=mlflow_result,
+                            flow_config=flow_config,
+                            inputs=flow_config.get("inputs"),
+                            async_logger=async_logger,
+                            execution_id=execution_id,
+                            flow_id=flow_id,
+                            job_id=execution_id,
+                            run_name=run_name,
+                            config=flow_config,
+                        )
 
                     async_logger.info(
                         "[FLOW_SUBPROCESS] Flow execution completed successfully"

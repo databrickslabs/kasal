@@ -10,6 +10,7 @@ from src.services.agent_builder.task_adapter import (
     get_pydantic_class_from_name,
     is_data_missing,
 )
+from tests.unit.helpers.harness_double import patch_build
 
 
 class TestIsDataMissing:
@@ -239,7 +240,9 @@ class TestCreateTask:
     ):
         """Test basic task creation"""
         with (
-            patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
+            patch_build(
+                "src.services.agent_builder.task_adapter", "task"
+            ) as mock_task_class,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
         ):
 
@@ -279,7 +282,9 @@ class TestCreateTask:
         mock_pydantic_class.__name__ = "TestOutputModel"
 
         with (
-            patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
+            patch_build(
+                "src.services.agent_builder.task_adapter", "task"
+            ) as mock_task_class,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.agent_builder.task_adapter.get_pydantic_class_from_name"
@@ -324,7 +329,9 @@ class TestCreateTask:
         }
 
         with (
-            patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
+            patch_build(
+                "src.services.agent_builder.task_adapter", "task"
+            ) as mock_task_class,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
         ):
 
@@ -358,7 +365,9 @@ class TestCreateTask:
         }
 
         with (
-            patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
+            patch_build(
+                "src.services.agent_builder.task_adapter", "task"
+            ) as mock_task_class,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
         ):
 
@@ -403,7 +412,9 @@ class TestCreateTask:
         }
 
         with (
-            patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
+            patch_build(
+                "src.services.agent_builder.task_adapter", "task"
+            ) as mock_task_class,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
         ):
 
@@ -444,7 +455,9 @@ class TestCreateTask:
         }
 
         with (
-            patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
+            patch_build(
+                "src.services.agent_builder.task_adapter", "task"
+            ) as mock_task_class,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
         ):
 
@@ -476,7 +489,9 @@ class TestCreateTask:
         task_config = {"description": "Test task", "expected_output": "Test output"}
 
         with (
-            patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
+            patch_build(
+                "src.services.agent_builder.task_adapter", "task"
+            ) as mock_task_class,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
         ):
 
@@ -514,7 +529,9 @@ class TestCreateTask:
         }
 
         with (
-            patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
+            patch_build(
+                "src.services.agent_builder.task_adapter", "task"
+            ) as mock_task_class,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
@@ -572,7 +589,9 @@ class TestCreateTask:
         }
 
         with (
-            patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
+            patch_build(
+                "src.services.agent_builder.task_adapter", "task"
+            ) as mock_task_class,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
@@ -630,7 +649,9 @@ class TestCreateTask:
         }
 
         with (
-            patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
+            patch_build(
+                "src.services.agent_builder.task_adapter", "task"
+            ) as mock_task_class,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
@@ -689,7 +710,9 @@ class TestCreateTask:
         mock_tool_factory = MagicMock()
 
         with (
-            patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
+            patch_build(
+                "src.services.agent_builder.task_adapter", "task"
+            ) as mock_task_class,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
@@ -744,7 +767,9 @@ class TestCreateTask:
         mock_tool_factory = MagicMock()
 
         with (
-            patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
+            patch_build(
+                "src.services.agent_builder.task_adapter", "task"
+            ) as mock_task_class,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
@@ -789,7 +814,9 @@ class TestCreateTask:
         mock_tool_factory = MagicMock()
 
         with (
-            patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
+            patch_build(
+                "src.services.agent_builder.task_adapter", "task"
+            ) as mock_task_class,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
@@ -834,7 +861,9 @@ class TestCreateTask:
         mock_tool_factory = MagicMock()
 
         with (
-            patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
+            patch_build(
+                "src.services.agent_builder.task_adapter", "task"
+            ) as mock_task_class,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
@@ -879,7 +908,9 @@ class TestCreateTask:
         mock_tool_factory = MagicMock()
 
         with (
-            patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
+            patch_build(
+                "src.services.agent_builder.task_adapter", "task"
+            ) as mock_task_class,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
@@ -925,7 +956,9 @@ class TestCreateTask:
         mock_tool_service = AsyncMock()
 
         with (
-            patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
+            patch_build(
+                "src.services.agent_builder.task_adapter", "task"
+            ) as mock_task_class,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
@@ -967,7 +1000,9 @@ class TestCreateTask:
         mock_tool_factory = MagicMock()
 
         with (
-            patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
+            patch_build(
+                "src.services.agent_builder.task_adapter", "task"
+            ) as mock_task_class,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
@@ -1008,7 +1043,9 @@ class TestCreateTask:
         }
 
         with (
-            patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
+            patch_build(
+                "src.services.agent_builder.task_adapter", "task"
+            ) as mock_task_class,
             patch(
                 "src.services.mcp.mcp_client.service.MCPService",
                 side_effect=Exception("MCP setup failed"),
@@ -1046,7 +1083,9 @@ class TestCreateTask:
         }
 
         with (
-            patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
+            patch_build(
+                "src.services.agent_builder.task_adapter", "task"
+            ) as mock_task_class,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.agent_builder.task_adapter.get_pydantic_class_from_name"
@@ -1110,7 +1149,9 @@ class TestCreateTask:
         }
 
         with (
-            patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
+            patch_build(
+                "src.services.agent_builder.task_adapter", "task"
+            ) as mock_task_class,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.agent_builder.task_adapter.get_pydantic_class_from_name"
@@ -1171,7 +1212,9 @@ class TestCreateTask:
         }
 
         with (
-            patch("src.services.agent_builder.task_adapter.Task") as mock_task_class,
+            patch_build(
+                "src.services.agent_builder.task_adapter", "task"
+            ) as mock_task_class,
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp,
             patch(
                 "src.services.agent_builder.task_adapter.get_pydantic_class_from_name"

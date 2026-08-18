@@ -15,9 +15,9 @@ from pydantic import BaseModel
 from src.core.exceptions import NotFoundError
 from src.core.logger import LoggerManager
 from src.services.agent_builder.schema_converter import build_model_from_schema
+from src.services.execution.harnesses import active_harness
 from src.services.execution.kernel.task_builder import build_task_args
 from src.services.execution.kernel.tool_helpers import resolve_tool_ids_to_names
-from src.services.execution.runtime import Agent, Task, TaskOutput
 from src.services.guardrails.wrapper import GuardrailWrapper
 
 # Get loggers from the centralized logging system
@@ -25,7 +25,7 @@ logger = LoggerManager.get_instance().crew
 guardrail_logger = LoggerManager.get_instance().guardrails
 
 
-def is_data_missing(output: TaskOutput) -> bool:
+def is_data_missing(output: Any) -> bool:
     """
     Check if data is missing from task output
 
@@ -213,13 +213,16 @@ def create_callback_from_string(
 async def create_task(
     task_key: str,
     task_config: dict,
-    agent: Agent,
+    # `Any`, not `Agent`/`Task`: which runtime these are is the active engine's
+    # answer, so naming one engine's class would be a type that is wrong half
+    # the time.
+    agent: Any,
     tools: List[Any] = None,
     config: dict = None,
     tool_service=None,
     tool_factory=None,
     execution_name: Optional[str] = None,
-) -> Task:
+) -> Any:
     """
     Creates a Task instance from the provided configuration.
 
@@ -633,7 +636,7 @@ async def create_task(
     # Create the task instance
     try:
         # Create the task with properly separated parameters
-        task = Task(**task_args)
+        task = active_harness().build_task(**task_args)
 
         # Store the task ID from config if available
         # This ID matches the database task ID and is used for status tracking

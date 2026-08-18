@@ -62,6 +62,7 @@ def mock_session_factory(mock_session):
     So we build an object whose __call__ returns an async context manager
     that yields mock_session.
     """
+
     async def _gen():
         yield mock_session
 

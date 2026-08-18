@@ -8,6 +8,7 @@ from src.services.agent_builder.process_executor import (
     ProcessCrewExecutor,
     run_crew_in_process,
 )
+from tests.unit.helpers.harness_double import patch_build
 
 
 class TestProcessCrewExecutorValidation:
@@ -455,8 +456,9 @@ class TestOtelShutdownOnError:
             with patch("src.seeds.model_configs.MODEL_CONFIGS", {}):
                 # Force an exception during the inner try block
                 # by making Crew(...) raise when instantiated
-                with patch(
-                    "src.services.execution.runtime.Crew",
+                with patch_build(
+                    "src.services.agent_builder.crew_preparation",
+                    "crew",
                     side_effect=RuntimeError("Boom"),
                 ):
                     result = run_crew_in_process(

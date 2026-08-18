@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.unit.helpers.harness_double import patch_build
+
 
 class TestFlowProcessorManager:
     """Tests for FlowProcessorManager class."""
@@ -256,7 +258,9 @@ class TestProcessStartingPoints:
             patch(
                 "src.services.flow_builder.modules.task_adapter.TaskConfig"
             ) as mock_task_config,
-            patch("src.services.execution.runtime.Task") as mock_crewai_task,
+            patch_build(
+                "src.services.flow_builder.modules.flow_processors", "task"
+            ) as mock_crewai_task,
         ):
             mock_agent_obj = MagicMock()
             mock_agent_config.configure_agent_and_tools = AsyncMock(
@@ -332,7 +336,9 @@ class TestProcessStartingPoints:
             patch(
                 "src.services.flow_builder.modules.task_adapter.TaskConfig"
             ) as mock_task_config,
-            patch("src.services.execution.runtime.Task") as mock_crewai_task,
+            patch_build(
+                "src.services.flow_builder.modules.flow_processors", "task"
+            ) as mock_crewai_task,
         ):
             mock_agent_obj = MagicMock()
             mock_agent_config.configure_agent_and_tools = AsyncMock(

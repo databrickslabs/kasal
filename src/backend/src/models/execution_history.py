@@ -187,6 +187,16 @@ class ExecutionHistory(Base):
     # Anything writing here must MERGE, never replace the column wholesale.
     checkpoint_data = Column(JSON, nullable=True, default=None)
 
+    # Which agent runtime ran this — "kasal" or "crewai". Resolved ONCE when the
+    # row is created and read back from here forever after, rather than
+    # re-reading the operator setting: a run that started before a switch must
+    # not finish on the other engine, and a resume has to continue on whatever
+    # produced the checkpoint it is resuming from.
+    #
+    # NULL on every row written before the engine layer existed, and read as
+    # "kasal" — which is what those runs actually used.
+    harness = Column(String(20), nullable=True, index=True)
+
     # Relationships
     task_statuses = relationship(
         "TaskStatus",

@@ -1273,6 +1273,9 @@ async def _ensure_execution_history_columns(conn) -> None:
         # what lets a resume rebuild from the current definition instead of
         # replaying the frozen inputs snapshot.
         ("crew_id", "TEXT", "UUID"),
+        # Which agent runtime ran this execution. NULL on pre-existing rows,
+        # which read as "kasal" — the only engine there was.
+        ("harness", "TEXT", "VARCHAR(20)"),
     ]
     try:
         if is_sqlite:
@@ -1529,16 +1532,33 @@ async def _heal_personal_group_names(conn) -> None:
         logger.warning(f"Could not heal personal group names: {e}")
 
 
+#: The engineconfig keys that existed before the crewai→kasal rename. The heal
+#: below is scoped to these, and must stay scoped: `crewai` is a REAL engine
+#: name again, so an unscoped rewrite would silently un-select it on every boot.
+_LEGACY_ENGINE_CONFIG_KEYS = (
+    "flow_enabled",
+    "otel_app_telemetry_enabled",
+    "otel_app_telemetry_log_level",
+)
+
+
 async def _heal_engine_config_names(conn) -> None:
     """One-time data heal for the crewai→kasal engine rename: engine_configs
-    rows persisted engine_name='crewai' (the legacy name of the now-native
+    rows persisted engine_name='crewai' (the legacy name of what is now the
     kasal engine). Rewrite in place so lookups keyed on 'kasal' find them.
     Idempotent (the WHERE no longer matches after the first run) and DML-only,
-    so it also runs on deployments where DDL is unavailable."""
+    so it also runs on deployments where DDL is unavailable.
+
+    SCOPED to the keys that predate the rename. CrewAI is a selectable engine
+    again, so `engine_name = 'crewai'` is once more a legitimate value; an
+    unscoped UPDATE here would rewrite a live CrewAI configuration to `kasal`
+    at every startup, and the symptom — "the engine keeps switching back" —
+    would point nowhere near this function."""
     try:
+        keys = "', '".join(_LEGACY_ENGINE_CONFIG_KEYS)
         res = await conn.exec_driver_sql(
             "UPDATE engineconfig SET engine_name = 'kasal' "
-            "WHERE engine_name = 'crewai'"
+            f"WHERE engine_name = 'crewai' AND config_key IN ('{keys}')"
         )
         renamed = getattr(res, "rowcount", 0) or 0
         if renamed > 0:

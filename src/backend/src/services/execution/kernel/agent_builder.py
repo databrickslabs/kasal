@@ -5,11 +5,13 @@ from src.utils.model_config import DEFAULT_ENGINE_MODEL
 (``flow.modules.agent_adapter``).
 
 Single source of truth for:
-- ``build_agent_llm`` — build a CrewAI LLM via ``LLMManager.configure_kasal_llm``
+- ``build_agent_llm`` — build the agent's LLM through the ACTIVE ENGINE's binding,
   with explicit ``group_id`` (multi-tenant isolation) + temperature override, the
   exact approach the crew path uses. A flow is just composed crews, so flow agents
   must build their LLMs the same way rather than via a divergent ``get_llm`` call.
-- ``build_agent_kwargs`` — assemble the kwargs dict passed to ``crewai.Agent``.
+- ``build_agent_kwargs`` — assemble the kwargs dict handed to the binding's
+  ``build_agent``. The dict is engine-neutral; each binding owns the translation
+  onto its own runtime (see ``services/execution/harnesses/binding.py``).
 
 The security preamble is injected by the CALLER
 (``agent_adapter.inject_security_preamble``) right after ``build_agent_kwargs``
@@ -22,10 +24,10 @@ from typing import Any, Dict, List, Optional
 
 from src.core.llm.output_cap import output_cap
 from src.core.logger import LoggerManager
-from src.services.execution.kernel.agent_security import inject_security_preamble
+from src.services.execution.harnesses import active_harness
 from src.services.execution.kernel.agent_plan import add_plan_tool
+from src.services.execution.kernel.agent_security import inject_security_preamble
 from src.services.execution.kernel.agent_skills import inject_skills
-from src.services.execution.runtime import Agent
 
 logger = LoggerManager.get_instance().crew
 
@@ -216,7 +218,7 @@ async def build_agent_llm(
     (``spec['reasoning_config']['reasoning_effort']``) is stamped onto the built
     LLM for models that natively support it — see ``_apply_reasoning_effort``.
     """
-    from src.services.llm.manager import LLMManager
+    engine = active_harness()
 
     llm = None
     try:
@@ -224,7 +226,8 @@ async def build_agent_llm(
             if isinstance(spec["llm"], str):
                 model_name = spec["llm"]
                 logger.info(
-                    f"Configuring agent {label} LLM using LLMManager for model: {model_name}"
+                    f"Configuring agent {label} LLM via the {engine.name} engine "
+                    f"for model: {model_name}"
                 )
                 temperature = None
                 if spec.get("temperature") is not None:
@@ -235,9 +238,7 @@ async def build_agent_llm(
                     )
                 if not group_id:
                     raise ValueError("group_id is REQUIRED for LLM configuration")
-                llm = await LLMManager.configure_kasal_llm(
-                    model_name, group_id, temperature
-                )
+                llm = await engine.build_llm(model_name, group_id, temperature)
                 logger.info(
                     f"Successfully configured LLM for agent {label} using model: {model_name}"
                 )
@@ -252,13 +253,13 @@ async def build_agent_llm(
                     )
                 if not group_id:
                     raise ValueError("group_id is REQUIRED for LLM configuration")
-                # LLMManager handles provider prefix, API key/base, DatabricksRetryLLM,
-                # GPT-5 params, temperature-rejection, and telemetry headers.
-                llm = await LLMManager.configure_kasal_llm(
-                    model_name, group_id, temperature
-                )
+                # The binding handles provider prefix, API key/base, DatabricksRetryLLM,
+                # GPT-5 params, temperature-rejection and telemetry headers — on
+                # BOTH engines, deliberately: switching engine must not quietly
+                # switch provider behaviour along with it.
+                llm = await engine.build_llm(model_name, group_id, temperature)
                 # Apply any additional overrides from llm_config (e.g. top_p, stop, max_tokens)
-                skip_keys = {"model"}  # already handled by LLMManager
+                skip_keys = {"model"}  # already handled by the binding
                 for key, value in llm_config.items():
                     if key not in skip_keys and value is not None:
                         setattr(llm, key, value)
@@ -270,7 +271,7 @@ async def build_agent_llm(
             logger.info(f"No LLM specified for agent {label}, using default")
             if not group_id:
                 raise ValueError("group_id is REQUIRED for LLM configuration")
-            llm = await LLMManager.configure_kasal_llm(default_model, group_id)
+            llm = await engine.build_llm(default_model, group_id)
     except ValueError:
         # Missing group_id is a multi-tenant isolation violation — never fall back
         # to an unscoped model string, surface it instead.
@@ -427,7 +428,7 @@ async def build_agent(
     differ only in how they SOURCE tools and normalize their native inputs into
     ``spec`` — the build itself lives here.
 
-    Steps: build the LLM (``configure_kasal_llm`` with explicit group_id +
+    Steps: build the LLM (the binding's ``build_llm`` with explicit group_id +
     temperature) → assemble kwargs → inject the security preamble → merge any
     path-specific ``extra_kwargs`` (e.g. flow's ``config``) → construct the Agent
     → set path-specific ``custom_attrs`` (e.g. ``_agent_key`` /
@@ -469,7 +470,10 @@ async def build_agent(
     if extra_kwargs:
         agent_kwargs.update(extra_kwargs)
 
-    agent = Agent(**agent_kwargs)
+    # Through the engine layer rather than `Agent(**kwargs)`: which runtime this
+    # becomes is an operator setting, and this is the single place where BOTH the
+    # crew and the flow path construct an agent.
+    agent = active_harness().build_agent(**agent_kwargs)
     # Path-specific custom attributes set via object.__setattr__ to bypass
     # Pydantic validation (e.g. _agent_key for crew, _kasal_memory_disabled for flow).
     for attr, value in (custom_attrs or {}).items():

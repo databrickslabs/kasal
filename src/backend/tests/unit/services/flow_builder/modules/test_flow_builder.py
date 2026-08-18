@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
+from tests.unit.helpers.harness_double import HarnessDouble
+
 MODULE = "src.services.flow_builder.modules.flow_builder"
 
 
@@ -72,9 +74,11 @@ def _patches():
         "router": _fake_router,
         "and_": _fake_and,
         "or_": _fake_or,
-        "Crew": MagicMock,
-        "Task": MagicMock,
-        "Process": MagicMock(),
+        # Construction goes through the engine binding now, so the thing to
+        # replace is `active_harness`, not the three classes the module used to
+        # name. `Process` needs no entry at all: the double's `process` returns
+        # the name it is given.
+        "active_harness": MagicMock(return_value=HarnessDouble()),
         "BaseModel": MagicMock,
         "FlowConfigManager": MagicMock(),
         "FlowProcessorManager": MagicMock(),
@@ -87,6 +91,25 @@ def _patches():
         "get_model_context_limits": AsyncMock(return_value=(128000, 16000)),
         "FlowPausedForApprovalException": Exception,
     }
+
+
+def _use_engine(p, *, crew=None, task=None):
+    """Point ``active_harness`` in ``p`` at a double carrying these builders.
+
+    Mutates the double already in ``p`` rather than installing a fresh one, so
+    setting the crew builder and then the task builder leaves BOTH in place —
+    two independent entries would have left the first recording nothing while
+    the test asserted on it.
+    """
+    engine = getattr(p.get("active_harness"), "return_value", None)
+    if not isinstance(engine, HarnessDouble):
+        engine = HarnessDouble()
+        p["active_harness"] = MagicMock(return_value=engine)
+    if crew is not None:
+        engine.build_crew = crew
+    if task is not None:
+        engine.build_task = task
+    return engine
 
 
 # ---------------------------------------------------------------------------
@@ -1956,11 +1979,11 @@ class TestRouteListeners:
         mock_crew_instance = MagicMock()
         mock_crew_instance.kickoff_async = AsyncMock(return_value="route_result")
         mock_crew_cls.return_value = mock_crew_instance
-        p["Crew"] = mock_crew_cls
+        _use_engine(p, crew=mock_crew_cls)
 
         mock_task_cls = MagicMock()
         mock_task_cls.return_value = MagicMock()
-        p["Task"] = mock_task_cls
+        _use_engine(p, task=mock_task_cls)
 
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
         router_cfg = {
@@ -2007,8 +2030,8 @@ class TestRouteListeners:
         mock_crew_instance = MagicMock()
         mock_crew_instance.kickoff_async = AsyncMock(return_value="result")
         mock_crew_cls.return_value = mock_crew_instance
-        p["Crew"] = mock_crew_cls
-        p["Task"] = MagicMock(return_value=MagicMock())
+        _use_engine(p, crew=mock_crew_cls)
+        _use_engine(p, task=MagicMock(return_value=MagicMock()))
 
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
         router_cfg = {
@@ -2050,8 +2073,8 @@ class TestRouteListeners:
         mock_crew_instance = MagicMock()
         mock_crew_instance.kickoff_async = AsyncMock(return_value="ok")
         mock_crew_cls.return_value = mock_crew_instance
-        p["Crew"] = mock_crew_cls
-        p["Task"] = MagicMock(return_value=MagicMock())
+        _use_engine(p, crew=mock_crew_cls)
+        _use_engine(p, task=MagicMock(return_value=MagicMock()))
         # Make extract_final_answer return very long string
         p["extract_final_answer"] = MagicMock(return_value="x" * 999999)
         # Small context to force truncation
@@ -2100,8 +2123,8 @@ class TestRouteListeners:
         mock_crew_instance = MagicMock()
         mock_crew_instance.kickoff_async = AsyncMock(return_value="combined")
         mock_crew_cls.return_value = mock_crew_instance
-        p["Crew"] = mock_crew_cls
-        p["Task"] = MagicMock(return_value=MagicMock())
+        _use_engine(p, crew=mock_crew_cls)
+        _use_engine(p, task=MagicMock(return_value=MagicMock()))
 
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
         router_cfg = {
@@ -2113,13 +2136,7 @@ class TestRouteListeners:
             "conditionField": "success",
         }
 
-        with (
-            patch.multiple(MODULE, **p),
-            patch(
-                "src.services.execution.runtime.Task",
-                MagicMock(return_value=MagicMock()),
-            ),
-        ):
+        with (patch.multiple(MODULE, **p),):
             flow = await FlowBuilder._create_dynamic_flow(
                 sp,
                 [],
@@ -2150,8 +2167,8 @@ class TestRouteListeners:
         mock_crew_instance = MagicMock()
         mock_crew_instance.kickoff_async = AsyncMock(return_value="ok")
         mock_crew_cls.return_value = mock_crew_instance
-        p["Crew"] = mock_crew_cls
-        p["Task"] = MagicMock(return_value=MagicMock())
+        _use_engine(p, crew=mock_crew_cls)
+        _use_engine(p, task=MagicMock(return_value=MagicMock()))
 
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
         router_cfg = {
@@ -2194,8 +2211,8 @@ class TestRouteListeners:
         mock_crew_instance = MagicMock()
         mock_crew_instance.kickoff_async = AsyncMock(return_value="ok")
         mock_crew_cls.return_value = mock_crew_instance
-        p["Crew"] = mock_crew_cls
-        p["Task"] = MagicMock(return_value=MagicMock())
+        _use_engine(p, crew=mock_crew_cls)
+        _use_engine(p, task=MagicMock(return_value=MagicMock()))
 
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
         router_cfg = {
@@ -2238,8 +2255,8 @@ class TestRouteListeners:
         mock_crew_instance = MagicMock()
         mock_crew_instance.kickoff_async = AsyncMock(return_value="ok")
         mock_crew_cls.return_value = mock_crew_instance
-        p["Crew"] = mock_crew_cls
-        p["Task"] = MagicMock(return_value=MagicMock())
+        _use_engine(p, crew=mock_crew_cls)
+        _use_engine(p, task=MagicMock(return_value=MagicMock()))
 
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
         router_cfg = {
@@ -2280,8 +2297,8 @@ class TestRouteListeners:
         mock_crew_instance = MagicMock()
         mock_crew_instance.kickoff_async = AsyncMock(return_value="ok")
         mock_crew_cls.return_value = mock_crew_instance
-        p["Crew"] = mock_crew_cls
-        p["Task"] = MagicMock(return_value=MagicMock())
+        _use_engine(p, crew=mock_crew_cls)
+        _use_engine(p, task=MagicMock(return_value=MagicMock()))
 
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
         router_cfg = {
@@ -2695,8 +2712,8 @@ class TestEdgeCases:
         mock_crew_instance = MagicMock()
         mock_crew_instance.kickoff_async = AsyncMock(return_value="ok")
         mock_crew_cls.return_value = mock_crew_instance
-        p["Crew"] = mock_crew_cls
-        p["Task"] = MagicMock(return_value=MagicMock())
+        _use_engine(p, crew=mock_crew_cls)
+        _use_engine(p, task=MagicMock(return_value=MagicMock()))
 
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
         router_cfg = {
@@ -2823,8 +2840,8 @@ class TestRouterMethodNamePatching:
 
         mock_crew_cls = MagicMock()
         mock_crew_cls.return_value.kickoff_async = AsyncMock(return_value="ok")
-        p["Crew"] = mock_crew_cls
-        p["Task"] = MagicMock(return_value=MagicMock())
+        _use_engine(p, crew=mock_crew_cls)
+        _use_engine(p, task=MagicMock(return_value=MagicMock()))
 
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
         router_cfg = {

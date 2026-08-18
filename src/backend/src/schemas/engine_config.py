@@ -89,3 +89,48 @@ class OtelAppTelemetryConfigUpdate(BaseModel):
         description="OTel log export level (DEBUG, INFO, WARNING, ERROR)",
         pattern="^(DEBUG|INFO|WARNING|ERROR)$",
     )
+
+
+class HarnessDescription(BaseModel):
+    """One harness, and whether it can actually run here."""
+
+    name: str = Field(..., description="Harness identifier ('kasal' or 'crewai')")
+    label: Optional[str] = Field(None, description="Display name")
+    version: Optional[str] = Field(None, description="The runtime's own version")
+    available: bool = Field(..., description="Whether this harness can run here")
+    unavailable_reason: Optional[str] = Field(
+        None,
+        description=(
+            "Why it cannot, in terms an operator can act on. The UI shows this "
+            "beside a disabled option — a greyed-out engine with no reason is "
+            "the thing people open a ticket about."
+        ),
+    )
+    capabilities: List[str] = Field(
+        default_factory=list,
+        description=(
+            "What this engine supports (checkpoint_resume, tool_approval, "
+            "flow, …). The UI disables what the selected engine cannot do "
+            "instead of offering a button that fails."
+        ),
+    )
+
+
+class HarnessResponse(BaseModel):
+    """The default harness, alongside every harness's availability."""
+
+    harness: str = Field(
+        ...,
+        description=(
+            "The harness new runs DEFAULT to. A run may name its own; this is "
+            "what applies when it does not — scheduled runs and API-triggered "
+            "runs have no picker."
+        ),
+    )
+    harnesses: List[HarnessDescription] = Field(default_factory=list)
+
+
+class HarnessUpdate(BaseModel):
+    """Change the harness runs default to."""
+
+    harness: str = Field(..., description="'kasal' or 'crewai'")

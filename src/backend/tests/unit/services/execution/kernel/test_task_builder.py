@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.services.execution.kernel.task_builder import build_task_args
+from tests.unit.helpers.harness_double import patch_build
 
 GENIE_MCP_URL = (
     "https://ws.databricks.com/api/2.0/mcp/genie/01f16bcd318214ec8ef983b7627e0221"
@@ -123,7 +124,9 @@ class TestCodeGuardrail:
         # A 'guardrail' with description/llm_model but no 'type' is actually an LLM
         # guardrail and must be re-routed.
         with (
-            patch("src.services.execution.runtime.LLMGuardrail") as MockLLMG,
+            patch_build(
+                "src.services.execution.kernel.task_builder", "guardrail"
+            ) as MockLLMG,
             patch(
                 "src.services.llm.manager.LLMManager.configure_kasal_llm",
                 new_callable=AsyncMock,
@@ -149,7 +152,9 @@ class TestLlmGuardrail:
     @pytest.mark.asyncio
     async def test_llm_guardrail_set(self):
         with (
-            patch("src.services.execution.runtime.LLMGuardrail") as MockLLMG,
+            patch_build(
+                "src.services.execution.kernel.task_builder", "guardrail"
+            ) as MockLLMG,
             patch(
                 "src.services.llm.manager.LLMManager.configure_kasal_llm",
                 new_callable=AsyncMock,

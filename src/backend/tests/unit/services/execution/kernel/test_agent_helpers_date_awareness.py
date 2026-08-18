@@ -20,6 +20,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.services.agent_builder.agent_adapter import create_agent
+from tests.unit.helpers.harness_double import patch_build
 
 
 class TestCreateAgentDateAwareness:
@@ -57,8 +58,8 @@ class TestCreateAgentDateAwareness:
         agent_config = {**base_agent_config, "inject_date": True}
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent"
+            patch_build(
+                "src.services.execution.kernel.agent_builder", "agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
             patch("src.db.session.routed_scoped_session") as mock_session_factory,
@@ -111,8 +112,8 @@ class TestCreateAgentDateAwareness:
         agent_config = {**base_agent_config, "inject_date": False}
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent"
+            patch_build(
+                "src.services.execution.kernel.agent_builder", "agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
             patch("src.db.session.routed_scoped_session") as mock_session_factory,
@@ -165,8 +166,8 @@ class TestCreateAgentDateAwareness:
         agent_config = {**base_agent_config, "date_format": date_format}
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent"
+            patch_build(
+                "src.services.execution.kernel.agent_builder", "agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
             patch("src.db.session.routed_scoped_session") as mock_session_factory,
@@ -218,8 +219,8 @@ class TestCreateAgentDateAwareness:
         agent_config = {**base_agent_config, "inject_date": None}
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent"
+            patch_build(
+                "src.services.execution.kernel.agent_builder", "agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
             patch("src.db.session.routed_scoped_session") as mock_session_factory,
@@ -270,8 +271,8 @@ class TestCreateAgentDateAwareness:
         agent_config = {**base_agent_config, "date_format": None}
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent"
+            patch_build(
+                "src.services.execution.kernel.agent_builder", "agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
             patch("src.db.session.routed_scoped_session") as mock_session_factory,
@@ -322,8 +323,8 @@ class TestCreateAgentDateAwareness:
         # base_agent_config does not include inject_date
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent"
+            patch_build(
+                "src.services.execution.kernel.agent_builder", "agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
             patch("src.db.session.routed_scoped_session") as mock_session_factory,
@@ -374,8 +375,8 @@ class TestCreateAgentDateAwareness:
         # base_agent_config does not include date_format
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent"
+            patch_build(
+                "src.services.execution.kernel.agent_builder", "agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
             patch("src.db.session.routed_scoped_session") as mock_session_factory,
@@ -431,8 +432,8 @@ class TestCreateAgentDateAwareness:
         }
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent"
+            patch_build(
+                "src.services.execution.kernel.agent_builder", "agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
             patch("src.db.session.routed_scoped_session") as mock_session_factory,
@@ -490,8 +491,8 @@ class TestCreateAgentDateAwareness:
         }
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent"
+            patch_build(
+                "src.services.execution.kernel.agent_builder", "agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
             patch("src.db.session.routed_scoped_session") as mock_session_factory,
@@ -577,8 +578,8 @@ class TestCreateAgentDateFormatVariations:
         agent_config = {**base_agent_config, "date_format": date_format}
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent"
+            patch_build(
+                "src.services.execution.kernel.agent_builder", "agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
             patch("src.db.session.routed_scoped_session") as mock_session_factory,
@@ -630,8 +631,8 @@ class TestCreateAgentDateFormatVariations:
         agent_config = {**base_agent_config, "date_format": ""}
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent"
+            patch_build(
+                "src.services.execution.kernel.agent_builder", "agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
             patch("src.db.session.routed_scoped_session") as mock_session_factory,
@@ -711,8 +712,8 @@ class TestCreateAgentDateAwarenessWithOtherParams:
         }
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent"
+            patch_build(
+                "src.services.execution.kernel.agent_builder", "agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
             patch("src.db.session.routed_scoped_session") as mock_session_factory,
@@ -774,8 +775,8 @@ class TestCreateAgentDateAwarenessWithOtherParams:
         }
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent"
+            patch_build(
+                "src.services.execution.kernel.agent_builder", "agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
             patch("src.db.session.routed_scoped_session") as mock_session_factory,
@@ -840,8 +841,8 @@ class TestCreateAgentDateAwarenessWithOtherParams:
         }
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent"
+            patch_build(
+                "src.services.execution.kernel.agent_builder", "agent"
             ) as mock_agent_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
             patch("src.db.session.routed_scoped_session") as mock_session_factory,

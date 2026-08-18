@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 import pytest
 
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
+from tests.unit.helpers.harness_double import patch_build
 
 # ============================================================================
 # _build_security_preamble
@@ -71,7 +72,7 @@ GLOBAL_CONFIG = {"group_id": "test-group-xyz", "api_keys": {}}
 def _patch_all_deps():
     """Patch every external dependency of create_agent."""
     return (
-        patch("src.services.execution.kernel.agent_builder.Agent"),
+        patch_build("src.services.execution.kernel.agent_builder", "agent"),
         patch(
             "src.services.agent_builder.agent_adapter.resolve_tool_ids_to_names",
             new_callable=AsyncMock,
@@ -174,8 +175,9 @@ class TestSecurityPreambleInjection:
             return MagicMock()
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent",
+            patch_build(
+                "src.services.execution.kernel.agent_builder",
+                "agent",
                 side_effect=capture_agent,
             ),
             patch(
@@ -221,8 +223,9 @@ class TestSecurityPreambleInjection:
         agent_config["system_template"] = custom_template
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent",
+            patch_build(
+                "src.services.execution.kernel.agent_builder",
+                "agent",
                 side_effect=capture_agent,
             ),
             patch(
@@ -255,8 +258,9 @@ class TestSecurityPreambleInjection:
             return MagicMock()
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent",
+            patch_build(
+                "src.services.execution.kernel.agent_builder",
+                "agent",
                 side_effect=capture_agent,
             ),
             patch(
@@ -304,8 +308,9 @@ class TestCreateAgentLlmConfig:
         agent_config["llm"] = "gpt-4"
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent",
+            patch_build(
+                "src.services.execution.kernel.agent_builder",
+                "agent",
                 side_effect=capture_agent,
             ),
             patch(
@@ -335,8 +340,9 @@ class TestCreateAgentLlmConfig:
         captured_args = {}
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent",
+            patch_build(
+                "src.services.execution.kernel.agent_builder",
+                "agent",
                 return_value=MagicMock(),
             ),
             patch(
@@ -376,8 +382,9 @@ class TestCreateAgentLlmConfig:
         mock_llm = MagicMock()
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent",
+            patch_build(
+                "src.services.execution.kernel.agent_builder",
+                "agent",
                 side_effect=capture_agent,
             ),
             patch(
@@ -425,8 +432,9 @@ class TestKnowledgeSourcesRemoval:
         agent_config["knowledge_sources"] = ["some_source"]
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent",
+            patch_build(
+                "src.services.execution.kernel.agent_builder",
+                "agent",
                 side_effect=capture_agent,
             ),
             patch(
@@ -470,8 +478,9 @@ class TestToolResolution:
         mock_tool.name = "MockTool"
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent",
+            patch_build(
+                "src.services.execution.kernel.agent_builder",
+                "agent",
                 side_effect=capture_agent,
             ),
             patch(
@@ -509,8 +518,9 @@ class TestToolResolution:
         mcp_tool.name = "MCPTool"
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent",
+            patch_build(
+                "src.services.execution.kernel.agent_builder",
+                "agent",
                 side_effect=capture_agent,
             ),
             patch(
@@ -555,8 +565,9 @@ class TestToolResolution:
         mock_tool_svc.get_tool_config_by_name = AsyncMock(return_value={})
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent",
+            patch_build(
+                "src.services.execution.kernel.agent_builder",
+                "agent",
                 side_effect=capture_agent,
             ),
             patch(
@@ -608,8 +619,9 @@ class TestToolResolution:
         mock_tool_svc.get_tool_config_by_name = AsyncMock(return_value={})
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent",
+            patch_build(
+                "src.services.execution.kernel.agent_builder",
+                "agent",
                 side_effect=capture_agent,
             ),
             patch(
@@ -670,8 +682,9 @@ class TestAdditionalAgentParams:
         agent_config["max_iter"] = 5
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent",
+            patch_build(
+                "src.services.execution.kernel.agent_builder",
+                "agent",
                 side_effect=capture_agent,
             ),
             patch(
@@ -707,8 +720,9 @@ class TestAdditionalAgentParams:
         agent_config["memory"] = True
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent",
+            patch_build(
+                "src.services.execution.kernel.agent_builder",
+                "agent",
                 side_effect=capture_agent,
             ),
             patch(
@@ -746,8 +760,9 @@ class TestAdditionalAgentParams:
         agent_config["max_iter"] = None  # None should NOT be passed
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent",
+            patch_build(
+                "src.services.execution.kernel.agent_builder",
+                "agent",
                 side_effect=capture_agent,
             ),
             patch(
@@ -794,8 +809,9 @@ class TestPromptTemplates:
         agent_config["system_template"] = "Custom system template."
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent",
+            patch_build(
+                "src.services.execution.kernel.agent_builder",
+                "agent",
                 side_effect=capture_agent,
             ),
             patch(
@@ -834,8 +850,9 @@ class TestPromptTemplates:
         agent_config["prompt_template"] = "Task prompt here."
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent",
+            patch_build(
+                "src.services.execution.kernel.agent_builder",
+                "agent",
                 side_effect=capture_agent,
             ),
             patch(
@@ -871,8 +888,9 @@ class TestPromptTemplates:
         agent_config["response_template"] = "Response format."
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent",
+            patch_build(
+                "src.services.execution.kernel.agent_builder",
+                "agent",
                 side_effect=capture_agent,
             ),
             patch(
@@ -913,8 +931,9 @@ class TestDefaultAgentSettings:
             return MagicMock()
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent",
+            patch_build(
+                "src.services.execution.kernel.agent_builder",
+                "agent",
                 side_effect=capture_agent,
             ),
             patch(
@@ -948,8 +967,9 @@ class TestDefaultAgentSettings:
             return MagicMock()
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent",
+            patch_build(
+                "src.services.execution.kernel.agent_builder",
+                "agent",
                 side_effect=capture_agent,
             ),
             patch(
@@ -978,8 +998,9 @@ class TestDefaultAgentSettings:
         mock_agent = MagicMock()
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent",
+            patch_build(
+                "src.services.execution.kernel.agent_builder",
+                "agent",
                 return_value=mock_agent,
             ),
             patch(
@@ -1025,8 +1046,9 @@ class TestLlmFallback:
         agent_config["llm"] = "my-fallback-model"
 
         with (
-            patch(
-                "src.services.execution.kernel.agent_builder.Agent",
+            patch_build(
+                "src.services.execution.kernel.agent_builder",
+                "agent",
                 side_effect=capture_agent,
             ),
             patch(

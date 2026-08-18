@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional
 from uuid import UUID
 
 from src.core.logger import LoggerManager
+from src.services.execution.harnesses import active_harness
 from src.services.flow_builder.runtime import listen, router
 from src.utils.sensitive_data_utils import safe_log_tool_configs
 
@@ -498,20 +499,18 @@ class FlowProcessorManager:
                     ]
 
                     if len(async_tasks) > 1:
-                        # Auto-create a lightweight completion task that waits for all async tasks
-                        # This allows all async tasks to run in parallel while satisfying CrewAI validation
-                        from src.services.execution.runtime import Task
-
+                        # Auto-create a lightweight completion task that waits for all
+                        # async tasks. Both runtimes need a sync task to join on.
                         # Use the last async task's agent for the completion task
                         completion_agent = async_tasks[-1].agent
 
                         # Create completion task that aggregates results
-                        completion_task = Task(
+                        completion_task = active_harness().build_task(
                             description="Aggregate and return results from parallel task executions",
                             expected_output="Combined results from all parallel tasks",
                             agent=completion_agent,
                             context=async_tasks,  # Wait for ALL async tasks
-                            async_execution=False,  # This must be sync to satisfy CrewAI validation
+                            async_execution=False,  # Must be sync: it joins the async ones
                         )
 
                         # Add to the crew's task list

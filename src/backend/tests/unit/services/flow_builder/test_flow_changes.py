@@ -14,6 +14,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.unit.helpers.harness_double import patch_build
+
 
 class MockAsyncSession:
     """Mock that acts as both a session and an async context manager (like AsyncSession)."""
@@ -95,8 +97,8 @@ class TestFlowMethodsNoPlanner:
 
         # Crew IS a module-level import; LLMManager is a lazy import inside the closure
         with (
-            patch(
-                "src.services.flow_builder.modules.flow_methods.Crew"
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
             ) as mock_crew_class,
             patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
         ):
@@ -174,8 +176,8 @@ class TestFlowMethodsNoPlanner:
         mock_task.expected_output = "Test output"
         mock_task.context = None
 
-        with patch(
-            "src.services.flow_builder.modules.flow_methods.Crew"
+        with patch_build(
+            "src.services.flow_builder.modules.flow_methods", "crew"
         ) as mock_crew_class:
             mock_crew_instance = MagicMock()
             mock_crew_class.return_value = mock_crew_instance
@@ -238,8 +240,8 @@ class TestFlowMethodsNoPlanner:
         mock_task.expected_output = "Test output"
         mock_task.context = None
 
-        with patch(
-            "src.services.flow_builder.modules.flow_methods.Crew"
+        with patch_build(
+            "src.services.flow_builder.modules.flow_methods", "crew"
         ) as mock_crew_class:
             mock_crew_instance = MagicMock()
             mock_crew_class.return_value = mock_crew_instance

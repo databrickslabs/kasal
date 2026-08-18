@@ -14,6 +14,7 @@ from src.services.agent_builder.task_adapter import (
 )
 from src.services.execution.runtime import Agent, Task, TaskOutput
 from src.services.tools.base import BaseTool
+from tests.unit.helpers.harness_double import patch_build
 
 
 class TestIsDataMissing:
@@ -1183,8 +1184,9 @@ class TestCreateTask:
 
         with (
             patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
-            patch(
-                "src.services.agent_builder.task_adapter.Task",
+            patch_build(
+                "src.services.agent_builder.task_adapter",
+                "task",
                 side_effect=Exception("Task creation failed"),
             ),
         ):

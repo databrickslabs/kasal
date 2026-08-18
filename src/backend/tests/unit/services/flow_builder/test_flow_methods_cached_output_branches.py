@@ -17,6 +17,8 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 
+from tests.unit.helpers.harness_double import patch_build
+
 # ============================================================================
 # extract_final_answer - uncovered branches
 # ============================================================================
@@ -683,8 +685,8 @@ class TestStartingPointMethodBranches:
         mock_flow = MagicMock()
         mock_flow.state = {}
 
-        with patch(
-            "src.services.flow_builder.modules.flow_methods.Crew"
+        with patch_build(
+            "src.services.flow_builder.modules.flow_methods", "crew"
         ) as mock_crew_cls:
             mock_crew = MagicMock()
             mock_crew.kickoff_async = AsyncMock(return_value=MagicMock(raw="result"))
@@ -720,8 +722,8 @@ class TestStartingPointMethodBranches:
         mock_flow.state = {}
 
         with (
-            patch(
-                "src.services.flow_builder.modules.flow_methods.Crew"
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
             ) as mock_crew_cls,
             patch("asyncio.wait_for", new_callable=AsyncMock) as mock_wait,
         ):
@@ -777,11 +779,11 @@ class TestListenerMethodBranches:
         mock_flow.state = {}
 
         with (
-            patch(
-                "src.services.flow_builder.modules.flow_methods.Crew"
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
             ) as mock_crew_cls,
-            patch(
-                "src.services.flow_builder.modules.flow_methods.Task"
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "task"
             ) as mock_task_cls,
             patch("asyncio.wait_for", new_callable=AsyncMock) as mock_wait,
         ):
@@ -818,11 +820,11 @@ class TestListenerMethodBranches:
         large_output = "A" * 5000  # > 2000 chars
 
         with (
-            patch(
-                "src.services.flow_builder.modules.flow_methods.Crew"
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
             ) as mock_crew_cls,
-            patch(
-                "src.services.flow_builder.modules.flow_methods.Task"
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "task"
             ) as mock_task_cls,
             patch("asyncio.wait_for", new_callable=AsyncMock) as mock_wait,
         ):
@@ -881,11 +883,11 @@ class TestListenerMethodBranches:
         )
 
         with (
-            patch(
-                "src.services.flow_builder.modules.flow_methods.Crew"
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
             ) as mock_crew_cls,
-            patch(
-                "src.services.flow_builder.modules.flow_methods.Task"
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "task"
             ) as mock_task_cls,
             patch("asyncio.wait_for", new_callable=AsyncMock) as mock_wait,
         ):
@@ -938,11 +940,11 @@ class TestListenerMethodBranches:
         mock_flow.state = {}
 
         with (
-            patch(
-                "src.services.flow_builder.modules.flow_methods.Crew"
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
             ) as mock_crew_cls,
-            patch(
-                "src.services.flow_builder.modules.flow_methods.Task"
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "task"
             ) as mock_task_cls,
             patch("asyncio.wait_for", new_callable=AsyncMock) as mock_wait,
         ):
@@ -985,11 +987,11 @@ class TestListenerMethodBranches:
         mock_flow.state = {}
 
         with (
-            patch(
-                "src.services.flow_builder.modules.flow_methods.Crew"
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
             ) as mock_crew_cls,
-            patch(
-                "src.services.flow_builder.modules.flow_methods.Task"
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "task"
             ) as mock_task_cls,
             patch("asyncio.wait_for", new_callable=AsyncMock) as mock_wait,
         ):
@@ -1029,11 +1031,11 @@ class TestListenerMethodBranches:
         mock_flow.state = {}
 
         with (
-            patch(
-                "src.services.flow_builder.modules.flow_methods.Crew"
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "crew"
             ) as mock_crew_cls,
-            patch(
-                "src.services.flow_builder.modules.flow_methods.Task"
+            patch_build(
+                "src.services.flow_builder.modules.flow_methods", "task"
             ) as mock_task_cls,
             patch("asyncio.wait_for", new_callable=AsyncMock) as mock_wait,
         ):

@@ -17,6 +17,7 @@ from src.services.flow_builder.modules.task_adapter import (
     TaskConfig,
     _resolve_tool_override,
 )
+from tests.unit.helpers.harness_double import patch_build
 
 # ---------------------------------------------------------------------------
 # _resolve_tool_override (module-level helper)
@@ -191,7 +192,11 @@ class TestConfigureTask:
 
         with (
             patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
-            patch("src.services.execution.runtime.Task", return_value=task),
+            patch_build(
+                "src.services.flow_builder.modules.task_adapter",
+                "task",
+                return_value=task,
+            ),
         ):
             result = await TaskConfig.configure_task(task_data, agent=agent)
 
@@ -205,7 +210,11 @@ class TestConfigureTask:
 
         with (
             patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
-            patch("src.services.execution.runtime.Task", return_value=task),
+            patch_build(
+                "src.services.flow_builder.modules.task_adapter",
+                "task",
+                return_value=task,
+            ),
         ):
             result = await TaskConfig.configure_task(
                 task_data, agent=agent, task_output_callback=callback
@@ -226,7 +235,11 @@ class TestConfigureTask:
 
         with (
             patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
-            patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor),
+            patch_build(
+                "src.services.flow_builder.modules.task_adapter",
+                "task",
+                side_effect=mock_task_ctor,
+            ),
         ):
             result = await TaskConfig.configure_task(task_data, agent=agent)
 
@@ -246,7 +259,11 @@ class TestConfigureTask:
 
         with (
             patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
-            patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor),
+            patch_build(
+                "src.services.flow_builder.modules.task_adapter",
+                "task",
+                side_effect=mock_task_ctor,
+            ),
         ):
             await TaskConfig.configure_task(task_data, agent=agent)
 
@@ -265,7 +282,11 @@ class TestConfigureTask:
 
         with (
             patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
-            patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor),
+            patch_build(
+                "src.services.flow_builder.modules.task_adapter",
+                "task",
+                side_effect=mock_task_ctor,
+            ),
         ):
             await TaskConfig.configure_task(task_data, agent=agent)
 
@@ -285,7 +306,11 @@ class TestConfigureTask:
 
         with (
             patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
-            patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor),
+            patch_build(
+                "src.services.flow_builder.modules.task_adapter",
+                "task",
+                side_effect=mock_task_ctor,
+            ),
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
             ) as MockGF,
@@ -318,7 +343,11 @@ class TestConfigureTask:
 
         with (
             patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
-            patch("src.services.execution.runtime.Task", return_value=task),
+            patch_build(
+                "src.services.flow_builder.modules.task_adapter",
+                "task",
+                return_value=task,
+            ),
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
             ) as MockGF,
@@ -353,7 +382,11 @@ class TestConfigureTask:
 
         with (
             patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
-            patch("src.services.execution.runtime.Task", return_value=task),
+            patch_build(
+                "src.services.flow_builder.modules.task_adapter",
+                "task",
+                return_value=task,
+            ),
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
             ) as MockGF,
@@ -376,7 +409,11 @@ class TestConfigureTask:
 
         with (
             patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
-            patch("src.services.execution.runtime.Task", return_value=task),
+            patch_build(
+                "src.services.flow_builder.modules.task_adapter",
+                "task",
+                return_value=task,
+            ),
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
             ) as MockGF,
@@ -394,7 +431,11 @@ class TestConfigureTask:
 
         with (
             patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
-            patch("src.services.execution.runtime.Task", return_value=task),
+            patch_build(
+                "src.services.flow_builder.modules.task_adapter",
+                "task",
+                return_value=task,
+            ),
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory",
                 side_effect=ImportError("no module"),
@@ -428,8 +469,14 @@ class TestConfigureTask:
 
         with (
             patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
-            patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor),
-            patch("src.services.execution.runtime.LLMGuardrail") as MockLLMG,
+            patch_build(
+                "src.services.flow_builder.modules.task_adapter",
+                "task",
+                side_effect=mock_task_ctor,
+            ),
+            patch_build(
+                "src.services.execution.kernel.task_builder", "guardrail"
+            ) as MockLLMG,
             patch(
                 "src.services.llm.manager.LLMManager.configure_kasal_llm",
                 new_callable=AsyncMock,
@@ -464,8 +511,14 @@ class TestConfigureTask:
 
         with (
             patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
-            patch("src.services.execution.runtime.Task", return_value=task),
-            patch("src.services.execution.runtime.LLMGuardrail") as MockLLMG,
+            patch_build(
+                "src.services.flow_builder.modules.task_adapter",
+                "task",
+                return_value=task,
+            ),
+            patch_build(
+                "src.services.execution.kernel.task_builder", "guardrail"
+            ) as MockLLMG,
             patch(
                 "src.services.llm.manager.LLMManager.configure_kasal_llm",
                 new_callable=AsyncMock,
@@ -496,8 +549,14 @@ class TestConfigureTask:
 
         with (
             patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
-            patch("src.services.execution.runtime.Task", return_value=task),
-            patch("src.services.execution.runtime.LLMGuardrail") as MockLLMG,
+            patch_build(
+                "src.services.flow_builder.modules.task_adapter",
+                "task",
+                return_value=task,
+            ),
+            patch_build(
+                "src.services.execution.kernel.task_builder", "guardrail"
+            ) as MockLLMG,
             patch(
                 "src.services.llm.manager.LLMManager.configure_kasal_llm",
                 new=mock_configure_llm,
@@ -561,8 +620,12 @@ class TestConfigureTask:
 
         with (
             patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
-            patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor),
-            patch("src.services.execution.runtime.LLMGuardrail"),
+            patch_build(
+                "src.services.flow_builder.modules.task_adapter",
+                "task",
+                side_effect=mock_task_ctor,
+            ),
+            patch_build("src.services.execution.kernel.task_builder", "guardrail"),
             patch(
                 "src.services.llm.manager.LLMManager.configure_kasal_llm",
                 new_callable=AsyncMock,
@@ -593,9 +656,14 @@ class TestConfigureTask:
 
         with (
             patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
-            patch("src.services.execution.runtime.Task", return_value=task),
-            patch(
-                "src.services.execution.runtime.LLMGuardrail",
+            patch_build(
+                "src.services.flow_builder.modules.task_adapter",
+                "task",
+                return_value=task,
+            ),
+            patch_build(
+                "src.services.execution.kernel.task_builder",
+                "guardrail",
                 side_effect=ImportError("no crewai"),
             ),
             patch(

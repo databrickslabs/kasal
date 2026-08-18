@@ -6,6 +6,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.base_repository import BaseRepository
 from src.models.engine_config import EngineConfig
 
+#: Where the HARNESS selection lives in the engineconfig table.
+#:
+#: The table itself keeps its name: it is the settings store this platform has
+#: always had (it also holds `flow_enabled` and the otel switches), and renaming
+#: it would be a data migration for no gain. The harness is simply a row in it.
+HARNESS_ENGINE_NAME = "execution"
+HARNESS_KEY = "harness"
+HARNESS_DEFAULT = "kasal"
+
 
 class EngineConfigRepository(BaseRepository[EngineConfig]):
     """
@@ -310,3 +319,57 @@ class EngineConfigRepository(BaseRepository[EngineConfig]):
                 raise
 
         return success
+
+    # ------------------------------------------------------------------
+    # Which agent runtime executes a run: "kasal" or "crewai".
+    #
+    # Stored under its OWN engine_name rather than reusing `kasal`/`crewai` in
+    # the engine_name column, and that is not cosmetic: `crewai` USED to be the
+    # legacy name of the Kasal engine there, and db/session.py rewrites such
+    # rows to `kasal` on startup. A selection row keyed on the word would be
+    # silently flipped back on the next boot.
+    #
+    # The strings are literals here rather than the HarnessName enum because a
+    # repository may not import a service (import-linter, "Repositories never
+    # import services"). The SERVICE validates the value; this layer stores it.
+    # ------------------------------------------------------------------
+
+    async def get_harness(self) -> str:
+        """The configured agent runtime, defaulting to 'kasal'.
+
+        Never raises on an unknown stored value — resolution is on the hot path
+        of every execution, and a bad row must degrade to the default engine
+        rather than take the platform down. The service reports the mismatch.
+        """
+        config = await self.find_by_engine_and_key(HARNESS_ENGINE_NAME, HARNESS_KEY)
+        if not config or not config.config_value:
+            return HARNESS_DEFAULT
+        return config.config_value.strip().lower()
+
+    async def set_harness(self, backend: str) -> bool:
+        """Persist the agent runtime every subsequent run starts on."""
+        value = backend.strip().lower()
+        if await self.update_config_value(HARNESS_ENGINE_NAME, HARNESS_KEY, value):
+            return True
+        try:
+            await self.create(
+                {
+                    "engine_name": HARNESS_ENGINE_NAME,
+                    "engine_type": "ai",
+                    "config_key": HARNESS_KEY,
+                    "config_value": value,
+                    "enabled": True,
+                    "description": (
+                        "Which agent runtime executes a run: the Kasal runtime "
+                        "or CrewAI. Resolved once per execution and stamped on "
+                        "the row, so a run and its resume stay on one engine."
+                    ),
+                }
+            )
+            return True
+        except Exception as e:
+            import logging
+
+            logging.error(f"Error creating execution backend config: {str(e)}")
+            await self.session.rollback()
+            raise

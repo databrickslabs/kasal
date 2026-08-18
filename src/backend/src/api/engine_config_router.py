@@ -14,6 +14,8 @@ from src.schemas.engine_config import (
     EngineConfigToggleUpdate,
     EngineConfigUpdate,
     EngineConfigValueUpdate,
+    HarnessResponse,
+    HarnessUpdate,
     KasalFlowConfigUpdate,
     OtelAppTelemetryConfigUpdate,
 )
@@ -511,3 +513,42 @@ async def delete_engine_config(
         raise NotFoundError(f"Engine configuration with name {engine_name} not found")
 
     logger.info(f"Engine config {engine_name} deleted successfully")
+
+
+@router.get("/harness", response_model=HarnessResponse)
+async def get_harness(
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+):
+    """Which agent runtime new executions start on, and what each can do.
+
+    Readable by anyone who can see the configuration page — the answer changes
+    what the rest of the UI is allowed to offer (resume, flows, export), so
+    gating the READ behind system-admin would leave every other user looking at
+    controls that do not match the running engine.
+    """
+    logger.info("API call: GET /engine-config/harness")
+    return await service.get_harnesses()
+
+
+@router.put("/harness", response_model=HarnessResponse)
+async def set_harness(
+    config_data: HarnessUpdate,
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+):
+    """Switch the engine. Takes effect on the NEXT execution, never a running one.
+
+    A run resolves its engine once, at creation, and carries it in its own row
+    (``execution_history.harness``) — so flipping this mid-flight cannot
+    split a run across two runtimes, and a resume continues on the engine that
+    started it.
+    """
+    if not is_system_admin(group_context):
+        raise ForbiddenError(
+            "Only system administrators can manage engine configuration"
+        )
+
+    logger.info(f"API call: PUT /engine-config/harness - harness={config_data.harness}")
+    await service.set_harness(config_data.harness)
+    return await service.get_harnesses()

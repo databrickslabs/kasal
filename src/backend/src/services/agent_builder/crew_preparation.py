@@ -18,7 +18,7 @@ from src.services.agent_builder.task_adapter import create_task, is_data_missing
 from src.services.execution.config.crew_config_builder import CrewConfigBuilder
 from src.services.execution.config.embedder_config_builder import EmbedderConfigBuilder
 from src.services.execution.config.manager_config_builder import ManagerConfigBuilder
-from src.services.execution.runtime import Agent, Crew, Process, Task
+from src.services.execution.harnesses import active_harness
 from src.services.memory.backend_factory import MemoryBackendFactory
 
 # Import new service classes
@@ -104,9 +104,12 @@ class CrewPreparation:
             user_token: Optional user access token for OBO authentication
         """
         self.config = config
-        self.agents: Dict[str, Agent] = {}
-        self.tasks: List[Task] = []
-        self.crew: Optional[Crew] = None
+        # Annotated `Any`, not `Agent`/`Task`/`Crew`: which runtime these are is
+        # the active engine's answer, and naming one engine's class here would be
+        # a type that is wrong half the time.
+        self.agents: Dict[str, Any] = {}
+        self.tasks: List[Any] = []
+        self.crew: Optional[Any] = None
         self.tool_service = tool_service
         self.tool_factory = tool_factory
         self.user_token = user_token  # Store user token for OBO auth
@@ -180,7 +183,7 @@ class CrewPreparation:
             handle_crew_error(e, "Error during crew preparation")
             return False
 
-    def _find_agent_by_reference(self, agent_reference: str) -> Optional[Agent]:
+    def _find_agent_by_reference(self, agent_reference: str) -> Optional[Any]:
         """
         Find an agent by various reference formats.
 
@@ -820,20 +823,19 @@ class CrewPreparation:
                             )
                             async_task.context = None
 
-                    # Add a minimal completion task that waits for all async tasks
-                    # This satisfies CrewAI's validation while enabling true parallel execution
-                    from src.services.execution.runtime import Task as CrewAITask
-
+                    # Add a minimal completion task that waits for all async tasks.
+                    # Both runtimes require a sync task to join on; this satisfies
+                    # that while still running the real work in parallel.
                     # Use the last async task's agent for the completion task
                     completion_agent = async_tasks[-1].agent
 
                     # Create a minimal completion task
-                    completion_task = CrewAITask(
+                    completion_task = active_harness().build_task(
                         description="Return the combined outputs from the parallel tasks.",
                         expected_output="The outputs from all parallel tasks.",
                         agent=completion_agent,
                         context=async_tasks,  # Wait for ALL async tasks to complete
-                        async_execution=False,  # Sync task to satisfy CrewAI validation
+                        async_execution=False,  # Sync task to join the async ones
                     )
 
                     # Add completion task to the crew's task list
@@ -1067,7 +1069,7 @@ class CrewPreparation:
             # NOTE: knowledge_sources no longer used - we use DatabricksKnowledgeSearchTool instead
             logger.info(f"Creating Crew with kwargs: {list(crew_kwargs.keys())}")
             try:
-                self.crew = Crew(**crew_kwargs)
+                self.crew = active_harness().build_crew(**crew_kwargs)
             except (TypeError, Exception) as e:
                 # Handle both TypeError and Pydantic ValidationError
                 error_msg = str(e)
@@ -1093,7 +1095,7 @@ class CrewPreparation:
                             )
                             crew_kwargs.pop(key, None)
                             try:
-                                self.crew = Crew(**crew_kwargs)
+                                self.crew = active_harness().build_crew(**crew_kwargs)
                                 logger.info(
                                     f"Successfully created crew after removing '{key}'"
                                 )
@@ -1118,7 +1120,7 @@ class CrewPreparation:
                             minimal_kwargs["manager_agent"] = crew_kwargs[
                                 "manager_agent"
                             ]
-                        self.crew = Crew(**minimal_kwargs)
+                        self.crew = active_harness().build_crew(**minimal_kwargs)
                 else:
                     raise
 
@@ -1207,17 +1209,19 @@ class CrewPreparation:
                 request_from_inputs,
             )
 
-            crew_memory = getattr(self.crew, "memory", None)
+            # Through the binding: `crew.memory` means different things per
+            # engine (the CrewAI one forces the field False so CrewAI's own
+            # store never initialises), and reading it directly is how a crew
+            # ends up configured for memory but silently wired to none.
+            engine = active_harness()
+            crew_memory = engine.crew_memory(self.crew)
             # The run's request leads the recall query — see the provider's
             # docstring for why a saved crew cannot discriminate without it.
             memory_provider = make_memory_context_provider(
                 crew_memory, request_from_inputs(self.config.get("inputs"))
             )
-            if memory_provider is not None:
-                self.crew.context_providers.append(memory_provider)
             memory_sink = make_memory_output_sink(crew_memory)
-            if memory_sink is not None:
-                self.crew.output_sinks.append(memory_sink)
+            engine.wire_memory(self.crew, provider=memory_provider, sink=memory_sink)
             if memory_provider is not None or memory_sink is not None:
                 logger.info("Memory recall provider + persist sink attached to crew")
 

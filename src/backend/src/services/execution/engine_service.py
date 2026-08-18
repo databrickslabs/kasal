@@ -52,12 +52,16 @@ from src.services.execution.config_adapter import (
     normalize_config,
     normalize_flow_config,
 )
+from src.services.execution.harness_choice import (
+    dispatch_session,
+    harness_for_execution,
+    stamp_on_config,
+    subprocess_env,
+)
+from src.services.execution.harnesses import active_harness, bind
 
 # Import helper modules
 from src.services.execution.logs.writer_task import LogWriterTask
-
-# Import CrewAI components
-from src.services.execution.runtime import Crew
 from src.services.flow_builder.flow_execution_runner import run_flow_in_process
 from src.utils.user_context import GroupContext
 
@@ -225,6 +229,18 @@ class KasalEngineService(BaseEngineService):
         try:
             # Normalize config to ensure consistent format
             execution_config = normalize_config(execution_config)
+
+            # The engine this run was CREATED with, carried into the spawned
+            # interpreter. Read from the execution row rather than the setting:
+            # flipping the configuration while this run is queued must not send
+            # it to a different runtime than the one recorded against it.
+            async with dispatch_session(session) as db:
+                engine = await harness_for_execution(db, execution_id)
+            stamp_on_config(execution_config, engine)
+            os.environ.update(subprocess_env(engine))
+            logger.info(
+                f"[KasalEngineService] Execution {execution_id} engine: {engine}"
+            )
 
             # Add group_id to config if we have group_context
             if group_context and group_context.primary_group_id:
@@ -610,6 +626,18 @@ class KasalEngineService(BaseEngineService):
             # Normalize flow config
             flow_config = normalize_flow_config(flow_config)
 
+            # Same contract as the crew path — see run_execution. run_flow takes
+            # no session (its callers are background paths), so the boundary
+            # acquires one through the router rather than inventing a parameter
+            # every caller would pass as None.
+            async with dispatch_session() as db:
+                engine = await harness_for_execution(db, execution_id)
+            stamp_on_config(flow_config, engine)
+            os.environ.update(subprocess_env(engine))
+            flow_logger.info(
+                f"[KasalEngineService] Flow {execution_id} engine: {engine}"
+            )
+
             # Add group_id to config if we have group_context
             if group_context and group_context.primary_group_id:
                 flow_config["group_id"] = group_context.primary_group_id
@@ -726,6 +754,21 @@ class KasalEngineService(BaseEngineService):
         """
         from src.services.chat.service import LightAgentService
 
-        return await LightAgentService().run_light_agent_execution(
-            execution_id, config, group_context, session
-        )
+        # The Chat path runs IN-PROCESS, in a server that serves many chats, so
+        # the engine is bound for the duration of this turn rather than pinned
+        # process-wide the way a spawned crew interpreter pins it.
+        async with dispatch_session(session) as db:
+            engine = await harness_for_execution(db, execution_id)
+
+        # The event bridge is installed INSIDE the bind, because which bridge to
+        # install is the active engine's answer — under Kasal it is a no-op, and
+        # under CrewAI it republishes that runtime's lifecycle events onto the
+        # Kasal bus so traces, the live chat stream and the log writer keep
+        # working unchanged. Scoped to this turn: the Chat path serves many
+        # turns in one process, and a handler outliving its run attaches traces
+        # to the wrong job.
+        with bind(engine):
+            with active_harness().event_bridge():
+                return await LightAgentService().run_light_agent_execution(
+                    execution_id, config, group_context, session
+                )

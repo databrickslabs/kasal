@@ -560,6 +560,36 @@ class ExecutionStatusService:
             return None
 
     @staticmethod
+    @staticmethod
+    async def _fill_harness(session, execution_data: Dict[str, Any]) -> None:
+        """Record which agent runtime this run uses, if the caller did not say.
+
+        Decided ONCE, here, and read back from the row forever after — a run
+        that started before an engine switch has to finish on the engine it
+        started on, and its resume has to continue there. See
+        ``services/execution/harness_choice.py``.
+
+        Takes the session it is given rather than opening one. The no-session
+        branch below writes this row on a PRIVATE connection on purpose; asking
+        the router for a second session here would quietly reintroduce the
+        shared connection that branch exists to avoid.
+
+        Never raises: a run must not fail because the engine setting could not
+        be read. A NULL column reads as "kasal", which is what every run before
+        this column existed actually used.
+        """
+        if execution_data.get("harness"):
+            return
+        try:
+            from src.services.settings.engine import EngineConfigService
+
+            execution_data["harness"] = await EngineConfigService(session).get_harness()
+        except Exception as e:  # noqa: BLE001 — never fail a run over this
+            logger.warning(
+                f"[ExecutionStatusService] Could not resolve the execution "
+                f"engine ({e}); leaving it unrecorded"
+            )
+
     async def create_execution(
         execution_data: Dict[str, Any],
         group_context=None,
@@ -614,6 +644,7 @@ class ExecutionStatusService:
                 logger.debug(
                     f"[ExecutionStatusService] Creating execution record with job_id: {job_id}"
                 )
+                await ExecutionStatusService._fill_harness(session, execution_data)
                 await repo.create_execution(data=execution_data)
 
                 # Explicitly commit transaction
@@ -660,6 +691,7 @@ class ExecutionStatusService:
                     logger.debug(
                         f"[ExecutionStatusService] Creating execution record with job_id: {job_id}"
                     )
+                    await ExecutionStatusService._fill_harness(session, execution_data)
                     await repo.create_execution(data=execution_data)
 
                     # Explicitly commit transaction

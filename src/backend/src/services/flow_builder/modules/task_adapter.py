@@ -8,13 +8,13 @@ import json
 from typing import Dict, Optional
 
 from src.core.logger import LoggerManager
+from src.services.execution.harnesses import active_harness
 
 # Single source of truth for per-tool override resolution (shared with the crew
 # path). The common version additionally guards get_tool_info in try/except.
 from src.services.execution.kernel.agent_tools import (
     resolve_tool_override as _resolve_tool_override,
 )
-from src.services.execution.runtime import Task
 from src.services.tools.tool_factory import ToolFactory
 from src.utils.user_context import GroupContext
 
@@ -93,9 +93,7 @@ class TaskConfig:
                 spec, agent, [], config={"group_id": group_id} if group_id else None
             )
 
-            from src.services.execution.runtime import Task
-
-            task = Task(**task_args)
+            task = active_harness().build_task(**task_args)
 
             # Flow execution output callback (separate from any guardrail).
             if task_output_callback:
