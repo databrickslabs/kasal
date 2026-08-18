@@ -428,6 +428,20 @@ def build_messages(agent: Any, user_prompt: str) -> list[dict[str, str]]:
     ]
 
 
+def _identical_prompt_would_fail_again(error: Exception) -> bool:
+    """Is this a failure the SAME prompt is guaranteed to reproduce?
+
+    A retry here replays the turn verbatim, so it can only help when the failure
+    was the network or the endpoint having a bad moment. Malformed tool-call
+    arguments are not that: Databricks and llama.cpp both report them as a 500
+    ("Failed to parse tool call arguments as JSON"), and the model writes the
+    same arguments again from the same prompt. The run then spends its budget
+    rediscovering that, one identical round at a time.
+    """
+    text = str(error).lower()
+    return "parse tool call" in text or "tool call arguments" in text
+
+
 def run_agent(
     agent: Any,
     user_prompt: str,
@@ -440,6 +454,32 @@ def run_agent(
     if messages is None:
         messages = build_messages(agent, user_prompt)
     schemas, functions = build_tool_context(tools, agent, task)
+
+    # Did this attempt actually DO anything before it failed?
+    #
+    # The transport runs the whole tool-call loop inside one `call`, on its own
+    # copy of the conversation — so an exception thrown late in that loop
+    # discards every round it had completed. Retrying then re-sends the
+    # ORIGINAL prompt: the model reproduces its opening line, calls the same
+    # tools again, and the side effects happen a second time. One observed run
+    # replayed 43 `postgres_execute_sql` calls and printed the same sentence
+    # into the chat 92 times.
+    #
+    # A turn that ran a tool is not idempotent, so it is not replayed.
+    executed_a_tool = False
+    if functions:
+        def _watch(name: str, fn: Callable[..., Any]) -> Callable[..., Any]:
+            def watched(*args: Any, **kwargs: Any) -> Any:
+                nonlocal executed_a_tool
+                executed_a_tool = True
+                return fn(*args, **kwargs)
+
+            # The transport reads these off the callable itself.
+            watched.__name__ = getattr(fn, "__name__", name)
+            watched.result_as_answer = getattr(fn, "result_as_answer", False)
+            return watched
+
+        functions = {name: _watch(name, fn) for name, fn in functions.items()}
 
     last_error: Exception | None = None
     for _attempt in range(max(1, agent.max_retry_limit + 1)):
@@ -469,6 +509,22 @@ def run_agent(
         except Exception as e:
             last_error = e
             logger.warning("agent %r LLM call failed: %s", agent.role, e)
+            if executed_a_tool:
+                logger.warning(
+                    "agent %r: not replaying a turn that already ran tools — "
+                    "the retry would re-send the identical prompt and repeat "
+                    "their side effects",
+                    agent.role,
+                )
+                raise
+            if _identical_prompt_would_fail_again(e):
+                logger.warning(
+                    "agent %r: %s reproduces from the same prompt; not "
+                    "replaying it",
+                    agent.role,
+                    type(e).__name__,
+                )
+                raise
     else:
         raise last_error  # type: ignore[misc]
 
