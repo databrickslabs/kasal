@@ -415,10 +415,12 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
         };
       }).filter((event): event is NonNullable<typeof event> => event !== null);
 
-      const events = visibleEvents.map((event, idx) => ({
+      const collapsed = collapseAdjacentPlanRows(visibleEvents);
+
+      const events = collapsed.map((event, idx) => ({
         ...event,
-        duration: idx + 1 < visibleEvents.length
-          ? visibleEvents[idx + 1].timestamp.getTime() - event.timestamp.getTime()
+        duration: idx + 1 < collapsed.length
+          ? collapsed[idx + 1].timestamp.getTime() - event.timestamp.getTime()
           : taskEnd.getTime() - event.timestamp.getTime(),
       }));
 
@@ -598,7 +600,31 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
   };
 }
 
-const formatDuration = (ms: number): string => {
+/**
+ * One plan update, one line.
+ *
+ * A single update writes up to three rows: the engine's own `plan_updated`
+ * event and the `todo` tool call's start/finish pair. All three now describe
+ * the plan, so without this the timeline shows the same "Plan — 2/5 done" three
+ * times in a row and the actual work scrolls out of view.
+ *
+ * The LAST of a run wins: it reflects the state after the call, and it is the
+ * one whose progress matches what happens next.
+ */
+function collapseAdjacentPlanRows<T extends { type: string }>(events: T[]): T[] {
+  const out: T[] = [];
+  for (const event of events) {
+    const prev = out[out.length - 1];
+    if (event.type === 'plan_updated' && prev?.type === 'plan_updated') {
+      out[out.length - 1] = event;
+      continue;
+    }
+    out.push(event);
+  }
+  return out;
+}
+
+export const formatTraceDuration = (ms: number): string => {
   // Offsets/chips deal in whole-ms timestamp deltas — show a literal zero
   // instead of the helper's "<1 ms" (which is meant for measured sub-ms times).
   if (ms <= 0) return '0 ms';
@@ -607,7 +633,7 @@ const formatDuration = (ms: number): string => {
 
 // Offset column: ONE format everywhere — seconds with one decimal ("+0.0s",
 // "+7.0s", "+11.8s") so offsets line up and read as a single system.
-const formatTimeDelta = (start: Date, timestamp: Date): string => {
+export const formatTraceOffset = (start: Date, timestamp: Date): string => {
   const deltaSec = Math.max(0, timestamp.getTime() - start.getTime()) / 1000;
   return `+${deltaSec.toFixed(1)}s`;
 };
@@ -634,7 +660,7 @@ const HAS_TIMEZONE_RE = /(?:Z|[+-]\d{2}:?\d{2})$/;
  * Treating a zoneless timestamp as UTC is correct for every producer here: the
  * database column is UTC, and the engine stamps UTC.
  */
-const parseTraceTime = (value: string | undefined | null): Date => {
+export const parseTraceTime = (value: string | undefined | null): Date => {
   if (!value) return new Date(NaN);
   const iso = value.includes('T') ? value : value.replace(' ', 'T');
   return new Date(HAS_TIMEZONE_RE.test(iso) ? iso : `${iso}Z`);
@@ -983,8 +1009,8 @@ export function useTraceData({
     selectedTaskDescription,
     setSelectedTaskDescription,
     handleTaskDescriptionClick,
-    formatDuration,
-    formatTimeDelta,
+    formatDuration: formatTraceDuration,
+    formatTimeDelta: formatTraceOffset,
     truncateTaskName,
   };
 }

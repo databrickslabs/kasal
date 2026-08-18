@@ -35,10 +35,33 @@ export interface PlanItem {
  * JSON view the dialog already has.
  */
 export function extractPlanItems(output: unknown): PlanItem[] | null {
+  // The RENDERED plan, which is what the `todo` tool returns as its result and
+  // therefore the only copy some rows have: "Plan (1/5 completed):" followed by
+  // "[x] 1. …" lines. Parsed last-resort but parsed, because otherwise a plan
+  // whose JSON never reached the trace shows as its own bracket markers.
+  if (typeof output === 'string') {
+    return tryParse(output) ?? parseRenderedPlan(output);
+  }
   if (typeof output !== 'object' || output === null) return null;
-  const extra = (output as Record<string, unknown>).extra_data as
-    | Record<string, unknown>
-    | undefined;
+  const record = output as Record<string, unknown>;
+
+  // The light-agent path writes the call's arguments under `input`, not under
+  // `extra_data.tool_args` — reading only the latter is why a chat run's plan
+  // was invisible on both the timeline row and the step's content.
+  const input = record.input;
+  if (typeof input === 'string' && input.includes('todos')) {
+    const parsed = tryParse(pythonReprToJson(input));
+    if (parsed) return parsed;
+  }
+  if (Array.isArray(record.todos)) return normalise(record.todos);
+
+  // A result envelope: the rendered plan sits in `content`.
+  if (typeof record.content === 'string') {
+    const fromContent = parseRenderedPlan(record.content);
+    if (fromContent) return fromContent;
+  }
+
+  const extra = record.extra_data as Record<string, unknown> | undefined;
   if (!extra) return null;
 
   // Preferred: the engine's structured payload.
@@ -111,6 +134,45 @@ function pythonReprToJson(input: string): string {
     .replace(/\bNone\b/g, 'null')
     .replace(/\bTrue\b/g, 'true')
     .replace(/\bFalse\b/g, 'false');
+}
+
+/** Status markers the rendered plan uses, in the tool's own vocabulary. */
+const RENDERED_STATUS: Record<string, string> = {
+  x: 'completed',
+  X: 'completed',
+  '>': 'in_progress',
+  '-': 'cancelled',
+  '~': 'cancelled',
+  ' ': 'pending',
+  '': 'pending',
+};
+
+/**
+ * The `todo` tool's own rendering, back into items.
+ *
+ * ```
+ * Plan (1/5 completed):
+ * [x] 1. Create the swiss_tech_companies table
+ * [>] 2. Research and gather 300 Swiss tech companies
+ * ```
+ *
+ * Returns null unless at least one line matches, so ordinary prose that happens
+ * to contain a bracket is never mistaken for a plan.
+ */
+function parseRenderedPlan(text: string): PlanItem[] | null {
+  const items: PlanItem[] = [];
+  for (const line of text.split('\n')) {
+    const match = /^\s*\[([^\]]?)\]\s*(?:(\d+)[.)]\s*)?(.+?)\s*$/.exec(line);
+    if (!match) continue;
+    const content = match[3];
+    if (!content) continue;
+    items.push({
+      id: match[2] ?? String(items.length + 1),
+      content,
+      status: RENDERED_STATUS[match[1]] ?? 'pending',
+    });
+  }
+  return items.length ? items : null;
 }
 
 function tryParse(text: string): PlanItem[] | null {

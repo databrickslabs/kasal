@@ -7,8 +7,10 @@ import ChatMessageComponent, { TraceEntryData } from './ChatMessage';
 import { findInlineTraceRenderer } from './traces';
 import ChatInput from './ChatInput';
 import ChatEmptyState from './ChatEmptyState';
-import ThinkingStream from '../Preview/ThinkingStream';
-import type { RunStep } from '../Preview/RunTimeline';
+import RunTraceTimeline from '../Preview/RunTraceTimeline';
+import { traceEventToRunStep } from '../Preview/traceEventStep';
+import { useRunTimeline } from '../../hooks/useRunTimeline';
+import type { RunStep } from '../Preview/traceEventStep';
 import type { PreviewContent } from '../Preview/PreviewPanel';
 
 /**
@@ -70,22 +72,6 @@ export function liveStepLine(step: TraceEntryData): { name: string; line: string
   return { name: step.label, line: line.length > 100 ? `${line.slice(0, 100)}…` : line };
 }
 
-/** Convert a segment's chat trace groups into RunStep[] for the thinking stream
- *  — the same shape the preview pane uses. EVERY labeled trace kind is kept
- *  (tool_call / tool_result / event): whatever the user watched stream by while
- *  the run was live must stay visible after it completes. No duplicate risk — a
- *  pending tool_call message is PROMOTED IN PLACE to its result (processTrace),
- *  so a call and its result never coexist as two messages. */
-function deriveStepsFromGroups(groups: TraceGroupItem[]): RunStep[] {
-  const out: RunStep[] = [];
-  groups.flatMap((g) => g.msgs).forEach((m, i) => {
-    const t = m.resultData as TraceEntryData | undefined;
-    if (!t || !t.label) return;
-    out.push({ id: m.id || `step-${i}`, label: t.label, sublabel: t.sublabel, detail: t.detail, durationMs: t.durationMs });
-  });
-  return out;
-}
-
 /**
  * A single, collapsible "run activity" container shown in the conversation flow:
  * a status row (pulsing dot while running, check when done) + a chevron that
@@ -103,16 +89,15 @@ const RunProgress: React.FC<{
   running: boolean;
   generating: boolean;
   onStop?: () => void;
-  /** When provided, the expanded section shows the "thinking" stream (the chat
-   *  placement of the run activity) instead of the raw timeline. */
-  streamSteps?: RunStep[];
   /** Open THIS run in the side preview pane (its deliverable + activity). Shown as
    *  a pane icon on every run card; the pane is opt-in, so it opens only on click. */
   onShowInPane?: () => void;
   /** Click an individual step row in the expanded timeline → open THAT step's
    *  context in the preview pane (not just the whole run via the pane icon). */
   onSelectStep?: (step: RunStep) => void;
-}> = ({ groups, running, generating, onStop, streamSteps, onShowInPane, onSelectStep }) => {
+  /** The run whose trace the expanded activity renders. */
+  jobId?: string;
+}> = ({ groups, running, generating, onStop, onShowInPane, onSelectStep, jobId }) => {
   const [open, setOpen] = useState(false);
   // Transient feedback: the moment Stop is pressed we show "Stopping…" (the
   // backend takes a beat to actually halt the run); cleared once it ends.
@@ -120,11 +105,13 @@ const RunProgress: React.FC<{
   useEffect(() => {
     if (!running) setStopping(false);
   }, [running]);
-  // The activity ALWAYS renders as the thinking stream: use the caller-supplied
-  // steps (the latest run) or derive them from this segment's trace groups
-  // (historical runs) — the legacy raw timeline is gone.
-  const displaySteps = streamSteps ?? deriveStepsFromGroups(groups);
-  const hasTimeline = displaySteps.length > 0;
+  // The expanded body is the run's trace, read from the trace API — the same
+  // record the Execution Trace Timeline renders, so the rows ARE the events
+  // rather than a second reading of them. Fetched only once expanded.
+  const { processed, loading: timelineLoading } = useRunTimeline(jobId, running, open);
+  // A run exists → there is activity to open. Gating on fetched rows instead
+  // would leave the chevron dead until the first fetch returned.
+  const hasTimeline = Boolean(jobId);
   // The latest streamed step drives a live one-liner in the header while the
   // run is active — the static labels are only fallbacks for the gaps before
   // the first trace arrives and after the run ends.
@@ -259,9 +246,14 @@ const RunProgress: React.FC<{
         </div>
         {open && hasTimeline && (
           <div className="px-4 py-3 max-h-[60vh] overflow-y-auto" style={{ borderTop: '1px solid var(--border-color)' }}>
-            {/* Rows with context are clickable: they open that step's content in
+            {/* Rows with content are clickable: they open that step's output in
                 the preview panel (same master→detail the pane itself offers). */}
-            <ThinkingStream steps={displaySteps} live={running} onSelect={onSelectStep} />
+            <RunTraceTimeline
+              processed={processed}
+              loading={timelineLoading}
+              live={running}
+              onSelectEvent={onSelectStep ? (event) => onSelectStep(traceEventToRunStep(event)) : undefined}
+            />
           </div>
         )}
       </div>
@@ -306,13 +298,14 @@ interface ChatContainerProps {
    *  expandable timeline of the live segment is hidden. Completed (historical)
    *  segments keep their timeline. */
   hideLiveTimeline?: boolean;
-  /** The latest run's steps (for the chat thinking stream). */
-  runSteps?: RunStep[];
+  /** The run currently in flight, so the LIVE segment can show its activity
+   *  before the message that carries the execution id has arrived. */
+  liveJobId?: string;
   /** Open a run in the side preview pane — its deliverable (A2UI surface or the
    *  plain-text answer) with the activity collapsed above. Wired to the per-run
    *  pane icon AND to individual step rows (which pass `focusStep` so the pane
    *  opens directly on that step's content); the pane is opt-in — click only. */
-  onShowRunInPane?: (deliverable: PreviewContent | undefined, steps: RunStep[], focusStep?: RunStep) => void;
+  onShowRunInPane?: (deliverable: PreviewContent | undefined, jobId?: string, focusStep?: RunStep) => void;
   models: ModelConfigResponse[];
   selectedModel: string;
   onModelChange: (model: string) => void;
@@ -354,7 +347,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   isExecuting,
   isGenerating,
   hideLiveTimeline,
-  runSteps,
+  liveJobId,
   onShowRunInPane,
   models,
   selectedModel,
@@ -460,18 +453,20 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
         }
       }
     }
-    // Historical segments' pane steps, derived once (the LATEST run is pinned
-    // to [] so the pane tracks the live/durable runActivitySteps instead).
-    const segSteps = new Map<number, RunStep[]>();
-    for (const [s, msgs] of segTraces) {
-      if (s !== lastSeg) {
-        segSteps.set(
-          s,
-          deriveStepsFromGroups([{ kind: 'traceGroup', key: `seg-${s}`, label: 'run', msgs }]),
-        );
+    // The run each segment's activity belongs to. The timeline is read from the
+    // trace API by job id, so a segment with no execution id simply has no
+    // activity to show (a plain answer with no run behind it).
+    const segJobs = new Map<number, string>();
+    for (const { item, seg: s } of itemsWithSeg) {
+      // Both shapes carry it: the answer/result message, and the trace messages
+      // folded into the activity group. Scanning only the former missed runs
+      // whose id had so far appeared on a trace alone.
+      const candidates = item.kind === 'msg' ? [item.msg] : item.msgs;
+      for (const m of candidates) {
+        if (m.executionId && !segJobs.has(s)) segJobs.set(s, m.executionId);
       }
     }
-    return { itemsWithSeg, lastSeg, segTraces, segDeliverables, segSteps };
+    return { itemsWithSeg, lastSeg, segTraces, segDeliverables, segJobs };
   }, [messages]);
 
   /** Serialize a deliverable only at click time (lazy JSON.stringify). */
@@ -566,7 +561,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
         <div className="py-6 max-w-3xl mx-auto w-full">
           {(() => {
-            const { itemsWithSeg, lastSeg, segTraces, segDeliverables, segSteps } = grouped;
+            const { itemsWithSeg, lastSeg, segTraces, segDeliverables, segJobs } = grouped;
             const running = Boolean(isExecuting || isGenerating);
             const placedSegs = new Set<number>();
             const renderRunProgress = (s: number) => {
@@ -576,17 +571,13 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
               // status row + Stop; once done there's nothing left to show, so skip.
               const inPreviewPane = Boolean(hideLiveTimeline) && s === lastSeg;
               if (inPreviewPane && !live) return null;
-              // Whenever the CHAT hosts the latest run's activity — 'chat' placement,
-              // OR a run that produced no preview-pane deliverable — render the same
-              // thinking stream (not the legacy raw timeline). Older segments keep
-              // their own historical timeline (runSteps only covers the latest run).
-              const useStream = s === lastSeg && !inPreviewPane && Array.isArray(runSteps);
               const msgs = inPreviewPane ? [] : (segTraces.get(s) ?? []);
-              // Steps for THIS run when opened in the pane. The LATEST run is left
-              // empty so the pane tracks the live/durable `runActivitySteps` (which
-              // keep updating as the run streams); a HISTORICAL run is pinned to its
-              // own trace steps (pre-derived in the grouping memo).
-              const stepsForSeg: RunStep[] = s === lastSeg ? [] : (segSteps.get(s) ?? []);
+              // The run this segment's activity belongs to — what the pane is
+              // pinned to when opened from here, and what the expanded timeline
+              // reads. The LATEST run is left unpinned so the pane tracks the
+              // live run as it goes.
+              const jobForSeg = segJobs.get(s) ?? (live ? liveJobId : undefined);
+              const pinnedJob = s === lastSeg ? undefined : jobForSeg;
               return (
                 <RunProgress
                   key={`run-progress-${s}`}
@@ -594,15 +585,15 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
                   running={live}
                   generating={live && Boolean(isGenerating)}
                   onStop={live && isExecuting && onStopExecution ? onStopExecution : undefined}
-                  streamSteps={useStream ? (runSteps ?? []) : undefined}
+                  jobId={jobForSeg}
                   // Pane icon on every run card — opens THIS run's deliverable +
                   // activity in the side pane. Opt-in: nothing opens until clicked
                   // (deliverable serialization also happens only at click time).
-                  onShowInPane={onShowRunInPane ? () => onShowRunInPane(toPreviewContent(segDeliverables.get(s)), stepsForSeg) : undefined}
+                  onShowInPane={onShowRunInPane ? () => onShowRunInPane(toPreviewContent(segDeliverables.get(s)), pinnedJob) : undefined}
                   // A step ROW opens the pane focused on that step's content.
                   onSelectStep={
                     onShowRunInPane
-                      ? (step) => onShowRunInPane(toPreviewContent(segDeliverables.get(s)), stepsForSeg, step)
+                      ? (step) => onShowRunInPane(toPreviewContent(segDeliverables.get(s)), pinnedJob, step)
                       : undefined
                   }
                 />

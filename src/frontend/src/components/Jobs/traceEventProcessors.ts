@@ -23,7 +23,7 @@ import ChecklistIcon from '@mui/icons-material/Checklist';
 // Import Trace type from the store
 import { Trace } from '../../store/runStatus';
 import { isRedactedReasoning } from '../Common/ReasoningPanel';
-import { extractPlanItems } from './TracePlanView';
+import { extractPlanItems, type PlanItem } from './TracePlanView';
 
 // ============================================================================
 // Shared Extraction Helpers
@@ -250,6 +250,16 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
     const metadata = parseTraceMetadata(trace);
     const operation = metadata?.operation as string | undefined;
     const cacheSuffix = isFromCache(trace) ? ' [cached]' : '';
+
+    // A `todo` call IS the plan. Rendered as a tool it produced a bare
+    // "todo" / "todo (output)" pair that said nothing about the plan it just
+    // wrote; as a plan row it says how far along the run is and which step is
+    // now running. Adjacent plan rows are collapsed to one downstream, so the
+    // engine's own plan_updated event and this call do not both draw a line.
+    if (isTodoTool(toolName)) {
+      const items = todoPlanItems(trace);
+      return { type: 'plan_updated', description: planRowDescription(items ?? []) };
+    }
 
     if (operation === 'tool_started') {
       return { type: 'tool', description: `${toolName} (input)` };
@@ -700,26 +710,66 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
     // Counts come off the event when the bridge stamped them; deriving from the
     // items keeps the row honest for a plan that arrived as JSON only.
     const items = extractPlanItems(trace.output) ?? [];
-    const total = num('plan_total') ?? items.length;
-    const completed =
-      num('plan_completed') ?? items.filter((i) => i.status === 'completed').length;
-
-    if (!total) return { type: 'plan_updated', description: 'Plan Updated' };
-
-    let description = `Plan — ${completed}/${total} done`;
-    const current = items.find((i) => i.status === 'in_progress');
-    if (current) {
-      const step = current.label || current.content;
-      description += ` · now: ${step.length > 60 ? `${step.slice(0, 59)}…` : step}`;
-    }
-    return { type: 'plan_updated', description };
+    return {
+      type: 'plan_updated',
+      description: planRowDescription(items, num('plan_total'), num('plan_completed')),
+    };
   },
 
-  // Crew Execution (instrumentor root span) — skip, bridge handles crew_started/completed
+// Crew Execution (instrumentor root span) — skip, bridge handles crew_started/completed
   crew_execution: (): ProcessedEvent | null => {
     return null;
   },
 };
+
+/**
+ * The one line a plan update earns: how far along it is, and which step is
+ * running now.
+ *
+ * Progress is the only thing the row knows that the rows around it do not —
+ * "Plan Updated" (the generic Title-Case fallback) said nothing the `todo` call
+ * beside it did not already say, which is why it read as noise.
+ */
+export function planRowDescription(
+  items: PlanItem[],
+  total?: number,
+  completed?: number,
+): string {
+  const t = total ?? items.length;
+  const done = completed ?? items.filter((i) => i.status === 'completed').length;
+  if (!t) return 'Plan Updated';
+
+  let description = `Plan — ${done}/${t} done`;
+  const current = items.find((i) => i.status === 'in_progress');
+  if (current) {
+    const step = current.label || current.content;
+    description += ` · now: ${step.length > 60 ? `${step.slice(0, 59)}…` : step}`;
+  }
+  return description;
+}
+
+/** The `todo` tool by any of the names the two paths give it. */
+function isTodoTool(toolName: string): boolean {
+  return toolName.toLowerCase().replace(/[_\s-]/g, '') === 'todo';
+}
+
+/**
+ * The plan a `todo` call carries, wherever this path put it.
+ *
+ * The crew/OTel path stamps `extra_data.tool_args`; the light-agent path writes
+ * the same JSON under `output.input`. Reading only the first is why a chat run
+ * showed a bare "todo" / "todo (output)" pair instead of its plan.
+ */
+function todoPlanItems(trace: Trace): PlanItem[] | null {
+  const fromArgs = extractPlanItems(trace.output);
+  if (fromArgs) return fromArgs;
+  const output = trace.output as Record<string, unknown> | undefined;
+  const input = output?.input;
+  if (typeof input === 'string' && input.includes('todos')) {
+    return extractPlanItems({ extra_data: { tool_args: input } });
+  }
+  return null;
+}
 
 // ============================================================================
 // Process Trace Event Function
@@ -755,6 +805,14 @@ export function processTraceEvent(trace: Trace): ProcessedEvent | null {
       return null;
     }
     const toolName = extractToolName(trace);
+    // `<tool>_run` names the tool in the event type itself — the light-agent
+    // path does not always stamp `extra_data.tool_name`, and falling back to
+    // the generic "Tool" would hide a plan behind a nameless row.
+    const runTool = trace.event_type.replace(/_run$/, '');
+    if (isTodoTool(toolName) || isTodoTool(runTool)) {
+      const items = todoPlanItems(trace);
+      return { type: 'plan_updated', description: planRowDescription(items ?? []) };
+    }
     // The badge belongs here too. These are the CHAT path's tool rows, and
     // chat is where replay pays off most (re-asking the same question), so a
     // branch that could not render "[cached]" made a working feature look

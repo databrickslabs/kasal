@@ -4,7 +4,7 @@ import PreviewPanel, { parsePreviewContent, PreviewContent } from './PreviewPane
 import { UIConfigService } from '../../../../api/config/UIConfigService';
 import { THEME_PRESETS, type Theme } from '../../../Configuration/uiConfigShared';
 import { themeToTokens } from '../../../../shared/a2ui';
-import type { RunStep } from './RunTimeline';
+
 
 // The panel fetches the workspace UI-Configurator palettes on mount; stub the
 // service so tests control (or disable) the configured themes.
@@ -522,45 +522,57 @@ describe('PreviewPanel — Download menu (PDF / PowerPoint)', () => {
 
 describe('PreviewPanel run activity', () => {
   const uiContent: PreviewContent = { type: 'ui', data: uiDoc };
-  const steps: RunStep[] = [
-    { id: '1', label: 'GenieTool', sublabel: 'sales by region', detail: 'Revenue rose 12% in EMEA.', timestamp: 1, durationMs: 2200 },
-  ];
+  const step = {
+    id: 'trace-2',
+    label: 'postgres_execute_sql (output)',
+    detail: 'CREATE TABLE',
+  };
 
-  it('lists plain-English steps and opens a step’s full context on its own page, with Back', async () => {
-    render(<PreviewPanel content={uiContent} {...baseProps} runSteps={steps} />);
-    // The deliverable is visible to start.
-    expect(screen.getByText('Hello App')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Activity'));
-    // List view: friendly headings + a short cleaned preview; deliverable hidden.
-    expect(screen.queryByText('Hello App')).not.toBeInTheDocument();
-    expect(screen.getByText('Querying your data')).toBeInTheDocument();
-    expect(screen.getByText('Revenue rose 12% in EMEA.')).toBeInTheDocument(); // preview
-    // The full-page context isn't open until a step is clicked.
-    expect(screen.queryByTestId('run-step-context')).not.toBeInTheDocument();
-    // Click the step → its context opens full-page with the readable content.
-    fireEvent.click(screen.getByText('Querying your data').closest('button')!);
-    await waitFor(() => expect(screen.getByTestId('run-step-context')).toBeInTheDocument());
-    expect(screen.getByText('Revenue rose 12% in EMEA.')).toBeInTheDocument();
-    // Back returns to the step list.
-    fireEvent.click(screen.getByLabelText('Back to the run activity'));
-    expect(screen.queryByTestId('run-step-context')).not.toBeInTheDocument();
-    expect(screen.getByText('Querying your data')).toBeInTheDocument();
-  });
-
-  it('shows no Run activity control when there are no steps', () => {
-    render(<PreviewPanel content={uiContent} {...baseProps} runSteps={[]} />);
-    expect(screen.queryByText('Activity')).not.toBeInTheDocument();
-  });
-
-  it('opens directly on a focused step (row-clicked in the chat dropdown), Back returns to the list', () => {
-    render(<PreviewPanel content={uiContent} {...baseProps} runSteps={steps} focusStep={steps[0]} />);
-    // The pane lands on the step's full-page context immediately — no extra clicks.
+  it('opens the clicked step\'s content, with Back to the deliverable', async () => {
+    // The timeline itself lives in the CHAT. This pane is the other half of
+    // that master→detail: it shows what the chosen step actually produced.
+    // Rendering the list here too put identical rows on both halves of the
+    // screen.
+    render(<PreviewPanel content={uiContent} {...baseProps} focusStep={step} />);
     expect(screen.getByTestId('run-step-context')).toBeInTheDocument();
-    expect(screen.getByText('Revenue rose 12% in EMEA.')).toBeInTheDocument();
-    // Back returns to the step list (activity stays open), not the deliverable.
+    expect(screen.getByText('CREATE TABLE')).toBeInTheDocument();
+    // The deliverable is hidden while a step's content is open.
+    expect(screen.queryByText('Hello App')).not.toBeInTheDocument();
+    // Back returns to the deliverable.
     fireEvent.click(screen.getByLabelText('Back to the run activity'));
+    await waitFor(() => expect(screen.queryByTestId('run-step-context')).not.toBeInTheDocument());
+    expect(screen.getByText('Hello App')).toBeInTheDocument();
+  });
+
+  it('shows the deliverable, not an activity list, when no step is open', () => {
+    render(<PreviewPanel content={uiContent} {...baseProps} />);
+    expect(screen.getByText('Hello App')).toBeInTheDocument();
+    expect(screen.queryByText('Activity')).not.toBeInTheDocument();
     expect(screen.queryByTestId('run-step-context')).not.toBeInTheDocument();
-    expect(screen.getByText('Querying your data')).toBeInTheDocument();
+  });
+
+  it('renders a plan step as a checklist rather than its raw payload', () => {
+    // The payload says "[>] 1. Create the table"; a checklist is what that is.
+    render(
+      <PreviewPanel
+        content={uiContent}
+        {...baseProps}
+       
+        focusStep={{
+          id: 'trace-3',
+          label: 'todo (output)',
+          detail: '[>] 1. Create the table',
+          plan: [
+            { id: '1', content: 'Create the swiss_tech_companies table', status: 'in_progress' },
+            { id: '2', content: 'Research 300 Swiss tech companies', status: 'pending' },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByText('Plan')).toBeInTheDocument();
+    expect(screen.getByText('0/2 done')).toBeInTheDocument();
+    expect(screen.getByText('Create the swiss_tech_companies table')).toBeInTheDocument();
+    expect(screen.queryByText('[>] 1. Create the table')).not.toBeInTheDocument();
   });
 
   it('renders "Show in chat" as an icon button that moves the activity to the chat', () => {
@@ -569,7 +581,8 @@ describe('PreviewPanel run activity', () => {
       <PreviewPanel
         content={uiContent}
         {...baseProps}
-        runSteps={steps}
+       
+        focusStep={step}
         onMoveActivityToChat={onMoveActivityToChat}
       />,
     );

@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import ChatContainer, { liveStepLine } from './ChatContainer';
+import { makeEvent, makeProcessedTraces } from '../Preview/testTraceFixture';
+
+// The expanded activity is the run's trace, fetched by job id. Mocked so these
+// tests stay about the container (header, Stop, expand, pane hand-off).
+const mockTimeline = vi.fn(() => ({ processed: makeProcessedTraces(), loading: false }));
+vi.mock('../../hooks/useRunTimeline', () => ({
+  useRunTimeline: (...args: unknown[]) => mockTimeline(...(args as [])),
+}));
 import type { ChatMessage as ChatMessageType } from '../../types/chat';
 
 // Stub the heavy children so we can isolate ChatContainer logic. The run/
@@ -239,6 +247,12 @@ describe('liveStepLine — the live header one-liner', () => {
   });
 });
 
+beforeEach(() => {
+  // Each test states the run it expects; without this a fixture set by the
+  // previous one leaks into the next.
+  mockTimeline.mockReturnValue({ processed: makeProcessedTraces(), loading: false });
+});
+
 describe('ChatContainer — run-activity container (RunProgress)', () => {
   const traceMsg = (id: string, label: string, extra: Record<string, unknown> = {}): ChatMessageType =>
     ({
@@ -246,6 +260,9 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
       role: 'assistant',
       content: '',
       timestamp: new Date(),
+      // The run these traces belong to: the expanded activity is read from the
+      // trace API by this id.
+      executionId: 'job-1',
       resultType: 'trace',
       resultData: { label, kind: 'tool_result', durationMs: 100, ...extra },
     } as unknown as ChatMessageType);
@@ -278,18 +295,16 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
     expect(screen.queryByText('Working…')).toBeNull();
     fireEvent.click(screen.getByLabelText('Stop execution'));
     expect(onStop).toHaveBeenCalledTimes(1);
-    // collapsed by default → the stream is hidden.
-    expect(screen.queryByText('Searching the web')).toBeNull();
-    // expand → the thinking stream's friendly phase headings (not raw tool names).
+    // collapsed by default → the timeline is hidden.
+    expect(screen.queryByText('postgres_execute_sql (output)')).toBeNull();
+    // expand → the run's OWN events, named as the trace timeline names them.
     fireEvent.click(screen.getByLabelText('Expand run activity'));
-    expect(screen.getByText('Searching the web')).toBeInTheDocument();
-    expect(screen.getByText('Recalling context')).toBeInTheDocument();
-    expect(screen.getByText('Reading sources')).toBeInTheDocument();
-    // the search query is woven into the first-person narrative.
-    expect(screen.getByText(/find stock photos/)).toBeInTheDocument();
-    // toggling closed again (Collapse label) hides the stream.
+    expect(screen.getByText('postgres_execute_sql (output)')).toBeInTheDocument();
+    expect(screen.getByText('LLM Request — KAT-Coder (3,585 chars)')).toBeInTheDocument();
+    expect(screen.getByText('Database Researcher and Data Storage Specialist')).toBeInTheDocument();
+    // toggling closed again (Collapse label) hides it.
     fireEvent.click(screen.getByLabelText('Collapse run activity'));
-    expect(screen.queryByText('Searching the web')).toBeNull();
+    expect(screen.queryByText('postgres_execute_sql (output)')).toBeNull();
   });
 
   it('live header shows the latest step name + first line of its query (one-liner)', () => {
@@ -336,9 +351,14 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
         messages={[msg('u'), traceMsg('e1', 'EchoTool', { sublabel: 'same text', detail: 'extra context' })]}
       />,
     );
+    mockTimeline.mockReturnValue({
+      processed: makeProcessedTraces([makeEvent({ description: 'EchoTool (output)' })]),
+      loading: false,
+    });
     fireEvent.click(screen.getByLabelText('Expand run activity'));
-    // Unknown tool → its name is the heading; the legacy "Show context" toggle is gone.
-    expect(screen.getByText('EchoTool')).toBeInTheDocument();
+    // A tool nothing has a friendly name for keeps its own name — there is no
+    // labeller left to guess, and so nothing left to fall through to raw JSON.
+    expect(screen.getByText('EchoTool (output)')).toBeInTheDocument();
     expect(screen.queryByLabelText('Show context for EchoTool')).toBeNull();
   });
 
@@ -349,11 +369,17 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
         messages={[msg('u'), traceMsg('p1', 'PerplexityTool', { sublabel: 'q1' }), traceMsg('p2', 'PerplexityTool', { sublabel: 'q2' })]}
       />,
     );
+    mockTimeline.mockReturnValue({
+      processed: makeProcessedTraces([
+        makeEvent({ description: 'perplexity_search (input)', traceId: 1 }),
+        makeEvent({ description: 'perplexity_search (output)', traceId: 2 }),
+      ]),
+      loading: false,
+    });
     fireEvent.click(screen.getByLabelText('Expand run activity'));
-    // Two Perplexity calls → two "Searching the web" steps; each query in its narrative.
-    expect(screen.getAllByText('Searching the web')).toHaveLength(2);
-    expect(screen.getByText(/q1/)).toBeInTheDocument();
-    expect(screen.getByText(/q2/)).toBeInTheDocument();
+    // Each call is its own row — the pair a tool call actually writes.
+    expect(screen.getByText('perplexity_search (input)')).toBeInTheDocument();
+    expect(screen.getByText('perplexity_search (output)')).toBeInTheDocument();
   });
 
   it('keeps non-tool_result steps (pending calls, events) visible after the run completes', () => {
@@ -370,10 +396,18 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
         ]}
       />,
     );
+    mockTimeline.mockReturnValue({
+      processed: makeProcessedTraces([
+        makeEvent({ description: 'scrape_website (input)', traceId: 1 }),
+        makeEvent({ type: 'tool_error', description: "⚠ MCP server 'x': HTTP 403 - Forbidden", traceId: 2 }),
+        makeEvent({ type: 'memory_retrieval', description: 'Memory Read — 3 results', traceId: 3 }),
+      ]),
+      loading: false,
+    });
     fireEvent.click(screen.getByLabelText('Expand run activity'));
-    expect(screen.getByText('Reading sources')).toBeInTheDocument(); // the pending call
+    expect(screen.getByText('scrape_website (input)')).toBeInTheDocument(); // the pending call
     expect(screen.getByText(/HTTP 403/)).toBeInTheDocument(); // the event
-    expect(screen.getByText('Recalling context')).toBeInTheDocument(); // the result
+    expect(screen.getByText('Memory Read — 3 results')).toBeInTheDocument(); // the result
   });
 
   it('clicking a step ROW opens that step in the preview pane (focusStep passed through)', () => {
@@ -385,11 +419,20 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
         onShowRunInPane={onShowRunInPane}
       />,
     );
+    mockTimeline.mockReturnValue({
+      processed: makeProcessedTraces([
+        makeEvent({ type: 'memory_retrieval', description: 'Memory Read — 3 results', output: 'WTI closed at $78.12' }),
+      ]),
+      loading: false,
+    });
     fireEvent.click(screen.getByLabelText('Expand run activity'));
-    fireEvent.click(screen.getByLabelText('Open the full context for Recalling context'));
+    fireEvent.click(screen.getByText('Memory Read — 3 results'));
     expect(onShowRunInPane).toHaveBeenCalledTimes(1);
     const [, , focusStep] = onShowRunInPane.mock.calls[0];
-    expect(focusStep).toMatchObject({ label: 'Memory', detail: 'WTI closed at $78.12' });
+    expect(focusStep).toMatchObject({
+      label: 'Memory Read — 3 results',
+      detail: 'WTI closed at $78.12',
+    });
   });
 
   it('after the run (not executing) shows "Run activity" and no Stop', () => {
@@ -460,13 +503,13 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
     );
     // Live header shows the latest step name (the timeline itself stays collapsed).
     expect(screen.getByText('PerplexityTool')).toBeInTheDocument();
+    expect(screen.queryByText('postgres_execute_sql (output)')).toBeNull();
     expect(screen.queryByTestId('crew-card-gen1')).toBeNull();
     expect(screen.getByLabelText('Stop execution')).toBeInTheDocument();
-    // stream collapsed by default; expands to the friendly phase + narrative.
-    expect(screen.queryByText('Searching the web')).toBeNull();
+    // Collapsed by default; expands into that run's timeline.
     fireEvent.click(screen.getByLabelText('Expand run activity'));
-    expect(screen.getByText('Searching the web')).toBeInTheDocument();
-    // The query shows in the live header AND the stream narrative while executing.
+    expect(screen.getByText('postgres_execute_sql (output)')).toBeInTheDocument();
+    // The query still shows in the live header while executing.
     expect(screen.getAllByText(/find stock photos/).length).toBeGreaterThan(0);
   });
 
@@ -511,9 +554,10 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
 describe('ChatContainer — one run-activity section per prompt', () => {
   const userMsg = (id: string, content: string) =>
     ({ id, role: 'user', content, timestamp: new Date() } as unknown as ChatMessageType);
-  const trace = (id: string, label: string, sublabel?: string) =>
+  const trace = (id: string, label: string, sublabel?: string, executionId?: string) =>
     ({
       id, role: 'assistant', content: '', timestamp: new Date(),
+      executionId,
       resultType: 'trace',
       resultData: { label, ...(sublabel ? { sublabel } : {}), kind: 'tool_result', timestamp: Date.now() },
     } as unknown as ChatMessageType);
@@ -524,9 +568,9 @@ describe('ChatContainer — one run-activity section per prompt', () => {
         {...baseProps}
         messages={[
           userMsg('u1', 'first prompt'),
-          trace('t1', 'PerplexityTool', 'alpha query'),
+          trace('t1', 'PerplexityTool', 'alpha query', 'job-a'),
           userMsg('u2', 'second prompt'),
-          trace('t2', 'GenieTool', 'beta query'),
+          trace('t2', 'GenieTool', 'beta query', 'job-b'),
         ]}
       />,
     );
@@ -540,13 +584,18 @@ describe('ChatContainer — one run-activity section per prompt', () => {
     expect(first.compareDocumentPosition(p2) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(p2.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-    // Each section's stream contains only its OWN step (friendly phase heading).
+    // Each section reads ITS OWN run: expanding one asks the timeline for that
+    // segment's job, not the other's.
+    mockTimeline.mockReturnValue({
+      processed: makeProcessedTraces([makeEvent({ description: 'perplexity_search (output)' })]),
+      loading: false,
+    });
     fireEvent.click(screen.getAllByLabelText('Expand run activity')[0]);
-    expect(screen.getByText('Searching the web')).toBeInTheDocument();
-    expect(screen.queryByText('Querying your data')).toBeNull();
+    expect(mockTimeline).toHaveBeenCalledWith('job-a', false, true);
+    expect(screen.getByText('perplexity_search (output)')).toBeInTheDocument();
     // The first toggle now reads "Collapse…" — the remaining Expand is section 2
     fireEvent.click(screen.getAllByLabelText('Expand run activity')[0]);
-    expect(screen.getByText('Querying your data')).toBeInTheDocument();
+    expect(mockTimeline).toHaveBeenCalledWith('job-b', false, true);
   });
 
   it('only the LATEST prompt section is live while running (Stop only there)', () => {
@@ -589,29 +638,29 @@ describe('ChatContainer — one run-activity section per prompt', () => {
 });
 
 describe('ChatContainer — run activity in the chat ("chat" placement)', () => {
-  const steps = [
-    { id: '1', label: 'PerplexityTool', sublabel: 'Switzerland news today', detail: 'Title: SwissInfo\nUrl: https://www.swissinfo.ch/eng/x' },
-  ];
-
-  it('shows the Working bar with a "Show in panel" icon that opens the run in the pane, expandable to the thinking stream', () => {
+  it('shows the Working bar with a "Show in panel" icon that opens the run in the pane, expandable to the timeline', () => {
     const onShow = vi.fn();
     render(
       <ChatContainer
         {...baseProps}
         messages={[{ ...msg('u', 'q'), role: 'user' }]}
         isExecuting
-        runSteps={steps}
+        // The run in flight. Before this, a live segment had no run to open
+        // until the message carrying the execution id arrived — so the bar's
+        // chevron was dead for the first part of every run.
+        liveJobId="job-live"
         onShowRunInPane={onShow}
       />,
     );
     expect(screen.getByText('Working…')).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Show in panel'));
-    // The latest run is left unpinned ([] steps) so the pane tracks the live feed;
-    // it has no deliverable yet (no answer message), so the deliverable is undefined.
-    expect(onShow).toHaveBeenCalledWith(undefined, []);
-    // Expanding the bar reveals the thinking stream (friendly phase heading).
+    // The latest run is left unpinned so the pane tracks the live run; it has no
+    // deliverable yet (no answer message), so the deliverable is undefined.
+    expect(onShow).toHaveBeenCalledWith(undefined, undefined);
+    // Expanding the bar reveals that run's timeline.
     fireEvent.click(screen.getByLabelText('Expand run activity'));
-    expect(screen.getByText('Searching the web')).toBeInTheDocument();
+    expect(mockTimeline).toHaveBeenCalledWith('job-live', true, true);
+    expect(screen.getByText('postgres_execute_sql (output)')).toBeInTheDocument();
   });
 
   it('opens a HISTORICAL run\'s plain-text answer in the pane as a text deliverable, pinned to its own steps', () => {
@@ -622,7 +671,7 @@ describe('ChatContainer — run activity in the chat ("chat" placement)', () => 
         messages={[
           // Run 1 (historical): user prompt, a tool-result trace, the text answer.
           { ...msg('u1', 'q1'), role: 'user' },
-          { ...msg('t', ''), resultType: 'trace', resultData: { kind: 'tool_result', label: 'PerplexityTool', sublabel: 'q1', detail: 'x' } },
+          { ...msg('t', ''), executionId: 'job-old', resultType: 'trace', resultData: { kind: 'tool_result', label: 'PerplexityTool', sublabel: 'q1', detail: 'x' } },
           { ...msg('a', 'Here is your answer.') },
           // Run 2 makes run 1 historical (so it isn't the latest segment).
           { ...msg('u2', 'q2'), role: 'user' },
@@ -631,9 +680,8 @@ describe('ChatContainer — run activity in the chat ("chat" placement)', () => 
       />,
     );
     fireEvent.click(screen.getByLabelText('Show in panel'));
-    expect(onShow).toHaveBeenCalledWith(
-      { type: 'text', data: 'Here is your answer.' },
-      expect.arrayContaining([expect.objectContaining({ label: 'PerplexityTool' })]),
-    );
+    // Pinned to ITS OWN run, so the pane shows that run's activity rather than
+    // following the live one.
+    expect(onShow).toHaveBeenCalledWith({ type: 'text', data: 'Here is your answer.' }, 'job-old');
   });
 });
