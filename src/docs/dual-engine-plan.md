@@ -1,7 +1,17 @@
-# Dual engine: Kasal runtime and CrewAI, selectable in configuration
+# Dual harness: Kasal runtime and CrewAI, chosen per run
 
 Branch: `engine/crewai-dual-engine`
-Status: **plan — nothing implemented yet**
+Status: **Phases 0–6 done, then renamed.** Both harnesses run all three paths.
+The only capability CrewAI does not claim is `EXPORT`, a deliberate boundary
+rather than a gap.
+
+**The runtime is called a HARNESS**, and it is chosen **per run**, beside the
+model, rather than globally in Configuration. The Configuration value remains —
+demoted to the DEFAULT for runs that name none, which is what scheduled and
+API-triggered runs do, having no picker. The pre-existing `EngineConfig` table
+and `engine-config` router keep their names: they are the settings store this
+platform has always had (they also hold `flow_enabled` and the otel switches),
+and the harness is simply a row in them.
 Target CrewAI: **1.15.16** (latest on PyPI as of 2026-08-18)
 
 ## What this is
@@ -475,3 +485,221 @@ is the config-validation and signal-handling preamble in `run_crew_in_process`.
   existing Configuration → Engines page, stamped per execution so runs and
   resumes stick. Not per-group and not per-workflow: both reopen stickiness at a
   second level, and neither has a use case yet.
+
+
+## Where this stands
+
+**Phase 0 — done.** `crewai==1.15.16` is a dependency, `mcp` is bumped to
+`~=1.28.1`, and `uv.lock` regenerated. The real delta is much smaller than the
+`uv pip compile` probe suggested: **43 packages added, 10 version changes, none
+removed** (242 → 285). The only movement outside crewai's own tree is
+`mcp` 1.26→1.28, `opentelemetry` 1.34→1.42 (crewai-core requires ~=1.42),
+`pydantic-settings` 2.10→2.15 and `pyjwt` 2.11→2.13. `pydantic` stays 2.11.10,
+`litellm` stays 1.74.9, `openai` stays 2.32.0, `fastapi` is untouched.
+`import crewai` costs ~2.6s and loads chromadb, which is why the CrewAI binding
+is imported lazily and never on a Kasal-only install.
+
+**Phase 1 — the engine layer, backend done.**
+
+- `services/execution/engines/` — `binding.py` (the protocol + `Capability`),
+  `selection.py` (DB-free resolution), `kasal/` (a pass-through binding).
+- Every construction site now builds through the binding: `kernel/agent_builder`,
+  `kernel/task_builder`, `config/{crew,manager}_config_builder`,
+  `agent_builder/{agent_adapter,task_adapter,crew_preparation}`,
+  `flow_builder/{backend_flow,modules/*}`. Two dead imports of the Kasal `Crew`
+  were removed from `engine_service` and `agent_builder/process_executor` —
+  both would have loaded the Kasal runtime into a CrewAI subprocess.
+- `services/execution/engine_choice.py` — resolve once, stamp on the row, carry
+  into the subprocess by payload and environment, adopt process-wide in the
+  child, and read the ROW (not the setting) when dispatching or resuming.
+- `executionhistory.engine_backend` — model column, startup self-heal (alembic
+  does not run at boot here) and migration `20260818_engine_backend`.
+- `engineconfig` row `execution`/`backend`, repository + service + `GET`/`PUT
+  /engine-config/execution-backend`, and an `ExecutionEngineSelector` on the
+  Configuration → Engines page.
+- `db/session.py::_heal_engine_config_names` is now SCOPED to the pre-rename
+  keys. It rewrote every `engine_name='crewai'` row to `'kasal'` on every
+  startup; unscoped, it would have silently un-selected CrewAI at each boot.
+
+**Tests.** ~330 tests patched a construction class the modules no longer name
+(`patch("…flow_methods.Crew")`). They now go through
+`tests/unit/helpers/engine_double.py` — `patched_engine` / `patch_build` —
+which moves the same assertion one layer out, onto the binding. New suites cover
+selection, the registry and `engine_choice`.
+
+**Phase 2 — the CrewAI binding, Chat path.** `engines/crewai/` is real, and
+`describe_engines()` now reports both engines available with different
+capability sets.
+
+- `availability.py` — lazy import guard. Also turns CrewAI's outbound reporting
+  OFF (`CREWAI_DISABLE_TELEMETRY` / `_TRACKING` / `TRACING_ENABLED`) before the
+  import: it ships telemetry on by default, phoning home from the process that
+  just ran a tenant's crew. Deliberately NOT `OTEL_SDK_DISABLED`, which CrewAI
+  also honours but which would kill Kasal's own span export.
+- `llm.py` — `KasalBackedLLM(crewai.BaseLLM)` forwarding to
+  `src.core.llm.transport`. The signatures were already identical, so it adds
+  nothing to the request path. The credential stays on the wrapped object.
+- `tools.py` — the 38 first-party tools wrapped, `args_schema` passed through
+  unchanged so the model sees the same function signature on both engines.
+- `events.py` — CrewAI's bus republished onto Kasal's, 12 lifecycle types. LLM,
+  tool, memory and guardrail events are NOT bridged: Kasal's own subsystems
+  emit them under both engines, and bridging would double every trace row.
+- `build.py` — kwargs filtered against the target class's own `model_fields`,
+  with `_KNOWN_DROPS` naming every Kasal concept CrewAI lacks and *why*.
+  Anything unclassified is dropped with a WARNING.
+
+**Two bugs the first real runs surfaced**, both in the LLM adapter, both now
+fixed with regression tests. They share a shape worth naming: CrewAI treats an
+LLM as a *capability-bearing collaborator*, not just something with a `call`
+method, and both failures came from implementing the call and missing the
+conversation around it.
+
+1. **`supports_function_calling` was absent**, and CrewAI probes for it with
+   `hasattr`. Finding nothing, it silently fell back to a ReAct PROSE loop where
+   the agent writes `Action Input:` as text. Every no-argument tool call then
+   failed with "the Action Input is not a valid key, value dictionary", and the
+   model retried with an invented `{"dummy": ""}` to satisfy the parser. Same
+   tools, same model, fine on Kasal — because the transport has always made
+   native tool calls. Now delegated to the transport, along with
+   `supports_multimodal` and `supports_native_structured_output`.
+2. **The two engines divide tool execution differently, and neither said so.**
+   Kasal's transport owns the whole loop: give it `available_functions` and it
+   returns final text. CrewAI's executor owns the loop instead — it passes
+   `available_functions=None` because it applies reflection prompts, iteration
+   limits and its tool-failure policy between rounds. With tools present and no
+   functions to call, the transport fell through and returned `""`, which CrewAI
+   could only report as `Invalid response from LLM call - None or empty`.
+   The transport now takes a declared `delegate_tool_calls` flag (a FIELD, not a
+   call kwarg: the handler subclasses do not share one `call` signature, and an
+   undeclared constructor kwarg on that class is collected into
+   `additional_params` and sent to the endpoint). The adapter enables it and
+   translates the calls into CrewAI's shape — as OBJECTS, since
+   `is_tool_call_list` accepts a dict but `extract_tool_call_info` reads
+   `.function.name` by attribute and would silently skip every dict.
+
+3. **`max_execution_time` reported but did not bind.** CrewAI honours the field
+   by running the agent in a `ThreadPoolExecutor` and calling
+   `future.result(timeout=...)` — but Python cannot kill a thread and the
+   enclosing `with` block joins on exit, so the loop keeps going and the
+   `TimeoutError` surfaces only once the agent finishes anyway. Measured: one
+   task, a 30s cap, still making LLM calls 145 seconds later.
+   The Kasal engine stops the agent because the TRANSPORT enforces a deadline
+   inside its round loop — but `resolve_execution_budget` rebuilds that deadline
+   on every `call()`, so it only bounds a turn when one call IS the turn. True
+   under Kasal; false under CrewAI, where each call is one round.
+   `engines/crewai/deadline.py` now stamps `run_deadline` — the one term that
+   survives across calls — per agent turn, taking the earlier of the turn cap
+   and any run-level ceiling. Verified: **51 rounds / 51.6s against a 2s cap
+   before, 2 rounds / 2.0s after.**
+4. **The event bridge was only installed on the Chat path.** The crew and flow
+   subprocesses never entered it, so under CrewAI a crew run produced LLM, tool
+   and memory trace rows but no agent/task/crew lifecycle rows at all — and,
+   because the checkpoint recorder subscribes to `TaskCompletedEvent`, **no
+   checkpoints**. Phase 4's "writing needed nothing" was right in principle and
+   untrue in practice. Both subprocess paths now enter the engine's run scope,
+   which is also where turn deadlines install: one lifetime, one install site.
+
+5. **An audit of every configurable agent/task feature** found two more gaps.
+   `max_context_window_size` was dropped — CrewAI has no such field, but the
+   field is not really CrewAI's business: `transport._effective_context_window`
+   reads it off `from_agent`, so it is now carried on the agent and a per-agent
+   window override works on both engines. And `guardrail_on_exhausted="degrade"`
+   — set automatically by the generated research and deep modes — had no CrewAI
+   equivalent, so a crew that degrades on Kasal would ABORT on CrewAI, losing
+   everything already produced. `engines/crewai/guardrails.py` applies it by
+   wrapping the guardrail callable (public contract only, no CrewAI internals),
+   annotating the output in both text and structure.
+
+**Two earlier bugs the work surfaced**, both now fixed and covered:
+
+1. **CrewAI's `emit` is fire-and-forget** — it dispatches handlers on a thread
+   pool and returns a Future. Removing the bridge's handlers at teardown
+   therefore dropped the tail of every run: exactly the completion events a
+   timeline ends on. Teardown now flushes before unregistering.
+2. **`tests/unit/services/memory/conftest.py` stubbed `chromadb` and installed a
+   permanent `crewai.rag` meta-path finder**, process-wide and never removed.
+   Harmless while crewai was absent; with crewai installed it shadowed the real
+   library and broke 43 unrelated tests with `AttributeError: __spec__`. Both
+   stubs are now conditional on the real package being missing. `require_crewai`
+   also refuses to CACHE a module with no `__spec__`, so a test that stubs
+   crewai to exercise an "not installed" branch can no longer poison a worker.
+
+**Phase 3 — Agent Builder (crew) path.**
+
+- `engines/crewai/memory.py` — a `crewai.Crew` subclass overriding `_get_context`
+  and `_process_task_result`, which are exactly the two points Kasal's
+  `context_providers` / `output_sinks` correspond to. The memory subsystem, its
+  queries, its events and its group scoping are untouched.
+- `Crew(memory=False)` would have taken the Kasal memory OBJECT with it — the
+  call sites read the backend back off the crew, so it would have returned
+  False and every CrewAI crew would have been silently memory-less. The object
+  is carried separately and read through the binding's `crew_memory()`.
+- `manager_llm` / `planning_llm` are wrapped alongside the agent's. Missing one
+  is a quiet failure: CrewAI accepts the object and only discovers it is not a
+  `BaseLLM` at the manager's first call, halfway into a hierarchical run.
+
+**Phase 4 — checkpoint and HITL parity.**
+
+- **Writing needed nothing.** The recorder subscribes to bus events and matches
+  tasks by identity; the event bridge already republishes CrewAI's
+  `TaskCompletedEvent` carrying the same task object.
+- **Reading** is `engines/crewai/checkpoint.py`, consuming the same
+  engine-neutral payload `checkpointing/resume.build_crew_payload` produces and
+  applying the same longest-matching-prefix rule via the same
+  `runtime/identity.py` functions.
+- Restored tasks keep their place in the list and have their `execute_sync`
+  replaced. Removing them would drop them from CrewAI's `task_outputs` chain,
+  so every later task would run with different context than it did originally.
+- **HITL and replay** came from one change: the tool adapter now calls
+  `runtime/executor.wrap_tool` instead of the tool directly. That is where the
+  approval gate, replay, the outcome ledger and all three `ToolUsage*` events
+  live, so reusing it makes them true on both engines by construction. CrewAI's
+  `before_tool_call` hook supplies the agent and task, without which tool trace
+  rows could not be grouped under their task.
+
+**Phase 5 — Flow Builder.** The Flow Builder's ORCHESTRATOR — routing,
+conditions, HITL gates, per-crew checkpoints, conversational state — stays
+Kasal's own under both engines. The engine setting selects the AGENT RUNTIME,
+and every crew a flow composes is built through the binding, so a flow running
+under CrewAI executes its agents and crews on CrewAI. Swapping the orchestrator
+for `crewai.flow.Flow` was considered and NOT taken: it would re-implement
+routing, HITL and checkpointing against a second set of primitives for no
+behaviour a user could observe.
+
+**Phase 6 — the parity suite.**
+`tests/unit/services/execution/engines/test_parity.py` runs the same input
+through both bindings and compares: construction, the LLM path, memory wiring,
+the restore prefix, and — the check that keeps the capability enum from becoming
+decoration — that a declared capability is one the binding actually delivers.
+That last one caught a real over-claim: `TOOL_APPROVAL` and `TOOL_REPLAY` were
+declared on CrewAI while its adapter still bypassed the hook pipeline.
+
+**A finding worth recording: task identity is engine-dependent.** CrewAI's
+`Task` inherits its agent's tools and Kasal's does not, so the identity hash
+differs for what is otherwise the same task — and a checkpoint therefore cannot
+cross engines. That is handled rather than papered over: a run's engine is
+recorded and its resume reuses it, and a row with NO recorded engine now
+resolves to Kasal (the only engine that existed when such rows were written)
+rather than to the current setting. Without that, resuming an old run after a
+switch would restore nothing while reporting that task 0 had changed.
+
+**Sessions.** `engine_choice.py` no longer opens a session of its own. Both
+resolvers take the caller's session; `engine_for_execution` reads the run
+through `ExecutionService.get_run_by_job_id` — the execution domain's own
+service — rather than constructing `ExecutionHistoryRepository`. The single
+remaining acquisition is `dispatch_session()`, used only at the boundary that
+dispatches a run and only when the caller genuinely has no session, via
+`routed_scoped_session`.
+
+**Pre-existing failures, not caused by this work.** Five PowerBI
+`test_converter_service` tests fail on `main` too (verified against a stashed
+tree). Four `mlflow/test_mlflow_setup.py::TestConfigureMlflowInSubprocess` tests
+reach the developer's real Databricks workspace via `~/.databrickscfg` and
+assert `tracing_ready is False`; they fail on any machine that has credentials,
+and they are what writes the stray `mlruns/` directory the artifact guard
+reports.
+
+**Carried debt.** `services/execution/service.py` (2,7xx lines) and
+`agent_builder/process_executor.py` (3,0xx) are over the 1,500 ceiling and each
+grew by a few lines here. Per `CLAUDE.md` they owe a compensating extraction the
+next time a phase touches them.

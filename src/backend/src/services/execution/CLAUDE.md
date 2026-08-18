@@ -47,7 +47,7 @@ services/
 └── execution/
     ├── engine_service.py    # the hub: dispatch + status/cancel
     ├── engine_factory.py    # builds one KasalEngineService
-    ├── base.py              # the engine interface (one implementation)
+    ├── base.py              # the ENGINE-SERVICE interface (the hub, not a harness)
     ├── config_adapter.py    # normalizes the SHAPE of frontend config
     ├── config/              # crew / embedder / manager config BUILDERS
     ├── kernel/              # path-AGNOSTIC single-source build logic:
@@ -137,12 +137,89 @@ agent loop stops being runnable from anywhere that is not a full Kasal process,
 and every import graph in this directory develops a cycle.
 
 Two more things that outlived the package:
-- **`crewai_event_bus` is now `event_bus`** (and `CrewAIEventsBus` is
-  `EventsBus`). No alias was left behind.
-- **Never stub these modules into `sys.modules` in a test.** That was a habit
-  from when `crewai` was an absent third-party dependency; it now shadows working
-  first-party code, and anything imported inside the stub window stays cached
-  holding MagicMocks, which breaks unrelated suites on the same xdist worker.
+- **Kasal's bus is `event_bus`** (and `CrewAIEventsBus` is `EventsBus`). No
+  alias was left behind — and now that `crewai` is a real dependency again,
+  `crewai_event_bus` means CrewAI's OWN bus, a different object. See the harness
+  layer below: exactly one bridge connects them, in one direction.
+- **Never stub `crewai` into `sys.modules` in a test.** This used to be about
+  shadowing first-party code while crewai was absent. It is now worse: crewai IS
+  installed, so a stub shadows a working library, and anything imported inside
+  the stub window stays cached holding MagicMocks — breaking unrelated suites on
+  the same xdist worker.
+
+## Two engines live here
+
+`crewai` is a dependency again, as a SECOND runtime beside
+`services/execution/runtime/`. Which one executes a run is an operator setting.
+This did not add a second service — it added a layer under the one that exists.
+
+```
+KasalEngineService              the hub, unchanged: dispatch, status, cancel
+  chat/ agent_builder/ flow_builder/   the three paths, unchanged
+    execution/kernel/            build logic, now harness-parameterised
+      execution/harnesses/         <- the harness layer
+        kasal/                       services/execution/runtime/
+        crewai/                      the crewai package
+```
+
+**Rules for this layer:**
+
+- **Never construct a runtime class directly.** No
+  `from ...runtime import Agent` followed by `Agent(**kwargs)`. Build through
+  `active_harness().build_agent(**kwargs)`. The kwargs dict is harness-neutral;
+  each binding owns the translation onto its own runtime.
+- **`harnesses/` never reads the database and never imports a path package.**
+  The setting is resolved once per execution by `harness_choice.py`, which takes
+  a SESSION rather than opening one; bindings receive a decided value.
+- **A run's harness is decided once and recorded** on
+  `execution_history.harness`, then carried into a subprocess by payload
+  and environment. Never re-read the setting mid-run: a switch landing between
+  agent-build and task-build would produce a run that is half each. A run may
+  NAME its harness (`CrewConfig.harness`, picked beside the model); the
+  Configuration value is the default for runs that do not — scheduled and
+  API-triggered runs have no picker.
+- **One bus still writes traces.** The CrewAI binding bridges
+  `crewai_event_bus` onto `event_bus` (`engines/crewai/events.py`) and nothing
+  downstream changes. Do NOT bridge events a Kasal subsystem already emits —
+  LLM calls, tools, memory and guardrails all reach the bus under both harnesses,
+  and bridging them again doubles every trace row.
+- **Both engines call models through Kasal's transport.** The CrewAI binding's
+  LLM is a `crewai.BaseLLM` subclass that forwards to
+  `src.core.llm.transport` (`engines/crewai/llm.py`). Keep it that way: it is
+  what makes Databricks auth, retry, the context clamp and token accounting
+  identical, and therefore what makes a cross-engine comparison mean anything.
+- **What a harness cannot do is DECLARED, not discovered.** `Capability` in
+  `engines/binding.py` drives the API and greys out the UI. Today CrewAI claims
+  everything except `EXPORT` — the exported Databricks App vendors the KASAL
+  runtime so it ships with no third-party framework. A declared capability must
+  be one the binding actually delivers; the parity suite checks that, and it
+  has already caught an over-claim.
+- **The two harnesses divide tool execution differently — say which you mean.**
+  Kasal's transport owns the tool loop (give it `available_functions`, get final
+  text). CrewAI's executor owns it instead, and asks the LLM only for the
+  decision. `transport.delegate_tool_calls` selects the second; the CrewAI
+  binding sets it. Without it a tool-call response reaches CrewAI as `""`.
+- **CrewAI probes an LLM for capabilities with `hasattr`.** An omitted
+  `supports_function_calling` is read as "cannot", and the agent silently drops
+  to a ReAct prose loop — no error, just tool calls that stop parsing. Anything
+  added to `engines/crewai/llm.py` should ask the transport rather than assert a
+  convenient default.
+- **A tool is invoked through `runtime/executor.wrap_tool` on BOTH engines.**
+  That function is where the approval gate, replay, the outcome ledger and all
+  three `ToolUsage*` events live. Never call `tool.run()` directly from an
+  adapter — a HITL gate that applies on one harness is not a gate, it is a
+  setting that silently stops applying when someone changes a dropdown.
+- **Task identity is engine-dependent, so a checkpoint cannot cross engines.**
+  CrewAI's `Task` inherits its agent's tools and Kasal's does not. This is
+  handled by stickiness, not by normalising the hash: a run records its engine
+  and its resume reuses it, and a row with no recorded engine means Kasal.
+- **The Flow Builder's orchestrator is Kasal's under both harnesses.** The harness
+  setting selects the agent runtime; a flow's crews are built through the
+  binding, so they run on the selected engine while routing, HITL gates and
+  per-crew checkpoints stay in `flow_builder/runtime/`.
+
+See `src/docs/dual-engine-plan.md` for the phases and what is still open.
 
 ## Related
+- `src/docs/dual-engine-plan.md` — the dual-engine plan and its status
 - `src/docs/crewai-engine-refactor-proposal.md` — the earlier refactor record
