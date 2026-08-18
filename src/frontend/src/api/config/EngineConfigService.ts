@@ -27,6 +27,32 @@ export interface KasalFlowStatusResponse {
 
 
 
+export interface HarnessDescription {
+  /** 'kasal' | 'crewai' — the wire value, also what the run row records. */
+  name: string;
+  label?: string;
+  version?: string;
+  available: boolean;
+  /**
+   * Why a harness cannot run here. Rendered beside a disabled option: a
+   * greyed-out engine with no reason is what people open a ticket about.
+   */
+  unavailable_reason?: string;
+  /**
+   * What this harness supports — checkpoint_resume, tool_approval, flow, export…
+   * The UI disables what the selected harness cannot do rather than offering a
+   * control that fails at run time.
+   */
+  capabilities: string[];
+}
+
+export interface HarnessResponse {
+  /** The harness runs DEFAULT to when they do not name one themselves. */
+  harness: string;
+  harnesses: HarnessDescription[];
+}
+
+
 export class EngineConfigService {
   private static baseUrl = `/engine-config`;
 
@@ -77,6 +103,27 @@ export class EngineConfigService {
     const response = await apiClient.patch<{ success: boolean; flow_enabled: boolean }>(
       `${this.baseUrl}/kasal/flow-enabled`,
       { flow_enabled: enabled }
+    );
+    return response.data;
+  }
+
+  /**
+   * The harness runs default to, plus every harness's availability and
+   * capabilities. A run may still name its own — see the model picker.
+   */
+  static async getHarness(): Promise<HarnessResponse> {
+    const response = await apiClient.get<HarnessResponse>(`${this.baseUrl}/harness`);
+    return response.data;
+  }
+
+  /**
+   * Change the DEFAULT harness. A run that names its own is unaffected, and
+   * so is any run already in flight — each keeps what its row records.
+   */
+  static async setHarness(harness: string): Promise<HarnessResponse> {
+    const response = await apiClient.put<HarnessResponse>(
+      `${this.baseUrl}/harness`,
+      { harness }
     );
     return response.data;
   }

@@ -24,6 +24,7 @@ import ChatIcon from '@mui/icons-material/Chat';
 import { useFlowConfigStore } from '../../../store/flowConfig';
 import { EngineConfigService } from '../../../api/config/EngineConfigService';
 import { useCrewExecutionStore } from '../../../store/crewExecution';
+import HarnessSelector from './HarnessSelector';
 
 const EnginesConfiguration: React.FC = () => {
   const {
@@ -149,6 +150,10 @@ const EnginesConfiguration: React.FC = () => {
       >
         Configure execution engines and their features. Disabling features will hide related UI components.
       </Alert>
+
+      {/* The DEFAULT harness. A run may name its own beside the model; this is
+          what applies when it does not — scheduled and API-triggered runs. */}
+      <HarnessSelector />
 
       {/* Kasal Engine Section */}
       <Paper sx={{ p: 2, mb: 2 }} elevation={1}>

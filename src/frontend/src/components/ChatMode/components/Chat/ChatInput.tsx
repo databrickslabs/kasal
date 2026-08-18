@@ -104,6 +104,11 @@ interface ChatInputProps {
   models: ModelConfigResponse[];
   selectedModel: string;
   onModelChange: (model: string) => void;
+  /** Harness options, the configured default, and the per-run override. */
+  harnesses?: { name: string; label?: string; version?: string; available: boolean; unavailable_reason?: string }[];
+  defaultHarness?: string;
+  selectedHarness?: string;
+  onHarnessChange?: (harness: string) => void;
   /** Active chat session id — pending (uploaded, unsent) attachments persist per session. */
   sessionId?: string | null;
   /** This session owns a crew that is currently running — the Send button becomes Stop. */
@@ -179,6 +184,10 @@ const ChatInput: React.FC<ChatInputProps> = ({
   models,
   selectedModel,
   onModelChange,
+  harnesses = [],
+  defaultHarness = 'kasal',
+  selectedHarness = '',
+  onHarnessChange,
   sessionId,
   isExecuting = false,
   isGenerating = false,
@@ -1028,6 +1037,50 @@ const ChatInput: React.FC<ChatInputProps> = ({
                         </button>
                       ))}
                     </div>
+                    {harnesses.length > 1 && onHarnessChange && (
+                      <>
+                        <div className="mx-3 my-1" style={{ borderTop: '1px solid var(--border-color)' }} />
+                        <div className="px-3 py-2">
+                          <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                            Harness
+                          </span>
+                        </div>
+                        <div className="px-1.5 pb-1.5">
+                          {harnesses.map((h) => {
+                            const active = (selectedHarness || defaultHarness) === h.name;
+                            return (
+                              <button
+                                key={h.name}
+                                disabled={!h.available}
+                                onClick={() => {
+                                  // Choosing the default CLEARS the override, so
+                                  // the run follows the configured value rather
+                                  // than freezing today's into every future run.
+                                  onHarnessChange(h.name === defaultHarness ? '' : h.name);
+                                  setShowModelPicker(false);
+                                  inputRef.current?.focus();
+                                }}
+                                className={`w-full text-left !px-2.5 !py-2 my-0.5 rounded-lg flex items-center justify-between transition-colors ${active ? 'bg-[var(--bg-active-chip)]' : 'hover:bg-[var(--bg-rail-hover)]'} ${h.available ? '' : 'opacity-50 cursor-not-allowed'}`}
+                              >
+                                <div>
+                                  <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                                    {h.label || h.name}{h.name === defaultHarness ? ' (default)' : ''}
+                                  </div>
+                                  <div className="text-[11px] mt-0.5" style={{ color: h.available ? 'var(--text-muted)' : 'var(--danger, #d33)' }}>
+                                    {h.available ? h.version : (h.unavailable_reason || 'unavailable')}
+                                  </div>
+                                </div>
+                                {active && (
+                                  <svg className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--accent)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                  </svg>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
               </div>

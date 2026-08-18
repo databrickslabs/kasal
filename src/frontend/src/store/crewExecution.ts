@@ -99,6 +99,12 @@ interface CrewExecutionState {
   // Execution state
   isExecuting: boolean;
   selectedModel: string;
+  /**
+   * Which agent runtime runs the next job: 'kasal' | 'crewai', or '' for the
+   * configured default. Sits beside the model because it is the other thing you
+   * choose when starting a run, and is sent with every execution payload.
+   */
+  selectedHarness: string;
   reasoningEnabled: boolean;
   reasoningLLM: string;
   reasoningConfig: ReasoningConfig;
@@ -143,6 +149,7 @@ interface CrewExecutionState {
 
   // Setters
   setSelectedModel: (model: string) => void;
+  setSelectedHarness: (harness: string) => void;
   setReasoningEnabled: (enabled: boolean) => void;
   setReasoningLLM: (model: string) => void;
   setReasoningConfig: (cfg: Partial<ReasoningConfig>) => void;
@@ -191,6 +198,9 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   // Initial state
   isExecuting: false,
   selectedModel: 'databricks-gpt-5-3-codex',
+  // Empty means "whatever Configuration -> Engines says". Persisted like the
+  // process type so a choice survives a reload.
+  selectedHarness: localStorage.getItem('kasal-harness') || '',
   reasoningEnabled: false,
   reasoningLLM: '',
   reasoningConfig: { ...DEFAULT_REASONING_CONFIG },
@@ -227,6 +237,14 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
 
   // State setters
   setSelectedModel: (model) => set({ selectedModel: model as string }),
+  setSelectedHarness: (harness) => {
+    if (harness) {
+      localStorage.setItem('kasal-harness', harness);
+    } else {
+      localStorage.removeItem('kasal-harness');
+    }
+    set({ selectedHarness: harness });
+  },
   setReasoningEnabled: (enabled) => set({ reasoningEnabled: enabled }),
   setReasoningLLM: (model) => set({ reasoningLLM: model }),
   setReasoningConfig: (cfg) => set((state) => ({ reasoningConfig: { ...state.reasoningConfig, ...cfg } })),
@@ -301,7 +319,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     console.log('[CrewExecution] executeCrew - nodes:', nodes);
     console.log('[CrewExecution] executeCrew - edges:', edges);
 
-    const { selectedModel, reasoningEnabled, reasoningLLM, reasoningConfig, schemaDetectionEnabled, inputVariables, processType, managerLLM } = get();
+    const { selectedModel, selectedHarness, reasoningEnabled, reasoningLLM, reasoningConfig, schemaDetectionEnabled, inputVariables, processType, managerLLM } = get();
     set({ isExecuting: true });
 
     try {
@@ -449,7 +467,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         schemaDetectionEnabled,
         reasoningEnabled,
         undefined,
-        savedCrewId
+        savedCrewId,
+        selectedHarness || undefined
       );
 
       console.log('[CrewExecution] Job execution response:', response);
@@ -528,7 +547,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     console.log('[CrewExecution] executeFlow - edges:', edges);
     console.log('[CrewExecution] executeFlow - savedFlowId:', savedFlowId);
 
-    const { selectedModel, reasoningEnabled, reasoningLLM, reasoningConfig, schemaDetectionEnabled, inputVariables } = get();
+    const { selectedModel, selectedHarness, reasoningEnabled, reasoningLLM, reasoningConfig, schemaDetectionEnabled, inputVariables } = get();
     set({ isExecuting: true });
 
     try {
@@ -585,7 +604,9 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         additionalInputs,
         schemaDetectionEnabled,
         reasoningEnabled,
-        savedFlowId
+        savedFlowId,
+        undefined,
+        selectedHarness || undefined
       );
 
       console.log('[FlowExecution] Job execution response:', response);
@@ -645,7 +666,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   },
 
   executeTab: async (tabId, nodes, edges, tabName) => {
-    const { selectedModel, reasoningEnabled, reasoningLLM, reasoningConfig, schemaDetectionEnabled, processType, managerLLM } = get();
+    const { selectedModel, selectedHarness, reasoningEnabled, reasoningLLM, reasoningConfig, schemaDetectionEnabled, processType, managerLLM } = get();
     set({ isExecuting: true });
 
     try {
@@ -767,7 +788,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         schemaDetectionEnabled,
         reasoningEnabled,
         tab?.savedFlowId || undefined,
-        tab?.savedCrewId || undefined
+        tab?.savedCrewId || undefined,
+        selectedHarness || undefined
       );
 
       console.log('[TabExecution] Job execution response:', response);

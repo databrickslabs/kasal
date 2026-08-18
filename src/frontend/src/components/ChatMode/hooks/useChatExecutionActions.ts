@@ -100,6 +100,7 @@ export function useChatExecutionActions({
 
   const addMessage = useSessionStore((s) => s.addMessage);
   const selectedModel = useAppStore((s) => s.selectedModel);
+  const selectedHarness = useAppStore((s) => s.selectedHarness);
 
   // Input variables dialog state: a run parked until the user supplies the
   // variables the crew/flow declares. Nothing outside this hook reads it.
@@ -166,6 +167,9 @@ export function useChatExecutionActions({
           // Agent Bricks endpoints picked in the "+" menu — equip + configure the
           // tool on this loaded crew so it has the endpoint (else "not configured").
           useExecutionStore.getState().selectedAgentBricksEndpoints,
+          // Which runtime runs this job, chosen beside the model in the
+          // composer. Empty means "use the configured default".
+          selectedHarness || undefined,
         );
         const execution = await createExecution(crewConfig);
         const jobId = execution.job_id || execution.execution_id;
@@ -183,7 +187,7 @@ export function useChatExecutionActions({
         execStore.setIsLoading(false);
       }
     },
-    [addMessage, handleStartExecutionStream, selectedModel],
+    [addMessage, handleStartExecutionStream, selectedModel, selectedHarness],
   );
 
   const handleExecuteCrew = useCallback(
@@ -297,6 +301,9 @@ export function useChatExecutionActions({
           // without this it would run ungated while the identical
           // auto-executed run was gated.
           useExecutionStore.getState().chatModeType,
+          // Which runtime runs this job, chosen beside the model in the
+          // composer. Empty means "use the configured default".
+          selectedHarness || undefined,
         );
         const execution = await createExecution(crewConfig);
         const jobId = execution.job_id || execution.execution_id;
@@ -314,7 +321,7 @@ export function useChatExecutionActions({
         execStore.setIsLoading(false);
       }
     },
-    [addMessage, handleStartExecutionStream, selectedModel],
+    [addMessage, handleStartExecutionStream, selectedModel, selectedHarness],
   );
 
   const handleExecuteGenerated = useCallback(
@@ -461,6 +468,9 @@ export function useChatExecutionActions({
           inputs,
           originSessionId,
           userMessage,
+          // Which runtime runs this job, chosen beside the model in the
+          // composer. Empty means "use the configured default".
+          selectedHarness || undefined,
         );
         const execution = await createExecution(flowConfig);
         const jobId = execution.job_id || execution.execution_id;
@@ -478,7 +488,7 @@ export function useChatExecutionActions({
         execStore.setIsLoading(false);
       }
     },
-    [addMessage, handleStartExecutionStream, selectedModel],
+    [addMessage, handleStartExecutionStream, selectedModel, selectedHarness],
   );
 
   const handleExecuteFlow = useCallback(

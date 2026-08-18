@@ -12,6 +12,7 @@ import {
   ListItemButton,
   ListItemText,
   Divider,
+  ListSubheader,
   Tooltip,
   Stack,
   Menu,
@@ -33,6 +34,7 @@ const kasalIcon16 = `${import.meta.env.BASE_URL}kasal-icon-16.png`;
 import DispatcherService, { DispatchResult, ConfigureCrewResult, CatalogListResult, CatalogLoadResult, FlowListResult, FlowLoadResult, StreamingGenerationResult } from '../../api/execution/DispatcherService';
 import { useWorkflowStore } from '../../store/workflow';
 import { useCrewExecutionStore } from '../../store/crewExecution';
+import { EngineConfigService, HarnessDescription } from '../../api/config/EngineConfigService';
 import { useChatMessagesStore, deduplicateMessages } from '../../store/chatMessagesStore';
 import { useKnowledgeConfigStore } from '../../store/knowledgeConfigStore';
 import { useModelConfigStore } from '../../store/modelConfig';
@@ -108,6 +110,28 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   const modelLabels = useMemo(() => buildModelLabels(models), [models]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [modelMenuAnchor, setModelMenuAnchor] = useState<null | HTMLElement>(null);
+
+  // The harness options, fetched once. The picker lives in the model menu
+  // rather than in Configuration because it is a per-RUN choice: the value is
+  // sent with the execution payload and recorded on the run's own row.
+  const { selectedHarness, setSelectedHarness } = useCrewExecutionStore();
+  const [harnesses, setHarnesses] = useState<HarnessDescription[]>([]);
+  const [defaultHarness, setDefaultHarness] = useState<string>('kasal');
+  useEffect(() => {
+    let cancelled = false;
+    EngineConfigService.getHarness()
+      .then((response) => {
+        if (cancelled) return;
+        setHarnesses(response.harnesses || []);
+        setDefaultHarness(response.harness || 'kasal');
+      })
+      .catch(() => {
+        // A picker nobody can use beats a chat that will not render. The run
+        // simply goes to the configured default, which is the behaviour before
+        // this control existed.
+      });
+    return () => { cancelled = true; };
+  }, []);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [slashMenuIndex, setSlashMenuIndex] = useState(0);
   const [slashFilteredCommands, setSlashFilteredCommands] = useState<SlashCommand[]>([]);
@@ -2195,6 +2219,14 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                       },
                     }}
                   >
+                    {/* Model above, harness below: the model is the choice
+                        being made most of the time, so it gets the top of the
+                        menu and the harness sits under a divider. */}
+                    {harnesses.length > 1 && (
+                      <ListSubheader sx={{ fontSize: '0.688rem', lineHeight: 2, bgcolor: 'transparent' }}>
+                        Model
+                      </ListSubheader>
+                    )}
                     {isLoadingModels ? (
                       <MenuItem disabled>
                         <CircularProgress size={16} sx={{ mr: 1 }} />
@@ -2241,6 +2273,37 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                         </MenuItem>
                       ))
                     )}
+                    {harnesses.length > 1 && [
+                      <Divider key="harness-divider" />,
+                      <ListSubheader key="harness-heading" sx={{ fontSize: '0.688rem', lineHeight: 2, bgcolor: 'transparent' }}>
+                        Harness
+                      </ListSubheader>,
+                      ...harnesses.map((h) => (
+                        <MenuItem
+                          key={`harness-${h.name}`}
+                          disabled={!h.available}
+                          onClick={() => {
+                            setSelectedHarness(h.name === defaultHarness ? '' : h.name);
+                            setModelMenuAnchor(null);
+                          }}
+                          selected={(selectedHarness || defaultHarness) === h.name}
+                          sx={{ fontSize: '0.813rem', py: 0.75 }}
+                        >
+                          <Box sx={{ width: '100%' }}>
+                            <Typography variant="body2" sx={{ fontSize: '0.813rem' }}>
+                              {h.label || h.name}
+                              {h.name === defaultHarness && ' (default)'}
+                            </Typography>
+                            <Typography
+                              variant="caption"
+                              sx={{ fontSize: '0.688rem', color: h.available ? 'text.secondary' : 'error.main', display: 'block' }}
+                            >
+                              {h.available ? h.version : (h.unavailable_reason || 'unavailable')}
+                            </Typography>
+                          </Box>
+                        </MenuItem>
+                      )),
+                    ]}
                   </Menu>
                   {/* Send button - on same level as model selector */}
                   <IconButton
