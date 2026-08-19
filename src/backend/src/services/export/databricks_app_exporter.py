@@ -25,7 +25,29 @@ from src.services.execution.harnesses.binding import Capability, HarnessName
 from .base_exporter import BaseExporter
 from .runtime_vendor import kasal_runtime_files, rewrite_import_root
 from .secret_hints import SECRET_KEY_HINTS as _SECRET_KEY_HINTS
+
 from .yaml_generator import YAMLGenerator
+
+#: The CrewAI version a CrewAI bundle pins, EXACTLY as the platform pins it in
+#: ``src/backend/pyproject.toml``. An exported app that resolves a different
+#: version is no longer the app that was tested here, and this bundle ships no
+#: uv.lock to stop it drifting — the pin is the whole guarantee. A test asserts
+#: the two stay equal.
+_CREWAI_PIN = "1.15.16"
+
+def _can_export(name: "HarnessName") -> bool:
+    """Whether a bundle can be produced for this harness, per its own binding.
+
+    Asks the binding rather than keeping a second list here: the declaration is
+    the answer, and two places to state it is how they stop agreeing.
+    """
+    try:
+        from src.services.execution.harnesses import binding_for
+
+        return binding_for(name).supports(Capability.EXPORT)
+    except Exception:  # noqa: BLE001 — an unavailable harness simply cannot export
+        return False
+
 
 TEMPLATE_DIR = Path(__file__).parent / "templates" / "databricks_app"
 # The ONE portable A2UI composer (stdlib-only), shared with the live app and
@@ -175,6 +197,12 @@ class DatabricksAppExporter(BaseExporter):
         include_obo = options.get("include_obo_auth", True)
         include_comments = options.get("include_comments", True)
         model_override = options.get("model_override") or None
+        # Which agent runtime this bundle should run on. Defaults to Kasal's,
+        # which ships no third-party framework — that is what makes an exported
+        # app standalone. "crewai" puts CrewAI's Agent/Task/Crew on top of the
+        # same vendored transport, for a spin-off team that would rather own a
+        # mainstream framework than a copy of ours.
+        requested_runtime = str(options.get("runtime") or "").strip().lower()
 
         # Deploy-time selections (set by the one-click deploy); fall back to the
         # workspace's configured catalog/schema for plain downloads.
@@ -197,7 +225,7 @@ class DatabricksAppExporter(BaseExporter):
         # now, and a crew tuned against CrewAI's executor can behave differently
         # once deployed. `Capability.EXPORT` has said this since the harness
         # landed; nothing read it.
-        bundle_runtime, runtime_notice = self._bundle_runtime()
+        bundle_runtime, runtime_notice = self._bundle_runtime(requested_runtime)
 
         tools = self._get_unique_tools(agents, tasks)
         sanitized = self._sanitize_name(crew_name)
@@ -240,8 +268,12 @@ class DatabricksAppExporter(BaseExporter):
             "{{TOOL_IMPORTS}}": self._tool_imports(tools, include_custom_tools),
             "{{TOOL_MAP}}": self._tool_map(tools, tool_configs, include_custom_tools),
             "{{EXTRA_DEPENDENCIES}}": self._extra_deps(
-                tools, include_custom_tools, has_mcp=bool(mcp_servers)
+                tools,
+                include_custom_tools,
+                has_mcp=bool(mcp_servers),
+                runtime=bundle_runtime,
             ),
+            "{{BUNDLE_RUNTIME}}": bundle_runtime,
             "{{ENV_TOOL_KEYS}}": self._env_keys(tools, mcp_servers),
             # Crew execution settings (mirror Kasal's runtime).
             "{{PROCESS}}": crew_data.get("process") or "sequential",
@@ -329,7 +361,7 @@ class DatabricksAppExporter(BaseExporter):
         # 1d. Vendor Kasal's agent runtime under agent_server/kasal_runtime/ so the
         #     exported crew runs on the SAME engine Kasal runs, not a second one.
         #     Read from live backend source at export time — see runtime_vendor.py.
-        files.extend(await kasal_runtime_files(self.logger))
+        files.extend(await kasal_runtime_files(self.logger, runtime=bundle_runtime))
 
         # 2. Generated crew config (read at runtime by agent_server/agent.py).
         files.append(
@@ -390,35 +422,44 @@ class DatabricksAppExporter(BaseExporter):
             "size_bytes": sum(len(f["content"]) for f in files),
         }
 
-    def _bundle_runtime(self) -> tuple[str, Optional[str]]:
+    def _bundle_runtime(self, requested: str = "") -> tuple[str, Optional[str]]:
         """The runtime this bundle will run on, and a warning when it differs.
 
-        Returns ``(runtime, notice)``. The notice is None when the configured
-        harness is the one the bundle ships.
+        Returns ``(runtime, notice)``. The notice is None when nothing surprising
+        happened — the common case must read exactly as it did before.
 
-        Deliberately NOT a refusal. The export works — it produces a correct
-        Kasal-runtime app whatever the workspace is set to — and blocking it
-        would take away a working capability to make a point. Saying so is
-        enough, and it is the part that was missing.
+        Order: an explicit ``runtime`` option wins, then the workspace's
+        configured harness, then Kasal's. A harness that does not declare
+        ``Capability.EXPORT`` falls back to Kasal with a notice rather than
+        failing: the export produces a correct app either way, and refusing
+        would take away a working capability to make a point.
 
-        Never raises: an export must not fail because a harness lookup did.
+        Never raises. An export must not fail because a harness lookup did.
         """
-        bundle_runtime = HarnessName.KASAL.value
+        default_runtime = HarnessName.KASAL.value
+        exportable = {h.value for h in HarnessName if _can_export(h)}
+
+        if requested:
+            if requested in exportable:
+                return requested, None
+            return default_runtime, (
+                f"'{requested}' is not a runtime this export can produce, so the "
+                f"bundle runs Kasal's own. Available: {', '.join(sorted(exportable))}."
+            )
+
         try:
             harness = active_harness()
-            if harness.supports(Capability.EXPORT):
-                return bundle_runtime, None
-            return bundle_runtime, (
-                f"This app runs Kasal's own runtime. Your workspace is configured "
-                f"for the {harness.name.value} harness, which cannot be exported — "
-                f"the bundle ships no third-party agent framework. Behaviour may "
-                f"differ from the runs you tested here."
-            )
         except Exception:  # noqa: BLE001 — telemetry must not fail an export
-            self.logger.debug(
-                "Could not read the active harness for the export notice"
-            )
-            return bundle_runtime, None
+            self.logger.debug("Could not read the active harness for the export")
+            return default_runtime, None
+
+        if harness.supports(Capability.EXPORT):
+            return harness.name.value, None
+        return default_runtime, (
+            f"This app runs Kasal's own runtime. Your workspace is configured for "
+            f"the {harness.name.value} harness, which cannot be exported. "
+            f"Behaviour may differ from the runs you tested here."
+        )
 
     # ── Token builders ─────────────────────────────────────────────────
 
@@ -656,7 +697,11 @@ class DatabricksAppExporter(BaseExporter):
         return ("\n".join(lines) + "\n") if lines else ""
 
     def _extra_deps(
-        self, tools: List[str], include_custom: bool, has_mcp: bool = False
+        self,
+        tools: List[str],
+        include_custom: bool,
+        has_mcp: bool = False,
+        runtime: str = "kasal",
     ) -> str:
         seen: set = set()
         lines: List[str] = []
@@ -676,6 +721,14 @@ class DatabricksAppExporter(BaseExporter):
             # the other made every server fail at import with a misleading
             # "missing the 'mcp' package" message.
             deps.append('"mcp>=1.26.0,<1.27.0"')
+        if runtime == "crewai":
+            # Pinned to a MINOR range, not a floor. This bundle ships no
+            # uv.lock, and the pair that broke exports before was a floating
+            # crewai + litellm resolving to a mismatch that only failed at the
+            # first LLM call — in the customer's workspace. The transport stays
+            # Kasal's, so litellm is not pulled in: CrewAI 1.15 moved it to an
+            # extra, and not enabling that extra is what keeps it out.
+            deps.append(f'"crewai=={_CREWAI_PIN}"')
         for dep in deps:
             if dep not in seen:
                 seen.add(dep)

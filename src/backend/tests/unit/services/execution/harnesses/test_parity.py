@@ -355,10 +355,16 @@ class TestCapabilitiesAreHonest:
         harness.wire_memory(crew, provider=lambda **k: "M")
         assert crew.context_providers
 
-    def test_export_is_kasal_only_and_says_so(self):
-        """The exported app vendors the Kasal runtime and ships no framework."""
-        assert not binding_for(HarnessName.CREWAI.value).supports(Capability.EXPORT)
+    def test_both_harnesses_can_be_exported(self):
+        """A bundle can be produced for either runtime.
+
+        The Kasal bundle vendors the runtime and ships no third-party framework.
+        The CrewAI bundle puts CrewAI's Agent/Task/Crew on that SAME vendored
+        transport — not CrewAI's own LLM stack, which would be an app nobody
+        tested. Export was Kasal-only until the CrewAI bundle existed.
+        """
         assert binding_for(HarnessName.KASAL.value).supports(Capability.EXPORT)
+        assert binding_for(HarnessName.CREWAI.value).supports(Capability.EXPORT)
 
     def test_every_engine_describes_itself_for_the_api(self, harness):
         described = harness.describe()

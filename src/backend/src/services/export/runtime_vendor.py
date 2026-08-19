@@ -117,6 +117,31 @@ STUB_INITS: Dict[str, str] = {
         '"""\n'
     ),
     "core/__init__.py": '"""Vendored from Kasal ``src/core``."""\n',
+    # The harness adapters (vendored only for a CrewAI bundle) log through
+    # Kasal's LoggerManager, which reaches into settings, log directories and
+    # per-run files that no exported app has. This shim gives them the same
+    # call shape over stdlib logging, so the adapters vendor VERBATIM — an
+    # edited copy is one that drifts, and this bundle already learned that
+    # lesson with the codex handler.
+    "core/logger.py": (
+        '"""``LoggerManager`` call shape over stdlib logging.\n\n'
+        "Upstream this configures per-run log files under a configured root.\n"
+        "An exported app has none of that: it logs to stdout, which Databricks\n"
+        "Apps collects. Only the interface is reproduced.\n"
+        '"""\n\n'
+        "import logging\n\n\n"
+        "class LoggerManager:\n"
+        "    _instance = None\n\n"
+        "    def __init__(self):\n"
+        "        self.crew = logging.getLogger('kasal.crew')\n"
+        "        self.llm = logging.getLogger('kasal.llm')\n"
+        "        self.system = logging.getLogger('kasal.system')\n\n"
+        "    @classmethod\n"
+        "    def get_instance(cls):\n"
+        "        if cls._instance is None:\n"
+        "            cls._instance = cls()\n"
+        "        return cls._instance\n"
+    ),
     "core/llm/__init__.py": (
         '"""Vendored from Kasal ``src/core/llm`` — deliberately EMPTY.\n\n'
         "Upstream this module imports ``usage_telemetry``, which reaches into\n"
@@ -172,8 +197,21 @@ async def _read(path: Path) -> str:
         return str(await f.read())
 
 
+#: Vendored ONLY for a CrewAI bundle. The adapters are what let CrewAI's Agent,
+#: Task and Crew sit on Kasal's transport, tools and events — the same
+#: arrangement the platform runs, so an exported CrewAI app behaves like the runs
+#: it was tested as rather than like a fresh CrewAI project.
+_CREWAI_TREES: List[Tuple[Path, str]] = [
+    (
+        BACKEND_SRC / "services" / "execution" / "harnesses",
+        "services/execution/harnesses",
+    ),
+]
+
+
 async def kasal_runtime_files(
     logger: Optional[logging.Logger] = None,
+    runtime: str = "kasal",
 ) -> List[Dict[str, str]]:
     """The full vendored runtime as export ``files`` entries.
 
@@ -205,6 +243,25 @@ async def kasal_runtime_files(
                     "type": "python",
                 }
             )
+
+    if runtime == "crewai":
+        for source_dir, dest in _CREWAI_TREES:
+            if not source_dir.is_dir():
+                raise FileNotFoundError(
+                    f"CrewAI harness source missing: {source_dir}. A CrewAI "
+                    "bundle cannot be produced without it."
+                )
+            for path in sorted(source_dir.rglob("*")):
+                if not _is_vendorable(path):
+                    continue
+                rel = path.relative_to(source_dir).as_posix()
+                files.append(
+                    {
+                        "path": f"{VENDOR_ROOT}/{dest}/{rel}",
+                        "content": rewrite_import_root(await _read(path)),
+                        "type": "python",
+                    }
+                )
 
     for source_file, dest in _MODULES:
         if not source_file.is_file():

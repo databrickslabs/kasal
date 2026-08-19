@@ -302,9 +302,15 @@ class TestNoCrewaiTools:
         assert not used, f"MCPServerAdapter is still used: {used}"
         assert "from agent_server.mcp_tools import open_mcp_server" in agent_py
 
-    def test_nothing_in_the_bundle_imports_crewai_tools(self, app_bundle):
+    def test_nothing_in_a_kasal_bundle_imports_crewai_tools(self, app_bundle):
+        """``runtime_binding`` is exempt: it names crewai only under
+        ``if RUNTIME == "crewai"``, which a Kasal bundle never enters. Everything
+        else must be clean — MCP tools are built with the SDK directly, and
+        crewai_tools has been gone since that migration."""
         offenders = []
         for path in sorted((app_bundle).rglob("*.py")):
+            if path.name == "runtime_binding.py":
+                continue
             for line in path.read_text(encoding="utf-8").splitlines():
                 if line.strip().startswith(("from crewai", "import crewai")):
                     offenders.append(f"{path.name}: {line.strip()}")

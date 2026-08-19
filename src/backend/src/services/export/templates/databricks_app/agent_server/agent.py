@@ -32,12 +32,10 @@ from agent_server import a2ui_store, cancel, crew_progress, mlflow_bridge, progr
 from agent_server.a2ui.compose import compose_a2ui as _compose_surface
 from agent_server.a2ui.compose import guidance_for as _a2ui_guidance_for
 from agent_server.a2ui.compose import load_catalog as _load_a2ui_catalog
-from agent_server.kasal_runtime.services.execution.runtime import (
-    Agent,
-    Crew,
-    Process,
-    Task,
-)
+# The runtime this bundle was exported for — Kasal's own, or CrewAI. Which one
+# is stamped into runtime_binding at export time; everything that differs
+# between them lives there, so the construction below reads the same either way.
+from agent_server.runtime_binding import Agent, Crew, Process, Task
 from agent_server.utils import get_session_id, get_user_id, get_user_workspace_client
 from mlflow.genai.agent_server import invoke, stream
 from mlflow.types.responses import (
@@ -361,7 +359,7 @@ def _make_task_guardrail(cfg: Dict[str, Any]):
     if not isinstance(text, str) or not text.strip():
         return None
     try:
-        from agent_server.kasal_runtime.services.execution.runtime import LLMGuardrail
+        from agent_server.runtime_binding import LLMGuardrail
 
         return LLMGuardrail(
             description=text.strip(),

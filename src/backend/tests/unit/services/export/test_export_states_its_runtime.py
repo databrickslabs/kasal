@@ -46,13 +46,35 @@ class TestTheBundleNamesItsRuntime:
         assert "**Note:**" not in readme
 
     @pytest.mark.asyncio
-    async def test_a_harness_that_cannot_export_is_called_out(self):
+    async def test_the_configured_harness_decides_the_bundle(self):
+        """A CrewAI workspace exports a CrewAI bundle — no warning, because
+        nothing surprising happened. This used to fall back to Kasal with a
+        notice, before a CrewAI bundle existed."""
         metadata, readme = await _export("crewai")
-        notice = metadata.get("runtime_notice", "")
-        assert "crewai" in notice
-        assert "Kasal's own runtime" in notice
-        # …and where the person deploying it will actually read it.
+        assert metadata["bundle_runtime"] == "crewai"
+        assert "runtime_notice" not in metadata
+        assert "**Note:**" not in readme
+
+    @pytest.mark.asyncio
+    async def test_a_runtime_nothing_can_produce_falls_back_and_says_so(self):
+        """The notice is for the case that is actually surprising: you asked for
+        a bundle this export cannot make, and got a working one anyway."""
+        with bind("kasal"):
+            result = await DatabricksAppExporter().export(CREW, {"runtime": "langgraph"})
+        notice = result["metadata"].get("runtime_notice", "")
+        assert result["metadata"]["bundle_runtime"] == "kasal"
+        assert "langgraph" in notice
+        readme = next(
+            f for f in result["files"] if f["path"].endswith("README.md")
+        )["content"]
         assert "**Note:**" in readme
+
+    @pytest.mark.asyncio
+    async def test_an_explicit_request_beats_the_configured_harness(self):
+        """Export is a deliberate act: what you ask for is what you get."""
+        with bind("kasal"):
+            result = await DatabricksAppExporter().export(CREW, {"runtime": "crewai"})
+        assert result["metadata"]["bundle_runtime"] == "crewai"
 
     @pytest.mark.asyncio
     async def test_the_export_still_succeeds(self):
@@ -67,3 +89,23 @@ class TestTheBundleNamesItsRuntime:
         for harness in ("kasal", "crewai"):
             _, readme = await _export(harness)
             assert "{{RUNTIME_NOTICE}}" not in readme
+
+
+class TestTheOptionReachesTheExporter:
+    """The runtime is only useful if a caller can actually ask for it. Each of
+    these was broken at some point between the schema and the exporter, and none
+    of the failures raised — you simply got the other runtime's bundle."""
+
+    def test_the_schema_carries_it(self):
+        from src.schemas.crew_export import ExportOptions
+
+        # ``CrewExportService`` passes options through ``.dict()``, so a field
+        # missing here is silently dropped rather than rejected.
+        assert ExportOptions(runtime="crewai").dict()["runtime"] == "crewai"
+
+    def test_it_defaults_to_unset_rather_than_to_kasal(self):
+        """Unset must mean "follow the configured harness". A default of
+        "kasal" here would override a CrewAI workspace on every export."""
+        from src.schemas.crew_export import ExportOptions
+
+        assert ExportOptions().runtime is None

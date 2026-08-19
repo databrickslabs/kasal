@@ -84,6 +84,11 @@ _CAPABILITIES = frozenset(
         Capability.OUTPUT_SINKS,
         Capability.CHECKPOINT_RESUME,
         Capability.FLOW,
+        # An exported bundle can now be produced for CrewAI: its Agent/Task/Crew
+        # over the SAME vendored transport, tools and events the Kasal bundle
+        # ships. Not CrewAI's own LLM stack — that would be an app nobody tested,
+        # missing the endpoint fixes Kasal's handlers carry.
+        Capability.EXPORT,
     }
 )
 

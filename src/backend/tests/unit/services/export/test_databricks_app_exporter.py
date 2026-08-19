@@ -240,8 +240,16 @@ class TestDatabricksAppExporter:
         files = _files(await exporter.export(crew_data, {}))
         agent = files["agent_server/agent.py"]
         assert "crew.kickoff" in agent
+        # The construction seam. agent.py imports the runtime through
+        # runtime_binding, which resolves to the vendored Kasal runtime for a
+        # Kasal bundle and to CrewAI for a CrewAI one — so the file itself no
+        # longer names either.
+        assert "from agent_server.runtime_binding import" in agent
+        binding = files["agent_server/runtime_binding.py"]
+        assert 'RUNTIME = "kasal"' in binding
         assert (
-            "from agent_server.kasal_runtime.services.execution.runtime import" in agent
+            "from agent_server.kasal_runtime.services.execution.runtime import"
+            in binding
         )
         for banned in (
             "from crewai import",

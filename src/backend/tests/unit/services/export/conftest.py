@@ -62,20 +62,29 @@ def purge_agent_server_modules():
         pass
 
 
-@pytest_asyncio.fixture
-async def app_bundle(tmp_path, monkeypatch):
-    """Render the export to ``tmp_path`` and make ``agent_server`` importable."""
-    result = await DatabricksAppExporter().export(dict(SAMPLE_CREW), {})
+async def _render_bundle(tmp_path, monkeypatch, options=None):
+    result = await DatabricksAppExporter().export(dict(SAMPLE_CREW), options or {})
     for f in result["files"]:
         dest = tmp_path / f["path"]
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(f["content"], encoding="utf-8")
     monkeypatch.syspath_prepend(str(tmp_path))
     purge_agent_server_modules()
-    try:
-        yield tmp_path
-    finally:
-        purge_agent_server_modules()
+    return tmp_path
+
+
+@pytest_asyncio.fixture
+async def app_bundle(tmp_path, monkeypatch):
+    """Render the export to ``tmp_path`` and make ``agent_server`` importable."""
+    yield await _render_bundle(tmp_path, monkeypatch)
+    purge_agent_server_modules()
+
+
+@pytest_asyncio.fixture
+async def crewai_app_bundle(tmp_path, monkeypatch):
+    """The same bundle, exported for the CrewAI runtime."""
+    yield await _render_bundle(tmp_path, monkeypatch, {"runtime": "crewai"})
+    purge_agent_server_modules()
 
 
 @pytest.fixture

@@ -212,31 +212,24 @@ class TestTheBindingSwapsWhatIsBuilt:
         # Same intent, both ways round.
         assert crew_agent.role == kasal_agent.role == "Researcher"
 
-    def test_crewai_claims_everything_except_export_and_the_plan_tool(self):
+    def test_the_plan_tool_is_the_only_thing_crewai_does_not_claim(self):
         """Capabilities keep the product honest, so they track what is real.
 
-        Two absences, for different reasons:
+        AGENT_PLAN is the one absence: the plan tool is written for Kasal's
+        executor, and CrewAI's agent executor plans its own way. Given both, one
+        run called `todo` 28 times without writing a single item.
 
-        * EXPORT — the exported Databricks App vendors the KASAL runtime so it
-          runs with no third-party agent framework at all; shipping CrewAI into
-          exported apps is a separate project, not a gap in this one.
-        * AGENT_PLAN — the plan tool is written for Kasal's executor, and
-          CrewAI's agent executor plans its own way. Given both, one run called
-          `todo` 28 times without writing a single item.
-
-        Everything else — memory seams, checkpoint resume, flows, tool approval
-        and replay — is implemented on both and therefore declared on both.
+        EXPORT used to be absent too, and is not any more — a CrewAI bundle can
+        be produced, running CrewAI's Agent/Task/Crew over the same vendored
+        transport the Kasal bundle ships.
         """
         from src.services.execution.harnesses.binding import Capability
 
         crewai = binding_for("crewai")
         kasal = binding_for("kasal")
 
-        assert kasal.capabilities() - crewai.capabilities() == {
-            Capability.EXPORT,
-            Capability.AGENT_PLAN,
-        }
-        assert not crewai.supports(Capability.EXPORT)
+        assert kasal.capabilities() - crewai.capabilities() == {Capability.AGENT_PLAN}
         assert not crewai.supports(Capability.AGENT_PLAN)
-        assert kasal.supports(Capability.EXPORT)
         assert kasal.supports(Capability.AGENT_PLAN)
+        assert crewai.supports(Capability.EXPORT)
+        assert kasal.supports(Capability.EXPORT)

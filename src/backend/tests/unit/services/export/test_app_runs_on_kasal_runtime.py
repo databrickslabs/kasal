@@ -34,20 +34,45 @@ class TestTheAppImports:
         cannot resolve — every string assertion passes on a broken import."""
         assert _import(module) is not None
 
-    def test_no_app_module_imports_crewai(self, app_bundle):
-        """crewai is not installed in this venv, so a leftover top-level import
-        would already have raised above. This pins the intent explicitly."""
+    def test_a_kasal_bundle_never_reaches_crewai(self, app_bundle):
+        """A Kasal bundle must not need CrewAI installed to run.
+
+        ``runtime_binding.py`` is the ONE file that mentions it, and only inside
+        ``if RUNTIME == "crewai"`` — inert in a Kasal bundle, where RUNTIME is
+        stamped "kasal". Every other module must be free of it, which is what
+        makes this app standalone.
+        """
+        binding = (app_bundle / "agent_server" / "runtime_binding.py").read_text(
+            encoding="utf-8"
+        )
+        assert 'RUNTIME = "kasal"' in binding
+
         for path in sorted((app_bundle / "agent_server").rglob("*.py")):
-            if "kasal_runtime" in path.parts:
+            if "kasal_runtime" in path.parts or path.name == "runtime_binding.py":
                 continue
-            text = path.read_text(encoding="utf-8")
-            for line in text.splitlines():
+            for line in path.read_text(encoding="utf-8").splitlines():
                 stripped = line.strip()
                 if stripped.startswith(("import crewai", "from crewai")):
-                    # crewai_tools is Phase 5; crewai itself must be gone.
                     assert stripped.startswith(
                         "from crewai_tools"
                     ), f"{path.name}: {stripped}"
+
+    def test_the_crewai_branch_is_unreachable_in_a_kasal_bundle(self, app_bundle):
+        """Not just unused — unreached. The import sits under the guard, so a
+        Kasal bundle imports cleanly on a machine with no crewai installed."""
+        import ast
+
+        source = (app_bundle / "agent_server" / "runtime_binding.py").read_text(
+            encoding="utf-8"
+        )
+        tree = ast.parse(source)
+        crewai_imports_at_module_level = [
+            node
+            for node in tree.body
+            if isinstance(node, (ast.Import, ast.ImportFrom))
+            and "crewai" in ast.unparse(node)
+        ]
+        assert not crewai_imports_at_module_level
 
 
 class TestTheCrewIsKasals:
