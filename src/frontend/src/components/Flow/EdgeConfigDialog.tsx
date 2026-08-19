@@ -132,6 +132,23 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
   const sourceNode = edge ? nodes.find(n => n.id === edge.source) : null;
   const fallbackSourceTasks: Task[] = sourceNode?.data?.allTasks || [];
 
+  /**
+   * How many upstream connections join at this edge.
+   *
+   * AND/OR describe a JOIN: wait for all of several sources, or fire when any
+   * of them completes. That is a property of the connection, not of the crew
+   * behind it — a crew with two tasks is still ONE source, and it finishes when
+   * it finishes. Counting its tasks instead disabled "None (Default)" for every
+   * ordinary edge out of a multi-task crew and silently forced AND.
+   *
+   * `aggregatedSourceTasks` is already one entry per source crew: several only
+   * for a merge group, which IS the real join.
+   */
+  const sourceCount = aggregatedSourceTasks.length > 0
+    ? aggregatedSourceTasks.length
+    : (fallbackSourceTasks.length > 0 ? 1 : 0);
+  const isJoin = sourceCount > 1;
+
   // Stable id keys for the auto-include effect (avoids array-identity churn in deps)
   const sourceTaskIdsKey = (aggregatedSourceTasks.length > 0
     ? aggregatedSourceTasks.flatMap(g => g.tasks)
@@ -206,16 +223,16 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, edge?.id, sourceTaskIdsKey, targetTaskIdsKey]);
 
-  // Auto-adjust logic type when multiple tasks are selected/deselected
+  // Auto-adjust the logic type when this edge becomes (or stops being) a join.
   useEffect(() => {
-    if (listenToTaskIds.length > 1 && logicType === 'NONE') {
-      // Switch to AND when multiple tasks selected and currently NONE
+    if (isJoin && logicType === 'NONE') {
+      // Several sources have to be combined somehow; AND is the safe default.
       setLogicType('AND');
-    } else if (listenToTaskIds.length <= 1 && (logicType === 'AND' || logicType === 'OR')) {
-      // Switch to NONE when tasks reduced to 1 or 0 and currently AND/OR
+    } else if (!isJoin && (logicType === 'AND' || logicType === 'OR')) {
+      // A single source needs no join — sequential is the default again.
       setLogicType('NONE');
     }
-  }, [listenToTaskIds.length, logicType]);
+  }, [isJoin, logicType]);
 
   // Get all source tasks as a flat list. The crew's final task is the one whose
   // output becomes the crew result (what the router routes on), so the schema is
@@ -451,38 +468,38 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
                 );
               }}
             >
-              <MenuItem value="NONE" disabled={listenToTaskIds.length > 1}>
+              <MenuItem value="NONE" disabled={isJoin}>
                 <Box>
                   <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 500 }}>
                     None (Default) <Typography component="span" variant="caption" color="text.secondary">— Sequential</Typography>
                   </Typography>
-                  {listenToTaskIds.length > 1 && (
+                  {isJoin && (
                     <Typography variant="caption" color="error" sx={{ fontSize: '0.7rem', display: 'block' }}>
-                      Not available with multiple source tasks
+                      Not available when several connections join here
                     </Typography>
                   )}
                 </Box>
               </MenuItem>
-              <MenuItem value="AND" disabled={listenToTaskIds.length <= 1}>
+              <MenuItem value="AND" disabled={!isJoin}>
                 <Box>
                   <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 500 }}>
                     AND Logic <Typography component="span" variant="caption" color="text.secondary">— Wait for all</Typography>
                   </Typography>
-                  {listenToTaskIds.length <= 1 && (
+                  {!isJoin && (
                     <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', display: 'block' }}>
-                      Requires multiple source tasks
+                      Requires several connections joining here
                     </Typography>
                   )}
                 </Box>
               </MenuItem>
-              <MenuItem value="OR" disabled={listenToTaskIds.length <= 1}>
+              <MenuItem value="OR" disabled={!isJoin}>
                 <Box>
                   <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 500 }}>
                     OR Logic <Typography component="span" variant="caption" color="text.secondary">— Execute when any completes</Typography>
                   </Typography>
-                  {listenToTaskIds.length <= 1 && (
+                  {!isJoin && (
                     <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', display: 'block' }}>
-                      Requires multiple source tasks
+                      Requires several connections joining here
                     </Typography>
                   )}
                 </Box>
