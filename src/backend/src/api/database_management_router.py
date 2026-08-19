@@ -26,6 +26,7 @@ from src.schemas.database_management import (
     ListBackupsRequest,
     ListBackupsResponse,
 )
+from src.schemas.lakebase_preflight import LakebasePreflightReport
 from src.services.databricks.lakebase.management import DatabaseManagementService
 from src.services.databricks.lakebase.service import LakebaseService
 
@@ -921,9 +922,20 @@ async def enable_lakebase_without_migration(
                 "Provide the endpoint manually or verify the instance exists."
             )
 
-    return await service.enable_lakebase(
+    result = await service.enable_lakebase(
         instance_name, endpoint, expand_schema=expand_schema
     )
+    # Attach a preflight report so the UI can immediately flag whether this app's
+    # service principal can actually keep the schema up to date (owns the tables),
+    # or surface the remediation if not. Best-effort: never fail enable on it.
+    try:
+        from src.services.databricks.lakebase.preflight import preflight_via_service
+
+        if isinstance(result, dict):
+            result["preflight"] = await preflight_via_service(service, instance_name)
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"enable preflight skipped: {e}")
+    return result
 
 
 @router.post("/lakebase/test-connection", dependencies=_SYSTEM_ADMIN_ONLY)
@@ -933,14 +945,39 @@ async def test_lakebase_connection(
     """
     Test connection to Lakebase instance (POST endpoint).
 
+    Runs the full preflight diagnostic (connectivity, pgvector, and — critically —
+    whether this app's service principal OWNS the tables Kasal needs so it can
+    keep the schema up to date). The report is attached under ``preflight`` so the
+    UI can show a green check or the exact remediation.
+
     Args:
         request: Instance name in request body
 
     Returns:
-        Connection test result
+        Connection test result, with a ``preflight`` report attached.
     """
     instance_name = request.get("instance_name")
     if not instance_name:
         raise BadRequestError("instance_name is required")
 
-    return await service.test_connection(instance_name)
+    result = await service.test_connection(instance_name)
+    from src.services.databricks.lakebase.preflight import preflight_via_service
+
+    result["preflight"] = await preflight_via_service(service, instance_name)
+    return result
+
+
+@router.post("/lakebase/preflight", dependencies=_SYSTEM_ADMIN_ONLY)
+async def lakebase_preflight(
+    request: Dict[str, Any], service: LakebaseServiceDep
+) -> LakebasePreflightReport:
+    """Run the Lakebase preflight diagnostic.
+
+    Verifies the app's service principal can operate the schema and, when it
+    cannot (e.g. tables orphaned by an app delete+recreate), returns the exact
+    remediation. ``instance_name`` in the body overrides the configured instance.
+    """
+    from src.services.databricks.lakebase.preflight import preflight_via_service
+
+    report = await preflight_via_service(service, request.get("instance_name"))
+    return LakebasePreflightReport(**report)

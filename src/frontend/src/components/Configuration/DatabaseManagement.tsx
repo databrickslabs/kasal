@@ -51,6 +51,7 @@ import {
 } from '@mui/icons-material';
 import { apiClient, config } from '../../config/api/ApiConfig';
 import { useDatabaseStore } from '../../store/databaseStore';
+import LakebasePreflightPanel from './LakebasePreflightPanel';
 import { APIKeysService } from '../../api/config/APIKeysService';
 
 // Type guard for Axios errors with response data
@@ -1234,6 +1235,15 @@ const DatabaseManagement: React.FC = () => {
                     </Grid>
                   )}
                 </Grid>
+
+                {/* Connection diagnostics: verify the app SP can operate the
+                    schema, or show the exact remediation. */}
+                {(lakebaseConfig.enabled || lakebaseConfig.instance_status === 'READY') && (
+                  <LakebasePreflightPanel
+                    instanceName={lakebaseConfig.instance_name}
+                    autoRun={!!lakebaseConfig.enabled}
+                  />
+                )}
 
                 {/* View in Databricks Button */}
                 {lakebaseConfig.instance_status === 'READY' && (
