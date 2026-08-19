@@ -192,10 +192,16 @@ KasalEngineService              the hub, unchanged: dispatch, status, cancel
   identical, and therefore what makes a cross-engine comparison mean anything.
 - **What a harness cannot do is DECLARED, not discovered.** `Capability` in
   `engines/binding.py` drives the API and greys out the UI. Today CrewAI claims
-  everything except `EXPORT` — the exported Databricks App vendors the KASAL
-  runtime so it ships with no third-party framework. A declared capability must
-  be one the binding actually delivers; the parity suite checks that, and it
-  has already caught an over-claim.
+  everything except `AGENT_PLAN` — the `todo` tool is written for Kasal's
+  executor, one call per round over a conversation that executor owns. A declared
+  capability must be one the binding actually delivers; the parity suite checks
+  that, and it has already caught an over-claim.
+- **An export ships one runtime, chosen at export time.** Both harnesses claim
+  `EXPORT` and produce a DIFFERENT bundle: the Kasal one vendors
+  `services/execution/runtime/`, the CrewAI one ships `crewai` pinned, on top of
+  the same vendored transport. `export/templates/databricks_app/agent_server/runtime_binding.py`
+  is the whole seam — `agent.py` is identical either way. Keep it that way; a
+  second `if RUNTIME ==` anywhere in the template is the start of two apps.
 - **The two harnesses divide tool execution differently — say which you mean.**
   Kasal's transport owns the tool loop (give it `available_functions`, get final
   text). CrewAI's executor owns it instead, and asks the LLM only for the
