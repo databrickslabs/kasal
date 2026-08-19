@@ -22,6 +22,9 @@ export interface Run {
   group_email?: string;
   // Execution type for distinguishing crew vs flow
   execution_type?: 'crew' | 'flow' | string;
+  /** Which agent runtime ran it — decided once at creation and stamped on the
+   *  row, so a finished run can say what ran it however the setting changes. */
+  harness?: string;
   // Flow-specific fields
   flow_id?: string;
   inputs?: {

@@ -262,6 +262,15 @@ class ExecutionResponse(BaseModel):
     execution_type: Optional[str] = Field(
         None, description="Type of execution (crew or flow)"
     )
+    harness: Optional[str] = Field(
+        None,
+        description=(
+            "Which agent runtime ran this execution ('kasal' or 'crewai'), read "
+            "back from the row it was stamped on at creation. Recorded since the "
+            "harness landed and surfaced nowhere: a finished run knew what ran it "
+            "and could not say so."
+        ),
+    )
     execution_key: Optional[str] = Field(
         None, description="Optional external key for the execution"
     )

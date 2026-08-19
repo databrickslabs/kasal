@@ -1829,3 +1829,124 @@ class TestRunCrewExecutionExtra:
                 execution_type="flow",
             )
         assert result == {"status": "ok"}
+
+
+class TestTheStatusSaysWhichHarnessRanIt:
+    """A finished run has always known what ran it and could not say so.
+
+    `execution_history.harness` is stamped at creation and read back on every
+    resume, but it reached no API response — so the only way to answer "which
+    runtime ran this?" was to open the database.
+    """
+
+    @staticmethod
+    def _row(**overrides):
+        row = SimpleNamespace(
+            status="COMPLETED",
+            created_at=datetime(2024, 1, 1),
+            completed_at=datetime(2024, 1, 2),
+            result={"output": "done"},
+            run_name="run-1",
+            error=None,
+            execution_type="crew",
+            harness="crewai",
+            mlflow_trace_id=None,
+            mlflow_experiment_name=None,
+            mlflow_evaluation_run_id=None,
+        )
+        for key, value in overrides.items():
+            setattr(row, key, value)
+        return row
+
+    @staticmethod
+    async def _status_for(row):
+        svc = make_service(session=AsyncMock())
+        mock_repo = AsyncMock()
+        mock_repo.get_execution_summary_by_job_id = AsyncMock(return_value=row)
+        mock_repo.get_execution_by_job_id = AsyncMock(return_value=row)
+        with patch.dict(
+            "sys.modules",
+            {
+                "src.repositories.execution_history_repository": MagicMock(
+                    ExecutionHistoryRepository=MagicMock(return_value=mock_repo)
+                )
+            },
+        ):
+            return await svc.get_execution_status("exec-1")
+
+    @pytest.mark.asyncio
+    async def test_the_recorded_harness_is_returned(self):
+        result = await self._status_for(self._row())
+        assert result["harness"] == "crewai"
+
+    @pytest.mark.asyncio
+    async def test_a_row_without_the_column_still_reports_its_status(self):
+        """The column arrives via the startup self-heal. A status read is on the
+        hot path of every poll, so a row that predates it must still answer."""
+        row = self._row()
+        del row.harness
+
+        result = await self._status_for(row)
+
+        assert result["status"] == "COMPLETED"
+        assert result["harness"] is None
+
+
+class TestTheRunListSaysWhichHarnessRanEach:
+    """The run list is where "what ran this?" is actually asked.
+
+    `execution_history.harness` reached the single-run status response but not
+    the LIST, so the Job History column that renders it had nothing to render —
+    the field was absent from every row.
+    """
+
+    @staticmethod
+    def _row(**overrides):
+        row = SimpleNamespace(
+            job_id="job-1",
+            status="COMPLETED",
+            created_at=datetime(2024, 1, 1),
+            completed_at=datetime(2024, 1, 2),
+            run_name="run-1",
+            result=None,
+            error=None,
+            group_email="a@b.c",
+            group_id="g1",
+            inputs={},
+            execution_type="crew",
+            flow_id=None,
+            harness="crewai",
+            agents_yaml=None,
+            tasks_yaml=None,
+        )
+        for key, value in overrides.items():
+            setattr(row, key, value)
+        return row
+
+    @pytest.mark.asyncio
+    async def test_each_row_carries_its_harness(self):
+        svc = make_service(session=AsyncMock())
+        mock_repo = AsyncMock()
+        mock_repo.get_execution_history = AsyncMock(return_value=([self._row()], 1))
+        with patch(
+            "src.repositories.execution_repository.ExecutionRepository",
+            MagicMock(return_value=mock_repo),
+        ):
+            rows = await svc.list_executions(group_ids=["g1"])
+
+        assert rows and rows[0]["harness"] == "crewai"
+
+    @pytest.mark.asyncio
+    async def test_a_row_without_the_column_still_lists(self):
+        row = self._row()
+        del row.harness
+        svc = make_service(session=AsyncMock())
+        mock_repo = AsyncMock()
+        mock_repo.get_execution_history = AsyncMock(return_value=([row], 1))
+        with patch(
+            "src.repositories.execution_repository.ExecutionRepository",
+            MagicMock(return_value=mock_repo),
+        ):
+            rows = await svc.list_executions(group_ids=["g1"])
+
+        assert rows and rows[0]["harness"] is None

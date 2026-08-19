@@ -1038,6 +1038,10 @@ class ExecutionService:
                             else None
                         )
                         or "crew",
+                        # Which runtime ran it, so the run list can say so. The
+                        # column is added by the startup self-heal, hence
+                        # getattr: a row that predates it still lists.
+                        "harness": getattr(e, "harness", None),
                         "flow_id": (
                             str(e.flow_id)
                             if getattr(e, "flow_id", None)
@@ -1335,6 +1339,15 @@ class ExecutionService:
                 # Lets the trace poller skip requests that don't apply to this
                 # run type (e.g. task-states for light/agent chat runs).
                 "execution_type": execution.execution_type,
+                # Which runtime ran it. Decided once at creation and stamped on
+                # the row; read back here so a finished run can SAY what ran it
+                # — it was recorded from the start and surfaced nowhere.
+                #
+                # getattr: the column is added by the startup self-heal, and a
+                # status read must not fail on a row object that predates it.
+                # Status is on the hot path of every poll; a missing label is a
+                # smaller failure than a run that cannot report its state.
+                "harness": getattr(execution, "harness", None),
                 # MLflow integration fields
                 "mlflow_trace_id": execution.mlflow_trace_id,
                 "mlflow_experiment_name": execution.mlflow_experiment_name,

@@ -29,6 +29,13 @@ class ExecutionHistoryItem(BaseModel):
     execution_type: Optional[str] = Field(
         default=None, description="Type of execution (crew or flow)"
     )
+    harness: Optional[str] = Field(
+        default=None,
+        description=(
+            "Which agent runtime ran this execution ('kasal' or 'crewai'). "
+            "`from_attributes` reads it straight off the row it was stamped on."
+        ),
+    )
     result: Optional[Dict[str, Any]] = None
     group_email: Optional[str] = Field(
         None, description="Email of the user who submitted the execution"

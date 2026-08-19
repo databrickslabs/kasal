@@ -819,11 +819,27 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
                         '& td': { py: 0.25, fontSize: '0.8125rem' }
                       }}
                     >
-                      <TableCell>{
-                        run.run_name?.startsWith('"') && run.run_name?.endsWith('"')
+                      <TableCell>
+                        {run.run_name?.startsWith('"') && run.run_name?.endsWith('"')
                           ? run.run_name.slice(1, -1)
-                          : run.run_name
-                      }</TableCell>
+                          : run.run_name}
+                        {/* Which runtime ran it. Recorded on the row since the
+                            harness landed, and shown nowhere until now — so the
+                            only way to answer "what ran this?" was the database. */}
+                        {run.harness && (
+                          <Chip
+                            label={run.harness === 'crewai' ? 'CrewAI' : 'Kasal'}
+                            size="small"
+                            variant="outlined"
+                            sx={{
+                              ml: 1,
+                              height: 18,
+                              fontSize: '0.65rem',
+                              '& .MuiChip-label': { px: 0.75 },
+                            }}
+                          />
+                        )}
+                      </TableCell>
                       <TableCell>
                         <ExecutionStatusBadge
                           status={run.status}
