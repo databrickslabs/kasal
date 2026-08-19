@@ -237,3 +237,41 @@ class TestEventCoverageIsAccountedFor:
             "_BRIDGED (CrewAI emits it) or _SOURCED_FROM_KASAL (a Kasal "
             "subsystem does)."
         )
+
+
+class TestCrewAIFlowEventsAreNotBridged:
+    """CrewAI's flow events do not describe a flow here.
+
+    In CrewAI 1.15 the agent executor IS a Flow —
+    ``class AgentExecutor(Flow[AgentExecutorState], BaseAgentExecutor)`` — so
+    every agent TURN emits FlowStartedEvent(flow_name="AgentExecutor").
+    Republishing those on Kasal's bus reads as a new flow run, and
+    ``flow_started`` opens the OUTERMOST causality scope, so each one re-roots
+    every event after it. A measured flow run recorded six flow_started rows
+    against two flow_completed: one real "DynamicFlow" and five "AgentExecutor".
+    """
+
+    def test_the_flow_lifecycle_is_not_in_the_bridge(self):
+        from src.services.execution.harnesses.crewai import events as bridge
+
+        assert "FlowStartedEvent" not in bridge._BRIDGED
+        assert "FlowFinishedEvent" not in bridge._BRIDGED
+
+    def test_it_is_recorded_as_kasal_sourced_instead_of_forgotten(self):
+        # The completeness test treats an event in neither set as a hole; these
+        # are emitted by Kasal's own flow runtime under both harnesses.
+        from src.services.execution.harnesses.crewai import events as bridge
+
+        assert "FlowStartedEvent" in bridge._SOURCED_FROM_KASAL
+        assert "FlowFinishedEvent" in bridge._SOURCED_FROM_KASAL
+
+    def test_kasals_own_flow_runtime_still_emits_them(self):
+        """The flow layer is Kasal's under both harnesses, so the events the
+        timeline needs still arrive — from the runtime, not from CrewAI."""
+        import inspect
+
+        from src.services.flow_builder.runtime import flow as kasal_flow
+
+        source = inspect.getsource(kasal_flow)
+        assert "FlowStartedEvent(" in source
+        assert "FlowFinishedEvent(" in source

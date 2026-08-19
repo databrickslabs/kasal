@@ -90,9 +90,8 @@ _BRIDGED: Dict[str, Tuple[str, str]] = {
         "crewai.events.types.crew_events",
         "CrewKickoffCompletedEvent",
     ),
-    # Flow lifecycle
-    "FlowStartedEvent": ("crewai.events.types.flow_events", "FlowStartedEvent"),
-    "FlowFinishedEvent": ("crewai.events.types.flow_events", "FlowFinishedEvent"),
+    # Flow lifecycle is DELIBERATELY absent — see the note in
+    # _SOURCED_FROM_KASAL. CrewAI's flow events do not describe a flow here.
 }
 
 #: Kasal event types that reach the bus WITHOUT CrewAI, under either harness.
@@ -127,6 +126,19 @@ _SOURCED_FROM_KASAL: frozenset = frozenset(
         "LLMGuardrailStartedEvent",
         "LLMGuardrailCompletedEvent",
         "LLMGuardrailFailedEvent",
+        # services/flow_builder/runtime/flow.py — the flow layer is Kasal's
+        # under BOTH harnesses, so these never need bridging. Bridging them was
+        # actively wrong: in CrewAI 1.15 `AgentExecutor` IS a Flow
+        # (`class AgentExecutor(Flow[AgentExecutorState], BaseAgentExecutor)`),
+        # so every agent TURN kicks off a CrewAI flow and emits
+        # FlowStartedEvent(flow_name="AgentExecutor"). Republished on Kasal's
+        # bus those read as new flow runs — and `flow_started` opens the
+        # OUTERMOST causality scope (see bus._SCOPE_CLOSERS), so each one
+        # re-rooted everything after it. One measured flow run recorded six
+        # flow_started rows against two flow_completed: one real "DynamicFlow"
+        # and five "AgentExecutor".
+        "FlowStartedEvent",
+        "FlowFinishedEvent",
         # services/a2ui, kernel/agent_plan, execution/checkpointing
         "A2UISurfaceEvent",
         "PlanUpdatedEvent",
