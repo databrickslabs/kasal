@@ -170,6 +170,21 @@ class DatabricksResponsesLLM(OpenAICompletion):
             if isinstance(item, dict):
                 item = dict(item)  # shallow copy
 
+                # CrewAI's executor stamps a top-level ``cache_breakpoint`` flag on
+                # messages for prompt caching (crewai.llms.cache.mark_cache_breakpoint).
+                # Only Claude's native caching understands it; the Responses API
+                # rejects it with 400 "Unknown parameter: 'input[N].cache_breakpoint'".
+                # Strip it here — the sibling handlers (databricks_retry_llm and the
+                # exported-app databricks_llm) do the same for chat completions.
+                item.pop("cache_breakpoint", None)
+
+                # Drop an empty ``name``. CrewAI can emit a message with
+                # ``name=""``; the Responses API rejects it with 400
+                # "Invalid 'input[N].name': empty string. Expected a string with
+                # minimum length 1". The field is optional, so omit it when blank.
+                if "name" in item and not item["name"]:
+                    item.pop("name", None)
+
                 # Truncate oversized IDs
                 if (
                     "id" in item

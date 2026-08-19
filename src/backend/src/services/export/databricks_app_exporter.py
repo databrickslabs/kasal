@@ -19,6 +19,9 @@ from typing import Any, Dict, List, Optional
 
 import aiofiles
 
+from src.services.execution.harnesses import active_harness
+from src.services.execution.harnesses.binding import Capability, HarnessName
+
 from .base_exporter import BaseExporter
 from .runtime_vendor import kasal_runtime_files, rewrite_import_root
 from .secret_hints import SECRET_KEY_HINTS as _SECRET_KEY_HINTS
@@ -185,6 +188,17 @@ class DatabricksAppExporter(BaseExporter):
             options.get("databricks_schema") or crew_data.get("databricks_schema") or ""
         )
 
+        # Which runtime the BUNDLE will run on, and whether that is the one this
+        # workspace is configured for.
+        #
+        # The bundle vendors Kasal's runtime: it ships no agent framework, which
+        # is what lets an exported app stand alone. So a workspace configured for
+        # CrewAI still exports a Kasal-runtime app — correct, but silent until
+        # now, and a crew tuned against CrewAI's executor can behave differently
+        # once deployed. `Capability.EXPORT` has said this since the harness
+        # landed; nothing read it.
+        bundle_runtime, runtime_notice = self._bundle_runtime()
+
         tools = self._get_unique_tools(agents, tasks)
         sanitized = self._sanitize_name(crew_name)
         app_name = self._app_name(crew_name)
@@ -196,6 +210,11 @@ class DatabricksAppExporter(BaseExporter):
             "{{APP_NAME}}": app_name,
             "{{BUNDLE_NAME}}": bundle_name,
             "{{DISPLAY_NAME}}": display_name,
+            # Empty when the configured harness is the one the bundle ships, so
+            # an ordinary export reads exactly as it did before.
+            "{{RUNTIME_NOTICE}}": (
+                f"\n> **Note:** {runtime_notice}\n" if runtime_notice else ""
+            ),
             "{{DESCRIPTION}}": (
                 f"CrewAI crew '{display_name}' deployed as a Databricks App."
             ),
@@ -362,10 +381,44 @@ class DatabricksAppExporter(BaseExporter):
                 # Tools the crew uses that can't run standalone (Kasal-internal);
                 # attach these via MCP or add an implementation under tools/.
                 "unsupported_tools": sorted(set(self._unsupported_tools)),
+                # The runtime the bundle runs on, and a note when the workspace
+                # is configured for a different one.
+                "bundle_runtime": bundle_runtime,
+                **({"runtime_notice": runtime_notice} if runtime_notice else {}),
             },
             "generated_at": self._get_timestamp(),
             "size_bytes": sum(len(f["content"]) for f in files),
         }
+
+    def _bundle_runtime(self) -> tuple[str, Optional[str]]:
+        """The runtime this bundle will run on, and a warning when it differs.
+
+        Returns ``(runtime, notice)``. The notice is None when the configured
+        harness is the one the bundle ships.
+
+        Deliberately NOT a refusal. The export works — it produces a correct
+        Kasal-runtime app whatever the workspace is set to — and blocking it
+        would take away a working capability to make a point. Saying so is
+        enough, and it is the part that was missing.
+
+        Never raises: an export must not fail because a harness lookup did.
+        """
+        bundle_runtime = HarnessName.KASAL.value
+        try:
+            harness = active_harness()
+            if harness.supports(Capability.EXPORT):
+                return bundle_runtime, None
+            return bundle_runtime, (
+                f"This app runs Kasal's own runtime. Your workspace is configured "
+                f"for the {harness.name.value} harness, which cannot be exported — "
+                f"the bundle ships no third-party agent framework. Behaviour may "
+                f"differ from the runs you tested here."
+            )
+        except Exception:  # noqa: BLE001 — telemetry must not fail an export
+            self.logger.debug(
+                "Could not read the active harness for the export notice"
+            )
+            return bundle_runtime, None
 
     # ── Token builders ─────────────────────────────────────────────────
 
