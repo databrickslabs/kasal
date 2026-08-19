@@ -219,7 +219,7 @@ class BackendFlow:
 
     async def flow(self) -> CrewAIFlow:
         """Creates and returns a CrewAI Flow instance based on the loaded flow configuration"""
-        logger.info("Creating CrewAI Flow")
+        logger.info("Creating the flow")
 
         # CRITICAL: Set group context for multi-tenant isolation before ANY LLM calls
         group_context = self._config.get("group_context")
@@ -667,7 +667,7 @@ class BackendFlow:
             try:
                 engine_flow = await self.flow()
                 logger.info(
-                    "Successfully created CrewAI flow instance for async execution"
+                    "Successfully created the flow instance for async execution"
                 )
             except Exception as e:
                 logger.error(f"Error creating CrewAI flow: {e}", exc_info=True)
@@ -973,7 +973,7 @@ class BackendFlow:
             try:
                 # Create the flow instance by awaiting the coroutine
                 engine_flow = await self.flow()
-                logger.info("Successfully created CrewAI flow instance")
+                logger.info("Successfully created the flow instance")
             except Exception as e:
                 logger.error(f"Error creating CrewAI flow: {e}", exc_info=True)
                 return {

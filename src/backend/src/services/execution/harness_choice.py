@@ -129,8 +129,24 @@ def adopt_in_subprocess(config: Optional[Dict[str, Any]] = None) -> HarnessName:
     a parent that has since been reconfigured, while the payload was built for
     THIS run. Falls back to the environment, then to the default.
     """
-    chosen = engine_from_config(config) or coerce(os.environ.get(HARNESS_ENV_VAR))
-    return set_process_default(chosen or DEFAULT_HARNESS)
+    from_payload = engine_from_config(config)
+    from_env = coerce(os.environ.get(HARNESS_ENV_VAR))
+    chosen = from_payload or from_env or DEFAULT_HARNESS
+    # Logged unconditionally, and naming the SOURCE.
+    #
+    # Nothing in the child announced which runtime it had adopted, so a log
+    # could not answer "did this actually run on CrewAI?" — and the parts of a
+    # run that are shared between harnesses (the plan tool, memory, the LLM
+    # transport, the tool wrappers) all still say "kasal", which reads as the
+    # wrong answer to that question.
+    logger.info(
+        "[harness] this interpreter runs on %s (from %s)",
+        chosen.value,
+        "the run's payload"
+        if from_payload
+        else ("the environment" if from_env else "the default"),
+    )
+    return set_process_default(chosen)
 
 
 async def harness_for_execution(session: Any, execution_id: str) -> HarnessName:

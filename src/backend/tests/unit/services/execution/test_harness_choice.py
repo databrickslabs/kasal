@@ -5,6 +5,7 @@ change harness because someone changed a setting while it was queued, running, o
 waiting to be resumed.
 """
 
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -13,6 +14,13 @@ from src.services.execution import harness_choice
 from src.services.execution.harnesses import selection
 from src.services.execution.harnesses import coerce as engine_choice_coerce
 from src.services.execution.harnesses.binding import HarnessName
+from src.services.execution.harness_choice import adopt_in_subprocess
+from src.services.execution.harnesses import (
+    DEFAULT_HARNESS,
+    HARNESS_CONFIG_KEY,
+    HARNESS_ENV_VAR,
+    reset_for_tests,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -234,3 +242,44 @@ class TestDispatchSession:
             async with harness_choice.dispatch_session() as used:
                 assert used is acquired
         opened.assert_called_once_with()
+
+
+class TestTheChildSaysWhichHarnessItAdopted:
+    """A spawned interpreter announces its runtime, and where it read it from.
+
+    Nothing in the child said so, and the parts of a run that are SHARED between
+    harnesses — the plan tool, memory, the LLM transport, the tool wrappers —
+    all log as "kasal". Reading a flow log, that looks like the wrong runtime
+    ran, and there was no line to check it against.
+
+    The module logs through LoggerManager (its own handlers, no propagation), so
+    the logger itself is the seam these assert on.
+    """
+
+    @staticmethod
+    def _adopt(config=None, env=None):
+        # reset_for_tests clears the env stamp, so the environment case has to
+        # set it AFTER the reset — not before.
+        reset_for_tests()
+        if env:
+            os.environ[HARNESS_ENV_VAR] = env
+        with patch.object(harness_choice, "logger") as logger:
+            adopted = adopt_in_subprocess(config)
+        said = " ".join(str(a) for call in logger.info.call_args_list for a in call.args)
+        return adopted, said
+
+    def test_it_names_the_harness_and_the_payload_it_came_from(self):
+        adopted, said = self._adopt({HARNESS_CONFIG_KEY: "crewai"})
+        assert adopted is HarnessName.CREWAI
+        assert "crewai" in said
+        assert "payload" in said
+
+    def test_it_says_when_the_environment_supplied_it(self):
+        adopted, said = self._adopt(None, env="crewai")
+        assert adopted is HarnessName.CREWAI
+        assert "environment" in said
+
+    def test_it_says_when_it_fell_back_to_the_default(self):
+        adopted, said = self._adopt(None)
+        assert adopted is DEFAULT_HARNESS
+        assert "default" in said
