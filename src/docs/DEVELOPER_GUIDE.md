@@ -38,7 +38,7 @@ The backend uses FastAPI with a clean layered structure. It separates HTTP routi
 - Services: src/backend/src/services/* implement business logic and transactions.
 - Repositories: src/backend/src/repositories/* handle database CRUD.
 - Models/Schemas: src/backend/src/models/* and src/backend/src/schemas/* define persistence and I/O contracts.
-- Core/Engines: src/backend/src/core/* and src/backend/src/engines/* integrate LLMs and execution flows.
+- Core/Engines: src/backend/src/core/* and src/backend/src/services/execution/* integrate LLMs and execution flows.
 - DB/Session: src/backend/src/db/* configures sessions and Alembic migrations.
 - Config/Security: src/backend/src/config/* and src/backend/src/dependencies/* provide settings and auth.
 

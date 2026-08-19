@@ -56,7 +56,7 @@ Because both are Databricks-served, pair them with a Databricks model that handl
 
 ## Automatic fallback
 
-Kasal wraps Databricks chat models in `DatabricksRetryLLM`, which can switch to a different model when a call fails in a way that a model swap can plausibly fix. The policy lives in `src/backend/src/core/llm/handlers/model_fallback.py`.
+Kasal wraps Databricks chat models in `DatabricksRetryLLM`, which can switch to a different model when a call fails in a way that a model swap can plausibly fix. The policy lives in `src/backend/src/services/llm/handlers/model_fallback.py`.
 
 A failure is classified into one of three reasons, and only these trigger a fallback:
 

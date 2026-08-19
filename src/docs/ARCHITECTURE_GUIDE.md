@@ -44,7 +44,7 @@ graph TB
     end
 
     subgraph "AI Layer"
-        CREW[CrewAI Engine]
+        CREW[Agent runtime<br/>Kasal or CrewAI]
         LLM[LLM Gateway]
         MEM[Memory Service]
         TOOLS[Tool Registry]
@@ -82,7 +82,8 @@ The layered approach and how requests flow through components.
 - Layered architecture: Frontend (React SPA) to API (FastAPI) to Services to Repositories to Database
 - Async-first (async SQLAlchemy, background tasks, queues)
 - Config via environment (src/backend/src/config/settings.py)
-- Pluggable orchestration engine (src/backend/src/engines/ with CrewAI)
+- Swappable agent runtime, or HARNESS (src/backend/src/services/execution/harnesses/):
+  Kasal's own runtime by default, CrewAI as an alternative. See [Harnesses](./harnesses.md).
 
 ### Request lifecycle (CRUD path)
 
@@ -99,10 +100,10 @@ From HTTP request to response: validation, business logic, and persistence.
 How executions are prepared, run, and observed using the engine.
 
 - Entry via executions_router.py to execution_service.py
-- Service prepares agents/tools/memory and selects engine (engines/engine_factory.py)
-- CrewAI path:
-  - Prep: engines/kasal/paths/crew/crew_preparation.py and engines/kasal/paths/flow/ (flow services/runners)
-  - Run: engines/kasal/paths/crew/execution_runner.py with callbacks/guardrails
+- Service prepares agents/tools/memory and selects engine (services/execution/harnesses/)
+- Crew path:
+  - Prep: services/agent_builder/crew_preparation.py and services/flow_builder/ (flow services/runners)
+  - Run: services/agent_builder/process_executor.py with callbacks/guardrails
   - Observability: execution_logs_service.py, execution_trace_service.py
 - Persist status/history: execution_repository.py, execution_history_repository.py
 
@@ -175,6 +176,7 @@ Important toggles that affect developer and runtime experience.
 - [Code structure guide](./CODE_STRUCTURE_GUIDE.md)
 - [Developer guide](./DEVELOPER_GUIDE.md)
 - [API endpoints reference](./api_endpoints.md)
-- [CrewAI engine refactor proposal](./crewai-engine-refactor-proposal.md)
+- [Harnesses: Kasal and CrewAI](./harnesses.md)
+- [CrewAI engine refactor proposal](./crewai-engine-refactor-proposal.md) (historical)
 
 Back to the [documentation hub](./README.md).

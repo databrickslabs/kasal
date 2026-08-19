@@ -16,9 +16,9 @@ Kasal splits LLM work into four layers. Each one knows only about the layer bene
 
 | Layer | Location | Knows about |
 |-------|----------|-------------|
-| Facade | `src/backend/src/core/llm_manager.py` | The kasal API other code calls. Stable by contract — `LLMManager.completion` alone has 38+ call sites. |
+| Facade | `src/backend/src/services/llm/manager.py` | The kasal API other code calls. Stable by contract — `LLMManager.completion` alone has 38+ call sites. |
 | Configuration | `src/backend/src/core/llm/` | The model catalog, tenants, credentials, endpoint URLs, telemetry, embeddings. |
-| Endpoint policy |  `src/backend/src/core/llm/handlers/` | How one serving endpoint misbehaves: retries, fallback, message sanitization, alternate APIs. |
+| Endpoint policy |  `src/backend/src/services/llm/handlers/` | How one serving endpoint misbehaves: retries, fallback, message sanitization, alternate APIs. |
 | Transport | `src/backend/kasal_engine/llm/` | The OpenAI-compatible wire protocol. No database, no tenants, no catalog. |
 
 Only two directories hold LLM code: `src/core/llm/` for everything kasal-specific (handlers included, as a subpackage), and `kasal_engine/llm/` for the transport.

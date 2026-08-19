@@ -38,31 +38,31 @@ python run_tests.py --type unit
 
 # Run only the Phase 1 security tests
 python -m pytest tests/unit/test_security_headers_middleware.py -v
-python -m pytest tests/unit/engines/kasal/helpers/test_agent_helpers_security.py -v
+python -m pytest tests/unit/services/execution/kernel/test_agent_helpers_security.py -v
 
 # Run only the Phase 2 security tests
-python -m pytest tests/unit/security/ -v
+python -m pytest tests/unit/services/security/ -v
 
 # Run only the Phase 3 guardrail tests
-python -m pytest tests/unit/engines/kasal/guardrails/test_llm_injection_guardrail.py -v
-python -m pytest tests/unit/engines/kasal/guardrails/test_self_reflection_guardrail.py -v
+python -m pytest tests/unit/services/guardrails/test_llm_injection_guardrail.py -v
+python -m pytest tests/unit/services/guardrails/test_self_reflection_guardrail.py -v
 
 # Run only the Phase 4 security tests
-python -m pytest tests/unit/security/test_secret_leak_detector.py -v
-python -m pytest tests/unit/security/test_tool_capability_manifest_destructive.py -v
-python -m pytest tests/unit/engines/kasal/flow/test_flow_state_security.py -v
+python -m pytest tests/unit/services/security/test_secret_leak_detector.py -v
+python -m pytest tests/unit/services/security/test_tool_capability_manifest_destructive.py -v
+python -m pytest tests/unit/services/flow_builder/test_flow_state_security.py -v
 
 # Run only the Phase 5 optimisation tests
-python -m pytest tests/unit/security/test_scanner_pipeline.py -v
-python -m pytest tests/unit/engines/kasal/guardrails/test_guardrail_caching.py -v
+python -m pytest tests/unit/services/security/test_scanner_pipeline.py -v
+python -m pytest tests/unit/services/guardrails/test_guardrail_caching.py -v
 
 # Run ALL security tests at once (Phases 1 to 5)
 python -m pytest \
   tests/unit/test_security_headers_middleware.py \
-  tests/unit/engines/kasal/helpers/test_agent_helpers_security.py \
-  tests/unit/security/ \
-  tests/unit/engines/kasal/guardrails/ \
-  tests/unit/engines/kasal/flow/test_flow_state_security.py \
+  tests/unit/services/execution/kernel/test_agent_helpers_security.py \
+  tests/unit/services/security/ \
+  tests/unit/services/guardrails/ \
+  tests/unit/services/flow_builder/test_flow_state_security.py \
   -v
 ```
 
@@ -72,8 +72,8 @@ All tests should pass. A typical passing output looks like:
 tests/unit/test_security_headers_middleware.py::TestSecurityHeadersMiddleware::test_all_four_security_headers_present PASSED
 tests/unit/test_security_headers_middleware.py::TestSecurityHeadersMiddleware::test_content_security_policy_header_present PASSED
 ...
-tests/unit/engines/kasal/helpers/test_agent_helpers_security.py::TestBuildSecurityPreamble::test_returns_non_empty_string PASSED
-tests/unit/engines/kasal/helpers/test_agent_helpers_security.py::TestCreateAgentSecurityPreamble::test_system_prompt_contains_preamble_without_custom_template PASSED
+tests/unit/services/execution/kernel/test_agent_helpers_security.py::TestBuildSecurityPreamble::test_returns_non_empty_string PASSED
+tests/unit/services/execution/kernel/test_agent_helpers_security.py::TestCreateAgentSecurityPreamble::test_system_prompt_contains_preamble_without_custom_template PASSED
 ...
 ```
 

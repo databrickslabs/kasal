@@ -33,7 +33,8 @@ A fast, skimmable map of the repository to help you find the right place quickly
 - db/: Sessions and Alembic integration (session.py, all_models.py)
 - config/: Settings & logging (settings.py, logging.py)
 - core/: Cross-cutting utilities (base_service.py, base_repository.py, logger.py, permissions.py, llm/)
-- engines/: AI engine integration (CrewAI prep/runner, memory, tools, guardrails)
+- services/execution/: the agent runtime — runtime/ (Kasal's own engine), harnesses/
+  (the binding that swaps in CrewAI), kernel/ (agent/task construction shared by both)
 - utils/: Helpers (user_context.py, databricks_url_utils.py, etc.)
 - seeds/, scripts/, dependencies/: Seeders, scripts, DI helpers
 
@@ -68,15 +69,15 @@ Common examples under src/backend/src/api/:
 - src/backend/src/config/logging.py and src/backend/src/core/logger.py: centralized logging
 
 ## Core and engines
-- src/backend/src/core/llm_manager.py: provider/model selection, streaming options
-- src/backend/src/engines/kasal/*: crew preparation, execution runner, callbacks, memory/tool adapters
+- src/backend/src/services/llm/manager.py: provider/model selection, streaming options
+- src/backend/src/services/execution/*: crew preparation, execution runner, callbacks, memory/tool adapters
 
 ## How to trace a feature
 1) Start at the router file for the endpoint.
 2) Open the called service and scan business logic.
 3) Inspect repository methods and related models.
 4) Check Pydantic schemas for request/response contracts.
-5) Search for engine usage under engines/kasal if orchestration is involved.
+5) Search for engine usage under services/execution if orchestration is involved.
 
 ---
 
@@ -129,7 +130,7 @@ Common examples under src/backend/src/api/:
 
 ### Services (selected)
 - services/execution_service.py: high-level execution orchestration
-- services/kasal_execution_service.py, engines/kasal/paths/crew/execution_runner.py: CrewAI integration points
+- services/execution/engine_service.py, services/agent_builder/process_executor.py: where a run is dispatched
 - services/scheduler_service.py: background scheduling
 - services/documentation_embedding_service.py: embeddings for better generation
 
@@ -166,8 +167,8 @@ Notes:
 
 ## Engines and orchestration
 
-- Engine selection: src/backend/src/engines/engine_factory.py
-- CrewAI integration lives under src/backend/src/engines/kasal/, organized into:
+- Engine selection: src/backend/src/services/execution/harnesses/
+- The agent runtime lives under src/backend/src/services/execution/, organized into:
   paths/ (per-execution flavours), kernel/ (agent/task builders, security, tooling helpers),
   infra/ (logging, tracing, mlflow), memory/, guardrails/, callbacks/, config/, tools/, exporters/
   - paths/crew/crew_preparation.py: build agents, tools, memory for a run
@@ -204,7 +205,7 @@ Memory/model caveat:
 
 1) Router (executions_router.py) accepts POST /executions with schema
 2) Service (execution_service.py) validates logic, kicks off orchestration
-3) Engine (engines/kasal/...) prepares crew and runs execution
+3) Engine (services/execution/...) prepares crew and runs execution
 4) Logs/Traces recorded via services and repositories
 5) Repositories (execution_repository.py) persist status/history
 6) Client polls GET /executions/{id} and GET /execution-logs/{id}
@@ -224,7 +225,7 @@ Memory/model caveat:
 - Compose routers: src/backend/src/api/__init__.py
 - Settings: src/backend/src/config/settings.py
 - Sessions: src/backend/src/db/session.py
-- CrewAI runner: src/backend/src/engines/kasal/paths/crew/execution_runner.py
+- Crew runner: src/backend/src/services/agent_builder/process_executor.py
 
 ---
 
@@ -232,7 +233,8 @@ Memory/model caveat:
 - [Architecture guide](./ARCHITECTURE_GUIDE.md)
 - [Developer guide](./DEVELOPER_GUIDE.md)
 - [API endpoints reference](./api_endpoints.md)
-- [CrewAI engine refactor proposal](./crewai-engine-refactor-proposal.md)
+- [Harnesses: Kasal and CrewAI](./harnesses.md)
+- [CrewAI engine refactor proposal](./crewai-engine-refactor-proposal.md) (historical)
 - [Why Kasal](./WHY_KASAL.md)
 
 Back to the [documentation hub](./README.md).
