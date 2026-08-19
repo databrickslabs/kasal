@@ -1,6 +1,6 @@
 # Crew export and deployment
 
-Export CrewAI crews from Kasal to Python projects, Databricks notebooks, or deployable Databricks Apps, and deploy them to Databricks Model Serving for production use.
+Export a Kasal crew as a deployable Databricks App, and deploy it to Databricks Apps or Databricks Model Serving for production use.
 
 ## Contents
 
@@ -17,52 +17,25 @@ Export CrewAI crews from Kasal to Python projects, Databricks notebooks, or depl
 
 ## Overview
 
-Kasal now supports exporting CrewAI crews to various formats and deploying them to Databricks Model Serving endpoints. This feature allows you to take your visually designed agent workflows and run them in production environments.
+Kasal exports a crew as a **Databricks App** and deploys it to Databricks, so a
+workflow you designed on the canvas runs in production.
+
+The exported app runs **Kasal's own agent runtime**, vendored into the bundle —
+the same engine Kasal itself runs. It has no CrewAI dependency.
+
+> **Retired formats.** `python_project` and `databricks_notebook` are gone. Both
+> generated projects that ran on `pip install crewai`, which meant a second
+> engine to keep in agreement with Kasal's by hand — and the divergence was not
+> hypothetical (an exported app once ran a planner Kasal had disabled).
+>
+> Requesting either returns **410 Gone** with a message naming `databricks_app`
+> as the replacement. They are still accepted as *values* so that message can be
+> returned at all; dropping them would fail the request at validation, before
+> anything could explain what happened.
 
 ## Features
 
 ### Export formats
-
-#### Python project export
-Exports your crew as a complete Python project with the following structure:
-- **README.md**: Setup and usage instructions
-- **requirements.txt**: Python dependencies
-- **.env.example**: Environment variable template
-- **.gitignore**: Git ignore patterns
-- **src/{crew_name}/config/agents.yaml**: Agent configurations
-- **src/{crew_name}/config/tasks.yaml**: Task configurations
-- **src/{crew_name}/crew.py**: Crew class implementation
-- **src/{crew_name}/main.py**: Execution entry point
-- **tests/test_crew.py**: Unit tests (optional)
-
-**Best for:**
-- Local development and testing
-- Version control integration
-- Custom modifications and extensions
-- CI/CD pipelines
-
-#### Databricks notebook export
-Exports your crew as a single `.ipynb` notebook file compatible with Databricks, containing:
-- Title and overview
-- Setup instructions
-- **Package compatibility warning** (important - read before running)
-- Installation commands with proper dependency handling
-- Agent and task configurations (YAML)
-- Crew implementation code with custom tool placeholders
-- Execution logic
-- Usage examples
-
-**Best for:**
-- Quick prototyping in Databricks
-- Interactive development and debugging
-- Sharing with team members
-- Documentation and demonstrations
-
-**Important Note:**
-- Installing CrewAI will upgrade core Databricks packages (numpy, pyarrow, protobuf, grpcio)
-- This triggers warnings but is expected behavior
-- Recommend using Databricks Runtime 14.3 LTS ML or higher for best compatibility
-- After installation, Python kernel will restart automatically
 
 #### Databricks App export
 
@@ -195,19 +168,13 @@ Deploy your crew as an MLflow model behind a Databricks Model Serving endpoint f
 1. Design your crew in the visual canvas
 2. Save the crew using the Save button
 3. Click the **Export** button (download icon) in the toolbar
-4. Select export format:
-   - **Python Project**: For local development
-   - **Databricks Notebook**: For Databricks environment
-5. Configure export options:
+4. Configure export options:
    - **Include custom tools**: Include tool implementations
    - **Include comments**: Add explanatory comments
-   - **Include tests**: Generate test files (Python Project only)
    - **Model override**: Override LLM model for all agents
-6. Click **Export & Download**
+5. Click **Export & Download**
 
-The exported file will be downloaded to your browser:
-- Python Project: `{crew_name}_project.zip`
-- Databricks Notebook: `{crew_name}.ipynb`
+The exported file downloads as `{crew_name}_app.zip`.
 
 ### Deploy to Databricks Model Serving
 
@@ -277,13 +244,13 @@ print("Result:", response)
 ## Export options explained
 
 ### Include custom tools
-When enabled, the export includes implementations for custom tools used by your agents. Standard tools (SerperDevTool, etc.) are imported from crewai-tools, but custom tools need implementations.
+When enabled, the export includes implementations for custom tools used by your
+agents. Standard tools (Serper search, website scraping, image generation) come
+from Kasal's own tool library, vendored into the bundle — the exported crew uses
+exactly the implementations Kasal uses.
 
 ### Include comments
 Adds explanatory comments throughout the generated code to help understand the structure and functionality.
-
-### Include tests
-(Python Project only) Generates a basic test file with examples of how to test your crew.
 
 ### Model override
 Allows you to override the LLM model for all agents in the exported crew. This is useful when:
@@ -316,18 +283,11 @@ Registering your model in Unity Catalog provides:
 3. Ensure custom tools are working correctly
 4. Save your crew with a descriptive name
 
-### Python project export
-1. Review the generated code
+### Databricks App export
+1. Review the generated project
 2. Add custom tool implementations if needed
 3. Update environment variables in `.env`
-4. Run tests before deploying
-5. Commit to version control
-
-### Databricks notebook export
-1. Import notebook into Databricks workspace
-2. Configure Databricks secrets for API keys
-3. Run cells sequentially to verify functionality
-4. Customize inputs for your use case
+4. Deploy with `databricks apps deploy`, or use the one-click deploy above
 
 ### Deployment
 1. Start with small workload size for testing
@@ -373,11 +333,10 @@ POST /api/crews/{crew_id}/export
 Request body:
 ```json
 {
-  "export_format": "python_project" | "databricks_notebook",
+  "export_format": "databricks_app",
   "options": {
     "include_custom_tools": true,
     "include_comments": true,
-    "include_tests": true,
     "model_override": "optional-model-name"
   }
 }
@@ -388,7 +347,7 @@ Request body:
 GET /api/crews/{crew_id}/export/download?format={format}
 ```
 
-Returns: File download (zip or ipynb)
+Returns: File download (zip)
 
 ### Deploy as a Databricks App (one-click)
 ```http

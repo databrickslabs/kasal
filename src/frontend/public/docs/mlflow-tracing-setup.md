@@ -136,6 +136,7 @@ back from Databricks immediately after upload and confirms the span data persist
 
 ## Related
 
+- [Prompt optimization (GEPA) setup](./prompt-optimization-setup.md): the Unity Catalog grant the app SP needs to register prompts
 - [Lakebase setup for Kasal](./lakebase-deployment.md): persistence for crews, agents, tasks, and run history
 - [Crew export and deployment](./crew-export-deployment.md): deployed apps that emit traces
 - [Solution architecture guide](./ARCHITECTURE_GUIDE.md): where tracing fits the platform

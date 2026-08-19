@@ -40,7 +40,8 @@ General guidance:
 Tool-calling and structured-output caveats, all observed in the codebase and recorded in the seed file:
 
 - Some Gemini-family endpoints fail multi-turn tool-calling crews (for example with a missing `thought_signature` error). For crews that call tools, prefer a `gpt-5*` or Claude Sonnet model.
-- Reasoning models that emit a "thinking" preamble can break crew planning, which expects a JSON-only response ("Could not parse response as JSON"). Such models have been pruned from the default catalog.
+- Reasoning models that emit a "thinking" preamble can break the JSON-only generation prompts ("Could not parse response as JSON"). Such models have been pruned from the default catalog.
+- Reasoning is the model's own thinking budget: turning on Reasoning for a crew sets `reasoning_effort` (`low`/`medium`/`high`) on each agent's LLM. It applies only to models that accept that parameter (currently the `gpt-5*` family and the o3/o4 families); for any other model the setting is dropped silently and the run is unaffected. Set `KASAL_REASONING_EFFORT_MODELS` to extend the allow-list for a custom endpoint, or `KASAL_REASONING_EFFORT_DISABLED=true` to turn the feature off entirely.
 - Some endpoints only support the OpenAI Responses API and cannot be used through Kasal's chat-completions path; these are also pruned.
 - The internal generation services (agent, task, and crew generation) default to `databricks-gpt-5-3-codex`, overridable through environment variables such as `AGENT_MODEL`, `CREW_MODEL`, and `DEFAULT_TASK_MODEL`.
 
@@ -55,7 +56,7 @@ Because both are Databricks-served, pair them with a Databricks model that handl
 
 ## Automatic fallback
 
-Kasal wraps Databricks chat models in `DatabricksRetryLLM`, which can switch to a different model when a call fails in a way that a model swap can plausibly fix. The policy lives in `src/backend/src/core/llm_handlers/model_fallback.py`.
+Kasal wraps Databricks chat models in `DatabricksRetryLLM`, which can switch to a different model when a call fails in a way that a model swap can plausibly fix. The policy lives in `src/backend/src/core/llm/handlers/model_fallback.py`.
 
 A failure is classified into one of three reasons, and only these trigger a fallback:
 

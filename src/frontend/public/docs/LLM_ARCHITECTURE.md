@@ -65,10 +65,23 @@ Subclasses of the engine's `LLM` that add what one serving endpoint needs.
 | Class | Responsibility |
 |-------|----------------|
 | `DatabricksRetryLLM` | Retry and backoff (with longer waits for rate limits), OBO token refresh, cross-model fallback, and Databricks message sanitization — empty assistant content, Llama message format, Gemini system-prompt merging and `$ref` resolution. |
-| `DatabricksResponsesLLM` | The Databricks Responses API, served under a different base URL than chat completions (`gpt-5-3-codex` today). |
-| `VLLMFunctionCallingLLM` | Self-hosted vLLM: pins `tool_choice="required"` on the opening turn, for models that otherwise skip their tools. |
+| `DatabricksResponsesLLM` | The Databricks Responses API, served under a different base URL than chat completions (`gpt-5-3-codex` today). Preserves the `phase` field on assistant output items across turns, without which the model degrades into early text-only responses. |
 
 Files here are named for the endpoint or protocol they serve, never for a model. Models leave the catalog and a module named after one outlives it — `databricks_gpt_oss_handler.py` sat in the tree long after the models it existed for were pruned.
+
+| `VLLMFunctionCallingLLM` | Self-hosted vLLM: states `tool_choice="auto"` explicitly when tools are offered, rather than inheriting whatever the endpoint defaults to. Overridable per deployment with `VLLM_TOOL_CHOICE`. |
+
+### A handler may declare tool policy; it must not decide for the model
+
+`VLLMFunctionCallingLLM` used to pin `tool_choice="required"` until a tool result appeared, and `DatabricksResponsesLLM` held a second version of the same idea — `"required"` until a tool-call counter passed `max(2, min(10, tool_count // 4 + 1))`. **Both forcings are gone.** The Responses handler now sets nothing; the vLLM one sends `"auto"`, which is what a compliant server already applies when tools are present — the value of stating it is that the policy is explicit and in one place.
+
+No mainstream framework does. CrewAI sets `"auto"` and stops; LangGraph never mentions `tool_choice`; LangChain passes through only what the caller asked for; LiteLLM drops even a caller's value once a tool result exists. Forcing was also keyed on the **endpoint**, the one axis none of them use — so a chat greeting and a long crew task hit the same handler and got the same answer, and "hello how are you" opened with a web search. Measured live, 3 samples per cell: forced called a tool 3/3 on a greeting; plain `auto` was 0/3 on a greeting and 3/3 on an explicit search request.
+
+Ending a runaway tool loop is a separate concern, solved one layer down and model-agnostically: `transport/budget.py` spends a final call carrying `FORCE_FINAL_ANSWER` **with no tools attached**, so it cannot open another round.
+
+A caller that genuinely needs a tool call still passes `tool_choice` explicitly, and it is honoured end to end.
+
+**Known limitation.** Self-hosted Qwen3-Coder under-uses its tools: given a large scaffolded prompt it declines `auto` and answers from nothing rather than calling the tool it was handed, while tool-calling correctly on short prompts. A per-model `force_tool_first_turn` flag was written for it and deliberately reverted — a single-model hack with no precedent in any framework, and one that would have re-armed the greeting problem for the very model it helped, since a forced opening turn cannot tell "gather swiss news" from "hello". The principled fix is to choose **which tools are attached** from the request rather than whether a call is compelled; until that exists, prefer a tool-following model for tool-heavy work.
 
 ### Facade: `LLMManager`
 

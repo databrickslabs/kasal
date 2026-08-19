@@ -17,7 +17,7 @@ Run a controlled measurement of whether reusing past crews actually improves the
 ## Before you begin
 
 - You need the **admin** or **editor** role — the report describes how the workspace's generation behaviour is being shaped.
-- The workspace needs mined recipes. Mining runs automatically every 5 minutes and back-fills existing history on its first pass, so if crews have been run at all, recipes exist.
+- The workspace needs mined recipes. Mining runs automatically as each crew run completes, and back-fills existing history once at startup, so if crews have been run at all, recipes exist.
 - An embedder must be reachable (Databricks in production, local Ollama in dev). Recipes without vectors are captured but not retrievable.
 - Read [Workflow recipes](./workflow-recipes.md) first if the terms *recipe*, *curation* and *arm* are not already familiar. In particular, understand why a control group is required — without it the numbers below cannot support a causal claim.
 
@@ -60,7 +60,7 @@ The holdout has a real cost — that 20% gets a deliberately worse-informed gene
 
 ## 3. Let it run
 
-Two background steps run on the existing 5-minute sweep and need no action:
+Two background steps run on the same mining pass and need no action:
 
 - **Mining and embedding** keep the library current.
 - **Linking** attaches each trial to the run its generated crew produced, matching the agent ids recorded at generation against the `agents_yaml` keys of executions. The join is exact, not fuzzy.
@@ -111,7 +111,7 @@ The top-line figures answer a different question — not "does it help?" but "co
 | `WORKFLOW_RECIPE_HOLDOUT` | `0.0` | Fraction of eligible generations denied exemplars, as the control arm. `0.0` disables the control (and with it, any causal reading). |
 | `WORKFLOW_RECIPE_EXEMPLARS` | `true` | Kill-switch for injection entirely. Set `false` when diagnosing a generation regression. |
 | `WORKFLOW_RECIPE_MIN_SIMILARITY` | `0.75` | Cosine floor for a recipe to be offered. **Model-dependent** — see below. |
-| `WORKFLOW_RECIPE_MINE_BATCH` | `100` | Executions examined per mining sweep. |
+| `WORKFLOW_RECIPE_MINE_BATCH` | `100` | Executions examined per mining pass. |
 
 The similarity default was measured on a dev corpus (51 recipes, local `nomic-embed-text`): genuinely matching prompts scored 0.818 / 0.826 / 0.831, while an unrelated prompt ("build me a snake game in python") topped out at 0.456. `0.75` sits in that gap with margin on the noise side, because the costs are asymmetric — missing a reusable crew just means generating it as before, whereas offering the wrong crew wastes attention and erodes trust in every later suggestion.
 
