@@ -48,15 +48,17 @@ class ExportFormat(str, Enum):
 RETIRED_EXPORT_FORMATS: Dict[ExportFormat, str] = {
     ExportFormat.PYTHON_PROJECT: (
         "The 'python_project' export format has been removed. It generated a "
-        "project that ran on CrewAI, a second agent engine Kasal no longer "
-        "ships. Export as 'databricks_app' instead — it runs Kasal's own "
-        "runtime, so an exported crew behaves the same as it does in Kasal."
+        "project from a template kept in agreement with Kasal's runtime by "
+        "hand, which is how an exported crew came to behave differently from "
+        "the one you tested. Export as 'databricks_app' instead — it ships the "
+        "runtime itself. Set runtime='crewai' if you want a CrewAI project."
     ),
     ExportFormat.DATABRICKS_NOTEBOOK: (
         "The 'databricks_notebook' export format has been removed. It generated "
-        "a notebook that ran on CrewAI, a second agent engine Kasal no longer "
-        "ships. Export as 'databricks_app' instead — it runs Kasal's own "
-        "runtime and deploys straight to Databricks Apps."
+        "a notebook from a template kept in agreement with Kasal's runtime by "
+        "hand, which is how an exported crew came to behave differently from "
+        "the one you tested. Export as 'databricks_app' instead — it ships the "
+        "runtime itself and deploys straight to Databricks Apps."
     ),
 }
 
@@ -80,6 +82,16 @@ class ExportOptions(BaseModel):
     )
     include_memory_config: bool = Field(
         True, description="Include memory backend configuration"
+    )
+
+    # Which agent runtime the bundle ships. Chosen at EXPORT time, because a
+    # bundle carries one runtime's dependencies — there is no switch inside a
+    # deployed app. Left unset it follows the workspace's configured harness,
+    # so a crew tuned against CrewAI's executor deploys onto CrewAI's executor.
+    runtime: Optional[str] = Field(
+        None,
+        description="Agent runtime for the exported app: 'kasal' or 'crewai'. "
+        "Defaults to the workspace's configured harness.",
     )
 
     # Databricks App options

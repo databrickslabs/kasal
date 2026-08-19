@@ -99,15 +99,18 @@ async def export_crew(
     - `databricks_app`: Complete Databricks App project (downloaded as .zip)
 
     The `python_project` and `databricks_notebook` formats were retired: both
-    generated projects that ran on `pip install crewai`, a second engine kept in
-    agreement with Kasal's by hand. Requesting either returns **410 Gone** with a
-    message naming the replacement — they remain valid enum values precisely so
-    the answer can say that, rather than a bare validation error.
+    generated projects from a template kept in agreement with the runtime by
+    hand, so an exported crew could behave differently from the one you tested.
+    Requesting either returns **410 Gone** with a message naming the replacement
+    — they remain valid enum values precisely so the answer can say that, rather
+    than a bare validation error.
 
     **Options:**
     - `include_custom_tools`: Include custom tool implementations (default: true)
     - `include_comments`: Add explanatory comments (default: true)
     - `model_override`: Override default LLM model for all agents (optional)
+    - `runtime`: `kasal` or `crewai` — which agent runtime the bundle ships.
+      Defaults to the workspace's configured harness.
 
     Args:
         crew_id: ID of the crew to export
@@ -140,9 +143,13 @@ async def export_crew(
         )
 
         # Add download URL
-        result["download_url"] = (
-            f"/api/crews/{crew_id}/export/download?format={request.export_format}"
-        )
+        # The runtime rides along, or following this URL would hand back a
+        # bundle for a DIFFERENT runtime than the one just exported — the two
+        # differ in their dependencies, so it is not a cosmetic mismatch.
+        download_url = f"/api/crews/{crew_id}/export/download?format={request.export_format}"
+        if result.get("metadata", {}).get("bundle_runtime"):
+            download_url += f"&runtime={result['metadata']['bundle_runtime']}"
+        result["download_url"] = download_url
 
         return CrewExportResponse(**result)
 
@@ -167,6 +174,9 @@ async def download_export(
     ),
     include_obo_auth: bool = Query(
         True, description="Include OBO authentication (databricks_app only)"
+    ),
+    runtime: str = Query(
+        None, description="Agent runtime for the app: 'kasal' or 'crewai'"
     ),
 ):
     """
@@ -208,6 +218,7 @@ async def download_export(
             model_override=model_override if model_override else None,
             include_static_frontend=include_static_frontend,
             include_obo_auth=include_obo_auth,
+            runtime=runtime if runtime else None,
         )
 
         logger.info(f"Download request with options: {export_options}")

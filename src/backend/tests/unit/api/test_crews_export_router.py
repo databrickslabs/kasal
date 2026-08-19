@@ -130,6 +130,73 @@ class TestExportCrew:
         assert f"/api/crews/{crew_id}/export/download" in result.download_url
 
     @pytest.mark.asyncio
+    async def test_the_download_url_carries_the_runtime_that_was_exported(
+        self, mock_service, valid_group_context
+    ):
+        """The response hands back files AND a URL to fetch them again. That URL
+        re-runs the export, so dropping the runtime from it would rebuild the
+        bundle on the workspace default — a different dependency set from the
+        one just returned, out of a single export request."""
+        crew_id = "test-crew-123"
+        request = CrewExportRequest(
+            export_format=ExportFormat.DATABRICKS_APP,
+            options=ExportOptions(runtime="crewai"),
+        )
+        mock_service.export_crew.return_value = {
+            "crew_id": crew_id,
+            "crew_name": "Test Crew",
+            "export_format": "databricks_app",
+            "files": [{"path": "README.md", "content": "# Test", "type": "markdown"}],
+            "metadata": {"bundle_runtime": "crewai"},
+            "generated_at": "2025-01-01 00:00:00 UTC",
+        }
+
+        with patch(
+            "src.api.crews_export_router.check_role_in_context", return_value=True
+        ):
+            result = await export_crew(
+                crew_id=crew_id,
+                request=request,
+                service=mock_service,
+                group_context=valid_group_context,
+            )
+
+        assert "runtime=crewai" in result.download_url
+        # And the option reached the service rather than stopping at the schema.
+        assert mock_service.export_crew.await_args.kwargs["options"].runtime == "crewai"
+
+    @pytest.mark.asyncio
+    async def test_a_kasal_export_url_names_kasal_rather_than_staying_silent(
+        self, mock_service, valid_group_context
+    ):
+        """Explicit on both sides: a URL with no runtime is one whose meaning
+        changes when an operator switches the workspace harness."""
+        crew_id = "test-crew-123"
+        request = CrewExportRequest(
+            export_format=ExportFormat.DATABRICKS_APP, options=ExportOptions()
+        )
+        mock_service.export_crew.return_value = {
+            "crew_id": crew_id,
+            "crew_name": "Test Crew",
+            "export_format": "databricks_app",
+            "files": [{"path": "README.md", "content": "# Test", "type": "markdown"}],
+            "metadata": {"bundle_runtime": "kasal"},
+            "generated_at": "2025-01-01 00:00:00 UTC",
+        }
+
+        with patch(
+            "src.api.crews_export_router.check_role_in_context", return_value=True
+        ):
+            result = await export_crew(
+                crew_id=crew_id,
+                request=request,
+                service=mock_service,
+                group_context=valid_group_context,
+            )
+
+        assert "runtime=kasal" in result.download_url
+
+    @pytest.mark.asyncio
     async def test_export_crew_forbidden_for_non_editors(
         self, mock_service, valid_group_context
     ):
@@ -247,6 +314,7 @@ class TestDownloadExport:
                 model_override=None,
                 include_static_frontend=True,
                 include_obo_auth=True,
+                runtime=None,
             )
 
         assert result.media_type == "application/zip"
@@ -280,6 +348,7 @@ class TestDownloadExport:
                 model_override="gpt-4o",
                 include_static_frontend=True,
                 include_obo_auth=True,
+                runtime=None,
             )
 
         assert result.media_type == "application/zip"
@@ -304,6 +373,7 @@ class TestDownloadExport:
                     model_override=None,
                     include_static_frontend=True,
                     include_obo_auth=True,
+                    runtime=None,
                 )
 
     @pytest.mark.asyncio
@@ -326,6 +396,7 @@ class TestDownloadExport:
                     model_override=None,
                     include_static_frontend=True,
                     include_obo_auth=True,
+                    runtime=None,
                 )
 
     @pytest.mark.asyncio
@@ -345,6 +416,7 @@ class TestDownloadExport:
                     model_override=None,
                     include_static_frontend=True,
                     include_obo_auth=True,
+                    runtime=None,
                 )
 
     @pytest.mark.asyncio
@@ -366,6 +438,7 @@ class TestDownloadExport:
                     model_override=None,
                     include_static_frontend=True,
                     include_obo_auth=True,
+                    runtime=None,
                 )
 
 
