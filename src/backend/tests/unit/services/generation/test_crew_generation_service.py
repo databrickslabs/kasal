@@ -2077,7 +2077,6 @@ class TestProgressiveGeneration:
         model="test-model",
         tools=None,
         auto_execute=False,
-        harness=None,
         session_id=None,
         memory_workspace_scope=True,
         disable_memory=False,
@@ -2104,9 +2103,6 @@ class TestProgressiveGeneration:
         req.tools = tools or []
         req.original_prompt = None
         req.auto_execute = auto_execute
-        # A bare Mock attribute is a Mock, and CrewConfig.harness is a str field
-        # — it would fail validation on a run this helper is meant to exercise.
-        req.harness = harness
         req.session_id = session_id
         req.memory_workspace_scope = memory_workspace_scope
         req.disable_memory = disable_memory
@@ -4096,31 +4092,6 @@ class TestBuildCrewConfigFromGenerated:
         )
         assert cfg["reasoning"] is True
         assert cfg["inputs"]["reasoning_config"] == {"reasoning_effort": "high"}
-
-    def test_the_picked_harness_reaches_the_auto_executed_run(self):
-        """ChatMode generates AND runs on the backend, so this builder is the
-        only config path a chat run has. The picker was wired through the
-        frontend's own builders — which ChatMode uses only for a manual re-run
-        — so every chat run was created with no harness named and fell back to
-        the configured default. The log said `_harness: kasal` for a run
-        started with CrewAI selected."""
-        cfg = CrewGenerationService.build_crew_config_from_generated(
-            self._req(harness="crewai"),
-            [{"id": "a1", "role": "r"}],
-            [{"id": "t1", "description": "d", "agent_id": "a1"}],
-        )
-        assert cfg["harness"] == "crewai"
-
-    def test_naming_no_harness_leaves_the_run_on_the_default(self):
-        """Absent, not empty: `CrewConfig.harness` of "" is not a harness, and
-        the run must fall back to the configured default rather than a name
-        nothing can resolve."""
-        cfg = CrewGenerationService.build_crew_config_from_generated(
-            self._req(),
-            [{"id": "a1", "role": "r"}],
-            [{"id": "t1", "description": "d", "agent_id": "a1"}],
-        )
-        assert cfg["harness"] is None
 
     def test_mcp_servers_injected_into_agents_and_tasks(self):
         req = self._req(mcp_servers=["Databricks Genie: Sales"])

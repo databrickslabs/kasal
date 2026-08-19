@@ -11,11 +11,6 @@ export interface ExecutionConfig {
   inputs?: Record<string, unknown>;
   reasoning?: boolean;
   model?: string;
-  /**
-   * Which agent runtime runs the job: 'kasal' | 'crewai'. Omitted means the
-   * workspace default. Picked beside the model in the composer.
-   */
-  harness?: string;
   execution_type?: string;
   schema_detection_enabled?: boolean;
   // Memory scoping (chat). crew_id is generated backend-side for tracing.

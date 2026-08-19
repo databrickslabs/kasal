@@ -10,10 +10,6 @@ import { PublicationService } from '../../../api/workflow/PublicationService';
 
 const CONFIG_STORAGE_KEY = 'kasal-chat-config';
 const MODEL_STORAGE_KEY = 'kasal-chat-model';
-// Shared with the designer's picker (store/crewExecution.ts): the harness is a
-// property of the RUN, not of one surface, so choosing it in chat and then
-// running from the canvas should not silently change it back.
-const HARNESS_STORAGE_KEY = 'kasal-harness';
 const THEME_STORAGE_KEY = 'kasal-chat-theme';
 // Preferred default model for chat mode when the user hasn't picked one yet.
 // Falls back to the first enabled model if this endpoint isn't available.
@@ -94,12 +90,6 @@ interface AppState {
    */
   catalogLoaded: boolean;
   selectedModel: string;
-  /**
-   * Which agent runtime runs the next job: 'kasal' | 'crewai', or '' for the
-   * configured default. Chosen beside the model because it is the other thing
-   * a run picks; sent with the execution payload and recorded on the run's row.
-   */
-  selectedHarness: string;
   sidebarOpen: boolean;
   settingsOpen: boolean;
 }
@@ -114,7 +104,6 @@ interface AppActions {
   toggleTheme: () => void;
   setTheme: (theme: Theme) => void;
   setSelectedModel: (model: string) => void;
-  setSelectedHarness: (harness: string) => void;
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
   setSettingsOpen: (open: boolean) => void;
@@ -137,13 +126,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
   selectedModel: (() => {
     try {
       return localStorage.getItem(MODEL_STORAGE_KEY) || '';
-    } catch {
-      return '';
-    }
-  })(),
-  selectedHarness: (() => {
-    try {
-      return localStorage.getItem(HARNESS_STORAGE_KEY) || '';
     } catch {
       return '';
     }
@@ -261,20 +243,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ selectedModel: model });
     try {
       localStorage.setItem(MODEL_STORAGE_KEY, model);
-    } catch { /* */ }
-  },
-
-  setSelectedHarness: (harness) => {
-    set({ selectedHarness: harness });
-    try {
-      if (harness) {
-        localStorage.setItem(HARNESS_STORAGE_KEY, harness);
-      } else {
-        // Empty means "follow the configured default" — REMOVE rather than
-        // store '', so a later change to that default is picked up instead of
-        // today's value being frozen into every future run.
-        localStorage.removeItem(HARNESS_STORAGE_KEY);
-      }
     } catch { /* */ }
   },
 

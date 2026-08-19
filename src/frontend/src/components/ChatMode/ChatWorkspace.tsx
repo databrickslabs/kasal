@@ -1,5 +1,4 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { EngineConfigService, HarnessDescription } from '../../api/config/EngineConfigService';
 import { useChatRunStream } from './hooks/useChatRunStream';
 import { useRunActivity } from './hooks/useRunActivity';
 import { useChatCommands } from './hooks/useChatCommands';
@@ -122,27 +121,7 @@ const ChatWorkspace: React.FC = () => {
 
   const models = useAppStore((s) => s.models);
   const selectedModel = useAppStore((s) => s.selectedModel);
-  const selectedHarness = useAppStore((s) => s.selectedHarness);
 
-  // The harness options, fetched once. Chosen beside the model rather than in
-  // Configuration because it is a per-RUN property: it travels in the execution
-  // payload and is recorded on the run's own row.
-  const [harnesses, setHarnesses] = useState<HarnessDescription[]>([]);
-  const [defaultHarness, setDefaultHarness] = useState<string>('kasal');
-  useEffect(() => {
-    let cancelled = false;
-    EngineConfigService.getHarness()
-      .then((response) => {
-        if (cancelled) return;
-        setHarnesses(response.harnesses || []);
-        setDefaultHarness(response.harness || 'kasal');
-      })
-      .catch(() => {
-        // No picker beats no chat. The run goes to the configured default,
-        // which is the behaviour before this control existed.
-      });
-    return () => { cancelled = true; };
-  }, []);
   const sidebarOpen = useAppStore((s) => s.sidebarOpen);
 
   // Saved-catalog library shown in the rail (replaces /list crews & /list flows).
@@ -702,10 +681,6 @@ const ChatWorkspace: React.FC = () => {
               models={models}
               selectedModel={selectedModel}
               onModelChange={(m) => useAppStore.getState().setSelectedModel(m)}
-              harnesses={harnesses}
-              defaultHarness={defaultHarness}
-              selectedHarness={selectedHarness}
-              onHarnessChange={(h) => useAppStore.getState().setSelectedHarness(h)}
               sessionId={currentSessionId}
               memoryEnabled={memoryEnabled}
               onMemoryEnabledChange={setMemoryEnabled}

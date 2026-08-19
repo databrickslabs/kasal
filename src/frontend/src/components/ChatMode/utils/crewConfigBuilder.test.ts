@@ -1002,35 +1002,3 @@ describe('a flow can be given inputs', () => {
     expect(buildFlowConfig(flow, 'm').inputs).toEqual({});
   });
 });
-
-describe('a run may name the harness that runs it', () => {
-  // The harness is picked in the composer beside the model, so it has to
-  // travel the same way the model does — on the payload of every path chat
-  // can execute. It was declared on the config but emitted by none of them,
-  // so the picker moved and the run still went to the configured default.
-  const plan = { name: 'Crew', nodes: [], edges: [] };
-  const flow = { id: 'f1', name: 'Flow', nodes: [], edges: [] };
-
-  it('carries it from a loaded crew', () => {
-    expect(buildCrewConfig(plan, 'm', {}, true, [], 'crewai').harness).toBe('crewai');
-  });
-
-  it('carries it from a generated crew', () => {
-    const config = buildCrewConfigFromGenerated(
-      [], [], 'm', undefined, undefined, {}, null, true, true, [],
-      undefined, [], false, undefined, 'crewai',
-    );
-    expect(config.harness).toBe('crewai');
-  });
-
-  it('carries it from a flow', () => {
-    expect(buildFlowConfig(flow, 'm', {}, null, undefined, 'crewai').harness).toBe('crewai');
-  });
-
-  it('leaves it unset when the run takes the default', () => {
-    // Empty means "whatever the workspace is configured for" — an empty
-    // string on the payload would read as a harness named "".
-    expect(buildCrewConfig(plan, 'm', {}, true, [], '').harness).toBeUndefined();
-    expect(buildCrewConfig(plan, 'm').harness).toBeUndefined();
-  });
-});

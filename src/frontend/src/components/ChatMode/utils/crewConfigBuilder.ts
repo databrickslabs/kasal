@@ -34,11 +34,6 @@ export interface CrewExecutionConfig {
   inputs: Record<string, unknown>;
   reasoning: boolean;
   model?: string;
-  /**
-   * Which agent runtime runs this job: 'kasal' | 'crewai'. Omitted means the
-   * configured default. Chosen beside the model, in the composer's picker.
-   */
-  harness?: string;
   execution_type: string;
   schema_detection_enabled: boolean;
   /**
@@ -66,11 +61,6 @@ export interface FlowExecutionConfig {
   inputs: Record<string, unknown>;
   reasoning: boolean;
   model?: string;
-  /**
-   * Which agent runtime runs this job: 'kasal' | 'crewai'. Omitted means the
-   * configured default. Chosen beside the model, in the composer's picker.
-   */
-  harness?: string;
   execution_type: string;
   schema_detection_enabled: boolean;
   nodes: { id: string; type: string; position: { x: number; y: number }; data: NodeData }[];
@@ -108,7 +98,7 @@ export function buildCrewConfig(plan: {
   edges: unknown[];
   process?: string;
 }, model?: string, inputs?: Record<string, string>, memoryEnabled: boolean = true,
-   agentBricksEndpoints: string[] = [], harness?: string): CrewExecutionConfig {
+   agentBricksEndpoints: string[] = []): CrewExecutionConfig {
   const nodes = plan.nodes as FlowNode[];
   const edges = plan.edges as FlowEdge[];
 
@@ -265,7 +255,6 @@ export function buildCrewConfig(plan: {
     inputs: inputs || {},
     reasoning: false,
     model: model || undefined,
-    harness: harness || undefined,
     execution_type: 'crew',
     schema_detection_enabled: true,
   };
@@ -382,7 +371,6 @@ export function buildCrewConfigFromGenerated(
   agentBricksEndpoints: string[] = [],
   reasoning: boolean = false,
   chatModeType?: string,
-  harness?: string,
 ): CrewExecutionConfig {
   const agents_yaml: Record<string, Record<string, unknown>> = {};
   const tasks_yaml: Record<string, Record<string, unknown>> = {};
@@ -580,7 +568,6 @@ export function buildCrewConfigFromGenerated(
     inputs: inputs || {},
     reasoning,
     model: model || undefined,
-    harness: harness || undefined,
     execution_type: 'crew',
     schema_detection_enabled: true,
     chat_mode_type: chatModeType,
@@ -605,8 +592,7 @@ export function buildFlowConfig(flow: {
     *  checkpoint lineage from it, so a second message continues the first. */
    sessionId?: string | null,
    /** This turn's user line, for a conversational flow. */
-   userMessage?: string,
-   harness?: string): FlowExecutionConfig {
+   userMessage?: string): FlowExecutionConfig {
   const nodes = flow.nodes as FlowNode[];
   const edges = flow.edges as FlowEdge[];
 
@@ -636,7 +622,6 @@ export function buildFlowConfig(flow: {
     inputs: inputs || {},
     reasoning: false,
     model: model || undefined,
-    harness: harness || undefined,
     execution_type: 'flow',
     schema_detection_enabled: true,
     nodes: mappedNodes,

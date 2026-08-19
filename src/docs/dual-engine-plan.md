@@ -5,10 +5,13 @@ Status: **Phases 0–6 done, then renamed.** Both harnesses run all three paths.
 The only capability CrewAI does not claim is `EXPORT`, a deliberate boundary
 rather than a gap.
 
-**The runtime is called a HARNESS**, and it is chosen **per run**, beside the
-model, rather than globally in Configuration. The Configuration value remains —
-demoted to the DEFAULT for runs that name none, which is what scheduled and
-API-triggered runs do, having no picker. The pre-existing `EngineConfig` table
+**The runtime is called a HARNESS**, and it is chosen in **Configuration →
+Engines**, which is the one place. A run MAY still name its own on
+`CrewConfig.harness` / `FlowConfig.harness`, and the recorded value is what a
+resume reads back — but nothing in the UI sets it: the per-run pickers were
+built, tried, and removed, because choosing a runtime is an operator decision
+and putting it beside the model asked every chat user to have an opinion about
+agent frameworks. The pre-existing `EngineConfig` table
 and `engine-config` router keep their names: they are the settings store this
 platform has always had (they also hold `flow_enabled` and the otel switches),
 and the harness is simply a row in them.

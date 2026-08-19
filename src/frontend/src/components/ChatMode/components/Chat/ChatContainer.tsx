@@ -309,10 +309,6 @@ interface ChatContainerProps {
   models: ModelConfigResponse[];
   selectedModel: string;
   onModelChange: (model: string) => void;
-  harnesses?: { name: string; label?: string; version?: string; available: boolean; unavailable_reason?: string }[];
-  defaultHarness?: string;
-  selectedHarness?: string;
-  onHarnessChange?: (harness: string) => void;
   sessionId?: string | null;
   /** "Workspace memory" toggle — owned by the store, forwarded to the input. */
   /** "No memory" toggle — when false, crews run without memory. */
@@ -352,10 +348,6 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   models,
   selectedModel,
   onModelChange,
-  harnesses,
-  defaultHarness,
-  selectedHarness,
-  onHarnessChange,
   sessionId,
   memoryEnabled,
   onMemoryEnabledChange,
@@ -531,10 +523,6 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
               models={models}
               selectedModel={selectedModel}
               onModelChange={onModelChange}
-              harnesses={harnesses}
-              defaultHarness={defaultHarness}
-              selectedHarness={selectedHarness}
-              onHarnessChange={onHarnessChange}
               sessionId={sessionId}
               memoryEnabled={memoryEnabled}
               onMemoryEnabledChange={onMemoryEnabledChange}
@@ -678,10 +666,6 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
           models={models}
           selectedModel={selectedModel}
           onModelChange={onModelChange}
-          harnesses={harnesses}
-          defaultHarness={defaultHarness}
-          selectedHarness={selectedHarness}
-          onHarnessChange={onHarnessChange}
           sessionId={sessionId}
           isExecuting={isExecuting}
           isGenerating={isGenerating}

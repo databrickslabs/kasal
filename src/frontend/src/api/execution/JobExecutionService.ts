@@ -23,11 +23,6 @@ interface CrewConfig {
   inputs: Record<string, unknown>;
   reasoning?: boolean;
   model?: string;
-  /**
-   * Which agent runtime runs this job: 'kasal' | 'crewai'. Omitted means the
-   * configured default (Configuration -> Engines).
-   */
-  harness?: string;
   execution_type?: string;
   schema_detection_enabled?: boolean;
   nodes?: { id: string; type: string; position: { x: number; y: number }; data: NodeData }[];
@@ -59,9 +54,7 @@ export class JobExecutionService {
     schemaDetectionEnabled = true,
     reasoning = false,
     savedFlowId?: string,
-    savedCrewId?: string,
-    /** 'kasal' | 'crewai', or undefined for the configured default. */
-    harness?: string
+    savedCrewId?: string
   ): Promise<JobResponse> {
     try {
       // Generate a temporary ID to use for file path generation
@@ -79,10 +72,6 @@ export class JobExecutionService {
         inputs: additionalInputs,
         reasoning,
         model,
-        // Beside the model, because it is the other thing a run chooses.
-        // Undefined means "the configured default", which is what a scheduled
-        // or API-triggered run gets — those have no picker.
-        harness,
         execution_type: executionType,
         schema_detection_enabled: schemaDetectionEnabled
       };

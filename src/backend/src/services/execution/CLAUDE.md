@@ -175,9 +175,11 @@ KasalEngineService              the hub, unchanged: dispatch, status, cancel
   `execution_history.harness`, then carried into a subprocess by payload
   and environment. Never re-read the setting mid-run: a switch landing between
   agent-build and task-build would produce a run that is half each. A run may
-  NAME its harness (`CrewConfig.harness`, picked beside the model); the
-  Configuration value is the default for runs that do not — scheduled and
-  API-triggered runs have no picker.
+  NAME its harness on `CrewConfig.harness` / `FlowConfig.harness`; the
+  Configuration value is the default for runs that do not, which today is EVERY
+  run started from the UI. The per-run pickers were removed deliberately —
+  choosing a runtime is an operator decision, not something to put in front of
+  someone writing a chat message — so the field is reachable from the API only.
 - **One bus still writes traces.** The CrewAI binding bridges
   `crewai_event_bus` onto `event_bus` (`engines/crewai/events.py`) and nothing
   downstream changes. Do NOT bridge events a Kasal subsystem already emits —

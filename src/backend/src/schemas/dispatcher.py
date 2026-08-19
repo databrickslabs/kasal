@@ -75,13 +75,6 @@ class DispatcherRequest(BaseModel):
         "immediately. The AgentBuilder / crew canvas leaves this False — it renders the "
         "plan and the user runs it via the Play button (sending it twice would double-run).",
     )
-    harness: Optional[str] = Field(
-        None,
-        description="Which agent runtime runs the auto-executed crew ('kasal' or "
-        "'crewai'), chosen beside the model in the ChatMode composer. None means "
-        "the configured default. ChatMode generates AND runs on the backend, so a "
-        "harness the user picked reaches the run only if it travels on THIS request.",
-    )
     session_id: Optional[str] = Field(
         None,
         description="Chat session id — scopes session-only memory recall for the run",

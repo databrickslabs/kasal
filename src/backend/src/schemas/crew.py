@@ -424,13 +424,6 @@ class CrewStreamingRequest(BaseModel):
         False,
         description="When true, run the generated crew on the backend immediately after generation (ChatMode). AgentBuilder keeps this false and only renders the plan.",
     )
-    harness: Optional[str] = Field(
-        None,
-        description="Which agent runtime runs the auto-executed crew ('kasal' or "
-        "'crewai'), chosen beside the model in the ChatMode composer. None means "
-        "the configured default. ChatMode generates AND runs on the backend, so a "
-        "harness the user picked reaches the run only if it travels on THIS request.",
-    )
     session_id: Optional[str] = Field(
         None,
         description="Chat session id — memory partition + run ownership for the auto-executed run",

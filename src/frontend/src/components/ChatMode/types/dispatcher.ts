@@ -31,10 +31,6 @@ export type IntentType =
 export interface DispatcherRequest {
   message: string;
   model?: string;
-  // Which runtime runs the auto-executed crew ('kasal' | 'crewai'), picked
-  // beside the model in the composer. ChatMode generates AND runs on the
-  // backend, so this is the only way a picked harness reaches the run.
-  harness?: string;
   tools?: string[];
   // The user's CLEAN message (before the intent-steering prefix is added to
   // `message`). The backend grounds the generated crew's run with this so the
@@ -78,8 +74,6 @@ export interface DispatcherRequest {
 /** ChatMode run settings gathered from the execution store at dispatch time. */
 export interface DispatchRunSettings {
   auto_execute?: boolean;
-  /** @see DispatcherRequest.harness */
-  harness?: string;
   session_id?: string;
   memory_workspace_scope?: boolean;
   disable_memory?: boolean;

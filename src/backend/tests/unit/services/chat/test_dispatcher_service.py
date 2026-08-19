@@ -872,48 +872,6 @@ class TestDispatch:
         assert streaming_request.agentbricks_endpoints == ["mas-1-endpoint"]
 
     @pytest.mark.asyncio
-    async def test_dispatch_generate_crew_forwards_the_picked_harness(self):
-        """The composer's harness must reach the CrewStreamingRequest, because
-        ChatMode's run is created on the backend from that request. Dropped
-        here, the run is created naming no harness and silently takes the
-        configured default — which is what happened: a run started with CrewAI
-        selected logged `_harness: kasal`."""
-        svc = _build_service()
-        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
-        svc.detect_intent = AsyncMock(
-            return_value=self._make_intent_result("generate_crew")
-        )
-        svc._log_llm_interaction = AsyncMock()
-        svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
-
-        request = DispatcherRequest(
-            message="build a team", model="test-model", harness="crewai"
-        )
-        with patch("asyncio.create_task", return_value=MagicMock()):
-            await svc.dispatch(request)
-
-        streaming_request = svc.crew_service.create_crew_progressive.call_args[0][0]
-        assert streaming_request.harness == "crewai"
-
-    @pytest.mark.asyncio
-    async def test_dispatch_generate_crew_without_a_harness_names_none(self):
-        """A request that names no harness leaves the field None rather than
-        guessing — the default is resolved once, later, against the setting."""
-        svc = _build_service()
-        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
-        svc.detect_intent = AsyncMock(
-            return_value=self._make_intent_result("generate_crew")
-        )
-        svc._log_llm_interaction = AsyncMock()
-        svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
-
-        with patch("asyncio.create_task", return_value=MagicMock()):
-            await svc.dispatch(DispatcherRequest(message="build a team"))
-
-        streaming_request = svc.crew_service.create_crew_progressive.call_args[0][0]
-        assert streaming_request.harness is None
-
-    @pytest.mark.asyncio
     async def test_dispatch_generate_crew_agentbricks_endpoints_defaults_to_empty(self):
         """When the DispatcherRequest omits agentbricks_endpoints, the dispatched
         CrewStreamingRequest gets an empty list (never None)."""
