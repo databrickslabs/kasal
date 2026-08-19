@@ -334,3 +334,40 @@ class TestBuildAgent:
         # The Kasal binding forwards a None third argument to
         # configure_kasal_llm; that is the binding's business, not this layer's.
         engine.build_llm.assert_awaited_once_with("gpt-4o", "g")
+
+
+class TestThePlanToolFollowsTheHarness:
+    """The plan tool is Kasal's, and only Kasal's.
+
+    It is written for Kasal's executor — one tool call per round, the plan
+    carried in the conversation that executor owns. CrewAI's agent executor
+    plans its own way, and given both, one measured run called `todo` 28 times
+    without ever writing an item: the reply to a bare read ("write one with the
+    'todos' argument") is not a prompt CrewAI's loop acts on.
+    """
+
+    def test_kasal_gets_it(self):
+        from src.services.execution.harnesses import bind
+        from src.services.execution.harnesses.binding import Capability
+        from src.services.execution.harnesses import active_harness
+
+        with bind("kasal"):
+            assert Capability.AGENT_PLAN in active_harness().capabilities()
+
+    def test_crewai_does_not(self):
+        from src.services.execution.harnesses import bind
+        from src.services.execution.harnesses.binding import Capability
+        from src.services.execution.harnesses import active_harness
+
+        with bind("crewai"):
+            assert Capability.AGENT_PLAN not in active_harness().capabilities()
+
+    def test_the_builder_asks_the_harness_rather_than_attaching_it_always(self):
+        """The gate is the declared capability, so one answer serves the
+        builder and the UI alike."""
+        import inspect
+
+        from src.services.execution.kernel import agent_builder
+
+        source = inspect.getsource(agent_builder)
+        assert "Capability.AGENT_PLAN in harness.capabilities()" in source

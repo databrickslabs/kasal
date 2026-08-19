@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 from src.core.llm.output_cap import output_cap
 from src.core.logger import LoggerManager
 from src.services.execution.harnesses import active_harness
+from src.services.execution.harnesses.binding import Capability
 from src.services.execution.kernel.agent_plan import add_plan_tool
 from src.services.execution.kernel.agent_security import inject_security_preamble
 from src.services.execution.kernel.agent_skills import inject_skills
@@ -465,7 +466,21 @@ async def build_agent(
 
     # The agent's own plan for whatever task it is given. Engine machinery, so
     # it is attached here rather than selected — see kernel/agent_plan.py.
-    add_plan_tool(agent_kwargs, label=label)
+    #
+    # Only for a harness that declares it. The tool is written for Kasal's
+    # executor — one tool call per round, the plan carried in the conversation
+    # that executor owns — and CrewAI's agent executor plans its own way. Giving
+    # it both produced the failure the tool exists to prevent: 28 `todo` calls
+    # in one run without a single item written.
+    harness = active_harness()
+    if Capability.AGENT_PLAN in harness.capabilities():
+        add_plan_tool(agent_kwargs, label=label)
+    else:
+        logger.debug(
+            "[plan] agent '%s': the %s harness does not take the plan tool",
+            label,
+            harness.name.value,
+        )
 
     if extra_kwargs:
         agent_kwargs.update(extra_kwargs)

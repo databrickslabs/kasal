@@ -123,13 +123,19 @@ def write_plan(items: list[dict[str, Any]], merge: bool = False) -> list[PlanIte
     one thing off without restating the rest.
     """
     incoming: list[PlanItem] = []
-    for raw in items[:MAX_ITEMS]:
+    for position, raw in enumerate(items[:MAX_ITEMS], start=1):
         if not isinstance(raw, dict):
             continue
-        item_id = str(raw.get("id") or "").strip()
         content = str(raw.get("content") or "").strip()
-        if not item_id or not content:
+        # An item with nothing to do is not a step; an item with no id is one
+        # the model did not number. Dropping the second kind silently is how a
+        # run stops dead: every item written without an `id` vanished, the tool
+        # answered "The plan is empty. Write one…", and the model wrote the same
+        # plan again. One measured run made 42 identical `todo` calls and never
+        # sent its email. The id is bookkeeping — number it here.
+        if not content:
             continue
+        item_id = str(raw.get("id") or "").strip() or str(position)
         status = str(raw.get("status") or "pending").strip()
         if status not in VALID_STATUSES:
             status = "pending"
@@ -357,6 +363,16 @@ class PlanTool(BaseTool):
 
         counts = plan_counts(items)
         if not items:
+            # Answering a WRITE with "the plan is empty" tells the model to do
+            # what it just did, so it does — forever. Say what was wrong with
+            # what it sent instead; only a read gets the write-one nudge.
+            if todos:
+                return (
+                    f"None of the {len(todos)} items supplied could be used: an "
+                    "item needs a non-empty 'content'. Send "
+                    "todos=[{'id': '1', 'content': 'the step', 'status': "
+                    "'pending'}, ...]."
+                )
             return (
                 "The plan is empty. Write one with the 'todos' argument before "
                 "starting multi-step work."

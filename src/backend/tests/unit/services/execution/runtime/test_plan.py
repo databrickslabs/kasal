@@ -68,7 +68,13 @@ class TestWritingAPlan:
         write_plan([{"id": "1", "content": "x", "status": "almost-done"}])
         assert plan()[0].status == "pending"
 
-    def test_items_without_id_or_content_are_dropped(self):
+    def test_an_item_with_no_content_is_dropped_but_a_missing_id_is_filled_in(self):
+        """Only "nothing to do" disqualifies a step.
+
+        A missing id used to drop the item too, which silently emptied plans
+        the model wrote without numbering them — see
+        TestAPlanTheModelDidNotNumber for what that cost.
+        """
         write_plan(
             [
                 {"id": "", "content": "x"},
@@ -76,7 +82,9 @@ class TestWritingAPlan:
                 {"id": "2", "content": "ok"},
             ]
         )
-        assert [i.id for i in plan()] == ["2"]
+        # Item 1 keeps its content and is numbered by position; item 2 has
+        # nothing to do and is dropped.
+        assert [(i.id, i.content) for i in plan()] == [("1", "x"), ("2", "ok")]
 
     def test_content_and_item_count_are_bounded(self):
         write_plan(
@@ -357,3 +365,53 @@ class TestTheCompletionCheck:
             write_plan(_items(("a", "coworker work", "completed")))
             assert abandoned_plan_reason() is None
         assert abandoned_plan_reason() is not None
+
+
+class TestAPlanTheModelDidNotNumber:
+    """An item without an `id` is still a step.
+
+    Dropping it silently is how a run stops dead: every item vanished,
+    `write_plan` returned [], and the tool answered "The plan is empty. Write
+    one with the 'todos' argument" — which is exactly what the model had just
+    tried. One measured flow made 42 identical `todo` calls, emitted
+    plan_total=0 each time, and never sent its email.
+    """
+
+    def test_items_without_an_id_are_numbered_rather_than_dropped(self):
+        reset_plan()
+        items = write_plan(
+            [
+                {"content": "Draft the email", "status": "in_progress"},
+                {"content": "Send it", "status": "pending"},
+            ]
+        )
+
+        assert [i.content for i in items] == ["Draft the email", "Send it"]
+        assert [i.id for i in items] == ["1", "2"]
+        assert [i.status for i in items] == ["in_progress", "pending"]
+
+    def test_an_id_the_model_did_supply_is_kept(self):
+        reset_plan()
+        items = write_plan([{"id": "a", "content": "Do it"}])
+        assert [i.id for i in items] == ["a"]
+
+    def test_an_item_with_no_content_is_still_dropped(self):
+        """Nothing to do is not a step."""
+        reset_plan()
+        items = write_plan([{"id": "1", "content": "   "}, {"content": "Real"}])
+        assert [i.content for i in items] == ["Real"]
+
+    def test_a_failed_write_says_what_was_wrong_instead_of_repeating_itself(self):
+        reset_plan()
+        tool = build_plan_tool()
+
+        answer = tool._run(todos=[{"status": "pending"}])
+
+        # The reply must not be the instruction the model just followed.
+        assert "The plan is empty" not in answer
+        assert "content" in answer
+
+    def test_a_bare_read_still_nudges_the_model_to_write_one(self):
+        reset_plan()
+        tool = build_plan_tool()
+        assert "The plan is empty" in tool._run()

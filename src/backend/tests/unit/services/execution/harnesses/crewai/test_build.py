@@ -212,20 +212,31 @@ class TestTheBindingSwapsWhatIsBuilt:
         # Same intent, both ways round.
         assert crew_agent.role == kasal_agent.role == "Researcher"
 
-    def test_export_is_the_only_thing_crewai_does_not_claim(self):
+    def test_crewai_claims_everything_except_export_and_the_plan_tool(self):
         """Capabilities keep the product honest, so they track what is real.
 
-        The exported Databricks App vendors the KASAL runtime so it runs with
-        no third-party agent framework at all; shipping CrewAI into exported
-        apps is a separate project, not a gap in this one. Everything else —
-        memory seams, checkpoint resume, flows, tool approval and replay — is
-        implemented on both harnesses and therefore declared on both.
+        Two absences, for different reasons:
+
+        * EXPORT — the exported Databricks App vendors the KASAL runtime so it
+          runs with no third-party agent framework at all; shipping CrewAI into
+          exported apps is a separate project, not a gap in this one.
+        * AGENT_PLAN — the plan tool is written for Kasal's executor, and
+          CrewAI's agent executor plans its own way. Given both, one run called
+          `todo` 28 times without writing a single item.
+
+        Everything else — memory seams, checkpoint resume, flows, tool approval
+        and replay — is implemented on both and therefore declared on both.
         """
         from src.services.execution.harnesses.binding import Capability
 
         crewai = binding_for("crewai")
         kasal = binding_for("kasal")
 
-        assert kasal.capabilities() - crewai.capabilities() == {Capability.EXPORT}
+        assert kasal.capabilities() - crewai.capabilities() == {
+            Capability.EXPORT,
+            Capability.AGENT_PLAN,
+        }
         assert not crewai.supports(Capability.EXPORT)
+        assert not crewai.supports(Capability.AGENT_PLAN)
         assert kasal.supports(Capability.EXPORT)
+        assert kasal.supports(Capability.AGENT_PLAN)

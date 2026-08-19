@@ -62,11 +62,22 @@ logger = LoggerManager.get_instance().crew
 #: taken: it would re-implement routing, HITL and checkpointing against a
 #: second set of primitives, for no behaviour a user could observe — the agents
 #: already run on the chosen harness either way.
+#: What this harness does. AGENT_PLAN is deliberately absent.
+#:
+#: The plan tool is Kasal's own answer to a long task losing track of itself,
+#: and it is written for Kasal's executor: one tool call per round, with the
+#: plan carried in the conversation the executor owns. CrewAI's agent executor
+#: plans its own way, and giving it a second plan produced exactly the failure
+#: the tool exists to prevent — one run called `todo` 28 times without ever
+#: writing an item, because the reply to a read ("write one with the 'todos'
+#: argument") is not a prompt CrewAI's loop acts on.
+#:
+#: Declared here rather than special-cased in the kernel, so "does this runtime
+#: get the plan tool?" has one answer and the UI can render it.
 _CAPABILITIES = frozenset(
     {
         Capability.TOOL_APPROVAL,
         Capability.TOOL_REPLAY,
-        Capability.AGENT_PLAN,
         Capability.RUN_DEADLINE,
         Capability.HIERARCHICAL,
         Capability.CONTEXT_PROVIDERS,
