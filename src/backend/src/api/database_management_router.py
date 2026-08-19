@@ -594,6 +594,21 @@ async def save_lakebase_config(
     Returns:
         Saved configuration
     """
+    # PREFLIGHT GATE (same guard as /lakebase/enable): this is the OTHER door that
+    # turns Lakebase on — the "Save" button posts the config with enabled=true.
+    # Refuse to persist enabled=true unless the diagnostics pass, so a Databricks
+    # App (which never restarts) can't be pointed at a schema its service principal
+    # cannot manage and then 500 every request.
+    if config.get("enabled"):
+        from src.services.databricks.lakebase.preflight import preflight_via_service
+
+        report = await preflight_via_service(service, config.get("instance_name"))
+        if report.get("status") != "healthy":
+            summary = (report.get("remediation") or {}).get("summary") or (
+                "Lakebase preflight diagnostics did not pass; not enabling. "
+                "Run diagnostics for details."
+            )
+            raise BadRequestError(summary)
     return await service.save_config(config)
 
 

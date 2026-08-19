@@ -293,44 +293,65 @@ async def preflight_via_service(
 def _build_remediation(
     app_sp: Optional[str], orphaned: List[Dict[str, Any]]
 ) -> Dict[str, Any]:
-    """Actionable fix for the orphaned-ownership case, tailored to the findings."""
+    """Actionable fix for the orphaned-ownership case, tailored to the findings.
+
+    Two shapes of owner, two fixes:
+      * an app service principal (a UUID role) you CANNOT log in as → drop it via
+        the Lakebase UI with "Reassign owned objects" (control plane does it);
+      * a USER account (an email role) you CAN log in as → run a short SQL recipe
+        as that user that moves the tables to a shared role the app SP inherits
+        (a member of the owning role can ALTER; no SET ROLE needed).
+    """
     owners = sorted({o["owner"] for o in orphaned})
     tables = ", ".join(o["table"] for o in orphaned)
-    old_owner = owners[0] if len(owners) == 1 else "the previous service principal"
+    old_owner = owners[0] if len(owners) == 1 else "the current owner role"
+    # A user role is an email; an app SP is a bare UUID you cannot authenticate as.
+    owner_is_user = any("@" in o for o in owners)
 
     summary = (
         f"Kasal cannot update the Lakebase schema: table(s) [{tables}] are owned "
         f"by a different Postgres role ({', '.join(owners)}), not this app's "
         f"service principal ({app_sp}). On PostgreSQL, adding a column is "
-        f"owner-only, and on Lakebase SET ROLE is disabled and you cannot log in as "
-        f"another app's service principal — so this cannot be fixed from the SQL "
-        f"editor. It happens when a Databricks App is deleted and recreated (a new "
-        f"service principal is minted, orphaning the old one's tables). Fix it from "
-        f"the Lakebase UI, which reassigns ownership through the control plane."
+        f"owner-only. Reassign ownership so this app's service principal can manage "
+        f"the schema, using the appropriate method below."
     )
-    # The reliable, self-serve fix is a UI action, not SQL: dropping the orphaned
-    # role with "Reassign owned objects" runs through the control plane, which has
-    # the privilege the SQL editor and even a databricks_superuser lack. No SQL, no
-    # logging in as the old SP, no Support ticket.
-    steps = [
-        "Open the Lakebase project's Roles list (Compute → Database → your "
-        "project → Roles).",
-        f"Click the '⋮' menu next to the owner role '{old_owner}' and choose "
-        f"'Drop role'.",
-        "In the dialog, turn ON 'Reassign owned objects' and set 'Reassign owned "
-        f"to' = this app's service principal ('{app_sp}'). Confirm. (The warning "
-        "that some grants can't be reassigned is fine — only stale grants to the "
-        "dropped role are removed, not your tables.)",
-        "Redeploy this app. On startup Kasal adds the missing columns (it now owns "
-        "the tables) and the app works — no data loss, no SQL.",
-        "Prevention: redeploy the app in place; never delete + recreate it (that "
-        "rotates the service principal and re-orphans the tables). If you must "
-        "recreate, remove the Lakebase resource with 'Can manage' first so the "
-        "platform reassigns ownership cleanly.",
-    ]
-    # No SQL commands — the SQL-editor paths (REASSIGN/ALTER OWNER, SET ROLE) all
-    # fail on Lakebase for a table owned by an app SP you cannot log in as. The UI
-    # drop-with-reassign above is the only self-serve fix. Support (cloud_admin) is
-    # the fallback if the UI option is unavailable.
-    commands: List[str] = []
+
+    if owner_is_user:
+        # The owner is a user account you can log in as. Run the transfer as that
+        # user: create a shared owner role, move the tables to it, and grant the
+        # app SP membership WITH INHERIT so it can ALTER them (no SET ROLE needed).
+        steps = [
+            f"Open the Databricks SQL editor connected to this Lakebase database as "
+            f"the owner '{old_owner}' (your own account).",
+            "Run the SQL below. It creates a shared owner role, moves the tables to "
+            "it, and makes this app's service principal a member (so it can ALTER "
+            "them). Existing data is untouched.",
+            "Redeploy this app — the self-heal adds the missing columns on connect.",
+        ]
+        commands = [
+            "CREATE ROLE kasal_shared_owner NOLOGIN;  -- skip if it already exists",
+            "GRANT kasal_shared_owner TO CURRENT_USER;",
+            f'GRANT kasal_shared_owner TO "{app_sp}" WITH INHERIT TRUE;',
+            "REASSIGN OWNED BY CURRENT_USER TO kasal_shared_owner;",
+        ]
+    else:
+        # The owner is an app service principal you cannot log in as. The only
+        # self-serve fix is the UI drop-with-reassign, which runs through the
+        # control plane (the privilege the SQL editor and databricks_superuser lack).
+        steps = [
+            "Open the Lakebase project's Roles list (Compute → Database → your "
+            "project → Roles).",
+            f"Click the '⋮' menu next to the owner role '{old_owner}' and choose "
+            f"'Drop role'.",
+            "In the dialog, turn ON 'Reassign owned objects' and set 'Reassign "
+            f"owned to' = this app's service principal ('{app_sp}'). Confirm. (The "
+            "warning that some grants can't be reassigned is fine — only stale "
+            "grants to the dropped role are removed, not your tables.)",
+            "Redeploy this app — the self-heal adds the missing columns on connect. "
+            "No data loss, no SQL.",
+            "Prevention: redeploy the app in place; never delete + recreate it "
+            "(that rotates the service principal and re-orphans the tables).",
+        ]
+        commands = []
+
     return {"summary": summary, "steps": steps, "commands": commands}

@@ -99,6 +99,27 @@ async def test_action_required_when_orphaned_table_missing_column(small_schema):
 
 
 @pytest.mark.asyncio
+async def test_action_required_user_owner_gets_sql_recipe(small_schema):
+    # When the owner is a USER account (email) you CAN log in as, the remediation
+    # is the SQL recipe (not the UI drop-role, which is for app-SP owners).
+    conn = _FakeConn(
+        user="new_sp",
+        has_vec=True,
+        owners=[("executionhistory", "person@databricks.com"), ("agents", "new_sp")],
+        cols=[("executionhistory", "id"), ("agents", "id"), ("agents", "name")],
+    )
+    report = await pf.run_lakebase_preflight(conn)
+    assert report["status"] == pf.STATUS_ACTION_REQUIRED
+    rem = report["remediation"]
+    joined = "\n".join(rem["commands"])
+    assert "CREATE ROLE kasal_shared_owner" in joined
+    assert 'GRANT kasal_shared_owner TO "new_sp" WITH INHERIT TRUE;' in joined
+    assert "REASSIGN OWNED BY CURRENT_USER TO kasal_shared_owner;" in joined
+    # Not the UI drop-role path for a human owner.
+    assert "Drop role" not in "\n".join(rem["steps"])
+
+
+@pytest.mark.asyncio
 async def test_auto_fixable_when_owned_table_missing_column(small_schema):
     # Missing column but the current SP OWNS the table -> self-heal can add it,
     # so it is NOT a blocker (status stays healthy).
