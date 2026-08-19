@@ -1,546 +1,464 @@
 # Kasal API endpoints reference
 
-Complete reference for all available API endpoints in the Kasal platform.
+The routes this platform actually serves, grouped by domain.
+
+**This document is a map, not a contract.** The app exposes **444 routes across
+53 domains** — more than a hand-written page can carry without going stale, which
+is exactly what happened to the previous version of this file (24 of its 63
+documented endpoints did not exist, including a `/crews/{id}/kickoff` pair that
+was never how a crew ran). The authoritative, always-current reference is the
+OpenAPI schema the app generates from its own routers:
+
+```text
+GET /docs          # Swagger UI
+GET /openapi.json  # the machine-readable schema
+```
+
+When those two disagree with this page, the schema is right. See
+[Keeping this page honest](#keeping-this-page-honest) for the check.
 
 ---
 
 ## Base URL
 
-All API endpoints use the following base URL structure:
-
 ```text
-https://<your-app>.databricksapps.com/api/v1
+https://<your-app>.databricksapps.com/api/v1     # Databricks Apps
+http://localhost:8000/api/v1                     # local development
 ```
 
-**Example:**
-```text
-https://<your-app>.aws.databricksapps.com/api/v1/executions
-```
-
-**Local Development:**
-```text
-http://localhost:8000/api/v1
-```
+Every path below is relative to that prefix.
 
 ---
 
 ## Table of contents
 
 - [Authentication](#authentication)
-- [Crews (workflows)](#crews-workflows)
+- [Crews](#crews)
 - [Agents](#agents)
 - [Tasks](#tasks)
-- [Tools](#tools)
+- [Flows](#flows)
 - [Executions](#executions)
+- [Execution history](#execution-history)
+- [Execution traces](#execution-traces)
+- [Tools](#tools)
 - [Models](#models)
 - [API keys](#api-keys)
-- [Power BI integration](#power-bi-integration)
-- [Health and status](#health-and-status)
+- [Schedules](#schedules)
+- [Engine configuration](#engine-configuration)
+- [Other domains](#other-domains)
+- [Conventions](#conventions)
+- [Rate limiting](#rate-limiting)
+- [Keeping this page honest](#keeping-this-page-honest)
 
 ---
 
 ## Authentication
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/auth/login` | User login with credentials |
-| `POST` | `/auth/logout` | User logout |
-| `GET` | `/auth/me` | Get current user information |
-| `POST` | `/auth/refresh` | Refresh JWT token |
+**There is no login endpoint.** Kasal does not issue its own credentials — no
+`/auth/login`, no refresh tokens, no session to establish. Identity arrives on
+each request as headers, set by whatever fronts the app.
 
-**Authentication Header:**
-```text
-Authorization: Bearer <JWT_TOKEN>
-```
+Under **Databricks Apps**, the platform sets them for you:
+
+| Header | Carries |
+| --- | --- |
+| `X-Forwarded-Email` | The caller's identity; the group (teamspace) is derived from it |
+| `X-Forwarded-Access-Token` | The user's Databricks OAuth token, used for on-behalf-of calls |
+
+Behind an **OAuth2 proxy**, the equivalents are read too: `X-Auth-Request-Email`,
+`X-Auth-Request-User`, `X-Auth-Request-Access-Token`.
+
+Two optional headers override the derived context:
+
+| Header | Effect |
+| --- | --- |
+| `group_id` | Act in a specific teamspace rather than the default one for the email |
+| `X-Group-Domain` | Select the group by email domain |
+
+A plain `Authorization: Bearer <token>` is also accepted as a source of the
+access token, but it does **not** by itself establish identity — the email
+header is what determines the group, and group context is what every
+tenant-scoped endpoint filters on.
+
+See `src/backend/src/core/dependencies.py` (`get_group_context`) and
+`src/backend/src/utils/user_context.py`.
 
 ---
 
-## Crews (workflows)
+## Crews
 
-### Crew management
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/crews` | List all crews in the teamspace |
-| `POST` | `/crews` | Create a new crew |
-| `GET` | `/crews/{id}` | Get crew details by ID |
-| `PUT` | `/crews/{id}` | Update crew configuration |
-| `DELETE` | `/crews/{id}` | Delete crew |
-| `POST` | `/crews/{id}/duplicate` | Duplicate crew with new name |
-
-### Crew execution
+A crew is a saved workflow definition. **Running one is not a crew endpoint** —
+see [Executions](#executions).
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/crews/{id}/kickoff` | Start crew execution |
-| `POST` | `/crews/{id}/kickoff-async` | Start async crew execution |
-| `GET` | `/crews/{id}/status` | Get crew execution status |
-| `POST` | `/crews/{id}/stop` | Stop running crew |
+| --- | --- | --- |
+| `GET` | `/crews` | List crews in the teamspace |
+| `POST` | `/crews` | Create a crew |
+| `GET` | `/crews/{crew_id}` | Get a crew |
+| `PUT` | `/crews/{crew_id}` | Update a crew |
+| `DELETE` | `/crews/{crew_id}` | Delete a crew |
+| `DELETE` | `/crews` | Delete every crew in the teamspace |
+| `POST` | `/crews/debug` | Echo a crew payload back with validation detail |
+| `GET` | `/crews/{crew_id}/feedback` | Read feedback recorded against a crew |
+| `POST` | `/crews/{crew_id}/feedback` | Record feedback |
+| `GET` | `/crews/feedback-summary` | Aggregated feedback across crews |
+| `GET` | `/crews/{crew_id}/publish` | Where this crew is published |
+| `POST` | `/crews/{crew_id}/publish` | Publish (e.g. to chat) |
+| `PATCH` | `/crews/{crew_id}/publish` | Change a publication |
+| `DELETE` | `/crews/{crew_id}/publish` | Unpublish |
 
-### Crew export/import
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/crews/{id}/export` | Export crew configuration as JSON |
-| `POST` | `/crews/import` | Import crew from JSON |
+Export lives on its own router: see [Other domains](#other-domains).
 
 ---
 
 ## Agents
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/agents` | List all agents |
-| `POST` | `/agents` | Create a new agent |
-| `GET` | `/agents/{id}` | Get agent details by ID |
-| `PUT` | `/agents/{id}` | Update agent configuration |
-| `DELETE` | `/agents/{id}` | Delete agent |
+| --- | --- | --- |
+| `GET` | `/agents` | List agents |
+| `POST` | `/agents` | Create an agent |
+| `GET` | `/agents/{agent_id}` | Get an agent |
+| `PUT` | `/agents/{agent_id}` | Update selected fields |
+| `PUT` | `/agents/{agent_id}/full` | Replace the whole agent |
+| `DELETE` | `/agents/{agent_id}` | Delete an agent |
+| `DELETE` | `/agents` | Delete every agent in the teamspace |
 
-**Agent Configuration Fields:**
-- `name`: Agent name
-- `role`: Agent role description
-- `goal`: Agent's objective
-- `backstory`: Agent's background context
-- `tools`: Array of tool IDs
-- `tool_configs`: Tool-specific configurations
-- `llm_config`: LLM model and parameters
+**Configuration fields:** `name`, `role`, `goal`, `backstory`, `tools`
+(tool ids), `tool_configs`, `llm`, plus execution limits (`max_iter`,
+`max_rpm`, `max_execution_time`, `max_retry_limit`) and `memory`.
 
 ---
 
 ## Tasks
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/tasks` | List all tasks |
-| `POST` | `/tasks` | Create a new task |
-| `GET` | `/tasks/{id}` | Get task details by ID |
-| `PUT` | `/tasks/{id}` | Update task configuration |
-| `DELETE` | `/tasks/{id}` | Delete task |
+| --- | --- | --- |
+| `GET` | `/tasks` | List tasks |
+| `POST` | `/tasks` | Create a task |
+| `GET` | `/tasks/{task_id}` | Get a task |
+| `PUT` | `/tasks/{task_id}` | Update selected fields |
+| `PUT` | `/tasks/{task_id}/full` | Replace the whole task |
+| `DELETE` | `/tasks/{task_id}` | Delete a task |
+| `DELETE` | `/tasks` | Delete every task in the teamspace |
 
-**Task Configuration Fields:**
-- `name`: Task name
-- `description`: Task description
-- `expected_output`: Expected output format
-- `agent_id`: Assigned agent ID
-- `context`: Context task IDs (dependencies)
-- `tool_configs`: Task-level tool configurations
+**Configuration fields:** `name`, `description`, `expected_output`, `agent_id`,
+`context` (ids of tasks whose output feeds this one), `tools`, `tool_configs`,
+`output_pydantic` / `output_json` for structured output, `guardrail`,
+`human_input`, `async_execution`.
 
 ---
 
-## Tools
-
-### Tool management
+## Flows
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/tools` | List all available tools |
-| `GET` | `/tools/{id}` | Get tool details by ID |
-| `PUT` | `/tools/{id}` | Update tool configuration |
-| `POST` | `/tools/{id}/enable` | Enable tool for the teamspace |
-| `POST` | `/tools/{id}/disable` | Disable tool for the teamspace |
+| --- | --- | --- |
+| `GET` | `/flows` | List flows |
+| `POST` | `/flows` | Create a flow |
+| `GET` | `/flows/{flow_id}` | Get a flow |
+| `PUT` | `/flows/{flow_id}` | Update a flow |
+| `DELETE` | `/flows/{flow_id}` | Delete a flow |
+| `DELETE` | `/flows` | Delete every flow in the teamspace |
+| `POST` | `/flows/debug` | Validate a flow payload |
+| `GET` | `/flows/{flow_id}/checkpoints` | Checkpoints recorded for this flow |
+| `DELETE` | `/flows/{flow_id}/checkpoints/{execution_id}` | Drop one run's checkpoints |
+| `GET`/`POST`/`PATCH`/`DELETE` | `/flows/{flow_id}/publish` | Publication, as for crews |
 
-### Tool categories
-
-**Available Tool Types:**
-- `ai`: AI-powered tools (Dall-E, Perplexity)
-- `database`: Database tools (Genie, Databricks, Power BI)
-- `search`: Search tools (Serper, Knowledge Search)
-- `web`: Web tools (Scrape Website)
-- `integration`: Integration tools (MCP)
-- `development`: Development tools
+Flow *runs* go through `/executions` like everything else.
 
 ---
 
 ## Executions
 
-### Execution management
+**This is how work is started.** A crew or a flow is executed by POSTing its
+configuration — there is no per-crew run endpoint.
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/executions` | List all executions |
-| `GET` | `/executions/{id}` | Get execution details |
-| `GET` | `/executions/{id}/status` | Get execution status |
-| `GET` | `/executions/{id}/logs` | Get execution logs |
-| `POST` | `/executions/{id}/stop` | Stop running execution |
-| `POST` | `/executions/{id}/force-stop` | Force-stop a running execution |
-| `DELETE` | `/executions/{id}` | Delete execution record |
+| --- | --- | --- |
+| `POST` | `/executions` | Start a run (crew or flow) and return its `execution_id` |
+| `GET` | `/executions` | List runs (`limit` 1–100, default 50; `offset`) |
+| `GET` | `/executions/{execution_id}` | Full record including the result |
+| `GET` | `/executions/{execution_id}/status` | Status only — the polling endpoint |
+| `POST` | `/executions/{execution_id}/stop` | Ask a run to stop |
+| `POST` | `/executions/{execution_id}/force-stop` | Kill it |
+| `POST` | `/executions/{execution_id}/resume` | Resume from a checkpoint |
+| `GET` | `/executions/{execution_id}/checkpoints` | Checkpoints for a run |
+| `GET` | `/executions/{execution_id}/checkpoints/{unit_key}` | One checkpointed unit |
+| `DELETE` | `/executions/{execution_id}/checkpoints` | Drop them |
+| `POST` | `/executions/generate-name` | Suggest a run name from the payload |
+| `GET` | `/executions/health` | Liveness of the execution subsystem |
 
-### Execution status values
+**Status values:** `PENDING`, `PREPARING`, `RUNNING`, `COMPLETED`, `FAILED`,
+`CANCELLED`, `STOPPED`.
 
-- `pending`: Execution queued
-- `running`: Execution in progress
-- `completed`: Execution finished successfully
-- `failed`: Execution failed with error
-- `stopped`: Execution manually stopped
+There is **no `/executions/{id}/logs`**. Per-step detail is in the traces
+(below); process logs are streamed over SSE.
 
-### Execution traces
+### Starting a crew run
 
-Trace records capture per-agent / per-task events for a run.
+```bash
+curl -X POST https://<your-app>.databricksapps.com/api/v1/executions \
+  -H "Content-Type: application/json" \
+  -H "X-Forwarded-Email: you@example.com" \
+  -d '{
+        "agents_yaml": {
+          "researcher": {
+            "role": "Research Analyst",
+            "goal": "Find and summarise the relevant material",
+            "backstory": "An analyst who checks sources before answering.",
+            "tools": []
+          }
+        },
+        "tasks_yaml": {
+          "research": {
+            "description": "Research the Swiss fintech market.",
+            "expected_output": "A short briefing with sources.",
+            "agent": "researcher"
+          }
+        },
+        "inputs": {},
+        "model": "databricks-llama-4-maverick",
+        "execution_type": "crew"
+      }'
+```
+
+The response carries `execution_id`; poll
+`/executions/{execution_id}/status` until it reaches a terminal status, then
+read `/executions/{execution_id}` for the result.
+
+To run a **saved** crew, send its stored `agents_yaml` / `tasks_yaml` (read them
+from `GET /crews/{crew_id}`) — or use the UI, which does exactly this.
+
+To run a **flow**, POST the same endpoint with `execution_type: "flow"` and
+either `flow_id` or an inline `nodes` / `edges` definition.
+
+---
+
+## Execution history
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/traces` | List execution traces |
-| `GET` | `/traces/{trace_id}` | Get a single trace item |
-| `GET` | `/traces/execution/{run_id}` | Traces for a run (by run id) |
-| `GET` | `/traces/job/{job_id}` | Traces for a job (by job id) |
-| `GET` | `/traces/job/{job_id}/crew-node-states` | Crew node states for a job |
-| `GET` | `/traces/job/{job_id}/task-states` | Task states for a job |
-| `POST` | `/traces` | Create a trace record |
-| `DELETE` | `/traces/{trace_id}` | Delete a trace item |
-| `DELETE` | `/traces/execution/{run_id}` | Delete traces for a run |
-| `DELETE` | `/traces/job/{job_id}` | Delete traces for a job |
+| --- | --- | --- |
+| `GET` | `/executions/history` | Paged run history for the teamspace |
+| `GET` | `/executions/history/{execution_id}` | One historical run |
+| `DELETE` | `/executions/history/{execution_id}` | Delete one |
+| `DELETE` | `/executions/history` | Delete all history for the teamspace |
+| `GET` | `/executions/history/all-groups` | Across teamspaces (admin) |
+| `GET` | `/executions/{execution_id}/outputs` | Task outputs recorded for a run |
+| `PATCH` | `/executions/{job_id}/result` | Amend a stored result |
+| `DELETE` | `/executions/{job_id}` | Delete a run record |
+
+---
+
+## Execution traces
+
+Per-agent, per-task and per-tool events for a run — what the timeline renders.
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `GET` | `/traces/` | List traces |
+| `POST` | `/traces/` | Record a trace |
+| `DELETE` | `/traces/` | Delete traces |
+| `GET` | `/traces/{trace_id}` | One trace row |
+| `DELETE` | `/traces/{trace_id}` | Delete one |
+| `GET` | `/traces/job/{job_id}` | Every trace for a run (`limit`, `offset`) |
+| `DELETE` | `/traces/job/{job_id}` | Delete them |
+| `GET` | `/traces/job/{job_id}/task-states` | Per-task status map |
+| `GET` | `/traces/job/{job_id}/crew-node-states` | Per-crew-node status map |
+| `GET` | `/traces/execution/{run_id}` | By numeric run id |
+| `DELETE` | `/traces/execution/{run_id}` | Delete by numeric run id |
+
+Note the trailing slash on the collection routes.
+
+---
+
+## Tools
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `GET` | `/tools` | List tools |
+| `GET` | `/tools/enabled` | Only the enabled ones |
+| `GET` | `/tools/global` | Globally available tools |
+| `POST` | `/tools/` | Create a tool |
+| `GET` | `/tools/{tool_id}` | Get a tool |
+| `PUT` | `/tools/{tool_id}` | Update a tool |
+| `DELETE` | `/tools/{tool_id}` | Delete a tool |
+| `PATCH` | `/tools/{tool_id}/toggle-enabled` | Enable / disable — **not** `/enable` or `/disable` |
+| `PATCH` | `/tools/{tool_id}/global-availability` | Make available to every teamspace |
+| `GET` | `/tools/configurations/all` | Every tool configuration |
+| `GET` | `/tools/configurations/{tool_name}` | One tool's configuration |
+| `PUT` | `/tools/configurations/{tool_name}` | Update it |
 
 ---
 
 ## Models
 
-### Model configuration
+Keyed by **model key** (e.g. `databricks-llama-4-maverick`), not a numeric id.
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/models` | List available LLM models |
-| `GET` | `/models/{id}` | Get model configuration |
-| `PUT` | `/models/{id}` | Update model parameters |
-| `POST` | `/models/test` | Test model connection |
+| --- | --- | --- |
+| `GET` | `/models` | List model configurations |
+| `GET` | `/models/enabled` | Only the enabled ones |
+| `GET` | `/models/global` | Global model configurations |
+| `POST` | `/models` | Create one |
+| `GET` | `/models/{model_key}` | Get one |
+| `PUT` | `/models/{model_key}` | Update one |
+| `DELETE` | `/models/{model_key}` | Delete one |
+| `PATCH` | `/models/{model_key}/toggle` | Enable / disable |
+| `PATCH` | `/models/global/{model_key}/toggle` | Toggle globally |
+| `POST` | `/models/enable-all` | Enable every model |
+| `POST` | `/models/disable-all` | Disable every model |
 
-**Supported Model Providers:**
-- Databricks (Foundation Models)
-- OpenAI (GPT-3.5, GPT-4)
-- Anthropic (Claude)
-- Google (Gemini)
-- Azure OpenAI
-- Ollama (Local models)
+There is no `/models/test`. Provider reachability is checked through
+`/databricks/...` and the connection endpoints.
 
 ---
 
 ## API keys
 
-### API key management
+Keyed by **name**, not an id — the name *is* the identifier.
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api-keys` | List all API keys (encrypted) |
-| `POST` | `/api-keys` | Create new API key |
-| `GET` | `/api-keys/{id}` | Get API key details |
-| `PUT` | `/api-keys/{id}` | Update API key value |
-| `DELETE` | `/api-keys/{id}` | Delete API key |
+| --- | --- | --- |
+| `GET` | `/api-keys` | List keys (values never returned) |
+| `POST` | `/api-keys` | Create a key |
+| `PUT` | `/api-keys/{api_key_name}` | Update a key's value |
+| `DELETE` | `/api-keys/{api_key_name}` | Delete a key |
 
-**Common API Keys:**
-- `OPENAI_API_KEY`: OpenAI authentication
-- `ANTHROPIC_API_KEY`: Anthropic Claude authentication
-- `SERPER_API_KEY`: Serper search tool
-- `PERPLEXITY_API_KEY`: Perplexity AI tool
-- `DATABRICKS_TOKEN`: Databricks API access
-- `POWERBI_CLIENT_SECRET`: Power BI service principal
-- `POWERBI_USERNAME`: Power BI device code auth
-- `POWERBI_PASSWORD`: Power BI device code auth
-
-**Security:**
-- All API keys are encrypted at rest
-- Keys are never returned in plain text via API
-- Multi-tenant isolation by group_id
+Values are encrypted at rest, never returned in plain text, and scoped by group.
+Commonly set: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `SERPER_API_KEY`,
+`PERPLEXITY_API_KEY`, `DATABRICKS_TOKEN`, `POWERBI_CLIENT_SECRET`.
 
 ---
 
-## Power BI integration
-
-### Power BI configuration
+## Schedules
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/powerbi/config` | Configure Power BI connection |
-| `GET` | `/powerbi/config` | Get Power BI configuration |
+| --- | --- | --- |
+| `GET` | `/schedules` | List schedules |
+| `POST` | `/schedules` | Create a schedule |
+| `POST` | `/schedules/from-execution` | Turn a past run into a schedule |
+| `GET` | `/schedules/{schedule_id}` | Get one |
+| `PUT` | `/schedules/{schedule_id}` | Update one |
+| `DELETE` | `/schedules/{schedule_id}` | Delete one |
+| `POST` | `/schedules/{schedule_id}/toggle` | Activate / pause |
+| `GET`/`POST` | `/schedules/jobs` | Databricks job bindings |
+| `PUT` | `/schedules/jobs/{job_id}` | Update a job binding |
 
-**Power BI Tool Configuration (Task-Level):**
-```json
-{
-  "tenant_id": "Azure AD Tenant ID",
-  "client_id": "Azure AD Application ID",
-  "semantic_model_id": "Power BI Dataset ID",
-  "workspace_id": "Power BI Workspace ID (optional)",
-  "auth_method": "service_principal or device_code",
-  "databricks_job_id": "Databricks Job ID (optional)"
-}
-```
-
-**Required API Keys:**
-- `POWERBI_CLIENT_SECRET`
-- `POWERBI_USERNAME` (for device_code)
-- `POWERBI_PASSWORD` (for device_code)
-- `DATABRICKS_API_KEY` or `DATABRICKS_TOKEN`
+A scheduled run names no harness, so it takes the configured default — see
+below.
 
 ---
 
-## Health and status
+## Engine configuration
+
+Platform settings, including which agent runtime runs new jobs.
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/health` | API health check |
-| `GET` | `/health/db` | Database connection status |
-| `GET` | `/health/services` | External services status |
-| `GET` | `/version` | API version information |
+| --- | --- | --- |
+| `GET` | `/engine-config/harness` | The configured harness and what is available |
+| `PUT` | `/engine-config/harness` | Change it — applies to runs started afterwards |
+
+A run's harness is decided once, at creation, and recorded on its row; changing
+this setting never re-points a run already under way.
+
+The same router also carries the rest of `engine-config` (16 routes) —
+`flow_enabled`, OpenTelemetry switches and similar.
 
 ---
 
-## Common response formats
+## Other domains
 
-### Success response
+The app serves considerably more than the above. These are real, and documented
+in the OpenAPI schema rather than repeated here:
+
+| Domain | Routes | What it covers |
+| --- | --- | --- |
+| `memory-backend` | 22 | Memory backends, Databricks Vector Search, indices |
+| `database-management` | 21 | Connections, migrations, maintenance |
+| `mcp` | 20 | MCP servers, tools, connection testing |
+| `converters` | 18 | Document and format conversion |
+| `chat-history` | 16 | Chat sessions and their messages |
+| `prompt optimization` | 15 | GEPA prompt optimisation |
+| `databricks-secrets` | 14 | Secret scopes and values |
+| `powerbi` | 14 | Semantic models, business mappings, field synonyms, query |
+| `groups` | 12 | Teamspaces and membership |
+| `Human in the Loop` | 10 | Approval gates for tool calls |
+| `skills` | 10 | Skill definitions attached to agents |
+| `templates` | 9 | Prompt templates |
+| `mlflow` | 9 | Experiments, traces, evaluation |
+| `databricks` | 9 | Workspace configuration and auth |
+| `a2a` / `a2a-agents` | 17 | Agent-to-agent protocol |
+| `crews-export` | 8 | Export a crew as a standalone Databricks App |
+| `users` | 7 | Users and permissions |
+| `Server-Sent Events` | 6 | Live run streaming |
+| `schemas` | 6 | Structured-output schema definitions |
+| `genie`, `agentbricks`, `databricks_knowledge` | 15 | Databricks-native tooling |
+| `health` | 3 | `/health`, `/health/db`, `/health/cache` |
+
+There is no `/health/services` and no `/version`.
+
+---
+
+## Conventions
+
+**Responses are the resource itself.** Endpoints return their Pydantic model
+directly — there is no `{"status": ..., "data": ...}` envelope. A list endpoint
+returns a JSON array (or an object with the collection plus paging fields, e.g.
+`/traces/job/{job_id}` returns `{"traces": [...]}`).
+
+**Errors** are FastAPI's shape:
 
 ```json
-{
-  "status": "success",
-  "data": { ... },
-  "message": "Operation completed successfully"
-}
+{ "detail": "Human-readable message" }
 ```
 
-### Error response
+with the meaning in the HTTP status: `400` invalid input, `403` outside your
+group, `404` unknown id, `409` conflict, `422` schema validation, `500` server
+error.
 
-```json
-{
-  "status": "error",
-  "error": {
-    "code": "ERROR_CODE",
-    "message": "Human-readable error message",
-    "details": { ... }
-  }
-}
-```
+**Paging** is `limit` + `offset`, not `page`. Where a cap exists it is stated on
+the route — `/executions` allows `limit` 1–100 (default 50). Endpoints without
+those parameters return everything for the teamspace.
 
-### Pagination
-
-For list endpoints that support pagination:
-
-```text
-GET /crews?page=1&limit=50&sort=created_at&order=desc
-```
-
-**Query Parameters:**
-- `page`: Page number (default: 1)
-- `limit`: Items per page (default: 50, max: 100)
-- `sort`: Sort field
-- `order`: Sort order (`asc` or `desc`)
+**Tenancy** is implicit. Every tenant-scoped endpoint filters by the group
+derived from your identity headers; you never pass a tenant id in the path.
 
 ---
 
 ## Rate limiting
 
-**Default Limits:**
-- Anonymous: 100 requests/hour
-- Authenticated: 1000 requests/hour
-- Enterprise: 10,000 requests/hour
+Per identity (group, falling back to client IP), applied only to the `/api/`
+surface. SSE streams and health checks are exempt so a long-lived stream cannot
+exhaust a window.
 
-**Rate Limit Headers:**
-```text
-X-RateLimit-Limit: 1000
-X-RateLimit-Remaining: 999
-X-RateLimit-Reset: 1609459200
-```
+| Setting | Default |
+| --- | --- |
+| `RATE_LIMIT_DEFAULT` | `600/minute` |
+| `RATE_LIMIT_STORAGE_URI` | in-memory |
 
----
+Exceeding it returns `429`. If the `limits` package is not installed the
+middleware is a no-op — there is no limiting at all, rather than a stricter
+fallback.
 
-## Memory management
-
-### GET /api/v1/memory/{crew_id}
-**Get crew memory (short-term and long-term)**
-
-```json
-Response: 200 OK
-{
-  "short_term": [
-    {
-      "timestamp": "2024-01-15T10:00:00Z",
-      "content": "Customer prefers email communication"
-    }
-  ],
-  "long_term": [
-    {
-      "category": "preferences",
-      "insights": ["Email preferred", "Weekly reports"]
-    }
-  ]
-}
-```
-
-### POST /api/v1/memory/{crew_id}/clear
-**Clear crew memory**
-
-```json
-Request:
-{
-  "type": "short_term"  // Options: "short_term", "long_term", or "all"
-}
-
-Response: 204 No Content
-```
+See `src/backend/src/core/rate_limit.py`.
 
 ---
 
-## WebSocket endpoints
+## Keeping this page honest
 
-### Real-time execution updates
-
-```text
-ws://localhost:8000/ws/executions/{execution_id}
-```
-
-**Message Format:**
-```json
-{
-  "type": "status_update",
-  "execution_id": "abc123",
-  "status": "running",
-  "progress": 45,
-  "message": "Processing task 2 of 5..."
-}
-```
-
----
-
-## Examples
-
-### Create and execute a crew
+The previous version of this file drifted to 38% fiction because nothing ever
+compared it with the app. To check it:
 
 ```bash
-# 1. Create a crew
-curl -X POST http://localhost:8000/api/v1/crews \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Sales Analysis Crew",
-    "agents": [...],
-    "tasks": [...]
-  }'
-
-# Response: {"id": "crew_123", ...}
-
-# 2. Start execution
-curl -X POST http://localhost:8000/api/v1/crews/crew_123/kickoff \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"inputs": {"query": "Analyze Q4 sales"}}'
-
-# Response: {"execution_id": "exec_456", ...}
-
-# 3. Monitor execution
-curl -X GET http://localhost:8000/api/v1/executions/exec_456/status \
-  -H "Authorization: Bearer $TOKEN"
+cd src/backend
+uv run python - <<'PY'
+from src.api import api_router
+from src.config.settings import settings
+for r in sorted(api_router.routes, key=lambda r: getattr(r, "path", "")):
+    for m in sorted(getattr(r, "methods", set()) - {"HEAD", "OPTIONS"}):
+        print(f"{m:7} {settings.API_V1_STR}{r.path}")
+PY
 ```
 
-### Configure Power BI tool in task
-
-```bash
-# Create task with PowerBI configuration
-curl -X POST http://localhost:8000/api/v1/tasks \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Analyze Sales Data",
-    "description": "Analyze sales trends using Power BI",
-    "agent_id": "agent_123",
-    "tools": [71],
-    "tool_configs": {
-      "PowerBIAnalysisTool": {
-        "tenant_id": "<tenant-id>",
-        "client_id": "<client-id>",
-        "semantic_model_id": "<semantic-model-id>",
-        "workspace_id": "<workspace-id>",
-        "auth_method": "service_principal",
-        "databricks_job_id": "<databricks-job-id>"
-      }
-    }
-  }'
-```
-
----
-
-## Error codes
-
-| Code | Description |
-|------|-------------|
-| `AUTH_001` | Invalid or expired token |
-| `AUTH_002` | Insufficient permissions |
-| `CREW_001` | Crew not found |
-| `CREW_002` | Invalid crew configuration |
-| `EXEC_001` | Execution failed |
-| `EXEC_002` | Execution timeout |
-| `TOOL_001` | Tool not available |
-| `TOOL_002` | Tool configuration error |
-| `DB_001` | Database connection error |
-| `EXT_001` | External service unavailable |
-
----
-
-## SDK examples
-
-### Python SDK
-
-```python
-from kasal import KasalClient
-
-# Initialize client
-client = KasalClient(
-    base_url="http://localhost:8000",
-    token="your-jwt-token"
-)
-
-# Create and execute crew
-crew = client.crews.create(
-    name="Data Analysis Crew",
-    agents=[...],
-    tasks=[...]
-)
-
-execution = crew.kickoff(inputs={"query": "Analyze data"})
-result = execution.wait()  # Blocks until complete
-
-print(result.output)
-```
-
-### JavaScript/TypeScript SDK
-
-```typescript
-import { KasalClient } from '@kasal/sdk';
-
-const client = new KasalClient({
-  baseUrl: 'http://localhost:8000',
-  token: 'your-jwt-token'
-});
-
-// Create and execute crew
-const crew = await client.crews.create({
-  name: 'Data Analysis Crew',
-  agents: [...],
-  tasks: [...]
-});
-
-const execution = await crew.kickoff({
-  inputs: { query: 'Analyze data' }
-});
-
-// Stream results
-execution.on('status', (status) => {
-  console.log('Status:', status);
-});
-
-const result = await execution.wait();
-console.log('Result:', result.output);
-```
-
----
-
-## Additional resources
-
-- **API Playground**: `/api/playground`
-- **OpenAPI Schema**: `/api/openapi.json`
-- **Swagger UI**: `/api/docs`
-- **ReDoc**: `/api/redoc`
-
-## See also
-- [Power BI tools reference](./powerbi/README.md)
-- [Power BI comprehensive analysis tool](./powerbi/tool-72-comprehensive-analysis.md)
-- [Crew export and deployment guide](./crew-export-deployment.md)
-- [Developer guide](./DEVELOPER_GUIDE.md)
-- [Architecture guide](./ARCHITECTURE_GUIDE.md)
-
-Back to the [documentation hub](./README.md).
+Anything in this document that is not in that output does not exist. When they
+disagree, fix the document — and prefer sending people to `/docs`, which cannot
+drift.
