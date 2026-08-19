@@ -17,6 +17,7 @@ from src.services.llm.handlers.databricks_retry_llm import (
     _is_gemini_model,
     _resolve_schema_refs,
     _sanitize_tools_for_gemini,
+    _strip_tool_strict,
 )
 
 
@@ -492,6 +493,52 @@ class TestIsGeminiModel:
     def test_empty_and_none(self):
         assert _is_gemini_model("") is False
         assert _is_gemini_model(None) is False
+
+
+class TestStripToolStrict:
+    """Test suite for _strip_tool_strict helper.
+
+    CrewAI stamps ``"strict": True`` inside every tool's ``function`` schema;
+    Databricks endpoints reject it with 400
+    ``tools.0.custom.strict: Extra inputs are not permitted``.
+    """
+
+    def test_removes_strict_from_function_schema(self):
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "my_tool",
+                    "description": "d",
+                    "parameters": {"type": "object", "properties": {}},
+                    "strict": True,
+                },
+            }
+        ]
+        _strip_tool_strict(tools)
+        assert "strict" not in tools[0]["function"]
+        # The rest of the schema is preserved.
+        assert tools[0]["function"]["name"] == "my_tool"
+
+    def test_removes_top_level_strict(self):
+        tools = [{"type": "custom", "strict": True, "name": "t"}]
+        _strip_tool_strict(tools)
+        assert "strict" not in tools[0]
+
+    def test_no_op_when_no_strict(self):
+        tools = [{"type": "function", "function": {"name": "clean"}}]
+        _strip_tool_strict(tools)
+        assert tools == [{"type": "function", "function": {"name": "clean"}}]
+
+    def test_no_op_when_tools_none_or_empty(self):
+        _strip_tool_strict(None)  # no error
+        _strip_tool_strict([])  # no error
+
+    def test_skips_non_dict_tools(self):
+        tools = ["nope", {"function": {"name": "f", "strict": True}}]
+        _strip_tool_strict(tools)
+        assert tools[0] == "nope"
+        assert "strict" not in tools[1]["function"]
 
 
 class TestSanitizeToolsForGemini:

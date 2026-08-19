@@ -918,6 +918,7 @@ class DatabricksRetryLLM(LLM):
         )
         if tools and isinstance(tools, list):
             _sanitize_tools_for_gemini(tools, str(getattr(self, "model", "")))
+            _strip_tool_strict(tools)
         msg_count = len(fixed_messages) if isinstance(fixed_messages, list) else 1
 
         # --- Tool-call limiter: prevent infinite tool-calling loops ---
@@ -1128,6 +1129,9 @@ class DatabricksRetryLLM(LLM):
 
         fixed_messages = self._fix_message_format_for_llama(messages, crew_log)
         fixed_messages = self._sanitize_messages_for_databricks(fixed_messages)
+        if tools and isinstance(tools, list):
+            _sanitize_tools_for_gemini(tools, str(getattr(self, "model", "")))
+            _strip_tool_strict(tools)
 
         try:
             result = await super().acall(
@@ -1254,6 +1258,30 @@ def _merge_system_messages_for_gemini(messages, model):
     messages.append(merged)
     messages.extend(non_system)
     return messages
+
+
+def _strip_tool_strict(tools) -> None:
+    """Remove ``strict`` from tool function schemas.
+
+    CrewAI's tool converter (``crewai.utilities.agent_utils``) stamps
+    ``"strict": True`` inside every tool's ``function`` schema. Databricks
+    serving endpoints reject it with 400
+    ``tools.0.custom.strict: Extra inputs are not permitted`` (the gateway
+    surfaces the ``function`` variant as ``custom``). ``strict`` only tightens
+    argument validation, so dropping it is safe. Modifies the list in-place.
+    This handler serves only Databricks endpoints, so no provider that honours
+    ``strict`` is affected.
+    """
+    if not tools or not isinstance(tools, list):
+        return
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        func = tool.get("function")
+        if isinstance(func, dict):
+            func.pop("strict", None)
+        # Some converters place it at the top level; drop that too.
+        tool.pop("strict", None)
 
 
 def _sanitize_tools_for_gemini(tools, model):

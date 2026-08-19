@@ -142,7 +142,11 @@ def build_kasal_backed_llm(inner: Any) -> Any:
                 available_functions,
                 from_task,
                 from_agent,
-                response_model,
+                # response_model MUST be keyword, not positional. DatabricksRetryLLM.call
+                # accepts it via **kwargs (not a named positional), so a 7th positional
+                # arg raises "takes from 2 to 7 positional arguments but 8 were given".
+                # The base transport and DatabricksResponsesLLM take it as a keyword too.
+                response_model=response_model,
             )
             # A list means the model chose tools and the transport handed the
             # decision back for CrewAI's executor to act on — see
@@ -168,7 +172,8 @@ def build_kasal_backed_llm(inner: Any) -> Any:
                 available_functions,
                 from_task,
                 from_agent,
-                response_model,
+                # Keyword, not positional — see the note in call() above.
+                response_model=response_model,
             )
             if isinstance(answer, list):
                 return _as_crewai_tool_calls(answer)

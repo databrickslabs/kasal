@@ -348,6 +348,39 @@ class TestPrepareResponsesParams:
         for item in user_items:
             assert item.get("content") is not None
 
+    def test_strips_cache_breakpoint_from_input(self, handler):
+        """CrewAI stamps a top-level ``cache_breakpoint`` flag on messages for
+        prompt caching; the Responses API rejects it with 400 "Unknown
+        parameter: 'input[N].cache_breakpoint'", so it must be stripped."""
+        messages = [
+            {"role": "user", "content": "Hello", "cache_breakpoint": True},
+            {"role": "system", "content": "Be concise", "cache_breakpoint": True},
+        ]
+        params = handler._prepare_responses_params(messages)
+        for item in params["input"]:
+            if isinstance(item, dict):
+                assert "cache_breakpoint" not in item
+
+    def test_strips_empty_name_from_input(self, handler):
+        """CrewAI can emit a message with ``name=""``; the Responses API rejects
+        it with 400 "Invalid 'input[N].name': empty string", so a blank name
+        must be dropped (the field is optional)."""
+        messages = [
+            {"role": "user", "content": "Hi", "name": ""},
+            {"role": "assistant", "content": "Hello", "name": "assistant"},
+        ]
+        params = handler._prepare_responses_params(messages)
+        for item in params["input"]:
+            if isinstance(item, dict):
+                # No item may carry an empty name; a real name is preserved.
+                assert item.get("name") != ""
+        named = [
+            it
+            for it in params["input"]
+            if isinstance(it, dict) and it.get("name") == "assistant"
+        ]
+        assert len(named) == 1
+
     def test_truncates_long_ids(self, handler):
         """IDs longer than 64 chars should be truncated."""
         long_id = "x" * 100

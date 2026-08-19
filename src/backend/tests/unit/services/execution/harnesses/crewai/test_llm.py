@@ -62,8 +62,14 @@ class TestTheCredentialStaysInOnePlace:
 
 
 class TestForwarding:
-    def test_call_forwards_every_argument_positionally_and_in_order(self):
-        """CrewAI and the transport agree on the signature; keep it that way."""
+    def test_call_forwards_every_argument_in_order(self):
+        """CrewAI and the transport agree on the signature; keep it that way.
+
+        ``response_model`` is forwarded by KEYWORD, not positionally:
+        ``DatabricksRetryLLM.call`` accepts it via ``**kwargs`` (not a named
+        positional), so a 7th positional arg raised "takes from 2 to 7 positional
+        arguments but 8 were given". See ``test_call_tolerates_kwargs_only_inner``.
+        """
         inner = MagicMock(model="m", temperature=None, stop=[], provider="openai")
         inner.call.return_value = "answer"
         wrapped = build_kasal_backed_llm(inner)
@@ -77,8 +83,40 @@ class TestForwarding:
 
         assert result == "answer"
         inner.call.assert_called_once_with(
-            "hello", tools, callbacks, functions, "task", "agent", "model"
+            "hello",
+            tools,
+            callbacks,
+            functions,
+            "task",
+            "agent",
+            response_model="model",
         )
+
+    def test_call_tolerates_kwargs_only_inner(self):
+        """Regression: a transport whose ``call`` takes ``response_model`` only via
+        ``**kwargs`` (DatabricksRetryLLM's shape) must not raise a positional-arity
+        TypeError. Forwarding ``response_model`` by keyword is what makes this hold."""
+        captured = {}
+
+        def inner_call(
+            messages,
+            tools=None,
+            callbacks=None,
+            available_functions=None,
+            from_task=None,
+            from_agent=None,
+            **kwargs,
+        ):
+            captured.update(kwargs)
+            return "ok"
+
+        inner = MagicMock(model="m", temperature=None, stop=[], provider="openai")
+        inner.call = inner_call
+        wrapped = build_kasal_backed_llm(inner)
+
+        result = wrapped.call("hi", response_model="MySchema")
+        assert result == "ok"
+        assert captured.get("response_model") == "MySchema"
 
     @pytest.mark.asyncio
     async def test_acall_forwards_to_the_transport_s_own_acall(self):
