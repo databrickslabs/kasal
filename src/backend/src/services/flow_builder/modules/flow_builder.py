@@ -155,7 +155,7 @@ class FlowBuilder:
         Returns:
             CrewAIFlow: A configured CrewAI Flow instance
         """
-        logger.info("Building CrewAI Flow")
+        logger.info("Building the flow")
         if resume_from_crew_sequence is not None:
             logger.info(
                 f"Resume from crew sequence: {resume_from_crew_sequence} "
@@ -384,6 +384,7 @@ class FlowBuilder:
                 user_token=user_token,
                 group_id=group_id,
                 checkpoint_identities=checkpoint_identities,
+                resume_from_execution_id=resume_from_execution_id,
             )
 
             logger.info("=" * 100)
@@ -517,6 +518,7 @@ class FlowBuilder:
         user_token=None,
         group_id=None,
         checkpoint_identities=None,
+        resume_from_execution_id=None,
     ):
         """
         Create a dynamic flow class with all start, listener, and router methods.
@@ -658,12 +660,22 @@ class FlowBuilder:
         # Decided ONCE for the whole flow, before any crew is built: a crew's
         # verdict depends on crews that may be built after it (declaration
         # order is not dependency order), so it cannot be answered lazily.
+        # Is this run continuing ITSELF (a gate approved, a pause released), or
+        # resuming a checkpoint written by a DIFFERENT run? Only the second can
+        # have been edited in between — see CrewSkipPolicy.decide.
+        this_job_id = (callbacks or {}).get("job_id") if isinstance(callbacks, dict) else None
+        same_execution = bool(
+            resume_from_execution_id
+            and this_job_id
+            and str(resume_from_execution_id) == str(this_job_id)
+        )
         skip_policy = CrewSkipPolicy.decide(
             resume_from_crew_sequence,
             checkpoint_identities,
             starting_points=starting_points,
             listener_crews=listener_crews,
             flow_config=flow_config,
+            same_execution=same_execution,
         )
         if resume_from_crew_sequence is not None:
             logger.info("=" * 100)

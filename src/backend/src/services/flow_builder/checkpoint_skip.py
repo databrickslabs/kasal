@@ -81,6 +81,7 @@ class CrewSkipPolicy:
         starting_points: Optional[List[Any]] = None,
         listener_crews: Optional[List[Any]] = None,
         flow_config: Optional[Dict[str, Any]] = None,
+        same_execution: bool = False,
     ) -> "CrewSkipPolicy":
         """Work out which crews must re-run, before any of them is built.
 
@@ -101,6 +102,28 @@ class CrewSkipPolicy:
         """
         if resume_from_crew_sequence is None:
             return cls(None)
+
+        if same_execution:
+            # A run continuing ITSELF — a HITL gate approved, a pause released.
+            # Nobody edited anything between the pause and the release, so a
+            # changed identity here is drift in what the hash is taken over
+            # (a tool set that resolved differently on the rebuild, a model
+            # string that arrived by another route), not a different crew.
+            #
+            # Acting on that drift replays work this very execution already
+            # completed: one measured run re-ran its news-gathering crew — two
+            # and a half minutes of the same searches — every time its gate was
+            # approved, and the timeline showed each task twice.
+            #
+            # The identity check still guards the case it was written for:
+            # resuming a checkpoint from a DIFFERENT run, where the crew really
+            # may have been edited in between.
+            logger.info(
+                "  ⏭️  Resuming the same execution — replaying every crew before "
+                "sequence %s without re-verifying identity",
+                resume_from_crew_sequence,
+            )
+            return cls(resume_from_crew_sequence, set())
 
         identities = checkpoint_identities or {}
         sp_configs = (flow_config or {}).get("startingPoints", []) or []
@@ -202,15 +225,55 @@ def _identity_changed(
         verify_crew_identity,
     )
 
-    verdict = verify_crew_identity(
-        compute_crew_identity(crew_name, crew_tasks), identities.get(crew_name)
-    )
+    current = compute_crew_identity(crew_name, crew_tasks)
+    stored = identities.get(crew_name)
+    verdict = verify_crew_identity(current, stored)
     if verdict != MATCH and verdict != CHANGED:
         logger.warning(
             f"  ⚠️  Crew '{crew_name}' is UNVERIFIED — the checkpoint carries no "
             f"identity, so an edit to it cannot be detected"
         )
+    if verdict == CHANGED:
+        # A hash mismatch is a verdict, not an explanation, and this one costs
+        # the user a full replay of the crew and everything downstream. When a
+        # HITL gate resumes a run nobody edited, "it changed" is the answer that
+        # cannot be acted on — so say WHICH ingredient differs.
+        logger.warning(
+            f"  🔎 Crew '{crew_name}' identity {current} != checkpoint {stored}; "
+            f"ingredients now: {_identity_ingredients(crew_name, crew_tasks)}"
+        )
     return verdict == CHANGED
+
+
+def _identity_ingredients(crew_name: Optional[str], crew_tasks: Any) -> str:
+    """The values the crew hash is taken over, for a mismatch log line.
+
+    Bounded and never raises: this runs only on the unhappy path, and a
+    diagnostic that can fail the build it is diagnosing is worse than none.
+    """
+    from src.services.execution.runtime.identity import (
+        agent_fingerprint,
+        task_identity,
+    )
+
+    try:
+        rows = []
+        for task in list(crew_tasks or [])[:8]:
+            agent = getattr(task, "agent", None)
+            tools = getattr(task, "tools", None) or []
+            rows.append(
+                {
+                    "key": str(getattr(task, "key", None))[:12],
+                    "identity": str(task_identity(task))[:12],
+                    "agent": agent_fingerprint(agent)[:120],
+                    "task_tools": sorted(
+                        str(getattr(tool, "name", tool)) for tool in tools
+                    ),
+                }
+            )
+        return f"crew={crew_name!r} tasks={rows}"
+    except Exception as e:  # noqa: BLE001 — diagnostics never fail a build
+        return f"(could not describe: {e})"
 
 
 def _propagate(changed: Set[int], upstream: Dict[int, Set[int]]) -> Set[int]:
