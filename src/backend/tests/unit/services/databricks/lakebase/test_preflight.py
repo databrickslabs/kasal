@@ -87,10 +87,15 @@ async def test_action_required_when_orphaned_table_missing_column(small_schema):
     assert rem is not None
     assert "executionhistory" in rem["summary"]
     assert "old_sp" in rem["summary"] and "new_sp" in rem["summary"]
-    # Reference SQL targets the orphaned owner and reassigns to the current SP.
-    joined = "\n".join(rem["commands"])
-    assert 'REASSIGN OWNED BY "old_sp" TO "new_sp"' in joined
-    assert 'ALTER TABLE "executionhistory" OWNER TO "new_sp"' in joined
+    # The fix is the UI "Drop role → Reassign owned objects" flow, not SQL.
+    steps = "\n".join(rem["steps"])
+    assert "Drop role" in steps
+    assert "Reassign owned" in steps
+    assert "old_sp" in steps  # names the orphaned owner role to drop
+    assert "new_sp" in steps  # reassign target = this app's SP
+    # No SQL is suggested (every SQL-editor path fails on Lakebase here).
+    assert rem["commands"] == []
+    assert "REASSIGN OWNED" not in steps and "ALTER TABLE" not in steps
 
 
 @pytest.mark.asyncio
@@ -112,6 +117,39 @@ async def test_auto_fixable_when_owned_table_missing_column(small_schema):
     eh = next(t for t in report["tables"] if t["name"] == "executionhistory")
     assert eh["status"] == "auto_fixable"
     assert eh["missing_columns"] == ["harness"]
+
+
+@pytest.mark.asyncio
+async def test_enable_blocked_when_preflight_not_healthy(monkeypatch):
+    """The connect gate: enable_lakebase must NOT flip 'enabled' when the preflight
+    is not healthy — it returns success=False with the remediation instead."""
+    from src.services.databricks.lakebase.service import LakebaseService
+
+    svc = LakebaseService(session=None)
+
+    saved = {}
+
+    async def fake_get_config():
+        return {"enabled": False}
+
+    async def fake_save_config(cfg):
+        saved.update(cfg)
+
+    monkeypatch.setattr(svc, "get_config", fake_get_config)
+    monkeypatch.setattr(svc, "save_config", fake_save_config)
+
+    async def fake_preflight(service, instance_name=None):
+        return {
+            "status": pf.STATUS_ACTION_REQUIRED,
+            "remediation": {"summary": "fix ownership"},
+        }
+
+    monkeypatch.setattr(pf, "preflight_via_service", fake_preflight)
+
+    result = await svc.enable_lakebase("inst", "endpoint")
+    assert result["success"] is False
+    assert result["preflight"]["status"] == pf.STATUS_ACTION_REQUIRED
+    assert saved == {}  # config was NOT saved — Lakebase not connected
 
 
 @pytest.mark.asyncio

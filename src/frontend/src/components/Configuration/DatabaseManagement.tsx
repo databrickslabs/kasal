@@ -1583,6 +1583,10 @@ const DatabaseManagement: React.FC = () => {
                                   // Refresh config and info in background — don't block the button
                                   loadLakebaseConfig().catch(() => {});
                                   loadDatabaseInfo().catch(() => {});
+                                } else {
+                                  // Preflight gate blocked the connect — surface why.
+                                  const pf = response.data.preflight;
+                                  setError(pf?.remediation?.summary || response.data.message || 'Lakebase did not connect: preflight diagnostics did not pass. Run diagnostics for details.');
                                 }
                               } else {
                                 // The four setup options, and exactly what each does:
@@ -1848,6 +1852,10 @@ const DatabaseManagement: React.FC = () => {
                       setSuccess('Connected to Lakebase. Using existing schema.');
                       await loadLakebaseConfig();
                       await loadDatabaseInfo();
+                    } else {
+                      // Preflight gate blocked the connect — surface why.
+                      const pf = response.data.preflight;
+                      setError(pf?.remediation?.summary || response.data.message || 'Lakebase did not connect: preflight diagnostics did not pass. Run diagnostics for details.');
                     }
                   } catch (err: unknown) {
                     const errorMessage = isErrorWithResponse(err)

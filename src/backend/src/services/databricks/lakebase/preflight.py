@@ -204,9 +204,12 @@ async def run_lakebase_preflight(conn) -> Dict[str, Any]:
     if self_fixable:
         checks.append(
             {
-                "name": "self_heal_pending",
+                "name": "self_heal_ready",
                 "ok": True,
-                "detail": f"{len(self_fixable)} owned table(s) will be auto-migrated on startup",
+                "detail": (
+                    f"{len(self_fixable)} owned table(s) missing columns — reconciled "
+                    f"automatically when you connect/enable Lakebase (no restart needed)"
+                ),
             }
         )
 
@@ -299,30 +302,35 @@ def _build_remediation(
         f"Kasal cannot update the Lakebase schema: table(s) [{tables}] are owned "
         f"by a different Postgres role ({', '.join(owners)}), not this app's "
         f"service principal ({app_sp}). On PostgreSQL, adding a column is "
-        f"owner-only; on Lakebase SET ROLE is disabled and databricks_superuser "
-        f"cannot reassign another role's objects, so the app cannot fix this "
-        f"itself. This typically happens when a Databricks App is deleted and "
-        f"recreated (a new service principal is minted, orphaning the old one's "
-        f"tables)."
+        f"owner-only, and on Lakebase SET ROLE is disabled and you cannot log in as "
+        f"another app's service principal — so this cannot be fixed from the SQL "
+        f"editor. It happens when a Databricks App is deleted and recreated (a new "
+        f"service principal is minted, orphaning the old one's tables). Fix it from "
+        f"the Lakebase UI, which reassigns ownership through the control plane."
     )
+    # The reliable, self-serve fix is a UI action, not SQL: dropping the orphaned
+    # role with "Reassign owned objects" runs through the control plane, which has
+    # the privilege the SQL editor and even a databricks_superuser lack. No SQL, no
+    # logging in as the old SP, no Support ticket.
     steps = [
-        "Recommended — point Kasal at a fresh schema this app owns: set the "
-        "Lakebase schema to a new name (e.g. 'kasal2') the current service "
-        "principal will create and own; Kasal builds the full up-to-date schema "
-        "there. (Existing data stays in the old schema; migrate it if needed.)",
-        "Or reassign ownership: in Compute → Apps → this app → Edit, REMOVE the "
-        "Lakebase (Database) resource with the 'Can manage' permission — the "
-        "platform reassigns the old service principal's objects — then re-add the "
-        "resource and redeploy.",
+        "Open the Lakebase project's Roles list (Compute → Database → your "
+        "project → Roles).",
+        f"Click the '⋮' menu next to the owner role '{old_owner}' and choose "
+        f"'Drop role'.",
+        "In the dialog, turn ON 'Reassign owned objects' and set 'Reassign owned "
+        f"to' = this app's service principal ('{app_sp}'). Confirm. (The warning "
+        "that some grants can't be reassigned is fine — only stale grants to the "
+        "dropped role are removed, not your tables.)",
+        "Redeploy this app. On startup Kasal adds the missing columns (it now owns "
+        "the tables) and the app works — no data loss, no SQL.",
         "Prevention: redeploy the app in place; never delete + recreate it (that "
-        "rotates the service principal). If you must recreate, remove the Lakebase "
-        "resource first so ownership is reassigned cleanly.",
+        "rotates the service principal and re-orphans the tables). If you must "
+        "recreate, remove the Lakebase resource with 'Can manage' first so the "
+        "platform reassigns ownership cleanly.",
     ]
-    # Reference SQL for an operator who has a privileged Postgres identity
-    # (the object owner, or Databricks support / cloud_admin). A plain app SP
-    # cannot run these on Lakebase (SET ROLE is disabled).
-    commands = [
-        f"-- Run as a role that can act as {old_owner} (owner / cloud_admin):",
-        f'REASSIGN OWNED BY "{old_owner}" TO "{app_sp}";',
-    ] + [f'ALTER TABLE "{o["table"]}" OWNER TO "{app_sp}";' for o in orphaned]
+    # No SQL commands — the SQL-editor paths (REASSIGN/ALTER OWNER, SET ROLE) all
+    # fail on Lakebase for a table owned by an app SP you cannot log in as. The UI
+    # drop-with-reassign above is the only self-serve fix. Support (cloud_admin) is
+    # the fallback if the UI option is unavailable.
+    commands: List[str] = []
     return {"summary": summary, "steps": steps, "commands": commands}

@@ -1943,6 +1943,27 @@ class LakebaseService(BaseService):
         # Get current config
         config = await self.get_config()
 
+        # PREFLIGHT GATE: only connect if diagnostics pass. Databricks Apps do not
+        # restart, so a schema the app SP cannot manage (e.g. tables orphaned by an
+        # app delete+recreate) would 500 every request with no way to self-heal.
+        # Refuse to flip the 'enabled' flag in that case and return the remediation,
+        # so the app keeps running on its current database instead of breaking.
+        # (auto_fixable = owned tables missing columns still reports 'healthy'; the
+        # self-heal below adds those columns on connect.)
+        from src.services.databricks.lakebase.preflight import preflight_via_service
+
+        preflight = await preflight_via_service(self, instance_name)
+        if preflight.get("status") != "healthy":
+            return {
+                "success": False,
+                "message": (
+                    "Lakebase not connected: preflight diagnostics did not pass. "
+                    "Fix the reported issue, then connect again."
+                ),
+                "preflight": preflight,
+                "config": config,  # unchanged — 'enabled' NOT flipped
+            }
+
         # Update config with instance details
         config["instance_name"] = instance_name
         config["endpoint"] = endpoint
@@ -1956,10 +1977,44 @@ class LakebaseService(BaseService):
             "success": True,
             "message": "Lakebase enabled successfully. Next request will use Lakebase.",
             "config": config,
+            "preflight": preflight,
         }
 
         if not expand_schema:
-            # Plain connect: use the existing schema exactly as-is, create nothing.
+            # Plain connect: do NOT create tables, but DO reconcile COLUMNS now.
+            # Databricks Apps never restart, so the startup self-heal never runs
+            # for a runtime connect — a column added since the instance was
+            # provisioned (e.g. executionhistory.harness) would otherwise stay
+            # missing until a redeploy and 500 every request. run_schema_self_heal
+            # is idempotent and non-destructive (ADD COLUMN IF NOT EXISTS) and only
+            # succeeds on tables the app SP owns; on a not-yet-owned schema it is a
+            # safe no-op (the preflight surfaces the ownership fix). Best-effort.
+            try:
+                cred = await self.connection_service.generate_credentials(instance_name)
+                pg_user = await self.connection_service.get_username()
+                lakebase_engine = (
+                    await self.connection_service.create_lakebase_engine_async(
+                        endpoint, pg_user, cred.token
+                    )
+                )
+                try:
+                    from src.db.session import run_schema_self_heal
+
+                    async with lakebase_engine.begin() as conn:
+                        await self.schema_service.set_search_path_async(conn)
+                        await run_schema_self_heal(conn)
+                    result["schema_reconcile"] = "reconciled"
+                    logger.info(
+                        "Lakebase columns reconciled on connect (no restart needed)"
+                    )
+                finally:
+                    await lakebase_engine.dispose()
+            except Exception as heal_err:  # noqa: BLE001 — never block enable
+                result["schema_reconcile"] = "skipped"
+                logger.warning(
+                    f"Lakebase column reconcile on connect skipped (non-fatal): "
+                    f"{heal_err}"
+                )
             return result
 
         # Expand: reconcile the schema NON-DESTRUCTIVELY so an EXISTING Kasal

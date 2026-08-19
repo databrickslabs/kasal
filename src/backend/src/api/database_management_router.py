@@ -922,20 +922,12 @@ async def enable_lakebase_without_migration(
                 "Provide the endpoint manually or verify the instance exists."
             )
 
-    result = await service.enable_lakebase(
+    # enable_lakebase runs the preflight gate itself: it refuses to connect
+    # (success=False + preflight remediation) unless diagnostics pass, and attaches
+    # the preflight report to the result either way.
+    return await service.enable_lakebase(
         instance_name, endpoint, expand_schema=expand_schema
     )
-    # Attach a preflight report so the UI can immediately flag whether this app's
-    # service principal can actually keep the schema up to date (owns the tables),
-    # or surface the remediation if not. Best-effort: never fail enable on it.
-    try:
-        from src.services.databricks.lakebase.preflight import preflight_via_service
-
-        if isinstance(result, dict):
-            result["preflight"] = await preflight_via_service(service, instance_name)
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"enable preflight skipped: {e}")
-    return result
 
 
 @router.post("/lakebase/test-connection", dependencies=_SYSTEM_ADMIN_ONLY)
