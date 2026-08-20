@@ -21,7 +21,11 @@ from src.db.lakebase_session import (
     get_lakebase_session,
 )
 from src.db.lakebase_state import is_fallback_allowed, record_successful_connection
-from src.db.session import _request_session, async_session_factory
+from src.db.session import (
+    _enter_request_session,
+    _exit_request_session,
+    async_session_factory,
+)
 
 logger_manager = LoggerManager.get_instance()
 logger = logger_manager.database
@@ -302,15 +306,12 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
                     instance_name, user_token, user_email
                 ) as session:
                     record_successful_connection()
-                    token = _request_session.set(session)
+                    tokens = _enter_request_session(session)
                     try:
                         session_yielded = True
                         yield session
                     finally:
-                        try:
-                            _request_session.reset(token)
-                        except ValueError:
-                            pass
+                        _exit_request_session(tokens)
                 return
             except GeneratorExit:
                 return
@@ -345,7 +346,7 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
     # Use regular database session with proper lifecycle management
     logger.debug("🔄 DATABASE ROUTER: Using PostgreSQL/SQLite")
     async with async_session_factory() as session:
-        token = _request_session.set(session)
+        tokens = _enter_request_session(session)
         try:
             yield session
             await session.commit()
@@ -369,8 +370,5 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
                 await session.rollback()
                 raise
         finally:
-            try:
-                _request_session.reset(token)
-            except ValueError:
-                pass
+            _exit_request_session(tokens)
             await session.close()

@@ -74,18 +74,14 @@ class ProgressiveGenerationMixin:
             is_lakebase_enabled,
         )
         from src.db.lakebase_session import get_lakebase_session
-        from src.db.session import (
-            detach_request_session,
-            get_isolated_db_session,
-        )
+        from src.db.session import get_isolated_db_session
 
-        # This runs via asyncio.create_task, so it inherited a COPY of the
-        # dispatch request's context — including the request-scoped DB session,
-        # which FastAPI has already closed. Detach it so every
-        # routed_scoped_session() below (notably the model-config read inside
-        # LLMManager.configure_kasal_llm during planning) opens a fresh session
-        # instead of failing with "Cannot operate on a closed database".
-        detach_request_session()
+        # This runs via asyncio.create_task. Every routed_scoped_session() below
+        # (notably the model-config read inside LLMManager.configure_kasal_llm
+        # during planning) opens a FRESH session for it automatically: a child
+        # task has a different current_task(), so the ownership check in
+        # routed_scoped_session never reuses the request's (already-closed)
+        # session. (Before that rule this needed an explicit detach.)
 
         if mlflow_enabled:
             try:

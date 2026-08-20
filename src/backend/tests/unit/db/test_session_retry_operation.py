@@ -233,61 +233,21 @@ class TestRoutedScopedSession:
     @pytest.mark.asyncio
     async def test_reuses_existing_request_session(self):
         """Inside request context, returns the stored ContextVar session."""
-        from src.db.session import _request_session, routed_scoped_session
+        from src.db.session import (
+            _enter_request_session,
+            _exit_request_session,
+            routed_scoped_session,
+        )
 
         existing = AsyncMock()
-        token = _request_session.set(existing)
+        # Record the owning task so the ownership check reuses it (the in-request
+        # contract). A bare _request_session.set would now route fresh instead.
+        tokens = _enter_request_session(existing)
         try:
             async with routed_scoped_session() as session:
                 assert session is existing
         finally:
-            _request_session.reset(token)
-
-    @pytest.mark.asyncio
-    async def test_detach_request_session_forces_fresh_session(self):
-        """After detach, routed_scoped_session must NOT reuse the inherited
-        ContextVar session — it opens a fresh standalone one.
-
-        Regression for the background-task bug: asyncio.create_task copies the
-        request's ContextVar (a session FastAPI then closes), and reusing it
-        raised 'Cannot operate on a closed database' in the model-config read
-        inside LLMManager.configure_kasal_llm.
-        """
-        from src.db.session import (
-            _request_session,
-            detach_request_session,
-            routed_scoped_session,
-        )
-
-        leaked_closed = AsyncMock()  # the inherited, now-closed request session
-        fresh = AsyncMock()
-
-        class MockCtx:
-            async def __aenter__(self):
-                return fresh
-
-            async def __aexit__(self, *args):
-                pass
-
-        token = _request_session.set(leaked_closed)
-        try:
-            detach_request_session()
-            # The inherited session is cleared from this context...
-            assert _request_session.get(None) is None
-
-            # ...so a fresh session is opened instead — via the router.
-            async def fake_router():
-                yield fresh
-
-            with patch(
-                "src.db.database_router.get_smart_db_session", side_effect=fake_router
-            ):
-                async with routed_scoped_session() as session:
-                    assert session is fresh
-                    assert session is not leaked_closed
-        finally:
-            _request_session.reset(token)
-
+            _exit_request_session(tokens)
 
 # ---------------------------------------------------------------------------
 # get_smart_engine

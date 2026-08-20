@@ -44,7 +44,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from src.core.exceptions import BadRequestError
-from src.db.session import background_task_context
 from src.repositories.prompt_optimization_run_repository import (
     PromptOptimizationRunRepository,
 )
@@ -270,12 +269,11 @@ class PromptOptimizationService(
                 registry_uri=registry_uri,
                 prompt_name=prompt_name,
                 group_context=group_context,
-            ),
-            # Spawn without the request's DB session: this task outlives the
-            # request, whose session FastAPI closes at response end. group_context
-            # / user token are re-established inside the run. See
-            # db.session.background_task_context.
-            context=background_task_context(),
+            )
+            # Spawned mid-request but outlives it: routed_scoped_session routes a
+            # fresh session for this task (a child create_task has a different
+            # current_task(), so it never reuses the request's connection).
+            # group_context / user token are re-established inside the run.
         )
         return {"run_id": run_id, "status": "pending", "dataset_size": len(examples)}
 
@@ -727,10 +725,9 @@ class PromptOptimizationService(
                 cancel_run_id=run_id,
                 group_context=group_context,
                 crew_traces_experiment=crew_traces_experiment,
-            ),
-            # Spawn without the request's DB session (closed at response end);
-            # see db.session.background_task_context.
-            context=background_task_context(),
+            )
+            # Spawned mid-request but outlives it: routed_scoped_session routes a
+            # fresh session for this child task (different current_task()).
         )
         return {"run_id": run_id, "status": "pending", "dataset_size": 1}
 

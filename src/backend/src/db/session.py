@@ -5,7 +5,7 @@ import re
 import sys
 import time
 from contextlib import asynccontextmanager
-from contextvars import Context, ContextVar, copy_context
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
@@ -490,6 +490,53 @@ _request_session: ContextVar[Optional[AsyncSession]] = ContextVar(
     "_request_session", default=None
 )
 
+# The asyncio Task that OWNS the request-scoped session above — recorded when the
+# session is published so reuse can be scoped to the owning task.
+#
+# `asyncio.create_task` copies the current context (both vars) into the child, so
+# a task spawned mid-request would otherwise see `_request_session` and reuse the
+# request's connection — which the request is still using or has since closed, so
+# on Lakebase/asyncpg it raises "another operation is in progress" and on SQLite
+# "Cannot operate on a closed database". A child task has a DIFFERENT
+# `current_task()`, so comparing against this owner lets `routed_scoped_session`
+# reuse the session only for code running in the request's OWN task and route a
+# fresh connection for everything spawned off it. Callers can no longer forget to
+# detach — the primitive is safe by default.
+_request_session_owner: ContextVar[Optional["asyncio.Task"]] = ContextVar(
+    "_request_session_owner", default=None
+)
+
+
+def _enter_request_session(session: AsyncSession):
+    """Publish ``session`` as the request-scoped session, owned by the CURRENT task.
+
+    Returns opaque tokens to hand back to :func:`_exit_request_session`. Every
+    site that sets ``_request_session`` goes through here so the session and its
+    owner can never drift apart. Recording the owner is what makes reuse
+    task-scoped (see ``_request_session_owner``)."""
+    session_token = _request_session.set(session)
+    owner_token = None
+    try:
+        owner_token = _request_session_owner.set(asyncio.current_task())
+    except Exception:  # noqa: BLE001 — no running loop is not fatal; reuse just won't match
+        pass
+    return session_token, owner_token
+
+
+def _exit_request_session(tokens) -> None:
+    """Undo :func:`_enter_request_session`. Tolerates a token created in a
+    different async context (generator GC'd or cancelled across tasks)."""
+    session_token, owner_token = tokens
+    try:
+        _request_session.reset(session_token)
+    except ValueError:
+        pass
+    if owner_token is not None:
+        try:
+            _request_session_owner.reset(owner_token)
+        except ValueError:
+            pass
+
 
 def _usable_for_more_sql(session: AsyncSession) -> bool:
     """Whether ``session`` can still take a query, i.e. is not mid-commit.
@@ -568,7 +615,17 @@ async def routed_scoped_session():
     as the raw factory in 33 of its 37 call sites.
     """
     existing = _request_session.get(None)
-    if existing is not None and _usable_for_more_sql(existing):
+    # Reuse the request session ONLY for code running in the task that owns it.
+    # A task spawned mid-request (asyncio.create_task) inherits a COPY of these
+    # vars but has a different current_task(), so it falls through to the router
+    # and gets a fresh connection instead of colliding on the request's — which
+    # is closed/concurrently-busy by the time the child runs. This is what makes
+    # the primitive safe without every spawn site remembering to detach.
+    if (
+        existing is not None
+        and _request_session_owner.get(None) is asyncio.current_task()
+        and _usable_for_more_sql(existing)
+    ):
         yield existing
         return
 
@@ -587,40 +644,14 @@ async def routed_scoped_session():
         break
 
 
-def detach_request_session() -> None:
-    """Clear the request-scoped session for the CURRENT context.
-
-    A task spawned with ``asyncio.create_task`` during an HTTP request inherits
-    a COPY of that request's context — including ``_request_session`` pointing at
-    the request-scoped DB session, which FastAPI closes the instant the response
-    returns. Such a background task must call this FIRST so that any later
-    ``request_scoped_session()`` (e.g. the model-config read inside
-    ``LLMManager.configure_kasal_llm``) opens a fresh standalone session instead
-    of operating on the closed one (``sqlite3.ProgrammingError: Cannot operate on
-    a closed database``). Setting the var here only affects this task's copied
-    context, never the originating request.
-    """
-    _request_session.set(None)
-
-
-def background_task_context() -> Context:
-    """A copy of the current context with the request-scoped DB session cleared.
-
-    Pass to ``asyncio.create_task(coro, context=background_task_context())`` when
-    spawning a job that OUTLIVES the request that started it. The task keeps the
-    request's other contextvars (group id, OBO token) but never inherits
-    ``_request_session`` — the session FastAPI closes at response end — so every
-    ``request_scoped_session()`` inside it opens a fresh standalone session.
-
-    This is the spawn-side complement to :func:`detach_request_session` (which
-    clears the var from INSIDE an already-running task): declaring the clean
-    context at the ``create_task`` boundary means the task can never observe the
-    dead session at all, so there is no "detach first or crash" ordering to
-    forget. The db layer owns ``_request_session``, so it owns this helper too.
-    """
-    ctx = copy_context()
-    ctx.run(_request_session.set, None)
-    return ctx
+# NOTE: detach_request_session() / background_task_context() were removed once
+# routed_scoped_session became ownership-aware. They existed only to clear
+# `_request_session` in a spawned task so it wouldn't reuse the request's
+# session; the ownership check (reuse only when current_task() owns the session)
+# now does that automatically for every create_task child. There is one way to
+# get a session outside a request — routed_scoped_session — and nothing to
+# remember at the spawn site. A task that genuinely needs its own private
+# connection uses get_isolated_db_session().
 
 
 # Create separate session factories for pooled and nullpool engines
@@ -2111,7 +2142,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             async with smart_session_factory() as session:
                 # Publish session into ContextVar so that
                 # request_scoped_session() returns the same session
-                token = _request_session.set(session)
+                tokens = _enter_request_session(session)
                 try:
                     yield session
                     # Commit the transaction if no exception occurred
@@ -2136,12 +2167,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
                     await session.rollback()
                     raise
                 finally:
-                    try:
-                        _request_session.reset(token)
-                    except ValueError:
-                        # Token created in a different async context (generator
-                        # GC'd or cancelled across tasks). Safe to ignore.
-                        pass
+                    _exit_request_session(tokens)
                     # Ensure session is properly closed
                     await session.close()
         except OperationalError as e:
@@ -2160,7 +2186,7 @@ async def get_local_db() -> AsyncGenerator[AsyncSession, None]:
     bypassing the Lakebase swap.  Used for bootstrap config tables
     like database_configs that are never migrated to Lakebase."""
     async with _local_session_factory() as session:
-        token = _request_session.set(session)
+        tokens = _enter_request_session(session)
         try:
             yield session
             await session.commit()
@@ -2168,10 +2194,7 @@ async def get_local_db() -> AsyncGenerator[AsyncSession, None]:
             await session.rollback()
             raise
         finally:
-            try:
-                _request_session.reset(token)
-            except ValueError:
-                pass
+            _exit_request_session(tokens)
             await session.close()
 
 

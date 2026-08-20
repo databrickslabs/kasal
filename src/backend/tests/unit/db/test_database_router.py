@@ -433,7 +433,7 @@ class TestGetSmartDbSessionRegularPath:
                 return_value=False,
             ),
             patch("src.db.database_router.async_session_factory", mock_factory),
-            patch("src.db.database_router._request_session", mock_request_session),
+            patch("src.db.session._request_session", mock_request_session),
         ):
             from src.db.database_router import get_smart_db_session
 
@@ -469,7 +469,7 @@ class TestGetSmartDbSessionRegularPath:
                 return_value=False,
             ),
             patch("src.db.database_router.async_session_factory", mock_factory),
-            patch("src.db.database_router._request_session", mock_request_session),
+            patch("src.db.session._request_session", mock_request_session),
         ):
             from src.db.database_router import get_smart_db_session
 
@@ -510,7 +510,7 @@ class TestGetSmartDbSessionRegularPath:
                 return_value=False,
             ),
             patch("src.db.database_router.async_session_factory", mock_factory),
-            patch("src.db.database_router._request_session", mock_request_session),
+            patch("src.db.session._request_session", mock_request_session),
         ):
             from src.db.database_router import get_smart_db_session
 
@@ -544,7 +544,7 @@ class TestGetSmartDbSessionRegularPath:
                 return_value=False,
             ),
             patch("src.db.database_router.async_session_factory", mock_factory),
-            patch("src.db.database_router._request_session", mock_request_session),
+            patch("src.db.session._request_session", mock_request_session),
         ):
             from src.db.database_router import get_smart_db_session
 
@@ -581,7 +581,7 @@ class TestGetSmartDbSessionRegularPath:
                 return_value=False,
             ),
             patch("src.db.database_router.async_session_factory", mock_factory),
-            patch("src.db.database_router._request_session", mock_request_session),
+            patch("src.db.session._request_session", mock_request_session),
         ):
             from src.db.database_router import get_smart_db_session
 
@@ -642,7 +642,7 @@ class TestGetSmartDbSessionLakebasePath:
                 new_callable=AsyncMock,
                 return_value=mock_auth,
             ),
-            patch("src.db.database_router._request_session", mock_request_session),
+            patch("src.db.session._request_session", mock_request_session),
         ):
             from src.db.database_router import get_smart_db_session
 
@@ -703,7 +703,7 @@ class TestGetSmartDbSessionLakebasePath:
                 new_callable=AsyncMock,
                 return_value=mock_auth,
             ),
-            patch("src.db.database_router._request_session", mock_request_session),
+            patch("src.db.session._request_session", mock_request_session),
             patch.dict("os.environ", {"LAKEBASE_INSTANCE_NAME": "env-instance"}),
         ):
             from src.db.database_router import get_smart_db_session
@@ -760,7 +760,7 @@ class TestGetSmartDbSessionLakebasePath:
                 new_callable=AsyncMock,
                 side_effect=Exception("Auth unavailable"),
             ),
-            patch("src.db.database_router._request_session", mock_request_session),
+            patch("src.db.session._request_session", mock_request_session),
         ):
             from src.db.database_router import get_smart_db_session
 
@@ -816,7 +816,7 @@ class TestGetSmartDbSessionLakebasePath:
                 new_callable=AsyncMock,
                 return_value=None,
             ),
-            patch("src.db.database_router._request_session", mock_request_session),
+            patch("src.db.session._request_session", mock_request_session),
         ):
             from src.db.database_router import get_smart_db_session
 
@@ -894,7 +894,7 @@ class TestGetSmartDbSessionLakebaseFallback:
                 return_value=mock_auth,
             ),
             patch("src.db.database_router.async_session_factory", mock_regular_factory),
-            patch("src.db.database_router._request_session", mock_request_session),
+            patch("src.db.session._request_session", mock_request_session),
             patch("src.db.database_router.is_fallback_allowed", return_value=True),
             patch("src.db.database_router.asyncio.sleep", new_callable=AsyncMock),
         ):
@@ -1020,7 +1020,7 @@ class TestGetSmartDbSessionLakebaseFallback:
                 new_callable=AsyncMock,
                 return_value=mock_auth,
             ),
-            patch("src.db.database_router._request_session", mock_request_session),
+            patch("src.db.session._request_session", mock_request_session),
             patch("src.db.database_router.record_successful_connection") as mock_record,
             patch("src.db.database_router.asyncio.sleep", new_callable=AsyncMock),
         ):
@@ -1136,7 +1136,7 @@ class TestGetSmartDbSessionLakebaseFallback:
                 return_value=None,
             ),
             patch("src.db.database_router.async_session_factory", mock_regular_factory),
-            patch("src.db.database_router._request_session", mock_request_session),
+            patch("src.db.session._request_session", mock_request_session),
             patch("src.db.database_router.is_fallback_allowed", return_value=True),
             patch("src.db.database_router.asyncio.sleep", new_callable=AsyncMock),
         ):
@@ -1204,7 +1204,7 @@ class TestGetSmartDbSessionLakebasePostYieldError:
                 new_callable=AsyncMock,
                 return_value=mock_auth,
             ),
-            patch("src.db.database_router._request_session", mock_request_session),
+            patch("src.db.session._request_session", mock_request_session),
         ):
             from src.db.database_router import get_smart_db_session
 
@@ -1269,7 +1269,7 @@ class TestGetSmartDbSessionGeneratorExit:
                 new_callable=AsyncMock,
                 return_value=mock_auth,
             ),
-            patch("src.db.database_router._request_session", mock_request_session),
+            patch("src.db.session._request_session", mock_request_session),
         ):
             from src.db.database_router import get_smart_db_session
 
@@ -1301,7 +1301,7 @@ class TestGetSmartDbSessionGeneratorExit:
                 return_value=False,
             ),
             patch("src.db.database_router.async_session_factory", mock_factory),
-            patch("src.db.database_router._request_session", mock_request_session),
+            patch("src.db.session._request_session", mock_request_session),
         ):
             from src.db.database_router import get_smart_db_session
 
@@ -1367,7 +1367,7 @@ class TestGetSmartDbSessionLakebaseResetError:
                 new_callable=AsyncMock,
                 return_value=mock_auth,
             ),
-            patch("src.db.database_router._request_session", mock_request_session),
+            patch("src.db.session._request_session", mock_request_session),
         ):
             from src.db.database_router import get_smart_db_session
 
@@ -1426,7 +1426,7 @@ class TestGetSmartDbSessionConfigNoneAfterEnabled:
                 new_callable=AsyncMock,
                 return_value=mock_auth,
             ),
-            patch("src.db.database_router._request_session", mock_request_session),
+            patch("src.db.session._request_session", mock_request_session),
             patch.dict("os.environ", {"LAKEBASE_INSTANCE_NAME": "env-fallback"}),
         ):
             from src.db.database_router import get_smart_db_session
@@ -1476,7 +1476,7 @@ class TestGetSmartDbSessionConfigNoneAfterEnabled:
                 new_callable=AsyncMock,
                 return_value=None,
             ),
-            patch("src.db.database_router._request_session", mock_request_session),
+            patch("src.db.session._request_session", mock_request_session),
             patch.dict("os.environ", {}, clear=False),
         ):
             # Remove LAKEBASE_INSTANCE_NAME if set

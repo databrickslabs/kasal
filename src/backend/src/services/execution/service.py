@@ -1827,9 +1827,12 @@ class ExecutionService:
                 f"[ExecutionService.create_execution] Added execution_id: {execution_id} to in-memory store with status RUNNING"
             )
 
-            # Fire-and-forget the LLM rename now that the record exists. The
-            # created asyncio task inherits this request's contextvars, so the
-            # group context / OBO token set above still applies inside it.
+            # Fire-and-forget the LLM rename now that the record exists. The task
+            # keeps the request's contextvars (group id / OBO token). It does NOT
+            # reuse the request's DB session: routed_scoped_session only reuses the
+            # request session for the task that OWNS it, and a create_task child
+            # has a different current_task(), so the rename's model-config read
+            # routes its own fresh session — no explicit detach needed.
             asyncio.create_task(
                 ExecutionService._generate_run_name_async(
                     execution_id=execution_id,
@@ -1865,7 +1868,11 @@ class ExecutionService:
                             config=config,
                             execution_type=execution_type,
                             group_context=group_context,
-                            session=self.session,
+                            # NOT self.session: this runs after the response, when
+                            # the request session is closed. None makes the run
+                            # route its own fresh session (dispatch_session →
+                            # routed_scoped_session) instead of reusing a dead one.
+                            session=None,
                         )
                         task_logger.info(
                             f"[run_execution_task] ExecutionService.run_crew_execution completed for execution_id: {execution_id}"
@@ -1912,7 +1919,9 @@ class ExecutionService:
                         config=config,
                         execution_type=execution_type,
                         group_context=group_context,
-                        session=self.session,
+                        # None, not self.session: a spawned task must route its
+                        # own session, never reuse the request's connection.
+                        session=None,
                     )
                 )
                 # Store the task reference so we can cancel it later
@@ -2179,7 +2188,9 @@ class ExecutionService:
                 config=config,
                 execution_type=execution_type,
                 group_context=group_context,
-                session=self.session,
+                # None, not self.session: a spawned task must route its own
+                # session, never reuse the request's connection.
+                session=None,
             )
         )
         if new_execution_id in ExecutionService.executions:

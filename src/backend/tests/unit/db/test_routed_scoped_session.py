@@ -145,12 +145,53 @@ class TestInsideARequestNothingChanges:
     async def test_it_reuses_the_request_session(self):
         """Both helpers must join the single request transaction."""
         existing = MagicMock(name="REQUEST_session")
-        token = session_module._request_session.set(existing)
+        # _enter_request_session records the OWNING task, so the ownership check
+        # in routed_scoped_session matches and the session is reused — the real
+        # in-request contract. (A bare _request_session.set would leave the owner
+        # unset, which now correctly reads as "not this task" and routes fresh.)
+        tokens = session_module._enter_request_session(existing)
         try:
             async with session_module.routed_scoped_session() as session:
                 assert session is existing
         finally:
-            session_module._request_session.reset(token)
+            session_module._exit_request_session(tokens)
+
+    async def test_a_child_task_does_not_reuse_the_request_session(self):
+        """The ownership guard — and the whole reason no detach helper is needed.
+
+        A task spawned mid-request via ``asyncio.create_task`` inherits a COPY of
+        ``_request_session`` (and its owner) but runs under a DIFFERENT
+        ``current_task()``. So ``routed_scoped_session`` must NOT hand it the
+        request's session — it routes a fresh one. Without this the child would
+        reuse a connection the request is still using or has since closed
+        ("another operation is in progress" on Lakebase; "Cannot operate on a
+        closed database" on SQLite). This is what makes the primitive safe by
+        construction, so callers never have to remember to detach."""
+        existing = MagicMock(name="REQUEST_session")
+        fresh = MagicMock(name="FRESH_routed_session")
+
+        async def _fresh_router():
+            yield fresh
+
+        tokens = session_module._enter_request_session(existing)
+        try:
+            # Same (owning) task: reuses the request session.
+            async with session_module.routed_scoped_session() as s:
+                assert s is existing
+
+            # A child task: must route fresh, never reuse `existing`.
+            seen = {}
+
+            async def _child():
+                with patch.object(router, "get_smart_db_session", _fresh_router):
+                    async with session_module.routed_scoped_session() as s:
+                        seen["session"] = s
+
+            await asyncio.create_task(_child())
+            assert seen["session"] is fresh
+            assert seen["session"] is not existing
+        finally:
+            session_module._exit_request_session(tokens)
 
     async def test_a_nested_reader_inherits_the_routed_session(self):
         """Why converting only the OUTER opens is sufficient.
@@ -349,7 +390,9 @@ class TestASessionMidCommitIsNotReused:
         engine, poisoned = await self._sqlite_session()
         try:
             poisoned.sync_session._transaction._state = SessionTransactionState.PREPARED
-            token = session_module._request_session.set(poisoned)
+            # Own the session (same task) so the ONLY reason it is refused is the
+            # mid-commit guard this test is about — not the ownership check.
+            tokens = session_module._enter_request_session(poisoned)
             try:
                 async with session_module.routed_scoped_session() as got:
                     # The poisoned session is NOT handed back. What the substitute is
@@ -358,7 +401,7 @@ class TestASessionMidCommitIsNotReused:
                     assert got is not poisoned
                 assert not session_module._usable_for_more_sql(poisoned)
             finally:
-                session_module._request_session.reset(token)
+                session_module._exit_request_session(tokens)
                 poisoned.sync_session._transaction._state = (
                     SessionTransactionState.ACTIVE
                 )
@@ -370,12 +413,12 @@ class TestASessionMidCommitIsNotReused:
         """The guard must not break the normal case it exists to protect."""
         engine, healthy = await self._sqlite_session()
         try:
-            token = session_module._request_session.set(healthy)
+            tokens = session_module._enter_request_session(healthy)
             try:
                 async with session_module.routed_scoped_session() as got:
                     assert got is healthy
             finally:
-                session_module._request_session.reset(token)
+                session_module._exit_request_session(tokens)
         finally:
             await healthy.close()
             await engine.dispose()
@@ -383,9 +426,9 @@ class TestASessionMidCommitIsNotReused:
     async def test_a_test_double_is_treated_as_usable(self):
         """A MagicMock has no real transaction; it must not be rejected."""
         fake = MagicMock(name="A_MOCK_SESSION")
-        token = session_module._request_session.set(fake)
+        tokens = session_module._enter_request_session(fake)
         try:
             async with session_module.routed_scoped_session() as got:
                 assert got is fake
         finally:
-            session_module._request_session.reset(token)
+            session_module._exit_request_session(tokens)
