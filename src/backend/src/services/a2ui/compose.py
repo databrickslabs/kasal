@@ -20,13 +20,83 @@ self-contained export):
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 # Caller-injected LLM: takes a list of {"role","content"} messages, returns text.
 LLMCall = Callable[[List[Dict[str, str]]], str]
+
+
+class ComposeStream:
+    """What the composer tells its host as a surface is being generated.
+
+    The composer does not know how a surface reaches a reader — that is SSE here,
+    something else in an exported app — so it only announces the milestones and
+    lets the host ship them. A no-op base class rather than a Protocol so the
+    default (``compose_a2ui`` with no stream) costs nothing and every method is
+    always safe to call.
+    """
+
+    def skeleton(self, surface: Dict[str, Any]) -> None:
+        """A placeholder surface is ready — real structure, no content yet."""
+
+    def attempt(self, n: int) -> None:
+        """A surface generation is about to start; its tokens belong to revision n.
+
+        Called before the SURFACE calls only, never the outline pre-pass — the
+        outline is not a surface and parsing it as one would emit nonsense.
+        """
+
+    def final(self, surface: Optional[Dict[str, Any]]) -> None:
+        """Composition finished. This surface, or None, is authoritative."""
+
+
+#: How long composition may run before the OPTIONAL design-polish pass is
+#: skipped. Correctness retries (an invalid surface, a deck whose body slides
+#: are empty) are NOT bounded by this — those produce a deck the reader cannot
+#: use, so they are worth the wait. The design pass is different: it fires on a
+#: deck that is already valid and already shippable, and only makes it prettier.
+#:
+#: Measured on a real presentation run: outline 6s, first deck 12s, then 63s for
+#: the polish retry — 49s of it before a single token, because the correction
+#: appends the entire previous deck to the prompt and the endpoint has to prefill
+#: it. That turned an 18-second answer into 81 seconds to make a valid deck less
+#: "visually flat".
+#:
+#: So the rule is not "never polish", it is "polish only while it is still cheap
+#: relative to what the reader has already waited". Under budget, nothing changes.
+#: Kasal configures logging, so this reaches ``logs/system.log`` — which is where
+#: anyone asking "why did that take so long" is already looking. ``print`` would
+#: land on uvicorn's stdout instead, i.e. nowhere greppable. In an exported app
+#: (no logging config) an INFO record is simply dropped, which is the right
+#: trade: the diagnosis matters here, and the composer must not import Kasal's
+#: logger — see ``test_compose_portability``.
+logger = logging.getLogger(__name__)
+
+_DESIGN_RETRY_BUDGET_ENV = "A2UI_DESIGN_RETRY_BUDGET_S"
+_DESIGN_RETRY_BUDGET_DEFAULT_S = 25.0
+
+
+def _design_retry_budget_s() -> float:
+    """Seconds of composition after which the polish pass is skipped.
+
+    ``0`` disables the polish pass outright; a negative or unparseable value
+    falls back to the default rather than raising — a malformed environment
+    variable must not be able to break composition.
+    """
+    raw = os.getenv(_DESIGN_RETRY_BUDGET_ENV)
+    if raw is None or not raw.strip():
+        return _DESIGN_RETRY_BUDGET_DEFAULT_S
+    try:
+        value = float(raw)
+    except ValueError:
+        return _DESIGN_RETRY_BUDGET_DEFAULT_S
+    return value if value >= 0 else _DESIGN_RETRY_BUDGET_DEFAULT_S
+
 
 _DEFAULT_CATALOG_PATH = Path(__file__).parent / "catalog.json"
 
@@ -127,6 +197,13 @@ DELIVERABLE_KEYWORDS = [
     ("presentation", "presentation"),
     ("slide", "presentation"),
     ("deck", "presentation"),
+    # Board keywords precede "dashboard": a "sprint board" is a Kanban, not a KPI
+    # dashboard, and the bare word would otherwise never be reached.
+    ("kanban", "kanban"),
+    ("sprint board", "kanban"),
+    ("task board", "kanban"),
+    ("project board", "kanban"),
+    ("backlog", "kanban"),
     ("dashboard", "dashboard"),
     ("kpi", "dashboard"),
     ("metric", "dashboard"),
@@ -617,8 +694,19 @@ def plan_presentation_outline(
             'JSON object only: {"slides": [{"title": str, "variant": str, '
             '"visual": str, "focus": str}]}.\n'
             "variant is one of: title, content, two-column, comparison, visual, "
-            "image-full, stats, agenda, quote, section, kpi-split, boxes, split. "
-            "visual names the visual that "
+            "image-full, stats, agenda, quote, section, kpi-split (headline KPI "
+            "band over a split body), boxes (N equal titled panels), split "
+            "(two regions at an explicit ratio, no text/visual assumption — use "
+            "when the VISUAL leads), hero (big centered "
+            "title + subtitle, keynote style), big-number (one giant metric with "
+            "label and context line), end-card (closing slide, accent background, "
+            "centered takeaway), process (horizontal numbered steps with arrows "
+            "for workflows), icon-cards (grid of feature/benefit cards), "
+            "numbered-list (large numbered items 1-6 with detail for ranked "
+            "points), contrast (before/after or problem/solution in two visually "
+            "distinct panels), callout (a single dominant statement with "
+            "decorative accent treatment), or pillars (3-4 vertical columns for "
+            "frameworks and models). visual names the visual that "
             "slide carries: "
             "'chart:<bar|line|pie|area|scatter|radar>', "
             "'diagram:<process|timeline|cycle|funnel|pyramid|comparison|matrix2x2|hierarchy>', "
@@ -631,6 +719,9 @@ def plan_presentation_outline(
             "levels -> diagram:pyramid, two options -> diagram:comparison, two axes "
             "-> diagram:matrix2x2, org/tree structure -> diagram:hierarchy, numeric "
             "series -> chart, key figures -> stats; use variant 'comparison' when two "
+            "options are weighed; use variant 'process' for workflows/steps/pipelines (numbered "
+            "horizontal steps with arrows); use variant 'icon-cards' for feature lists or "
+            "benefits (grid of cards with titles/descriptions)."
             "peers are weighed in TEXT on both sides; never plan two consecutive "
             "slides with the same variant unless both are 'content'; plan only "
             "slides the content can genuinely fill.\n"
@@ -1198,6 +1289,8 @@ def compose_a2ui(
     enabled: bool = True,
     retries: int = 2,
     guidance: str = "",
+    stream: Optional[ComposeStream] = None,
+    outline: Optional[List[Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
     """Compose an A2UI surface from the agent's text answer. Generic, never raises.
 
@@ -1213,27 +1306,49 @@ def compose_a2ui(
         guidance: optional per-deliverable settings sentence (e.g. "aim for ~8
             slides; ≤4 bullets per slide") appended to the prompt as defaults the
             request can override. Supplied by the host from its UI config.
+        stream: optional host hook told when a skeleton is ready, when each
+            surface generation starts, and what the final surface is — so the
+            host can render progressively instead of waiting for the return.
+        outline: a slide plan the host already computed (from a PARTIAL answer,
+            while the agent was still writing). Supplied, the pre-pass is
+            skipped — this is a head start, not an extra call — and so is the
+            skeleton emit, since the host shipped it when it planned.
 
     Returns:
         A valid A2UI surface dict (a markdown surface on the cheap/fallback paths).
     """
     text = output_text or ""
+    stream = stream or ComposeStream()
+
+    def _done(surface: Dict[str, Any]) -> Dict[str, Any]:
+        """Every exit reports its result: a host left without a final would sit
+        on a half-drawn surface forever."""
+        try:
+            stream.final(surface)
+        except Exception:  # noqa: BLE001 — reporting must not fail composition
+            pass
+        return surface
+
     if not enabled:
-        return markdown_surface(text)
+        return _done(markdown_surface(text))
     catalog = catalog if catalog is not None else load_catalog()
     if not catalog:
-        return markdown_surface(text)
+        return _done(markdown_surface(text))
     # Cheap path: only spend a composer LLM call when a genuinely rich surface is
     # likely. Decide PER TURN from what the user actually asked (query), NOT the
     # static crew hint — folding the hint in here would turn EVERY answer
     # (including clarifying questions) into a deck for a presentation-biased crew.
     if not wants_rich_surface(text, query):
-        return markdown_surface(text)
+        return _done(markdown_surface(text))
     # A valid-but-visually-flat deck kept as the floor: if the design-lint retry
     # burns the last attempt, fails, or raises, we ship this instead of falling
     # all the way back to markdown. Declared outside the try so an exception
     # mid-retry can't lose an already-composed deck.
     best: Optional[Dict[str, Any]] = None
+    # Started here, not at function entry: everything above is local work (intent
+    # checks, catalog load) and the budget is about how long the READER has been
+    # waiting on LLM calls.
+    started = time.monotonic()
     try:
         # Presentation OUTLINE pre-pass (two-stage generation): plan slide titles,
         # layout variants and per-slide visuals with a small extra LLM call, then
@@ -1241,14 +1356,29 @@ def compose_a2ui(
         # failure degrades to the single-pass behavior. Disable with
         # A2UI_PRESENTATION_OUTLINE=0.
         user_content = text
+        # A host-supplied outline was planned early and its skeleton already
+        # shipped, so neither is redone here.
+        preplanned = bool(outline)
         if (
             infer_deliverable(query) == "presentation"
             and os.getenv("A2UI_PRESENTATION_OUTLINE", "1") != "0"
         ):
-            outline = plan_presentation_outline(
-                text, query, purpose, llm_call, guidance
-            )
+            if not preplanned:
+                outline = plan_presentation_outline(
+                    text, query, purpose, llm_call, guidance
+                )
             if outline:
+                # The deck's SHAPE is knowable now — real titles, real layouts —
+                # long before the slides themselves are written. Show it.
+                if not preplanned:
+                    try:
+                        from .stream import skeleton_from_outline
+
+                        sk = skeleton_from_outline(outline)
+                        if sk:
+                            stream.skeleton(sk)
+                    except Exception:  # noqa: BLE001
+                        pass
                 user_content = (
                     text
                     + "\n\n[SLIDE PLAN — a planning pass already chose each slide's "
@@ -1264,7 +1394,10 @@ def compose_a2ui(
             {"role": "user", "content": user_content},
         ]
         design_retry_done = False
-        for _ in range(max(1, retries)):
+        for attempt_n in range(max(1, retries)):
+            # A correction pass regenerates the WHOLE surface, so each attempt is
+            # its own revision and supersedes whatever the last one streamed.
+            stream.attempt(attempt_n)
             raw = llm_call(messages)
             raw_str = raw if isinstance(raw, str) else str(raw)
             payload = extract_json(raw_str)
@@ -1299,7 +1432,24 @@ def compose_a2ui(
                         else []
                     )
                     if not findings:
-                        return payload
+                        return _done(payload)
+                    # The deck in hand is VALID. Polishing it costs a second full
+                    # generation — the whole deck regenerated, with the previous
+                    # one appended to the prompt — so past the budget the reader
+                    # gets the shippable deck now instead of a prettier one a
+                    # minute later. See _design_retry_budget_s.
+                    budget = _design_retry_budget_s()
+                    elapsed = time.monotonic() - started
+                    if elapsed >= budget:
+                        logger.info(
+                            "[a2ui] design polish skipped after %.1fs (budget "
+                            "%.0fs): shipping the valid deck. Would have "
+                            "addressed: %s",
+                            elapsed,
+                            budget,
+                            "; ".join(findings),
+                        )
+                        return _done(payload)
                     # ONE reflective design retry (cheap PPTAgent-style critique);
                     # if the retry can't do better we still ship this valid deck.
                     design_retry_done = True
@@ -1328,4 +1478,4 @@ def compose_a2ui(
             ]
     except Exception as exc:  # noqa: BLE001
         print(f"A2UI compose failed ({exc}); markdown fallback.")
-    return best if best is not None else markdown_surface(text)
+    return _done(best if best is not None else markdown_surface(text))

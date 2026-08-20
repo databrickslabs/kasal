@@ -14,6 +14,8 @@ import {
   clearActiveExecution,
 } from './activeExecutionMarker';
 import { deriveSessionPreviews } from '../utils/sessionPreview';
+import { applyA2uiMessage } from '../../../shared/a2ui/stream';
+import type { A2uiMessage } from '../../../shared/a2ui/stream';
 import type { Surface } from '../../../shared/a2ui';
 
 interface SessionExecSnapshot {
@@ -264,6 +266,26 @@ interface ExecutionActions {
     surface: Surface,
     resultText?: string,
   ) => boolean;
+  /**
+   * Fold one streamed A2UI message into the surface being composed for a run.
+   *
+   * Composition is slow (a deck measured 140s+) and used to deliver nothing
+   * until it was entirely done. The backend now ships each piece as it lands, and
+   * this paints them onto the run's LIVE STREAM BUBBLE — the same message
+   * `completeExecution` later folds the final answer into. That choice is what
+   * keeps this from double-posting: when the finished surface arrives it
+   * overwrites this message rather than adding a second one, so no extra
+   * bookkeeping is needed on the completion path.
+   *
+   * A run with no stream bubble (nothing was typed in front of the reader) is
+   * skipped: there is no message to paint on, and its surface still arrives whole
+   * at completion exactly as before.
+   */
+  applySurfaceDelta: (
+    jobId: string | undefined,
+    message: A2uiMessage,
+    seq?: number,
+  ) => void;
   failExecution: (error: string, jobId?: string) => void;
   /** The session that started a still-tracked job (parallel-session routing). */
   jobOwnerOf: (jobId: string) => string | null;
@@ -315,6 +337,42 @@ const jobOwners = new Map<string, string>();
 // jobId -> message id of the live token-streaming bubble (SSE `llm_chunk`).
 // Same lifecycle discipline as jobOwners: entries die when the job finalizes.
 const streamBubbles = new Map<string, string>();
+
+// The surface each run has streamed SO FAR, keyed by job. Held here rather than
+// read back off the message because the reducer needs the previous surface to
+// fold the next message into, and the message only carries the rendered result.
+// Cleared wherever streamBubbles is cleared on a terminal path.
+const streamingSurfaces = new Map<string, Surface | null>();
+
+// Runs whose TEXT was actually painted. Distinct from `streamBubbleSeq`, which
+// used to stand in for it: a bubble is now also opened by a surface arriving
+// first (the instant deck shell), so the sequence counter no longer answers
+// "did the reader see prose?" — and getting that wrong prints the whole answer
+// next to the deck it was composed into.
+const textPainted = new Set<string>();
+
+// Runs a SURFACE led: it was on screen before a single token of prose. Only the
+// instant deck shell can do that, which is exactly the case where the prose is
+// source material rather than the deliverable — the reader asked for slides, and
+// watching the raw answer type itself out beside the deck being built from it
+// reads as the same thing happening twice.
+const surfaceLedRuns = new Set<string>();
+
+// The highest delta sequence applied per run.
+//
+// A run's SSE stream belongs to whichever session is on screen, so switching
+// away closes it and switching back reconnects — and a reconnect REPLAYS the
+// snapshots (`createSurface`), which is what lets a late joiner see the deck at
+// all. But a snapshot replaces the whole surface, so replaying the shell at a
+// client that had already accumulated forty slides threw all of them away: the
+// deck visibly reverted to an empty frame. Sequence numbers make replay
+// idempotent — already-seen messages are skipped, new ones still apply.
+const lastSurfaceSeq = new Map<string, number>();
+
+// Surface kinds the backend may still drop as prose-only (`GATED_SURFACE_KINDS`
+// in services/a2ui/stream.py). A shell for one of these is provisional, so it
+// never silences the answer's text.
+const RETRACTABLE_SURFACE_KINDS = new Set(['dashboard', 'document']);
 
 // jobId -> the LAST bubble this job painted, kept across task boundaries.
 //
@@ -540,13 +598,29 @@ function discardStreamPacing(jobId: string, flush: boolean): void {
  * the A2UI surface with it (completeExecution writes the surface INTO this same
  * bubble). Creating with content means the insert always carries the answer.
  */
-function paintStreamText(jobId: string, text: string): void {
-  const sessionStore = useSessionStore.getState();
+/**
+ * The message a run's live output paints into, created on first use.
+ *
+ * Shared by the two things that can be first: streamed TEXT, and a streamed
+ * A2UI surface. The instant deck shell now ships before the agent writes a
+ * token, so the surface genuinely arrives first on a presentation turn — and if
+ * this only existed inside the text path, that shell would have nowhere to land
+ * and would be silently dropped.
+ */
+function ensureStreamBubble(
+  jobId: string,
+  initialText = '',
+  card?: { resultType: string; resultData: unknown },
+): string {
   const existing = streamBubbles.get(jobId);
-  if (existing) {
-    sessionStore.appendToMessage(existing, text);
-    return;
-  }
+  if (existing) return existing;
+  // Route by the job's OWNER, not by what is on screen. `addMessage` writes to
+  // the CURRENT session, so a run whose surface opened its bubble while the
+  // reader had switched away created the deck in the wrong conversation and
+  // persisted it there — the session that asked for it came back to nothing.
+  // The target variant updates memory only when that session is being viewed
+  // and persists either way, which is what makes switching away lossless.
+  const owner = jobOwners.get(jobId);
   // The id carries a sequence: a crew closes the bubble at each task boundary
   // (closeStreamBubble) so the NEXT task's tokens open a fresh one below its own
   // header, instead of every task pouring into a single bubble with all the
@@ -556,7 +630,28 @@ function paintStreamText(jobId: string, text: string): void {
   const bubbleId = `stream-${jobId}-${seq}`;
   streamBubbles.set(jobId, bubbleId);
   lastStreamBubble.set(jobId, bubbleId);
-  sessionStore.addMessage('assistant', text, { id: bubbleId, isStreaming: true });
+  // The card rides along AT CREATION, never as a follow-up update. The messages
+  // API declares `content: str = Field(..., min_length=1)`, so a row posted with
+  // empty content is rejected 422 and never exists — and a later PUT against a
+  // row that was never created is lost with it. With a card present the writer
+  // substitutes CARD_PLACEHOLDER for the missing text, which persists. This is
+  // why a surface-led run used to vanish the moment you switched sessions: its
+  // bubble had no text by design, so it was never stored at all.
+  const extra = { id: bubbleId, isStreaming: true, ...(card ?? {}) };
+  const sessionStore = useSessionStore.getState();
+  if (owner) sessionStore.addMessageToTargetSession(owner, 'assistant', initialText, extra);
+  else sessionStore.addMessage('assistant', initialText, extra);
+  return bubbleId;
+}
+
+function paintStreamText(jobId: string, text: string): void {
+  textPainted.add(jobId);
+  const existing = streamBubbles.get(jobId);
+  if (existing) {
+    useSessionStore.getState().appendToMessage(existing, text);
+    return;
+  }
+  ensureStreamBubble(jobId, text);
 }
 
 /** Drain a job's buffer into its bubble immediately (no pacing). */
@@ -915,6 +1010,11 @@ export const useExecutionStore = create<ExecutionStore>()(
     // stream while the owner session is on screen. Switching away just pauses
     // the live text; completeExecution still routes the final answer by owner.
     if (sessionStore.currentSessionId !== ownerSession) return;
+    // A surface got here first, so the prose is the deck's SOURCE, not the
+    // answer — dropping it leaves the deliverable alone on screen instead of
+    // racing a wall of markdown against the slides being built from it. The
+    // text is not lost: completion still folds it in if no surface survives.
+    if (surfaceLedRuns.has(jobId)) return;
     // Paced, not painted per SSE frame — see enqueueStreamText.
     enqueueStreamText(jobId, chunk);
   },
@@ -923,6 +1023,11 @@ export const useExecutionStore = create<ExecutionStore>()(
 
   hasStreamedTaskText: (jobId) => {
     if (!jobId) return false;
+    // Deliberately NOT `textPainted`: this question is per-TASK, and must go
+    // false again when a task boundary closes the bubble so the next task's
+    // trace body still posts. `textPainted` is per-RUN (it answers
+    // `readerSawText`, which must survive those closes) — the two look alike and
+    // are not interchangeable.
     return Boolean(streamBubbles.get(jobId) || streamBuffers.get(jobId));
   },
 
@@ -937,6 +1042,67 @@ export const useExecutionStore = create<ExecutionStore>()(
     // lastStreamBubble deliberately KEPT: completion folds the final answer into
     // this bubble, and a boundary close must not hide it.
     useSessionStore.getState().updateMessage(bubbleId, { isStreaming: false });
+  },
+
+  applySurfaceDelta: (jobId, message, seq) => {
+    if (!jobId || !message) return;
+    // Replay-safe: the reconnect after a session switch re-sends every snapshot.
+    if (typeof seq === 'number') {
+      const seen = lastSurfaceSeq.get(jobId);
+      if (seen !== undefined && seq <= seen) return;
+      lastSurfaceSeq.set(jobId, seq);
+    }
+    // Paint onto the run's live bubble, opening one if the surface is first.
+    // No owner, no paint. `appendStreamChunk` has always bailed out here, and
+    // the surface path must too: opening a bubble for an unattributable run
+    // writes it into whichever conversation happens to be on screen, which is
+    // how a deck turned up above an unrelated prompt in an older session.
+    if (!jobOwners.get(jobId)) return;
+    const prev = streamingSurfaces.get(jobId) ?? null;
+    const next = applyA2uiMessage(prev, message);
+    if (next === prev) return; // a message the reducer could not use
+    streamingSurfaces.set(jobId, next);
+
+    // `streamBubbles` first, then `lastStreamBubble` — the same order completion
+    // uses, so a delta arriving just after a task boundary still lands on the
+    // message the reader is watching rather than starting a stray one. Only
+    // OPEN a bubble for a surface that exists: a retraction with no bubble has
+    // nothing to take back, and creating one to do it would post an empty message.
+    const hadBubble = Boolean(streamBubbles.get(jobId) ?? lastStreamBubble.get(jobId));
+    // A surface that beat every token to the screen LEADS the run: from here the
+    // prose is the deck's source material, not the answer, so it stops being
+    // painted (see appendStreamChunk). Only the instant shell can win this race,
+    // which is precisely the case the reader asked for slides rather than text.
+    if (next && !hadBubble && !textPainted.has(jobId) && !streamBuffers.get(jobId)) {
+      // ...but only for a surface that CANNOT be taken back. A dashboard or a
+      // document is dropped to plain text when the answer turns out to carry no
+      // real data, so silencing the prose under one of those frames risks the
+      // frame vanishing with nothing left in its place. Those keep streaming
+      // text underneath, which makes a retraction cost the reader nothing.
+      if (!RETRACTABLE_SURFACE_KINDS.has(next.surfaceKind)) {
+        surfaceLedRuns.add(jobId);
+      }
+    }
+    // A retraction hands the run back to prose — the turn is answering in text
+    // after all, so let it through again.
+    if (!next) surfaceLedRuns.delete(jobId);
+
+    const bubbleId =
+      streamBubbles.get(jobId) ??
+      lastStreamBubble.get(jobId) ??
+      (next ? ensureStreamBubble(jobId, '', { resultType: 'a2ui', resultData: next }) : undefined);
+    if (!bubbleId) return;
+
+    const sessionStore = useSessionStore.getState();
+    const owner = jobOwners.get(jobId);
+    // A retraction takes the surface off the bubble but leaves the TEXT: the
+    // reader has been reading it the whole time, and the run is about to
+    // complete with that text as the answer.
+    const update = next
+      ? { resultType: 'a2ui', resultData: next }
+      : { resultType: undefined, resultData: undefined };
+    if (owner) sessionStore.updateMessageInTargetSession(owner, bubbleId, update);
+    else sessionStore.updateMessage(bubbleId, update);
   },
 
   attachSurface: (
@@ -1021,7 +1187,7 @@ export const useExecutionStore = create<ExecutionStore>()(
     // The per-job counter survives those closes. Read BEFORE the flush below,
     // which clears it. Text still queued counts: the flush is about to paint it.
     const readerSawText = Boolean(
-      jobId && ((streamBubbleSeq.get(jobId) ?? 0) > 0 || streamBuffers.get(jobId)),
+      jobId && (textPainted.has(jobId) || streamBuffers.get(jobId)),
     );
     if (jobId) discardStreamPacing(jobId, true);
     // The live bubble, or the last one this job painted if a task boundary
@@ -1030,9 +1196,20 @@ export const useExecutionStore = create<ExecutionStore>()(
     const streamBubbleId = jobId
       ? (streamBubbles.get(jobId) ?? lastStreamBubble.get(jobId))
       : undefined;
+    // Did the live bubble already receive a STREAMED surface? Read before the
+    // cleanup below clears it. It matters because the answer does not always
+    // fold into that bubble — when a task-output message is superseded instead,
+    // the surface is applied THERE while the bubble keeps its own copy, and the
+    // deck renders twice, once under the other. Only became reachable when the
+    // streamed bubble started persisting its surface at all.
+    const bubbleCarriesSurface = Boolean(jobId && streamingSurfaces.get(jobId));
     if (jobId) {
       streamBubbles.delete(jobId);
       lastStreamBubble.delete(jobId);
+      streamingSurfaces.delete(jobId);
+      textPainted.delete(jobId);
+      surfaceLedRuns.delete(jobId);
+      lastSurfaceSeq.delete(jobId);
       // Terminal: a task_completed trace arriving after this is stale.
       markRunFinalized(jobId);
     }
@@ -1163,7 +1340,10 @@ export const useExecutionStore = create<ExecutionStore>()(
         }
         if (supersededId) {
           // A bubble left open by an earlier task is not the message carrying
-          // the answer, but it must still stop claiming to be typing.
+          // the answer, but it must still stop claiming to be typing — and it
+          // must give up any streamed surface, which now belongs to the message
+          // the answer folded into. Two messages holding the same deck renders
+          // it twice.
           if (streamBubbleId && streamBubbleId !== supersededId && ownerSession) {
             sessionStore.updateMessageInTargetSession(ownerSession, streamBubbleId, {
               isStreaming: false,
@@ -1175,7 +1355,15 @@ export const useExecutionStore = create<ExecutionStore>()(
           // surface and never applied `runExtra`. It can now — a run whose
           // bubble closed at a task boundary lands here — and without this the
           // answer would keep its text and silently lose its surface.
-          if (runExtra) {
+          //
+          // ...unless the live bubble is ALREADY showing this run's streamed
+          // surface. Then it has a home, and copying it here would render the
+          // deck twice, once under the other. Clearing the bubble instead is not
+          // an option: the persisted envelope is merged forward, so a surface
+          // cannot be un-set by omission — leaving it where it already is, is
+          // both simpler and the only thing that survives a reload.
+          const surfaceHasAHome = bubbleCarriesSurface && streamBubbleId;
+          if (runExtra && !surfaceHasAHome) {
             if (ownerSession) {
               sessionStore.updateMessageInTargetSession(
                 ownerSession,
@@ -1184,6 +1372,12 @@ export const useExecutionStore = create<ExecutionStore>()(
               );
             } else {
               sessionStore.updateMessage(supersededId, runExtra);
+            }
+          } else if (runExtra && surfaceHasAHome && ownerSession) {
+            // The execution id still belongs on the folded answer.
+            const { resultType: _t, resultData: _d, ...rest } = runExtra as Record<string, unknown>;
+            if (Object.keys(rest).length) {
+              sessionStore.updateMessageInTargetSession(ownerSession, supersededId, rest);
             }
           }
           // Register the message we folded into. Registering null here made the
@@ -1299,6 +1493,10 @@ export const useExecutionStore = create<ExecutionStore>()(
     if (jobId) {
       streamBubbles.delete(jobId);
       lastStreamBubble.delete(jobId);
+      streamingSurfaces.delete(jobId);
+      textPainted.delete(jobId);
+      surfaceLedRuns.delete(jobId);
+      lastSurfaceSeq.delete(jobId);
       // Terminal: a task_completed trace arriving after this is stale.
       markRunFinalized(jobId);
     }
@@ -1373,6 +1571,10 @@ export const useExecutionStore = create<ExecutionStore>()(
     discardStreamPacing(jobId, false);
     streamBubbles.delete(jobId);
     lastStreamBubble.delete(jobId);
+    streamingSurfaces.delete(jobId);
+    textPainted.delete(jobId);
+    surfaceLedRuns.delete(jobId);
+    lastSurfaceSeq.delete(jobId);
     finalizedJobs.delete(jobId);
     const ownerSession = jobOwners.get(jobId)!;
     jobOwners.delete(jobId);
@@ -1506,6 +1708,10 @@ export const useExecutionStore = create<ExecutionStore>()(
     discardStreamPacing(jobId, false);
     streamBubbles.delete(jobId);
     lastStreamBubble.delete(jobId);
+    streamingSurfaces.delete(jobId);
+    textPainted.delete(jobId);
+    surfaceLedRuns.delete(jobId);
+    lastSurfaceSeq.delete(jobId);
   },
 
   stashSessionPreview: (sessionId: string, preview: PreviewContent) => {

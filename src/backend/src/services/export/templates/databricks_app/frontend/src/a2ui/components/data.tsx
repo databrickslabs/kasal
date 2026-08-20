@@ -10,7 +10,7 @@ import { downloadCsv } from '../lib/download'
 import { DeckThemeContext, seriesFromAccent } from '../lib/deckThemes'
 import { SurfaceChromeContext } from '../lib/surfaceContext'
 import { cn } from '../lib/utils'
-import { asArr, asNum, asStr, numericValue } from './values'
+import { asArr, asNum, asStr, compactNumber, numericValue } from './values'
 
 export function Table({ node, resolve }: NodeProps) {
   // Resolve columns through the dataModel too — the composer may bind it
@@ -158,6 +158,7 @@ export function Chart({ node, resolve }: NodeProps) {
   // evenly-spaced hues derived from it. Pie needs one per slice, bar/line one
   // per series.
   const theme = useContext(DeckThemeContext)
+  if (!data.length) return null
   const series = seriesFromAccent(theme.accent, Math.max(data.length, keys.length, 1))
   return (
     <div className="flex h-full w-full min-w-0 flex-col">
@@ -169,7 +170,19 @@ export function Chart({ node, resolve }: NodeProps) {
           <PieChart margin={{ top: 8, right: 16, bottom: 8, left: 16 }}>
             {/* Radius RELATIVE to the box and cy lifted to 46% so the bottom legend
                 has room — a fixed 90px radius overflowed small cells. */}
-            <Pie data={data} dataKey={keys[0]} nameKey={xKey} cx="50%" cy="46%" outerRadius="70%" label>
+            {/* Slice labels ONLY while they can be read. Past a handful of
+                slices they pile up on top of one another in the middle of the
+                pie — ten countries rendered as an illegible knot of overlapping
+                numbers. The legend already names every slice. */}
+            <Pie
+              data={data}
+              dataKey={keys[0]}
+              nameKey={xKey}
+              cx="50%"
+              cy="46%"
+              outerRadius="70%"
+              label={data.length <= 6}
+            >
               {data.map((_, i) => <Cell key={i} fill={series[i % series.length]} />)}
             </Pie>
             <Tooltip /><Legend />
@@ -177,13 +190,13 @@ export function Chart({ node, resolve }: NodeProps) {
         ) : type === 'line' ? (
           <LineChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-            <XAxis dataKey={xKey} /><YAxis /><Tooltip /><Legend />
+            <XAxis dataKey={xKey} /><YAxis width={64} tickFormatter={compactNumber} /><Tooltip /><Legend />
             {keys.map((k, i) => <Line key={k} type="monotone" dataKey={k} stroke={series[i % series.length]} />)}
           </LineChart>
         ) : type === 'area' ? (
           <AreaChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-            <XAxis dataKey={xKey} /><YAxis /><Tooltip /><Legend />
+            <XAxis dataKey={xKey} /><YAxis width={64} tickFormatter={compactNumber} /><Tooltip /><Legend />
             {keys.map((k, i) => (
               <Area key={k} type="monotone" dataKey={k} stroke={series[i % series.length]} fill={series[i % series.length]} fillOpacity={0.25} />
             ))}
@@ -223,7 +236,7 @@ export function Chart({ node, resolve }: NodeProps) {
         ) : (
           <BarChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-            <XAxis dataKey={xKey} /><YAxis /><Tooltip /><Legend />
+            <XAxis dataKey={xKey} /><YAxis width={64} tickFormatter={compactNumber} /><Tooltip /><Legend />
             {keys.map((k, i) => <Bar key={k} dataKey={k} fill={series[i % series.length]} />)}
           </BarChart>
         )}

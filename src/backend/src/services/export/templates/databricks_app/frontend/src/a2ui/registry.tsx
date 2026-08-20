@@ -4,7 +4,7 @@ import {
   Markdown, Text, Heading, Image, Card, KeyValue, List, Table, Divider,
   Row, Column, Grid, Chart, SlideDeck, Slide, Mindmap, Quiz, Flashcards, GeoMap,
   RegionHeatmap, Sankey,
-  Forecast, Graph, Sequence, Album, Diagram, Unsupported,
+  Forecast, Graph, Sequence, Album, Diagram, Kanban, Skeleton, Unsupported,
 } from './components'
 
 // The extensibility seam: component name -> React renderer. To add a new A2UI
@@ -18,6 +18,11 @@ export const registry: Record<string, FC<NodeProps>> = {
   Map: GeoMap,
   // Data-viz + diagram components (usable inside dashboard/document surfaces).
   Forecast, Graph, Sequence, Album, Diagram, RegionHeatmap, Sankey,
+  // Project management.
+  Kanban,
+  // The instant-shell placeholder, drawn while the real surface is composed.
+  // Deliberately absent from catalog.json so only the shell can produce one.
+  Skeleton,
 }
 
 export { Unsupported }

@@ -24,7 +24,17 @@ vi.mock('./sessionStore', () => {
       painted.push({ id, content });
       return id;
     }),
-    addMessageToTargetSession: vi.fn(),
+    // Implemented, not stubbed: the store routes a run's bubble by its OWNER
+    // session so switching away mid-run cannot lose it. A no-op here swallows
+    // every message the code under test writes — which is exactly how the
+    // wrong-session bug this routing fixes stayed invisible.
+    addMessageToTargetSession: vi.fn(
+      (_session: string, _role: string, content: string, extra?: Record<string, unknown>) => {
+        const id = (extra?.id as string) ?? `m-${painted.length}`;
+        painted.push({ id, content, ...(extra as object) });
+        return id;
+      },
+    ),
     updateMessageInTargetSession: vi.fn(),
     updateMessage: vi.fn(),
     appendToMessage: vi.fn((id: string, chunk: string) => {
@@ -165,18 +175,28 @@ describe('stream pacing', () => {
   // same bubble.
   it('never creates an empty bubble — the row must be inserted WITH content', () => {
     const { jobId } = startOwnedJob('job-6');
-    const addMessage = (
-      useSessionStore as unknown as { getState: () => { addMessage: { mock: { calls: unknown[][] } } } }
-    ).getState().addMessage;
 
     useExecutionStore.getState().appendStreamChunk(jobId, 'the answer text');
     drainFrames();
 
-    const bubbleInserts = addMessage.mock.calls.filter(
-      (call) => String((call[2] as { id?: string } | undefined)?.id ?? '').startsWith('stream-'),
-    );
+    // A run's bubble is created through the OWNER-targeted variant so switching
+    // sessions mid-run cannot lose it, and through `addMessage` when the job has
+    // no owner. Both are checked: watching only one let this invariant slip the
+    // moment the routing changed.
+    const state = (
+      useSessionStore as unknown as {
+        getState: () => Record<string, { mock: { calls: unknown[][] } }>;
+      }
+    ).getState();
+    const bubbleInserts = [
+      // addMessage(role, content, extra)
+      ...state.addMessage.mock.calls.map((c) => ({ content: c[1], extra: c[2] })),
+      // addMessageToTargetSession(session, role, content, extra)
+      ...state.addMessageToTargetSession.mock.calls.map((c) => ({ content: c[2], extra: c[3] })),
+    ].filter((i) => String((i.extra as { id?: string } | undefined)?.id ?? '').startsWith('stream-'));
+
     expect(bubbleInserts.length).toBeGreaterThan(0);
-    bubbleInserts.forEach((call) => expect(call[1]).not.toBe(''));
+    bubbleInserts.forEach((i) => expect(i.content).not.toBe(''));
   });
 
   it('is a no-op for an untracked job', () => {

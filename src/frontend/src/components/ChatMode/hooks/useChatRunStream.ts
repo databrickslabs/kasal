@@ -25,6 +25,7 @@ import { useExecutionStream } from './useExecutionStream';
 import { stopAllGenerationStreams } from '../utils/generationStreamManager';
 import { generateId } from '../utils/markdown';
 import { parsePreviewContent } from '../components/Preview/PreviewPanel';
+import type { A2uiMessage } from '../../../shared/a2ui/stream';
 import type { Surface } from '../../../shared/a2ui';
 import { buildTraceEntry } from '../utils/traceActivity';
 import { cleanTaskLabel, taskHeaderLabel, summarizeTaskOutput } from '../utils/taskChatRendering';
@@ -383,6 +384,18 @@ export function useChatRunStream({ pendingActionsRef }: UseChatRunStreamArgs) {
       // falling back to the stream this workspace opened.
       const jobId = (data.job_id as string) || sseJobIdRef.current;
       if (jobId) useExecutionStore.getState().appendStreamChunk(jobId, chunk);
+    },
+    onSurfaceDelta: (message, data) => {
+      // Same job-id routing as onChunk: a delta belongs to the run that emitted
+      // it, not to whichever run happens to be in the foreground.
+      const jobId = (data.job_id as string) || sseJobIdRef.current;
+      if (jobId) {
+        // The seq rides along so a reconnect's replay cannot regress a surface
+        // this client has already built past.
+        useExecutionStore
+          .getState()
+          .applySurfaceDelta(jobId, message as A2uiMessage, data.seq as number | undefined);
+      }
     },
     onStatusChange: (status) => {
       useExecutionStore.getState().updateExecutionStatus(status as ExecutionStatus);

@@ -4,7 +4,7 @@
  * Slides render their children through the `render` prop rather than importing
  * the component modules, which is what keeps this module free of cycles.
  */
-import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { ComponentNode, NodeProps } from '../types'
 import { ChevronDown, Download, FileText, Presentation, StickyNote } from 'lucide-react'
@@ -58,7 +58,7 @@ export function Slide({ node, render, resolve }: NodeProps) {
   const kicker = asStr(node.kicker)
   const subtitle = asStr(node.subtitle)
   const children = node.children || []
-  const body = children.map((id) => render(id))
+ const body = children.map((id) => render(id)).filter(Boolean)
   // Does the body actually render anything? (no/blank children → no.)
   const slideHasBody = useMemo(() => {
     const comps = surface?.components
@@ -137,8 +137,50 @@ export function Slide({ node, render, resolve }: NodeProps) {
     variant === 'image-full' ||
     variant === 'kpi-split' ||
     variant === 'boxes' ||
-    variant === 'split'
+    variant === 'split' ||
+    variant === 'process' ||
+    variant === 'icon-cards' ||
+    variant === 'numbered-list' ||
+    variant === 'contrast' ||
+    variant === 'pillars' ||
+    // 'big-number' belongs here too: its whole layout is the first child
+    // rendered huge, so a childless one is an empty stage, not a headline.
+    variant === 'big-number'
+  // NOT 'hero' / 'end-card' / 'callout': those three are title-dominant BY
+  // DESIGN (a keynote opener, an accent closing card, a pull-quote) and render
+  // correctly with no children at all. Listing them here would redirect every
+  // ordinary one to the centered section layout and throw away exactly what
+  // distinguishes them — the 3.5rem title, the accent background, the blockquote.
   const titleOnlyContent = bodyVariant && !slideHasBody && node.title != null
+
+  // The outline pre-pass knows every slide's title and layout minutes before its
+  // body is written, and ships that skeleton so the deck's shape is on screen
+  // while the slides are still being composed. Draw a pending slide as being
+  // WRITTEN — its real title over placeholder bars — rather than as a finished
+  // slide that happens to be empty, which is what it would otherwise look like.
+  if (node.pending === true) {
+    return (
+      <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={stageStyle}>
+        {chrome}
+        {eyebrow}
+        <div className="mb-5 mt-2 h-1.5 w-16 rounded-full" style={{ background: theme.accent }} />
+        {node.title != null && (
+          <h2 className="text-balance text-[2.5rem] font-bold leading-tight tracking-tight" style={{ color: theme.title }}>
+            {asStr(node.title)}
+          </h2>
+        )}
+        <div className="mt-8 flex flex-1 flex-col gap-4" aria-busy="true" aria-label="Slide being written">
+          {[0.92, 0.78, 0.85, 0.6].map((w, i) => (
+            <div
+              key={i}
+              className="a2-slide-pending h-4 animate-pulse rounded"
+              style={{ width: `${w * 100}%`, background: theme.panelBorder, animationDelay: `${i * 120}ms` }}
+            />
+          ))}
+        </div>
+      </div>
+    )
+  }
   if (variant === 'title' || variant === 'section' || titleOnlyContent) {
     return (
       <div
@@ -222,6 +264,291 @@ export function Slide({ node, render, resolve }: NodeProps) {
           {subtitle && <p className="mt-5 max-w-3xl text-pretty text-xl leading-relaxed text-white/90">{subtitle}</p>}
         </div>
         {chrome}
+      </div>
+    )
+  }
+
+  if (variant === 'hero') {
+    // Keynote-style opening: massive centered title, subtitle, accent rule — no page number.
+    // Use for the main deck opener after the title slide, or for a major section header.
+    return (
+      <div
+        className="a2-slide relative flex h-full flex-col items-center justify-center p-12 text-center"
+        style={stageStyle}
+      >
+        {chrome}
+        {eyebrow}
+        {node.title != null && (
+          <h2 className="mt-3 text-balance text-[3.5rem] font-extrabold leading-[1.05] tracking-tight" style={{ color: theme.title }}>
+            {asStr(node.title)}
+          </h2>
+        )}
+        <div className="mt-6 h-1 w-24 rounded-full" style={{ background: theme.accent }} />
+        {subtitle && <p className="mt-6 max-w-2xl text-pretty text-2xl leading-relaxed" style={{ color: theme.muted }}>{subtitle}</p>}
+        {children.length > 0 && <div className="mt-6 max-w-3xl space-y-2 text-left text-pretty">{body}</div>}
+      </div>
+    )
+  }
+
+  if (variant === 'big-number') {
+    // One giant metric with label and context line — for the deck's headline number.
+    // Children: first child is the number (KeyValue or Heading), rest is context.
+    return (
+      <div className="a2-slide relative flex h-full flex-col p-12" style={stageStyle}>
+        {chrome}
+        {eyebrow}
+        {node.title != null && (
+          <h2 className="text-balance text-2xl font-semibold tracking-tight" style={{ color: theme.muted }}>{asStr(node.title)}</h2>
+        )}
+        <div className="mt-8 flex-1 flex flex-col items-center justify-center">
+          {body[0]}
+          {body.length > 1 && (
+            <div className="mt-6 max-w-2xl text-pretty text-lg text-center" style={{ color: theme.muted }}>
+              {body.slice(1).map((c, i) => <div key={i}>{c}</div>)}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  if (variant === 'end-card') {
+    // Closing slide: accent background, centered takeaway — signals the deck is done.
+    return (
+      <div
+        className="a2-slide relative flex h-full flex-col items-center justify-center p-12 text-center"
+        style={{ ...stageStyle, background: theme.accent }}
+      >
+        {chrome}
+        {eyebrow}
+        {node.title != null && (
+          <h2 className="mt-3 text-balance text-[3rem] font-extrabold leading-[1.05] tracking-tight text-white">
+            {asStr(node.title)}
+          </h2>
+        )}
+        {subtitle && <p className="mt-5 max-w-2xl text-pretty text-xl leading-relaxed text-white/90">{subtitle}</p>}
+        {children.length > 0 && <div className="mt-6 max-w-3xl space-y-2 text-left text-pretty text-white/90">{body}</div>}
+      </div>
+    )
+  }
+
+
+  if (variant === 'process') {
+    // Horizontal process flow: numbered steps in a row with connecting arrows.
+    // Use for workflows, pipelines, stages, or step-by-step guides.
+    // Each child is a Text node describing one step.
+    // Keep the RENDERED node. `asStr(render(id))` coerces a React element to a
+    // string, which is empty — every step card drew as a blank panel under a
+    // numbered circle, on every process slide.
+    const steps = children.map((id) => ({ id, node: render(id) }))
+    return (
+      <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={stageStyle}>
+        {chrome}
+        {eyebrow}
+        {node.title != null && (
+          <h2 className="text-balance text-[2.5rem] font-bold leading-tight tracking-tight" style={{ color: theme.title }}>
+            {asStr(node.title)}
+          </h2>
+        )}
+        {subtitle && (
+          <p className="mt-4 max-w-4xl text-pretty text-[1.4rem] leading-snug" style={{ color: theme.muted }}>{subtitle}</p>
+        )}
+        <div className="mt-8 flex min-w-0 flex-1 items-stretch gap-3">
+          {steps.map((step, i) => (
+            <Fragment key={step.id}>
+              <div className="flex min-w-0 flex-1 flex-col items-center">
+                <div
+                  className="mb-3 flex size-12 shrink-0 items-center justify-center rounded-full text-xl font-extrabold"
+                  style={{ background: theme.accent, color: '#fff' }}
+                >
+                  {i + 1}
+                </div>
+                <div
+                  className="w-full min-w-0 flex-1 overflow-hidden rounded-xl border p-4 text-center text-[1.15rem] leading-snug"
+                  style={{ background: theme.panel, borderColor: theme.panelBorder }}
+                >
+                  {step.node}
+                </div>
+              </div>
+              {/* Between the columns, not below one: the arrow is a sibling of
+                  the steps rather than a third child of a step's own column,
+                  which is why they used to stack under the cards. Aligned to
+                  the numbered circles so the row reads left-to-right. */}
+              {i < steps.length - 1 && (
+                <div
+                  aria-hidden="true"
+                  className="flex shrink-0 items-start pt-3 text-2xl leading-none"
+                  style={{ color: theme.muted }}
+                >
+                  →
+                </div>
+              )}
+            </Fragment>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (variant === 'icon-cards') {
+    // Feature/benefit cards in a grid, each with an icon placeholder and title/description.
+    // Use for listing features, benefits, capabilities, or key points.
+    // Each child should be a Card or KeyValue with title and description.
+    const cols = Math.min(Math.max(children.length, 1), 3)
+    return (
+      <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={stageStyle}>
+        {chrome}
+        {eyebrow}
+        {node.title != null && (
+          <h2 className="text-balance text-[2.5rem] font-bold leading-tight tracking-tight" style={{ color: theme.title }}>
+            {asStr(node.title)}
+          </h2>
+        )}
+        {subtitle && (
+          <p className="mt-4 max-w-4xl text-pretty text-[1.4rem] leading-snug" style={{ color: theme.muted }}>{subtitle}</p>
+        )}
+        <div
+          className="mt-7 grid flex-1 content-center gap-5"
+          style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+        >
+          {body}
+        </div>
+      </div>
+    )
+  }
+
+
+  if (variant === 'numbered-list') {
+    // Large numbered items for ranked / ordered points — each child gets a big
+    // accent number badge and its own row. Use for top-3 lists, priorities, or
+    // any ordered set where the sequence matters.
+    return (
+      <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={stageStyle}>
+        {chrome}
+        {eyebrow}
+        <div className="mb-5 mt-2 h-1.5 w-16 rounded-full" style={{ background: theme.accent }} />
+        {node.title != null && (
+          <h2 className="text-balance text-[2.5rem] font-bold leading-tight tracking-tight" style={{ color: theme.title }}>
+            {asStr(node.title)}
+          </h2>
+        )}
+        {subtitle && (
+          <p className="mt-4 max-w-4xl text-pretty text-[1.4rem] leading-snug" style={{ color: theme.muted }}>{subtitle}</p>
+        )}
+        <div className="mt-7 flex min-h-0 flex-1 flex-col justify-center gap-6">
+          {children.map((id, i) => (
+            <div key={id} className="flex items-start gap-5">
+              <span
+                className="flex size-12 shrink-0 items-center justify-center rounded-full text-xl font-extrabold"
+                style={{ background: theme.accent, color: 'white' }}
+              >
+                {i + 1}
+              </span>
+              <div className="min-w-0 flex-1 text-pretty text-[1.45rem] leading-snug">{render(id)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (variant === 'contrast') {
+    // Before/after or problem/solution: two visually distinct panels separated
+    // by a bold accent divider. Use when the answer contrasts two states,
+    // approaches, or time periods. leftLabel / rightLabel name the sides.
+    const labels = [asStr(node.leftLabel) || 'Before', asStr(node.rightLabel) || 'After']
+    const mid = Math.ceil(children.length / 2)
+    const columns = [children.slice(0, mid), children.slice(mid)]
+    return (
+      <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={stageStyle}>
+        {chrome}
+        {eyebrow}
+        <div className="mb-5 mt-2 h-1.5 w-16 rounded-full" style={{ background: theme.accent }} />
+        {node.title != null && (
+          <h2 className="text-balance text-[2.5rem] font-bold leading-tight tracking-tight" style={{ color: theme.title }}>
+            {asStr(node.title)}
+          </h2>
+        )}
+        {subtitle && (
+          <p className="mt-4 max-w-4xl text-pretty text-[1.4rem] leading-snug" style={{ color: theme.muted }}>{subtitle}</p>
+        )}
+        <div className="mt-6 grid min-h-0 flex-1 grid-cols-[1fr_auto_1fr] items-stretch gap-0">
+          {columns.map((col, side) => (
+            <div
+              key={side}
+              className="flex min-w-0 flex-col px-6 py-5"
+              style={{
+                background: theme.panel,
+                borderRight: side === 0 ? `2px solid ${theme.accent}` : 'none',
+              }}
+            >
+              <div
+                className="mb-4 text-base font-bold uppercase tracking-widest"
+                style={{ color: side === 0 ? theme.accent : theme.kicker }}
+              >
+                {labels[side]}
+              </div>
+              <div className="flex min-w-0 flex-1 flex-col justify-center space-y-3 text-pretty text-[1.25rem] leading-relaxed [&_ul]:space-y-2 [&_ol]:space-y-2">
+                {col.map((id) => render(id))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (variant === 'callout') {
+    // A single dominant statement with decorative treatment — the slide's focus
+    // is one punchy idea. Use for a key insight, a rule of thumb, or a principle
+    // the audience should remember. Children are optional supporting detail.
+    return (
+      <div className="a2-slide relative flex h-full flex-col items-center justify-center p-12 text-center" style={stageStyle}>
+        {chrome}
+        {eyebrow}
+        <div className="mx-auto mt-2 h-1 w-20 rounded-full" style={{ background: theme.accent }} />
+        {node.title != null && (
+          <blockquote className="mt-6 max-w-4xl text-balance text-[2.6rem] font-extrabold leading-[1.15]" style={{ color: theme.title }}>
+            "{asStr(node.title)}"
+          </blockquote>
+        )}
+        {subtitle && <p className="mt-5 max-w-2xl text-pretty text-xl leading-relaxed" style={{ color: theme.muted }}>{subtitle}</p>}
+        {children.length > 0 && <div className="mt-6 max-w-3xl text-pretty text-[1.35rem] leading-relaxed" style={{ color: theme.muted }}>{body}</div>}
+      </div>
+    )
+  }
+
+  if (variant === 'pillars') {
+    // 3-4 vertical pillars / columns for frameworks, models, or capability
+    // categories. Each child becomes one pillar with a title and body.
+    const cols = Math.min(Math.max(body.length, 1), 4)
+    return (
+      <div className="a2-slide relative flex h-full flex-col px-14 py-12" style={stageStyle}>
+        {chrome}
+        {eyebrow}
+        <div className="mb-5 mt-2 h-1.5 w-16 rounded-full" style={{ background: theme.accent }} />
+        {node.title != null && (
+          <h2 className="text-balance text-[2.5rem] font-bold leading-tight tracking-tight" style={{ color: theme.title }}>
+            {asStr(node.title)}
+          </h2>
+        )}
+        {subtitle && (
+          <p className="mt-4 max-w-4xl text-pretty text-[1.4rem] leading-snug" style={{ color: theme.muted }}>{subtitle}</p>
+        )}
+        <div
+          className="mt-7 grid flex-1 content-center gap-5"
+          style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+        >
+          {body.map((child, i) => (
+            <div
+              key={i}
+              className="flex min-h-0 flex-col rounded-2xl border px-5 py-6"
+              style={{ borderColor: theme.panelBorder, background: theme.panel }}
+            >
+              {child}
+            </div>
+          ))}
+        </div>
       </div>
     )
   }

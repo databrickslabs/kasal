@@ -271,3 +271,45 @@ describe('slide bodies collapse to full width when one side is empty', () => {
     expect(bodyGrid?.style.gridTemplateColumns).toBe('3fr 2fr');
   });
 });
+
+describe('process slides', () => {
+  // The steps were built with `asStr(render(id))`, which coerces a React element
+  // to a string — always empty. Every process slide drew numbered circles above
+  // four blank panels.
+  const deck = (children: string[]) => ({
+    surfaceKind: 'presentation',
+    root: 'deck',
+    components: [
+      { id: 'deck', component: 'SlideDeck', children: ['s1'] },
+      {
+        id: 's1',
+        component: 'Slide',
+        variant: 'process',
+        title: 'Getting Around',
+        children,
+      },
+      ...children.map((id, i) => ({
+        id,
+        component: 'Text',
+        text: `Step ${i + 1} explains what to do`,
+      })),
+    ],
+    dataModel: {},
+  })
+
+  it('renders each step’s text inside its card', () => {
+    const { getByText } = render(<A2UIRenderer payload={deck(['a', 'b', 'c']) as never} />)
+    expect(getByText('Step 1 explains what to do')).toBeTruthy()
+    expect(getByText('Step 3 explains what to do')).toBeTruthy()
+  })
+
+  it('puts an arrow BETWEEN steps, not one per step', () => {
+    // They used to be a third child of each step's own column, so they stacked
+    // underneath the cards instead of reading left to right.
+    const { container } = render(<A2UIRenderer payload={deck(['a', 'b', 'c', 'd']) as never} />)
+    const arrows = [...container.querySelectorAll('[aria-hidden="true"]')].filter(
+      (el) => el.textContent === '→',
+    )
+    expect(arrows).toHaveLength(3)
+  })
+})

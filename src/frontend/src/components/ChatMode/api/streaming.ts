@@ -58,10 +58,18 @@ export function streamExecution(
     console.log('[SSE] Connecting to execution stream:', sseUrl, `(attempt ${reconnectAttempts + 1})`);
     eventSource = new EventSource(sseUrl);
 
+    // EventSource only delivers a NAMED event to a listener registered for that
+    // exact name — `onmessage` sees unnamed frames only. So this list is not
+    // documentation, it is the filter: an event type missing here is dropped by
+    // the browser before any application code runs, silently and with the server
+    // logs showing a perfectly healthy broadcast.
     const eventTypes = [
       'execution_update',
       'trace',
       'llm_chunk',
+      // A2UI surface deltas — the instant deck shell, the outline skeleton and
+      // each slide as it is composed.
+      'a2ui_delta',
       'hitl_request',
       'connected',
     ];

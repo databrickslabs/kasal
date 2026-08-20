@@ -125,9 +125,13 @@ export function KeyValue({ node, resolve }: NodeProps) {
     )
   }
   return (
-    <div className="flex h-full flex-col rounded-xl border bg-secondary/40 p-4">
+    <div className="flex h-full min-w-0 flex-col overflow-hidden rounded-xl border bg-secondary/40 p-4">
       {Icon && <Icon className="mb-2 size-5 shrink-0" style={{ color: theme.accent }} aria-hidden="true" />}
-      <div className="text-2xl font-bold">{asStr(resolve(node.value))}</div>
+      {/* `min-w-0` + wrapping: a value like "17.1M km²" in a narrow cell used to
+          spill past the tile and collide with its neighbour's text. */}
+      <div className="min-w-0 break-words text-2xl font-bold leading-tight">
+        {asStr(resolve(node.value))}
+      </div>
       <div className="mt-1 text-sm font-medium text-foreground/80">{asStr(resolve(node.label))}</div>
     </div>
   )
@@ -200,13 +204,24 @@ export function Grid({ node, render }: NodeProps) {
     if (n.component === 'Table') return true
     return (Array.isArray(n.children) ? n.children : []).some((cid) => hasTable(cid, depth + 1))
   }
+  // A child that is ITSELF a Grid is a band — a KPI row, a set of tiles — and a
+  // band packed into 1/N of a row is never right. The composer's usual dashboard
+  // is a 3-column Grid whose first child is a 4-column KPI Grid; that put four
+  // stat tiles inside one third of the width, where their values and labels
+  // overlapped into an unreadable pile. Same reasoning as the Table rule above,
+  // and the same remedy: give it the whole row.
+  const isBand = (id: string): boolean => byId[id]?.component === 'Grid'
   // Lay out row-by-row instead of one fixed N-column grid. Normal cells pack
   // `columns` per row; an UNDERFULL last row uses its own item count as the
   // column count so its cells STRETCH to fill the width (symmetric, no empty
   // gap — e.g. 2 charts in a 3-col dashboard become two equal halves instead of
   // leaving a blank third cell). A Table-bearing cell always takes its OWN
   // full-width row (the wide footer).
-  const children = node.children || []
+  const children = (node.children || []).filter((id) => {
+    const n = byId[id]
+    if (!n) return true
+    return n.component !== "Chart" || (Array.isArray(n.data) ? n.data.length > 0 : true)
+  })
   const rows: { wide: boolean; ids: string[] }[] = []
   let buf: string[] = []
   const flush = () => {
@@ -216,7 +231,7 @@ export function Grid({ node, render }: NodeProps) {
     }
   }
   for (const id of children) {
-    if (hasTable(id)) {
+    if (hasTable(id) || isBand(id)) {
       flush()
       rows.push({ wide: true, ids: [id] })
     } else {

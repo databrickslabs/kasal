@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { compactNumber } from './components/values'
 import { render, screen, fireEvent } from '@testing-library/react';
 import { A2UIRenderer } from './A2UIRenderer';
 import type { Surface } from './types';
@@ -425,3 +426,105 @@ describe('Album', () => {
     expect(screen.queryByText('Gallery')).toBeNull();
   });
 });
+
+describe('Skeleton — the instant shell placeholder', () => {
+  // Shipped before any model runs, so for the first seconds of a quiz or
+  // mindmap request it is the ONLY thing on screen.
+  const render1 = (variant: string, title?: string) =>
+    render(
+      <A2UIRenderer
+        payload={{
+          surfaceKind: variant,
+          root: 'shell',
+          components: [
+            { id: 'shell', component: 'Skeleton', variant, title, pending: true },
+          ],
+          dataModel: {},
+        }}
+      />,
+    )
+
+  it.each(['quiz', 'flashcards', 'mindmap', 'map', 'document'])(
+    'draws a %s placeholder without crashing',
+    (variant) => {
+      const { container } = render1(variant)
+      expect(container.querySelector('.a2-skeleton')).toBeTruthy()
+    },
+  )
+
+  it('shows the title derived from the request', () => {
+    const { getByText } = render1('quiz', 'SQL Joins')
+    expect(getByText('SQL Joins')).toBeTruthy()
+  })
+
+  it('announces itself as busy rather than as an empty surface', () => {
+    const { container } = render1('quiz', 'SQL Joins')
+    const el = container.querySelector('.a2-skeleton')!
+    expect(el.getAttribute('aria-busy')).toBe('true')
+    expect(el.getAttribute('aria-label')).toContain('SQL Joins')
+  })
+
+  it('shapes the body to the kind that is coming', () => {
+    // A quiz frame reads as questions-and-options, not as a generic spinner.
+    const quiz = render1('quiz').container.querySelectorAll('.a2-skeleton-bar').length
+    const doc = render1('document').container.querySelectorAll('.a2-skeleton-bar').length
+    expect(quiz).toBeGreaterThan(doc)
+  })
+})
+
+describe('dashboard layout', () => {
+  // A composed dashboard is a 3-column Grid whose first child is a 4-column KPI
+  // Grid. Packing that band into one third of the width put four stat tiles in
+  // a space meant for one, where their values and labels overlapped illegibly.
+  const dashboard = {
+    surfaceKind: 'dashboard',
+    root: 'root',
+    components: [
+      { id: 'root', component: 'Grid', columns: 3, children: ['kpis', 'bar', 'pie'] },
+      { id: 'kpis', component: 'Grid', columns: 4, children: ['k1', 'k2', 'k3', 'k4'] },
+      ...['k1', 'k2', 'k3', 'k4'].map((id, i) => ({
+        id,
+        component: 'KeyValue',
+        label: `Metric ${i + 1}`,
+        value: '17.1M km²',
+      })),
+      { id: 'bar', component: 'Chart', chartType: 'bar', xKey: 'c', yKeys: ['area'], data: [{ c: 'A', area: 1 }] },
+      { id: 'pie', component: 'Chart', chartType: 'pie', xKey: 'c', yKeys: ['area'], data: [{ c: 'A', area: 1 }] },
+    ],
+    dataModel: {},
+  }
+
+  it('gives a nested grid its own full-width row', () => {
+    const { container } = render(<A2UIRenderer payload={dashboard as never} />)
+    const rows = [...container.querySelectorAll<HTMLElement>('div.grid')]
+    const bandRow = rows.find((r) => r.style.gridTemplateColumns === '1fr')
+    expect(bandRow, 'the KPI band was packed into a narrow cell').toBeTruthy()
+  })
+
+  it('keeps a long stat value inside its tile', () => {
+    const { container } = render(<A2UIRenderer payload={dashboard as never} />)
+    const tile = container.querySelector<HTMLElement>('.rounded-xl.border')
+    expect(tile?.className).toContain('min-w-0')
+    expect(tile?.className).toContain('overflow-hidden')
+  })
+})
+
+describe('compactNumber', () => {
+  // A y-axis of land areas ticks at 700000; the default gutter clipped that to
+  // "00000", which reads as a broken chart rather than a number.
+  it.each([
+    [0, '0'],
+    [999, '999'],
+    [1500, '1.5k'],
+    [700000, '700k'],
+    [1_500_000, '1.5M'],
+    [2_000_000_000, '2B'],
+    [-4200, '-4.2k'],
+  ])('formats %s as %s', (input, expected) => {
+    expect(compactNumber(input)).toBe(expected)
+  })
+
+  it('passes non-numbers through untouched', () => {
+    expect(compactNumber('n/a')).toBe('n/a')
+  })
+})

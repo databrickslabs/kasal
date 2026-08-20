@@ -15,9 +15,12 @@ surface dict, or ``None`` when A2UI is disabled or there is no text to render.
 import asyncio
 import logging
 import os
-from typing import Any, Dict, List, Optional, Tuple
+import threading
+import time
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from src.services.a2ui.compose import (
+    ComposeStream,
     compose_a2ui,
     guidance_for,
     infer_deliverable,
@@ -25,6 +28,12 @@ from src.services.a2ui.compose import (
     resolve_catalog,
     resolve_directives,
     wants_rich_surface,
+)
+from src.services.a2ui.stream import (
+    SURFACE_ID,
+    SurfaceStreamer,
+    delete_surface_msg,
+    surface_to_messages,
 )
 from src.services.a2ui.structured_text import render_research_envelope
 
@@ -258,31 +267,12 @@ async def _resolve_config(
 # envelope when they carry real data — see `compose_surface`.
 _DATA_SURFACE_KINDS = frozenset({"dashboard", "document"})
 
-# Components that make a surface a genuine DELIVERABLE (a real graph/table/number,
-# a diagram, a map, an image gallery). A dashboard/document surface with none of
-# these is just prose wrapped in Text/Markdown and would render the answer twice
-# (see the double-render fix). The data-viz + diagram + gallery components must be
-# listed here or their surfaces get dropped back to plain text.
-_DATA_COMPONENTS = frozenset(
-    {
-        "Chart",
-        "Table",
-        "Stat",
-        "KeyValue",
-        "Grid",
-        "Forecast",
-        "Graph",
-        "Sequence",
-        "Album",
-        "Map",
-        "Diagram",
-        # Region shading and flow ribbons are genuine deliverables: omitted here,
-        # their whole surface is dropped as "prose-only" and the answer silently
-        # falls back to markdown (the Album bug in the A2UI checklist).
-        "RegionHeatmap",
-        "Sankey",
-    }
-)
+# The deliverable-component set now lives in ``stream`` — the STREAM gate needs
+# the same list (a dashboard may not start streaming until it has proven it
+# carries data), and two copies of it is exactly how Kanban ended up in the
+# renderer and the catalog but not here, which silently drops every Kanban
+# dashboard back to markdown.
+from src.services.a2ui.stream import DATA_COMPONENTS as _DATA_COMPONENTS
 
 
 def _has_data_component(surface: Dict[str, Any]) -> bool:
@@ -298,6 +288,164 @@ def _has_data_component(surface: Dict[str, Any]) -> bool:
     return False
 
 
+#: Ships one A2UI message to the reader. Awaited on the event loop; the bridge
+#: hops threads for you, so an implementation only has to broadcast.
+DeltaSink = Callable[[Dict[str, Any]], Awaitable[None]]
+
+
+class _ComposeStreamBridge(ComposeStream):
+    """Carries a surface to the reader WHILE the composer is still writing it.
+
+    Three threads of control meet here, which is the whole difficulty:
+
+    * the composer runs in a worker thread (``asyncio.to_thread``), so the LLM's
+      chunk events arrive off-loop and the buffer needs a lock;
+    * the delta sink is a coroutine owned by the event loop, so every delivery
+      hops back via ``run_coroutine_threadsafe``;
+    * the composer may generate the surface more than once (a design-lint
+      correction regenerates the whole deck), so each attempt is a REVISION that
+      supersedes the last.
+
+    Failure is always silent and always degrades to today's behavior: if anything
+    here goes wrong the reader simply waits for the finished surface, exactly as
+    before. Nothing in this class may raise into the composer.
+    """
+
+    #: Rescan cadence, seconds. The parser re-reads the whole buffer each pass
+    #: (that is what keeps it stateless and testable), so pacing it stops a long
+    #: deck from turning into quadratic work — at ~8 passes/second the cost is
+    #: invisible and the reader cannot perceive the difference. Configurable
+    #: because a test emitting a whole deck in microseconds would otherwise see
+    #: exactly one batch and prove nothing about incremental delivery.
+    @staticmethod
+    def _interval() -> float:
+        try:
+            return max(0.0, float(os.getenv("A2UI_STREAM_INTERVAL_MS", "120")) / 1000.0)
+        except Exception:  # noqa: BLE001
+            return 0.12
+
+    def __init__(self, surface_id, on_delta, loop, llm) -> None:
+        self._surface_id = surface_id
+        self._on_delta = on_delta
+        self._loop = loop
+        self._llm = llm
+        self._lock = threading.Lock()
+        self._buf: List[str] = []
+        self._streamer = None
+        self._revision = 0
+        self._active = False
+        self._last_feed = 0.0
+        self.sent = 0
+        self.chunks = 0
+
+    # -- delivery ----------------------------------------------------------
+    def _ship(self, msg: Dict[str, Any]) -> None:
+        self.sent += 1
+        try:
+            asyncio.run_coroutine_threadsafe(self._on_delta(msg), self._loop)
+        except Exception as err:  # noqa: BLE001
+            logger.debug(f"[a2ui] delta not shipped: {err}")
+
+    # -- LLM chunk handler --------------------------------------------------
+    def on_chunk(self, source: Any, event: Any) -> None:
+        """Bus handler. Matched by INSTANCE so a concurrent chat run's tokens can
+        never be parsed as this composer's surface."""
+        try:
+            if source is not self._llm or not self._active:
+                return
+            chunk = getattr(event, "chunk", "") or ""
+            if not chunk:
+                return
+            with self._lock:
+                self._buf.append(chunk)
+                self.chunks += 1
+                now = time.monotonic()
+                if now - self._last_feed < self._interval():
+                    return
+                self._last_feed = now
+                buf = "".join(self._buf)
+            self._feed(buf)
+        except Exception as err:  # noqa: BLE001
+            logger.debug(f"[a2ui] chunk not streamed: {err}")
+
+    def _feed(self, buf: str) -> None:
+        if self._streamer is not None:
+            self._streamer.feed(buf)
+
+    # -- ComposeStream protocol (called from the composer thread) -----------
+    def skeleton(self, surface: Dict[str, Any]) -> None:
+        """Ship the outline's placeholder deck — real titles, no content yet."""
+        try:
+            for msg in surface_to_messages(surface, self._surface_id):
+                self._ship(msg)
+        except Exception as err:  # noqa: BLE001
+            logger.debug(f"[a2ui] skeleton not shipped: {err}")
+
+    def attempt(self, n: int) -> None:
+        """A surface generation starts. Everything it emits replaces revision n-1."""
+        try:
+            with self._lock:
+                self._buf = []
+                self._last_feed = 0.0
+                self._revision = n
+                self._active = True
+            self._streamer = SurfaceStreamer(
+                self._surface_id, self._ship, revision=n
+            )
+        except Exception as err:  # noqa: BLE001
+            logger.debug(f"[a2ui] stream attempt not armed: {err}")
+
+    def final(self, surface: Optional[Dict[str, Any]]) -> None:
+        """Composition returned. Stop parsing; the caller decides what ships."""
+        try:
+            with self._lock:
+                self._active = False
+                buf = "".join(self._buf)
+            self._feed(buf)  # a last pass so a tail that arrived under the
+            #                  throttle is not lost
+            # One line per composed surface, at INFO. "The deck composed but
+            # streamed nothing" is invisible at debug level and costs a whole
+            # 3-minute run to reproduce; this says which half failed.
+            logger.info(
+                f"[a2ui] stream: {self.chunks} chunks -> {self.sent} messages "
+                f"({len(buf)} chars, revision {self._revision})"
+            )
+        except Exception as err:  # noqa: BLE001
+            logger.debug(f"[a2ui] final stream pass skipped: {err}")
+
+    # -- outcome ------------------------------------------------------------
+    def commit(self, surface: Dict[str, Any]) -> None:
+        """Replace whatever streamed with the validated surface.
+
+        The stream is an optimisation, never a second source of truth: it may
+        hold a superseded revision, a component the design-retry rewrote, or
+        simply less than the whole. Sending the finished surface as one more
+        ``createSurface`` makes the reader's copy exactly the stored one.
+        """
+        if not self.sent:
+            return
+        try:
+            for msg in surface_to_messages(surface, self._surface_id):
+                self._ship(msg)
+        except Exception as err:  # noqa: BLE001
+            logger.debug(f"[a2ui] final surface not shipped: {err}")
+
+    def retract(self) -> None:
+        """Take back a surface that streamed but will not be delivered.
+
+        Streaming commits early, so a late gate (a prose fallback, a
+        dashboard that turned out to carry no data) can fire AFTER the reader
+        has seen something. Leaving it there would strand a half-drawn artefact
+        of an answer that was never delivered.
+        """
+        if not self.sent:
+            return
+        try:
+            self._ship(delete_surface_msg(self._surface_id))
+        except Exception as err:  # noqa: BLE001
+            logger.debug(f"[a2ui] retraction not shipped: {err}")
+
+
 async def compose_surface(
     text: str,
     *,
@@ -308,6 +456,9 @@ async def compose_surface(
     group_id: Optional[str] = None,
     execution_id: Optional[str] = None,
     group_context: Any = None,
+    on_delta: Optional[DeltaSink] = None,
+    outline: Optional[List[Dict[str, str]]] = None,
+    shell_shipped: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Compose an A2UI surface from ``text`` for the live app.
 
@@ -321,6 +472,15 @@ async def compose_surface(
         group_id: the workspace whose UIConfigurator drives enabled + catalog +
             per-deliverable directives (the source of truth). When omitted, falls
             back to the env flag + bundled catalog.
+        on_delta: optional sink for A2UI stream messages. Supplied, the surface is
+            shipped progressively as it is generated — a deck's slides appear one
+            by one instead of after the whole (measured 140s+) compose. Omitted,
+            behavior is exactly as before: one surface, at the end.
+        outline: a slide plan already computed by ``a2ui.early`` from a partial
+            answer. Skips the pre-pass here.
+        shell_shipped: the caller already put an instant deck frame on screen. It
+            has to be RETRACTED on every path that ends without a surface, which
+            is why this is threaded in rather than inferred.
 
     Returns:
         A surface dict, or ``None`` if A2UI is disabled / there is nothing to render.
@@ -331,6 +491,20 @@ async def compose_surface(
     import time as _time
 
     started_at = _time.monotonic()
+
+    async def _retract_shell() -> None:
+        """Take back an instant shell on a path that will deliver no surface.
+
+        The shell ships before the agent runs, so it is on screen for every
+        bail-out below — an empty deck frame left behind by a turn that answered
+        in prose would be the most visible bug this feature could have.
+        """
+        if not shell_shipped or on_delta is None:
+            return
+        try:
+            await on_delta(delete_surface_msg(SURFACE_ID))
+        except Exception as err:  # noqa: BLE001
+            logger.debug(f"[a2ui] shell not retracted: {err}")
 
     def _skip(
         outcome: str, reason: str, surface: Optional[Dict[str, Any]] = None
@@ -348,6 +522,7 @@ async def compose_surface(
         )
 
     if not (text or "").strip():
+        await _retract_shell()
         _skip("no_text", "the answer was empty, so there was nothing to render")
         return None
 
@@ -355,6 +530,7 @@ async def compose_surface(
     # which component catalog the composer may use, and the per-deliverable settings.
     enabled, catalog, guidance = await _resolve_config(group_id, query)
     if not enabled or not catalog:
+        await _retract_shell()
         _skip(
             "disabled",
             "A2UI is off for this workspace, or its component catalog is empty",
@@ -367,6 +543,7 @@ async def compose_surface(
     # folded into the intent signal so a "create a presentation" deliverable fires
     # even when the user's chat prompt itself carries no rich-intent keyword.
     if not wants_rich_surface(text, f"{query}\n{purpose}"):
+        await _retract_shell()
         _skip(
             "no_rich_intent",
             "neither the request nor the agent's purpose implies a rich surface, "
@@ -386,6 +563,7 @@ async def compose_surface(
         logger.warning(
             f"[a2ui] could not build composer LLM ({exc}); keeping plain text"
         )
+        await _retract_shell()
         _skip("composer_unavailable", f"the composer LLM could not be built: {exc}")
         return None
 
@@ -396,6 +574,40 @@ async def compose_surface(
     except RuntimeError:
         _loop = None
     _attempt = {"n": 0}
+
+    # Progressive delivery. Opting the composer LLM into streamed completions makes
+    # the engine emit LLMStreamChunkEvent per delta; the bridge parses those into
+    # A2UI messages and ships them. Everything here is best-effort — if any of it
+    # fails we fall straight back to composing silently and delivering once.
+    # Kill-switch: A2UI_STREAMING=false.
+    bridge: Optional[_ComposeStreamBridge] = None
+    _chunk_handler = None
+    if (
+        on_delta is not None
+        and _loop is not None
+        and os.getenv("A2UI_STREAMING", "true").strip().lower()
+        not in ("0", "false", "no")
+    ):
+        try:
+            llm.stream = True
+            bridge = _ComposeStreamBridge(SURFACE_ID, on_delta, _loop, llm)
+            # The shell is already on screen, so the bridge must count it as
+            # sent — otherwise `retract()` would decide there was nothing to
+            # take back and leave the empty frame there.
+            if shell_shipped:
+                bridge.sent = 1
+            from src.core.events import LLMStreamChunkEvent
+            from src.core.events.bus import event_bus
+
+            _chunk_handler = bridge.on_chunk
+            event_bus.register_handler(LLMStreamChunkEvent, _chunk_handler)
+        except Exception as stream_err:  # noqa: BLE001
+            # WARNING, not debug: this is the switch that turns the whole feature
+            # off, and it failing silently is indistinguishable from a slow model.
+            logger.warning(f"[a2ui] streaming NOT enabled ({stream_err}); "
+                           "the surface will arrive in one piece")
+            bridge = None
+            _chunk_handler = None
 
     def _llm_call(messages: List[Dict[str, str]]) -> str:
         import time as _t
@@ -470,16 +682,36 @@ async def compose_surface(
             enabled=True,
             retries=_retries(),
             guidance=guidance,
+            stream=bridge,
+            outline=outline,
         )
     except Exception as exc:  # noqa: BLE001 — UI composition must never break a run
         logger.warning(f"[a2ui] compose_surface failed ({exc}); keeping plain text")
+        if bridge is not None:
+            bridge.retract()
         _skip("compose_failed", f"the composer raised: {exc}")
         return None
+    finally:
+        # Unregister ALWAYS: a handler left on the global bus would parse the next
+        # run's tokens (it filters by instance, so it would parse nothing — but it
+        # would still leak a bridge per composed surface, forever).
+        if _chunk_handler is not None:
+            try:
+                from src.core.events import LLMStreamChunkEvent
+                from src.core.events.bus import event_bus
+
+                event_bus.off(LLMStreamChunkEvent, _chunk_handler)
+            except Exception as off_err:  # noqa: BLE001
+                logger.debug(f"[a2ui] chunk handler not removed: {off_err}")
 
     # The composer falls back to a markdown 'conversation' surface when it can't
     # build a rich one; treat that as "no rich surface" so the result stays a plain
     # string rather than a redundant envelope around the same prose.
     if not surface or surface.get("surfaceKind") in (None, "conversation"):
+        # Streaming commits early, so a prose fallback here means the reader may
+        # already be looking at a surface that is not going to be delivered.
+        if bridge is not None:
+            bridge.retract()
         _skip(
             "conversation_fallback",
             "the composer produced prose rather than a rich surface",
@@ -499,6 +731,11 @@ async def compose_surface(
     if surface.get("surfaceKind") in _DATA_SURFACE_KINDS and not _has_data_component(
         surface
     ):
+        # The streamer holds these kinds back until they prove they carry data, so
+        # normally nothing shipped and this retraction is a no-op. It stays because
+        # the two gates are not identical: the streamer judges a PARTIAL surface.
+        if bridge is not None:
+            bridge.retract()
         _skip(
             "no_data_component",
             f"a {surface.get('surfaceKind')} surface carried no Chart/Table/Stat "
@@ -507,6 +744,11 @@ async def compose_surface(
         )
         return None
 
+    # Make the reader's copy exactly the stored one: the stream may hold a
+    # superseded revision (a design-lint retry rewrites the whole deck) or simply
+    # less than the whole.
+    if bridge is not None:
+        bridge.commit(surface)
     _skip("composed", "", surface=surface)
     return surface
 

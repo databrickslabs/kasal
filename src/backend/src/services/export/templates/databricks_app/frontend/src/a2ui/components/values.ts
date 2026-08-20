@@ -50,3 +50,27 @@ export const asNum = (v: unknown): number | null => {
   }
   return null
 }
+
+/**
+ * Axis-tick numbers, shortened so they fit the gutter.
+ *
+ * A y-axis of land areas ticks at 700000 / 1400000; recharts' default 60px
+ * gutter clips those to "00000", which reads as a rendering fault rather than a
+ * number. Compacting keeps the axis honest AND narrow.
+ */
+export function compactNumber(value: unknown): string {
+  const n = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(n)) return String(value ?? '')
+  const abs = Math.abs(n)
+  if (abs < 1_000) return String(n)
+  const [div, suffix] =
+    abs >= 1_000_000_000 ? [1_000_000_000, 'B']
+    : abs >= 1_000_000 ? [1_000_000, 'M']
+    : [1_000, 'k']
+  const scaled = n / div
+  // One decimal only when it says something: 1.5M is useful, 700.0k is noise.
+  const text = Math.abs(scaled) >= 100 || Number.isInteger(scaled)
+    ? String(Math.round(scaled))
+    : scaled.toFixed(1).replace(/\.0$/, '')
+  return `${text}${suffix}`
+}

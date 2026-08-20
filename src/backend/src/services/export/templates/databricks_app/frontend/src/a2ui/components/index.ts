@@ -17,6 +17,10 @@
 
 export { iconByName } from './icons'
 
+// The instant-shell placeholder. Not in catalog.json — the composer must not
+// emit one; only the shell does.
+export { Skeleton } from './skeleton'
+
 export {
   Markdown,
   Text,
@@ -35,6 +39,7 @@ export {
 export { Table, Chart, Forecast } from './data'
 
 export { Graph, Sequence, Diagram, normDiagramItems } from './diagrams'
+export { Kanban } from './kanban'
 export type { DiagramItem } from './diagrams'
 
 export { Album, GeoMap } from './media'

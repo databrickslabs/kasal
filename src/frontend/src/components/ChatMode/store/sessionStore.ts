@@ -33,7 +33,66 @@ const ACTIVE_SESSION_KEY = 'kasal-chat-active-session';
  * When the message isn't in memory (updating a non-viewed session) there is
  * nothing to merge from; the updates go through unchanged.
  */
+/**
+ * The last envelope known for each message, by id.
+ *
+ * `mergePersistedExtras` can only merge from a message that is IN MEMORY, and
+ * only the viewed session's messages are. That left the exact hole it was
+ * written to close: a run whose reader has switched away completes, its final
+ * update carries content but no `resultData`, and because there is nothing to
+ * merge from, the stored envelope is REPLACED — the composed surface is gone
+ * from storage for good. This cache is the merge source that survives the
+ * switch, so a background completion can no longer erase a deliverable.
+ */
+const lastKnownExtras = new Map<string, Partial<ChatMessage>>();
+
+/** Bounded: this store lives for the whole session, and a surface can be large. */
+const MAX_REMEMBERED_EXTRAS = 400;
+
+/** Drop the oldest entries once the cache is over its bound (insertion order). */
+function trimRememberedExtras(): void {
+  while (lastKnownExtras.size > MAX_REMEMBERED_EXTRAS) {
+    const oldest = lastKnownExtras.keys().next().value;
+    if (oldest === undefined) return;
+    lastKnownExtras.delete(oldest);
+  }
+}
+
+/** Test seam: the cache is module state and would otherwise leak across tests. */
+export function __clearRememberedExtras(): void {
+  lastKnownExtras.clear();
+}
+
+/** Remember any envelope fields an add/update carried. */
+export function rememberExtras(id: string, msg: Partial<ChatMessage>): void {
+  const keep: Partial<ChatMessage> = {};
+  if (msg.resultType !== undefined) keep.resultType = msg.resultType;
+  if (msg.resultData !== undefined) keep.resultData = msg.resultData;
+  if (msg.attachments !== undefined) keep.attachments = msg.attachments;
+  if (msg.executionId !== undefined) keep.executionId = msg.executionId;
+  if (msg.usedWorkspaceMemory !== undefined) keep.usedWorkspaceMemory = msg.usedWorkspaceMemory;
+  if (Object.keys(keep).length === 0) return;
+  lastKnownExtras.set(id, { ...(lastKnownExtras.get(id) ?? {}), ...keep });
+  trimRememberedExtras();
+}
+
 export function mergePersistedExtras(
+  updates: Partial<ChatMessage>,
+  existing?: ChatMessage,
+  id?: string,
+): Partial<ChatMessage> {
+  // Prefer the in-memory message; fall back to the cache for a session that is
+  // not on screen, which is the case this whole helper exists for.
+  const source = (existing ?? (id ? lastKnownExtras.get(id) : undefined)) as
+    | ChatMessage
+    | undefined;
+  if (id) rememberExtras(id, updates);
+  const merged = _merge(updates, source);
+  if (id) rememberExtras(id, merged);
+  return merged;
+}
+
+function _merge(
   updates: Partial<ChatMessage>,
   existing?: ChatMessage,
 ): Partial<ChatMessage> {
@@ -291,6 +350,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       ...extra,
     };
     set((state) => ({ messages: [...state.messages, message] }));
+    rememberExtras(id, message);
 
     // Persist to IndexedDB (fire-and-forget)
     const ensureAndPersist = async () => {
@@ -331,6 +391,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       set((s) => ({ messages: [...s.messages, message] }));
     }
 
+    rememberExtras(id, message);
     // Always persist
     addMessageToSession(targetSessionId, {
       ...message,
@@ -349,7 +410,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     }));
     const sessionId = get().currentSessionId;
     if (sessionId) {
-      updateMessageInSession(sessionId, id, mergePersistedExtras(updates, existing));
+      updateMessageInSession(sessionId, id, mergePersistedExtras(updates, existing, id));
     }
   },
 
@@ -368,7 +429,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         ),
       }));
     }
-    updateMessageInSession(targetSessionId, id, mergePersistedExtras(updates, existing));
+    updateMessageInSession(targetSessionId, id, mergePersistedExtras(updates, existing, id));
   },
 
   appendToMessage: (id, additionalContent) => {

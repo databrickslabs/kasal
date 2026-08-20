@@ -1,0 +1,142 @@
+{
+  "messages": [
+    {
+      "version": "v1.0",
+      "createSurface": {
+        "surfaceId": "fixture",
+        "surfaceKind": "presentation",
+        "root": "deck"
+      }
+    },
+    {
+      "version": "v1.0",
+      "updateComponents": {
+        "surfaceId": "fixture",
+        "components": [
+          {
+            "id": "deck",
+            "component": "SlideDeck",
+            "children": [
+              "slide_1",
+              "slide_2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "version": "v1.0",
+      "updateComponents": {
+        "surfaceId": "fixture",
+        "components": [
+          {
+            "id": "slide_1",
+            "component": "Slide",
+            "variant": "title",
+            "title": "Q3"
+          }
+        ]
+      }
+    },
+    {
+      "version": "v1.0",
+      "updateComponents": {
+        "surfaceId": "fixture",
+        "components": [
+          {
+            "id": "slide_2",
+            "component": "Slide",
+            "variant": "visual",
+            "title": "Revenue",
+            "children": [
+              "chart_1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "version": "v1.0",
+      "updateComponents": {
+        "surfaceId": "fixture",
+        "components": [
+          {
+            "id": "chart_1",
+            "component": "Chart",
+            "chartType": "bar",
+            "data": {
+              "path": "/rows"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "version": "v1.0",
+      "updateDataModel": {
+        "surfaceId": "fixture",
+        "path": "/rows",
+        "value": [
+          {
+            "m": "Jul",
+            "v": 12
+          }
+        ]
+      }
+    },
+    {
+      "version": "v1.0",
+      "updateDataModel": {
+        "surfaceId": "fixture",
+        "path": "/note",
+        "value": "in $m"
+      }
+    }
+  ],
+  "expected": {
+    "surfaceKind": "presentation",
+    "root": "deck",
+    "components": [
+      {
+        "id": "deck",
+        "component": "SlideDeck",
+        "children": [
+          "slide_1",
+          "slide_2"
+        ]
+      },
+      {
+        "id": "slide_1",
+        "component": "Slide",
+        "variant": "title",
+        "title": "Q3"
+      },
+      {
+        "id": "slide_2",
+        "component": "Slide",
+        "variant": "visual",
+        "title": "Revenue",
+        "children": [
+          "chart_1"
+        ]
+      },
+      {
+        "id": "chart_1",
+        "component": "Chart",
+        "chartType": "bar",
+        "data": {
+          "path": "/rows"
+        }
+      }
+    ],
+    "dataModel": {
+      "rows": [
+        {
+          "m": "Jul",
+          "v": 12
+        }
+      ],
+      "note": "in $m"
+    }
+  }
+}

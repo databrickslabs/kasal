@@ -20,6 +20,14 @@ interface UseExecutionStreamOptions {
   onError: (error: string) => void;
   /** Coalesced LLM token chunk (`llm_chunk` SSE event) for live typing. */
   onChunk?: (chunk: string, data: Record<string, unknown>) => void;
+  /**
+   * One A2UI stream message (`a2ui_delta` SSE event) — a piece of the surface
+   * the composer is still writing. Sent with skip_replay, because the finished
+   * surface is the durable record: a client that reconnects mid-compose gets the
+   * whole thing on completion, and replaying half a deck at it would only fight
+   * the real one.
+   */
+  onSurfaceDelta?: (message: unknown, data: Record<string, unknown>) => void;
 }
 
 export function useExecutionStream(options: UseExecutionStreamOptions) {
@@ -84,6 +92,13 @@ export function useExecutionStream(options: UseExecutionStreamOptions) {
                   (event.data.error as string) || `Execution ${status}`
                 );
                 stopStream();
+              }
+              break;
+            }
+            case 'a2ui_delta': {
+              const message = event.data.message;
+              if (message && opts.onSurfaceDelta) {
+                opts.onSurfaceDelta(message, event.data);
               }
               break;
             }

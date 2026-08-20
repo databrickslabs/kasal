@@ -773,7 +773,8 @@ class DatabricksAppExporter(BaseExporter):
         """Vendor the ONE shared A2UI composer + bake the workspace's resolved config.
 
         Ships ``agent_server/a2ui/`` = the portable composer (``__init__.py`` +
-        ``compose.py``, copied verbatim from ``src.services.a2ui``) plus two baked
+        ``compose.py`` + ``stream.py``, copied verbatim from ``src.services.a2ui``)
+        plus two baked
         data files: ``catalog.json`` (the catalog the composer may use, resolved
         from this workspace's UIConfig) and ``config.json`` ({enabled, directives}).
         The deployed ``agent.py`` imports this module instead of carrying its own
@@ -782,7 +783,11 @@ class DatabricksAppExporter(BaseExporter):
         only fall back to the full bundled catalog for plain exports.
         """
         files: List[Dict[str, str]] = []
-        for name in ("__init__.py", "compose.py"):
+        # ``stream.py`` rides along because ``compose.py`` imports it (relatively)
+        # for the presentation skeleton, and because the exported app streams its
+        # surface the same way live chat does. Both are stdlib-only — the
+        # portability tests enforce it.
+        for name in ("__init__.py", "compose.py", "stream.py"):
             src = SHARED_A2UI_DIR / name
             try:
                 async with aiofiles.open(src, "r", encoding="utf-8") as f:

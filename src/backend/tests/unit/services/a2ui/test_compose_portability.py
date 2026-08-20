@@ -14,9 +14,13 @@ convention, and a convention cannot fail a build. This can.
 import ast
 import pathlib
 
-COMPOSER = (
-    pathlib.Path(__file__).parents[4] / "src" / "services" / "a2ui" / "compose.py"
-)
+import pytest
+
+_A2UI = pathlib.Path(__file__).parents[4] / "src" / "services" / "a2ui"
+COMPOSER = _A2UI / "compose.py"
+#: ``stream.py`` is vendored alongside it (compose imports it for the skeleton),
+#: so it lives under exactly the same constraint.
+VENDORED = (COMPOSER, _A2UI / "stream.py")
 
 #: Everything the composer is allowed to import. Standard library only — the LLM
 #: is injected by the caller as an ``llm_call`` callable, never imported.
@@ -40,6 +44,7 @@ ALLOWED_ROOTS = {
     "re",
     "string",
     "textwrap",
+    "time",
     "typing",
     "uuid",
 }
@@ -58,26 +63,29 @@ def _imported_roots(path: pathlib.Path):
                 yield node.module.split(".")[0]
 
 
-def test_the_composer_exists_where_the_exporter_looks_for_it():
-    assert COMPOSER.exists(), COMPOSER
+@pytest.mark.parametrize("path", VENDORED, ids=lambda p: p.name)
+def test_the_vendored_module_exists(path):
+    assert path.exists(), path
 
 
-def test_the_composer_imports_nothing_from_kasal():
+@pytest.mark.parametrize("path", VENDORED, ids=lambda p: p.name)
+def test_it_imports_nothing_from_kasal(path):
     """A ``src.`` import here ships a broken export, silently."""
-    offenders = sorted({r for r in _imported_roots(COMPOSER) if r == "src"})
+    offenders = sorted({r for r in _imported_roots(path) if r == "src"})
 
     assert (
         not offenders
-    ), "compose.py is vendored into exported apps, which have no 'src' package"
+    ), f"{path.name} is vendored into exported apps, which have no 'src' package"
 
 
-def test_the_composer_imports_only_the_standard_library():
+@pytest.mark.parametrize("path", VENDORED, ids=lambda p: p.name)
+def test_it_imports_only_the_standard_library(path):
     """Third-party imports break the export too — the app's requirements.txt is
     generated from the template, not from what this file happens to need."""
-    used = set(_imported_roots(COMPOSER))
+    used = set(_imported_roots(path))
     unexpected = sorted(used - ALLOWED_ROOTS)
 
     assert not unexpected, (
-        f"compose.py may only import the stdlib; found {unexpected}. "
+        f"{path.name} may only import the stdlib; found {unexpected}. "
         "If one of these is genuinely stdlib, add it to ALLOWED_ROOTS."
     )

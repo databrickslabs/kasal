@@ -21,7 +21,7 @@ vi.mock('../db/sessionApi', () => ({
   clearSessionMessages: vi.fn(),
 }));
 
-import { useSessionStore } from './sessionStore';
+import { useSessionStore, __clearRememberedExtras } from './sessionStore';
 import * as db from '../db/sessionApi';
 
 const ACTIVE_SESSION_KEY = 'kasal-chat-active-session';
@@ -568,14 +568,38 @@ describe('updateMessage — persisted envelope stays complete (merge with existi
     });
   });
 
-  it('passes updates through unchanged when the message is not in memory', () => {
+  it('merges from the remembered envelope when the message is not in memory', () => {
+    // The gap this used to leave: only the VIEWED session's messages are in
+    // memory, so a run whose reader had switched away completed with an update
+    // carrying content but no resultData — and the stored envelope was replaced,
+    // erasing the composed surface for good. The cache is the merge source that
+    // survives the switch.
+    __clearRememberedExtras();
+    useSessionStore.setState({ currentSessionId: 'sess', messages: [cardMsg()] });
+    useSessionStore.getState().updateMessage('m1', { resultType: 'a2ui', resultData: { deck: 1 } });
+
+    useSessionStore.setState({ currentSessionId: 'viewing', messages: [] });
+    useSessionStore.getState().updateMessageInTargetSession('other', 'm1', { content: 'the answer' });
+
+    expect(db.updateMessageInSession).toHaveBeenLastCalledWith('other', 'm1', {
+      content: 'the answer',
+      resultType: 'a2ui',
+      resultData: { deck: 1 },
+      executionId: 'job-1',
+    });
+  });
+
+  it('passes updates through unchanged for a message it has never seen', () => {
+    __clearRememberedExtras();
     useSessionStore.setState({ currentSessionId: 'viewing', messages: [] });
 
     useSessionStore
       .getState()
-      .updateMessageInTargetSession('other', 'm1', { resultData: { x: 1 } });
+      .updateMessageInTargetSession('other', 'unknown-msg', { resultData: { x: 1 } });
 
-    expect(db.updateMessageInSession).toHaveBeenCalledWith('other', 'm1', { resultData: { x: 1 } });
+    expect(db.updateMessageInSession).toHaveBeenCalledWith('other', 'unknown-msg', {
+      resultData: { x: 1 },
+    });
   });
 
   it('explicit update values win over the existing message fields', () => {
@@ -611,6 +635,7 @@ describe('updateMessageInTargetSession', () => {
   });
 
   it('does not touch in-memory when not viewing the target but still persists', () => {
+    __clearRememberedExtras();
     useSessionStore.setState({
       currentSessionId: 'viewing',
       messages: [makeMsg('m1', 'old')],

@@ -988,6 +988,99 @@ class LightAgentService:
                 _chunk_state = {"scheduled": False, "seq": 0}
                 _chunk_lock = _threading.Lock()
 
+                # Ship the surface AS IT IS COMPOSED. Defined here, before the
+                # agent runs, because two things need it BEFORE there is an
+                # answer: the instant deck shell and the early outline pass.
+                # skip_replay because the finished surface is the durable record
+                # — a client that reconnects mid-compose gets the whole thing on
+                # completion, so replaying half a deck at it would only fight the
+                # real one.
+                _delta_seq = {"n": 0}
+
+                async def _on_a2ui_delta(msg: Dict[str, Any]) -> None:
+                    try:
+                        from src.core.sse_manager import SSEEvent, sse_manager
+
+                        from src.services.a2ui.stream import is_snapshot
+
+                        seq = _delta_seq["n"]
+                        _delta_seq["n"] += 1
+                        # Snapshots (createSurface / deleteSurface) REPLAY;
+                        # incremental batches do not. The instant shell goes out
+                        # before the browser can even open its event stream — it
+                        # only learns the job id from the POST that starts the run
+                        # — so a non-replayable shell is one nobody ever receives.
+                        await sse_manager.broadcast_to_job(
+                            execution_id,
+                            SSEEvent(
+                                data={
+                                    "job_id": execution_id,
+                                    "seq": seq,
+                                    "message": msg,
+                                },
+                                event="a2ui_delta",
+                            ),
+                            skip_replay=not is_snapshot(msg),
+                        )
+                    except Exception as sse_err:  # noqa: BLE001
+                        logger.debug(
+                            f"[light_agent] a2ui_delta broadcast skipped: {sse_err}"
+                        )
+
+                # The whole answer as it streams. `_chunk_buf` is drained on
+                # every flush, so the outline head start needs its own copy.
+                _answer_so_far: list = []
+                _outline_state: Dict[str, Any] = {"task": None}
+
+                # The request's contextvars, captured HERE — in the main
+                # coroutine, where they are actually set. The outline head start
+                # is spawned from the token-flush callback, which the LLM worker
+                # thread schedules onto the loop, so a task created there inherits
+                # the LOOP's default context: no UserContext, no group_id, and
+                # `LLMManager.get_llm` raises rather than leak across tenants.
+                # Handing this context to create_task is what makes the spawned
+                # task look like the request that spawned it — patching one value
+                # across would only fix whichever symptom we noticed first.
+                import contextvars as _contextvars
+
+                _request_ctx = _contextvars.copy_context()
+
+                def _maybe_plan_outline_early() -> None:
+                    """Plan the deck once enough of the answer exists.
+
+                    The outline is derived from the answer, so it used to wait for
+                    the last token — 13.4s on a measured run, then 8.7s more for
+                    the pass itself, and only THEN could the reader see real slide
+                    titles. It needs the gist, not the ending, so it runs here on
+                    the partial answer and overlaps the rest of the writing.
+                    """
+                    if _outline_state["task"] is not None:
+                        return
+                    with _chunk_lock:
+                        so_far = "".join(_answer_so_far)
+                    from src.services.a2ui.early import (
+                        outline_headstart_chars,
+                        plan_outline_early,
+                    )
+
+                    if len(so_far) < outline_headstart_chars():
+                        return
+                    _outline_state["task"] = asyncio.create_task(
+                        plan_outline_early(
+                            so_far,
+                            query=prompt,
+                            purpose=str(
+                                agent_spec.get("goal") or agent_spec.get("role") or ""
+                            ),
+                            model=getattr(config, "model", None),
+                            on_delta=_on_a2ui_delta,
+                            group_id=group_id,
+                            execution_id=execution_id,
+                            group_context=group_context,
+                        ),
+                        context=_request_ctx,
+                    )
+
                 async def _flush_chunks() -> None:
                     await asyncio.sleep(0.05)
                     with _chunk_lock:
@@ -996,6 +1089,7 @@ class LightAgentService:
                         _chunk_buf.clear()
                         seq = _chunk_state["seq"]
                         _chunk_state["seq"] += 1
+                    _maybe_plan_outline_early()
                     if not text:
                         return
                     try:
@@ -1027,6 +1121,7 @@ class LightAgentService:
                             return
                         with _chunk_lock:
                             _chunk_buf.append(text)
+                            _answer_so_far.append(text)
                             if _chunk_state["scheduled"]:
                                 return
                             _chunk_state["scheduled"] = True
@@ -1040,6 +1135,23 @@ class LightAgentService:
                         logger.debug(
                             f"[light_agent] llm-chunk forward skipped: {h_err}"
                         )
+
+                # A deck frame the INSTANT we know a deck is coming — no model, no
+                # answer, no outline, so it costs nothing and lands before the
+                # agent writes a word. Everything after this replaces it in place:
+                # the outline's skeleton swaps in real titles, then the composed
+                # slides swap in real content. `shell_shipped` is threaded into
+                # compose_surface so a turn that ends up answering in prose
+                # RETRACTS the frame rather than stranding an empty deck.
+                _shell_shipped = False
+                try:
+                    from src.services.a2ui.early import emit_instant_shell
+
+                    _shell_shipped = await emit_instant_shell(
+                        prompt, on_delta=_on_a2ui_delta, group_id=group_id
+                    )
+                except Exception as shell_err:  # noqa: BLE001
+                    logger.debug(f"[light_agent] instant shell skipped: {shell_err}")
 
                 event_bus.register_handler(LLMStreamChunkEvent, _on_llm_chunk)
                 event_bus.register_handler(ToolUsageStartedEvent, _on_tool_started)
@@ -1280,6 +1392,18 @@ class LightAgentService:
                 # Bounded: this is an auxiliary LLM call for the UI surface. If it
                 # hangs it must NOT block the terminal status — the prose answer has
                 # already streamed, so on timeout we complete with the plain answer.
+                # Collect the head start, if one was taken. It is the SAME pass
+                # the composer would otherwise run, moved earlier — never an
+                # extra call.
+                _early_outline = None
+                if _outline_state["task"] is not None:
+                    try:
+                        _early_outline = await _outline_state["task"]
+                    except Exception as outline_err:  # noqa: BLE001
+                        logger.debug(
+                            f"[light_agent] early outline unusable: {outline_err}"
+                        )
+
                 surface = await asyncio.wait_for(
                     compose_surface(
                         answer,
@@ -1291,6 +1415,9 @@ class LightAgentService:
                         group_id=group_id,
                         execution_id=execution_id,
                         group_context=group_context,
+                        on_delta=_on_a2ui_delta,
+                        outline=_early_outline,
+                        shell_shipped=_shell_shipped,
                     ),
                     # The model needs headroom to emit a full surface (e.g. a
                     # multi-slide presentation deck) as valid JSON; 30s and then 60s

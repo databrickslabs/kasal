@@ -47,7 +47,7 @@ const ALL_COMPONENTS: string[] = [
   'Markdown', 'Text', 'Heading', 'Image', 'Card', 'KeyValue', 'List', 'Table',
   'Divider', 'Row', 'Column', 'Grid', 'Chart', 'SlideDeck', 'Slide', 'Mindmap',
   'Quiz', 'Flashcards', 'Map', 'Forecast', 'Graph', 'Sequence', 'Album',
-  'Diagram', 'RegionHeatmap', 'Sankey',
+  'Diagram', 'RegionHeatmap', 'Sankey', 'Kanban',
 ];
 
 // Every component the shared renderer can draw — the universe the 'select' mode
