@@ -9,7 +9,12 @@ export default defineConfig(({ mode }) => {
 
   const config: UserConfig = {
     plugins: [
-      react(),
+      // disableOxcRecommendation: silence the "switch to @vitejs/plugin-react-oxc"
+      // notice. That plugin is now DEPRECATED (folded back into plugin-react), and
+      // the plugin-react version that includes it (6.x) requires Vite 8 — which
+      // this pinned rolldown-vite 6.3.21 toolchain can't use. So the recommendation
+      // is unactionable here; this is the plugin's own supported way to mute it.
+      react({ disableOxcRecommendation: true }),
       // NOTE: precompression (gzip/brotli) plugins removed — the app server
       // (entrypoint.py) does not serve .gz/.br, so those artifacts were unused
       // dead weight and brotli compression alone exhausted the Databricks Apps
