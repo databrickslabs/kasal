@@ -6,21 +6,35 @@ waiting to be resumed.
 """
 
 import os
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+
+def _fake_isolated_session(session):
+    """A stand-in for get_isolated_db_session() yielding a given session."""
+
+    @asynccontextmanager
+    async def _cm():
+        yield session
+
+    return _cm
+
+
 from src.services.execution import harness_choice
-from src.services.execution.harnesses import selection
-from src.services.execution.harnesses import coerce as engine_choice_coerce
-from src.services.execution.harnesses.binding import HarnessName
 from src.services.execution.harness_choice import adopt_in_subprocess
 from src.services.execution.harnesses import (
     DEFAULT_HARNESS,
     HARNESS_CONFIG_KEY,
     HARNESS_ENV_VAR,
-    reset_for_tests,
 )
+from src.services.execution.harnesses import coerce as engine_choice_coerce
+from src.services.execution.harnesses import (
+    reset_for_tests,
+    selection,
+)
+from src.services.execution.harnesses.binding import HarnessName
 
 
 @pytest.fixture(autouse=True)
@@ -40,22 +54,35 @@ class TestResolve:
         service.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_reads_the_setting_through_the_settings_service(self):
+    async def test_reads_the_setting_on_its_own_isolated_connection(self):
         service = MagicMock(get_harness=AsyncMock(return_value="crewai"))
-        session = MagicMock()
-        with patch(
-            "src.services.settings.engine.EngineConfigService", return_value=service
-        ) as cls:
-            resolved = await harness_choice.resolve_run_harness(session)
+        iso_session = MagicMock()
+        with (
+            patch(
+                "src.db.session.get_isolated_db_session",
+                _fake_isolated_session(iso_session),
+            ),
+            patch(
+                "src.services.settings.engine.EngineConfigService", return_value=service
+            ) as cls,
+        ):
+            resolved = await harness_choice.resolve_run_harness(MagicMock())
         assert resolved is HarnessName.CREWAI
-        # On the caller's session — never one it acquired itself.
-        cls.assert_called_once_with(session)
+        # Read on its OWN isolated connection (not the caller's, which may be
+        # mid-write and would collide on Lakebase), so the setting is honored.
+        cls.assert_called_once_with(iso_session)
 
     @pytest.mark.asyncio
     async def test_a_failed_config_read_degrades_instead_of_failing_the_run(self):
-        with patch(
-            "src.services.settings.engine.EngineConfigService",
-            side_effect=RuntimeError("no row"),
+        with (
+            patch(
+                "src.db.session.get_isolated_db_session",
+                _fake_isolated_session(MagicMock()),
+            ),
+            patch(
+                "src.services.settings.engine.EngineConfigService",
+                side_effect=RuntimeError("no row"),
+            ),
         ):
             resolved = await harness_choice.resolve_run_harness(MagicMock())
         assert resolved is HarnessName.KASAL
@@ -265,7 +292,9 @@ class TestTheChildSaysWhichHarnessItAdopted:
             os.environ[HARNESS_ENV_VAR] = env
         with patch.object(harness_choice, "logger") as logger:
             adopted = adopt_in_subprocess(config)
-        said = " ".join(str(a) for call in logger.info.call_args_list for a in call.args)
+        said = " ".join(
+            str(a) for call in logger.info.call_args_list for a in call.args
+        )
         return adopted, said
 
     def test_it_names_the_harness_and_the_payload_it_came_from(self):

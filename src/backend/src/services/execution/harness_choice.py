@@ -62,15 +62,19 @@ async def resolve_run_harness(
 ) -> HarnessName:
     """The harness for ONE execution, decided now, on the caller's session.
 
-    ``session`` is passed IN and never acquired here. Every caller already holds
-    one chosen for a reason — ``create_run_record`` the private connection its
-    row must be written on, the status service whichever branch it took — and a
-    resolver that opened its own would quietly put a second connection on a path
-    whose whole design is about which connection the write lands on.
-
     ``stored`` wins when present — that is a run being resumed or re-read, and
     its harness was decided when it was created. Otherwise the operator setting is
     read through the settings SERVICE, once.
+
+    The config read runs on its OWN isolated connection, NOT the caller's
+    ``session``. The caller's connection is typically mid-operation — most often
+    ``create_run_record`` writing the run row on it — and on Lakebase asyncpg
+    forbids two concurrent operations on one connection ("this session is
+    provisioning a new connection; concurrent operations are not permitted"). That
+    read failed, fell back to the default, and every CrewAI-configured run silently
+    executed on Kasal. The read is independent of the run write, so a private
+    connection is correct here; ``session`` is kept only for call-site
+    compatibility (the write it belongs to still lands on it).
 
     Never raises. A configuration read that fails (no row yet, a migration in
     flight, a permissions problem) must not stop a run from starting; it falls
@@ -81,9 +85,11 @@ async def resolve_run_harness(
         return already
 
     try:
+        from src.db.session import get_isolated_db_session
         from src.services.settings.engine import EngineConfigService
 
-        value = await EngineConfigService(session).get_harness()
+        async with get_isolated_db_session() as cfg_session:
+            value = await EngineConfigService(cfg_session).get_harness()
         return coerce(value) or DEFAULT_HARNESS
     except Exception as e:  # noqa: BLE001 — a config read must not fail a run
         logger.warning(
@@ -142,9 +148,11 @@ def adopt_in_subprocess(config: Optional[Dict[str, Any]] = None) -> HarnessName:
     logger.info(
         "[harness] this interpreter runs on %s (from %s)",
         chosen.value,
-        "the run's payload"
-        if from_payload
-        else ("the environment" if from_env else "the default"),
+        (
+            "the run's payload"
+            if from_payload
+            else ("the environment" if from_env else "the default")
+        ),
     )
     return set_process_default(chosen)
 
