@@ -338,7 +338,18 @@ def resolve_catalog(
         if raw:
             try:
                 parsed = json.loads(raw)
-                if isinstance(parsed, dict) and parsed.get("components"):
+                # A catalog's ``components`` is a DICT of name -> spec (the shape
+                # ``a2ui_system_prompt`` iterates with ``.items()``). Guard on that
+                # exact shape, not merely "truthy": a saved SURFACE is also a dict
+                # with a ``components`` key, but there it is a LIST of component
+                # INSTANCES. One got pasted into a workspace's custom catalog_json,
+                # passed the old truthy check, and every rich surface for that
+                # workspace 500'd inside the prompt build ("'list' object has no
+                # attribute 'items'") — swallowed by compose's broad except, so the
+                # deck silently fell back to plain text on every model. A non-dict
+                # (or empty) ``components`` is not a usable catalog; fall back.
+                components = parsed.get("components") if isinstance(parsed, dict) else None
+                if isinstance(components, dict) and components:
                     if not parsed.get("surfaceKinds"):
                         parsed["surfaceKinds"] = default_catalog.get("surfaceKinds", [])
                     return parsed
@@ -1335,10 +1346,16 @@ def compose_a2ui(
     if not catalog:
         return _done(markdown_surface(text))
     # Cheap path: only spend a composer LLM call when a genuinely rich surface is
-    # likely. Decide PER TURN from what the user actually asked (query), NOT the
-    # static crew hint — folding the hint in here would turn EVERY answer
-    # (including clarifying questions) into a deck for a presentation-biased crew.
-    if not wants_rich_surface(text, query):
+    # likely. The intent signal is the user's request AND the agent goal / crew
+    # purpose — exactly what wants_rich_surface documents its `query` arg to be,
+    # and what the host (compose_surface) already checked before shipping the
+    # skeleton. Passing `query` alone here re-decided it on a narrower signal and
+    # DISAGREED whenever the rich intent lived in the purpose (a research/report
+    # crew whose chat prompt has no rich keyword): the host shipped a deck shell,
+    # then this bailed to markdown BEFORE any LLM call — retracting the shell to
+    # plain text on every model, strong ones included. Fold the purpose in so the
+    # two gates agree.
+    if not wants_rich_surface(text, f"{query}\n{purpose}"):
         return _done(markdown_surface(text))
     # A valid-but-visually-flat deck kept as the floor: if the design-lint retry
     # burns the last attempt, fails, or raises, we ship this instead of falling
@@ -1379,12 +1396,29 @@ def compose_a2ui(
                             stream.skeleton(sk)
                     except Exception:  # noqa: BLE001
                         pass
+                # Render the plan as a bulleted LIST, never as {"slides":[...]} JSON.
+                # Injecting the plan verbatim as JSON primed the newer models to
+                # ECHO that exact shape back — returning the plan instead of a
+                # SlideDeck surface, which validate_surface rejected, so every deck
+                # fell back to prose ("composer returned prose"). A prose list can't
+                # be mirrored into a valid-looking wrong answer, and the explicit
+                # instruction below pins the required output.
+                plan_lines = "\n".join(
+                    f"- Slide {i + 1}: {s.get('title', '')} "
+                    f"[variant={s.get('variant', 'content')}, "
+                    f"visual={s.get('visual', 'none')}]"
+                    + (f" — {s.get('focus', '')}" if s.get("focus") else "")
+                    for i, s in enumerate(outline)
+                )
                 user_content = (
                     text
                     + "\n\n[SLIDE PLAN — a planning pass already chose each slide's "
                     "title, variant and visual. FOLLOW IT (adjust only where the "
-                    "content genuinely cannot fill a slide):]\n"
-                    + json.dumps({"slides": outline})
+                    "content genuinely cannot fill a slide). Now BUILD the full A2UI "
+                    "presentation surface (surfaceKind 'presentation', a SlideDeck "
+                    "root, and one Slide component per plan item, each with a real "
+                    "body). Return the SURFACE object, NOT this plan:]\n"
+                    + plan_lines
                 )
         messages: List[Dict[str, str]] = [
             {
@@ -1467,6 +1501,19 @@ def compose_a2ui(
                         "variant='two-column'. Keep the same content and slide "
                         "count. Reply with ONLY the corrected JSON object."
                     )
+            elif isinstance(payload, dict) and "slides" in payload and not payload.get(
+                "surfaceKind"
+            ):
+                # The model returned the slide PLAN ({"slides":[...]}), not a surface.
+                # This is the specific miss that dropped every deck to prose; name it.
+                correction = (
+                    "You returned the slide PLAN, not an A2UI surface. Build the "
+                    "surface: a JSON object with \"surfaceKind\":\"presentation\", "
+                    "\"root\" pointing at a SlideDeck component, and a \"components\" "
+                    "array holding the SlideDeck plus one Slide per plan item (each "
+                    "Slide with a real body). Do NOT return a top-level \"slides\" "
+                    "key. Reply with ONLY that surface JSON object."
+                )
             else:
                 correction = (
                     "That was not a valid A2UI surface. Reply with ONLY the corrected "
@@ -1477,5 +1524,10 @@ def compose_a2ui(
                 {"role": "user", "content": correction},
             ]
     except Exception as exc:  # noqa: BLE001
-        print(f"A2UI compose failed ({exc}); markdown fallback.")
+        # WARNING with the traceback, not a bare print: this except wraps the
+        # whole compose (prompt build, every LLM call, validation), so anything
+        # it swallows silently drops the surface to markdown with no way to tell
+        # WHY — which is exactly how a streamed-compose failure looked like a weak
+        # model. logger reaches logs/system.log; a print only reached stdout.
+        logger.warning("A2UI compose failed (%s); markdown fallback.", exc, exc_info=True)
     return _done(best if best is not None else markdown_surface(text))

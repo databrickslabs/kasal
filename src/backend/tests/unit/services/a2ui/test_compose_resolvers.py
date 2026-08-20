@@ -12,6 +12,7 @@ import json
 
 from src.services.a2ui.compose import (
     MINIMAL_COMPONENTS,
+    a2ui_system_prompt,
     compose_a2ui,
     guidance_for,
     infer_deliverable,
@@ -544,6 +545,47 @@ def test_custom_catalog_parsed_and_surfacekinds_backfilled():
 def test_invalid_custom_catalog_falls_back_to_default():
     out = resolve_catalog(
         {"id": 7, "catalog_type": "custom", "catalog_json": "{not valid"}, CATALOG
+    )
+    assert set(out["components"]) == FULL
+
+
+def test_custom_catalog_that_is_a_surface_not_a_catalog_falls_back():
+    """A saved SURFACE pasted into ``catalog_json`` has ``components`` as a LIST of
+    component INSTANCES — not the dict of name->spec a catalog is.
+
+    It parses as a dict with a truthy ``components``, so the old guard accepted it
+    and returned it as the catalog; ``a2ui_system_prompt`` then did ``.items()`` on
+    the list and raised ``'list' object has no attribute 'items'`` INSIDE the
+    composer's broad except, dropping every rich surface for that workspace to a
+    silent plain-text fallback. A non-dict (or empty) ``components`` is not a
+    usable catalog — resolve to the full bundled one instead."""
+    surface_as_catalog = json.dumps(
+        {
+            "surfaceKind": "presentation",
+            "title": "Vietnam Country Energy Profile",
+            "root": "c1",
+            "components": [
+                {"id": "c1", "component": "Slide", "variant": "title", "title": "X"},
+                {"id": "c2", "component": "Slide", "variant": "content", "title": "Y"},
+            ],
+        }
+    )
+    out = resolve_catalog(
+        {"id": 7, "catalog_type": "custom", "catalog_json": surface_as_catalog}, CATALOG
+    )
+    assert set(out["components"]) == FULL
+    # The resolved catalog must be USABLE by the prompt builder — the exact call
+    # that crashed on the surface-shaped components. Must not raise.
+    a2ui_system_prompt(out, "purpose", "", "make a slide deck", "")
+
+
+def test_custom_catalog_with_empty_components_falls_back():
+    """``{"components": {}}`` is a dict but names nothing the composer may emit;
+    like the disabled-everything ``select`` case, treat it as a mistake and use
+    the full catalog rather than a catalog that can produce no surface."""
+    out = resolve_catalog(
+        {"id": 7, "catalog_type": "custom", "catalog_json": '{"components": {}}'},
+        CATALOG,
     )
     assert set(out["components"]) == FULL
 

@@ -103,6 +103,46 @@ def _compose(llm, text="Alpine chalets are timber-framed."):
     return compose_a2ui(text, query=QUERY, llm_call=llm, catalog=CATALOG, retries=2)
 
 
+class TestRichIntentCanComeFromPurpose:
+    """Regression: the rich-surface intent can live in the agent PURPOSE, not the
+    user's query (a research/report crew whose chat prompt has no rich keyword).
+
+    compose_a2ui must fold `purpose` into its wants_rich gate — matching the host
+    (compose_surface), which already committed and shipped a skeleton on the same
+    combined signal. Checking `query` alone made compose_a2ui bail to markdown
+    BEFORE any LLM call, retracting the shell to plain text on EVERY model (the
+    conversation_fallback seen even on Fable 5)."""
+
+    def test_purpose_only_rich_intent_still_calls_the_llm(self):
+        llm = CountingLLM()
+        surface = compose_a2ui(
+            "Alpine chalets are timber-framed.",
+            purpose="Build a presentation deck for the customer",
+            query="tell me about chalets",  # no rich-intent keyword on its own
+            llm_call=llm,
+            catalog=CATALOG,
+            retries=2,
+        )
+        assert (
+            llm.calls > 0
+        ), "bailed before the LLM — the wants_rich gate ignored purpose"
+        assert surface.get("surfaceKind") == "presentation"
+
+    def test_no_rich_intent_anywhere_still_bails(self):
+        """The gate must still short-circuit plain prose (no query/purpose intent)."""
+        llm = CountingLLM()
+        surface = compose_a2ui(
+            "Just a plain sentence.",
+            purpose="Answer helpfully",
+            query="say hello",
+            llm_call=llm,
+            catalog=CATALOG,
+            retries=2,
+        )
+        assert llm.calls == 0
+        assert surface.get("surfaceKind") != "presentation"
+
+
 class TestTheFixtureActuallyTripsTheLint:
     """Without this, the budget tests would pass for the wrong reason."""
 

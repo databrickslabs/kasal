@@ -613,7 +613,27 @@ async def compose_surface(
         import time as _t
 
         began = _t.monotonic()
-        out = llm.call(messages)
+        try:
+            out = llm.call(messages)
+        except Exception as call_exc:  # noqa: BLE001
+            # Streaming the compose must never cost the whole surface. If the
+            # streamed call fails, degrade to a NON-streamed compose so the deck is
+            # still produced (it just arrives at once). Without this, a streaming
+            # error propagated into compose_a2ui and dropped the surface to plain
+            # text on every model — the conversation_fallback seen even on Fable 5.
+            if getattr(llm, "stream", False):
+                logger.warning(
+                    "[a2ui] streamed compose call failed (%s); retrying without "
+                    "streaming",
+                    call_exc,
+                )
+                try:
+                    llm.stream = False
+                except Exception:  # noqa: BLE001
+                    pass
+                out = llm.call(messages)
+            else:
+                raise
         text = out if isinstance(out, str) else str(out)
         _attempt["n"] += 1
 
