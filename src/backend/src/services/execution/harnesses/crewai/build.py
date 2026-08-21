@@ -38,6 +38,27 @@ logger = LoggerManager.get_instance().crew
 #: Kasal kwarg → CrewAI kwarg, where only the spelling differs.
 _RENAMED: Dict[str, str] = {}
 
+#: Keys CrewAI ACCEPTS but does not mean the same thing by — "false friends".
+#:
+#: Checked BEFORE the accepted-field test, which is the whole point: that test
+#: passes anything CrewAI declares straight through, so a key present in both
+#: vocabularies with different semantics reaches CrewAI as a well-formed value
+#: of the wrong kind. `_KNOWN_DROPS` cannot express this, because it is only
+#: consulted for keys CrewAI does NOT accept.
+_FALSE_FRIENDS: Dict[str, str] = {
+    "skills": (
+        "Kasal's skills are NAMES resolved from a group-scoped database by "
+        "services/skills; CrewAI 1.15's Agent.skills is a list of FILESYSTEM "
+        "paths it loads itself (crewai.skills.loader), so a name reaches it as "
+        "a path and raises FileNotFoundError before the agent is built. The "
+        "Kasal skill still reaches the agent, identically on both harnesses: "
+        "kernel/agent_skills.py injects the <available_skills> block into the "
+        "prompt and equips load_skill/read_skill_file, which go through "
+        "wrap_tool and so stay group-scoped, approvable and traced — none of "
+        "which CrewAI's own loader tool would be"
+    ),
+}
+
 #: Kasal concepts CrewAI has no equivalent for, and what it costs to lose them.
 #: Keyed by kwarg; the value is the reason, which is logged.
 _KNOWN_DROPS: Dict[str, str] = {
@@ -92,6 +113,11 @@ def translate(
     dropped = DroppedKwargs(subject)
 
     for key, value in kwargs.items():
+        # BEFORE the accepted test — see _FALSE_FRIENDS. A key CrewAI declares
+        # would otherwise be forwarded as a value of the wrong kind.
+        if key in _FALSE_FRIENDS:
+            dropped.drop(key, _FALSE_FRIENDS[key])
+            continue
         target = _RENAMED.get(key, key)
         if target in accepted:
             out[target] = value

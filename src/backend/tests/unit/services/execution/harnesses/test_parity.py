@@ -374,3 +374,153 @@ class TestCapabilitiesAreHonest:
         assert set(described["capabilities"]) == {
             c.value for c in harness.capabilities()
         }
+
+
+# ---------------------------------------------------------------------------
+# Agent Skills — the kernel injects, each harness must carry it through
+# ---------------------------------------------------------------------------
+
+
+class _FakeSkill:
+    """A resolved skill, in the shape ``build_prompt_section`` reads."""
+
+    def __init__(self, name="writing-presentation-content"):
+        self.name = name
+        self.description = "Write prose that composes into a good deck."
+        self.summary = self.description
+
+
+class _NoSession:
+    """``inject_skills`` opens a session purely to resolve skills; the resolver
+    is stubbed here, so the session only has to exist."""
+
+    async def __aenter__(self):
+        return object()
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+@pytest.fixture
+def injected_skills(monkeypatch):
+    """Run the REAL ``inject_skills`` with the database stubbed out.
+
+    Deliberately not a hand-written block and a hand-picked tool list: the thing
+    that can regress is the shape the KERNEL produces meeting the shape a
+    BINDING accepts, so the kernel half has to be the real one.
+    """
+    import src.db.session as db_session
+    from src.services.skills import injection, loader
+
+    async def _resolve(names, group_ids, session):
+        return [_FakeSkill()]
+
+    monkeypatch.setattr(db_session, "get_isolated_db_session", lambda: _NoSession())
+    monkeypatch.setattr(loader, "resolve_for_agent", _resolve)
+    monkeypatch.setattr(
+        injection,
+        "build_prompt_section",
+        lambda skills: "<available_skills>\nwriting-presentation-content\n</available_skills>",
+    )
+
+    async def _inject(agent_kwargs):
+        from src.services.execution.kernel.agent_skills import inject_skills
+
+        return await inject_skills(
+            agent_kwargs,
+            {"skills": ["writing-presentation-content"]},
+            group_id="g1",
+            label="Researcher",
+        )
+
+    return _inject
+
+
+class TestSkillsReachTheAgentOnBothEngines:
+    """A skill is prose in the prompt plus two tools that read the rest of it.
+
+    Both halves cross the harness boundary as ordinary kwargs, so both can be
+    dropped silently: CrewAI's ``translate`` keeps only what its Agent declares,
+    and a tool that loses its ``args_schema`` is one the model cannot call with
+    arguments. Neither failure raises — the agent simply behaves as though the
+    skill was never attached, which is indistinguishable from not having one.
+
+    There is no ``Capability`` for skills, so nothing else in this suite would
+    notice. Until there is, these ARE the declaration.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_available_skills_block_reaches_the_model(
+        self, harness, injected_skills
+    ):
+        kwargs = _agent_kwargs()
+        assert await injected_skills(kwargs) == 1
+        agent = harness.build_agent(**kwargs)
+        assert "<available_skills>" in (agent.backstory or "")
+
+    @pytest.mark.asyncio
+    async def test_the_block_survives_in_system_template_too(
+        self, harness, injected_skills
+    ):
+        """``inject_skills`` writes to ``system_template`` when the agent has
+        one, and to ``backstory`` otherwise. Both fields have to carry it, or
+        the block lands where the model never reads it."""
+        kwargs = _agent_kwargs(system_template="You are {role}.")
+        assert await injected_skills(kwargs) == 1
+        agent = harness.build_agent(**kwargs)
+        assert "<available_skills>" in (agent.system_template or "")
+        assert "<available_skills>" not in (agent.backstory or "")
+
+    @pytest.mark.asyncio
+    async def test_the_skill_tools_are_equipped(self, harness, injected_skills):
+        kwargs = _agent_kwargs()
+        await injected_skills(kwargs)
+        agent = harness.build_agent(**kwargs)
+        names = {t.name for t in agent.tools}
+        assert {"load_skill", "read_skill_file"} <= names
+        assert "search" in names  # the agent's own tools are not displaced
+
+    @pytest.mark.asyncio
+    async def test_the_tools_keep_the_arguments_the_model_must_supply(
+        self, harness, injected_skills
+    ):
+        """A skill tool with no schema is offered to the model as a no-argument
+        tool. It then calls ``load_skill`` with nothing, gets an error back, and
+        the skill never loads — with a tool call in the trace to suggest it did."""
+        kwargs = _agent_kwargs()
+        await injected_skills(kwargs)
+        agent = harness.build_agent(**kwargs)
+        by_name = {t.name: t for t in agent.tools}
+        assert "skill_name" in by_name["load_skill"].args_schema.model_fields
+        assert {"skill_name", "path"} <= set(
+            by_name["read_skill_file"].args_schema.model_fields
+        )
+
+    def test_a_skills_kwarg_never_reaches_the_runtime(self, harness):
+        """`skills` is a FALSE FRIEND: a Kasal spec concept (names in a
+        group-scoped database) that CrewAI also declares, meaning filesystem
+        paths it loads itself.
+
+        Before this was guarded the two harnesses diverged as badly as they can:
+        Kasal ignored the kwarg (its runtime Agent has no such field) while
+        CrewAI accepted it and raised FileNotFoundError before the agent
+        existed — the same crew configuration working on one runtime and dying
+        on the other, from a kwarg neither runtime should receive.
+        """
+        agent = harness.build_agent(
+            **_agent_kwargs(skills=["writing-presentation-content"])
+        )
+        assert agent.role == "Researcher"
+        assert not getattr(agent, "skills", None)
+
+    @pytest.mark.asyncio
+    async def test_the_skill_still_arrives_by_the_supported_route(
+        self, harness, injected_skills
+    ):
+        """Dropping the kwarg must not cost the agent its skill — the block and
+        the tools are how a skill actually reaches the model, on both."""
+        kwargs = _agent_kwargs(skills=["writing-presentation-content"])
+        assert await injected_skills(kwargs) == 1
+        agent = harness.build_agent(**kwargs)
+        assert "<available_skills>" in (agent.backstory or "")
+        assert "load_skill" in {t.name for t in agent.tools}
