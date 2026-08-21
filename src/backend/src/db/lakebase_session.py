@@ -598,6 +598,19 @@ class LakebaseSessionFactory:
                 # failures — the global exception handler already logs them.
                 raise
             except Exception as e:
+                # A request-shape problem (an empty body → 422, other 4xx) is a
+                # normal request outcome, not a DB/session failure. Recognise these
+                # by class name so this low-level module need not import FastAPI /
+                # pydantic, and re-raise WITHOUT the session-error log — the global
+                # exception handler renders them. This is what turned an empty
+                # chat-message body into a noisy "Error in Lakebase session:
+                # 1 validation error" ERROR line.
+                if any(
+                    klass.__name__
+                    in ("RequestValidationError", "ValidationError", "HTTPException")
+                    for klass in type(e).__mro__
+                ):
+                    raise
                 # Check if this is a token/auth error that might be fixable by refreshing
                 err_str = str(e).lower()
                 if (

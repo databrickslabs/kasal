@@ -119,19 +119,20 @@ class TestChatHistoryBase:
         assert "message_type" in missing_fields
         assert "content" in missing_fields
 
-    def test_empty_content_validation(self):
-        """Test content field minimum length validation."""
-        data = {
-            "session_id": "session-test",
-            "user_id": "user-test",
-            "message_type": "user",
-            "content": "",
-        }
-        with pytest.raises(ValidationError) as exc_info:
-            ChatHistoryBase(**data)
-
-        errors = exc_info.value.errors()
-        assert any(error["loc"] == ("content",) for error in errors)
+    def test_empty_content_is_accepted(self):
+        """Empty content is allowed. assistant/result/trace/execution messages
+        often carry their whole payload in generation_result with no text;
+        rejecting empty content (the old min_length=1) DROPPED those messages and
+        logged a spurious 422 as 'Error in Lakebase session: 1 validation error'.
+        Content must still be PRESENT (required) — it just may be an empty string."""
+        chat = ChatHistoryBase(
+            session_id="session-test",
+            user_id="user-test",
+            message_type="result",
+            content="",
+            generation_result={"crew": {"name": "x"}},
+        )
+        assert chat.content == ""
 
 
 class TestChatHistoryCreate:
@@ -195,14 +196,13 @@ class TestChatHistoryUpdate:
         assert update.confidence == "0.87"
         assert update.generation_result == {"crew_id": "crew-456", "status": "updated"}
 
-    def test_update_content_validation(self):
-        """Test content field validation in update."""
-        update_data = {"content": ""}
-        with pytest.raises(ValidationError) as exc_info:
-            ChatHistoryUpdate(**update_data)
-
-        errors = exc_info.value.errors()
-        assert any(error["loc"] == ("content",) for error in errors)
+    def test_update_content_empty_is_accepted(self):
+        """An update may set content to an empty string (e.g. a streaming append
+        that has not produced text yet, or attaching a result to a text-less
+        message). The old min_length=1 turned this into a spurious 422; content
+        stays Optional and now allows ""."""
+        update = ChatHistoryUpdate(content="")
+        assert update.content == ""
 
 
 class TestChatHistoryInDBBase:

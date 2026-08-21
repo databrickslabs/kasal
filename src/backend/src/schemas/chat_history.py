@@ -1,7 +1,19 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+def _require_content_or_payload(content: Optional[str], generation_result) -> None:
+    """A chat message must carry SOMETHING — text, or a structured payload.
+
+    Replaces the old ``content`` ``min_length=1``. assistant/result/trace/execution
+    messages routinely deliver a deck/quiz/crew in ``generation_result`` with no
+    prose; rejecting empty text dropped those messages AND logged the 422 as a
+    spurious "Error in Lakebase session: 1 validation error". Empty text with no
+    payload (e.g. a blank user message) is still rejected — cleanly, as a 422."""
+    if not (content or "").strip() and generation_result is None:
+        raise ValueError("a message must have content or a generation_result")
 
 
 # Shared properties
@@ -15,7 +27,15 @@ class ChatHistoryBase(BaseModel):
         pattern="^(user|assistant|system|execution|trace|result)$",
         description="Message type: user, assistant, system, execution, trace, or result",
     )
-    content: str = Field(..., min_length=1, description="Message content")
+    content: str = Field(
+        ...,
+        description=(
+            "Message content. May be empty: assistant/result/trace/execution "
+            "messages often carry their payload in generation_result with no text, "
+            "and rejecting those dropped the message and logged a spurious "
+            "'Error in Lakebase session' 422."
+        ),
+    )
     intent: Optional[str] = Field(
         None, description="Detected intent (generate_agent, generate_task, etc.)"
     )
@@ -23,6 +43,11 @@ class ChatHistoryBase(BaseModel):
     generation_result: Optional[Dict[str, Any]] = Field(
         None, description="Generated agent/task/crew data"
     )
+
+    @model_validator(mode="after")
+    def _check_content_or_payload(self):
+        _require_content_or_payload(self.content, self.generation_result)
+        return self
 
 
 # Properties to receive on chat message creation
@@ -38,7 +63,7 @@ class ChatHistoryUpdate(BaseModel):
     """Schema for updating a chat message."""
 
     content: Optional[str] = Field(
-        None, min_length=1, description="Updated message content"
+        None, description="Updated message content (may be empty)"
     )
     intent: Optional[str] = Field(None, description="Updated intent")
     confidence: Optional[str] = Field(None, description="Updated confidence score")
@@ -122,7 +147,15 @@ class SaveMessageRequest(BaseModel):
         pattern="^(user|assistant|system|execution|trace|result)$",
         description="Message type",
     )
-    content: str = Field(..., min_length=1, description="Message content")
+    content: str = Field(
+        ...,
+        description=(
+            "Message content. May be empty: assistant/result/trace/execution "
+            "messages often carry their payload in generation_result with no text, "
+            "and rejecting those dropped the message and logged a spurious "
+            "'Error in Lakebase session' 422."
+        ),
+    )
     intent: Optional[str] = Field(None, description="Detected intent")
     confidence: Optional[float] = Field(
         None, ge=0.0, le=1.0, description="Confidence score"
@@ -130,6 +163,11 @@ class SaveMessageRequest(BaseModel):
     generation_result: Optional[Dict[str, Any]] = Field(
         None, description="Generation result"
     )
+
+    @model_validator(mode="after")
+    def _check_content_or_payload(self):
+        _require_content_or_payload(self.content, self.generation_result)
+        return self
 
 
 class GetSessionRequest(BaseModel):
@@ -150,7 +188,7 @@ class UpdateMessageRequest(BaseModel):
     """Schema for updating a chat message (streaming append / result attach)."""
 
     content: Optional[str] = Field(
-        None, min_length=1, description="Updated message content"
+        None, description="Updated message content (may be empty)"
     )
     intent: Optional[str] = Field(None, description="Updated intent")
     generation_result: Optional[Dict[str, Any]] = Field(

@@ -838,23 +838,24 @@ class TestEdgeCases:
     """Additional edge-case and boundary tests."""
 
     @pytest.mark.asyncio
-    async def test_save_message_empty_content_raises_validation_error(self):
-        """Empty content raises ValidationError because ChatHistoryResponse
-        inherits min_length=1 from the base schema on the content field.
-
-        The service persists data first, then constructs the Pydantic DTO, so
-        the validation error comes from the ChatHistoryResponse constructor.
+    async def test_save_message_accepts_empty_content(self):
+        """Empty content is accepted. assistant/result/trace/execution messages
+        carry their payload in generation_result with no text; the base schema's
+        old min_length=1 rejected them, so the message was dropped and the 422
+        was mis-logged as 'Error in Lakebase session'. Content stays required
+        (must be present) but may now be an empty string.
         """
         svc, repo = _build_service()
         repo.create = AsyncMock(return_value=MagicMock())
 
-        with pytest.raises(ValidationError):
-            await svc.save_message(
-                session_id="s",
-                user_id="u",
-                message_type="user",
-                content="",
-            )
+        result = await svc.save_message(
+            session_id="s",
+            user_id="u",
+            message_type="result",
+            content="",
+            generation_result={"crew": {"name": "x"}},
+        )
+        assert result is not None
 
     @pytest.mark.asyncio
     async def test_save_message_with_large_generation_result(self):
