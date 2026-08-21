@@ -720,3 +720,59 @@ async def test_summary_is_applied_when_the_lookup_succeeds():
 
     assert "pears" not in out  # represented by the summary, not verbatim
     assert "User: my name is ada lovelace" in out
+
+
+class TestRunTraceWriterRelease:
+    """The light-agent run keeps its trace events on one private Lakebase session
+    (``_RunTraceWriter``). That session MUST be released on every exit — including
+    cancellation — or its connection is orphaned and GC-reaped as a
+    "non-checked-in connection". These guard the release contract.
+    """
+
+    def test_close_is_idempotent_when_never_opened(self):
+        import asyncio
+
+        from src.services.chat.service import _RunTraceWriter
+
+        writer = _RunTraceWriter()
+        # Never opened a session: close() is a no-op and must not raise.
+        asyncio.run(writer.close())
+
+    def test_close_exits_ctx_once_then_noops(self):
+        import asyncio
+
+        from src.services.chat.service import _RunTraceWriter
+
+        exits = []
+
+        class _FakeCtx:
+            async def __aexit__(self, *exc):
+                exits.append(True)
+                return False
+
+        writer = _RunTraceWriter()
+        writer._ctx = _FakeCtx()
+        writer._session = object()
+
+        async def _run():
+            await writer.close()
+            await writer.close()  # second call is a no-op (ctx already dropped)
+
+        asyncio.run(_run())
+        assert exits == [True]
+
+    def test_run_releases_trace_writer_in_a_finally(self):
+        """A cancelled run (CancelledError is BaseException, so `except Exception`
+        never runs on it) must still release the session — hence a `finally`."""
+        import inspect
+
+        from src.services.chat.service import LightAgentService
+
+        source = inspect.getsource(LightAgentService.run_light_agent_execution)
+        assert "finally:" in source
+        # The LAST finally in the method is the run's outermost teardown; the
+        # trace writer must be closed there, not only on the success/except paths.
+        tail = source[source.rindex("finally:") :]
+        assert (
+            "_trace_writer.close()" in tail
+        ), "run_light_agent_execution must release the trace writer in its finally"

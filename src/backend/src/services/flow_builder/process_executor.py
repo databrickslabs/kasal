@@ -1153,6 +1153,17 @@ def run_flow_in_process(
                 warnings.filterwarnings(
                     "ignore", category=RuntimeWarning, module=".*async_client_cleanup.*"
                 )
+                # Dispose the memory bridge loop's Lakebase engine and stop that
+                # daemon loop: memory backends run all their async DB work there,
+                # and on interpreter exit the daemon thread is killed abruptly,
+                # orphaning its asyncpg connection (the residual [FLOW]
+                # "non-checked-in connection" leak). Independent of `loop`.
+                try:
+                    from src.services.memory.bridge_loop import shutdown_bridge_loop
+
+                    shutdown_bridge_loop(timeout=5.0)
+                except Exception:
+                    pass
                 # Return this subprocess's thread-local Lakebase connection to its
                 # pool BEFORE closing the loop it lives on. Otherwise the pooled
                 # asyncpg connection is orphaned on a dead loop and its later

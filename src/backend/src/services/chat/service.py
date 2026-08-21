@@ -1495,6 +1495,19 @@ class LightAgentService:
                 "status": ExecutionStatus.FAILED.value,
                 "error": str(e),
             }
+        finally:
+            # Release the run's private trace session on EVERY exit — including
+            # cancellation. CancelledError is a BaseException, so the `except
+            # Exception` above never runs on it; without this a cancelled chat run
+            # orphans the trace session's Lakebase connection, GC-reaped later as a
+            # "non-checked-in connection". close() is idempotent, so the success and
+            # error paths that already closed it are unaffected.
+            try:
+                await _trace_writer.close()
+            except NameError:
+                pass  # cancelled before the writer was constructed
+            except Exception:  # noqa: BLE001 — teardown must never raise
+                pass
 
     @staticmethod
     def _event_matches_run(
