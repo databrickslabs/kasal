@@ -44,18 +44,26 @@ class ChatHistoryBase(BaseModel):
         None, description="Generated agent/task/crew data"
     )
 
+
+# Properties to receive on chat message creation
+class ChatHistoryCreate(ChatHistoryBase):
+    """Schema for creating a new chat message.
+
+    The content-or-payload rule lives on the INPUT schemas (this create schema
+    and SaveMessageRequest), NOT on ChatHistoryBase. ChatHistoryResponse is a
+    read/echo DTO built from an already-persisted row; enforcing the rule there
+    made ChatHistoryService.save_message write the row and THEN raise while
+    building the response — an empty internal save became a partial-success 500,
+    and a legitimately-empty stored row could not be read back. The API boundary
+    still rejects an empty, payload-less message as a clean 422 via
+    SaveMessageRequest.
+    """
+
+    # Timestamp will be auto-generated in the service.
     @model_validator(mode="after")
     def _check_content_or_payload(self):
         _require_content_or_payload(self.content, self.generation_result)
         return self
-
-
-# Properties to receive on chat message creation
-class ChatHistoryCreate(ChatHistoryBase):
-    """Schema for creating a new chat message."""
-
-    # Timestamp will be auto-generated in the service
-    pass
 
 
 # Properties to receive on chat message update

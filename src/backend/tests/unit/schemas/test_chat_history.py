@@ -161,6 +161,30 @@ class TestChatHistoryCreate:
         assert create_chat.message_type == "user"
         assert create_chat.content == "Create test message"
 
+    def test_rejects_empty_content_without_payload(self):
+        """The content-or-payload rule lives on the create INPUT (and on
+        SaveMessageRequest) — an empty, payload-less message is rejected here,
+        which is where it belongs, not on the response DTO."""
+        with pytest.raises(ValidationError):
+            ChatHistoryCreate(
+                session_id="s",
+                user_id="u",
+                message_type="assistant",
+                content="   ",
+            )
+
+    def test_accepts_empty_content_with_payload(self):
+        """A deck/quiz/crew delivered in generation_result with no prose is a
+        valid create."""
+        create = ChatHistoryCreate(
+            session_id="s",
+            user_id="u",
+            message_type="result",
+            content="",
+            generation_result={"crew": {"name": "x"}},
+        )
+        assert create.content == ""
+
 
 class TestChatHistoryUpdate:
     """Test cases for ChatHistoryUpdate schema."""
@@ -279,6 +303,21 @@ class TestChatHistoryResponse:
         assert response_chat.id == "response-123"
         assert response_chat.session_id == "response-session"
         assert response_chat.timestamp == now
+
+    def test_response_echoes_empty_stored_row(self):
+        """A response is a read/echo DTO and must NOT enforce content-or-payload.
+        save_message builds it from a row it just wrote; enforcing it here wrote
+        the row and THEN raised (a partial-success 500), and a legitimately-empty
+        stored row could not be read back. Regression guard for that fix."""
+        response = ChatHistoryResponse(
+            id="r1",
+            session_id="s",
+            user_id="u",
+            message_type="assistant",
+            content="",
+            timestamp=datetime.now(),
+        )
+        assert response.content == ""
 
 
 class TestChatSessionInfo:
