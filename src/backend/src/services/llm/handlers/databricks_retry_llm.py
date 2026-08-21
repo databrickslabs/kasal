@@ -93,19 +93,44 @@ def _append_placeholder_nudge(messages) -> None:
 _NO_FALLBACK = object()
 
 
+async def _with_lakebase_release(coro):
+    """Await ``coro``, then return any thread-local Lakebase connection to its
+    pool BEFORE the surrounding ``asyncio.run`` tears down this throwaway loop.
+
+    Credential reads here (``get_auth_context``) and any routed/isolated session
+    bind a thread-local asyncpg engine to ``asyncio.run``'s loop. Closing that
+    loop WITHOUT disposing the engine orphans the pooled connection on a dead
+    loop — its graceful close then raises ``RuntimeError: Event loop is closed``
+    and SQLAlchemy GC-terminates it as a "non-checked-in connection" (observed
+    every LLM setup on the deployed Lakebase app). Disposing inside the coro, on
+    that same loop, returns it cleanly. No-op when nothing touched Lakebase."""
+    try:
+        return await coro
+    finally:
+        try:
+            from src.db.lakebase_session import dispose_thread_local_lakebase_factory
+
+            await dispose_thread_local_lakebase_factory()
+        except Exception:  # noqa: BLE001 — teardown must never fail the call
+            pass
+
+
 def _run_coro_sync(coro):
     """Run an async coroutine to completion from a synchronous context.
 
     DatabricksRetryLLM.call() runs in a CrewAI worker thread (no running event
     loop), so asyncio.run works directly; the ThreadPoolExecutor branch is a
     safety net for the rare case a loop is already running on this thread.
+
+    The coroutine is wrapped so a thread-local Lakebase connection it opened is
+    returned before asyncio.run closes the loop (see _with_lakebase_release).
     """
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(coro)
+        return asyncio.run(_with_lakebase_release(coro))
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-        return ex.submit(lambda: asyncio.run(coro)).result()
+        return ex.submit(lambda: asyncio.run(_with_lakebase_release(coro))).result()
 
 
 class DatabricksRetryLLM(LLM):
@@ -501,11 +526,17 @@ class DatabricksRetryLLM(LLM):
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                     auth_ctx = pool.submit(
                         lambda: asyncio.run(
-                            get_auth_context(user_token=None, group_id=gid)
+                            _with_lakebase_release(
+                                get_auth_context(user_token=None, group_id=gid)
+                            )
                         )
                     ).result(timeout=15)
             else:
-                auth_ctx = asyncio.run(get_auth_context(user_token=None, group_id=gid))
+                auth_ctx = asyncio.run(
+                    _with_lakebase_release(
+                        get_auth_context(user_token=None, group_id=gid)
+                    )
+                )
 
             if auth_ctx and auth_ctx.token and auth_ctx.token != self.api_key:
                 old_method = "obo"  # the one that just failed

@@ -8,7 +8,7 @@ sanitization DatabricksRetryLLM applies before every call.
 import json
 import logging
 import sys
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
@@ -16,9 +16,32 @@ from src.services.llm.handlers.databricks_retry_llm import (
     DatabricksRetryLLM,
     _is_gemini_model,
     _resolve_schema_refs,
+    _run_coro_sync,
     _sanitize_tools_for_gemini,
     _strip_tool_strict,
 )
+
+
+class TestRunCoroSyncReleasesLakebase:
+    """_run_coro_sync bridges sync->async via asyncio.run (a throwaway loop). A
+    coroutine that opened a thread-local Lakebase engine (e.g. get_auth_context's
+    credential read) must have it disposed BEFORE that loop closes, or the pooled
+    asyncpg connection is orphaned on a dead loop → 'Event loop is closed' → GC
+    'non-checked-in connection'."""
+
+    def test_disposes_thread_local_lakebase_and_returns_result(self):
+        disposed = AsyncMock()
+
+        async def _coro():
+            return "value"
+
+        with patch(
+            "src.db.lakebase_session.dispose_thread_local_lakebase_factory", disposed
+        ):
+            result = _run_coro_sync(_coro())
+
+        assert result == "value"
+        disposed.assert_awaited_once()
 
 
 class TestSanitizeMessagesForDatabricks:
