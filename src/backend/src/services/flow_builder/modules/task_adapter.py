@@ -369,9 +369,13 @@ class TaskConfig:
                     except Exception as tool_error:
                         logger.warning(f"Error creating tool {tool_id}: {tool_error}")
 
-                # Assign tools to the agent if found
+                # Assign tools to the agent if found, ADAPTED for the active
+                # harness. tool_factory.create_tool returns raw Kasal BaseTools;
+                # on the CrewAI harness an unadapted tool fails crewai's
+                # parse_tools ("Tool is not a CrewStructuredTool or BaseTool") at
+                # crew kickoff. adapt_tools is identity on the Kasal harness.
                 if tools:
-                    agent.tools = tools
+                    agent.tools = active_harness().adapt_tools(tools)
                     logger.info(
                         f"Assigned {len(tools)} tools from task data to agent for task {task_data.name}"
                     )
@@ -439,9 +443,11 @@ class TaskConfig:
                                             f"Error creating tool {tool_id} from node data: {tool_error}"
                                         )
 
-                                # Assign tools to the agent if found
+                                # Assign tools to the agent if found, ADAPTED for
+                                # the active harness (see the task-data branch:
+                                # raw Kasal tools fail crewai parse_tools).
                                 if tools:
-                                    agent.tools = tools
+                                    agent.tools = active_harness().adapt_tools(tools)
                                     logger.info(
                                         f"Assigned {len(tools)} tools from node data to agent for task {task_data.name}"
                                     )
