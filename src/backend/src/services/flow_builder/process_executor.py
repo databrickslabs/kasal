@@ -1153,6 +1153,15 @@ def run_flow_in_process(
                 warnings.filterwarnings(
                     "ignore", category=RuntimeWarning, module=".*async_client_cleanup.*"
                 )
+                # Return this subprocess's thread-local Lakebase connection to its
+                # pool BEFORE closing the loop it lives on. Otherwise the pooled
+                # asyncpg connection is orphaned on a dead loop and its later
+                # graceful close raises "Event loop is closed", which SQLAlchemy
+                # GC-terminates as a "non-checked-in connection" — the warning seen
+                # in flow-subprocess teardown. Never raises (see asyncio_utils).
+                from src.utils.asyncio_utils import _dispose_thread_local_lakebase
+
+                _dispose_thread_local_lakebase(loop)
                 loop.close()
 
     except Exception as e:

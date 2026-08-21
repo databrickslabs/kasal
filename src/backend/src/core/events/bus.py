@@ -288,6 +288,25 @@ class EventsBus:
                         type(event).__name__,
                     )
 
+    def flush(self, timeout: float | None = None) -> bool:
+        """Wait for in-flight event handlers to finish; return True when they have.
+
+        This bus dispatches handlers SYNCHRONOUSLY and inline inside ``emit()`` —
+        by the time an ``emit()`` returns, its handlers have already run. There is
+        no internal queue or worker pool to drain, so there is nothing to wait for
+        and this returns ``True`` immediately. The crewAI event bus this replaced
+        ran handlers on a thread pool and needed a real flush; that history is why
+        the flow subprocess still calls ``flush(timeout=...)`` at teardown — and
+        why its absence here logged ``'EventsBus' object has no attribute 'flush'``
+        (caught as non-fatal) on every flow run.
+
+        Fire-and-forget work a handler itself schedules (trace DB writes, memory
+        saves) is drained by those subsystems' own teardown — ``flush_memory_writes``,
+        the log-writer stop, the OTel provider shutdown — not by the bus.
+        ``timeout`` is accepted for call-site compatibility and is unused.
+        """
+        return True
+
     @contextmanager
     def scoped_handlers(self) -> Iterator[None]:
         """Temporarily isolate handler registrations (test helper)."""

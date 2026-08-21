@@ -213,6 +213,27 @@ class TestRunFlowInProcessFlushIntegration:
         assert "Event bus flush timed out" in source
         assert "Final event bus flush before cleanup" in source
 
+    def test_run_flow_in_process_disposes_lakebase_before_loop_close(self):
+        """The subprocess returns its thread-local Lakebase connection to the pool
+        BEFORE closing its event loop.
+
+        Otherwise the pooled asyncpg connection is orphaned on a dead loop and its
+        graceful close raises "Event loop is closed", GC-terminated as a
+        "non-checked-in connection" — observed in flow-subprocess teardown.
+        """
+        import inspect
+
+        from src.services.flow_builder.process_executor import run_flow_in_process
+
+        source = inspect.getsource(run_flow_in_process)
+
+        assert (
+            "_dispose_thread_local_lakebase(loop)" in source
+        ), "flow subprocess must dispose its thread-local Lakebase engine"
+        assert source.index("_dispose_thread_local_lakebase(loop)") < source.index(
+            "loop.close()"
+        ), "Lakebase dispose must run BEFORE loop.close()"
+
 
 class TestProcessFlowExecutorFlushEnvironment:
     """Test the environment setup that affects flush behaviour."""
@@ -233,3 +254,32 @@ class TestProcessFlowExecutorFlushEnvironment:
         import src.services.flow_builder.process_executor  # noqa: F401
 
         assert os.environ.get("CREWAI_TELEMETRY_OPT_OUT") == "1"
+
+
+class TestRealEventBusFlushExists:
+    """The flow subprocess calls ``event_bus.flush(timeout=...)`` at teardown, so
+    the REAL bus must define it.
+
+    Regression guard: every other test in this file mocks ``event_bus.flush``, so
+    they stayed green while the real ``EventsBus`` had no such method — and every
+    flow run logged ``'EventsBus' object has no attribute 'flush'`` (caught as
+    non-fatal). These tests exercise the real object so the method can't silently
+    disappear again.
+    """
+
+    def test_events_bus_class_defines_flush(self):
+        from src.core.events.bus import EventsBus
+
+        assert callable(
+            getattr(EventsBus, "flush", None)
+        ), "EventsBus must define flush() — the flow subprocess calls it"
+
+    def test_real_event_bus_flush_returns_true(self):
+        """Handlers dispatch synchronously inline, so there is nothing to wait for:
+        flush returns True immediately and accepts the timeout kwarg the flow
+        subprocess passes as a keyword argument."""
+        from src.core.events import event_bus
+
+        assert event_bus.flush(timeout=30.0) is True
+        assert event_bus.flush(timeout=15.0) is True
+        assert event_bus.flush() is True
