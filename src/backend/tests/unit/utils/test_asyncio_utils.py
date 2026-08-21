@@ -132,6 +132,26 @@ class TestCreateAndRunLoop:
             result = create_and_run_loop(test_coroutine())
             assert result == "result"
 
+    def test_disposes_thread_local_lakebase_before_closing_loop(self):
+        """Regression: a coroutine that opened a thread-local Lakebase engine must
+        have it disposed BEFORE this throwaway loop closes. Otherwise the pooled
+        asyncpg connection is orphaned on a dead loop — its graceful close raises
+        'Event loop is closed' and SQLAlchemy GC-terminates it as a
+        'non-checked-in connection'. This bit the OTel DB span exporter, whose
+        per-batch create_and_run_loop(_write_async) opens a Lakebase session."""
+        disposed = AsyncMock()
+
+        async def _coro():
+            return "ok"
+
+        with patch(
+            "src.db.lakebase_session.dispose_thread_local_lakebase_factory", disposed
+        ):
+            result = create_and_run_loop(_coro())
+
+        assert result == "ok"
+        disposed.assert_awaited_once()
+
 
 class TestCreateTaskLifecycleCallback:
     """Test create_task_lifecycle_callback function."""

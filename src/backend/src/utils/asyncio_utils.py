@@ -162,6 +162,28 @@ async def execute_db_operation_smart(
     return await execute_db_operation_with_fresh_engine(operation)
 
 
+def _dispose_thread_local_lakebase(loop: Any) -> None:
+    """Dispose any thread-local Lakebase engine bound to THIS throwaway loop
+    before it closes.
+
+    ``get_lakebase_session`` (reached via routed/isolated sessions, or the OTel DB
+    span exporter's writes, or any tool that reads config/credentials) binds a
+    thread-local asyncpg engine + token-refresh task to whatever loop is running.
+    Closing the loop WITHOUT disposing that engine orphans the pooled asyncpg
+    connection on a dead loop; its later graceful close then raises
+    ``RuntimeError: Event loop is closed`` and SQLAlchemy GC-terminates it as a
+    "non-checked-in connection". Disposing here, on the same loop, returns the
+    connection cleanly. Safe no-op when the coroutine never touched Lakebase (no
+    thread-local factory), and never raises — teardown must not fail the caller.
+    """
+    try:
+        from src.db.lakebase_session import dispose_thread_local_lakebase_factory
+
+        loop.run_until_complete(dispose_thread_local_lakebase_factory())
+    except Exception as e:  # noqa: BLE001 — teardown must never raise
+        logger.debug(f"thread-local Lakebase dispose skipped: {e}")
+
+
 def create_and_run_loop(coroutine: Any) -> Any:
     """Create a new event loop, run the coroutine, and clean up properly."""
     new_loop = asyncio.new_event_loop()
@@ -183,6 +205,10 @@ def create_and_run_loop(coroutine: Any) -> Any:
                 new_loop.run_until_complete(
                     asyncio.gather(*pending, return_exceptions=True)
                 )
+            # Return a thread-local Lakebase connection to its pool BEFORE closing
+            # the loop it lives on (else it is orphaned → "Event loop is closed" →
+            # GC-terminated "non-checked-in connection").
+            _dispose_thread_local_lakebase(new_loop)
             # Remove the loop from the current context and close it
             asyncio.set_event_loop(None)
             new_loop.close()
@@ -230,6 +256,8 @@ def create_task_lifecycle_callback(
                     new_loop.run_until_complete(
                         asyncio.gather(*pending, return_exceptions=True)
                     )
+                # Return a thread-local Lakebase connection before closing its loop.
+                _dispose_thread_local_lakebase(new_loop)
                 # Remove the loop from the current context and close it
                 asyncio.set_event_loop(None)
                 new_loop.close()
@@ -264,6 +292,8 @@ def run_in_thread_with_loop(func: Callable, *args, **kwargs) -> Any:
         # Clean up the event loop only if we created it
         if created_loop and loop is not None:
             try:
+                # Return a thread-local Lakebase connection before closing its loop.
+                _dispose_thread_local_lakebase(loop)
                 # Only close the loop if we created it
                 asyncio.set_event_loop(None)
                 loop.close()
