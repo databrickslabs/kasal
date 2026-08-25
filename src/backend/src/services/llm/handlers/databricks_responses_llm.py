@@ -166,6 +166,14 @@ class DatabricksResponsesLLM(OpenAICompletion):
         #   - content: null is rejected → use empty string
         #   - id fields max 64 chars
         sanitised_input: list[Any] = []
+        # A tool call with a blank function name cannot be sent: the Responses
+        # API requires input[].name (min length 1) on a function_call. Track any
+        # we drop so their matching function_call_output is dropped too — an
+        # orphaned output ("No tool call found for call_id …") is just a
+        # different 400. With the delegated-call shape now matching the transport
+        # (see the return in _handle_responses), a blank name should not arise;
+        # this is the belt-and-suspenders that stops one from failing the run.
+        dropped_call_ids: set[str] = set()
         for item in params.get("input", []):
             if isinstance(item, dict):
                 item = dict(item)  # shallow copy
@@ -196,6 +204,10 @@ class DatabricksResponsesLLM(OpenAICompletion):
                 # Convert role:"tool" → function_call_output
                 if item.get("role") == "tool":
                     call_id = item.get("tool_call_id", "")
+                    if call_id in dropped_call_ids:
+                        # Its function_call was dropped for a blank name; a
+                        # function_call_output with no matching call is a 400.
+                        continue
                     output = item.get("content", "")
                     if output is None:
                         output = ""
@@ -213,11 +225,17 @@ class DatabricksResponsesLLM(OpenAICompletion):
                     tool_calls = item.get("tool_calls", [])
                     for tc in tool_calls:
                         func = tc.get("function", {})
+                        name = func.get("name", "")
+                        if not name:
+                            # Cannot send a function_call with a blank name;
+                            # drop it and remember to drop its output too.
+                            dropped_call_ids.add(tc.get("id", ""))
+                            continue
                         sanitised_input.append(
                             {
                                 "type": "function_call",
                                 "call_id": tc.get("id", ""),
-                                "name": func.get("name", ""),
+                                "name": name,
                                 "arguments": func.get("arguments", "{}"),
                             }
                         )
@@ -320,132 +338,195 @@ class DatabricksResponsesLLM(OpenAICompletion):
         from_agent: Any | None = None,
         response_model: Any | None = None,
     ) -> Any:
-        """Handle Responses API call, capturing output items with phase."""
-        from openai.types.responses import Response
+        """Drive the Responses API, running the whole tool-call loop in one call.
 
+        The Kasal runtime's contract (``runtime/executor.py``: "the transport
+        runs the whole tool-call loop inside one ``call``") means that when
+        ``available_functions`` is given, THIS method must execute the tools,
+        feed the results back, and keep going until the model answers — exactly
+        what the base ``OpenAICompletion._call_responses_api`` does.
+
+        It used to be single-shot: it ran the FIRST tool call and returned that
+        tool's raw output as the answer. So an agent that opened with a
+        ``todo``/plan call (or any parallel calls) never got a turn to act on the
+        plan — the MCP search it queued next never ran, and the task "completed"
+        with a 0/N plan. Now it loops, round-bounded by the execution budget.
+
+        The endpoint is stateless (no ``previous_response_id``), so each
+        follow-up round resends the model's own ``function_call`` items next to
+        their ``function_call_output``s — see ``_run_tool_round``.
+
+        When ``available_functions`` is absent the model's decision is handed
+        back to a caller that owns its own loop (the CrewAI executor); that path
+        returns after the first response, unchanged.
+        """
+        from openai.types.responses import Response  # noqa: F401 (parity import)
+
+        # Round cap + wall-clock deadline for the tool loop. getattr-guarded so
+        # the isolated unit test's minimal fake base (no _execution_budget) still
+        # runs; the real base always provides both.
+        budget = getattr(self, "_execution_budget", None)
+        rounds, deadline = budget(from_agent) if callable(budget) else (10, None)
+
+        usage_for_event: dict[str, Any] | None = None
         try:
-            # CrewAI 1.14+ moved the OpenAI client to a private attr; use the
-            # lazy getter so it is built on first use. Served from litellm's cache
-            # when an identical request is seen again (codex bypasses
-            # litellm.completion, so we reuse the cache object directly).
-            response: Response = self._cached_responses_create(params)
+            for _round in range(max(1, rounds)):
+                check_deadline = getattr(self, "_check_deadline", None)
+                if callable(check_deadline):
+                    check_deadline(deadline, _round, params.get("input"))
 
-            # Capture raw output items WITH phase for next turn
-            self._capture_output_items(response)
+                # CrewAI 1.14+ moved the OpenAI client to a private attr; the
+                # cached create uses the lazy getter. Served from litellm's cache
+                # when an identical request is seen again (codex bypasses
+                # litellm.completion, so we reuse the cache object directly).
+                response: Response = self._cached_responses_create(params)
 
-            # Track response ID for auto-chaining
-            if self.auto_chain and response.id:
-                self._last_response_id = response.id
+                # Capture raw output items WITH phase for next turn
+                self._capture_output_items(response)
 
-            # Track reasoning items for ZDR auto-chaining
-            if self.auto_chain_reasoning:
-                reasoning_items = self._extract_reasoning_items(response)
-                if reasoning_items:
-                    self._last_reasoning_items = reasoning_items
+                if self.auto_chain and response.id:
+                    self._last_response_id = response.id
+                if self.auto_chain_reasoning:
+                    reasoning_items = self._extract_reasoning_items(response)
+                    if reasoning_items:
+                        self._last_reasoning_items = reasoning_items
 
-            usage = self._extract_responses_token_usage(response)
-            if getattr(self, "_last_response_from_cache", False):
-                # Cache replay: the original usage is embedded in the cached
-                # payload but no API tokens were spent — counting it would
-                # overstate crew total_tokens by roughly the cache hit rate.
-                logger.debug("[DatabricksCodex] cache hit — token usage not counted")
-                usage_for_event = None
-            else:
-                self._track_token_usage_internal(usage)
-                # Surface per-call usage on the event bus (LLMCallCompletedEvent
-                # carries it to the OTel bridge → execution_trace) and in the
-                # logs — this path bypasses litellm, so without this the codex
-                # path records zero token usage anywhere.
-                usage_for_event = usage
-                if usage:
-                    logger.info(
-                        "[DatabricksCodex] usage: prompt=%s completion=%s total=%s",
-                        usage.get("prompt_tokens"),
-                        usage.get("completion_tokens"),
-                        usage.get("total_tokens"),
+                usage = self._extract_responses_token_usage(response)
+                if getattr(self, "_last_response_from_cache", False):
+                    # Cache replay: the original usage is embedded in the cached
+                    # payload but no API tokens were spent — counting it would
+                    # overstate crew total_tokens by roughly the cache hit rate.
+                    logger.debug(
+                        "[DatabricksCodex] cache hit — token usage not counted"
                     )
+                    usage_for_event = None
+                else:
+                    self._track_token_usage_internal(usage)
+                    # Surface per-call usage on the event bus
+                    # (LLMCallCompletedEvent carries it to the OTel bridge →
+                    # execution_trace) and in the logs — this path bypasses
+                    # litellm, so without this the codex path records zero token
+                    # usage anywhere.
+                    usage_for_event = usage
+                    if usage:
+                        logger.info(
+                            "[DatabricksCodex] usage: prompt=%s completion=%s "
+                            "total=%s",
+                            usage.get("prompt_tokens"),
+                            usage.get("completion_tokens"),
+                            usage.get("total_tokens"),
+                        )
 
-            self._log_response(response)
+                self._log_response(response)
 
-            # If parse_tool_outputs is enabled, return structured result
-            if self.parse_tool_outputs:
-                parsed_result = self._extract_builtin_tool_outputs(response)
-                parsed_result.text = self._apply_stop_words(parsed_result.text)
-                self._emit_call_completed_event(
-                    response=parsed_result.text,
-                    call_type=LLMCallType.LLM_CALL,
-                    from_task=from_task,
-                    from_agent=from_agent,
-                    messages=params.get("input", []),
-                    usage=usage_for_event,
-                )
-                return parsed_result
-
-            function_calls = self._extract_function_calls_from_response(response)
-            if function_calls and not available_functions:
-                # Wrap in OpenAI Chat Completions format so CrewAI's
-                # _is_tool_call_list() recognises them (it checks for
-                # "function" key).  The Responses API returns {id, name,
-                # arguments} but the executor expects {id, function: {name, arguments}}.
-                wrapped_calls = [
-                    {
-                        "id": fc.get("id", ""),
-                        "function": {
-                            "name": fc.get("name", ""),
-                            "arguments": fc.get("arguments", "{}"),
-                        },
-                    }
-                    for fc in function_calls
-                ]
-                self._emit_call_completed_event(
-                    response=wrapped_calls,
-                    call_type=LLMCallType.TOOL_CALL,
-                    from_task=from_task,
-                    from_agent=from_agent,
-                    messages=params.get("input", []),
-                    usage=usage_for_event,
-                )
-                return wrapped_calls
-
-            if function_calls and available_functions:
-                for call in function_calls:
-                    function_name = call.get("name", "")
-                    function_args = call.get("arguments", {})
-                    if isinstance(function_args, str):
-                        try:
-                            function_args = json.loads(function_args)
-                        except json.JSONDecodeError:
-                            function_args = {}
-
-                    result = self._handle_tool_execution(
-                        function_name,
-                        function_args,
-                        available_functions,
-                    )
-                    if result is not None:
-                        return result
-
-            content = response.output_text or ""
-
-            if response_model:
-                try:
-                    structured_result = self._validate_structured_output(
-                        content, response_model
-                    )
+                # If parse_tool_outputs is enabled, return structured result
+                if self.parse_tool_outputs:
+                    parsed_result = self._extract_builtin_tool_outputs(response)
+                    parsed_result.text = self._apply_stop_words(parsed_result.text)
                     self._emit_call_completed_event(
-                        response=structured_result,
+                        response=parsed_result.text,
                         call_type=LLMCallType.LLM_CALL,
                         from_task=from_task,
                         from_agent=from_agent,
                         messages=params.get("input", []),
                         usage=usage_for_event,
                     )
-                    return structured_result
-                except ValueError as e:
-                    logging.warning(f"Structured output validation failed: {e}")
+                    return parsed_result
 
-            content = self._apply_stop_words(content)
+                function_calls = self._extract_function_calls_from_response(response)
 
+                if function_calls and not available_functions:
+                    # The caller owns the tool loop and wants only the DECISION.
+                    # Hand back the transport's normalized shape — flat
+                    # {id, name, arguments}, exactly what base OpenAICompletion
+                    # returns from its delegated path. The sole consumer,
+                    # _as_crewai_tool_calls (harnesses/crewai/llm.py), reads these
+                    # keys at the TOP LEVEL. Nesting name/arguments under
+                    # "function" (the Chat Completions shape) made it read both as
+                    # absent, so every codex tool call became a nameless
+                    # _ToolCall and the next request 400'd on the empty
+                    # function_call name.
+                    delegated_calls = [
+                        {
+                            "id": fc.get("id", ""),
+                            "name": fc.get("name", ""),
+                            "arguments": fc.get("arguments", "{}"),
+                        }
+                        for fc in function_calls
+                    ]
+                    self._emit_call_completed_event(
+                        response=delegated_calls,
+                        call_type=LLMCallType.TOOL_CALL,
+                        from_task=from_task,
+                        from_agent=from_agent,
+                        messages=params.get("input", []),
+                        usage=usage_for_event,
+                    )
+                    return delegated_calls
+
+                if function_calls and available_functions:
+                    answer = self._run_tool_round(
+                        params, function_calls, available_functions
+                    )
+                    if answer is not None:
+                        # A result_as_answer tool: its output IS the answer.
+                        answer = self._apply_stop_words(answer)
+                        self._emit_call_completed_event(
+                            response=answer,
+                            call_type=LLMCallType.TOOL_CALL,
+                            from_task=from_task,
+                            from_agent=from_agent,
+                            messages=params.get("input", []),
+                            usage=usage_for_event,
+                        )
+                        return answer
+                    # Tools ran; their outputs are now in params["input"]. Loop
+                    # so the model can read them and decide the next step.
+                    continue
+
+                # No tool calls: this response is the answer.
+                content = response.output_text or ""
+
+                if response_model:
+                    try:
+                        structured_result = self._validate_structured_output(
+                            content, response_model
+                        )
+                        self._emit_call_completed_event(
+                            response=structured_result,
+                            call_type=LLMCallType.LLM_CALL,
+                            from_task=from_task,
+                            from_agent=from_agent,
+                            messages=params.get("input", []),
+                            usage=usage_for_event,
+                        )
+                        return structured_result
+                    except ValueError as e:
+                        logging.warning(f"Structured output validation failed: {e}")
+
+                content = self._apply_stop_words(content)
+
+                self._emit_call_completed_event(
+                    response=content,
+                    call_type=LLMCallType.LLM_CALL,
+                    from_task=from_task,
+                    from_agent=from_agent,
+                    messages=params.get("input", []),
+                    usage=usage_for_event,
+                )
+
+                return content
+
+            # Round budget exhausted while still calling tools. One final,
+            # tool-less request so the model answers with what it gathered rather
+            # than the run ending on a bare tool result.
+            params.pop("tools", None)
+            response = self._cached_responses_create(params)
+            self._capture_output_items(response)
+            if not getattr(self, "_last_response_from_cache", False):
+                usage_for_event = self._extract_responses_token_usage(response)
+                self._track_token_usage_internal(usage_for_event)
+            content = self._apply_stop_words(response.output_text or "")
             self._emit_call_completed_event(
                 response=content,
                 call_type=LLMCallType.LLM_CALL,
@@ -454,7 +535,6 @@ class DatabricksResponsesLLM(OpenAICompletion):
                 messages=params.get("input", []),
                 usage=usage_for_event,
             )
-
             return content
 
         except Exception as e:
@@ -466,6 +546,69 @@ class DatabricksResponsesLLM(OpenAICompletion):
                 from_agent=from_agent,
             )
             raise
+
+    def _run_tool_round(
+        self,
+        params: dict[str, Any],
+        function_calls: list[dict[str, Any]],
+        available_functions: dict[str, Any],
+    ) -> str | None:
+        """Execute EVERY tool call in one round; append the calls + outputs.
+
+        Returns a string only when a tool is marked ``result_as_answer`` — its
+        output is the final answer and the loop should stop. Otherwise returns
+        None, meaning the outputs were appended to ``params["input"]`` and the
+        caller should re-query the model with them.
+
+        Both the model's ``function_call`` item and its ``function_call_output``
+        are appended for every call, because the endpoint is stateless: an output
+        whose call is absent from ``input`` is rejected with a 400 ("No tool call
+        found for call_id ..."). This is also where the old single-shot bug lived
+        — it ran only ``function_calls[0]`` and returned; here every call runs.
+        """
+        conversation = params.setdefault("input", [])
+        for call in function_calls:
+            call_id = call.get("id", "")
+            name = call.get("name", "")
+            raw_args = call.get("arguments", "{}")
+
+            # Resend the call so its output has a matching function_call.
+            conversation.append(
+                {
+                    "type": "function_call",
+                    "call_id": call_id,
+                    "name": name,
+                    "arguments": (
+                        raw_args if isinstance(raw_args, str) else json.dumps(raw_args)
+                    ),
+                }
+            )
+
+            args: Any = raw_args
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args) if args.strip() else {}
+                except json.JSONDecodeError:
+                    args = {}
+
+            result = self._handle_tool_execution(name, args, available_functions)
+            if result is None:
+                # Unknown tool. Every sent call needs an output (a missing one is
+                # a 400), so report the error back rather than dropping it.
+                result = f"Error: tool {name!r} is not available."
+
+            conversation.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": str(result),
+                }
+            )
+
+            fn = available_functions.get(name)
+            if fn is not None and getattr(fn, "result_as_answer", False):
+                return str(result)
+        return None
 
     # ------------------------------------------------------------------
     # Output-item capture (phase preservation)

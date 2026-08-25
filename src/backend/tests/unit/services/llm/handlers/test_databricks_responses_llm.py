@@ -563,7 +563,16 @@ class TestHandleResponses:
     def test_function_call_response_without_available_functions(
         self, handler, make_response
     ):
-        """Function calls without available_functions should return wrapped calls."""
+        """Without available_functions the handler hands back the DECISION in the
+        transport's flat {id, name, arguments} shape.
+
+        This is the shape the sole consumer — _as_crewai_tool_calls in
+        harnesses/crewai/llm.py — reads by top-level key. A nested
+        {"function": {...}} here made it read name/arguments as absent, so every
+        codex tool call became a nameless _ToolCall and the NEXT request 400'd
+        on the empty function_call name. The `"function" not in ...` assertion is
+        that regression, pinned.
+        """
         response = make_response(
             output_items=[
                 {
@@ -582,11 +591,22 @@ class TestHandleResponses:
 
         assert isinstance(result, list)
         assert len(result) == 1
-        assert result[0]["function"]["name"] == "search_tool"
+        assert result[0]["name"] == "search_tool"
+        assert result[0]["arguments"] == '{"query": "test"}'
+        assert "function" not in result[0]
 
-    def test_function_call_with_available_functions(self, handler, make_response):
-        """Function calls with available_functions should execute them."""
-        response = make_response(
+    def test_function_call_with_available_functions_loops_to_an_answer(
+        self, handler, make_response
+    ):
+        """With available_functions the handler EXECUTES the tool, feeds the
+        result back, and loops until the model answers — it is NOT single-shot.
+
+        Round 1 returns a tool call; round 2 (after the output is appended)
+        returns text. The old handler returned the tool's raw output after the
+        first call, so an agent that opened with a plan/`todo` call never got a
+        turn to do the real work. Both the call and its output must be resent
+        (stateless endpoint)."""
+        tool_call = make_response(
             output_items=[
                 {
                     "type": "function_call",
@@ -597,18 +617,24 @@ class TestHandleResponses:
             ],
             output_text="",
         )
-        handler.client.responses.create.return_value = response
+        final = make_response(output_items=[], output_text="Here is the answer.")
+        handler.client.responses.create.side_effect = [tool_call, final]
 
         params = {"model": "test", "input": []}
         result = handler._handle_responses(
             params,
             available_functions={"my_tool": lambda **kw: "executed"},
         )
-        assert result == "result_my_tool"
+
+        assert result == "Here is the answer."
+        assert handler.client.responses.create.call_count == 2
+        types = [it.get("type") for it in params["input"] if isinstance(it, dict)]
+        assert "function_call" in types  # the call was resent...
+        assert "function_call_output" in types  # ...alongside its output
 
     def test_function_call_with_bad_json_arguments(self, handler, make_response):
-        """Function calls with invalid JSON arguments should use empty dict."""
-        response = make_response(
+        """Invalid JSON arguments should degrade to an empty dict, not crash."""
+        tool_call = make_response(
             output_items=[
                 {
                     "type": "function_call",
@@ -619,7 +645,8 @@ class TestHandleResponses:
             ],
             output_text="",
         )
-        handler.client.responses.create.return_value = response
+        final = make_response(output_items=[], output_text="done")
+        handler.client.responses.create.side_effect = [tool_call, final]
 
         params = {"model": "test", "input": []}
         # Should not crash
@@ -627,6 +654,142 @@ class TestHandleResponses:
             params,
             available_functions={"my_tool": lambda: "ok"},
         )
+        assert result == "done"
+
+    def test_plan_then_search_then_answer_runs_the_search(self, handler, make_response):
+        """The exact reported bug, pinned.
+
+        The agent opens with a `todo` (plan) call, then on its NEXT turn calls
+        the MCP search, then answers. The single-shot handler executed only the
+        `todo` and returned its output, so the search never ran and the task
+        finished with a 0/N plan. Now every turn gets its round."""
+        plan = make_response(
+            output_items=[
+                {"type": "function_call", "id": "c1", "name": "todo", "arguments": "{}"}
+            ]
+        )
+        search = make_response(
+            output_items=[
+                {
+                    "type": "function_call",
+                    "id": "c2",
+                    "name": "websearch_web_news",
+                    "arguments": '{"query": "tech news"}',
+                }
+            ]
+        )
+        final = make_response(output_items=[], output_text="Curated news list.")
+        handler.client.responses.create.side_effect = [plan, search, final]
+
+        params = {"model": "test", "input": []}
+        result = handler._handle_responses(
+            params,
+            available_functions={
+                "todo": lambda **kw: "planned",
+                "websearch_web_news": lambda **kw: "results",
+            },
+        )
+
+        assert result == "Curated news list."
+        assert handler.client.responses.create.call_count == 3
+        # Both tools' calls reached the request input across the two rounds.
+        names = [
+            it.get("name")
+            for it in params["input"]
+            if isinstance(it, dict) and it.get("type") == "function_call"
+        ]
+        assert names == ["todo", "websearch_web_news"]
+
+    def test_all_parallel_calls_in_one_response_execute(self, handler, make_response):
+        """Two calls in ONE response both run — not just the first.
+
+        The single-shot handler returned after ``function_calls[0]``, so a
+        parallel second call was silently dropped."""
+        parallel = make_response(
+            output_items=[
+                {
+                    "type": "function_call",
+                    "id": "c1",
+                    "name": "todo",
+                    "arguments": "{}",
+                },
+                {
+                    "type": "function_call",
+                    "id": "c2",
+                    "name": "websearch_web_news",
+                    "arguments": "{}",
+                },
+            ]
+        )
+        final = make_response(output_items=[], output_text="answer")
+        handler.client.responses.create.side_effect = [parallel, final]
+
+        params = {"model": "test", "input": []}
+        result = handler._handle_responses(
+            params,
+            available_functions={
+                "todo": lambda **kw: "a",
+                "websearch_web_news": lambda **kw: "b",
+            },
+        )
+
+        assert result == "answer"
+        outputs = [
+            it
+            for it in params["input"]
+            if isinstance(it, dict) and it.get("type") == "function_call_output"
+        ]
+        assert [o["call_id"] for o in outputs] == ["c1", "c2"]
+
+    def test_result_as_answer_tool_short_circuits(self, handler, make_response):
+        """A tool flagged result_as_answer ends the loop with its own output."""
+
+        def answer_tool(**kw):
+            return "unused — fake base returns result_answer_tool"
+
+        answer_tool.result_as_answer = True
+
+        resp = make_response(
+            output_items=[
+                {
+                    "type": "function_call",
+                    "id": "c1",
+                    "name": "answer_tool",
+                    "arguments": "{}",
+                }
+            ]
+        )
+        handler.client.responses.create.return_value = resp
+
+        params = {"model": "test", "input": []}
+        result = handler._handle_responses(
+            params, available_functions={"answer_tool": answer_tool}
+        )
+
+        assert result == "result_answer_tool"
+        # No second round — the tool's output was the answer.
+        assert handler.client.responses.create.call_count == 1
+
+    def test_tool_loop_is_round_bounded(self, handler, make_response):
+        """A model that never stops calling tools cannot loop forever.
+
+        With the fake base's fallback budget of 10 rounds, the loop runs 10
+        tool rounds then makes ONE tool-less wrap-up call — 11 requests, then
+        stops."""
+        forever = make_response(
+            output_items=[
+                {"type": "function_call", "id": "c1", "name": "t", "arguments": "{}"}
+            ]
+        )
+        handler.client.responses.create.return_value = forever
+
+        params = {"model": "test", "input": []}
+        result = handler._handle_responses(
+            params, available_functions={"t": lambda **kw: "again"}
+        )
+
+        assert result == ""  # wrap-up call has no output_text
+        assert handler.client.responses.create.call_count == 11
 
     def test_api_error_raises(self, handler):
         """API errors should be re-raised after logging."""
@@ -909,6 +1072,45 @@ class TestEdgeCases:
         assert fc_items[0]["name"] == "tool_a"
         assert fc_items[1]["name"] == "tool_b"
 
+    def test_blank_name_tool_call_and_its_output_are_dropped(self, handler):
+        """A tool_call with a blank function name cannot be sent.
+
+        The Responses API requires input[].name (min length 1) on a
+        function_call, so a blank one is a 400. The sanitiser drops it — AND its
+        matching function_call_output, since an output with no matching call is
+        just a different 400 ("No tool call found for call_id …"). A well-named
+        sibling and its output must survive untouched.
+        """
+        messages = [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {"id": "tc-blank", "function": {"name": "", "arguments": "{}"}},
+                    {"id": "tc-ok", "function": {"name": "tool_ok", "arguments": "{}"}},
+                ],
+            },
+            {"role": "tool", "tool_call_id": "tc-blank", "content": "orphan"},
+            {"role": "tool", "tool_call_id": "tc-ok", "content": "kept"},
+        ]
+        params = handler._prepare_responses_params(messages)
+
+        calls = [
+            it
+            for it in params["input"]
+            if isinstance(it, dict) and it.get("type") == "function_call"
+        ]
+        outputs = [
+            it
+            for it in params["input"]
+            if isinstance(it, dict) and it.get("type") == "function_call_output"
+        ]
+        # Only the well-named call and its output remain.
+        assert [c["name"] for c in calls] == ["tool_ok"]
+        assert [o["call_id"] for o in outputs] == ["tc-ok"]
+        # Nothing blank-named reaches the request at all.
+        assert all(c["name"] for c in calls)
+
 
 # ---------------------------------------------------------------------------
 # TestParallelFunctionCalls
@@ -948,7 +1150,9 @@ class TestParallelFunctionCalls:
 
         result = handler._handle_responses({"model": "test", "input": []})
 
-        assert [call["function"]["name"] for call in result] == ["tool_a", "tool_b"]
+        # Flat {id, name, arguments} shape (see
+        # test_function_call_response_without_available_functions).
+        assert [call["name"] for call in result] == ["tool_a", "tool_b"]
 
 
 # ---------------------------------------------------------------------------
