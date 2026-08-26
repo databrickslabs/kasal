@@ -162,6 +162,29 @@ export class EngineConfigService {
   }
 
   /**
+   * Get the event-trigger feature enabled status (system-level)
+   */
+  static async getEventTriggersEnabled(): Promise<{ event_triggers_enabled: boolean }> {
+    const response = await apiClient.get<{ event_triggers_enabled: boolean }>(
+      `${this.baseUrl}/kasal/event-triggers`,
+    );
+    return response.data;
+  }
+
+  /**
+   * Enable/disable the event-trigger feature (system-level)
+   */
+  static async setEventTriggersEnabled(
+    enabled: boolean,
+  ): Promise<{ success: boolean; event_triggers_enabled: boolean }> {
+    const response = await apiClient.patch<{ success: boolean; event_triggers_enabled: boolean }>(
+      `${this.baseUrl}/kasal/event-triggers`,
+      { enabled },
+    );
+    return response.data;
+  }
+
+  /**
    * Toggle engine configuration enabled status
    */
   static async toggleEngineEnabled(engineName: string, enabled: boolean): Promise<EngineConfig> {

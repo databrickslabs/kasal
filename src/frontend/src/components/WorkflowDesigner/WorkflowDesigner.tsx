@@ -59,6 +59,7 @@ import AgentDialog from '../Agents/AgentDialog';
 import TaskDialog from '../Tasks/TaskDialog';
 import CrewPlanningDialog from '../Planning/CrewPlanningDialog';
 import ScheduleDialog from '../Schedule/ScheduleDialog';
+import TriggersDialog from '../Triggers/TriggersDialog';
 import JobsPanel from '../Jobs/JobsPanel';
 import InteractiveTutorial from '../Tutorial/InteractiveTutorial';
 import APIKeys from '../Configuration/APIKeys/APIKeys';
@@ -1670,6 +1671,11 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           selectedModel={selectedModel}
         />
 
+        <TriggersDialog
+          open={dialogManager.isTriggersDialogOpen}
+          onClose={() => dialogManager.setTriggersDialogOpen(false)}
+        />
+
         <Dialog
           open={dialogManager.isAPIKeysDialogOpen}
           onClose={() => dialogManager.setIsAPIKeysDialogOpen(false)}
@@ -1870,6 +1876,9 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             onOpenSchedulesDialog={() => {
               // Open schedule dialog
               dialogManager.setScheduleDialogOpen(true);
+            }}
+            onOpenTriggersDialog={() => {
+              dialogManager.setTriggersDialogOpen(true);
             }}
             onToggleExecutionHistory={toggleExecutionHistory}
             areFlowsVisible={areFlowsVisible}

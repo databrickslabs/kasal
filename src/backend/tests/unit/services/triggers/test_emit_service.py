@@ -1,0 +1,236 @@
+"""EmitService — emit-on-completion fan-out, against real in-memory SQLite.
+
+The choreography loop's second half, with the standard-event-type scheme: a
+producer opts into a lifecycle type via an emit rule ("completed"/"failed"); the
+emitted event name is the canonical ``{kind}:{id}:{type}``; a subscription listens
+for that exact canonical name. Verifies fan-out, the completed/failed split, and
+the no-op cases.
+"""
+
+import pytest
+import pytest_asyncio
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
+
+from src.models.event_subscription import EmitRule, EventSubscription
+from src.models.trigger_queue import STATUS_PENDING, TriggerQueue
+from src.repositories.event_subscription_repository import (
+    EmitRuleRepository,
+    EventSubscriptionRepository,
+)
+from src.repositories.trigger_queue_repository import TriggerQueueRepository
+from src.services.triggers.emit_service import EmitService
+from src.services.triggers.event_types import canonical_event_name
+
+
+@pytest_asyncio.fixture
+async def session():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(TriggerQueue.__table__.create)
+        await conn.run_sync(EventSubscription.__table__.create)
+        await conn.run_sync(EmitRule.__table__.create)
+    maker = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with maker() as s:
+        yield s
+    await engine.dispose()
+
+
+async def _emit_rule(session, *, kind, target_id, event_type, group_id="g1", **kw):
+    return await EmitRuleRepository(session).insert(
+        on_target={"kind": kind, "id": target_id},
+        event_type=event_type,  # the lifecycle TYPE (completed/failed)
+        group_id=group_id,
+        enabled=True,
+        schema_ref=kw.get("schema_ref"),
+    )
+
+
+async def _subscription(session, *, event_type, kind, target_id, group_id="g1", **kw):
+    return await EventSubscriptionRepository(session).insert(
+        event_type=event_type,  # the canonical event name it listens for
+        target={"kind": kind, "id": target_id},
+        group_id=group_id,
+        enabled=True,
+        schema_ref=kw.get("schema_ref"),
+        input_mapping=kw.get("input_mapping"),
+    )
+
+
+async def _pending(session, group_id="g1"):
+    return await TriggerQueueRepository(session).list_for_groups(
+        [group_id], status=STATUS_PENDING
+    )
+
+
+class TestEmitFanOut:
+    @pytest.mark.asyncio
+    async def test_completed_crew_enqueues_one_row_per_subscriber(self, session):
+        # Producer crew 'c-src' opts into "completed"; two crews subscribe to it.
+        await _emit_rule(
+            session, kind="crew", target_id="c-src", event_type="completed"
+        )
+        canonical = canonical_event_name("crew", "c-src", "completed")
+        await _subscription(session, event_type=canonical, kind="crew", target_id="c-a")
+        await _subscription(session, event_type=canonical, kind="flow", target_id="f-b")
+        await session.commit()
+
+        n = await EmitService(session).emit_for_completed_run(
+            execution_type="crew",
+            flow_id=None,
+            crew_id="c-src",
+            group_id="g1",
+            job_id="run-1",
+            result={"summary": "done"},
+            event_type="completed",
+        )
+
+        assert n == 2
+        rows = await _pending(session)
+        assert sorted(r.target["id"] for r in rows) == ["c-a", "f-b"]
+        row = rows[0]
+        assert row.event_type == canonical
+        assert row.causation_run_id == "run-1"
+        assert row.payload["inputs"]["payload"] == {"summary": "done"}
+        assert row.payload["event"]["source_run"] == "run-1"
+
+    @pytest.mark.asyncio
+    async def test_flow_producer_matches_on_flow_id(self, session):
+        await _emit_rule(
+            session, kind="flow", target_id="f-src", event_type="completed"
+        )
+        canonical = canonical_event_name("flow", "f-src", "completed")
+        await _subscription(session, event_type=canonical, kind="crew", target_id="c-x")
+        await session.commit()
+
+        n = await EmitService(session).emit_for_completed_run(
+            execution_type="flow",
+            flow_id="f-src",
+            crew_id=None,
+            group_id="g1",
+            job_id="run-2",
+            result="raw text",
+            event_type="completed",
+        )
+
+        assert n == 1
+        rows = await _pending(session)
+        assert rows[0].target["id"] == "c-x"
+        assert rows[0].payload["inputs"]["payload"] == "raw text"
+
+    @pytest.mark.asyncio
+    async def test_completed_and_failed_are_distinct_events(self, session):
+        # Same producer opts into BOTH types; each has its own subscriber.
+        await _emit_rule(
+            session, kind="crew", target_id="c-src", event_type="completed"
+        )
+        await _emit_rule(session, kind="crew", target_id="c-src", event_type="failed")
+        done = canonical_event_name("crew", "c-src", "completed")
+        failed = canonical_event_name("crew", "c-src", "failed")
+        await _subscription(session, event_type=done, kind="crew", target_id="c-ok")
+        await _subscription(session, event_type=failed, kind="crew", target_id="c-oops")
+        await session.commit()
+
+        # A FAILED run triggers only the failed-subscriber.
+        n = await EmitService(session).emit_for_completed_run(
+            execution_type="crew",
+            flow_id=None,
+            crew_id="c-src",
+            group_id="g1",
+            job_id="run-3",
+            result="boom",
+            event_type="failed",
+        )
+        assert n == 1
+        rows = await _pending(session)
+        assert [r.target["id"] for r in rows] == ["c-oops"]
+
+    @pytest.mark.asyncio
+    async def test_input_mapping_overrides_passthrough(self, session):
+        await _emit_rule(
+            session, kind="crew", target_id="c-src", event_type="completed"
+        )
+        canonical = canonical_event_name("crew", "c-src", "completed")
+        await _subscription(
+            session,
+            event_type=canonical,
+            kind="crew",
+            target_id="c-a",
+            input_mapping={"topic": "fixed"},
+        )
+        await session.commit()
+
+        await EmitService(session).emit_for_completed_run(
+            execution_type="crew",
+            flow_id=None,
+            crew_id="c-src",
+            group_id="g1",
+            job_id="run-4",
+            result={"ignored": True},
+            event_type="completed",
+        )
+        rows = await _pending(session)
+        assert rows[0].payload["inputs"] == {"topic": "fixed"}
+
+
+class TestEmitNoOp:
+    @pytest.mark.asyncio
+    async def test_no_emit_rule_for_type_enqueues_nothing(self, session):
+        # Producer opts into "completed" only; a FAILED run emits nothing.
+        await _emit_rule(
+            session, kind="crew", target_id="c-src", event_type="completed"
+        )
+        failed = canonical_event_name("crew", "c-src", "failed")
+        await _subscription(session, event_type=failed, kind="crew", target_id="c-a")
+        await session.commit()
+
+        n = await EmitService(session).emit_for_completed_run(
+            execution_type="crew",
+            flow_id=None,
+            crew_id="c-src",
+            group_id="g1",
+            job_id="run-5",
+            result="x",
+            event_type="failed",
+        )
+        assert n == 0
+        assert await _pending(session) == []
+
+    @pytest.mark.asyncio
+    async def test_rule_with_no_subscriber_enqueues_nothing(self, session):
+        await _emit_rule(
+            session, kind="crew", target_id="c-src", event_type="completed"
+        )
+        await session.commit()
+
+        n = await EmitService(session).emit_for_completed_run(
+            execution_type="crew",
+            flow_id=None,
+            crew_id="c-src",
+            group_id="g1",
+            job_id="run-6",
+            result="x",
+            event_type="completed",
+        )
+        assert n == 0
+        assert await _pending(session) == []
+
+    @pytest.mark.asyncio
+    async def test_unsaved_run_without_identity_is_skipped(self, session):
+        await _emit_rule(
+            session, kind="crew", target_id="c-src", event_type="completed"
+        )
+        canonical = canonical_event_name("crew", "c-src", "completed")
+        await _subscription(session, event_type=canonical, kind="crew", target_id="c-a")
+        await session.commit()
+
+        n = await EmitService(session).emit_for_completed_run(
+            execution_type="crew",
+            flow_id=None,
+            crew_id=None,  # ad-hoc run, no saved crew
+            group_id="g1",
+            job_id="run-7",
+            result="x",
+            event_type="completed",
+        )
+        assert n == 0

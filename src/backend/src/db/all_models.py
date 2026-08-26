@@ -61,7 +61,9 @@ from src.models.powerbi_semantic_model_cache import PowerBISemanticModelCache
 
 # Prompt optimization models
 from src.models.prompt_optimization_run import PromptOptimizationRun
+from src.models.event_subscription import EmitRule, EventSubscription
 from src.models.schedule import Schedule
+from src.models.trigger_queue import TriggerQueue
 from src.models.schema import Schema
 from src.models.task import Task
 from src.models.template import PromptTemplate
@@ -100,6 +102,9 @@ __all__ = [
     "FlowExecution",
     "FlowNodeExecution",
     "Schedule",
+    "TriggerQueue",
+    "EventSubscription",
+    "EmitRule",
     "ApiKey",
     "Schema",
     "ExecutionLog",

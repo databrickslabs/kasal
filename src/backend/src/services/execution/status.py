@@ -74,6 +74,12 @@ class ExecutionStatusService:
 
                 # Get the integer primary key (id) from the record
                 record_id = execution_record.id
+                # Capture the status BEFORE the update so emit-on-completion fires
+                # only on the TRANSITION into COMPLETED. A run's terminal status is
+                # written more than once (the subprocess, then a parent-side
+                # reconciliation), and emitting on each write duplicates the
+                # downstream trigger — the "pending twice" symptom.
+                prior_status = (getattr(execution_record, "status", None) or "").upper()
                 logger.debug(
                     f"[ExecutionStatusService] Found record_id: {record_id} for job_id: {job_id}. Preparing update data."
                 )
@@ -290,6 +296,36 @@ class ExecutionStatusService:
                         logger.debug(
                             f"[ExecutionStatusService] external notify skipped: {notify_error}"
                         )
+
+                    # Event choreography: a run reaching a terminal lifecycle state
+                    # may emit a standard event ("completed"/"failed") that triggers
+                    # other crews/flows. Fire only on the TRANSITION into that state.
+                    # Awaited (so it is reliable even in the crew subprocess, which
+                    # exits soon after) but strictly non-fatal — a queue write must
+                    # never fail the run's status update. See
+                    # services/triggers/emit_service.py.
+                    _emit_type = {
+                        ExecutionStatus.COMPLETED.value: "completed",
+                        ExecutionStatus.FAILED.value: "failed",
+                    }.get(status)
+                    if _emit_type and prior_status != status.upper():
+                        try:
+                            from src.services.triggers import emit_for_completed_run
+
+                            await emit_for_completed_run(
+                                execution_type=updated_execution.execution_type,
+                                flow_id=updated_execution.flow_id,
+                                crew_id=updated_execution.crew_id,
+                                group_id=updated_execution.group_id,
+                                job_id=job_id,
+                                result=result,
+                                event_type=_emit_type,
+                            )
+                        except Exception as emit_err:  # noqa: BLE001
+                            logger.warning(
+                                f"[ExecutionStatusService] emit-on-completion "
+                                f"skipped for job_id {job_id}: {emit_err}"
+                            )
 
                     return True
                 else:

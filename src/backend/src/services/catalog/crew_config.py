@@ -221,7 +221,20 @@ async def build_crew_execution_config_by_id(
     None is a normal answer, not an error: a run whose crew was deleted since
     is exactly the case that has to fall back to its stored snapshot.
     """
+    import uuid
+
     from src.services.catalog.crews import CrewService
+
+    # ``crews.id`` is a UUID column; a string id (what MCP/A2A and the trigger
+    # queue pass) must be coerced or the SQLite UUID bind raises
+    # "'str' object has no attribute 'hex'". An unparseable id is a miss, not a
+    # crash — same as a deleted crew.
+    if isinstance(crew_id, str):
+        try:
+            crew_id = uuid.UUID(crew_id)
+        except ValueError:
+            logger.warning("Invalid crew id %r", crew_id)
+            return None
 
     try:
         crew = await CrewService(session).get(crew_id)

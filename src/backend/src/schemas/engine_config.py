@@ -78,6 +78,14 @@ class KasalFlowConfigUpdate(BaseModel):
     flow_enabled: bool = Field(..., description="Whether flow feature is enabled")
 
 
+class EventTriggersConfigUpdate(BaseModel):
+    """Schema for updating the event-trigger feature toggle."""
+
+    enabled: bool = Field(
+        ..., description="Whether the event-trigger feature is enabled"
+    )
+
+
 class OtelAppTelemetryConfigUpdate(BaseModel):
     """Schema for updating OTel App Telemetry configuration."""
 

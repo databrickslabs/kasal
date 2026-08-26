@@ -234,6 +234,54 @@ class EngineConfigRepository(BaseRepository[EngineConfig]):
 
         return success
 
+    async def get_event_triggers_enabled(self) -> bool:
+        """Get the event-trigger feature enabled status (system-level).
+
+        Returns:
+            True if enabled, False otherwise (defaults to False — the feature is
+            opt-in and OFF until an admin turns it on in Configuration).
+        """
+        config = await self.find_by_engine_and_key("kasal", "event_triggers_enabled")
+        if not config:
+            return False
+        return config.config_value.lower() == "true"
+
+    async def set_event_triggers_enabled(self, enabled: bool) -> bool:
+        """Set the event-trigger feature enabled status (system-level).
+
+        Args:
+            enabled: Whether the event-trigger queue consumer should run.
+
+        Returns:
+            True if successful
+        """
+        config_value = "true" if enabled else "false"
+
+        success = await self.update_config_value(
+            "kasal", "event_triggers_enabled", config_value
+        )
+
+        if not success:
+            try:
+                new_config_data = {
+                    "engine_name": "kasal",
+                    "engine_type": "system",
+                    "config_key": "event_triggers_enabled",
+                    "config_value": config_value,
+                    "enabled": True,
+                    "description": "Controls the event-driven trigger queue consumer (Preview)",
+                }
+                await self.create(new_config_data)
+                return True
+            except Exception as e:
+                import logging
+
+                logging.error(f"Error creating event triggers config: {str(e)}")
+                await self.session.rollback()
+                raise
+
+        return success
+
     async def get_otel_app_telemetry_log_level(self) -> str:
         """Get the OTel App Telemetry log level (system-level).
 

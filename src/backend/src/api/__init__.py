@@ -1,7 +1,6 @@
 from fastapi import APIRouter
 
 from src.api.a2a_agents_router import router as a2a_agents_router
-from src.api.skills_router import router as skills_router
 from src.api.a2a_router import router as a2a_router
 from src.api.agent_generation_router import router as agent_generation_router
 from src.api.agentbricks_router import router as agentbricks_router
@@ -52,6 +51,7 @@ from src.api.prompt_optimization_router import router as prompt_optimization_rou
 from src.api.publications_router import router as publications_router
 from src.api.scheduler_router import router as scheduler_router
 from src.api.schemas_router import router as schemas_router
+from src.api.skills_router import router as skills_router
 from src.api.sse_router import router as sse_router
 from src.api.task_generation_router import router as task_generation_router
 
@@ -61,6 +61,7 @@ from src.api.tasks_router import router as tasks_router
 from src.api.template_generation_router import router as template_generation_router
 from src.api.templates_router import router as templates_router
 from src.api.tools_router import router as tools_router
+from src.api.triggers_router import router as triggers_router
 from src.api.ui_config_router import router as ui_config_router
 from src.api.users_router import router as users_router
 from src.api.workflow_recipe_router import router as workflow_recipe_router
@@ -103,6 +104,7 @@ api_router.include_router(tools_router)
 # DISABLED: Local file uploads are not allowed - use Databricks volumes instead
 # api_router.include_router(upload_router)
 api_router.include_router(scheduler_router)
+api_router.include_router(triggers_router)
 api_router.include_router(agent_generation_router)
 api_router.include_router(connections_router)
 api_router.include_router(crew_generation_router)
@@ -154,6 +156,7 @@ __all__ = [
     "tools_router",
     # "upload_router",  # DISABLED: Local file uploads not allowed
     "scheduler_router",
+    "triggers_router",
     "agent_generation_router",
     "connections_router",
     "crew_generation_router",

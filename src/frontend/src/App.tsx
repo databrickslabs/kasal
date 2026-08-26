@@ -20,6 +20,7 @@ const ToolForm = lazy(() => import('./components/Tools/ToolForm'));
 const Documentation = lazy(() => import('./components/Documentation').then(module => ({ default: module.Documentation })));
 const ConverterPage = lazy(() => import('./components/Converter/ConverterPage'));
 const ConfigEditorPage = lazy(() => import('./components/ConfigEditor/ConfigEditorPage'));
+const TriggersPanel = lazy(() => import('./components/Triggers/TriggersPanel'));
 
 // Cache for Database Management permission to avoid repeated API calls
 let databaseManagementPermissionCache: {
@@ -124,6 +125,7 @@ function App() {
             <Route path="/tools" element={<ToolForm />} />
             <Route path="/converter" element={<ConverterPage />} />
             <Route path="/config-editor" element={<ConfigEditorPage />} />
+            <Route path="/triggers" element={<TriggersPanel />} />
             <Route path="/docs/*" element={<Documentation />} />
           </Routes>
         </Suspense>
