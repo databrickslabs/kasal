@@ -14,6 +14,7 @@ domain's repositories.
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any, Dict, Optional
 
@@ -41,6 +42,47 @@ def _max_hops() -> int:
         return max(1, int(os.getenv("KASAL_EVENT_TRIGGERS_MAX_HOPS", "5")))
     except (TypeError, ValueError):
         return 5
+
+
+def _shape_to_schema(schema_def: Any, result: Any) -> Optional[Dict[str, Any]]:
+    """Shape an upstream result into a declared schema's structure.
+
+    With a schema on the emit rule / subscription, the downstream run should
+    receive inputs KEYED BY THE SCHEMA'S FIELDS (``{"color": "black"}``), not
+    an opaque ``{"payload": ...}`` — that is what makes ``{color}`` usable in
+    the subscriber's templates. Best-effort, never inventing data:
+
+    - a dict result (or a string that parses as a JSON object) is projected
+      onto the schema's properties — only keys the schema names survive;
+    - a scalar result maps onto the schema's single required (or only)
+      property;
+    - anything else returns None and the caller falls back to the plain
+      ``payload`` passthrough.
+    """
+    props = (schema_def or {}).get("properties")
+    if not isinstance(props, dict) or not props:
+        return None
+    value = result
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (ValueError, TypeError):
+            parsed = None
+        if isinstance(parsed, dict):
+            value = parsed
+    if isinstance(value, dict):
+        matched = {k: value[k] for k in props if k in value}
+        return matched or None
+    required = schema_def.get("required") or []
+    if len(required) == 1:
+        target = required[0]
+    elif len(props) == 1:
+        target = next(iter(props))
+    else:
+        return None
+    if value is None or isinstance(value, (list, dict)):
+        return None
+    return {target: value}
 
 
 def _result_to_inputs(sub: Any, result: Any, event_type: str) -> Dict[str, Any]:
@@ -74,6 +116,57 @@ class EmitService:
         self.rules = EmitRuleRepository(session)
         self.subs = EventSubscriptionRepository(session)
         self.queue = TriggerQueueRepository(session)
+
+    async def _inputs_for(
+        self,
+        sub: Any,
+        result: Any,
+        event_type: str,
+        emit_schema: Optional[str],
+        schema_cache: Dict[str, Optional[Dict[str, Any]]],
+    ) -> Dict[str, Any]:
+        """Downstream inputs for one subscriber: mapping > schema shape > passthrough.
+
+        An explicit ``input_mapping`` always wins (static overrides). Otherwise a
+        declared schema shapes the result into its fields; a ``failed`` event or
+        an unshapeable result falls back to ``_result_to_inputs``.
+        """
+        schema_name = getattr(sub, "schema_ref", None) or emit_schema
+        if (
+            schema_name
+            and not getattr(sub, "input_mapping", None)
+            and event_type != EventType.FAILED.value
+        ):
+            if schema_name not in schema_cache:
+                schema_cache[schema_name] = await self._load_schema_definition(
+                    schema_name
+                )
+            shaped = _shape_to_schema(schema_cache[schema_name], result)
+            if shaped is not None:
+                return shaped
+            if schema_cache[schema_name] is not None:
+                logger.warning(
+                    "[Emit] result of run does not fit schema %r — passing raw payload",
+                    schema_name,
+                )
+        return _result_to_inputs(sub, result, event_type)
+
+    async def _load_schema_definition(self, name: str) -> Optional[Dict[str, Any]]:
+        """Resolve an Object Management schema through its owning service.
+
+        Best-effort: a missing/broken schema must not stop the emission — the
+        caller falls back to the plain payload passthrough."""
+        try:
+            from src.services.catalog.schemas import SchemaService
+
+            schema = await SchemaService(self.session).get_schema_by_name(name)
+            definition = getattr(schema, "schema_definition", None)
+            return definition if isinstance(definition, dict) else None
+        except Exception as exc:  # noqa: BLE001 — shaping is optional, emitting is not
+            logger.warning(
+                "[Emit] schema %r unresolvable (%s) — passing raw payload", name, exc
+            )
+            return None
 
     async def emit_for_completed_run(
         self,
@@ -140,6 +233,7 @@ class EmitService:
 
         thread_id = correlation_id or job_id
         enqueued = 0
+        schema_cache: Dict[str, Optional[Dict[str, Any]]] = {}
         for sub in subs:
             # A subscription whose target IS the producer is a self-loop: the
             # run it launches completes and emits this same event again. There
@@ -167,7 +261,9 @@ class EmitService:
                         event_type=canonical,
                         target=sub.target,
                         payload={
-                            "inputs": _result_to_inputs(sub, result, event_type),
+                            "inputs": await self._inputs_for(
+                                sub, result, event_type, emit_schema, schema_cache
+                            ),
                             # A pointer, not the state: the schema names the payload
                             # contract; the source run lets a consumer trace the chain.
                             "event": {

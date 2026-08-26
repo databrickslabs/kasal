@@ -20,6 +20,8 @@ resolved through the catalog), and ``kind="inline"`` (full config).
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -135,6 +137,7 @@ class TriggerQueueConsumerService:
                 config, execution_type = await self._build_config(
                     session, snap["target"], snap["payload"], group_context
                 )
+                self._inject_event_context(config, execution_type)
                 run_name = await self._resolve_run_name(
                     session, snap["target"], execution_type, job_id
                 )
@@ -243,6 +246,47 @@ class TriggerQueueConsumerService:
         )
 
     # --------------------------------------------------------------- helpers
+    _PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
+
+    def _inject_event_context(self, config: CrewConfig, execution_type: str) -> None:
+        """Make unreferenced event inputs VISIBLE to the subscriber crew.
+
+        Inputs are template variables: ``{key}`` in a task's description or
+        expected output is interpolated by the runtime, and anything the
+        templates never reference silently vanishes — it reaches the run's
+        inputs but no prompt. A subscriber crew is usually authored without
+        knowledge of its producer, so the hand-off payload would be dropped on
+        the floor. Append the unreferenced keys to the FIRST task's description
+        as an explicit context block instead; later tasks see it through normal
+        task-output chaining. A task that DOES reference ``{payload}`` (or any
+        event key) keeps full control — nothing is appended for that key.
+        """
+        if execution_type != "crew" or not config.tasks_yaml or not config.inputs:
+            return
+        referenced: set = set()
+        for task in config.tasks_yaml.values():
+            if isinstance(task, dict):
+                for field in ("description", "expected_output"):
+                    referenced.update(
+                        self._PLACEHOLDER_RE.findall(str(task.get(field) or ""))
+                    )
+        leftover = {k: v for k, v in config.inputs.items() if k not in referenced}
+        if not leftover:
+            return
+        first = next(iter(config.tasks_yaml))
+        task = config.tasks_yaml[first]
+        if not isinstance(task, dict):
+            return
+        lines = "\n".join(
+            f"- {k}: {json.dumps(v) if isinstance(v, (dict, list)) else v}"
+            for k, v in leftover.items()
+        )
+        task["description"] = (
+            str(task.get("description") or "")
+            + "\n\nContext from the triggering event:\n"
+            + lines
+        )
+
     async def _resolve_run_name(
         self,
         session: Any,

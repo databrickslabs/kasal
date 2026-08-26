@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from src.models.event_subscription import EmitRule, EventSubscription
+from src.models.schema import Schema
 from src.models.trigger_queue import STATUS_PENDING, TriggerQueue
 from src.repositories.event_subscription_repository import (
     EmitRuleRepository,
@@ -30,6 +31,7 @@ async def session():
         await conn.run_sync(TriggerQueue.__table__.create)
         await conn.run_sync(EventSubscription.__table__.create)
         await conn.run_sync(EmitRule.__table__.create)
+        await conn.run_sync(Schema.__table__.create)
     maker = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with maker() as s:
         yield s
@@ -413,3 +415,127 @@ class TestSelfLoopGuard:
         assert n == 1
         rows = await _pending(session)
         assert [r.target["id"] for r in rows] == ["c-next"]
+
+
+async def _schema(session, name, definition, **kw):
+    session.add(
+        Schema(
+            name=name,
+            schema_type=kw.get("schema_type", "data_model"),
+            description=kw.get("description", name),
+            schema_definition=definition,
+        )
+    )
+    await session.flush()
+
+
+class TestSchemaShaping:
+    async def _wire(self, session, *, sub_schema=None):
+        await _emit_rule(
+            session, kind="crew", target_id="c-src", event_type="completed"
+        )
+        canonical = canonical_event_name("crew", "c-src", "completed")
+        await _subscription(
+            session,
+            event_type=canonical,
+            kind="crew",
+            target_id="c-next",
+            schema_ref=sub_schema,
+        )
+        await session.commit()
+
+    async def _emit(self, session, result):
+        return await EmitService(session).emit_for_completed_run(
+            execution_type="crew",
+            flow_id=None,
+            crew_id="c-src",
+            group_id="g1",
+            job_id="run-s",
+            result=result,
+            event_type="completed",
+        )
+
+    @pytest.mark.asyncio
+    async def test_scalar_result_maps_onto_single_required_property(self, session):
+        await _schema(
+            session,
+            "color",
+            {
+                "type": "object",
+                "properties": {"color": {"type": "string"}},
+                "required": ["color"],
+            },
+        )
+        await self._wire(session, sub_schema="color")
+
+        assert await self._emit(session, "green") == 1
+        row = (await _pending(session))[0]
+        # The schema's STRUCTURE is the contract — not an opaque payload key.
+        assert row.payload["inputs"] == {"color": "green"}
+        assert row.payload["event"]["schema"] == "color"
+
+    @pytest.mark.asyncio
+    async def test_dict_result_is_projected_onto_schema_fields(self, session):
+        await _schema(
+            session,
+            "report",
+            {"type": "object", "properties": {"title": {}, "body": {}}},
+        )
+        await self._wire(session, sub_schema="report")
+
+        await self._emit(session, {"title": "T", "body": "B", "junk": "x"})
+        row = (await _pending(session))[0]
+        assert row.payload["inputs"] == {"title": "T", "body": "B"}
+
+    @pytest.mark.asyncio
+    async def test_json_string_result_parses_before_projection(self, session):
+        await _schema(
+            session, "color", {"properties": {"color": {}}, "required": ["color"]}
+        )
+        await self._wire(session, sub_schema="color")
+
+        await self._emit(session, '{"color": "green", "junk": 1}')
+        row = (await _pending(session))[0]
+        assert row.payload["inputs"] == {"color": "green"}
+
+    @pytest.mark.asyncio
+    async def test_unresolvable_schema_falls_back_to_payload(self, session):
+        await self._wire(session, sub_schema="does-not-exist")
+
+        await self._emit(session, "green")
+        row = (await _pending(session))[0]
+        assert row.payload["inputs"] == {"payload": "green"}
+
+    @pytest.mark.asyncio
+    async def test_unshapeable_result_falls_back_to_payload(self, session):
+        # Two properties, none singled out as required — a scalar can't be
+        # mapped without guessing, so the raw passthrough wins.
+        await _schema(session, "pair", {"properties": {"a": {}, "b": {}}})
+        await self._wire(session, sub_schema="pair")
+
+        await self._emit(session, "green")
+        row = (await _pending(session))[0]
+        assert row.payload["inputs"] == {"payload": "green"}
+
+    @pytest.mark.asyncio
+    async def test_input_mapping_still_beats_the_schema(self, session):
+        await _schema(
+            session, "color", {"properties": {"color": {}}, "required": ["color"]}
+        )
+        await _emit_rule(
+            session, kind="crew", target_id="c-src", event_type="completed"
+        )
+        canonical = canonical_event_name("crew", "c-src", "completed")
+        await _subscription(
+            session,
+            event_type=canonical,
+            kind="crew",
+            target_id="c-next",
+            schema_ref="color",
+            input_mapping={"topic": "fixed"},
+        )
+        await session.commit()
+
+        await self._emit(session, "green")
+        row = (await _pending(session))[0]
+        assert row.payload["inputs"] == {"topic": "fixed"}

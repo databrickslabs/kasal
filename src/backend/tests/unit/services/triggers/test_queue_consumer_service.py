@@ -427,3 +427,65 @@ class TestClaimScoping:
         snap = dispatch.await_args.args[0]
         assert snap["hops"] == 3
         assert snap["correlation_id"] == "chain-z"
+
+
+class TestEventContextInjection:
+    """Unreferenced event inputs must become VISIBLE prompt context, not vanish."""
+
+    def _config(self, tasks, inputs):
+        return CrewConfig(
+            agents_yaml={"a": {"role": "R"}},
+            tasks_yaml=tasks,
+            inputs=inputs,
+            model="m",
+            planning=False,
+            execution_type="crew",
+            schema_detection_enabled=False,
+        )
+
+    def test_unreferenced_inputs_append_to_first_task_only(self, service):
+        config = self._config(
+            {
+                "t1": {"description": "Do the thing.", "expected_output": "X"},
+                "t2": {"description": "Then this.", "expected_output": "Y"},
+            },
+            {"payload": "black"},
+        )
+        service._inject_event_context(config, "crew")
+        assert (
+            "Context from the triggering event:"
+            in config.tasks_yaml["t1"]["description"]
+        )
+        assert "- payload: black" in config.tasks_yaml["t1"]["description"]
+        assert config.tasks_yaml["t2"]["description"] == "Then this."
+
+    def test_referenced_inputs_are_left_to_interpolation(self, service):
+        config = self._config(
+            {"t1": {"description": "Given {payload}, act.", "expected_output": "X"}},
+            {"payload": "black"},
+        )
+        service._inject_event_context(config, "crew")
+        assert (
+            "Context from the triggering event"
+            not in config.tasks_yaml["t1"]["description"]
+        )
+
+    def test_dict_values_render_as_json(self, service):
+        config = self._config(
+            {"t1": {"description": "Do.", "expected_output": "X"}},
+            {"payload": {"color": "black"}},
+        )
+        service._inject_event_context(config, "crew")
+        assert '- payload: {"color": "black"}' in config.tasks_yaml["t1"]["description"]
+
+    def test_flows_and_empty_inputs_are_untouched(self, service):
+        config = self._config(
+            {"t1": {"description": "Do.", "expected_output": "X"}}, {}
+        )
+        service._inject_event_context(config, "crew")
+        assert config.tasks_yaml["t1"]["description"] == "Do."
+        config2 = self._config(
+            {"t1": {"description": "Do.", "expected_output": "X"}}, {"k": "v"}
+        )
+        service._inject_event_context(config2, "flow")
+        assert config2.tasks_yaml["t1"]["description"] == "Do."

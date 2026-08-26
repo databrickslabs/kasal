@@ -100,14 +100,30 @@ happen.
   name to a target to run. Every enabled subscription to the emitted event
   becomes one queue row.
 
-The downstream run's inputs come from the upstream output: a subscription's
-`input_mapping` is a set of **static input overrides** used as-is when present
-(it is *not* a payload projection — JSONPath-style mapping is future work).
-Without one, a `completed` event passes the producer's output through under
-`payload` (stringified when it is not a mapping), and a `failed` event passes
-the error under `error`. The row's `payload.event` carries the canonical name,
+The downstream run's inputs come from the upstream output, resolved in this
+order:
+
+1. **`input_mapping`** — static input overrides, used as-is when present (it is
+   *not* a payload projection — JSONPath-style mapping is future work).
+2. **Schema shaping** — with a `schema_ref` on the subscription (or the emit
+   rule), the result is shaped into the schema's STRUCTURE: a dict result (or a
+   JSON-object string) is projected onto the schema's properties; a scalar
+   result maps onto the schema's single required (or only) property. A `color`
+   schema turns the result `"green"` into `{"color": "green"}`, so the
+   subscriber's templates can use `{color}` directly. Shaping never invents
+   data — an unresolvable schema or an unshapeable result falls through to:
+3. **Passthrough** — a `completed` event passes the producer's output under
+   `payload` (stringified when it is not a mapping); a `failed` event passes
+   the error under `error`. The row's `payload.event` carries the canonical name,
 an optional `schema` pointer (Object Management schema ref), the `source_run`,
 and the chain depth (`hops`).
+
+**How the downstream crew SEES the context.** Inputs are template variables:
+`{payload}` (or any event key) written in a task's description/expected output
+is interpolated with the value. Keys the templates never reference are not
+dropped — the dispatcher appends them to the first task's description as an
+explicit "Context from the triggering event" block, so a subscriber authored
+without knowledge of its producer still sees the hand-off.
 
 Emission only happens for runs of a **saved** crew/flow — an ad-hoc run has no
 identity for a rule to match. Scheduled runs of a saved crew carry their
