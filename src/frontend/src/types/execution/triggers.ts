@@ -1,7 +1,7 @@
 // Event-driven trigger queue types (mirror src/backend/src/schemas/triggers.py).
 // A queued event triggers a crew/flow run; see src/docs/EVENT_TRIGGERS.md.
 
-export type TriggerKind = 'flow' | 'inline' | 'crew';
+export type TriggerKind = 'flow' | 'inline' | 'crew' | 'webhook';
 
 export type TriggerStatus =
   | 'pending'
@@ -19,6 +19,8 @@ export interface TriggerTarget {
   config?: Record<string, unknown>;
   /** Per-run engine override. */
   harness?: 'kasal' | 'crewai';
+  /** http(s) endpoint to POST the event to, for kind 'webhook'. */
+  url?: string;
 }
 
 export interface EnqueueTrigger {

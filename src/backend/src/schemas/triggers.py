@@ -15,13 +15,19 @@ class TriggerTarget(BaseModel):
     """What a queued event should run.
 
     - ``kind="flow"`` + ``id`` — run a saved flow by id (loaded from the repo).
+    - ``kind="crew"`` + ``id`` — run a saved crew by id (resolved via the catalog).
     - ``kind="inline"`` + ``config`` — run a full CrewConfig/FlowConfig inline.
-    - ``kind="crew"`` + ``id`` — reserved (Phase 2: resolve a saved crew by id).
+    - ``kind="webhook"`` + ``url`` — POST the event to an external service
+      instead of running anything (server-to-server delivery; the queue's
+      retry/backoff/dead-letter semantics apply to the delivery).
     """
 
-    kind: str = Field(description="'flow' | 'inline' | 'crew'")
+    kind: str = Field(description="'flow' | 'inline' | 'crew' | 'webhook'")
     id: Optional[str] = Field(
         None, description="Saved crew/flow id (for kind flow/crew)"
+    )
+    url: Optional[str] = Field(
+        None, description="http(s) endpoint to POST the event to (for kind 'webhook')"
     )
     config: Optional[Dict[str, Any]] = Field(
         None, description="Inline CrewConfig/FlowConfig fields (for kind 'inline')"

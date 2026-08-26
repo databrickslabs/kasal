@@ -62,7 +62,24 @@ field. Only a direct-SQL producer sets the column itself.
 
 // run a full config inline (crew or flow)
 { "kind": "inline", "config": { /* CrewConfig fields: agents_yaml, tasks_yaml, execution_type, ... */ } }
+
+// POST the event to an external service instead of running anything
+{ "kind": "webhook", "url": "https://example.com/hooks/kasal" }
 ```
+
+A **webhook target** turns a subscription into server-to-server delivery: when
+the event fires, the consumer POSTs `{event_type, event, inputs,
+correlation_id, causation_run_id}` to the URL (inputs are shaped/mapped exactly
+as for a crew target). A 2xx marks the row dispatched; a non-2xx or network
+error retries with the queue's normal backoff and dead-letters after
+`MAX_ATTEMPTS`; a malformed URL dead-letters immediately. Delivery is
+at-least-once — receivers should dedupe on the `X-Kasal-Delivery` header.
+
+Webhook URLs pass the same SSRF guard as HITL webhooks and A2A push configs
+(`assert_safe_outbound_url`): **https only, public hosts only**, re-checked
+after DNS resolution. A blocked URL dead-letters immediately. Local development
+against a localhost receiver can opt out with
+`KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS=1` on the backend process.
 
 ## Enqueuing an event
 

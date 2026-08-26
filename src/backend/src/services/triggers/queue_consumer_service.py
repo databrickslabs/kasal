@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import uuid
 from datetime import datetime, timedelta
@@ -77,6 +78,7 @@ class TriggerQueueConsumerService:
                         "group_id": row.group_id,
                         "target": row.target or {},
                         "payload": row.payload or {},
+                        "event_type": row.event_type,
                         "correlation_id": row.correlation_id,
                         "causation_run_id": row.causation_run_id,
                         "attempts": row.attempts or 0,
@@ -121,6 +123,12 @@ class TriggerQueueConsumerService:
         """Turn one claimed row into a launched crew/flow run."""
         row_id = snap["id"]
         try:
+            # A webhook target is a DELIVERY, not a run: POST the event to the
+            # subscriber's endpoint and mark the row dispatched. Failures ride
+            # the queue's normal machinery (backoff retries, dead-letter).
+            if ((snap.get("target") or {}).get("kind") or "").lower() == "webhook":
+                await self._deliver_webhook(snap)
+                return
             job_id = str(uuid.uuid4())
             group_id = snap.get("group_id")
             group_context = GroupContext(
@@ -244,6 +252,77 @@ class TriggerQueueConsumerService:
             " — dead-lettered" if dead else "",
             message,
         )
+
+    # --------------------------------------------------------------- webhook
+    async def _deliver_webhook(self, snap: Dict[str, Any]) -> None:
+        """POST one claimed event to its webhook target (server-to-server).
+
+        2xx marks the row dispatched. A non-2xx response or a network error
+        raises, so the normal failure path requeues with backoff and
+        dead-letters after MAX_ATTEMPTS. A malformed URL is a permanent
+        failure (ValueError -> straight to the dead letter).
+        """
+        target = snap.get("target") or {}
+        url = (target.get("url") or "").strip()
+        if not url.lower().startswith(("http://", "https://")):
+            raise ValueError(f"webhook target requires an http(s) 'url', got {url!r}")
+        # SECURITY (SSRF): the URL is tenant-supplied. Same guard as the HITL
+        # webhooks and A2A push configs -- https only, no loopback/private/
+        # link-local/metadata targets, re-checked after DNS resolution.
+        # UnsafeUrlError is a ValueError, so a blocked URL dead-letters
+        # immediately instead of burning retries. Local dev can opt out to
+        # deliver to a localhost receiver.
+        _allow_private = os.getenv(
+            "KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS", ""
+        ).lower() in ("1", "true", "yes")
+        if not _allow_private:
+            from src.utils.url_security import assert_safe_outbound_url
+
+            await assert_safe_outbound_url(url)
+        payload = snap.get("payload") or {}
+        body = {
+            "event_type": snap.get("event_type"),
+            "event": payload.get("event"),
+            "inputs": payload.get("inputs"),
+            "correlation_id": snap.get("correlation_id"),
+            "causation_run_id": snap.get("causation_run_id"),
+        }
+        headers = {
+            "Content-Type": "application/json",
+            # Receivers dedupe on this: at-least-once delivery means a crash
+            # between POST and mark_dispatched re-delivers the same row id.
+            "X-Kasal-Delivery": str(snap["id"]),
+            "X-Kasal-Event": str(snap.get("event_type") or ""),
+        }
+        status = await self._post_webhook(url, body, headers)
+        # 3xx counts as delivered: the endpoint RECEIVED the POST and answered
+        # with a redirect we deliberately do not follow (no SSRF re-entry).
+        # Google Apps Script web apps -- the common no-code Sheets/Docs
+        # receiver -- always respond 302 after running doPost, so treating a
+        # redirect as failure would retry (and re-run) successful deliveries.
+        if not 200 <= status < 400:
+            raise RuntimeError(f"webhook endpoint returned HTTP {status}")
+
+        async with routed_scoped_session() as session:
+            await TriggerQueueRepository(session).mark_dispatched(snap["id"])
+            await session.commit()
+        logger.info("[TriggerQueue] delivered row %s to webhook (%s)", snap["id"], url)
+
+    @staticmethod
+    async def _post_webhook(
+        url: str, body: Dict[str, Any], headers: Dict[str, str]
+    ) -> int:
+        """One POST, bounded: 15s total, no redirects (a redirect target was
+        not what the subscription vetted). Returns the HTTP status."""
+        import aiohttp
+
+        timeout = aiohttp.ClientTimeout(total=15)
+        async with aiohttp.ClientSession(timeout=timeout) as http:
+            async with http.post(
+                url, json=body, headers=headers, allow_redirects=False
+            ) as resp:
+                await resp.read()
+                return resp.status
 
     # --------------------------------------------------------------- helpers
     _PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")

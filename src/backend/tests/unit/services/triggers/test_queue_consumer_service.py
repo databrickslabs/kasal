@@ -303,6 +303,7 @@ class TestClaimAndDispatch:
                 payload={},
                 correlation_id=None,
                 causation_run_id=None,
+                event_type=None,
                 attempts=1,
             ),
             SimpleNamespace(
@@ -312,6 +313,7 @@ class TestClaimAndDispatch:
                 payload={},
                 correlation_id=None,
                 causation_run_id=None,
+                event_type=None,
                 attempts=1,
             ),
         ]
@@ -410,6 +412,7 @@ class TestClaimScoping:
             payload={"inputs": {}, "event": {"type": "crew:x:completed", "hops": 3}},
             correlation_id="chain-z",
             causation_run_id="run-up",
+            event_type=None,
             attempts=1,
         )
         repo = MagicMock()
@@ -489,3 +492,144 @@ class TestEventContextInjection:
         )
         service._inject_event_context(config2, "flow")
         assert config2.tasks_yaml["t1"]["description"] == "Do."
+
+
+class TestWebhookDelivery:
+    def _snap(self, url="https://example.com/hook"):
+        return {
+            "id": 9,
+            "group_id": "g1",
+            "target": {"kind": "webhook", "url": url},
+            "payload": {
+                "inputs": {"color": "black"},
+                "event": {"type": "crew:x:completed", "hops": 1},
+            },
+            "event_type": "crew:x:completed",
+            "correlation_id": "chain-1",
+            "causation_run_id": "run-up",
+            "attempts": 1,
+        }
+
+    @pytest.fixture(autouse=True)
+    def _allow_private(self, monkeypatch):
+        # Unit tests must not DNS-resolve; the strict-guard path has its own test.
+        monkeypatch.setenv("KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS", "1")
+
+    @pytest.mark.asyncio
+    async def test_2xx_marks_dispatched_and_posts_the_event(self, service):
+        mock_session = MagicMock()
+        mock_session.commit = AsyncMock()
+        repo = MagicMock()
+        repo.mark_dispatched = AsyncMock()
+
+        with (
+            patch(f"{MODULE}.routed_scoped_session", _fake_routed(mock_session)),
+            patch(f"{MODULE}.TriggerQueueRepository", return_value=repo),
+            patch.object(
+                service, "_post_webhook", new_callable=AsyncMock, return_value=200
+            ) as post,
+        ):
+            await service._dispatch(self._snap())
+
+        url, body, headers = post.await_args.args
+        assert url == "https://example.com/hook"
+        assert body["inputs"] == {"color": "black"}
+        assert body["event"]["type"] == "crew:x:completed"
+        assert headers["X-Kasal-Delivery"] == "9"
+        repo.mark_dispatched.assert_awaited_once_with(9)
+
+    @pytest.mark.asyncio
+    async def test_redirect_counts_as_delivered(self, service):
+        # Google Apps Script answers POST with a 302 AFTER running doPost;
+        # the redirect is not followed, but the delivery succeeded.
+        mock_session = MagicMock()
+        mock_session.commit = AsyncMock()
+        repo = MagicMock()
+        repo.mark_dispatched = AsyncMock()
+        repo.requeue = AsyncMock()
+
+        with (
+            patch(f"{MODULE}.routed_scoped_session", _fake_routed(mock_session)),
+            patch(f"{MODULE}.TriggerQueueRepository", return_value=repo),
+            patch.object(
+                service, "_post_webhook", new_callable=AsyncMock, return_value=302
+            ),
+        ):
+            await service._dispatch(self._snap())
+
+        repo.mark_dispatched.assert_awaited_once_with(9)
+        repo.requeue.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_non_2xx_requeues_with_backoff(self, service):
+        mock_session = MagicMock()
+        mock_session.commit = AsyncMock()
+        repo = MagicMock()
+        repo.requeue = AsyncMock()
+        repo.mark_failed = AsyncMock()
+        repo.mark_dispatched = AsyncMock()
+
+        with (
+            patch(f"{MODULE}.routed_scoped_session", _fake_routed(mock_session)),
+            patch(f"{MODULE}.TriggerQueueRepository", return_value=repo),
+            patch.object(
+                service, "_post_webhook", new_callable=AsyncMock, return_value=503
+            ),
+        ):
+            await service._dispatch(self._snap())
+
+        repo.requeue.assert_awaited_once()  # transient -> backoff retry
+        repo.mark_dispatched.assert_not_awaited()
+        repo.mark_failed.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_bad_url_is_permanent(self, service):
+        mock_session = MagicMock()
+        mock_session.commit = AsyncMock()
+        repo = MagicMock()
+        repo.requeue = AsyncMock()
+        repo.mark_failed = AsyncMock()
+
+        with (
+            patch(f"{MODULE}.routed_scoped_session", _fake_routed(mock_session)),
+            patch(f"{MODULE}.TriggerQueueRepository", return_value=repo),
+        ):
+            await service._dispatch(self._snap(url="ftp://nope"))
+
+        repo.mark_failed.assert_awaited_once()
+        assert repo.mark_failed.await_args.kwargs.get("dead") is True
+        repo.requeue.assert_not_awaited()
+
+
+class TestWebhookSsrfGuard:
+    @pytest.mark.asyncio
+    async def test_private_url_is_blocked_permanently_by_default(
+        self, service, monkeypatch
+    ):
+        # Without the dev escape, the shared guard applies: http (non-https)
+        # fails the structure check outright -- permanent, no retries, and no
+        # DNS lookup in the test.
+        monkeypatch.delenv("KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS", raising=False)
+        mock_session = MagicMock()
+        mock_session.commit = AsyncMock()
+        repo = MagicMock()
+        repo.requeue = AsyncMock()
+        repo.mark_failed = AsyncMock()
+        snap = {
+            "id": 11,
+            "group_id": "g1",
+            "target": {"kind": "webhook", "url": "http://127.0.0.1:9099/hook"},
+            "payload": {},
+            "event_type": "e",
+            "attempts": 1,
+        }
+
+        with (
+            patch(f"{MODULE}.routed_scoped_session", _fake_routed(mock_session)),
+            patch(f"{MODULE}.TriggerQueueRepository", return_value=repo),
+        ):
+            await service._dispatch(snap)
+
+        repo.mark_failed.assert_awaited_once()
+        assert repo.mark_failed.await_args.kwargs.get("dead") is True
+        repo.requeue.assert_not_awaited()

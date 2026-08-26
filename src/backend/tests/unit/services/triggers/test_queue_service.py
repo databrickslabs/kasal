@@ -55,6 +55,7 @@ class TestEnqueue:
             "id": "flow-1",
             "config": None,
             "harness": None,
+            "url": None,
         }
 
 
