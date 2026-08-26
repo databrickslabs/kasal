@@ -120,11 +120,16 @@ the producer supplied one) is carried through every downstream row, so all runs
 of one chain can be queried together. `causation_run_id` is the immediate
 parent.
 
-Every emitted row carries `event.hops` = parent depth + 1, and the emit hook
-refuses to emit at `KASAL_EVENT_TRIGGERS_MAX_HOPS` (default 5). That is the
-guard against cycles — A → B → A, or a handler subscribed to its own `failed`
-event — which would otherwise generate runs (and LLM spend) forever. A
-legitimately deeper pipeline can raise the env var; a cycle should be re-wired.
+A subscription whose target **is its own producer** (crew X subscribed to
+`crew:X:completed`) is refused outright with a warning — a direct self-loop has
+no terminating condition, so one event means one run, always.
+
+For **indirect** cycles the guard is the hop cap: every emitted row carries
+`event.hops` = parent depth + 1, and the emit hook refuses to emit at
+`KASAL_EVENT_TRIGGERS_MAX_HOPS` (default 5). That catches A → B → A, or a
+handler subscribed to another producer's `failed` event feeding back — chains
+that would otherwise generate runs (and LLM spend) forever. A legitimately
+deeper pipeline can raise the env var; a cycle should be re-wired.
 
 ## Delivery semantics
 

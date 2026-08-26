@@ -359,3 +359,57 @@ class TestFailedEventShape:
         row = (await _pending(session))[0]
         # A handler crew's template can name {error} honestly.
         assert row.payload["inputs"] == {"error": "boom: tool exploded"}
+
+
+class TestSelfLoopGuard:
+    @pytest.mark.asyncio
+    async def test_subscription_targeting_its_own_producer_is_skipped(self, session):
+        # One event -> one run. A crew subscribed to its OWN completion would
+        # re-run forever; the emission is refused outright, not hop-capped.
+        await _emit_rule(
+            session, kind="crew", target_id="c-src", event_type="completed"
+        )
+        canonical = canonical_event_name("crew", "c-src", "completed")
+        await _subscription(
+            session, event_type=canonical, kind="crew", target_id="c-src"
+        )
+        await session.commit()
+
+        n = await EmitService(session).emit_for_completed_run(
+            execution_type="crew",
+            flow_id=None,
+            crew_id="c-src",
+            group_id="g1",
+            job_id="run-self",
+            result="x",
+            event_type="completed",
+        )
+        assert n == 0
+        assert await _pending(session) == []
+
+    @pytest.mark.asyncio
+    async def test_other_subscribers_still_fire_beside_a_self_loop(self, session):
+        await _emit_rule(
+            session, kind="crew", target_id="c-src", event_type="completed"
+        )
+        canonical = canonical_event_name("crew", "c-src", "completed")
+        await _subscription(
+            session, event_type=canonical, kind="crew", target_id="c-src"  # self
+        )
+        await _subscription(
+            session, event_type=canonical, kind="crew", target_id="c-next"
+        )
+        await session.commit()
+
+        n = await EmitService(session).emit_for_completed_run(
+            execution_type="crew",
+            flow_id=None,
+            crew_id="c-src",
+            group_id="g1",
+            job_id="run-mixed",
+            result="x",
+            event_type="completed",
+        )
+        assert n == 1
+        rows = await _pending(session)
+        assert [r.target["id"] for r in rows] == ["c-next"]

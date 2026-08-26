@@ -766,6 +766,15 @@ class ExecutionStatusService:
             return False
 
     @staticmethod
+    async def broadcast_execution_created(execution_data: Dict[str, Any]) -> None:
+        """Announce a new run over SSE — public entry for callers that create
+        rows through ``ExecutionService.create_run_record`` instead of
+        ``create_execution`` (trigger consumer, scheduler). Without it the UI
+        first learns of the run from a status event that has no ``run_name``
+        and invents a placeholder ("Run <id>")."""
+        await ExecutionStatusService._broadcast_execution_created(execution_data)
+
+    @staticmethod
     async def _broadcast_execution_created(execution_data: Dict[str, Any]) -> None:
         """Broadcast an SSE event when a new execution is created."""
         try:

@@ -172,6 +172,20 @@ class TriggerQueueConsumerService:
                     trigger_type=TRIGGER_TYPE,
                     commit=True,
                 )
+                # Announce the run over SSE. The UI did not start this run, so
+                # this event is its FIRST sight of it — without the name here it
+                # renders a "Run <id>" placeholder forever.
+                from src.services.execution.status import ExecutionStatusService
+
+                await ExecutionStatusService.broadcast_execution_created(
+                    {
+                        "job_id": job_id,
+                        "status": "PENDING",
+                        "run_name": run_name,
+                        "execution_type": execution_type,
+                        "group_id": group_id,
+                    }
+                )
                 await ExecutionService.run_crew_execution(
                     execution_id=job_id,
                     config=config,

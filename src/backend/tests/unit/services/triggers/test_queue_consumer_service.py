@@ -181,8 +181,20 @@ class TestDispatch:
                 new_callable=AsyncMock,
                 return_value=None,
             ),
+            patch(
+                "src.services.execution.status.ExecutionStatusService."
+                "broadcast_execution_created",
+                new_callable=AsyncMock,
+            ) as announce,
         ):
             await service._dispatch(snap)
+
+        # The run is ANNOUNCED over SSE with its name — the UI's first sight of
+        # a queue-triggered run is this event, not a POST response.
+        announce.assert_awaited_once()
+        announced = announce.await_args.args[0]
+        assert announced["run_name"]
+        assert announced["group_id"] == "g1"
 
         # A run record was created for this event, tagged as queue-triggered.
         create_rec.assert_awaited_once()

@@ -451,6 +451,9 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
               return {
                 ...run,
                 status,
+                // A later event that carries the real name upgrades a
+                // placeholder ("Run <id>") created from a name-less event.
+                run_name: data.run_name || run.run_name,
                 error: message,
                 result: result || run.result,
                 updated_at: data.updated_at || new Date().toISOString(),

@@ -141,6 +141,20 @@ class EmitService:
         thread_id = correlation_id or job_id
         enqueued = 0
         for sub in subs:
+            # A subscription whose target IS the producer is a self-loop: the
+            # run it launches completes and emits this same event again. There
+            # is no terminating condition in the choreography layer, so it can
+            # never mean anything but "run forever" — refuse it outright
+            # instead of letting it burn through the hop cap.
+            tgt = sub.target or {}
+            if tgt.get("kind") == kind and str(tgt.get("id") or "") == str(target_id):
+                logger.warning(
+                    "[Emit] subscription %s targets its own producer (%s) — "
+                    "skipped. Point it at a different crew/flow to chain runs.",
+                    sub.id,
+                    canonical,
+                )
+                continue
             try:
                 # Savepoint per row: a duplicate must skip THIS row without
                 # poisoning the batch. The deterministic idempotency key makes a
