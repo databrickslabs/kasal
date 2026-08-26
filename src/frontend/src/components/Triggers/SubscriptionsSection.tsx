@@ -30,8 +30,16 @@ import {
 interface TargetOption {
   id: string;
   name: string;
-  kind: 'flow' | 'crew';
+  kind: 'flow' | 'crew' | 'webhook';
 }
+
+// Pseudo-option in the subscription target picker: instead of running a
+// crew/flow, POST the event to an external URL (server-to-server delivery).
+const WEBHOOK_OPTION: TargetOption = {
+  id: '__webhook__',
+  name: 'Webhook (POST a URL)',
+  kind: 'webhook',
+};
 
 const targetKey = (t?: TriggerTarget | null) => (t ? `${t.kind}:${t.id}` : '');
 
@@ -72,6 +80,7 @@ export const SubscriptionsSection: React.FC = () => {
   const [subEvent, setSubEvent] = useState('');
   const [subTarget, setSubTarget] = useState<TargetOption | null>(null);
   const [subSchema, setSubSchema] = useState('');
+  const [subUrl, setSubUrl] = useState('');
 
   // Emit-rule create form (emitEvent holds a lifecycle type from EVENT_TYPES)
   const [emitTarget, setEmitTarget] = useState<TargetOption | null>(null);
@@ -88,6 +97,14 @@ export const SubscriptionsSection: React.FC = () => {
 
   const targetLabel = (t?: TriggerTarget | null) => {
     if (!t) return '—';
+    if (t.kind === 'webhook') {
+      // Show the host, not the whole capability URL (it can carry a token).
+      try {
+        return `webhook: ${new URL(t.url || '').host}`;
+      } catch {
+        return 'webhook';
+      }
+    }
     return nameByKey[targetKey(t)] || `${t.kind}: ${t.id}`;
   };
 
@@ -177,16 +194,24 @@ export const SubscriptionsSection: React.FC = () => {
       setError('Pick an event to listen for and the crew/flow to run');
       return;
     }
+    const isWebhook = subTarget.kind === 'webhook';
+    if (isWebhook && !/^https?:\/\//i.test(subUrl.trim())) {
+      setError('Enter the http(s) URL the event should be POSTed to');
+      return;
+    }
     setError(null);
     try {
       await TriggersService.createSubscription({
         event_type: subEvent, // canonical name from the dropdown
-        target: { kind: subTarget.kind, id: subTarget.id },
+        target: isWebhook
+          ? { kind: 'webhook', url: subUrl.trim() }
+          : { kind: subTarget.kind, id: subTarget.id },
         schema_ref: subSchema.trim() || undefined,
       });
       setSubEvent('');
       setSubTarget(null);
       setSubSchema('');
+      setSubUrl('');
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to add subscription');
@@ -226,7 +251,13 @@ export const SubscriptionsSection: React.FC = () => {
       value={value}
       onChange={(_e, v) => onChange(v)}
       getOptionLabel={(o) => o.name}
-      groupBy={(o) => (o.kind === 'flow' ? 'Flows' : 'Crews')}
+      groupBy={(o) =>
+        o.kind === 'flow'
+          ? 'Flows'
+          : o.kind === 'crew'
+            ? 'Crews'
+            : 'Integrations'
+      }
       isOptionEqualToValue={(a, b) => a.id === b.id && a.kind === b.kind}
       renderInput={(params) => <TextField {...params} label={label} />}
     />
@@ -418,7 +449,35 @@ export const SubscriptionsSection: React.FC = () => {
         >
           {listenEventPicker(subEvent, setSubEvent)}
           {arrow}
-          {targetPicker(subTarget, setSubTarget, 'Run this crew/flow')}
+          <Autocomplete
+            size="small"
+            sx={{ minWidth: 200, flex: 1 }}
+            options={[...options, WEBHOOK_OPTION]}
+            value={subTarget}
+            onChange={(_e, v) => setSubTarget(v)}
+            getOptionLabel={(o) => o.name}
+            groupBy={(o) =>
+              o.kind === 'flow'
+                ? 'Flows'
+                : o.kind === 'crew'
+                  ? 'Crews'
+                  : 'Integrations'
+            }
+            isOptionEqualToValue={(a, b) => a.id === b.id && a.kind === b.kind}
+            renderInput={(params) => (
+              <TextField {...params} label="Run this crew/flow — or a webhook" />
+            )}
+          />
+          {subTarget?.kind === 'webhook' && (
+            <TextField
+              size="small"
+              sx={{ minWidth: 260, flex: 2 }}
+              label="Webhook URL (https, POSTed on each event)"
+              value={subUrl}
+              onChange={(e) => setSubUrl(e.target.value)}
+              placeholder="https://example.com/hooks/kasal"
+            />
+          )}
           {schemaPicker(subSchema, setSubSchema)}
           <IconButton
             color="primary"

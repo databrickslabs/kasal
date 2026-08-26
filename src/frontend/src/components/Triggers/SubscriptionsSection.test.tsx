@@ -151,4 +151,90 @@ describe('SubscriptionsSection', () => {
     );
     expect(createEmitRule).not.toHaveBeenCalled();
   });
+
+  it('renders a webhook subscription by host, not the raw capability URL', async () => {
+    getCrews.mockResolvedValue([{ id: 'c1', name: 'Producer Crew' }]);
+    listSubscriptions.mockResolvedValue({
+      emit_rules: [
+        {
+          id: 1,
+          on_target: { kind: 'crew', id: 'c1' },
+          event_type: 'completed',
+          enabled: true,
+        },
+      ],
+      subscriptions: [
+        {
+          id: 5,
+          event_type: 'crew:c1:completed',
+          // The URL can carry a secret token — only the host may render.
+          target: {
+            kind: 'webhook',
+            url: 'https://script.google.com/macros/s/abc/exec?token=sekret',
+          },
+          enabled: true,
+        },
+      ],
+    });
+    render(<SubscriptionsSection />);
+    await waitFor(() =>
+      expect(
+        screen.getByText('webhook: script.google.com'),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/sekret/)).not.toBeInTheDocument();
+  });
+
+  it('creating a webhook subscription requires a URL and sends kind webhook', async () => {
+    getCrews.mockResolvedValue([{ id: 'c1', name: 'Producer Crew' }]);
+    listSubscriptions.mockResolvedValue({
+      emit_rules: [
+        {
+          id: 1,
+          on_target: { kind: 'crew', id: 'c1' },
+          event_type: 'completed',
+          enabled: true,
+        },
+      ],
+      subscriptions: [],
+    });
+    createSubscription.mockResolvedValue({});
+    render(<SubscriptionsSection />);
+    await waitFor(() =>
+      expect(screen.getByText('No event triggers yet.')).toBeInTheDocument(),
+    );
+
+    // Pick the emitted event.
+    const eventBox = screen.getByLabelText('When this event fires');
+    fireEvent.mouseDown(eventBox);
+    fireEvent.click(await screen.findByText('Producer Crew · completed'));
+
+    // Pick the webhook pseudo-target from the Integrations group.
+    const targetBox = screen.getByLabelText('Run this crew/flow — or a webhook');
+    fireEvent.mouseDown(targetBox);
+    fireEvent.click(await screen.findByText('Webhook (POST a URL)'));
+
+    // Without a URL the add is rejected.
+    fireEvent.click(screen.getByRole('button', { name: /add subscription/i }));
+    await waitFor(() =>
+      expect(
+        screen.getByText('Enter the http(s) URL the event should be POSTed to'),
+      ).toBeInTheDocument(),
+    );
+    expect(createSubscription).not.toHaveBeenCalled();
+
+    // With a URL it posts a webhook-kind target.
+    fireEvent.change(
+      screen.getByLabelText('Webhook URL (https, POSTed on each event)'),
+      { target: { value: 'https://example.com/hooks/kasal' } },
+    );
+    fireEvent.click(screen.getByRole('button', { name: /add subscription/i }));
+    await waitFor(() =>
+      expect(createSubscription).toHaveBeenCalledWith({
+        event_type: 'crew:c1:completed',
+        target: { kind: 'webhook', url: 'https://example.com/hooks/kasal' },
+        schema_ref: undefined,
+      }),
+    );
+  });
 });
