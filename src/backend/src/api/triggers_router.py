@@ -13,7 +13,8 @@ from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.exc import IntegrityError
 
 from src.core.dependencies import GroupContextDep, SessionDep
-from src.core.exceptions import ConflictError
+from src.core.exceptions import ConflictError, ForbiddenError
+from src.core.permissions import check_role_in_context
 from src.schemas.triggers import (
     DispatchResult,
     EmitRuleCreate,
@@ -73,7 +74,12 @@ async def enqueue_trigger(
     service: TriggerQueueServiceDep,
     group_context: GroupContextDep,
 ) -> TriggerEventResponse:
-    """Enqueue an event that will trigger a crew/flow run."""
+    """Enqueue an event that will trigger a crew/flow run.
+
+    Roles: Admin / Editor / Operator — enqueueing is starting a run.
+    """
+    if not check_role_in_context(group_context, ["admin", "editor", "operator"]):
+        raise ForbiddenError("Enqueueing trigger events requires operator access")
     try:
         row = await service.enqueue(payload, group_context)
     except IntegrityError as exc:
@@ -125,6 +131,9 @@ async def create_subscription(
     service: SubscriptionServiceDep,
     group_context: GroupContextDep,
 ) -> SubscriptionResponse:
+    # Roles: Admin / Editor — choreography config changes what runs automatically.
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Managing subscriptions requires editor access")
     row = await service.create_subscription(payload, group_context)
     return SubscriptionResponse.model_validate(row)
 
@@ -135,6 +144,9 @@ async def delete_subscription(
     service: SubscriptionServiceDep,
     group_context: GroupContextDep,
 ) -> None:
+    # Roles: Admin / Editor.
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Managing subscriptions requires editor access")
     await service.delete_subscription(sub_id, group_context)
 
 
@@ -148,6 +160,9 @@ async def create_emit_rule(
     service: SubscriptionServiceDep,
     group_context: GroupContextDep,
 ) -> EmitRuleResponse:
+    # Roles: Admin / Editor — choreography config changes what runs automatically.
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Managing emit rules requires editor access")
     row = await service.create_emit_rule(payload, group_context)
     return EmitRuleResponse.model_validate(row)
 
@@ -158,24 +173,43 @@ async def delete_emit_rule(
     service: SubscriptionServiceDep,
     group_context: GroupContextDep,
 ) -> None:
+    # Roles: Admin / Editor.
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Managing emit rules requires editor access")
     await service.delete_emit_rule(rule_id, group_context)
 
 
 @router.post("/dispatch", response_model=DispatchResult)
 async def dispatch_pending(
     group_context: GroupContextDep,
+    session: SessionDep,
     batch: int = Query(10, ge=1, le=50),
 ) -> DispatchResult:
-    """Drain the queue on demand: claim up to ``batch`` due events and launch a
-    run for each in the background.
+    """Drain the caller's queue on demand: claim up to ``batch`` of THIS
+    tenant's due events and launch a run for each in the background.
 
-    This is the manual equivalent of the background consumer loop (which is
-    opt-in via ``KASAL_EVENT_TRIGGERS_ENABLED``) — it lets a fired event be
-    dispatched immediately without waiting for the poller. Each claimed row moves
-    ``pending`` → ``claimed`` → ``dispatched`` as its run is launched; refresh the
-    event list to watch the transitions.
+    The manual equivalent of the background consumer loop (which is opt-in via
+    the ``event_triggers_enabled`` setting in Configuration → Engines) — it lets
+    a fired event be dispatched immediately without waiting for the poller. Each
+    claimed row moves ``pending`` → ``claimed`` → ``dispatched`` as its run is
+    launched; refresh the event list to watch the transitions.
+
+    Roles: Admin / Editor / Operator. Scoped to the caller's groups — this can
+    never drain (or fast-forward the backoff of) another tenant's rows, and it
+    honours the same admin gate as the background consumer.
     """
-    tasks = await _dispatch_consumer.claim_and_dispatch(batch)
+    if not check_role_in_context(group_context, ["admin", "editor", "operator"]):
+        raise ForbiddenError("Dispatching trigger events requires operator access")
+    from src.services.settings.engine import EngineConfigService
+
+    if not await EngineConfigService(session).get_event_triggers_enabled():
+        raise ForbiddenError(
+            "Event triggers are disabled — enable them in Configuration -> Engines"
+        )
+    group_ids = group_context.group_ids or []
+    if not group_ids:
+        return DispatchResult(claimed=0)
+    tasks = await _dispatch_consumer.claim_and_dispatch(batch, group_ids=group_ids)
     return DispatchResult(claimed=len(tasks))
 
 
@@ -195,4 +229,7 @@ async def delete_trigger(
     service: TriggerQueueServiceDep,
     group_context: GroupContextDep,
 ) -> None:
+    # Roles: Admin / Editor / Operator.
+    if not check_role_in_context(group_context, ["admin", "editor", "operator"]):
+        raise ForbiddenError("Deleting trigger events requires operator access")
     await service.delete_event(event_id, group_context)

@@ -128,6 +128,9 @@ class TestLifecycle:
         refreshed = await repo.get(row.id)
         assert refreshed.status == STATUS_PENDING
         assert refreshed.available_at == future
+        # The claim stamp is cleared — a requeued row must not look "stuck in
+        # claimed" to the reclaim sweep.
+        assert refreshed.claimed_at is None
         # Not yet due → not claimed.
         assert await repo.claim(10) == []
 
@@ -158,3 +161,55 @@ class TestIdempotency:
         await _enqueue(repo, session, idempotency_key="order.created:1")
         with pytest.raises(IntegrityError):
             await _enqueue(repo, session, idempotency_key="order.created:1")
+
+
+class TestClaimScoping:
+    @pytest.mark.asyncio
+    async def test_group_ids_scopes_the_claim(self, repo, session):
+        await _enqueue(repo, session, group_id="g1")
+        await _enqueue(repo, session, group_id="g2")
+
+        rows = await repo.claim(10, group_ids=["g1"])
+        await session.commit()
+
+        assert [r.group_id for r in rows] == ["g1"]
+        # The other tenant's row is untouched, still claimable globally.
+        rest = await repo.claim(10)
+        assert [r.group_id for r in rest] == ["g2"]
+
+    @pytest.mark.asyncio
+    async def test_empty_group_list_claims_nothing(self, repo, session):
+        # A caller with NO groups must not fall through to the global scan.
+        await _enqueue(repo, session, group_id="g1")
+
+        assert await repo.claim(10, group_ids=[]) == []
+        assert (await repo.claim(10))[0].group_id == "g1"  # row was left alone
+
+    @pytest.mark.asyncio
+    async def test_none_claims_across_all_tenants(self, repo, session):
+        await _enqueue(repo, session, group_id="g1")
+        await _enqueue(repo, session, group_id="g2")
+
+        rows = await repo.claim(10, group_ids=None)
+        assert sorted(r.group_id for r in rows) == ["g1", "g2"]
+
+
+class TestPurge:
+    @pytest.mark.asyncio
+    async def test_purges_only_old_finished_rows(self, repo, session):
+        old_done = await _enqueue(repo, session, status=STATUS_DISPATCHED)
+        old_dead = await _enqueue(repo, session, status=STATUS_DEAD)
+        old_pending = await _enqueue(repo, session)  # pending is NEVER purged
+        recent_done = await _enqueue(repo, session, status=STATUS_DISPATCHED)
+        for row in (old_done, old_dead, old_pending):
+            row.created_at = datetime.utcnow() - timedelta(days=10)
+        await session.commit()
+
+        n = await repo.purge_finished(datetime.utcnow() - timedelta(days=7))
+        await session.commit()
+
+        assert n == 2
+        assert await repo.get(old_done.id) is None
+        assert await repo.get(old_dead.id) is None
+        assert (await repo.get(old_pending.id)) is not None
+        assert (await repo.get(recent_done.id)) is not None

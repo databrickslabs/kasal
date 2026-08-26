@@ -630,6 +630,11 @@ class SchedulerService:
                     group_id=schedule.group_id,
                     group_email=schedule.created_by_email,
                     flow_id=config.flow_id if execution_type == "flow" else None,
+                    # Without this a SCHEDULED crew run records no crew_id, so
+                    # emit-on-completion can never match it to an emit rule —
+                    # "runs on a schedule, then triggers downstream" silently
+                    # did nothing for crews.
+                    crew_id=getattr(config, "crew_id", None),
                     trigger_type="scheduled",
                     created_at=execution_time_naive,
                 )

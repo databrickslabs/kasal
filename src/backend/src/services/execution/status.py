@@ -312,6 +312,19 @@ class ExecutionStatusService:
                         try:
                             from src.services.triggers import emit_for_completed_run
 
+                            # The chain envelope rides in the run's stored inputs
+                            # (the trigger consumer stamps correlation_id and
+                            # trigger_hops there): threading it through is what
+                            # lets emit cap runaway chains and keep one
+                            # correlation id across hand-offs.
+                            _run_inputs = getattr(updated_execution, "inputs", None)
+                            if not isinstance(_run_inputs, dict):
+                                _run_inputs = {}
+                            try:
+                                _hops = int(_run_inputs.get("trigger_hops") or 0)
+                            except (TypeError, ValueError):
+                                _hops = 0
+
                             await emit_for_completed_run(
                                 execution_type=updated_execution.execution_type,
                                 flow_id=updated_execution.flow_id,
@@ -320,6 +333,8 @@ class ExecutionStatusService:
                                 job_id=job_id,
                                 result=result,
                                 event_type=_emit_type,
+                                correlation_id=_run_inputs.get("correlation_id"),
+                                hops=_hops,
                             )
                         except Exception as emit_err:  # noqa: BLE001
                             logger.warning(

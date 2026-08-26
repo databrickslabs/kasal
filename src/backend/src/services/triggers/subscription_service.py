@@ -85,9 +85,7 @@ class SubscriptionService:
     async def list_emit_rules(self, group_context: GroupContext) -> List[EmitRule]:
         return await self.emit_rules.list_for_groups(group_context.group_ids or [])
 
-    async def delete_emit_rule(
-        self, rule_id: int, group_context: GroupContext
-    ) -> None:
+    async def delete_emit_rule(self, rule_id: int, group_context: GroupContext) -> None:
         row = await self.emit_rules.get(rule_id)
         if row is None or row.group_id not in (group_context.group_ids or []):
             raise NotFoundError(f"Emit rule {rule_id} not found")

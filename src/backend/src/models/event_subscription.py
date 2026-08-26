@@ -38,8 +38,9 @@ class EventSubscription(Base):
     target = Column(JSON, nullable=False)
     #: Optional per-run engine override ("kasal" | "crewai").
     harness = Column(String(20), nullable=True)
-    #: Optional JSONPath-ish map event payload -> crew inputs. Null = pass the
-    #: whole payload through as inputs.
+    #: Optional STATIC input overrides for the triggered run (a plain dict used
+    #: as-is — NOT a payload projection; a JSONPath-style mapping is future
+    #: work). Null = pass the whole payload through as inputs.
     input_mapping = Column(JSON, nullable=True)
     #: Optional Object Management schema name the payload is expected to match.
     schema_ref = Column(String(255), nullable=True)

@@ -9,7 +9,7 @@ until the service decides the row is safely in-flight). See
 from datetime import datetime
 from typing import Any, List, Optional
 
-from sqlalchemy import delete, desc, select, text, update
+from sqlalchemy import delete, desc, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
@@ -51,7 +51,10 @@ class TriggerQueueRepository(BaseRepository[TriggerQueue]):
         return row
 
     async def claim(
-        self, limit: int = 5, now: Optional[datetime] = None
+        self,
+        limit: int = 5,
+        now: Optional[datetime] = None,
+        group_ids: Optional[List[str]] = None,
     ) -> List[TriggerQueue]:
         """Atomically claim up to ``limit`` due pending rows and mark them claimed.
 
@@ -59,18 +62,32 @@ class TriggerQueueRepository(BaseRepository[TriggerQueue]):
         never claim the same row. On SQLite (dev/tests) the lock clause is omitted
         — single-worker, which is all local dev needs. The claimed rows' locks are
         held until the caller commits, so the follow-up UPDATE is race-free.
+
+        ``group_ids`` scopes the claim to those tenants (the on-demand
+        ``/triggers/dispatch`` drain); None (the background consumer) claims
+        across all tenants. An EMPTY list claims nothing — a caller with no
+        groups must not fall through to the global scan.
         """
         now = now or datetime.utcnow()
-        lock = " FOR UPDATE SKIP LOCKED" if self._dialect() == "postgresql" else ""
-        id_result = await self.session.execute(
-            text(
-                "SELECT id FROM triggerqueue "
-                "WHERE status = :pending "
-                "AND (available_at IS NULL OR available_at <= :now) "
-                "ORDER BY created_at, id LIMIT :limit" + lock
-            ),
-            {"pending": STATUS_PENDING, "now": now, "limit": limit},
+        if group_ids is not None and not group_ids:
+            return []
+        stmt = (
+            select(TriggerQueue.id)
+            .where(
+                TriggerQueue.status == STATUS_PENDING,
+                or_(
+                    TriggerQueue.available_at.is_(None),
+                    TriggerQueue.available_at <= now,
+                ),
+            )
+            .order_by(TriggerQueue.created_at, TriggerQueue.id)
+            .limit(limit)
         )
+        if group_ids:
+            stmt = stmt.where(TriggerQueue.group_id.in_(group_ids))
+        if self._dialect() == "postgresql":
+            stmt = stmt.with_for_update(skip_locked=True)
+        id_result = await self.session.execute(stmt)
         ids = [row[0] for row in id_result.fetchall()]
         if not ids:
             return []
@@ -117,6 +134,7 @@ class TriggerQueueRepository(BaseRepository[TriggerQueue]):
             .values(
                 status=STATUS_PENDING,
                 available_at=available_at,
+                claimed_at=None,
                 last_error=(error or "")[:1000] if error else None,
             )
         )
@@ -130,6 +148,18 @@ class TriggerQueueRepository(BaseRepository[TriggerQueue]):
                 TriggerQueue.claimed_at < claimed_before,
             )
             .values(status=STATUS_PENDING, claimed_at=None)
+        )
+        return result.rowcount or 0
+
+    async def purge_finished(self, older_than: datetime) -> int:
+        """Delete finished rows (``dispatched``/``dead``) created before the
+        cutoff — the retention sweep. The queue is a work log, not an archive;
+        run history lives in ``executionhistory``."""
+        result = await self.session.execute(
+            delete(TriggerQueue).where(
+                TriggerQueue.status.in_((STATUS_DISPATCHED, STATUS_DEAD)),
+                TriggerQueue.created_at < older_than,
+            )
         )
         return result.rowcount or 0
 

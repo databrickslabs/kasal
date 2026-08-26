@@ -39,7 +39,9 @@ class EnqueueTrigger(BaseModel):
         default_factory=dict,
         description="Event body; run inputs are read from payload['inputs']",
     )
-    group_id: Optional[str] = Field(None, description="Tenant — becomes GroupContext")
+    # NOTE: no ``group_id`` field — the tenant is ALWAYS stamped from the
+    # authenticated caller's GroupContext. Accepting one here implied a producer
+    # could choose its tenant; it never could (the service ignored it).
     event_type: Optional[str] = Field(
         None, description="Topic name (reserved for Phase 2 subscription matching)"
     )

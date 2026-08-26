@@ -13,8 +13,8 @@ Design notes:
   (reaches Lakebase when enabled); the service never opens a raw session.
 - **Tenancy.** Each row's ``group_id`` becomes the run's ``GroupContext``.
 
-Phase 1 targets: ``kind="flow"`` (saved flow by id) and ``kind="inline"`` (full
-config). ``kind="crew"`` (saved crew by id) is Phase 2.
+Targets: ``kind="flow"`` (saved flow by id), ``kind="crew"`` (saved crew by id,
+resolved through the catalog), and ``kind="inline"`` (full config).
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.core.logger import LoggerManager
 from src.db.session import routed_scoped_session
@@ -49,19 +49,26 @@ class TriggerQueueConsumerService:
         self._tasks: set[asyncio.Task] = set()
 
     # ------------------------------------------------------------------ claim
-    async def claim_and_dispatch(self, batch: int = 5) -> List[asyncio.Task]:
+    async def claim_and_dispatch(
+        self, batch: int = 5, group_ids: Optional[List[str]] = None
+    ) -> List[asyncio.Task]:
         """Claim up to ``batch`` due rows and launch a dispatch task for each.
 
         Returns the launched tasks (the loop ignores them — non-blocking; tests
         await them). The ``claimed`` state is committed before dispatch so other
-        replicas skip these rows.
+        replicas skip these rows. ``group_ids`` scopes the claim (the on-demand
+        API drain claims only the caller's tenants); None (the background loop)
+        drains every tenant.
         """
         snapshots: List[Dict[str, Any]] = []
         async with routed_scoped_session() as session:
-            rows = await TriggerQueueRepository(session).claim(batch)
+            rows = await TriggerQueueRepository(session).claim(
+                batch, group_ids=group_ids
+            )
             # Snapshot BEFORE commit — commit expires ORM attributes, and a lazy
             # refresh on a closing session is a MissingGreenlet trap.
             for row in rows:
+                event = (row.payload or {}).get("event") or {}
                 snapshots.append(
                     {
                         "id": row.id,
@@ -71,6 +78,9 @@ class TriggerQueueConsumerService:
                         "correlation_id": row.correlation_id,
                         "causation_run_id": row.causation_run_id,
                         "attempts": row.attempts or 0,
+                        # Chain depth so far — threaded into the run's inputs and
+                        # read back by emit-on-completion to cap runaway loops.
+                        "hops": int(event.get("hops") or 0),
                     }
                 )
             await session.commit()
@@ -91,6 +101,17 @@ class TriggerQueueConsumerService:
             await session.commit()
         if n:
             logger.info("[TriggerQueue] reclaimed %d stuck row(s)", n)
+        return n
+
+    async def purge(self, older_than_days: int = 7) -> int:
+        """Retention sweep: drop finished rows (``dispatched``/``dead``) older
+        than the window. Without this the queue table grows forever."""
+        cutoff = datetime.utcnow() - timedelta(days=older_than_days)
+        async with routed_scoped_session() as session:
+            n = await TriggerQueueRepository(session).purge_finished(cutoff)
+            await session.commit()
+        if n:
+            logger.info("[TriggerQueue] purged %d finished row(s)", n)
         return n
 
     # --------------------------------------------------------------- dispatch
@@ -124,6 +145,9 @@ class TriggerQueueConsumerService:
                     "model": config.model,
                     "trigger": TRIGGER_TYPE,
                     "correlation_id": snap.get("correlation_id"),
+                    # Read back by the emit hook when THIS run completes, so a
+                    # chain of hand-offs carries its depth and can be capped.
+                    "trigger_hops": snap.get("hops", 0),
                 }
                 if execution_type == "flow" and config.flow_id:
                     config_dict["flow_id"] = str(config.flow_id)
@@ -165,12 +189,22 @@ class TriggerQueueConsumerService:
                 job_id,
             )
         except Exception as exc:  # noqa: BLE001 — one bad row must not kill the loop
-            await self._handle_failure(row_id, snap.get("attempts", 0), exc)
+            await self._handle_failure(
+                row_id,
+                snap.get("attempts", 0),
+                exc,
+                # A validation failure (unknown kind, missing/deleted target) is
+                # not transient — retrying it five times over ten minutes of
+                # backoff cannot fix it. Straight to the dead letter.
+                permanent=isinstance(exc, ValueError),
+            )
 
-    async def _handle_failure(self, row_id: int, attempts: int, exc: Exception) -> None:
-        """Requeue with backoff, or dead-letter once attempts are exhausted."""
+    async def _handle_failure(
+        self, row_id: int, attempts: int, exc: Exception, permanent: bool = False
+    ) -> None:
+        """Requeue with backoff, or dead-letter (attempts exhausted / permanent)."""
         message = f"{type(exc).__name__}: {exc}"
-        dead = attempts >= MAX_ATTEMPTS
+        dead = permanent or attempts >= MAX_ATTEMPTS
         try:
             async with routed_scoped_session() as session:
                 repo = TriggerQueueRepository(session)

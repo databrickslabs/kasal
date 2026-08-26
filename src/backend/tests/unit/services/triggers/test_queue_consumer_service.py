@@ -25,6 +25,7 @@ from src.utils.user_context import GroupContext
 def _ctx() -> GroupContext:
     return GroupContext(group_ids=["g1"], group_email="g1@example.com")
 
+
 MODULE = "src.services.triggers.queue_consumer_service"
 
 
@@ -53,7 +54,10 @@ class TestBuildConfig:
     @pytest.mark.asyncio
     async def test_flow_by_id(self, service):
         config, et = await service._build_config(
-            MagicMock(), {"kind": "flow", "id": "flow-123"}, {"inputs": {"topic": "x"}}, _ctx()
+            MagicMock(),
+            {"kind": "flow", "id": "flow-123"},
+            {"inputs": {"topic": "x"}},
+            _ctx(),
         )
         assert et == "flow"
         assert isinstance(config, CrewConfig)
@@ -107,7 +111,10 @@ class TestBuildConfig:
             return_value=({"a": {"role": "R"}}, {"t": {"description": "D"}}),
         ) as resolver:
             config, et = await service._build_config(
-                MagicMock(), {"kind": "crew", "id": "crew-1"}, {"inputs": {"k": "v"}}, _ctx()
+                MagicMock(),
+                {"kind": "crew", "id": "crew-1"},
+                {"inputs": {"k": "v"}},
+                _ctx(),
             )
         resolver.assert_awaited_once()
         assert et == "crew"
@@ -155,6 +162,7 @@ class TestDispatch:
             "payload": {"inputs": {"topic": "news"}},
             "correlation_id": "chain-1",
             "attempts": 1,
+            "hops": 2,
         }
 
         with (
@@ -183,6 +191,9 @@ class TestDispatch:
         assert kwargs["execution_type"] == "flow"
         assert kwargs["group_id"] == "g1"
         assert str(kwargs["flow_id"]) == "flow-9"
+        # The chain envelope rides in the run's stored inputs, for the emit hook.
+        assert kwargs["inputs"]["trigger_hops"] == 2
+        assert kwargs["inputs"]["correlation_id"] == "chain-1"
         # The run was launched, and the row marked dispatched.
         run_exec.assert_awaited_once()
         assert run_exec.await_args.kwargs["execution_type"] == "flow"
@@ -304,7 +315,7 @@ class TestClaimAndDispatch:
             for t in tasks:
                 await t
 
-        repo.claim.assert_awaited_once_with(5)
+        repo.claim.assert_awaited_once_with(5, group_ids=None)
         mock_session.commit.assert_awaited()
         assert dispatch.await_count == 2
         dispatched_ids = sorted(c.args[0]["id"] for c in dispatch.await_args_list)
@@ -326,3 +337,81 @@ class TestClaimAndDispatch:
 
         assert tasks == []
         dispatch.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_valueerror_dead_letters_immediately(self, service):
+        # A malformed target is PERMANENT — retrying five times over backoff
+        # cannot fix "unknown target kind". Straight to the dead letter.
+        mock_session = MagicMock()
+        mock_session.commit = AsyncMock()
+        repo = MagicMock()
+        repo.requeue = AsyncMock()
+        repo.mark_failed = AsyncMock()
+        snap = {
+            "id": 8,
+            "group_id": "g1",
+            "target": {"kind": "webhook"},  # _build_config raises ValueError
+            "payload": {},
+            "attempts": 1,  # attempts remain — dead-lettered anyway
+        }
+
+        with (
+            patch(f"{MODULE}.routed_scoped_session", _fake_routed(mock_session)),
+            patch(f"{MODULE}.TriggerQueueRepository", return_value=repo),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
+            await service._dispatch(snap)
+
+        repo.mark_failed.assert_awaited_once()
+        assert repo.mark_failed.await_args.kwargs.get("dead") is True
+        repo.requeue.assert_not_awaited()
+
+
+class TestClaimScoping:
+    @pytest.mark.asyncio
+    async def test_group_ids_are_passed_to_the_claim(self, service):
+        mock_session = MagicMock()
+        mock_session.commit = AsyncMock()
+        repo = MagicMock()
+        repo.claim = AsyncMock(return_value=[])
+
+        with (
+            patch(f"{MODULE}.routed_scoped_session", _fake_routed(mock_session)),
+            patch(f"{MODULE}.TriggerQueueRepository", return_value=repo),
+        ):
+            await service.claim_and_dispatch(3, group_ids=["g1", "g2"])
+
+        repo.claim.assert_awaited_once_with(3, group_ids=["g1", "g2"])
+
+    @pytest.mark.asyncio
+    async def test_snapshot_reads_hops_from_the_event_envelope(self, service):
+        mock_session = MagicMock()
+        mock_session.commit = AsyncMock()
+        row = SimpleNamespace(
+            id=9,
+            group_id="g1",
+            target={"kind": "flow", "id": "f1"},
+            payload={"inputs": {}, "event": {"type": "crew:x:completed", "hops": 3}},
+            correlation_id="chain-z",
+            causation_run_id="run-up",
+            attempts=1,
+        )
+        repo = MagicMock()
+        repo.claim = AsyncMock(return_value=[row])
+
+        with (
+            patch(f"{MODULE}.routed_scoped_session", _fake_routed(mock_session)),
+            patch(f"{MODULE}.TriggerQueueRepository", return_value=repo),
+            patch.object(service, "_dispatch", new_callable=AsyncMock) as dispatch,
+        ):
+            tasks = await service.claim_and_dispatch(5)
+            for t in tasks:
+                await t
+
+        snap = dispatch.await_args.args[0]
+        assert snap["hops"] == 3
+        assert snap["correlation_id"] == "chain-z"

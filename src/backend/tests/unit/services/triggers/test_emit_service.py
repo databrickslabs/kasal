@@ -234,3 +234,128 @@ class TestEmitNoOp:
             event_type="completed",
         )
         assert n == 0
+
+
+class TestChains:
+    @pytest.mark.asyncio
+    async def test_hop_cap_stops_the_chain(self, session, monkeypatch):
+        monkeypatch.setenv("KASAL_EVENT_TRIGGERS_MAX_HOPS", "3")
+        await _emit_rule(
+            session, kind="crew", target_id="c-src", event_type="completed"
+        )
+        canonical = canonical_event_name("crew", "c-src", "completed")
+        await _subscription(session, event_type=canonical, kind="crew", target_id="c-a")
+        await session.commit()
+
+        n = await EmitService(session).emit_for_completed_run(
+            execution_type="crew",
+            flow_id=None,
+            crew_id="c-src",
+            group_id="g1",
+            job_id="run-deep",
+            result="x",
+            event_type="completed",
+            hops=3,  # at the cap — emits nothing
+        )
+        assert n == 0
+        assert await _pending(session) == []
+
+    @pytest.mark.asyncio
+    async def test_correlation_threads_and_hops_increment(self, session):
+        await _emit_rule(
+            session, kind="crew", target_id="c-src", event_type="completed"
+        )
+        canonical = canonical_event_name("crew", "c-src", "completed")
+        await _subscription(session, event_type=canonical, kind="crew", target_id="c-a")
+        await session.commit()
+
+        n = await EmitService(session).emit_for_completed_run(
+            execution_type="crew",
+            flow_id=None,
+            crew_id="c-src",
+            group_id="g1",
+            job_id="run-mid",
+            result="x",
+            event_type="completed",
+            correlation_id="chain-origin",
+            hops=1,
+        )
+        assert n == 1
+        row = (await _pending(session))[0]
+        # The chain ORIGIN is preserved; this run is only the immediate cause.
+        assert row.correlation_id == "chain-origin"
+        assert row.causation_run_id == "run-mid"
+        assert row.payload["event"]["hops"] == 2
+
+    @pytest.mark.asyncio
+    async def test_chain_start_defaults_correlation_to_job_id(self, session):
+        await _emit_rule(
+            session, kind="crew", target_id="c-src", event_type="completed"
+        )
+        canonical = canonical_event_name("crew", "c-src", "completed")
+        await _subscription(session, event_type=canonical, kind="crew", target_id="c-a")
+        await session.commit()
+
+        await EmitService(session).emit_for_completed_run(
+            execution_type="crew",
+            flow_id=None,
+            crew_id="c-src",
+            group_id="g1",
+            job_id="run-first",
+            result="x",
+            event_type="completed",
+        )
+        row = (await _pending(session))[0]
+        assert row.correlation_id == "run-first"
+        assert row.payload["event"]["hops"] == 1
+
+
+class TestIdempotentEmission:
+    @pytest.mark.asyncio
+    async def test_double_emission_collapses_onto_the_unique_key(self, session):
+        # Two terminal-status writers racing (or a crash-retry) emit the same
+        # run twice; the deterministic idempotency key must make the second a
+        # no-op instead of double-firing the subscriber.
+        await _emit_rule(
+            session, kind="crew", target_id="c-src", event_type="completed"
+        )
+        canonical = canonical_event_name("crew", "c-src", "completed")
+        await _subscription(session, event_type=canonical, kind="crew", target_id="c-a")
+        await session.commit()
+
+        kwargs = dict(
+            execution_type="crew",
+            flow_id=None,
+            crew_id="c-src",
+            group_id="g1",
+            job_id="run-twice",
+            result="x",
+            event_type="completed",
+        )
+        assert await EmitService(session).emit_for_completed_run(**kwargs) == 1
+        assert await EmitService(session).emit_for_completed_run(**kwargs) == 0
+        assert len(await _pending(session)) == 1
+
+
+class TestFailedEventShape:
+    @pytest.mark.asyncio
+    async def test_failed_event_carries_error_not_payload(self, session):
+        await _emit_rule(session, kind="crew", target_id="c-src", event_type="failed")
+        canonical = canonical_event_name("crew", "c-src", "failed")
+        await _subscription(
+            session, event_type=canonical, kind="crew", target_id="c-handler"
+        )
+        await session.commit()
+
+        await EmitService(session).emit_for_completed_run(
+            execution_type="crew",
+            flow_id=None,
+            crew_id="c-src",
+            group_id="g1",
+            job_id="run-f",
+            result="boom: tool exploded",
+            event_type="failed",
+        )
+        row = (await _pending(session))[0]
+        # A handler crew's template can name {error} honestly.
+        assert row.payload["inputs"] == {"error": "boom: tool exploded"}

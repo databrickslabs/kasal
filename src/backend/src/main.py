@@ -483,14 +483,20 @@ async def lifespan(app: FastAPI):
                         if await _event_triggers_enabled():
                             await _trigger_consumer.claim_and_dispatch(_tq_batch)
                             ticks += 1
-                            if ticks >= 12:  # reclaim crashed-worker rows
+                            if ticks >= 12:  # housekeeping: crashed rows + retention
                                 await _trigger_consumer.reclaim()
+                                await _trigger_consumer.purge()
                                 ticks = 0
                     except Exception as _tq_err:  # noqa: BLE001
                         system_logger.error(f"[TriggerQueue] loop error: {_tq_err}")
                     await asyncio.sleep(_tq_interval)
 
-            asyncio.create_task(_trigger_queue_loop())
+            # Keep a strong reference on app.state: the event loop holds only
+            # weak refs to tasks, so a bare create_task here can be garbage-
+            # collected and the queue silently stops draining. (The consumer
+            # guards its own dispatch tasks the same way.) Cancelled at
+            # shutdown below.
+            app.state.trigger_queue_task = asyncio.create_task(_trigger_queue_loop())
             system_logger.info(
                 "Event-trigger consumer loop started (gated on Configuration "
                 "setting; interval=%ss, batch=%s)",
@@ -545,6 +551,16 @@ async def lifespan(app: FastAPI):
 
     try:
         yield
+
+        # Stop the event-trigger consumer loop first: it must not claim new
+        # rows while the executors below are shutting down.
+        _tq_task = getattr(app.state, "trigger_queue_task", None)
+        if _tq_task is not None:
+            _tq_task.cancel()
+            try:
+                await _tq_task
+            except BaseException:  # noqa: BLE001 — CancelledError is the point
+                pass
     finally:
         # Clean up running jobs during shutdown
         if db_initialized:

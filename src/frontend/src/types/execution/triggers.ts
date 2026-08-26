@@ -11,7 +11,7 @@ export type TriggerStatus =
   | 'dead';
 
 export interface TriggerTarget {
-  /** 'flow' (saved flow by id) | 'inline' (full config) | 'crew' (Phase 2) */
+  /** 'flow' (saved flow by id) | 'crew' (saved crew by id) | 'inline' (full config) */
   kind: TriggerKind;
   /** Saved crew/flow id, for kind 'flow'/'crew'. */
   id?: string;
