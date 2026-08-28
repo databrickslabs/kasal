@@ -14,6 +14,7 @@ from fastapi import APIRouter, FastAPI, Query, Request
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 from starlette.datastructures import Headers
+from tests.unit.route_utils import route_paths
 
 # Create a mock router for testing without importing the actual module
 # This avoids triggering the full import chain
@@ -99,7 +100,7 @@ class TestStreamExecutionUpdates:
 
     def test_stream_execution_updates_endpoint_exists(self, client):
         """Test that the endpoint exists and is accessible."""
-        routes = [route.path for route in app.routes]
+        routes = route_paths(app)
         assert "/sse/executions/{job_id}/stream" in routes
 
     @pytest.mark.asyncio
@@ -119,7 +120,7 @@ class TestStreamAllExecutions:
 
     def test_stream_all_executions_endpoint_exists(self, client):
         """Test that the stream-all endpoint exists."""
-        routes = [route.path for route in app.routes]
+        routes = route_paths(app)
         assert "/sse/executions/stream-all" in routes
 
 
@@ -128,7 +129,7 @@ class TestGetSSEStats:
 
     def test_get_stats_endpoint_exists(self, client):
         """Test that stats endpoint exists."""
-        routes = [route.path for route in app.routes]
+        routes = route_paths(app)
         assert "/sse/stats" in routes
 
 
@@ -137,7 +138,7 @@ class TestSSEHealth:
 
     def test_health_endpoint_exists(self, client):
         """Test that health endpoint exists."""
-        routes = [route.path for route in app.routes]
+        routes = route_paths(app)
         assert "/sse/health" in routes
 
 
@@ -161,7 +162,7 @@ class TestRouterConfiguration:
             "/sse/health",
         ]
 
-        routes = [route.path for route in app.routes]
+        routes = route_paths(app)
 
         for endpoint in expected_endpoints:
             assert endpoint in routes, f"Missing endpoint: {endpoint}"
@@ -289,7 +290,7 @@ class TestStreamGenerationUpdates:
 
     def test_stream_generation_updates_endpoint_exists(self, client):
         """Test that the generation stream endpoint is registered."""
-        routes = [route.path for route in app.routes]
+        routes = route_paths(app)
         assert "/sse/generations/{generation_id}/stream" in routes
 
     def test_stream_generation_updates_uses_get_method(self, client):

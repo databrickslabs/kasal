@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
+from tests.unit.route_utils import route_paths
 
 
 class TestAppCreation:
@@ -111,14 +112,14 @@ class TestRouteRegistration:
         """Test that /health endpoint is registered."""
         from src.main import app
 
-        routes = [r.path for r in app.routes]
+        routes = route_paths(app)
         assert "/health" in routes
 
     def test_api_v1_routes_registered(self):
         """Test that API v1 routes are registered."""
         from src.main import app
 
-        routes = [r.path for r in app.routes]
+        routes = route_paths(app)
         # At least some /api/v1 prefixed routes should exist
         api_routes = [r for r in routes if r.startswith("/api/v1")]
         assert len(api_routes) > 0
