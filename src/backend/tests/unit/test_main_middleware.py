@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from tests.unit.route_utils import route_paths
 
 # ---------------------------------------------------------------------------
 # Exception handler tests via TestClient
@@ -322,7 +323,7 @@ class TestAppConfiguration:
     def test_app_routes_include_api_v1_prefix(self):
         from src.main import app, settings
 
-        routes = [r.path for r in app.routes]
+        routes = route_paths(app)
         api_routes = [r for r in routes if r.startswith(settings.API_V1_STR)]
         assert len(api_routes) > 0
 

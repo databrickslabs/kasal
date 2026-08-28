@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from tests.unit.route_utils import route_paths
 
 
 class TestKasalIconRoutes:
@@ -48,13 +49,13 @@ class TestKasalIconRoutes:
     def test_kasal_icon_16_route_registered(self):
         """kasal-icon-16.png route is registered when file exists."""
         app = self._create_app_with_static_dir({"kasal-icon-16.png"})
-        routes = [r.path for r in app.routes]
+        routes = route_paths(app)
         assert "/kasal-icon-16.png" in routes
 
     def test_kasal_icon_24_route_registered(self):
         """kasal-icon-24.png route is registered when file exists."""
         app = self._create_app_with_static_dir({"kasal-icon-24.png"})
-        routes = [r.path for r in app.routes]
+        routes = route_paths(app)
         assert "/kasal-icon-24.png" in routes
 
     def test_both_icon_routes_registered(self):
@@ -62,20 +63,20 @@ class TestKasalIconRoutes:
         app = self._create_app_with_static_dir(
             {"kasal-icon-16.png", "kasal-icon-24.png"}
         )
-        routes = [r.path for r in app.routes]
+        routes = route_paths(app)
         assert "/kasal-icon-16.png" in routes
         assert "/kasal-icon-24.png" in routes
 
     def test_icon_24_route_not_registered_when_file_missing(self):
         """kasal-icon-24.png route is NOT registered when file doesn't exist."""
         app = self._create_app_with_static_dir({"kasal-icon-16.png"})
-        routes = [r.path for r in app.routes]
+        routes = route_paths(app)
         assert "/kasal-icon-24.png" not in routes
 
     def test_icon_16_route_not_registered_when_file_missing(self):
         """kasal-icon-16.png route is NOT registered when file doesn't exist."""
         app = self._create_app_with_static_dir({"kasal-icon-24.png"})
-        routes = [r.path for r in app.routes]
+        routes = route_paths(app)
         assert "/kasal-icon-16.png" not in routes
 
 

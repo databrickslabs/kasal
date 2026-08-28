@@ -13,7 +13,7 @@ dependencies = [
     # unchanged in Claude Code, Cursor, Codex and Gemini CLI.
     "skills-ref>=0.1.1",
     "uvicorn[standard]>=0.27.0",
-    "starlette>=0.49.1,<0.50.0", # >=0.49.1 fixes CVE-2025-54121 / CVE-2025-62727 (DoS); minimal bump from 0.40
+    "starlette>=1.0.1,<2.0.0", # every fix for PYSEC-2026-161/248/249/2280/2281 is on the 1.x line — no patched 0.49 exists
     "limits>=3.6", # API rate-limiting engine. NOTE: we use limits directly in a
     # pure-ASGI middleware (core/rate_limit.py) rather than slowapi, because
     # slowapi's SlowAPIMiddleware is BaseHTTPMiddleware and buffers streaming
@@ -52,7 +52,7 @@ dependencies = [
     # Azure
     "azure-identity>=1.15.0",
     # AI/ML
-    "litellm[caching]==1.74.9",
+    "litellm[caching]==1.84.0", # ==: the LLM path is transport-owned (OpenAI SDK); litellm only backs completion_with_usage. 1.84.0 clears PYSEC-2026-388/390/2597-2600/3476-3479 + GHSA-69x8-hrgq-fjj8
     "langchain",
     "langchain-text-splitters", # langchain 1.x moved text splitters out of core
     "mcp>=1.28.1,<1.29.0", # Kasal's own MCP integration. The floor is set by

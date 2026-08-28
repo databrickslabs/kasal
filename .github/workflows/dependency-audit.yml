@@ -63,7 +63,23 @@ jobs:
         run: |
           set -euo pipefail
           uv export --frozen --no-emit-project --no-dev --format requirements-txt > /tmp/reqs.txt
-          uvx pip-audit -r /tmp/reqs.txt
+          # --ignore-vuln is reserved for advisories with NO fixed release —
+          # nothing to upgrade to. Re-check on the weekly run and drop each id
+          # the moment upstream ships a fix.
+          #   chromadb 1.x  (CVE-2026-45830/45831/45833, PYSEC-2026-311): no
+          #     patched version published.
+          #   diskcache     (PYSEC-2026-2447): unmaintained, no fix released.
+          #   cryptography  (PYSEC-2026-3552): fixed only in 50.x, which
+          #     mlflow<4 excludes (mlflow caps cryptography <50). We are on
+          #     49.0.0 — every other cryptography advisory is cleared. Drop
+          #     this when mlflow lifts the cap or we move to mlflow 4.
+          uvx pip-audit -r /tmp/reqs.txt \
+            --ignore-vuln CVE-2026-45830 \
+            --ignore-vuln CVE-2026-45831 \
+            --ignore-vuln CVE-2026-45833 \
+            --ignore-vuln PYSEC-2026-311 \
+            --ignore-vuln PYSEC-2026-2447 \
+            --ignore-vuln PYSEC-2026-3552
 
   npm-cve:
     name: Frontend deps — lock consistency + npm audit
@@ -81,3 +97,7 @@ jobs:
         run: npm ci
       - name: CVE audit (fail on high/critical)
         run: npm audit --audit-level=high
+        # image-size is overridden with a local stub (src/frontend/stubs/) —
+        # pptxgenjs only uses it in Node builds (browser field maps it to
+        # `false`) and no fixed upstream release exists. Remove the override
+        # when upstream ships a fix.

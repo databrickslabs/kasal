@@ -1,0 +1,7 @@
+{
+  "name": "image-size",
+  "version": "99.0.0",
+  "description": "Local stub. pptxgenjs declares image-size for its Node build only — its browser field maps image-size to `false`, so Kasal's Vite bundle never includes it. Every published image-size release (<=2.0.2) carries unfixed DoS advisories (GHSA-w3rx-r6r6-pgpr, GHSA-5p2g-fcmc-qvqq) with no patched version to upgrade to, so the dependency is overridden with this inert stub. Delete the override in package.json (and this folder) when upstream ships a fixed release.",
+  "main": "index.js",
+  "license": "MIT"
+}

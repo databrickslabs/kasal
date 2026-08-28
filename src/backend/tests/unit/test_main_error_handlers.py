@@ -14,6 +14,7 @@ import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from tests.unit.route_utils import route_paths
 
 # ─── LocalDevAuthMiddleware ───────────────────────────────────────────────────
 
@@ -269,7 +270,7 @@ class TestAdditionalHandlers:
         """Verify the /health endpoint is registered."""
         from src.main import app
 
-        routes = [r.path for r in app.routes]
+        routes = route_paths(app)
         assert "/health" in routes
 
     def test_app_includes_api_router(self):
@@ -278,6 +279,6 @@ class TestAdditionalHandlers:
         from src.main import app
 
         # Check some routes contain the v1 prefix
-        routes = [r.path for r in app.routes]
+        routes = route_paths(app)
         v1_routes = [r for r in routes if settings.API_V1_STR in r]
         assert len(v1_routes) > 0
