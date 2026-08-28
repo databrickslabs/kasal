@@ -1674,14 +1674,18 @@ async def test_memory_save_emits_memory_write_trace():
     trace_instance.create_trace = AsyncMock()
 
     def _emit(captured):
-        captured["MemorySaveCompletedEvent"](
-            mock_agent.memory,
-            SimpleNamespace(
-                value="Remember the user likes Switzerland.",
-                metadata={},
-                save_time_ms=14212.6,
-                record_id="11111111-2222-3333-4444-555555555555",
-            ),
+        # The write trace comes from the SAVE HOOK on the run's Memory (bus
+        # handlers are gone before the async persist lands), registered via
+        # add_save_hook on the attached memory — the agent's own instance.
+        hook = mock_agent.memory.save_hooks[-1]
+        hook(
+            [
+                SimpleNamespace(
+                    content="Remember the user likes Switzerland.",
+                    id="11111111-2222-3333-4444-555555555555",
+                    metadata={},
+                )
+            ]
         )
 
     result, captured = await _run_with_captured_handlers(
@@ -1689,11 +1693,9 @@ async def test_memory_save_emits_memory_write_trace():
     )
 
     assert result["status"] == ExecutionStatus.COMPLETED.value
-    assert "MemorySaveCompletedEvent" in captured
     td = trace_instance.create_trace.await_args.args[0]
     assert td["event_type"] == "memory_write"
     assert "Switzerland" in td["output"]["content"]
-    assert td["trace_metadata"]["save_time_ms"] == 14212.6
     # The saved record's id — how the memory pane resolves "what this run
     # wrote" exactly, instead of guessing by completed_at time windows.
     assert td["trace_metadata"]["record_id"] == "11111111-2222-3333-4444-555555555555"
@@ -1702,7 +1704,9 @@ async def test_memory_save_emits_memory_write_trace():
 @pytest.mark.asyncio
 async def test_memory_events_for_other_run_memory_are_ignored():
     """A memory event whose source is a DIFFERENT Memory instance is dropped — no
-    cross-talk between concurrent in-process light runs."""
+    cross-talk between concurrent in-process light runs. Save tracing is
+    instance-bound by construction now (a hook ON this run's Memory), so the
+    cross-talk check drives the remaining bus-scoped handler (query)."""
     exec_id = f"light-{uuid.uuid4()}"
     config = make_config(
         agents_yaml={
@@ -1724,8 +1728,9 @@ async def test_memory_events_for_other_run_memory_are_ignored():
     trace_instance.create_trace = AsyncMock()
 
     def _emit(captured):
-        captured["MemorySaveCompletedEvent"](
-            object(), SimpleNamespace(value="leak", metadata={}, save_time_ms=1.0)
+        captured["MemoryQueryCompletedEvent"](
+            object(),
+            SimpleNamespace(query="leak", results=[1, 2], query_time_ms=1.0),
         )
 
     result, _ = await _run_with_captured_handlers(
