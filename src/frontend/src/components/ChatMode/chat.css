@@ -16,7 +16,6 @@
   --bg-secondary: #F5F7FA;
   --bg-sidebar: #F5F7FA;
   --bg-input: #FFFFFF;
-  --bg-user-msg: #EEF1F5;
   --bg-assistant-msg: transparent;
   --text-primary: #1B1F23;
   --text-secondary: #5A6872;
@@ -25,7 +24,13 @@
   --accent: #FF3621;
   --accent-hover: #E02E1B;
   /* Borderless-rail tonal + shadow tokens */
-  --bg-rail: #FFFFFF;                          /* white — flush with the canvas */
+  --bg-rail: transparent;                      /* the root vignette shows through */
+  /* Landing-stage vignette: centre stays paper-bright where the hero sits,
+     edges fall off a hair so the eye lands on the composer. The glow is a
+     whisper of accent warmth behind the hero block. */
+  --stage-center: #FFFFFF;
+  --stage-edge: #E7EBF2;
+  --stage-glow: rgba(255, 54, 33, 0.08);
   --bg-rail-hover: rgba(27, 31, 35, 0.045);    /* ~4.5% ink — whisper hover */
   --bg-active-chip: rgba(27, 31, 35, 0.075);   /* ~7.5% ink — soft filled active pill */
   --shadow-input: 0 1px 2px rgba(16, 24, 40, 0.05), 0 4px 16px rgba(16, 24, 40, 0.06);
@@ -64,7 +69,6 @@
   --bg-secondary: #232930;
   --bg-sidebar: #15191E;
   --bg-input: #232930;
-  --bg-user-msg: #2A3038;
   --bg-assistant-msg: transparent;
   --text-primary: #E8ECEF;
   --text-secondary: #A0AAB4;
@@ -73,7 +77,10 @@
   --accent: #FF3621;
   --accent-hover: #FF5A47;
   /* Borderless-rail tonal + shadow tokens */
-  --bg-rail: #15191E;                          /* reuse the darker sidebar tone */
+  --bg-rail: transparent;                      /* the root vignette shows through */
+  --stage-center: #21272E;
+  --stage-edge: #101317;
+  --stage-glow: rgba(255, 54, 33, 0.12);
   --bg-rail-hover: rgba(255, 255, 255, 0.05);
   --bg-active-chip: rgba(255, 255, 255, 0.085);
   --shadow-input: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.35);
@@ -115,6 +122,7 @@
   display: flex;
   width: 100%;
   height: 100%;
+  position: relative;
   font-family: 'Söhne', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
     Roboto, 'Helvetica Neue', Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -486,4 +494,52 @@
 @keyframes kasalThinkingDot {
   0%, 60%, 100% { opacity: 0; }
   20%, 40% { opacity: 1; }
+}
+
+/* ── Landing stage — the first-open "What can I help you with?" screen ──
+   A soft radial vignette (bright centre, gently darker edges) plus a large,
+   ultra-diffuse glow behind the hero block pull focus to the centered chat.
+   Both are token-driven so light and dark stay tuned independently. */
+.kasal-chat-root .kasal-landing-hero {
+  position: relative;
+}
+.kasal-chat-root .kasal-landing-hero::before {
+  content: '';
+  position: absolute;
+  inset: -14% -20%;
+  background: radial-gradient(
+    ellipse 62% 58% at 50% 42%,
+    var(--stage-glow) 0%,
+    transparent 70%
+  );
+  pointer-events: none;
+}
+/* Hero content sits above its own glow. */
+.kasal-chat-root .kasal-landing-hero > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Stage vignette — ONE fixed layer for the whole viewport ──
+   Painted once behind everything; the top bar and sidebar rails are
+   transparent over it, so bar + rail + stage read as a single surface with a
+   continuous falloff. Brightest around the chat input (50% x, ~58% y is the
+   landing composer), shadowing gently toward every edge and corner. */
+.kasal-chat-root::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 80% 62% at 50% 58%,
+    var(--stage-center) 0%,
+    var(--bg-primary) 42%,
+    var(--stage-edge) 100%
+  );
+}
+/* Chat content sits above the fixed vignette layer. */
+.kasal-chat-root > * {
+  position: relative;
+  z-index: 1;
 }

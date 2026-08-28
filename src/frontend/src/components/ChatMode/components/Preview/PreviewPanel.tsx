@@ -229,8 +229,10 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
       style={{
         flex: chatCollapsed ? '1 1 100%' : '1 1 50%',
         minWidth: '300px',
-        backgroundColor: 'var(--bg-primary)',
-        borderLeft: chatCollapsed ? 'none' : '1px solid var(--border-color)',
+        // Transparent over the chat root's fixed vignette — the pane is part of
+        // the same surface, not a second panel bolted beside it.
+        backgroundColor: 'transparent',
+        borderLeft: 'none',
       }}
     >
       {/* Header — hidden entirely in full screen for a chrome-free view (exit with
@@ -240,7 +242,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
       {!embedded && (
       <div
         className="flex items-center justify-between px-4 py-3 flex-shrink-0"
-        style={{ borderBottom: '1px solid var(--border-color)' }}
+        style={{ borderBottom: '1px solid var(--bg-rail-hover)' }}
       >
         <div className="flex items-center gap-2">
           {/* Toggle chat button — only when there's a chat column beside the pane */}

@@ -448,7 +448,7 @@ const ChatWorkspace: React.FC = () => {
 
 
   return (
-    <div id="kasal-chat-root" className="kasal-chat-root h-full w-full flex" style={{ backgroundColor: 'var(--bg-primary)' }}>
+    <div id="kasal-chat-root" className="kasal-chat-root h-full w-full flex">
       {/* Sidebar — collapses to a slim icon rail, never fully disappears */}
       {!sidebarOpen && <CollapsedRail onNewChat={handleNewChat} />}
       {sidebarOpen && (
@@ -456,23 +456,9 @@ const ChatWorkspace: React.FC = () => {
           className="w-64 flex flex-col flex-shrink-0"
           style={{ backgroundColor: 'var(--bg-rail)' }}
         >
-          {/* Icon-only header row: panel toggle left, new chat right. The panel
-              icon is the ONE sidebar toggle (mirrored in CollapsedRail) — the
-              old header hamburger duplicated it and is gone. A bare "+" reads
-              fine without a "New Chat" label chip. */}
-          <div className="px-3 pt-3 pb-1 flex items-center justify-between">
-            <button
-              type="button"
-              onClick={() => useAppStore.getState().setSidebarOpen(false)}
-              className="w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center transition-colors hover:bg-[var(--bg-rail-hover)]"
-              style={{ color: 'var(--text-secondary)' }}
-              aria-label="Hide chat history"
-            >
-              <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
-                <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
-                <path strokeLinecap="round" d="M9.5 4.5v15" />
-              </svg>
-            </button>
+          {/* Icon-only header row — just "+" (new chat); the sidebar toggle is
+              the one fixed control in the top bar (SidebarToggle). */}
+          <div className="px-3 pt-3 pb-1 flex items-center justify-end">
             <button
               type="button"
               onClick={handleNewChat}

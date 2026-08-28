@@ -9,10 +9,9 @@ describe('CollapsedRail', () => {
     useAppStore.setState({ sidebarOpen: false, theme: 'light', catalogOpen: false, savedCrews: [], savedFlows: [] });
   });
 
-  it('expands the sidebar from the rail', () => {
+  it('has no expand control of its own — that is the top-bar SidebarToggle', () => {
     render(<CollapsedRail onNewChat={() => {}} />);
-    fireEvent.click(screen.getByLabelText('Show chat history'));
-    expect(useAppStore.getState().sidebarOpen).toBe(true);
+    expect(screen.queryByLabelText('Show chat history')).toBeNull();
   });
 
   it('starts a new chat from the rail', () => {

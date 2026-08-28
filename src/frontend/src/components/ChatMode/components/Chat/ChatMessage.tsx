@@ -369,10 +369,9 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
     return (
       <div className="flex justify-end mb-5 px-4">
         <div className="max-w-[75%] flex flex-col items-end gap-1.5">
-          <div
-            className="rounded-3xl rounded-br-lg px-5 py-3"
-            style={{ backgroundColor: 'var(--bg-user-msg)' }}
-          >
+          {/* No bubble fill — the question sits on the stage like everything
+              else; right-alignment alone marks it as the user's turn. */}
+          <div className="px-5 py-3">
             <div className="text-[15px] leading-relaxed" style={{ color: 'var(--text-primary)' }}>
               {message.content}
             </div>
