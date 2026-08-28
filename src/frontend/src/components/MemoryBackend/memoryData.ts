@@ -321,6 +321,23 @@ export function extractSavedIds(traces: MemoryTrace[] | undefined): Set<string> 
   return ids;
 }
 
+/**
+ * Whether this run's traces are NEW-format (memory events stamped with record
+ * ids). On such runs an empty extractSavedIds() means the run truly saved
+ * nothing (yet — writes land after the answer), and callers must NOT fall
+ * back to time-window guessing, which attributes OTHER runs' records to this
+ * one. Old-format runs (no stamps anywhere) keep the fallback.
+ */
+export function tracesCarryIds(traces: MemoryTrace[] | undefined): boolean {
+  for (const tr of traces || []) {
+    if (!/memory_/.test(tr.event_type || '')) continue;
+    if (structuredIds(tr, 'record_ids').length || structuredIds(tr, 'record_id').length) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Symmetric co-occurrence map → unique undirected edge list for the graph. */
 export function coOccurrenceEdges(
   index: DerivedIndex,

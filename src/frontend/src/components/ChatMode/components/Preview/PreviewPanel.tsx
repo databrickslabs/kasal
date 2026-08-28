@@ -142,6 +142,14 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
   // clicked step's content opens — showing the timeline here as well put the
   // same list on both halves of the screen.
   const [activeStep, setActiveStep] = useState<RunStep | null>(null);
+  // NEW content shown in the pane dismisses a step view left over from the
+  // previous content — e.g. clicking "Memory graph" while a step page was
+  // open used to load the memory pane BEHIND the step view. Declared before
+  // the focusStep effect so a step-row click (which changes content and
+  // focusStep in the same commit) still lands on its step.
+  useEffect(() => {
+    setActiveStep(null);
+  }, [content.type, content.data]);
   // A step ROW clicked in the chat's activity dropdown lands the pane directly
   // on that step's content; "Back" returns to the deliverable.
   useEffect(() => {

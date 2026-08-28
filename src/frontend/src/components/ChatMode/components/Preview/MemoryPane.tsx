@@ -222,7 +222,7 @@ const MemoryPane: React.FC<{ runId: string }> = ({ runId }) => {
         <div className="mt-6 text-[13px]" style={{ color: 'var(--text-muted)' }}>
           {memory.mode === 'recalled'
             ? 'This run recalled nothing from memory.'
-            : 'This run saved nothing to memory.'}
+            : 'Nothing saved by this run — memory records land after the run finishes.'}
         </div>
       ) : view === 'graph' ? (
         <div className="mt-3">

@@ -80,8 +80,10 @@ const PreviewSkeleton: React.FC<PreviewSkeletonProps> = ({ focusStep, running = 
       style={{
         flex: '1 1 50%',
         minWidth: '300px',
-        backgroundColor: 'var(--bg-primary)',
-        borderLeft: '1px solid var(--border-color)',
+        // Transparent over the chat root's fixed vignette — same one-surface
+        // treatment as PreviewPanel; an opaque pane read as a foreign panel.
+        backgroundColor: 'transparent',
+        borderLeft: 'none',
       }}
       aria-busy={running}
       aria-label={running ? 'Building preview' : 'Run activity'}
@@ -89,7 +91,7 @@ const PreviewSkeleton: React.FC<PreviewSkeletonProps> = ({ focusStep, running = 
       {/* Header — mirrors PreviewPanel's so the swap to the live renderer is seamless */}
       <div
         className="flex items-center gap-2 px-4 py-3 flex-shrink-0"
-        style={{ borderBottom: '1px solid var(--border-color)' }}
+        style={{ borderBottom: '1px solid var(--bg-rail-hover)' }}
       >
         <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
           {running ? 'Running agent…' : 'Run activity'}
@@ -123,7 +125,7 @@ const PreviewSkeleton: React.FC<PreviewSkeletonProps> = ({ focusStep, running = 
             type="button"
             onClick={() => setActiveStep(null)}
             className="flex items-center gap-1.5 w-full px-4 py-2 flex-shrink-0 text-left text-[11px] font-medium transition-colors hover:opacity-80"
-            style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-color)' }}
+            style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--bg-rail-hover)' }}
             aria-label="Back to the run activity"
           >
             <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

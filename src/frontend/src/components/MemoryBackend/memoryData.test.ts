@@ -3,6 +3,7 @@ import {
   MemoryRecord,
   coOccurrenceEdges,
   extractSavedIds,
+  tracesCarryIds,
   deriveIndex,
   extractRecalledIds,
   recordsSavedInRun,
@@ -128,5 +129,25 @@ describe('extractSavedIds', () => {
 
   it('is empty for pre-id traces so callers fall back to the time window', () => {
     expect(extractSavedIds([{ event_type: 'memory_write', output: 'saved a thing' }]).size).toBe(0);
+  });
+});
+
+
+describe('tracesCarryIds', () => {
+  it('detects new-format runs by any id-stamped memory trace', () => {
+    expect(
+      tracesCarryIds([
+        { event_type: 'memory_retrieval', trace_metadata: { record_ids: ['a'] } },
+      ]),
+    ).toBe(true);
+    expect(
+      tracesCarryIds([{ event_type: 'memory_write', trace_metadata: { record_id: 'w' } }]),
+    ).toBe(true);
+  });
+
+  it('is false for old-format traces and non-memory events', () => {
+    expect(tracesCarryIds([{ event_type: 'memory_retrieval', output: "id='x'" }])).toBe(false);
+    expect(tracesCarryIds([{ event_type: 'llm_call', trace_metadata: { record_id: 'x' } }])).toBe(false);
+    expect(tracesCarryIds(undefined)).toBe(false);
   });
 });
