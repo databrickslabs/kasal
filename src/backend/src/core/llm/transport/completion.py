@@ -59,7 +59,15 @@ from .response_parsing import (
     split_message_content,
 )
 from .rpm import throttle
-from .tool_rounds import run_chat_round, run_responses_round
+from .tool_rounds import (
+    RepeatGuard,
+    run_chat_round,
+    run_responses_round,
+    salvage_last_assistant_text,
+    strip_tool_markup,
+    stub_repeated_chat_round,
+    stub_repeated_responses_round,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -620,6 +628,12 @@ class OpenAICompletion(BaseLLM):
         except Exception as wrapup_failed:
             logger.warning("wrap-up call after %s failed: %s", error, wrapup_failed)
             raise error from wrapup_failed
+        # The wrap-up must not hand back un-executed tool-call markup either —
+        # that is exactly the state a degenerate model is stuck in when the
+        # budget goes. Fall back to the last real assistant text.
+        cleaned = strip_tool_markup(text)
+        if cleaned != (text or "").strip():
+            text = cleaned or salvage_last_assistant_text(conversation)
         if not (text and text.strip()):
             raise error
         logger.warning("budget spent (%s); answered from what was gathered", error)
@@ -929,6 +943,7 @@ class OpenAICompletion(BaseLLM):
         # reported against this one. Both API paths share the emit site.
         self._reasoning_text = ""
         rounds, deadline = self._execution_budget(from_agent)
+        repeat_guard = RepeatGuard()
         for _round in range(rounds):
             self._check_deadline(deadline, _round, conversation)
             throttle(from_agent)
@@ -967,6 +982,16 @@ class OpenAICompletion(BaseLLM):
                 return function_calls, usage, LLMCallType.TOOL_CALL
             if function_calls and available_functions:
                 call_type = LLMCallType.TOOL_CALL
+                # A batch identical to the last two is a degenerate loop (the
+                # 21-times browser_close run): stop executing it, tell the
+                # model to answer, and one repeat later drop the tools so the
+                # next round CAN only answer.
+                repeats = repeat_guard.observe(function_calls)
+                if repeats >= 2:
+                    stub_repeated_chat_round(conversation, content, function_calls)
+                    if repeats >= 3:
+                        tools = None
+                    continue
                 outcome = run_chat_round(
                     conversation,
                     content,
@@ -984,13 +1009,16 @@ class OpenAICompletion(BaseLLM):
                         usage,
                     )
                 continue
-            return (
-                self._answer_or_recover(
-                    content, usage, self._reasoning_text[reasoning_mark:]
-                ),
-                usage,
-                call_type,
+            answer = self._answer_or_recover(
+                content, usage, self._reasoning_text[reasoning_mark:]
             )
+            # A "final answer" that is un-executed tool-call markup is not an
+            # answer. Strip it; if nothing is left, the last real assistant
+            # text (the sentence before the loop degenerated) beats XML soup.
+            cleaned = strip_tool_markup(answer)
+            if cleaned != (answer or "").strip():
+                answer = cleaned or salvage_last_assistant_text(conversation) or answer
+            return answer, usage, call_type
         return self._answer_within_budget(
             rounds_exhausted(rounds, self.model, conversation), conversation, usage
         )
@@ -1264,6 +1292,7 @@ class OpenAICompletion(BaseLLM):
         # reported against this one. Both API paths share the emit site.
         self._reasoning_text = ""
         rounds, deadline = self._execution_budget(from_agent)
+        repeat_guard = RepeatGuard()
         for _round in range(rounds):
             self._check_deadline(deadline, _round, conversation)
             throttle(from_agent)
@@ -1282,6 +1311,13 @@ class OpenAICompletion(BaseLLM):
                 return function_calls, usage, LLMCallType.TOOL_CALL
             if function_calls and available_functions:
                 call_type = LLMCallType.TOOL_CALL
+                # Same degenerate-loop breaker as the chat path.
+                repeats = repeat_guard.observe(function_calls)
+                if repeats >= 2:
+                    stub_repeated_responses_round(conversation, function_calls)
+                    if repeats >= 3:
+                        tools = None
+                    continue
                 outcome = run_responses_round(
                     conversation,
                     function_calls,
@@ -1298,13 +1334,13 @@ class OpenAICompletion(BaseLLM):
                         usage,
                     )
                 continue
-            return (
-                self._answer_or_recover(
-                    text, usage, self._reasoning_text[reasoning_mark:]
-                ),
-                usage,
-                call_type,
+            answer = self._answer_or_recover(
+                text, usage, self._reasoning_text[reasoning_mark:]
             )
+            cleaned = strip_tool_markup(answer)
+            if cleaned != (answer or "").strip():
+                answer = cleaned or salvage_last_assistant_text(conversation) or answer
+            return answer, usage, call_type
         return self._answer_within_budget(
             rounds_exhausted(rounds, self.model, conversation), conversation, usage
         )

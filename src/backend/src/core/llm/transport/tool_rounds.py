@@ -180,3 +180,149 @@ def run_responses_round(
             }
         )
     return outcome
+
+
+# ---------------------------------------------------------------------------
+# Degenerate-loop defenses
+# ---------------------------------------------------------------------------
+# Observed: a weak model closed an already-closed browser 21 times in a row —
+# each round announcing its final answer and then re-issuing the identical
+# call — and the run ended by returning the model's raw tool-call MARKUP as
+# the "answer". Two defenses, both model-agnostic:
+#   1. RepeatGuard — identical call batches stop being executed after the
+#      second repeat; the model gets a stub result telling it to answer, and
+#      one more repeat after that drops the tools entirely.
+#   2. strip_tool_markup / salvage_last_assistant_text — un-executed tool-call
+#      syntax never leaves the transport as an answer.
+
+#: Told to the model instead of re-running a call it has already made with the
+#: same arguments. Phrased as a tool result, like SKIPPED_RESULT.
+REPEATED_RESULT = (
+    "Not executed: you have already made this exact call and its result will "
+    "not change. STOP calling tools — write your complete final answer now."
+)
+
+
+def calls_signature(function_calls: list[dict[str, Any]]) -> str:
+    """A stable identity for one round's batch: names + arguments, order kept."""
+    try:
+        import json as _json
+
+        return _json.dumps(
+            [
+                {"n": c.get("name"), "a": c.get("arguments")}
+                for c in (function_calls or [])
+            ],
+            sort_keys=True,
+            default=str,
+        )
+    except Exception:  # noqa: BLE001 — a guard must never break the loop
+        return str(function_calls)
+
+
+@dataclass
+class RepeatGuard:
+    """Counts CONSECUTIVE identical call batches across rounds.
+
+    ``observe`` returns how many times in a row this exact batch has now been
+    seen beyond the first (0 = fresh). The caller acts on the count: at 2 the
+    batch is stubbed instead of executed; at 3+ it also drops the tools so the
+    next round can only produce an answer.
+    """
+
+    last: str | None = None
+    repeats: int = 0
+
+    def observe(self, function_calls: list[dict[str, Any]]) -> int:
+        sig = calls_signature(function_calls)
+        self.repeats = self.repeats + 1 if sig == self.last else 0
+        self.last = sig
+        return self.repeats
+
+
+def stub_repeated_chat_round(
+    conversation: list[dict[str, Any]],
+    content: str | None,
+    function_calls: list[dict[str, Any]],
+) -> None:
+    """Answer a repeated batch with REPEATED_RESULT stubs (Chat shape).
+
+    The assistant turn still enters the conversation — a turn whose
+    ``tool_calls`` have no matching results is malformed — but nothing runs.
+    """
+    conversation.append(
+        {
+            "role": "assistant",
+            "content": content,
+            "tool_calls": [
+                {
+                    "id": call["id"],
+                    "type": "function",
+                    "function": {
+                        "name": call["name"],
+                        "arguments": call["arguments"],
+                    },
+                }
+                for call in function_calls
+            ],
+        }
+    )
+    for call in function_calls:
+        conversation.append(
+            {"role": "tool", "tool_call_id": call["id"], "content": REPEATED_RESULT}
+        )
+
+
+def stub_repeated_responses_round(
+    conversation: list[dict[str, Any]],
+    function_calls: list[dict[str, Any]],
+) -> None:
+    """Answer a repeated batch with REPEATED_RESULT stubs (Responses shape)."""
+    for call in function_calls:
+        conversation.append(
+            {
+                "type": "function_call_output",
+                "call_id": call["id"],
+                "output": REPEATED_RESULT,
+            }
+        )
+
+
+#: Un-executed tool-call syntax, in the shapes self-hosted function-calling
+#: models emit as plain text when they degenerate: <tool_call>...</tool_call>
+#: blocks and stray <function=...>/<parameter=...> fragments.
+import re as _re
+
+_TOOL_MARKUP_RE = _re.compile(
+    r"<tool_call>[\s\S]*?(?:</tool_call>|$)"
+    r"|</?function[^>]*>"
+    r"|</?parameter[^>]*>"
+    r"|</?tool_call>",
+    _re.IGNORECASE,
+)
+
+
+def strip_tool_markup(text: str | None) -> str:
+    """Remove un-executed tool-call syntax from an answer. '' when that is all
+    the text was — the caller decides what to fall back to."""
+    if not text:
+        return ""
+    return _TOOL_MARKUP_RE.sub("", text).strip()
+
+
+def salvage_last_assistant_text(conversation: list[dict[str, Any]]) -> str:
+    """The last real thing the model SAID, for a turn that ended in markup.
+
+    Walks backwards over assistant turns and returns the first content that
+    survives ``strip_tool_markup`` — e.g. the "Now I'll build the deck" line
+    before the loop degenerated. '' when there is none.
+    """
+    for message in reversed(conversation or []):
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            cleaned = strip_tool_markup(content)
+            if cleaned:
+                return cleaned
+    return ""
