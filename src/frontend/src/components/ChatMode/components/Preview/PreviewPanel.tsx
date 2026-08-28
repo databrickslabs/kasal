@@ -9,6 +9,7 @@ import { useA2uiThemes } from '../../hooks/useA2uiThemes';
 import A2uiSurface from '../Chat/A2uiSurface';
 import MessageContent from '../Chat/MessageContent';
 import { type RunStep } from './traceEventStep';
+import MemoryPane from './MemoryPane';
 import StepContent from './StepContent';
 import RefinePanel from './RefinePanel';
 
@@ -36,7 +37,10 @@ const SURFACE_TO_DELIVERABLE: Record<string, string> = {
 // 'text' = a plain-text / markdown answer (chat-mode responses), shown in the
 // pane on demand via the run-activity "Show in panel" icon — it has no A2UI
 // controls (no Customize/refine, no PPTX export), just the rendered markdown.
-export type PreviewContentType = 'ui' | 'text';
+// 'memory' = a run's memory (concept graph + records); `data` holds the run's
+// job id and MemoryPane fetches/derives the rest. Like 'text' it has none of
+// the A2UI machinery.
+export type PreviewContentType = 'ui' | 'text' | 'memory';
 
 export interface PreviewContent {
   type: PreviewContentType;
@@ -152,11 +156,16 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
   // every A2UI-only control below additionally gates on `uiSurface`, which is null
   // here, so they hide automatically.
   const isText = content.type === 'text';
+  const isMemory = content.type === 'memory';
 
   // Coerce the stored content into the shared Surface (handles the new envelope,
   // a bare surface, or an older legacy doc — adapted). A2uiSurface re-resolves the
   // workspace branding (and any per-surface "Look" restyle) at render time.
-  const uiSurface = useMemo(() => toSurface(displayData), [displayData]) as ThemedSurface | null;
+  // 'memory' data is a job id, not a document — never try to parse it.
+  const uiSurface = useMemo(
+    () => (isMemory ? null : toSurface(displayData)),
+    [displayData, isMemory],
+  ) as ThemedSurface | null;
   // A deck is fit to the available HEIGHT (letterboxed, no scroll) so the whole
   // slide shows. Other surfaces (documents, dashboards) are tall content — they
   // keep the natural width + vertical scroll. Detect a deck by an actual SlideDeck
@@ -525,6 +534,8 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
             <MessageContent content={displayData} />
           </div>
         )}
+        {/* A run's memory — chat-styled graph/record views (see MemoryPane). */}
+        {!activeStep && !uiSurface && isMemory && <MemoryPane runId={content.data} />}
       </div>
     </aside>
   );

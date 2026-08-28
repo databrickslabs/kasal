@@ -25,14 +25,8 @@ vi.mock('../../../../store/uiLayout', () => ({
 }));
 
 // Stub the heavy browser; assert it opens scoped to the run + graph view.
-vi.mock('../../../MemoryBackend/MemoryRecordsBrowser', () => ({
-  MemoryRecordsBrowser: (props: { open: boolean; initialRunId?: string; initialView?: string }) =>
-    props.open ? (
-      <div data-testid="memory-graph" data-run={props.initialRunId} data-view={props.initialView} />
-    ) : null,
-}));
-
 import CrewActionsBar from './CrewActionsBar';
+import { useExecutionStore } from '../../store/executionStore';
 import { CrewNameConflictError } from '../../api/crews';
 
 const DATA = { agents: [{ name: 'A' }], tasks: [{ name: 'T' }] } as never;
@@ -183,7 +177,7 @@ describe('CrewActionsBar', () => {
     expect(screen.getByLabelText('View memory graph')).toBeInTheDocument();
   });
 
-  it('opens the run-scoped memory graph (graph view) on click', () => {
+  it('opens the run memory in the RIGHT PANE (not a dialog) on click', () => {
     render(
       <CrewActionsBar
         data={DATA}
@@ -194,9 +188,9 @@ describe('CrewActionsBar', () => {
       />,
     );
     fireEvent.click(screen.getByLabelText('View memory graph'));
-    const graph = screen.getByTestId('memory-graph');
-    expect(graph).toHaveAttribute('data-run', 'job-9');
-    expect(graph).toHaveAttribute('data-view', 'graph');
+    const st = useExecutionStore.getState();
+    expect(st.previewPaneOpen).toBe(true);
+    expect(st.previewContent).toMatchObject({ type: 'memory', data: 'job-9' });
   });
 
   it('hides the memory-graph button when there is no run id', () => {
