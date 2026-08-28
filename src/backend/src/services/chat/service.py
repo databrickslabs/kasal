@@ -567,7 +567,6 @@ class LightAgentService:
                     LLMStreamChunkEvent,
                     MemoryQueryCompletedEvent,
                     MemoryRetrievalCompletedEvent,
-                    MemorySaveCompletedEvent,
                     ToolUsageErrorEvent,
                     ToolUsageFinishedEvent,
                     ToolUsageStartedEvent,
@@ -917,28 +916,33 @@ class LightAgentService:
                             f"[light_agent] memory-retrieval trace skipped: {h_err}"
                         )
 
-                def _on_memory_save(source, event) -> None:
+                def _on_records_saved(records) -> None:
+                    # Save-hook on THIS run's Memory instance (see
+                    # Memory.add_save_hook) — NOT a bus handler: the bus
+                    # handlers are unregistered in kickoff's finally, and the
+                    # chat turn persist (remember_async) is submitted AFTER
+                    # that, so a bus handler structurally never saw chat-path
+                    # writes and the trace had no "Memory Write" row. The hook
+                    # fires inside Memory.remember whenever the write actually
+                    # lands — mid-kickoff (CrewAI-engine self-saves) or after
+                    # completion — and the instance scoping replaces
+                    # _matches_memory.
                     try:
-                        if not _matches_memory(source):
-                            return
-                        val = getattr(event, "value", None)
-                        content = "" if val is None else _cap(str(val))
-                        sms = getattr(event, "save_time_ms", None)
-                        extra: Dict[str, Any] = {}
-                        if sms is not None:
-                            extra["save_time_ms"] = float(sms)
-                        rid = getattr(event, "record_id", None)
-                        if rid:
-                            extra["record_id"] = str(rid)
-                        out = {
-                            "tool_name": "Memory",
-                            "content": content,
-                            "extra_data": extra,
-                        }
-                        td = _base_trace("memory_write", out, "Memory")
-                        td["trace_metadata"].update(extra)
-                        _log("Memory write")
-                        _schedule_trace(td)
+                        for record in records or []:
+                            content = _cap(str(getattr(record, "content", "") or ""))
+                            extra: Dict[str, Any] = {}
+                            rid = getattr(record, "id", None)
+                            if rid:
+                                extra["record_id"] = str(rid)
+                            out = {
+                                "tool_name": "Memory",
+                                "content": content,
+                                "extra_data": extra,
+                            }
+                            td = _base_trace("memory_write", out, "Memory")
+                            td["trace_metadata"].update(extra)
+                            _log("Memory write")
+                            _schedule_trace(td)
                     except Exception as h_err:  # noqa: BLE001
                         logger.debug(
                             f"[light_agent] memory-save trace skipped: {h_err}"
@@ -1203,7 +1207,10 @@ class LightAgentService:
                 event_bus.register_handler(
                     MemoryRetrievalCompletedEvent, _on_memory_retrieval
                 )
-                event_bus.register_handler(MemorySaveCompletedEvent, _on_memory_save)
+                if _agent_memory is not None:
+                    _add_save_hook = getattr(_agent_memory, "add_save_hook", None)
+                    if callable(_add_save_hook):
+                        _add_save_hook(_on_records_saved)
                 event_bus.register_handler(
                     LiteAgentExecutionStartedEvent, _on_agent_started
                 )
@@ -1356,7 +1363,6 @@ class LightAgentService:
                         event_bus.off(
                             MemoryRetrievalCompletedEvent, _on_memory_retrieval
                         )
-                        event_bus.off(MemorySaveCompletedEvent, _on_memory_save)
                         event_bus.off(LiteAgentExecutionStartedEvent, _on_agent_started)
                         event_bus.off(
                             LiteAgentExecutionCompletedEvent, _on_agent_completed

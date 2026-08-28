@@ -132,6 +132,32 @@ class MemoryRecord(BaseModel):
         """True when this record has not been retired."""
         return self.valid_to is None
 
+    # ── CrewAI MemoryMatch surface ─────────────────────────────────────────
+    # On the CrewAI engine this Memory is attached straight to a LiteAgent,
+    # whose recall consumers iterate crewai.memory.types.MemoryMatch objects:
+    # ``m.record.content`` / ``m.record.id`` (lite_agent._inject_memory_context,
+    # tools/memory_tools dedupe) and ``m.format()``. Kasal's recall() returns
+    # the records themselves — without this surface every one of those sites
+    # raised AttributeError inside crewai's broad try/except, so recalled
+    # memory was retrieved and then silently NEVER injected into the prompt
+    # (observed live: three recalls carrying the right fact, zero of them in
+    # any LLM request). The record acts as its own match.
+
+    @property
+    def record(self) -> "MemoryRecord":
+        return self
+
+    @property
+    def score(self) -> float:
+        value = (self.metadata or {}).get("similarity")
+        return float(value) if isinstance(value, (int, float)) else 0.0
+
+    def format(self) -> str:
+        lines = [f"- (score={self.score:.2f}) {self.content}"]
+        if self.categories:
+            lines.append(f"  categories: {', '.join(self.categories)}")
+        return "\n".join(lines)
+
 
 class ScopeInfo(BaseModel):
     """Engine replacement for crewai.memory.types.ScopeInfo"""

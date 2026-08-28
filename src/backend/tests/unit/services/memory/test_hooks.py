@@ -140,6 +140,62 @@ class TestFormatTurn:
         assert "\nAssistant: " in text
         assert len(text) <= 2100
 
+    def test_strips_run_grounding_scaffold(self):
+        """Every run shares the grounding wrapper; storing it made every record
+        embed close to every scaffolded query (the off-topic-recall bug). The
+        record must carry the REQUEST alone."""
+        prompt = (
+            "Respond directly and helpfully to the user's request. "
+            "USER REQUEST — this run exists to answer it:\n"
+            "create a diagram around genie ontology "
+            "MCP data sources attached — query them for data questions."
+        )
+        text = format_turn_for_memory(prompt, "done")
+        assert text == "User: create a diagram around genie ontology\nAssistant: done"
+
+    def test_strips_expected_output_and_tool_hint(self):
+        prompt = (
+            "provide me swiss news : browser Expected output: "
+            "A helpful, complete answer to the user's request."
+        )
+        text = format_turn_for_memory(prompt, "done")
+        assert text == "User: provide me swiss news\nAssistant: done"
+
+
+class TestRecallRelevanceCliff:
+    """_select_records drops storage candidates far below the recall's best."""
+
+    def _rec(self, content, sim):
+        record = MemoryRecord(content=content, source="chat")
+        record.metadata["similarity"] = sim
+        return record
+
+    def test_drops_the_far_tail_keeps_the_cluster(self):
+        records = [
+            self._rec("top match", 0.90),
+            self._rec("close second", 0.85),
+            self._rec("filler A", 0.60),
+            self._rec("filler B", 0.58),
+        ]
+        block = build_memory_preamble(_memory_with(records), "the query")
+        assert "top match" in block
+        assert "close second" in block
+        assert "filler A" not in block
+        assert "filler B" not in block
+
+    def test_unscored_records_pass_untouched(self):
+        plain = MemoryRecord(content="no similarity stamp", source="chat")
+        block = build_memory_preamble(
+            _memory_with([self._rec("top match", 0.90), plain]), "the query"
+        )
+        assert "no similarity stamp" in block
+
+    def test_cliff_width_is_env_tunable(self, monkeypatch):
+        monkeypatch.setenv("KASAL_MEMORY_RECALL_MAX_DROP", "0.5")
+        records = [self._rec("top match", 0.90), self._rec("filler A", 0.60)]
+        block = build_memory_preamble(_memory_with(records), "the query")
+        assert "filler A" in block  # 0.6 >= 0.9 - 0.5
+
 
 class TestInjectTaskMemory:
     def test_appends_block_to_descriptions(self):
@@ -220,3 +276,51 @@ class TestTaskOutputPersistence:
         crew = SimpleNamespace(memory=None, tasks=[])
         unregister = register_task_output_persistence(crew)
         unregister()  # no raise
+
+
+class TestRecallDefaultFloor:
+    """Memory.recall applies the calibrated floor when the caller passes none."""
+
+    def _memory(self):
+        from unittest.mock import MagicMock
+
+        from src.services.memory.engine.memory import Memory
+
+        storage = MagicMock()
+        storage.search.return_value = []
+        return Memory(storage=storage), storage
+
+    def test_default_floor_is_calibrated_and_env_tunable(self, monkeypatch):
+        memory, storage = self._memory()
+        memory.recall("q")
+        assert storage.search.call_args.kwargs["score_threshold"] == 0.75
+
+        monkeypatch.setenv("KASAL_MEMORY_RECALL_MIN_SCORE", "0.6")
+        memory.recall("q")
+        assert storage.search.call_args.kwargs["score_threshold"] == 0.6
+
+    def test_explicit_zero_disables_the_floor(self):
+        memory, storage = self._memory()
+        memory.recall("q", score_threshold=0.0)
+        assert storage.search.call_args.kwargs["score_threshold"] == 0.0
+
+
+class TestCrewAIMatchSurface:
+    """MemoryRecord serves as its own crewai MemoryMatch — the CrewAI engine
+    attaches Kasal's Memory to a LiteAgent whose recall consumers read
+    ``m.record.*`` and ``m.format()``. Without the surface, recalled memory
+    raised inside crewai's try/except and was silently never injected."""
+
+    def test_lite_agent_injection_expression_works(self):
+        r = MemoryRecord(content="Rony Fahed is a basketball player", source="chat")
+        r.metadata["similarity"] = 0.83
+        # crewai.lite_agent._inject_memory_context, verbatim shape:
+        block = "Relevant memories:\n" + "\n".join(f"- {m.record.content}" for m in [r])
+        assert "basketball player" in block
+
+    def test_memory_tools_dedupe_and_format(self):
+        r = MemoryRecord(content="fact", source="chat", categories=["sports"])
+        assert r.record.id == r.id  # tools/memory_tools dedupe key
+        formatted = r.format()
+        assert formatted.startswith("- (score=0.00) fact")
+        assert "sports" in formatted

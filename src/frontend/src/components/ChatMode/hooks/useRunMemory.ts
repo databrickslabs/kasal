@@ -20,6 +20,7 @@ import {
   extractSavedIds,
   recordsSavedInRun,
   timeMs,
+  tracesCarryIds,
 } from '../../MemoryBackend/memoryData';
 
 export type MemoryMode = 'saved' | 'recalled';
@@ -45,6 +46,7 @@ export function useRunMemory(runId: string): RunMemory {
   const [runs, setRuns] = useState<Run[]>([]);
   const [recalledIds, setRecalledIds] = useState<Set<string>>(new Set());
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  const [idStamped, setIdStamped] = useState(false);
   const [mode, setMode] = useState<MemoryMode>('saved');
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -79,6 +81,7 @@ export function useRunMemory(runId: string): RunMemory {
         );
         setRecalledIds(extractRecalledIds(tracesResp.data?.traces));
         setSavedIds(extractSavedIds(tracesResp.data?.traces));
+        setIdStamped(tracesCarryIds(tracesResp.data?.traces));
       } catch (err: unknown) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : String(err));
@@ -98,14 +101,17 @@ export function useRunMemory(runId: string): RunMemory {
       if (recalledIds.size === 0) return [];
       return allRecords.filter((r) => r.id && recalledIds.has(r.id));
     }
-    // Saved: exact when the run's memory_write traces carry record ids;
-    // otherwise (older runs, pre-id traces) fall back to the completed_at
-    // time window — which mis-scopes when chat runs overlap, so ids win.
+    // Saved: exact when the run's memory_write traces carry record ids. A
+    // NEW-format run (any id-stamped memory trace) with no write ids truly
+    // saved nothing YET — writes land after the answer — and must show empty
+    // rather than fall back. The completed_at window remains only for
+    // old-format runs, whose traces predate the id stamps.
     if (savedIds.size > 0) {
       return allRecords.filter((r) => r.id && savedIds.has(r.id));
     }
+    if (idStamped) return [];
     return recordsSavedInRun(allRecords, runs, runId);
-  }, [allRecords, runs, runId, mode, recalledIds, savedIds]);
+  }, [allRecords, runs, runId, mode, recalledIds, savedIds, idStamped]);
 
   const index = useMemo(() => deriveIndex(records), [records]);
   const edges = useMemo(() => coOccurrenceEdges(index), [index]);

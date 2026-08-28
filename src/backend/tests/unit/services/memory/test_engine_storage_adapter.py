@@ -315,3 +315,29 @@ class TestBuildLitellmEmbedder:
         )
         embedder(["hi"])
         assert captured["model"] == "text-embedding-3-small"
+
+
+class TestQueryBoilerplateSymmetry:
+    """search() sheds the run scaffold from the QUERY — records already shed it
+    at write time, and only symmetric treatment keeps similarity meaningful."""
+
+    def test_query_is_stripped_before_embedding(self):
+        from unittest.mock import MagicMock
+
+        from src.services.memory.engine_storage_adapter import EngineStorageAdapter
+
+        backend = MagicMock()
+        backend.search.return_value = []
+        adapter = EngineStorageAdapter(
+            backend, embedder=lambda texts: [[0.1] * 3 for _ in texts]
+        )
+        adapter._scope_has_records = lambda scope: True
+        seen = {}
+        adapter._embed_query = lambda q: seen.setdefault("q", q) and [0.1]
+
+        adapter.search(
+            "Respond directly and helpfully to the user's request. "
+            "USER REQUEST — this run exists to answer it:\nprovide me swiss news "
+            ": browser Expected output: A helpful, complete answer to the user's request."
+        )
+        assert seen["q"] == "provide me swiss news"

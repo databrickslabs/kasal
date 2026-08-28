@@ -16,10 +16,13 @@ from __future__ import annotations
 import concurrent.futures
 import contextvars
 import logging
+import os
+import re
 import threading
 from dataclasses import dataclass
 from typing import Any
 
+from src.services.memory.boilerplate import strip_run_boilerplate
 from src.services.memory.write_hygiene import screen_memory_write
 
 logger = logging.getLogger(__name__)
@@ -44,6 +47,28 @@ _RESERVED_DURABLE_SLOTS = 2
 # query per turn/task, no LLM calls" is this module's design rule (see above);
 # a wider candidate pool buys the reservation without breaking it.
 _RECALL_OVERSAMPLE = 3
+
+
+# Relative relevance cliff. Absolute floors drift across embedders/backends, so
+# besides Memory.recall's KASAL_MEMORY_RECALL_MIN_SCORE floor, the selection
+# also drops storage candidates that score far below the BEST candidate of the
+# same recall — a big drop marks where "matches the query" ends and "least
+# unrelated filler" begins. Override with KASAL_MEMORY_RECALL_MAX_DROP.
+def _recall_max_drop() -> float:
+    raw = os.getenv("KASAL_MEMORY_RECALL_MAX_DROP")
+    if raw is None:
+        return 0.12
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 0.12
+
+
+def _similarity(record: Any) -> float | None:
+    meta = getattr(record, "metadata", None)
+    value = meta.get("similarity") if isinstance(meta, dict) else None
+    return float(value) if isinstance(value, (int, float)) else None
+
 
 MEMORY_BLOCK_HEADER = (
     "Relevant memory from previous runs (background context — weigh it, "
@@ -258,6 +283,15 @@ def _select_records(mem: Any, records: list, limit: int) -> list:
         admit(record, unconditional=True)
 
     storage = [r for r in records if r not in pending]
+    # The cliff: measured against the best SCORED candidate; records without a
+    # similarity stamp (older backends) pass untouched. Pending records are
+    # exempt by design — they are this run's own output, not a search result.
+    sims = [sim for sim in (_similarity(r) for r in storage) if sim is not None]
+    if sims:
+        cutoff = max(sims) - _recall_max_drop()
+        storage = [
+            r for r in storage if (sim := _similarity(r)) is None or sim >= cutoff
+        ]
     room = max(limit - _RESERVED_DURABLE_SLOTS, len(chosen))
     remaining: list = []
     for record in storage:
@@ -470,8 +504,14 @@ def remember_async(
 
 def format_turn_for_memory(prompt: str, answer: str) -> str:
     """Compact single-record representation of one exchange. The record's
-    ``source`` field carries the kind ("chat"/"crew_task") — no prefix here."""
-    user = " ".join((prompt or "").split())[:600]
+    ``source`` field carries the kind ("chat"/"crew_task") — no prefix here.
+
+    The run-grounding scaffold is STRIPPED before storing: every run shares
+    those phrases, so records that carry them all embed close to each other —
+    and to every scaffolded query — which is how an off-topic prompt recalled
+    a store full of news at 0.84 cosine. The record should embed what the USER
+    asked, not the wrapper."""
+    user = strip_run_boilerplate(prompt)[:600]
     assistant = " ".join((answer or "").split())[:1400]
     return f"User: {user}\nAssistant: {assistant}"
 
