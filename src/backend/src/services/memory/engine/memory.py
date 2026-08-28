@@ -25,6 +25,7 @@ import contextvars
 import json
 import logging
 import re
+import os
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -258,6 +259,23 @@ class InMemoryStorage(StorageBackend):
             }
 
 
+def _default_recall_min_score() -> float:
+    """Blended-score floor applied when a recall caller passes no threshold.
+
+    The score is the storage backends' fused ranking (semantic + keyword +
+    recency + importance, see LocalStorageBackend.search). 0.75 is calibrated
+    against live data (see recall()); override per deployment with
+    KASAL_MEMORY_RECALL_MIN_SCORE when a different embedder shifts the scale.
+    """
+    raw = os.getenv("KASAL_MEMORY_RECALL_MIN_SCORE")
+    if raw is None:
+        return 0.75
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 0.75
+
+
 class MemoryConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -384,6 +402,15 @@ class Memory(BaseModel):
         """
         llm = self.llm
         if not self.analyze_on_save or llm is None or not hasattr(llm, "call"):
+            # A skipped labelling is a silent degradation — the record saves
+            # with no categories and disappears from every concept/graph view —
+            # so say WHY it was skipped instead of nothing.
+            logger.warning(
+                "memory labelling skipped: analyze_on_save=%s llm=%s has_call=%s",
+                self.analyze_on_save,
+                type(llm).__name__ if llm is not None else None,
+                hasattr(llm, "call"),
+            )
             return None
         text = " ".join((content or "").split())
         if len(text) < _MIN_ANALYSIS_CHARS:
@@ -541,6 +568,19 @@ class Memory(BaseModel):
         scope: str | None = None,
         score_threshold: float | None = None,
     ) -> list[MemoryRecord]:
+        # Nearest-neighbour search always returns SOMETHING — nearest is not
+        # near. Without a floor, a query about a topic the store has never seen
+        # returns the k least-unrelated records, and callers inject them as
+        # context. Knowledge search stops the same failure with the same rule
+        # (services/knowledge/search_guard.py: KNOWLEDGE_MIN_SCORE) — this is
+        # that stopping rule for memory (measured live: "genie ontology" over
+        # a news-only store
+        # recalled 18 news records at blended scores 0.56-0.74, and the
+        # model wove "Lebanon news" into the diagram). Related recalls in the same
+        # store scored 0.77-0.91, so the default floor sits between the two
+        # clusters. Callers may pass an explicit threshold — 0.0 disables.
+        if score_threshold is None:
+            score_threshold = _default_recall_min_score()
         start = time.perf_counter()
         event_bus.emit(
             self,

@@ -198,6 +198,14 @@ class EngineStorageAdapter(StorageBackend):
     ) -> list[MemoryRecord]:
         if not self._scope_has_records(scope):
             return []
+        # Symmetry with the write side (hooks.format_turn_for_memory): records
+        # store the request WITHOUT the run scaffold, so the query must shed it
+        # too — a scaffolded query against clean records scores low enough for
+        # the recall floor to reject everything (observed live: four runs in a
+        # row recalled 0 over a store full of matches).
+        from src.services.memory.boilerplate import strip_run_boilerplate
+
+        query = strip_run_boilerplate(query) or query
         vector = self._embed_query(query)
         if vector is None:
             return []
