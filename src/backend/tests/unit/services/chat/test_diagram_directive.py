@@ -125,3 +125,17 @@ class TestPaletteHardening:
         from src.services.chat.diagram_directive import deck_template
 
         assert "rebeccapurple" in deck_template({"accent": "rebeccapurple"})
+
+
+class TestDirectiveScope:
+    def test_a2ui_owned_deliverables_are_excluded_from_the_html_block(self):
+        # A map request must produce DATA for the app's native Leaflet Map —
+        # not a hand-drawn ```html approximation that makes A2UI yield.
+        from src.services.chat.diagram_directive import DIAGRAM_DIRECTIVE
+
+        assert "NEVER use the ```html block for maps" in DIAGRAM_DIRECTIVE
+        assert "dashboards" in DIAGRAM_DIRECTIVE
+        # Structured text, not drawings: an ASCII-art mindmap in a code fence
+        # is unparseable input for the composer and killed the Mindmap surface.
+        assert "STRUCTURED markdown" in DIAGRAM_DIRECTIVE
+        assert "NEVER draw ASCII art" in DIAGRAM_DIRECTIVE

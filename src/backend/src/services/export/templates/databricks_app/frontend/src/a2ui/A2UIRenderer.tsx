@@ -39,11 +39,14 @@ export function A2UIRenderer({ payload }: { payload: Surface }) {
   // Every surface (dashboard, document, quiz) gets the same elegant download
   // menu (PDF) — rendered as nothing when downloads are off (preview pane /
   // PDF rasterizer) or unwired. (Legacy SlideDeck surfaces render Unsupported —
-  // presentations moved to the chat HTML path.)
+  // presentations moved to the chat HTML path.) A PENDING shell (instant
+  // Skeleton frame) gets no chrome: offering "Download" on a placeholder that
+  // has no content yet reads as broken.
+  const isPendingShell = byId[payload.root]?.component === 'Skeleton'
   return (
     <SurfaceContext.Provider value={payload}>
       <div className={containerClass}>
-        <SurfaceDownloadMenu className="mb-1" />
+        {!isPendingShell && <SurfaceDownloadMenu className="mb-1" />}
         {render(payload.root)}
       </div>
     </SurfaceContext.Provider>

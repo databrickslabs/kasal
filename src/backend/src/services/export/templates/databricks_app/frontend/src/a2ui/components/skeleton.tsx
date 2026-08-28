@@ -26,7 +26,7 @@ function Bar({ w, delay, height = 'h-4' }: { w: string; delay: number; height?: 
   return (
     <div
       className={`a2-skeleton-bar ${height} animate-pulse rounded`}
-      style={{ width: w, background: theme.panelBorder, animationDelay: `${delay}ms` }}
+      style={{ width: w, background: theme.accent, opacity: 0.22, animationDelay: `${delay}ms` }}
     />
   )
 }
@@ -34,9 +34,12 @@ function Bar({ w, delay, height = 'h-4' }: { w: string; delay: number; height?: 
 /** Per-kind body: the shape the reader is waiting for, not a generic spinner. */
 function Body({ variant }: { variant: string }) {
   const theme = useContext(DeckThemeContext)
+  // Accent-tinted: `panelBorder` on a light workspace theme is near-white, so
+  // the old panelBorder-at-0.35 shimmer was INVISIBLE on the white panel and
+  // the shell read as an empty card with a lone accent bar.
   const panel = {
-    background: theme.panelBorder,
-    opacity: 0.35,
+    background: theme.accent,
+    opacity: 0.1,
   }
 
   if (variant === 'quiz') {
@@ -176,19 +179,20 @@ export function Skeleton({ node, resolve }: NodeProps) {
   const title = asStr(resolve(node.title))
   return (
     <div
-      className="a2-skeleton flex w-full flex-col gap-6 rounded-2xl p-8"
+      // Card + title use the APP's adaptive tokens, not the deck theme: the
+      // default DeckTheme is a dark-stage palette, so `theme.panel` /
+      // `theme.title` render white-on-white in the chat — an invisible card
+      // whose (wrapped) invisible title read as a mystery gap between the
+      // accent bar and the shimmer. Only the accents keep the deck theme.
+      className="a2-skeleton flex w-full flex-col gap-6 rounded-2xl border border-border bg-secondary/40 p-8"
       // aria-busy so a screen reader announces work in progress rather than
       // reading out a pile of empty boxes.
       aria-busy="true"
       aria-label={title ? `${title} — being prepared` : 'Being prepared'}
-      style={{ background: theme.panel, border: `1px solid ${theme.panelBorder}` }}
     >
       <div className="h-1.5 w-16 rounded-full" style={{ background: theme.accent }} />
       {title && (
-        <h2
-          className="text-balance text-3xl font-bold leading-tight tracking-tight"
-          style={{ color: theme.title }}
-        >
+        <h2 className="text-balance text-3xl font-bold leading-tight tracking-tight text-foreground">
           {title}
         </h2>
       )}

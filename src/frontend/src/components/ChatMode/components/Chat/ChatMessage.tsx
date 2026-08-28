@@ -402,7 +402,11 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
   // Assistant message
   return (
     <div className="mb-5 px-4">
-      <div className="max-w-[85%]">
+      {/* Full column width — the run-activity card and the chat input span the
+          whole column, and a surface (A2UI or HTML deck) capped at 85% beside
+          them read as misaligned. Prose line length is bounded by the column
+          itself, so no separate cap is needed. */}
+      <div className="w-full">
         {/* Loading indicator */}
         {message.isStreaming && (
           <div className="flex items-center gap-1.5 mb-2 ml-1">

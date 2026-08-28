@@ -241,6 +241,16 @@ OUTLINE = [
         ("build a mind map covering RAG pipelines", "RAG Pipelines"),
         ("please generate a short quiz on SQL joins", "SQL Joins"),
         ("can you put together a quiz about b2b saas pricing", "B2B SAAS Pricing"),
+        # Trailing-deliverable phrasing: the deliverable clause and the
+        # gather-verb are presentation, not subject.
+        (
+            "gather korean restaurants in zurich and show them on the map.",
+            "Korean Restaurants in Zurich",
+        ),
+        (
+            "collect the top swiss startups and plot them on a map",
+            "Top Swiss Startups",
+        ),
     ],
 )
 def test_a_title_is_derived_from_the_request_alone(query, expected):
@@ -275,7 +285,9 @@ def test_a_retraction_is_a_snapshot():
 
 
 def test_component_and_data_batches_are_increments():
-    assert not is_snapshot(update_components_msg("s", [{"id": "a", "component": "Text"}]))
+    assert not is_snapshot(
+        update_components_msg("s", [{"id": "a", "component": "Text"}])
+    )
     assert not is_snapshot(update_data_model_msg("s", "/k", 1))
 
 
@@ -299,9 +311,7 @@ def test_replaying_only_the_snapshots_still_yields_the_final_surface():
 # the prose gate can retract.
 
 
-@pytest.mark.parametrize(
-    "kind", ["quiz", "flashcards", "mindmap", "map"]
-)
+@pytest.mark.parametrize("kind", ["quiz", "flashcards", "mindmap", "map"])
 def test_a_non_deck_shell_is_one_placeholder_on_its_own_canvas(kind):
     shell = shell_from_request(f"make me a {kind} about python", kind=kind)
     assert shell["surfaceKind"] == kind
@@ -346,9 +356,20 @@ BIG_DECK = {
     "surfaceKind": "presentation",
     "root": "deck",
     "components": (
-        [{"id": "deck", "component": "SlideDeck", "children": [f"s{i}" for i in range(30)]}]
+        [
+            {
+                "id": "deck",
+                "component": "SlideDeck",
+                "children": [f"s{i}" for i in range(30)],
+            }
+        ]
         + [
-            {"id": f"s{i}", "component": "Slide", "variant": "content", "title": f"Slide {i}"}
+            {
+                "id": f"s{i}",
+                "component": "Slide",
+                "variant": "content",
+                "title": f"Slide {i}",
+            }
             for i in range(30)
         ]
     ),

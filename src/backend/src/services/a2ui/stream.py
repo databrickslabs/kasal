@@ -684,6 +684,25 @@ def title_from_request(query: str) -> str:
     """
     try:
         subject = _REQUEST_PREFIX.sub("", unwrap_request(query), count=1)
+        # Trailing-deliverable phrasing: "gather X and show them on the map" —
+        # the deliverable clause is presentation, not subject. Strip it, then
+        # the leading gather-verb, leaving the actual topic ("X").
+        subject = re.sub(
+            r"[,;]?\s*(?:and\s+)?(?:show|display|plot|put|draw|visualize|render)"
+            r"\s+(?:them|it|these|those|everything|all)?\s*"
+            r"(?:on|in|as)\s+(?:a|an|the)?\s*\w+\s*[.!?]?\s*$",
+            "",
+            subject,
+            flags=re.IGNORECASE,
+        )
+        subject = re.sub(
+            r"^\s*(?:please\s+)?(?:gather|collect|find|list|research|get|fetch"
+            r"|look\s+up|compile)\s+(?:me\s+)?(?:all\s+)?(?:the\s+)?",
+            "",
+            subject,
+            count=1,
+            flags=re.IGNORECASE,
+        )
         subject = subject.strip().strip(".!?,;:").strip()
         if not subject or len(subject) > 120:
             return ""
