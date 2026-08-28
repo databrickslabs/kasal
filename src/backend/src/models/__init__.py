@@ -1,5 +1,4 @@
 from src.models.a2a_agent import A2AAgent
-from src.models.skill import Skill, SkillFile
 from src.models.a2a_push_config import A2APushConfig
 from src.models.agent import Agent
 from src.models.api_key import ApiKey
@@ -43,8 +42,10 @@ from src.models.powerbi_semantic_model_cache import PowerBISemanticModelCache
 from src.models.prompt_optimization_run import PromptOptimizationRun
 from src.models.schedule import Schedule
 from src.models.schema import Schema
+from src.models.skill import Skill, SkillFile
 from src.models.task import Task
 from src.models.template import PromptTemplate
 from src.models.tool import Tool
+from src.models.trigger_queue import TriggerQueue
 from src.models.ui_config import UIConfig
 from src.models.user import User

@@ -448,6 +448,64 @@ async def lifespan(app: FastAPI):
     else:
         system_logger.warning("Skipping scheduler initialization. Database not ready.")
 
+    # Event-trigger queue consumer. Consumes rows from the `triggerqueue` table
+    # and dispatches each as a crew/flow run. The LOOP always starts, but each
+    # tick self-gates on the `event_triggers_enabled` engine setting (default
+    # OFF, toggled in Configuration) — so an admin can enable/disable the whole
+    # feature at runtime without a restart, and nothing drains until they do.
+    # Claims use FOR UPDATE SKIP LOCKED, so multiple app replicas are safe.
+    if db_initialized:
+        try:
+            from src.services.triggers import TriggerQueueConsumerService
+
+            _trigger_consumer = TriggerQueueConsumerService()
+            _tq_interval = int(os.environ.get("KASAL_EVENT_TRIGGERS_INTERVAL", "5"))
+            _tq_batch = int(os.environ.get("KASAL_EVENT_TRIGGERS_BATCH", "5"))
+
+            async def _event_triggers_enabled() -> bool:
+                """Read the admin toggle; default OFF, never raise."""
+                try:
+                    from src.db.session import routed_scoped_session
+                    from src.services.settings.engine import EngineConfigService
+
+                    async with routed_scoped_session() as session:
+                        return await EngineConfigService(
+                            session
+                        ).get_event_triggers_enabled()
+                except Exception:  # noqa: BLE001
+                    return False
+
+            async def _trigger_queue_loop():
+                await asyncio.sleep(_tq_interval)  # let the app finish booting
+                ticks = 0
+                while True:
+                    try:
+                        if await _event_triggers_enabled():
+                            await _trigger_consumer.claim_and_dispatch(_tq_batch)
+                            ticks += 1
+                            if ticks >= 12:  # housekeeping: crashed rows + retention
+                                await _trigger_consumer.reclaim()
+                                await _trigger_consumer.purge()
+                                ticks = 0
+                    except Exception as _tq_err:  # noqa: BLE001
+                        system_logger.error(f"[TriggerQueue] loop error: {_tq_err}")
+                    await asyncio.sleep(_tq_interval)
+
+            # Keep a strong reference on app.state: the event loop holds only
+            # weak refs to tasks, so a bare create_task here can be garbage-
+            # collected and the queue silently stops draining. (The consumer
+            # guards its own dispatch tasks the same way.) Cancelled at
+            # shutdown below.
+            app.state.trigger_queue_task = asyncio.create_task(_trigger_queue_loop())
+            system_logger.info(
+                "Event-trigger consumer loop started (gated on Configuration "
+                "setting; interval=%ss, batch=%s)",
+                _tq_interval,
+                _tq_batch,
+            )
+        except Exception as e:
+            system_logger.error(f"Failed to start event-trigger consumer: {e}")
+
     # Start HITL timeout service for processing expired approvals
     hitl_timeout_started = False
     if db_initialized:
@@ -493,6 +551,16 @@ async def lifespan(app: FastAPI):
 
     try:
         yield
+
+        # Stop the event-trigger consumer loop first: it must not claim new
+        # rows while the executors below are shutting down.
+        _tq_task = getattr(app.state, "trigger_queue_task", None)
+        if _tq_task is not None:
+            _tq_task.cancel()
+            try:
+                await _tq_task
+            except BaseException:  # noqa: BLE001 — CancelledError is the point
+                pass
     finally:
         # Clean up running jobs during shutdown
         if db_initialized:

@@ -18,6 +18,9 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import HistoryIcon from '@mui/icons-material/History';
 import SettingsIcon from '@mui/icons-material/Settings';
 import { useWorkflowStore } from '../../store/workflow';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
+import { getThemeOptions } from '../../theme/theme';
+import { useAppStore as useChatAppStore } from '../ChatMode/store/appStore';
 import { useThemeManager } from '../../hooks/workflow/useThemeManager';
 import { useErrorManager } from '../../hooks/workflow/useErrorManager';
 import { useFlowManager } from '../../hooks/workflow/useFlowManager';
@@ -47,7 +50,6 @@ import RightSidebar from './RightSidebar';
 import LeftSidebar from './LeftSidebar';
 import GroupSelector from '../Common/GroupSelector';
 import ChatWorkspace from '../ChatMode/ChatWorkspace';
-import ChatModeHeaderSlot from '../ChatMode/ChatModeHeaderSlot';
 import { useUILayoutStore } from '../../store/uiLayout';
 import { useUIFitView } from '../../hooks/workflow/useUIFitView';
 import { useWorkflowLayoutEvents } from '../../hooks/workflow/useWorkflowLayoutEvents';
@@ -59,6 +61,7 @@ import AgentDialog from '../Agents/AgentDialog';
 import TaskDialog from '../Tasks/TaskDialog';
 import CrewPlanningDialog from '../Planning/CrewPlanningDialog';
 import ScheduleDialog from '../Schedule/ScheduleDialog';
+import TriggersDialog from '../Triggers/TriggersDialog';
 import JobsPanel from '../Jobs/JobsPanel';
 import InteractiveTutorial from '../Tutorial/InteractiveTutorial';
 import APIKeys from '../Configuration/APIKeys/APIKeys';
@@ -1161,6 +1164,17 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
   // Chat mode swaps the crew/flow canvas for the embedded chat workspace.
   const isChatMode = appMode === 'chat';
+  // Chat carries its own (chat-scoped) dark theme. The top strip (TabBar +
+  // GroupSelector) sits OUTSIDE #kasal-chat-root, so when chat is dark it
+  // stayed white. Re-theme just that strip with a dark MUI theme.
+  const chatThemeDark = useChatAppStore((s) => s.theme) === 'dark';
+  const topStripDark = isChatMode && chatThemeDark;
+  const topStripTheme = React.useMemo(
+    () => (topStripDark ? createTheme(getThemeOptions('deepOcean')) : null),
+    [topStripDark],
+  );
+  const themeStrip = (node: React.ReactElement) =>
+    topStripTheme ? <ThemeProvider theme={topStripTheme}>{node}</ThemeProvider> : node;
 
   // Render the component
   return (
@@ -1180,6 +1194,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         <InteractiveTutorial isOpen={dialogManager.isTutorialOpen} onClose={dialogManager.handleCloseTutorial} />
 
         {/* Tab Bar — in chat mode only the mode switcher + group selector show */}
+        {themeStrip(
         <TabBar
           onRunTab={handleRunTab}
           isRunning={!!runningTabId}
@@ -1195,8 +1210,9 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           disabled={isChatProcessing || !!runningTabId}
           hideTabsAndButtons={isChatMode}
           isMobile={isMobile}
-          leftSlot={isChatMode ? <ChatModeHeaderSlot /> : undefined}
-        />
+          forceDark={topStripDark}
+        />,
+        )}
 
         {/* Chat workspace — replaces the crew/flow canvas and all of its
             sidebars/panels when the user switches to Chat mode. Kept mounted
@@ -1670,6 +1686,11 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           selectedModel={selectedModel}
         />
 
+        <TriggersDialog
+          open={dialogManager.isTriggersDialogOpen}
+          onClose={() => dialogManager.setTriggersDialogOpen(false)}
+        />
+
         <Dialog
           open={dialogManager.isAPIKeysDialogOpen}
           onClose={() => dialogManager.setIsAPIKeysDialogOpen(false)}
@@ -1871,6 +1892,9 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               // Open schedule dialog
               dialogManager.setScheduleDialogOpen(true);
             }}
+            onOpenTriggersDialog={() => {
+              dialogManager.setTriggersDialogOpen(true);
+            }}
             onToggleExecutionHistory={toggleExecutionHistory}
             areFlowsVisible={areFlowsVisible}
             toggleFlowsVisibility={toggleFlowsVisibility}
@@ -1952,7 +1976,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             alignItems: 'center'
           }}
         >
-          <GroupSelector />
+          {themeStrip(<GroupSelector />)}
         </Box>
 
         {/* Full-screen chat drawer (opens on mobile/compact when tapping collapsed chat) */}

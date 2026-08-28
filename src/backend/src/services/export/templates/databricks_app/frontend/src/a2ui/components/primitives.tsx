@@ -13,7 +13,6 @@ import { SurfaceContext } from '../lib/surfaceContext'
 import { mdComponents, linkifyCitations } from '../lib/markdown'
 import { cn } from '../lib/utils'
 import { iconByName } from './icons'
-import { SlideCtx } from './slideContext'
 import { asArr, asStr } from './values'
 
 export function Markdown({ node, resolve }: NodeProps) {
@@ -22,9 +21,7 @@ export function Markdown({ node, resolve }: NodeProps) {
   // default near-black colors and disappears on a dark deck theme (the title and
   // kicker stay visible because they use explicit theme.* colors, the bullets
   // don't). Outside a deck (chat / document surfaces) prose keeps its defaults.
-  const theme = useContext(DeckThemeContext)
-  const { inDeck } = useContext(SlideCtx)
-  const proseStyle = inDeck ? (deckProseVars(theme) as CSSProperties) : undefined
+  const proseStyle = undefined
   return (
     <div
       className="prose prose-sm prose-neutral max-w-none dark:prose-invert prose-pre:bg-muted prose-pre:text-foreground prose-code:before:content-none prose-code:after:content-none"
@@ -99,31 +96,8 @@ export function Card_({ node, render }: NodeProps) {
 }
 
 export function KeyValue({ node, resolve }: NodeProps) {
-  const { inDeck } = useContext(SlideCtx)
   const theme = useContext(DeckThemeContext)
   const Icon = iconByName(node.icon)
-  if (inDeck) {
-    // Big-number stat tile, themed to the active deck. `h-full` + flex column so a
-    // row of tiles is always equal height (a longer label wrapping to two lines no
-    // longer makes its tile taller than its neighbours).
-    return (
-      <div className="flex h-full flex-col rounded-xl border p-5" style={{ background: theme.panel, borderColor: theme.panelBorder }}>
-        {Icon && <Icon className="mb-3 size-7 shrink-0" style={{ color: theme.accent }} aria-hidden="true" />}
-        <div className="text-balance text-[2.2rem] font-extrabold leading-none" style={{ color: theme.accent }}>
-          {asStr(resolve(node.value))}
-        </div>
-        {/* Label pinned to the BOTTOM of the tile (`mt-auto`), so labels sit on one
-            line across the whole row. Stacked directly under the value they follow
-            its height instead: one tile whose value wraps to two lines pushed its
-            label down while its single-line neighbours kept theirs up, and the row
-            read as misaligned.
-            Color is the body foreground (not `muted`) so it stays legible — a
-            workspace palette whose muted color sits near the surface color would
-            otherwise wash the label out against the tile. */}
-        <div className="mt-auto pt-2 text-sm font-medium" style={{ color: theme.fg, opacity: 0.85 }}>{asStr(resolve(node.label))}</div>
-      </div>
-    )
-  }
   return (
     <div className="flex h-full min-w-0 flex-col overflow-hidden rounded-xl border bg-secondary/40 p-4">
       {Icon && <Icon className="mb-2 size-5 shrink-0" style={{ color: theme.accent }} aria-hidden="true" />}

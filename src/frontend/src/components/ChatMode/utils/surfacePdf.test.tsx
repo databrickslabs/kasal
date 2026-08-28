@@ -46,18 +46,6 @@ beforeEach(() => {
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const deckSurface = (): Surface => ({
-  surfaceKind: 'presentation',
-  root: 'root',
-  components: [
-    { id: 'root', component: 'SlideDeck', children: ['s1', 's2'] },
-    { id: 's1', component: 'Slide', title: 'One', children: ['t1'] },
-    { id: 's2', component: 'Slide', title: 'Two', children: ['t2'] },
-    { id: 't1', component: 'Text', text: 'first slide text' },
-    { id: 't2', component: 'Text', text: 'second slide text' },
-  ],
-  dataModel: {},
-});
 
 const docSurface = (): Surface => ({
   surfaceKind: 'document',
@@ -72,41 +60,6 @@ const docSurface = (): Surface => ({
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
-
-describe('downloadSurfacePdf — presentations', () => {
-  it('exports one LANDSCAPE page per slide (every slide, not just the visible one)', async () => {
-    await downloadSurfacePdf(deckSurface(), 'My Deck');
-
-    // One PDF, landscape, sized to the 16:9 slide.
-    expect(jsPDFCtor).toHaveBeenCalledTimes(1);
-    expect(jsPDFCtor.mock.calls[0][0]).toMatchObject({
-      orientation: 'landscape',
-      format: [1280, 720],
-    });
-    // Two slides → two rasterizations, two images, ONE extra page.
-    expect(html2canvasMock).toHaveBeenCalledTimes(2);
-    expect(addImage).toHaveBeenCalledTimes(2);
-    expect(addPage).toHaveBeenCalledTimes(1);
-    expect(addImage).toHaveBeenCalledWith(expect.stringContaining('data:image/png'), 'PNG', 0, 0, 1280, 720);
-    expect(save).toHaveBeenCalledWith('My Deck.pdf');
-  });
-
-  it('renders each slide offscreen with that slide as the surface root', async () => {
-    const rendered: string[] = [];
-    html2canvasMock.mockImplementation(async (el: HTMLElement) => {
-      rendered.push(el.textContent || '');
-      return fakeCanvas(2560, 1440);
-    });
-
-    await downloadSurfacePdf(deckSurface(), 'Deck');
-
-    expect(rendered[0]).toContain('first slide text');
-    expect(rendered[0]).not.toContain('second slide text');
-    expect(rendered[1]).toContain('second slide text');
-    // Offscreen containers are cleaned up after the export.
-    expect(document.body.textContent).not.toContain('first slide text');
-  });
-});
 
 describe('downloadSurfacePdf — other deliverables', () => {
   it('exports a single content-sized portrait page', async () => {

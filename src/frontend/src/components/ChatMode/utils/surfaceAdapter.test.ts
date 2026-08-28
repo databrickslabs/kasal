@@ -288,14 +288,11 @@ describe('inferSurfaceDeliverable', () => {
   });
 
   it('infers the deliverable from the components present', () => {
-    expect(inferSurfaceDeliverable(surfaceOf({ root: 'Slides', s1: 'Slide' }))).toBe('presentation');
     expect(inferSurfaceDeliverable(surfaceOf({ root: 'Quiz' }))).toBe('quiz');
     expect(inferSurfaceDeliverable(surfaceOf({ root: 'Column', f: 'Flashcards' }))).toBe('flashcards');
     expect(inferSurfaceDeliverable(surfaceOf({ root: 'Column', d: 'Dashboard' }))).toBe('dashboard');
     expect(inferSurfaceDeliverable(surfaceOf({ root: 'Column', t: 'Table' }))).toBe('genie');
     expect(inferSurfaceDeliverable(surfaceOf({ root: 'Column', t: 'Text' }))).toBe('default');
-    // Slides outranks the Table inside a slide.
-    expect(inferSurfaceDeliverable(surfaceOf({ root: 'Slides', t: 'Table' }))).toBe('presentation');
   });
 });
 

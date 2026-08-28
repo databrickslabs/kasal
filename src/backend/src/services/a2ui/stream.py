@@ -60,7 +60,6 @@ DATA_COMPONENTS = frozenset(
         "Sequence",
         "Album",
         "Map",
-        "Diagram",
         # Region shading and flow ribbons are genuine deliverables: omitted here,
         # their whole surface is dropped as "prose-only" and the answer silently
         # falls back to markdown (the Album bug in the A2UI checklist).
@@ -527,7 +526,9 @@ class SurfaceStreamer:
             for key, value in part.data_model.items():
                 if key not in self._sent_keys:
                     self._sent_keys.add(key)
-                    self._emit(update_data_model_msg(self.surface_id, _pointer(key), value))
+                    self._emit(
+                        update_data_model_msg(self.surface_id, _pointer(key), value)
+                    )
             # Re-check: the components just parsed may be what opens the gate, and
             # everything held so far should ship the moment it does.
             if self._gate_allows(part) and self._held:
@@ -565,58 +566,6 @@ class SurfaceStreamer:
         self._held = []
 
 
-# ── Presentation skeleton ───────────────────────────────────────────────────
-
-
-def skeleton_from_outline(
-    outline: List[Dict[str, str]], *, deck_id: str = "deck"
-) -> Optional[Dict[str, Any]]:
-    """Build a placeholder deck from the outline pre-pass.
-
-    This is the cheapest large win available. ``plan_presentation_outline``
-    already knows every slide's title and layout variant BEFORE the expensive
-    compose call, so the deck's shape can be on screen while the slides are still
-    being written — the reader sees the real structure and real titles in seconds
-    instead of a spinner for a couple of minutes.
-
-    Slide ids are pinned to ``slide_1..slide_N`` so the real slides, which the
-    composer is told to number the same way, replace these by id rather than
-    piling up beside them.
-    """
-    try:
-        slides = [s for s in (outline or []) if isinstance(s, dict) and s.get("title")]
-        if len(slides) < 2:
-            return None
-        components: List[Dict[str, Any]] = [
-            {
-                "id": deck_id,
-                "component": "SlideDeck",
-                "children": [f"slide_{i + 1}" for i in range(len(slides))],
-            }
-        ]
-        for i, s in enumerate(slides):
-            components.append(
-                {
-                    "id": f"slide_{i + 1}",
-                    "component": "Slide",
-                    "variant": s.get("variant") or "content",
-                    "title": s.get("title"),
-                    # Marks the slide as not-yet-written so the renderer can show a
-                    # placeholder rather than an empty stage. Harmless to a renderer
-                    # that does not know the flag — it is just an unused prop.
-                    "pending": True,
-                }
-            )
-        return {
-            "surfaceKind": "presentation",
-            "root": deck_id,
-            "components": components,
-            "dataModel": {},
-        }
-    except Exception:  # noqa: BLE001
-        return None
-
-
 # ── Instant shell ───────────────────────────────────────────────────────────
 # The skeleton above is derived from the outline pre-pass, which cannot run until
 # the agent has written its answer — measured 13.4s for the prose plus 8.7s for
@@ -647,16 +596,65 @@ _REQUEST_PREFIX = re.compile(
 
 #: Words a title keeps lowercase unless they lead it.
 _TITLE_MINOR = frozenset(
-    {"a", "an", "the", "and", "or", "but", "for", "of", "on", "in", "to", "with",
-     "at", "by", "from", "as", "vs", "via"}
+    {
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "but",
+        "for",
+        "of",
+        "on",
+        "in",
+        "to",
+        "with",
+        "at",
+        "by",
+        "from",
+        "as",
+        "vs",
+        "via",
+    }
 )
 
 #: Tokens that are acronyms, not words — "how llm works" should not title-case
 #: into "How Llm Works".
 _TITLE_ACRONYMS = frozenset(
-    {"llm", "llms", "ai", "ml", "api", "apis", "kpi", "kpis", "roi", "sql", "etl",
-     "ui", "ux", "gpu", "cpu", "saas", "b2b", "b2c", "crm", "erp", "rag", "mcp",
-     "aws", "gcp", "hr", "it", "seo", "faq", "pdf", "csv", "json", "sdk"}
+    {
+        "llm",
+        "llms",
+        "ai",
+        "ml",
+        "api",
+        "apis",
+        "kpi",
+        "kpis",
+        "roi",
+        "sql",
+        "etl",
+        "ui",
+        "ux",
+        "gpu",
+        "cpu",
+        "saas",
+        "b2b",
+        "b2c",
+        "crm",
+        "erp",
+        "rag",
+        "mcp",
+        "aws",
+        "gcp",
+        "hr",
+        "it",
+        "seo",
+        "faq",
+        "pdf",
+        "csv",
+        "json",
+        "sdk",
+    }
 )
 
 
@@ -686,6 +684,25 @@ def title_from_request(query: str) -> str:
     """
     try:
         subject = _REQUEST_PREFIX.sub("", unwrap_request(query), count=1)
+        # Trailing-deliverable phrasing: "gather X and show them on the map" —
+        # the deliverable clause is presentation, not subject. Strip it, then
+        # the leading gather-verb, leaving the actual topic ("X").
+        subject = re.sub(
+            r"[,;]?\s*(?:and\s+)?(?:show|display|plot|put|draw|visualize|render)"
+            r"\s+(?:them|it|these|those|everything|all)?\s*"
+            r"(?:on|in|as)\s+(?:a|an|the)?\s*\w+\s*[.!?]?\s*$",
+            "",
+            subject,
+            flags=re.IGNORECASE,
+        )
+        subject = re.sub(
+            r"^\s*(?:please\s+)?(?:gather|collect|find|list|research|get|fetch"
+            r"|look\s+up|compile)\s+(?:me\s+)?(?:all\s+)?(?:the\s+)?",
+            "",
+            subject,
+            count=1,
+            flags=re.IGNORECASE,
+        )
         subject = subject.strip().strip(".!?,;:").strip()
         if not subject or len(subject) > 120:
             return ""
@@ -718,7 +735,6 @@ def title_from_request(query: str) -> str:
 SHELLABLE_KINDS = {
     # Own a canvas. The request alone settles the shape, and the prose gate can
     # never drop them, so their frame is a promise that is always kept.
-    "presentation": "presentation",
     "quiz": "quiz",
     "flashcards": "flashcards",
     "mindmap": "mindmap",
@@ -732,7 +748,6 @@ SHELLABLE_KINDS = {
     "album": "dashboard",
     "graph": "dashboard",
     "sequence": "dashboard",
-    "diagram": "dashboard",
     "dashboard": "dashboard",
     "forecast": "document",
     "report": "document",
@@ -748,72 +763,35 @@ RETRACTABLE_SHELL_KINDS = GATED_SURFACE_KINDS
 def shell_from_request(
     query: str,
     *,
-    kind: str = "presentation",
+    kind: str,
     variant: str = "",
-    slides: int = 8,
-    deck_id: str = "deck",
 ) -> Optional[Dict[str, Any]]:
-    """A deck frame with no content, buildable the instant a request arrives.
+    """A surface frame with no content, buildable the instant a request arrives.
 
-    Costs nothing — no LLM call, no answer, no outline — so it can ship before
-    the agent has written a word. Every slide is ``pending``; the outline's
-    skeleton replaces them by id as soon as it lands, and the composed slides
-    replace those in turn.
+    Costs nothing — no LLM call, no answer — so it can ship before the agent has
+    written a word. The frame is ONE placeholder component filling its canvas —
+    a quiz, a card stack, a mindmap, a map — replaced by the real surface when
+    composition lands. (Decks are no longer an A2UI deliverable — presentations
+    render on the chat HTML path.)
     """
     try:
         title = title_from_request(query)
-        if kind != "presentation":
-            # Everything that is not a deck is ONE component filling its canvas —
-            # a quiz, a card stack, a mindmap, a map — so its frame is a single
-            # placeholder shaped like that component rather than a list of slides.
-            return {
-                "surfaceKind": kind,
-                "root": "shell",
-                "components": [
-                    {
-                        "id": "shell",
-                        "component": "Skeleton",
-                        # The DELIVERABLE, not the canvas: "kanban" and "album"
-                        # both live on a dashboard, and a frame shaped like a
-                        # generic dashboard tells the reader nothing about which
-                        # of the two is coming.
-                        "variant": variant or kind,
-                        "title": title or None,
-                        "pending": True,
-                    }
-                ],
-                "dataModel": {},
-            }
-        count = max(3, min(int(slides or 8), 24))
-        components: List[Dict[str, Any]] = [
-            {
-                "id": deck_id,
-                "component": "SlideDeck",
-                "children": [f"slide_{i + 1}" for i in range(count)],
-            },
-            # The opener carries the derived title so the frame reads as THIS
-            # deck rather than as a generic placeholder.
-            {
-                "id": "slide_1",
-                "component": "Slide",
-                "variant": "title",
-                "title": title or None,
-                "pending": True,
-            },
-        ]
-        for i in range(1, count):
-            components.append(
+        return {
+            "surfaceKind": kind,
+            "root": "shell",
+            "components": [
                 {
-                    "id": f"slide_{i + 1}",
-                    "component": "Slide",
-                    "variant": "content",
+                    "id": "shell",
+                    "component": "Skeleton",
+                    # The DELIVERABLE, not the canvas: "kanban" and "album"
+                    # both live on a dashboard, and a frame shaped like a
+                    # generic dashboard tells the reader nothing about which
+                    # of the two is coming.
+                    "variant": variant or kind,
+                    "title": title or None,
                     "pending": True,
                 }
-            )
-        return {
-            "surfaceKind": "presentation",
-            "root": deck_id,
-            "components": components,
+            ],
             "dataModel": {},
         }
     except Exception:  # noqa: BLE001

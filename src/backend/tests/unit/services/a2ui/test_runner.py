@@ -41,7 +41,7 @@ def test_subset_catalog_keeps_only_named_components():
 
 # --- _infer_deliverable ----------------------------------------------------
 def test_infer_deliverable_first_keyword_wins():
-    assert R._infer_deliverable("make a slide deck about Q3") == "presentation"
+    assert R._infer_deliverable("make a slide deck about Q3") is None  # decks left A2UI
     assert R._infer_deliverable("build a KPI dashboard") == "dashboard"
     assert R._infer_deliverable("quiz me on history") == "quiz"
     assert R._infer_deliverable("a mind map of the org") == "mindmap"
@@ -102,13 +102,13 @@ def test_guidance_picks_inferred_deliverables_directive():
         style_json=json.dumps(
             {
                 "directives": {
-                    "presentation": "aim for about 8 slides",
+                    "dashboard": "one row of KPI tiles",
                     "quiz": "10 questions",
                 }
             }
         ),
     )
-    assert R._resolve_guidance(cfg, "make a slide deck") == "aim for about 8 slides"
+    assert R._resolve_guidance(cfg, "build a KPI dashboard") == "one row of KPI tiles"
     assert R._resolve_guidance(cfg, "give me a quiz") == "10 questions"
 
 
@@ -123,10 +123,10 @@ def test_guidance_falls_back_to_default_then_empty():
 # --- guidance threads into the composer prompt -----------------------------
 def test_guidance_appears_in_system_prompt():
     sp = a2ui_system_prompt(
-        CATALOG, "purpose", "", "make a deck", "aim for about 8 slides"
+        CATALOG, "purpose", "", "build a dashboard", "one row of KPI tiles"
     )
     assert "DELIVERABLE SETTINGS" in sp
-    assert "aim for about 8 slides" in sp
+    assert "one row of KPI tiles" in sp
 
 
 def test_compose_a2ui_threads_guidance_to_llm():
@@ -134,26 +134,23 @@ def test_compose_a2ui_threads_guidance_to_llm():
 
     def stub(messages):
         seen["sys"] = messages[0]["content"]
-        # A content slide must carry a real body, else the hollow-deck guard
-        # rejects it and falls back to markdown.
         return (
-            '{"surfaceKind":"presentation","root":"d","components":'
-            '[{"id":"d","component":"SlideDeck","children":["s"]},'
-            '{"id":"s","component":"Slide","title":"Hi","children":["t"]},'
-            '{"id":"t","component":"Text","text":"A real point."}],"dataModel":{}}'
+            '{"surfaceKind":"dashboard","root":"g","components":'
+            '[{"id":"g","component":"Grid","children":["t"]},'
+            '{"id":"t","component":"Chart","chartType":"bar","data":[]}],"dataModel":{}}'
         )
 
     surf = compose_a2ui(
         "body text",
         "purpose",
         "",
-        "make a 8-slide deck",
+        "build a KPI dashboard",
         llm_call=stub,
         catalog=CATALOG,
-        guidance="aim for about 8 slides",
+        guidance="one row of KPI tiles",
     )
-    assert surf["surfaceKind"] == "presentation"
-    assert "aim for about 8 slides" in seen["sys"]
+    assert surf["surfaceKind"] == "dashboard"
+    assert "one row of KPI tiles" in seen["sys"]
 
 
 # --- _has_data_component ---------------------------------------------------
@@ -171,7 +168,6 @@ def test_has_data_component_detects_data_bearing_nodes():
         "Sequence",
         "Album",
         "Map",
-        "Diagram",
     ):
         surface = {"components": [{"id": "a", "component": comp}]}
         assert R._has_data_component(surface), comp

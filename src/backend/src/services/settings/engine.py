@@ -265,6 +265,33 @@ class EngineConfigService:
             logger.error(f"Error setting OTel App Telemetry status: {str(e)}")
             raise
 
+    async def get_event_triggers_enabled(self) -> bool:
+        """Get the event-trigger feature enabled status (system-level).
+
+        Returns:
+            True if enabled (defaults to False if not found or on error).
+        """
+        try:
+            return await self.repository.get_event_triggers_enabled()
+        except Exception as e:
+            logger.error(f"Error getting event triggers status: {str(e)}")
+            return False
+
+    async def set_event_triggers_enabled(self, enabled: bool) -> bool:
+        """Set the event-trigger feature enabled status (system-level).
+
+        Args:
+            enabled: Whether the event-trigger queue consumer should run.
+
+        Returns:
+            True if successful
+        """
+        try:
+            return await self.repository.set_event_triggers_enabled(enabled)
+        except Exception as e:
+            logger.error(f"Error setting event triggers status: {str(e)}")
+            raise
+
     async def get_otel_app_telemetry_log_level(self) -> str:
         """Get the OTel App Telemetry log level (system-level).
 

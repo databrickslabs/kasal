@@ -690,7 +690,7 @@ def _compose_a2ui(
 _A2UI_DATA_COMPONENTS = frozenset(
     {
         "Chart", "Table", "Stat", "KeyValue", "Grid",
-        "Forecast", "Graph", "Sequence", "Album", "Map", "Diagram",
+        "Forecast", "Graph", "Sequence", "Album", "Map",
     }
 )
 _A2UI_DATA_SURFACE_KINDS = frozenset({"dashboard", "document"})

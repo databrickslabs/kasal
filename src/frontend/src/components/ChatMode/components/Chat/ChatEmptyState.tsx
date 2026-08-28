@@ -3,13 +3,6 @@ import { useExecutionStore } from '../../store/executionStore';
 import { useAppStore } from '../../store/appStore';
 import { useUILayoutStore } from '../../../../store/uiLayout';
 import { useFlowConfigStore } from '../../../../store/flowConfig';
-import {
-  answerModeDisabledReason,
-  answerModeHint,
-  isAnswerModeDisabled,
-  modelDisplayName,
-  modelLacksReasoning,
-} from '../../utils/answerModes';
 
 /**
  * First-run launchpad shown BELOW the composer when a chat has no messages (the
@@ -38,126 +31,17 @@ export interface ChatEmptyStateProps {
   onPrefill: (text: string) => void;
 }
 
-// Answer-mode ids as used by the composer's mode pill (executionStore.chatModeType).
 type ModeId = 'chat' | 'research' | 'deep';
 
-interface ModeChip {
-  id: ModeId;
-  label: string;
-  /** Editable starter prompt dropped into the composer when the chip is clicked. */
-  prompt: string;
-  icon: React.ReactNode;
-}
-
-const iconClass = 'w-[18px] h-[18px]';
-const MODE_CHIPS: ModeChip[] = [
-  {
-    id: 'chat',
-    label: 'Chat',
-    prompt: 'Give me a quick summary of [topic].',
-    icon: (
-      <svg className={iconClass} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h8m-8-4h8m-4 8H8m-4.5 1.5V6.75A2.25 2.25 0 015.75 4.5h12.5a2.25 2.25 0 012.25 2.25v6a2.25 2.25 0 01-2.25 2.25H9l-4.5 3.75z" />
-      </svg>
-    ),
-  },
-  {
-    id: 'research',
-    label: 'Research',
-    prompt: 'Research [topic] and write a concise brief with sources.',
-    icon: (
-      <svg className={iconClass} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35m1.35-5.15a7 7 0 11-14 0 7 7 0 0114 0z" />
-      </svg>
-    ),
-  },
-  {
-    id: 'deep',
-    label: 'Deep Research',
-    prompt:
-      'Do a deep-dive analysis of [topic], comparing multiple sources and reasoning through the trade-offs.',
-    icon: (
-      <svg className={iconClass} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
-      </svg>
-    ),
-  },
-];
-
 const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({ onPrefill }) => {
-  const chatModeType = useExecutionStore((s) => s.chatModeType);
-  const setChatModeType = useExecutionStore((s) => s.setChatModeType);
   const setAppMode = useUILayoutStore((s) => s.setAppMode);
   const kasalFlowEnabled = useFlowConfigStore((s) => s.kasalFlowEnabled);
   // Read the model straight from the store, as this component already does for
   // every other piece of state, so the chips and the composer's mode pill agree
   // about what the selected model can actually do.
-  const models = useAppStore((s) => s.models);
-  const selectedModel = useAppStore((s) => s.selectedModel);
-  const lacksReasoning = modelLacksReasoning(models, selectedModel);
-  const reasoningModelName = modelDisplayName(models, selectedModel);
-
-  // Picking a chip selects that answer mode (so the composer's mode pill matches)
-  // and seeds an editable starter prompt.
-  const pickMode = (chip: ModeChip) => {
-    setChatModeType(chip.id);
-    onPrefill(chip.prompt);
-  };
-
-  // Neutral, theme-agnostic styling: the launchpad stays white/greyscale so it
-  // never clashes with the app's blue chrome (Agent Builder, MCP config). No
-  // accent colour here — icon tiles + emphasis use ink tones only.
-  const tileStyle: React.CSSProperties = {
-    backgroundColor: 'var(--bg-active-chip)',
-    color: 'var(--text-secondary)',
-  };
 
   return (
     <div className="w-full mt-4" data-testid="chat-empty-state">
-      {/* Answer-mode chips — one row. Selects the mode + seeds a starter prompt.
-          Padding is inline: the #kasal-chat-root reset zeroes Tailwind px/py on
-          <button>. The active mode is highlighted so this doubles as showing the
-          composer's current selection. */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mb-3">
-        {MODE_CHIPS.map((chip) => {
-          const chipDisabled = isAnswerModeDisabled(chip.id, lacksReasoning);
-          const active = chip.id === chatModeType && !chipDisabled;
-          return (
-            <button
-              key={chip.id}
-              type="button"
-              disabled={chipDisabled}
-              onClick={() => !chipDisabled && pickMode(chip)}
-              aria-pressed={active}
-              title={chipDisabled ? answerModeDisabledReason(reasoningModelName) : undefined}
-              className={`kasal-suggest group flex items-center gap-3 text-left rounded-xl transition-colors${
-                chipDisabled ? ' opacity-50 cursor-not-allowed' : ''
-              }`}
-              style={{
-                padding: '12px 14px',
-                backgroundColor: active ? 'var(--bg-active-chip)' : 'var(--bg-secondary)',
-                border: `1px solid ${active ? 'var(--text-muted)' : 'var(--border-color)'}`,
-              }}
-            >
-              <span
-                className="flex items-center justify-center w-9 h-9 rounded-lg flex-shrink-0"
-                style={tileStyle}
-              >
-                {chip.icon}
-              </span>
-              <span className="flex-1 min-w-0">
-                <span className="block text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
-                  {chip.label}
-                </span>
-                <span className="block text-xs truncate" style={{ color: 'var(--text-muted)' }}>
-                  {answerModeHint(chip.id, lacksReasoning)}
-                </span>
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
       {/* Builder bridge — Agent/Flow Builder are otherwise hidden behind the
           top-bar grid icon; surface them with a hint about WHEN to reach for each
           (crews vs sequenced multi-crew orchestration). Two tidy lines: the

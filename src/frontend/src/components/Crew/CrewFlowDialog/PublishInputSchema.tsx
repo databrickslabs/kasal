@@ -61,7 +61,7 @@ const PublishInputSchema: React.FC<PublishInputSchemaProps> = ({
       </Typography>
       <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
         The values this {entityLabel} takes, found from its {'{placeholders}'}. Untick
-        anything a caller can leave out — otherwise they are asked for all of them.
+        anything a caller can leave out; otherwise they are asked for all of them.
       </Typography>
 
       <Stack spacing={1}>

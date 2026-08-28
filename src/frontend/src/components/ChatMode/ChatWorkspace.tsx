@@ -13,6 +13,7 @@ import { startGenerationStream } from './utils/generationStreamManager';
 import { GenerationCompleteData } from './types/dispatcher';
 import ChatContainer from './components/Chat/ChatContainer';
 import CatalogLibrary from './components/CatalogLibrary';
+import CollapsedRail from './components/CollapsedRail';
 import PreviewPanel from './components/Preview/PreviewPanel';
 import PreviewSkeleton, { shouldShowPreviewSkeleton } from './components/Preview/PreviewSkeleton';
 import { useThemeStore } from '../../store/theme';
@@ -448,26 +449,40 @@ const ChatWorkspace: React.FC = () => {
 
   return (
     <div id="kasal-chat-root" className="kasal-chat-root h-full w-full flex" style={{ backgroundColor: 'var(--bg-primary)' }}>
-      {/* Sidebar */}
+      {/* Sidebar — collapses to a slim icon rail, never fully disappears */}
+      {!sidebarOpen && <CollapsedRail onNewChat={handleNewChat} />}
       {sidebarOpen && (
         <aside
           className="w-64 flex flex-col flex-shrink-0"
           style={{ backgroundColor: 'var(--bg-rail)' }}
         >
-          {/* New Chat button — soft filled chip */}
-          <div className="px-3 pt-3 pb-1">
+          {/* Icon-only header row: panel toggle left, new chat right. The panel
+              icon is the ONE sidebar toggle (mirrored in CollapsedRail) — the
+              old header hamburger duplicated it and is gone. A bare "+" reads
+              fine without a "New Chat" label chip. */}
+          <div className="px-3 pt-3 pb-1 flex items-center justify-between">
             <button
-              onClick={handleNewChat}
-              className="kasal-newchat w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium"
-              style={{
-                backgroundColor: 'var(--bg-secondary)',
-                color: 'var(--text-primary)',
-              }}
+              type="button"
+              onClick={() => useAppStore.getState().setSidebarOpen(false)}
+              className="w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center transition-colors hover:bg-[var(--bg-rail-hover)]"
+              style={{ color: 'var(--text-secondary)' }}
+              aria-label="Hide chat history"
             >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
+                <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
+                <path strokeLinecap="round" d="M9.5 4.5v15" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={handleNewChat}
+              className="w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center transition-colors hover:bg-[var(--bg-rail-hover)]"
+              style={{ color: 'var(--text-secondary)' }}
+              aria-label="New chat"
+            >
+              <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
               </svg>
-              New Chat
             </button>
           </div>
 
@@ -601,11 +616,11 @@ const ChatWorkspace: React.FC = () => {
             <>
               <div data-testid="context-menu-backdrop" className="fixed inset-0 z-40" onClick={() => setContextMenu(null)} />
               <div
-                className="kasal-popover fixed z-50 rounded-xl overflow-hidden p-1 shadow-lg"
+                className="kasal-popover fixed z-50 rounded-2xl overflow-hidden p-1.5 shadow-xl"
                 style={{
                   left: contextMenu.x,
                   top: contextMenu.y,
-                  minWidth: 168,
+                  minWidth: 190,
                   backgroundColor: 'var(--bg-input)',
                   border: '1px solid var(--border-color)',
                 }}
@@ -615,21 +630,20 @@ const ChatWorkspace: React.FC = () => {
                     const session = sessions.find((s) => s.id === contextMenu.sessionId);
                     if (session) handleStartRename(session.id, session.title);
                   }}
-                  className="w-full flex items-center gap-2.5 text-left px-3 py-2 text-sm rounded-lg transition-colors hover:bg-[var(--bg-rail-hover)]"
+                  className="w-full flex items-center gap-3 text-left !px-3.5 !py-2.5 text-[13.5px] font-medium rounded-xl transition-colors hover:bg-[var(--bg-rail-hover)]"
                   style={{ color: 'var(--text-primary)' }}
                 >
-                  <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <svg className="w-[18px] h-[18px] flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zM19.5 7.125L16.875 4.5" />
                   </svg>
                   Rename
                 </button>
-                <div className="my-1 h-px" style={{ backgroundColor: 'var(--border-color)' }} />
                 <button
                   onClick={() => handleDeleteSession(contextMenu.sessionId)}
-                  className="w-full flex items-center gap-2.5 text-left px-3 py-2 text-sm rounded-lg transition-colors hover:bg-[rgba(239,68,68,0.10)]"
-                  style={{ color: '#ef4444' }}
+                  className="w-full flex items-center gap-3 text-left !px-3.5 !py-2.5 text-[13.5px] font-medium rounded-xl transition-colors hover:bg-[rgba(239,68,68,0.10)] hover:!text-[#ef4444]"
+                  style={{ color: 'var(--text-primary)' }}
                 >
-                  <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <svg className="w-[18px] h-[18px] flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
                   </svg>
                   Delete
@@ -645,9 +659,8 @@ const ChatWorkspace: React.FC = () => {
           the build skeleton never hides chat — the activity must stay visible. */}
       {!(chatCollapsed && previewPaneOpen && previewContent) && (
         <main className="flex-1 flex flex-col overflow-hidden relative" style={{ flex: previewPaneVisible ? '1 1 50%' : '1 1 100%' }}>
-          {/* The sidebar toggle + Databricks wordmark now live in the app top bar
-              (ChatModeHeaderSlot), so the main area no longer renders its own
-              header — this keeps it vertically stable when the sidebar toggles. */}
+          {/* No header bar of its own: the sidebar toggle lives in the sidebar /
+              collapsed rail, keeping the main area vertically stable. */}
 
           {/* Chat container — the reopen-preview pill is rendered inside it,
               anchored above the composer, so it never overlaps the input. */}

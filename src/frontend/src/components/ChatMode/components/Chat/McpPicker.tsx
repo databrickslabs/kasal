@@ -27,7 +27,12 @@ const McpPicker: React.FC<{
    *  for workspace/system admins so first-run users can register/enable servers
    *  right from the picker. Members (who can't configure MCP) don't see it. */
   onOpenMcpConfig?: () => void;
-}> = ({ disabled, menuPlacement = 'up', onOpenMcpConfig }) => {
+  /** 'button' (default): the composer's icon trigger + its own popover.
+   *  'inline': render ONLY the list content, always open, position: static —
+   *  for embedding inside another menu (the composer "+" accordion), where an
+   *  absolutely-positioned popover would be clipped by overflow-hidden. */
+  variant?: 'button' | 'inline';
+}> = ({ disabled, menuPlacement = 'up', onOpenMcpConfig, variant = 'button' }) => {
   const [open, setOpen] = useState(false);
   const canConfigureMcp = usePermissionStore((s) => s.isWorkspaceAdmin());
   const [filter, setFilter] = useState('');
@@ -59,9 +64,16 @@ const McpPicker: React.FC<{
     return () => document.removeEventListener('mousedown', onDown);
   }, [open]);
 
-  // Load the workspace's configured MCP servers when the popover opens.
+  // Content is visible when the popover is open — or always, in the inline
+  // variant (embedded in the composer "+" menu, which mounts it only while
+  // that menu is open). Both fetches key off THIS, not `open`: the inline
+  // variant never sets `open`, and gating on it left the list on "Loading…"
+  // forever.
+  const contentVisible = variant === 'inline' || open;
+
+  // Load the workspace's configured MCP servers when the content shows.
   useEffect(() => {
-    if (!open) return;
+    if (!contentVisible) return;
     let cancelled = false;
     setError(null);
     listKasalMcpServers()
@@ -88,12 +100,12 @@ const McpPicker: React.FC<{
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [contentVisible]);
 
-  // Agent Bricks endpoints (loaded once when the popover opens; the section is
+  // Agent Bricks endpoints (loaded once when the content shows; the section is
   // hidden entirely when the workspace has none — i.e. the feature isn't in use).
   useEffect(() => {
-    if (!open || agentBricks !== null || !agentBricksToolEnabled) return;
+    if (!contentVisible || agentBricks !== null || !agentBricksToolEnabled) return;
     let cancelled = false;
     AgentBricksService.getEndpoints(true)
       .then((res) => {
@@ -114,7 +126,7 @@ const McpPicker: React.FC<{
     return () => {
       cancelled = true;
     };
-  }, [open, agentBricks, agentBricksToolEnabled]);
+  }, [contentVisible, agentBricks, agentBricksToolEnabled]);
 
   const check = (isSelected: boolean) => (
     <span
@@ -144,8 +156,29 @@ const McpPicker: React.FC<{
   const visibleAgentBricks = (agentBricks ?? []).filter((e) => nameMatches(e.display_name || e.name));
   const totalSelected = selected.length + selectedAgentBricks.length;
 
+  const contentShell = (children: React.ReactNode) =>
+    variant === 'inline' ? (
+      <div role="menu" aria-label="MCP picker" className="w-full">
+        {children}
+      </div>
+    ) : (
+      <div
+        role="menu"
+        aria-label="MCP picker"
+        className={`absolute right-0 ${menuPlacement === 'down' ? 'top-full mt-2' : 'bottom-full mb-2'} w-80 rounded-xl overflow-hidden z-20`}
+        style={{
+          backgroundColor: 'var(--bg-primary)',
+          border: '1px solid var(--border-color)',
+          boxShadow: 'var(--shadow-popover)',
+        }}
+      >
+        {children}
+      </div>
+    );
+
   return (
-    <div ref={rootRef} className="relative flex-shrink-0">
+    <div ref={rootRef} className={variant === 'inline' ? '' : 'relative flex-shrink-0'}>
+      {variant !== 'inline' && (
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -172,18 +205,10 @@ const McpPicker: React.FC<{
           </span>
         )}
       </button>
+      )}
 
-      {open && (
-        <div
-          role="menu"
-          aria-label="MCP picker"
-          className={`absolute right-0 ${menuPlacement === 'down' ? 'top-full mt-2' : 'bottom-full mb-2'} w-80 rounded-xl overflow-hidden z-20`}
-          style={{
-            backgroundColor: 'var(--bg-primary)',
-            border: '1px solid var(--border-color)',
-            boxShadow: 'var(--shadow-popover)',
-          }}
-        >
+      {contentVisible && contentShell(
+        <>
           <div
             className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wide"
             style={{ color: 'var(--text-muted)' }}
@@ -327,7 +352,7 @@ const McpPicker: React.FC<{
               </button>
             </div>
           )}
-        </div>
+        </>,
       )}
     </div>
   );

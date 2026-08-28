@@ -25,7 +25,7 @@
   --accent: #FF3621;
   --accent-hover: #E02E1B;
   /* Borderless-rail tonal + shadow tokens */
-  --bg-rail: #F7F8FA;                          /* a hair grayer than the white canvas */
+  --bg-rail: #FFFFFF;                          /* white — flush with the canvas */
   --bg-rail-hover: rgba(27, 31, 35, 0.045);    /* ~4.5% ink — whisper hover */
   --bg-active-chip: rgba(27, 31, 35, 0.075);   /* ~7.5% ink — soft filled active pill */
   --shadow-input: 0 1px 2px rgba(16, 24, 40, 0.05), 0 4px 16px rgba(16, 24, 40, 0.06);

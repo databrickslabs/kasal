@@ -21,36 +21,36 @@ import EngineeringIcon from '@mui/icons-material/Engineering';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import InputIcon from '@mui/icons-material/Input';
 import ChatIcon from '@mui/icons-material/Chat';
-import { useFlowConfigStore } from '../../../store/flowConfig';
 import { EngineConfigService } from '../../../api/config/EngineConfigService';
 import { useCrewExecutionStore } from '../../../store/crewExecution';
+import { useEventTriggersStore } from '../../../store/eventTriggers';
 import HarnessSelector from './HarnessSelector';
 
 const EnginesConfiguration: React.FC = () => {
-  const {
-    kasalFlowEnabled,
-    setKasalFlowEnabled
-  } = useFlowConfigStore();
   const { inputMode, setInputMode } = useCrewExecutionStore();
+  // Event Triggers lives in a shared store so this toggle and the workflow
+  // right-sidebar action stay in sync live (no refresh needed).
+  const eventTriggersEnabled = useEventTriggersStore((s) => s.enabled);
+  const setEventTriggersEnabledStore = useEventTriggersStore((s) => s.setEnabled);
+  const loadEventTriggers = useEventTriggersStore((s) => s.load);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState(false);
   const [otelEnabled, setOtelEnabled] = useState(false);
   const [otelLogLevel, setOtelLogLevel] = useState('INFO');
   const [otelSyncing, setOtelSyncing] = useState(false);
+  const [eventTriggersSyncing, setEventTriggersSyncing] = useState(false);
 
   // Load initial state from backend
   useEffect(() => {
     const loadConfig = async () => {
       try {
         setLoading(true);
-        const [flowResp, otelResp] = await Promise.all([
-          EngineConfigService.getKasalFlowEnabled(),
-          EngineConfigService.getOtelAppTelemetryConfig().catch(() => ({ otel_app_telemetry_enabled: false, otel_app_telemetry_log_level: 'INFO' })),
-        ]);
-        setKasalFlowEnabled(flowResp.flow_enabled);
+        const otelResp = await EngineConfigService.getOtelAppTelemetryConfig().catch(
+          () => ({ otel_app_telemetry_enabled: false, otel_app_telemetry_log_level: 'INFO' }),
+        );
         setOtelEnabled(otelResp.otel_app_telemetry_enabled);
         setOtelLogLevel(otelResp.otel_app_telemetry_log_level || 'INFO');
+        await loadEventTriggers();
       } catch (err) {
         console.error('Failed to load engine configuration:', err);
         setError('Failed to load configuration from server');
@@ -60,29 +60,7 @@ const EnginesConfiguration: React.FC = () => {
     };
 
     loadConfig();
-  }, [setKasalFlowEnabled]);
-
-  const handleFlowToggle = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const newValue = event.target.checked;
-
-    try {
-      setSyncing(true);
-      setError(null);
-
-      // Update backend first
-      await EngineConfigService.setKasalFlowEnabled(newValue);
-
-      // Update local state only after successful backend update
-      setKasalFlowEnabled(newValue);
-    } catch (err) {
-      console.error('Failed to update flow configuration:', err);
-      setError('Failed to save configuration to server');
-      // Revert the toggle if backend update failed
-      event.target.checked = !newValue;
-    } finally {
-      setSyncing(false);
-    }
-  };
+  }, [loadEventTriggers]);
 
   const handleOtelToggle = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = event.target.checked;
@@ -111,6 +89,22 @@ const EnginesConfiguration: React.FC = () => {
       setError('Failed to save OTel log level configuration');
     } finally {
       setOtelSyncing(false);
+    }
+  };
+
+  const handleEventTriggersToggle = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const newValue = event.target.checked;
+    try {
+      setEventTriggersSyncing(true);
+      setError(null);
+      await setEventTriggersEnabledStore(newValue);
+    } catch (err) {
+      console.error('Failed to update event triggers configuration:', err);
+      setError('Failed to save event-trigger configuration');
+    } finally {
+      setEventTriggersSyncing(false);
     }
   };
 
@@ -154,64 +148,6 @@ const EnginesConfiguration: React.FC = () => {
       {/* The DEFAULT harness. A run may name its own beside the model; this is
           what applies when it does not — scheduled and API-triggered runs. */}
       <HarnessSelector />
-
-      {/* Kasal Engine Section */}
-      <Paper sx={{ p: 2, mb: 2 }} elevation={1}>
-        <Box sx={{
-          display: 'flex',
-          alignItems: 'center',
-          mb: 2
-        }}>
-          <SmartToyIcon sx={{ mr: 1, color: 'primary.main', fontSize: '1.1rem' }} />
-          <Typography variant="subtitle1" fontWeight="medium">
-            Kasal Engine
-          </Typography>
-        </Box>
-
-        <Divider sx={{ mb: 2 }} />
-
-        <Stack spacing={2}>
-          <Box>
-            <FormControlLabel
-              control={
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                  <Switch
-                    checked={kasalFlowEnabled}
-                    onChange={handleFlowToggle}
-                    color="primary"
-                    disabled={syncing}
-                  />
-                  {syncing && (
-                    <CircularProgress size={16} sx={{ ml: 1 }} />
-                  )}
-                </Box>
-              }
-              label={
-                <Box>
-                  <Typography variant="body2" fontWeight="medium">
-                    Enable Flow Feature
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Toggle flow execution capabilities, flow panels, and flow-related UI components
-                  </Typography>
-                </Box>
-              }
-            />
-          </Box>
-
-          {!kasalFlowEnabled && (
-            <Alert severity="warning" sx={{ mt: 1 }}>
-              Flow feature is disabled. The following UI components will be hidden:
-              <ul style={{ margin: '8px 0 0 16px', paddingLeft: '16px' }}>
-                <li>Execute Flow button</li>
-                <li>Flow Panel</li>
-                <li>Add Flow button</li>
-              </ul>
-            </Alert>
-          )}
-
-        </Stack>
-      </Paper>
 
       {/* Input Variables Collection Mode */}
       <Paper elevation={1} sx={{ p: 3, mt: 3 }}>
@@ -349,6 +285,57 @@ const EnginesConfiguration: React.FC = () => {
                 Logs are written to the <code>otel_logs</code> table in the configured Unity Catalog schema.
               </Alert>
             </>
+          )}
+        </Stack>
+      </Paper>
+
+      {/* Event Triggers Section */}
+      <Paper sx={{ p: 2, mt: 3 }} elevation={1}>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+          <EngineeringIcon sx={{ mr: 1, color: 'primary.main', fontSize: '1.1rem' }} />
+          <Typography variant="subtitle1" fontWeight="medium">
+            Event Triggers (Preview)
+          </Typography>
+        </Box>
+
+        <Divider sx={{ mb: 2 }} />
+
+        <Stack spacing={2}>
+          <Box>
+            <FormControlLabel
+              control={
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Switch
+                    checked={eventTriggersEnabled}
+                    onChange={handleEventTriggersToggle}
+                    color="primary"
+                    disabled={eventTriggersSyncing}
+                  />
+                  {eventTriggersSyncing && (
+                    <CircularProgress size={16} sx={{ ml: 1 }} />
+                  )}
+                </Box>
+              }
+              label={
+                <Box>
+                  <Typography variant="body2" fontWeight="medium">
+                    Enable Event Triggers
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Let a crew/flow emit an event when it finishes and trigger
+                    another when that event fires. When on, the background consumer
+                    drains the queue; when off, nothing is dispatched.
+                  </Typography>
+                </Box>
+              }
+            />
+          </Box>
+
+          {!eventTriggersEnabled && (
+            <Alert severity="info" sx={{ mt: 1 }}>
+              Event triggers are disabled. Fired and emitted events stay queued
+              (nothing runs) until you enable this.
+            </Alert>
           )}
         </Stack>
       </Paper>

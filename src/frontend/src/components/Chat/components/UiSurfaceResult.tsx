@@ -49,11 +49,9 @@ export const UiSurfaceResult: React.FC<{ surface: Surface }> = ({ surface }) => 
   const innerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const [scaledHeight, setScaledHeight] = useState<number | null>(null);
-  // A presentation is navigated in place (Prev/Next/dots), so the card must not
-  // hijack those clicks to open the dialog, and must not clip away the deck's
-  // bottom navigation — its height is already bounded by the 16:9 stage. Other
-  // kinds keep the click-to-expand + readable-height clip behavior.
-  const isDeck = surface.surfaceKind === 'presentation';
+  // Presentations are no longer an A2UI kind (they render on the chat HTML
+  // path); every surface keeps the click-to-expand + readable-height clip.
+  const isDeck = false;
 
   // Shrink-to-fit: the surface renders at NATURAL_WIDTH and is scaled down to
   // the chat column's width; the wrapper's height tracks the scaled content.

@@ -154,10 +154,29 @@ export async function createSession(title: string, _groupId?: string): Promise<C
   return toSession(res.data);
 }
 
-/** Group scoping is enforced by the backend from the request's group header. */
+/** Group scoping is enforced by the backend from the request's group header.
+ *
+ * The endpoint pages at up to 100 sessions per request (server default is 50) —
+ * asking for just the first page silently capped the history rail at the 50
+ * most-recent sessions, so scrolling never reached the older ones. Walk the
+ * pages until a short page says we have them all. The page cap is a runaway
+ * guard, not a design limit (2,000 sessions is already beyond what a flat rail
+ * can present).
+ */
 export async function listSessions(_groupId?: string): Promise<ChatSession[]> {
-  const res = await getClient().get<NamedSessionWire[]>(`${BASE}/sessions/named`);
-  return (res.data || []).map(toSession);
+  const PER_PAGE = 100;
+  const MAX_PAGES = 20;
+  const all: NamedSessionWire[] = [];
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const res = await getClient().get<NamedSessionWire[]>(
+      `${BASE}/sessions/named`,
+      { params: { page, per_page: PER_PAGE } },
+    );
+    const batch = res.data || [];
+    all.push(...batch);
+    if (batch.length < PER_PAGE) break;
+  }
+  return all.map(toSession);
 }
 
 export async function deleteSession(id: string): Promise<void> {

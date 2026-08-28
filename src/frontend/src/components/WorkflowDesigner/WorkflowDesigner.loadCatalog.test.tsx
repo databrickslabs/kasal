@@ -20,7 +20,6 @@ vi.mock('./RightSidebar', () => ({ default: () => null }));
 vi.mock('./LeftSidebar', () => ({ default: () => null }));
 vi.mock('../Common/GroupSelector', () => ({ default: () => null }));
 vi.mock('../ChatMode/ChatWorkspace', () => ({ default: () => null }));
-vi.mock('../ChatMode/ChatModeHeaderSlot', () => ({ default: () => null }));
 vi.mock('../Agents/AgentDialog', () => ({ default: () => null }));
 vi.mock('../Tasks/TaskDialog', () => ({ default: () => null }));
 vi.mock('../Planning/CrewPlanningDialog', () => ({ default: () => null }));

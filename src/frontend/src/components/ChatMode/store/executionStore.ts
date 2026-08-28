@@ -1103,6 +1103,29 @@ export const useExecutionStore = create<ExecutionStore>()(
       : { resultType: undefined, resultData: undefined };
     if (owner) sessionStore.updateMessageInTargetSession(owner, bubbleId, update);
     else sessionStore.updateMessage(bubbleId, update);
+
+    // The preview pane FOLLOWS a live surface it was opened from. Without
+    // this it held a frozen click-time snapshot while the inline copy kept
+    // streaming — the reader saw a stale pane beside a live chat copy (and a
+    // retraction left the pane showing a surface that no longer existed).
+    const paneState = get();
+    if (paneState.previewPaneOpen && paneState.previewSourceMessageId === bubbleId) {
+      if (next) {
+        const data = JSON.stringify(next);
+        set((st) => {
+          const history = [...st.previewHistory];
+          if (st.previewIndex >= 0 && st.previewIndex < history.length) {
+            history[st.previewIndex] = { ...history[st.previewIndex], type: 'ui', data };
+          }
+          return {
+            previewContent: { ...(st.previewContent ?? { type: 'ui' }), type: 'ui', data },
+            previewHistory: history,
+          };
+        });
+      } else {
+        get().clearPreview();
+      }
+    }
   },
 
   attachSurface: (

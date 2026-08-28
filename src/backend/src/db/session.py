@@ -518,7 +518,9 @@ def _enter_request_session(session: AsyncSession):
     owner_token = None
     try:
         owner_token = _request_session_owner.set(asyncio.current_task())
-    except Exception:  # noqa: BLE001 — no running loop is not fatal; reuse just won't match
+    except (
+        Exception
+    ):  # noqa: BLE001 — no running loop is not fatal; reuse just won't match
         pass
     return session_token, owner_token
 
@@ -1705,6 +1707,48 @@ async def _ensure_databricks_config_columns(conn) -> None:
         )
 
 
+async def _ensure_trigger_queue_table(conn) -> None:
+    """Create the ``triggerqueue`` table on an existing DB.
+
+    The event-trigger queue was added after most DBs were provisioned, and
+    ``create_all`` never touches an existing database — so without this the
+    ``/triggers`` API and the consumer hit "no such table: triggerqueue" on both
+    the local SQLite ``app.db`` and any pre-existing Lakebase. Idempotent via
+    ``checkfirst=True``.
+    """
+    try:
+        from src.models.trigger_queue import TriggerQueue
+
+        def _create(sync_conn):
+            TriggerQueue.__table__.create(sync_conn, checkfirst=True)
+
+        await conn.run_sync(_create)
+        logger.info("Ensured triggerqueue table exists")
+    except Exception as e:
+        logger.warning(f"Could not ensure triggerqueue table: {e}")
+
+
+async def _ensure_event_choreography_tables(conn) -> None:
+    """Create the ``eventsubscription`` + ``emitrule`` tables on an existing DB.
+
+    Same rationale as ``_ensure_trigger_queue_table``: ``create_all`` never
+    touches an existing database, so these event-choreography config tables must
+    be self-healed on startup (SQLite and Lakebase). Idempotent via
+    ``checkfirst=True``.
+    """
+    try:
+        from src.models.event_subscription import EmitRule, EventSubscription
+
+        def _create(sync_conn):
+            EventSubscription.__table__.create(sync_conn, checkfirst=True)
+            EmitRule.__table__.create(sync_conn, checkfirst=True)
+
+        await conn.run_sync(_create)
+        logger.info("Ensured eventsubscription + emitrule tables exist")
+    except Exception as e:
+        logger.warning(f"Could not ensure event choreography tables: {e}")
+
+
 async def run_schema_self_heal(conn) -> None:
     """Create missing tables and add missing columns on an existing DB.
 
@@ -1763,6 +1807,8 @@ async def run_schema_self_heal(conn) -> None:
         _ensure_workflow_recipes_table,
         _ensure_workflow_recipe_trials_table,
         _ensure_crew_publications_table,
+        _ensure_trigger_queue_table,
+        _ensure_event_choreography_tables,
         _ensure_a2a_push_configs_table,
         _ensure_a2a_agents_table,
         _ensure_skills_tables,

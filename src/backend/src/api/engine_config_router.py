@@ -16,6 +16,7 @@ from src.schemas.engine_config import (
     EngineConfigValueUpdate,
     HarnessResponse,
     HarnessUpdate,
+    EventTriggersConfigUpdate,
     KasalFlowConfigUpdate,
     OtelAppTelemetryConfigUpdate,
 )
@@ -418,6 +419,49 @@ async def set_kasal_flow_enabled(
 
     logger.info(f"CrewAI flow enabled status updated to: {config_data.flow_enabled}")
     return {"success": True, "flow_enabled": config_data.flow_enabled}
+
+
+@router.get("/kasal/event-triggers")
+async def get_event_triggers_enabled(
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+):
+    """Get the event-trigger feature enabled status (system-level).
+
+    Only system administrators can access engine configuration.
+    """
+    if not is_system_admin(group_context):
+        raise ForbiddenError(
+            "Only system administrators can access engine configuration"
+        )
+
+    enabled = await service.get_event_triggers_enabled()
+    return {"event_triggers_enabled": enabled}
+
+
+@router.patch("/kasal/event-triggers")
+async def set_event_triggers_enabled(
+    config_data: EventTriggersConfigUpdate,
+    service: EngineConfigServiceDep,
+    group_context: GroupContextDep,
+):
+    """Enable/disable the event-trigger feature (system-level, Preview).
+
+    Only system administrators can manage this. When enabled, the background
+    consumer drains the trigger queue and completed runs emit their events;
+    when disabled, both stop (queued rows simply wait).
+    """
+    if not is_system_admin(group_context):
+        raise ForbiddenError(
+            "Only system administrators can manage engine configuration"
+        )
+
+    success = await service.set_event_triggers_enabled(config_data.enabled)
+    if not success:
+        raise KasalError("Failed to update event-trigger configuration")
+
+    logger.info(f"Event triggers enabled status updated to: {config_data.enabled}")
+    return {"success": True, "event_triggers_enabled": config_data.enabled}
 
 
 @router.get("/kasal/otel-app-telemetry")

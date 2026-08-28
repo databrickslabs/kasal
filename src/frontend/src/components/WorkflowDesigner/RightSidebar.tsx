@@ -12,6 +12,7 @@ import {
   AddTask as AddTaskIcon,
   Save as SaveIcon,
   MenuBook as MenuBookIcon,
+  Webhook as WebhookIcon,
   Schedule as ScheduleIcon,
   Assessment as LogsIcon,
   History as HistoryIcon,
@@ -21,6 +22,7 @@ import {
 import { Edge } from 'reactflow';
 import { usePermissionStore } from '../../store/permissions';
 import { useTabManagerStore } from '../../store/tabManager';
+import { useEventTriggersStore } from '../../store/eventTriggers';
 import ExportCrewDialog from '../CrewExport/ExportCrewDialog';
 
 interface SidebarItem {
@@ -45,6 +47,7 @@ interface RightSidebarProps {
   showRunHistory?: boolean;
   executionHistoryHeight?: number;
   onOpenSchedulesDialog?: () => void;
+  onOpenTriggersDialog?: () => void;
   onToggleExecutionHistory?: () => void;
   areFlowsVisible?: boolean;
   toggleFlowsVisibility?: () => void;
@@ -68,6 +71,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   showRunHistory = false,
   executionHistoryHeight = 200,
   onOpenSchedulesDialog,
+  onOpenTriggersDialog,
   onToggleExecutionHistory,
   areFlowsVisible = false,
   toggleFlowsVisibility: _toggleFlowsVisibility, // moved to TabBar mode switcher
@@ -81,6 +85,15 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   const [chatOpenedByClick, setChatOpenedByClick] = useState(false);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   const [pulsePlay, setPulsePlay] = useState(false);
+  // Event Triggers is a Preview feature toggled in Configuration → Engines.
+  // Read from the shared Zustand store so flipping it in Configuration hides/
+  // shows this sidebar action live, without a refresh. Default OFF.
+  const eventTriggersEnabled = useEventTriggersStore((s) => s.enabled);
+  const loadEventTriggers = useEventTriggersStore((s) => s.load);
+
+  useEffect(() => {
+    loadEventTriggers();
+  }, [loadEventTriggers]);
 
   // Get user permissions
   const { userRole } = usePermissionStore();
@@ -290,7 +303,14 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
       tooltip: 'Schedules',
       onClick: onOpenSchedulesDialog,
       disabled: !onOpenSchedulesDialog
-    }
+    },
+    ...(eventTriggersEnabled ? [{
+      id: 'triggers',
+      icon: <WebhookIcon />,
+      tooltip: 'Event Triggers',
+      onClick: onOpenTriggersDialog,
+      disabled: !onOpenTriggersDialog
+    }] : [])
   ];
 
   return (

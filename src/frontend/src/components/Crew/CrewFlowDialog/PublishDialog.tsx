@@ -269,7 +269,7 @@ const PublishDialog: React.FC<PublishDialogProps> = ({
           <Stack spacing={2} sx={{ mt: 1 }}>
             <Typography variant="body2" color="text.secondary">
               Publishing makes <strong>{entityName}</strong> reachable by something
-              other than the canvas. Pick where below — publishing to chat alone
+              other than the canvas. Pick where below. Publishing to chat alone
               exposes nothing outside this workspace.
             </Typography>
 
@@ -299,7 +299,7 @@ const PublishDialog: React.FC<PublishDialogProps> = ({
               size="small"
               helperText={
                 'What it does AND when to use it. This is the only thing a caller ' +
-                'matches on — a vague description means it is never chosen. Chat ' +
+                'matches on; a vague description means it is never chosen. Chat ' +
                 'routing has the least context of any caller, so name the phrases ' +
                 'someone would actually type.'
               }
@@ -316,7 +316,7 @@ const PublishDialog: React.FC<PublishDialogProps> = ({
                     onChange={() => toggleProtocol('chat')}
                   />
                 }
-                label="Chat — let this be picked in Use existing mode"
+                label="Chat: let this be picked in Use existing mode"
               />
               <Typography
                 variant="caption"
@@ -333,7 +333,7 @@ const PublishDialog: React.FC<PublishDialogProps> = ({
                     onChange={() => toggleProtocol('mcp')}
                   />
                 }
-                label="MCP — Claude Code, Cursor, other MCP clients"
+                label="MCP: Claude Code, Cursor, other MCP clients"
               />
               <FormControlLabel
                 control={
@@ -342,7 +342,7 @@ const PublishDialog: React.FC<PublishDialogProps> = ({
                     onChange={() => toggleProtocol('a2a')}
                   />
                 }
-                label="A2A — other agent platforms"
+                label="A2A: other agent platforms"
               />
               {protocols.length === 0 && (
                 <Typography variant="caption" color="warning.main" display="block">

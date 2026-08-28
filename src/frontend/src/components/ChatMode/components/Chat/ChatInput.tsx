@@ -1,20 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ModelConfigResponse } from '../../types/dispatcher';
-import {
-  answerModeDisabledReason,
-  answerModeHint,
-  isAnswerModeDisabled,
-  // aliased: this file already has a local `modelDisplayName` for the model pill
-  modelDisplayName as resolveModelDisplayName,
-  modelLacksReasoning,
-} from '../../utils/answerModes';
-import { ANSWER_MODE_LOCKED_REASON } from '../../utils/sourceModes';
-import SourcePill from './SourcePill';
+import { modelLacksReasoning } from '../../utils/answerModes';
 import HeldConversationPill from './HeldConversationPill';
-import { useAnchoredFixedStyle } from '../../hooks/useAnchoredFixedStyle';
 import { forgetKnowledgeFile, uploadKnowledgeFile } from '../../api/knowledge';
 import { improveChatPrompt } from '../../api/prompt';
-import McpPicker from './McpPicker';
+import ComposerMenu from './ComposerMenu';
 import TrifectaNotice from './TrifectaNotice';
 import SharedWorkspaceNotice from './SharedWorkspaceNotice';
 import { useExecutionStore } from '../../store/executionStore';
@@ -75,22 +65,6 @@ const SLASH_COMMANDS = [
 // Hints are resolved per model at render (see utils/answerModes): on a model
 // with no budget, Research is still a real crew but Deep Research would be
 // identical to it, so its promise — and the mode itself — is withdrawn.
-const MODES = [
-  { id: 'chat', label: 'Chat', short: 'Chat' },
-  { id: 'research', label: 'Research', short: 'Research' },
-  { id: 'deep', label: 'Deep Research', short: 'Deep' },
-] as const;
-
-// Memory modes shown in the composer's memory pill — same labelled-dropdown
-// pattern as the answer-mode pill so the three states are explicit (no blind
-// cycling). Mapped to the single `memoryEnabled` flag below.
-//   workspace = semantic memory ON (workspace/group-scoped recall + this chat's history)
-//   session   = semantic memory OFF — recall comes ONLY from this chat's history
-type MemoryModeId = 'workspace' | 'session';
-const MEMORY_MODES: { id: MemoryModeId; label: string; short: string; hint: string }[] = [
-  { id: 'workspace', label: 'Teamspace memory', short: 'Teamspace', hint: 'Recall context across the whole teamspace' },
-  { id: 'session', label: 'Session memory', short: 'Session', hint: "Recall only this chat's history — no teamspace memory" },
-];
 
 // NOTE: there is deliberately NO per-message output-format picker. The
 // deliverable type (presentation, dashboard, quiz, …) is derived from the
@@ -204,24 +178,17 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const [hintIndex, setHintIndex] = useState(0);
   const [reducedMotion] = useState(prefersReducedMotion);
   const [showCommands, setShowCommands] = useState(false);
-  const [showModelPicker, setShowModelPicker] = useState(false);
-  const [showModePicker, setShowModePicker] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const modelPickerRef = useRef<HTMLDivElement>(null);
-  const modePickerRef = useRef<HTMLDivElement>(null);
   // Viewport-anchored fixed coords for each pop-up menu (escape overflow-hidden).
-  const modeMenuStyle = useAnchoredFixedStyle(showModePicker, modePickerRef, menuPlacement);
-  const modelMenuStyle = useAnchoredFixedStyle(showModelPicker, modelPickerRef, menuPlacement);
   // Answer mode (chat|research|deep) lives in the store so the choice persists
   // and is consistent across ChatInput's dual mount (read store-direct, not props).
   const chatModeType = useExecutionStore((s) => s.chatModeType);
   const setChatModeType = useExecutionStore((s) => s.setChatModeType);
-  const activeMode = MODES.find((m) => m.id === chatModeType) ?? MODES[0];
   // The SOURCE axis. Only read here to grey the answer-mode pill — the control
   // itself owns its own state in SourcePill. chatModeType is deliberately left
   // alone while this is on: the user gets their selection back on switching
@@ -235,7 +202,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
   // hints and disables Deep Research, which on such a model is byte-for-byte
   // identical to Research (the engine drops the effort).
   const lacksReasoning = modelLacksReasoning(models, selectedModel);
-  const reasoningModelName = resolveModelDisplayName(models, selectedModel);
   // The mode persists in the store, so a Deep selection made under a
   // reasoning-capable model would otherwise stick after switching to one
   // without a budget — silently running as Research while the pill still reads
@@ -247,8 +213,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
   }, [chatModeType, lacksReasoning, setChatModeType]);
   // Memory mode is a single binary toggle: workspace (semantic memory on) vs
   // session (semantic memory off — recall comes only from this chat's history).
-  const memoryModeId: MemoryModeId = memoryEnabled ? 'workspace' : 'session';
-  const activeMemory = MEMORY_MODES.find((m) => m.id === memoryModeId) ?? MEMORY_MODES[0];
   const toggleMemoryMode = () => {
     onMemoryEnabledChange?.(!memoryEnabled);
     inputRef.current?.focus();
@@ -419,30 +383,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
       : LANDING_HINTS[hintIndex % LANDING_HINTS.length];
 
   // Close the model picker on outside click
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (modelPickerRef.current && !modelPickerRef.current.contains(e.target as Node)) {
-        setShowModelPicker(false);
-      }
-    };
-    if (showModelPicker) {
-      document.addEventListener('mousedown', handleClick);
-      return () => document.removeEventListener('mousedown', handleClick);
-    }
-  }, [showModelPicker]);
-
-  // Close the mode picker on outside click
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (modePickerRef.current && !modePickerRef.current.contains(e.target as Node)) {
-        setShowModePicker(false);
-      }
-    };
-    if (showModePicker) {
-      document.addEventListener('mousedown', handleClick);
-      return () => document.removeEventListener('mousedown', handleClick);
-    }
-  }, [showModePicker]);
 
   const handleSend = () => {
     const trimmed = value.trim();
@@ -606,8 +546,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
     }
   };
 
-  const selectedModelObj = models.find((m) => m.key === selectedModel);
-  const modelDisplayName = selectedModelObj?.name || selectedModel || 'Default';
 
   return (
     <div className="relative px-4 pb-5 pt-2">
@@ -803,236 +741,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
         <div className="flex items-center justify-end px-4 py-2.5">
           {/* mode + memory + model selector + attach + send */}
           <div className="flex items-center gap-2">
-            {/* Answer-mode pill + dropdown. The dropdown is anchored to THIS
-                pill (right-0, under the chat controls) and opens up/down per
-                menuPlacement — never off at the screen's side. Chat = single
-                light agent; Research = crew + balanced reasoning; Deep Research
-                = crew + maximum reasoning. Store-owned so it persists. */}
-            {/* Source pill: build something new, or run something already
-                published to chat. A different axis from the answer mode beside
-                it, which is why it is a separate control and not a fourth chip. */}
-            <SourcePill
-              menuPlacement={menuPlacement}
-              menuAnimClass={menuAnimClass}
-              onPicked={() => inputRef.current?.focus()}
-            />
-
-            {/* Answer mode is HIDDEN, not greyed, while "Use existing" is
-                selected. A saved crew carries its own agents, tasks, process and
-                model, so the effort dial has nothing to act on — and a control
-                that is visible but permanently inert reads as broken rather than
-                as inapplicable. The dependency is still legible: the source pill
-                sitting where the mode pill was is the thing that changed. */}
-            {!preferExisting && (
-              <div className="relative" ref={modePickerRef}>
-                <button
-                  type="button"
-                  disabled={preferExisting}
-                  onClick={() => {
-                    if (preferExisting) return;
-                    setShowModePicker(!showModePicker);
-                    setShowModelPicker(false);
-                    setShowCommands(false);
-                  }}
-                  aria-label={`Answer mode: ${activeMode.label}`}
-                  // Greyed rather than hidden while "Use existing" is selected: a
-                  // saved crew carries its own agents, tasks, process and model,
-                  // so the effort dial has nothing to act on. Saying so makes the
-                  // dependency VISIBLE — the failure of the fourth-chip design was
-                  // that it made it silent, and the user found out later.
-                  title={
-                    preferExisting
-                      ? ANSWER_MODE_LOCKED_REASON
-                      : answerModeHint(activeMode.id, lacksReasoning)
-                  }
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                    preferExisting ? 'opacity-40 cursor-not-allowed' : 'hover:opacity-80'
-                  }`}
-                  style={{ color: 'var(--text-secondary)', backgroundColor: 'transparent', border: 'none' }}
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-                  </svg>
-                  <span>{activeMode.short}</span>
-                  <svg
-                    className={`w-3 h-3 transition-transform ${showModePicker ? 'rotate-180' : ''}`}
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2.5}
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                  </svg>
-                </button>
-                {showModePicker && (
-                  <div
-                    className={`kasal-popover ${menuAnimClass} w-72 rounded-xl overflow-hidden z-50`}
-                    style={{ ...modeMenuStyle, backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)' }}
-                  >
-                    <div className="px-3 py-2">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-                        Answer mode
-                      </span>
-                    </div>
-                    <div className="px-1.5 pb-1.5">
-                      {MODES.map((m) => {
-                        const modeDisabled = isAnswerModeDisabled(m.id, lacksReasoning);
-                        return (
-                          <button
-                            key={m.id}
-                            disabled={modeDisabled}
-                            onClick={() => {
-                              if (modeDisabled) return;
-                              setChatModeType(m.id);
-                              setShowModePicker(false);
-                              inputRef.current?.focus();
-                            }}
-                            aria-label={`Answer mode: ${m.label}`}
-                            title={modeDisabled ? answerModeDisabledReason(reasoningModelName) : undefined}
-                            className={`w-full text-left !px-2.5 !py-2 my-0.5 rounded-lg flex items-center justify-between transition-colors ${
-                              modeDisabled
-                                ? 'opacity-50 cursor-not-allowed'
-                                : m.id === chatModeType
-                                  ? 'bg-[var(--bg-active-chip)]'
-                                  : 'hover:bg-[var(--bg-rail-hover)]'
-                            }`}
-                          >
-                            <div>
-                              <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{m.label}</div>
-                              <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                                {answerModeHint(m.id, lacksReasoning)}
-                              </div>
-                            </div>
-                            {m.id === chatModeType && !modeDisabled && (
-                              <svg className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--accent)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                              </svg>
-                            )}
-                          </button>
-                        );
-                      })}
-                      {lacksReasoning && (
-                        <div className="!px-2.5 !py-2 text-[11px] leading-snug" style={{ color: 'var(--text-muted)' }}>
-                          {answerModeDisabledReason(reasoningModelName)}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Memory toggle — a single button that flips between Workspace
-                memory (semantic memory on) and Session memory (chat-history only).
-                Owned by the parent (props) so the choice survives the
-                empty→conversation remount. */}
-            <button
-              type="button"
-              role="switch"
-              aria-checked={memoryEnabled}
-              onClick={toggleMemoryMode}
-              aria-label={`Memory mode: ${activeMemory.label}`}
-              title={activeMemory.hint}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
-              style={{
-                color: memoryEnabled ? 'var(--text-secondary)' : 'var(--text-muted)',
-                backgroundColor: 'transparent',
-                border: 'none',
-              }}
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
-                {!memoryEnabled && (
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4l16 16" />
-                )}
-              </svg>
-              <span>{activeMemory.label}</span>
-            </button>
-
-            {/* Model pill + dropdown — same anchored up/down pattern as the
-                answer-mode & memory pills: opens DOWN when the composer is
-                centered (empty state) and UP once it's docked at the bottom
-                (menuPlacement), so it never renders off-screen. */}
-            {models.length > 0 && (
-              <div className="relative" ref={modelPickerRef}>
-                <button
-                  onClick={() => {
-                    setShowModelPicker(!showModelPicker);
-                    setShowModePicker(false);
-                    setShowCommands(false);
-                  }}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
-                  style={{
-                    color: 'var(--text-secondary)',
-                    backgroundColor: 'transparent',
-                    border: 'none',
-                  }}
-                  title="Select model"
-                >
-                  <svg
-                    className="w-3.5 h-3.5 flex-shrink-0"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5"
-                    />
-                  </svg>
-                  <span className="max-w-[140px] truncate">{modelDisplayName}</span>
-                  <svg
-                    className={`w-3 h-3 transition-transform ${showModelPicker ? 'rotate-180' : ''}`}
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2.5}
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                  </svg>
-                </button>
-                {showModelPicker && (
-                  <div
-                    className={`kasal-popover ${menuAnimClass} w-72 rounded-xl overflow-hidden z-50`}
-                    style={{ ...modelMenuStyle, backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)' }}
-                  >
-                    <div className="px-3 py-2">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-                        Model
-                      </span>
-                    </div>
-                    <div className="max-h-64 overflow-y-auto px-1.5 pb-1.5">
-                      {models.map((m) => (
-                        <button
-                          key={m.key}
-                          onClick={() => {
-                            onModelChange(m.key);
-                            setShowModelPicker(false);
-                            inputRef.current?.focus();
-                          }}
-                          className={`w-full text-left !px-2.5 !py-2 my-0.5 rounded-lg flex items-center justify-between transition-colors ${m.key === selectedModel ? 'bg-[var(--bg-active-chip)]' : 'hover:bg-[var(--bg-rail-hover)]'}`}
-                        >
-                          <div>
-                            <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{m.name}</div>
-                            {m.provider && (
-                              <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{m.provider}</div>
-                            )}
-                          </div>
-                          {m.key === selectedModel && (
-                            <svg className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--accent)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                            </svg>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
             {/* Improve prompt — rewrites the typed request with prompt-
                 engineering best practices before sending. */}
             <button
@@ -1055,31 +763,24 @@ const ChatInput: React.FC<ChatInputProps> = ({
               )}
             </button>
 
-            {/* Attach knowledge files — sits just left of Send. */}
-            <button
-              onClick={() => fileInputRef.current?.click()}
+            {/* The "+" menu — source, answer mode, memory, model, attach and
+                the MCP tools all live here now; the bar stays sparkle + send. */}
+            <ComposerMenu
               disabled={disabled}
-              className="relative flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-colors hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed"
-              style={{ color: 'var(--text-secondary)', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}
-              title="Attach files as knowledge for the crew to search"
-              aria-label="Attach files"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
-              </svg>
-              {attachments.length > 0 && (
-                <span
-                  className="absolute -top-1 -right-1 text-[9px] tabular-nums rounded-full min-w-[14px] h-[14px] flex items-center justify-center px-0.5"
-                  style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
-                >
-                  {attachments.length}
-                </span>
-              )}
-            </button>
-
-            {/* MCP picker ("+") — select the MCP servers (Kasal-configured and
-                Databricks managed) the next crew gets equipped with. */}
-            <McpPicker disabled={disabled} menuPlacement={menuPlacement} onOpenMcpConfig={onOpenMcpConfig} />
+              menuPlacement={menuPlacement}
+              menuAnimClass={menuAnimClass}
+              onPicked={() => inputRef.current?.focus()}
+              chatModeType={chatModeType}
+              setChatModeType={setChatModeType}
+              models={models}
+              selectedModel={selectedModel}
+              onModelChange={onModelChange}
+              memoryEnabled={memoryEnabled}
+              onToggleMemory={toggleMemoryMode}
+              attachmentCount={attachments.length}
+              onAttachFiles={() => fileInputRef.current?.click()}
+              onOpenMcpConfig={onOpenMcpConfig}
+            />
 
             {/* Send — submit only. Stop lives in the run-activity container above.
                 When a catalog crew/flow is loaded and the input is empty, the

@@ -2,9 +2,9 @@ import type { FC } from 'react'
 import type { NodeProps } from './types'
 import {
   Markdown, Text, Heading, Image, Card, KeyValue, List, Table, Divider,
-  Row, Column, Grid, Chart, SlideDeck, Slide, Mindmap, Quiz, Flashcards, GeoMap,
+  Row, Column, Grid, Chart, Mindmap, Quiz, Flashcards, GeoMap,
   RegionHeatmap, Sankey,
-  Forecast, Graph, Sequence, Album, Diagram, Kanban, Skeleton, Unsupported,
+  Forecast, Graph, Sequence, Album, Kanban, Skeleton, Unsupported,
 } from './components'
 
 // The extensibility seam: component name -> React renderer. To add a new A2UI
@@ -13,11 +13,11 @@ import {
 // model is allowed to emit it. Names not in the registry render as Unsupported.
 export const registry: Record<string, FC<NodeProps>> = {
   Markdown, Text, Heading, Image, Card, KeyValue, List, Table, Divider,
-  Row, Column, Grid, Chart, SlideDeck, Slide, Mindmap, Quiz, Flashcards,
+  Row, Column, Grid, Chart, Mindmap, Quiz, Flashcards,
   // 'GeoMap' is the renderer; the catalog/composer name is 'Map'.
   Map: GeoMap,
   // Data-viz + diagram components (usable inside dashboard/document surfaces).
-  Forecast, Graph, Sequence, Album, Diagram, RegionHeatmap, Sankey,
+  Forecast, Graph, Sequence, Album, RegionHeatmap, Sankey,
   // Project management.
   Kanban,
   // The instant-shell placeholder, drawn while the real surface is composed.

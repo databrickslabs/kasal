@@ -47,6 +47,9 @@ interface TabBarProps {
   isMobile?: boolean;
   maxTabs?: number;
   leftSlot?: React.ReactNode; // Optional content rendered at the far-left of the bar (e.g. chat-mode hamburger + logo)
+  // Chat mode carries its own (chat-scoped) dark theme; when it's dark the bar
+  // must go dark with it even though the app-wide MUI theme is still light.
+  forceDark?: boolean;
 }
 
 const TabBar: React.FC<TabBarProps> = ({
@@ -58,7 +61,8 @@ const TabBar: React.FC<TabBarProps> = ({
   hideTabsAndButtons = false,
   isMobile = false,
   maxTabs = 20,
-  leftSlot
+  leftSlot,
+  forceDark = false
 }) => {
   const { isDarkMode } = useThemeManager();
   const {
@@ -426,7 +430,8 @@ const TabBar: React.FC<TabBarProps> = ({
         sx={{
           borderBottom: 1,
           borderColor: 'divider',
-          backgroundColor: isDarkMode ? '#1a1a1a' : '#ffffff',
+          // #1B1F23 = chat dark --bg-primary, so the bar blends with the chat below
+          backgroundColor: forceDark ? '#1B1F23' : isDarkMode ? '#1a1a1a' : '#ffffff',
           display: 'flex',
           alignItems: 'center',
           minHeight: isMobile ? '40px' : '48px',

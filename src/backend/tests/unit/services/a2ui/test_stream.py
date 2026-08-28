@@ -22,7 +22,6 @@ from src.services.a2ui.stream import (
     is_snapshot,
     scan_partial,
     shell_from_request,
-    skeleton_from_outline,
     surface_to_messages,
     title_from_request,
     update_components_msg,
@@ -166,15 +165,6 @@ def test_a_dashboard_streams_once_it_proves_it_has_data():
     assert "createSurface" in sent[0], "held messages flush in order"
 
 
-def test_presentations_are_not_gated():
-    """Only the kinds prose degrades into are gated; a deck streams immediately."""
-    assert "presentation" not in GATED_SURFACE_KINDS
-    raw = json.dumps(DECK)
-    sent = []
-    SurfaceStreamer("sid", sent.append).feed(raw[: raw.index('"slide_1"')])
-    assert sent and "createSurface" in sent[0]
-
-
 def test_kanban_counts_as_a_deliverable():
     """It was in the renderer and catalog but not the gate — the Album bug."""
     assert "Kanban" in DATA_COMPONENTS
@@ -244,59 +234,23 @@ OUTLINE = [
 ]
 
 
-def test_skeleton_carries_the_real_titles_and_ids():
-    sk = skeleton_from_outline(OUTLINE)
-    assert sk["surfaceKind"] == "presentation"
-    assert sk["components"][0]["children"] == ["slide_1", "slide_2", "slide_3"]
-    assert [c.get("title") for c in sk["components"][1:]] == [
-        "Why now",
-        "The market",
-        "Takeaways",
-    ]
-    assert all(c["pending"] for c in sk["components"][1:])
-
-
-def test_skeleton_ids_match_what_the_real_slides_replace():
-    """The skeleton is only useful if the real deck overwrites it by id."""
-    sk = skeleton_from_outline(OUTLINE)
-    msgs = surface_to_messages(sk, "sid")
-    real = {
-        "id": "slide_2",
-        "component": "Slide",
-        "variant": "visual",
-        "title": "The market",
-    }
-    msgs.append(
-        {
-            "version": "v1.0",
-            "updateComponents": {"surfaceId": "sid", "components": [real]},
-        }
-    )
-    out = apply_messages(msgs)
-    assert len(out["components"]) == 4, "replaced in place, not appended"
-    assert out["components"][2] == real
-
-
-@pytest.mark.parametrize("bad", [None, [], [{"title": "only one"}], "nonsense"])
-def test_a_weak_outline_yields_no_skeleton(bad):
-    assert skeleton_from_outline(bad) is None
-
-
-# ── the instant shell ───────────────────────────────────────────────────────
-# It ships before any model runs, so it is the only thing the reader can see in
-# the first ~20 seconds of a deck request. It has to be right without help.
-
-
 @pytest.mark.parametrize(
     "query,expected",
     [
-        ("create a presentation on how llm works", "How LLM Works"),
-        ("Create a presentation about our Q3 results", "Our Q3 Results"),
-        ("make me a deck on the future of AI", "The Future of AI"),
-        ("build a slide deck covering RAG pipelines", "RAG Pipelines"),
-        ("please generate a short presentation on SQL joins", "SQL Joins"),
-        ("can you put together a pitch for b2b saas pricing", "B2B SAAS Pricing"),
-        ("i want you to create a powerpoint explaining ETL", "ETL"),
+        ("make me a quiz on the future of AI", "The Future of AI"),
+        ("build a mind map covering RAG pipelines", "RAG Pipelines"),
+        ("please generate a short quiz on SQL joins", "SQL Joins"),
+        ("can you put together a quiz about b2b saas pricing", "B2B SAAS Pricing"),
+        # Trailing-deliverable phrasing: the deliverable clause and the
+        # gather-verb are presentation, not subject.
+        (
+            "gather korean restaurants in zurich and show them on the map.",
+            "Korean Restaurants in Zurich",
+        ),
+        (
+            "collect the top swiss startups and plot them on a map",
+            "Top Swiss Startups",
+        ),
     ],
 )
 def test_a_title_is_derived_from_the_request_alone(query, expected):
@@ -311,40 +265,8 @@ def test_an_underivable_title_is_empty_rather_than_wrong(query):
     assert title_from_request(query) == ""
 
 
-def test_the_shell_is_a_renderable_deck_immediately():
-    shell = shell_from_request("create a presentation on how llm works", slides=6)
-    assert shell["surfaceKind"] == "presentation"
-    assert shell["root"] == "deck"
-    assert len(shell["components"]) == 7  # the deck + 6 slides
-    assert shell["components"][0]["children"] == [f"slide_{i}" for i in range(1, 7)]
-    assert shell["components"][1]["title"] == "How LLM Works"
-    assert all(c["pending"] for c in shell["components"][1:])
-
-
-def test_the_shell_ids_are_the_ones_the_skeleton_overwrites():
-    """Shell -> outline skeleton -> real slides, all replacing in place."""
-    shell = shell_from_request("create a presentation on X", slides=3)
-    skeleton = skeleton_from_outline(OUTLINE)
-    out = apply_messages(
-        surface_to_messages(shell, "sid") + surface_to_messages(skeleton, "sid")
-    )
-    assert [c["id"] for c in out["components"]] == [
-        "deck",
-        "slide_1",
-        "slide_2",
-        "slide_3",
-    ]
-    assert out["components"][1]["title"] == "Why now"  # the outline's real title
-
-
-# 0/None read as "unspecified" and take the default; a real number is clamped.
-@pytest.mark.parametrize("n,expected", [(0, 8), (None, 8), (1, 3), (8, 8), (99, 24), (-4, 3)])
-def test_the_shell_slide_count_is_bounded(n, expected):
-    assert len(shell_from_request("a presentation on X", slides=n)["components"]) == expected + 1
-
-
 def test_the_shell_never_raises():
-    assert shell_from_request(None) is not None
+    assert shell_from_request(None, kind="quiz") is not None
 
 
 # ── replay policy ───────────────────────────────────────────────────────────
@@ -363,7 +285,9 @@ def test_a_retraction_is_a_snapshot():
 
 
 def test_component_and_data_batches_are_increments():
-    assert not is_snapshot(update_components_msg("s", [{"id": "a", "component": "Text"}]))
+    assert not is_snapshot(
+        update_components_msg("s", [{"id": "a", "component": "Text"}])
+    )
     assert not is_snapshot(update_data_model_msg("s", "/k", 1))
 
 
@@ -387,9 +311,7 @@ def test_replaying_only_the_snapshots_still_yields_the_final_surface():
 # the prose gate can retract.
 
 
-@pytest.mark.parametrize(
-    "kind", ["quiz", "flashcards", "mindmap", "map"]
-)
+@pytest.mark.parametrize("kind", ["quiz", "flashcards", "mindmap", "map"])
 def test_a_non_deck_shell_is_one_placeholder_on_its_own_canvas(kind):
     shell = shell_from_request(f"make me a {kind} about python", kind=kind)
     assert shell["surfaceKind"] == kind
@@ -414,15 +336,9 @@ def test_shellable_kinds_split_into_certain_and_retractable():
     certain = kinds - GATED_SURFACE_KINDS
     retractable = kinds & GATED_SURFACE_KINDS
 
-    assert certain == {"presentation", "quiz", "flashcards", "mindmap", "map"}
+    assert certain == {"quiz", "flashcards", "mindmap", "map"}
     assert retractable == RETRACTABLE_SHELL_KINDS
     assert retractable == {"dashboard", "document"}
-
-
-def test_a_deck_shell_is_still_slides_not_a_skeleton():
-    """A deck's frame carries REAL titles from the outline, so it uses Slide."""
-    shell = shell_from_request("create a presentation on X", kind="presentation")
-    assert {c["component"] for c in shell["components"]} == {"SlideDeck", "Slide"}
 
 
 def test_the_quiz_shell_carries_the_derived_title():
@@ -440,9 +356,20 @@ BIG_DECK = {
     "surfaceKind": "presentation",
     "root": "deck",
     "components": (
-        [{"id": "deck", "component": "SlideDeck", "children": [f"s{i}" for i in range(30)]}]
+        [
+            {
+                "id": "deck",
+                "component": "SlideDeck",
+                "children": [f"s{i}" for i in range(30)],
+            }
+        ]
         + [
-            {"id": f"s{i}", "component": "Slide", "variant": "content", "title": f"Slide {i}"}
+            {
+                "id": f"s{i}",
+                "component": "Slide",
+                "variant": "content",
+                "title": f"Slide {i}",
+            }
             for i in range(30)
         ]
     ),

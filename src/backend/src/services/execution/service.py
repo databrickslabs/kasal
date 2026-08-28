@@ -425,6 +425,7 @@ class ExecutionService:
         group_id: Optional[str] = None,
         group_email: Optional[str] = None,
         flow_id: Optional[Any] = None,
+        crew_id: Optional[Any] = None,
         status: Optional[str] = None,
         trigger_type: Optional[str] = None,
         created_at: Optional[datetime] = None,
@@ -454,6 +455,9 @@ class ExecutionService:
             execution_type: ``"crew"``, ``"flow"`` or ``"agent"``.
             group_id / group_email: tenant stamps.
             flow_id: set only for a flow with a saved definition.
+            crew_id: set only for a crew with a saved definition — the crew
+                equivalent of ``flow_id``; lets a completed run be matched back to
+                its saved crew (e.g. by emit-on-completion rules).
             status: defaults to PENDING; pass one only to override.
             trigger_type: e.g. ``"scheduled"`` — how the run was started.
             created_at: defaults to now; the scheduler passes the (naive) time the
@@ -486,8 +490,25 @@ class ExecutionService:
             run.trigger_type = trigger_type
         # Only for a flow with a saved definition — an ad-hoc flow run (nodes passed
         # inline) has no row to point at.
+        # ``flow_id``/``crew_id`` are UUID columns; a string id (what the trigger
+        # queue and MCP/A2A pass) must be coerced or the SQLite UUID bind raises
+        # "'str' object has no attribute 'hex'". An unparseable id is left unset —
+        # the run just isn't linked back to a saved definition.
+        import uuid
+
+        def _as_uuid(value: Any) -> Optional[uuid.UUID]:
+            if isinstance(value, uuid.UUID):
+                return value
+            try:
+                return uuid.UUID(str(value))
+            except (ValueError, TypeError, AttributeError):
+                return None
+
         if execution_type == "flow" and flow_id:
-            run.flow_id = flow_id
+            run.flow_id = _as_uuid(flow_id)
+        # The crew equivalent: only for a crew built from a saved definition.
+        if execution_type == "crew" and crew_id:
+            run.crew_id = _as_uuid(crew_id)
 
         return await ExecutionHistoryRepository(session).insert(run, commit=commit)
 

@@ -10,6 +10,8 @@ export interface DialogManagerResult {
   setCrewPlanningOpen: React.Dispatch<React.SetStateAction<boolean>>;
   isScheduleDialogOpen: boolean;
   setScheduleDialogOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  isTriggersDialogOpen: boolean;
+  setTriggersDialogOpen: React.Dispatch<React.SetStateAction<boolean>>;
   isAPIKeysDialogOpen: boolean;
   setIsAPIKeysDialogOpen: React.Dispatch<React.SetStateAction<boolean>>;
   isToolsDialogOpen: boolean;
@@ -34,6 +36,7 @@ export const useDialogManager = (
   const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false);
   const [isCrewPlanningOpen, setCrewPlanningOpen] = useState(false);
   const [isScheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+  const [isTriggersDialogOpen, setTriggersDialogOpen] = useState(false);
   const [isAPIKeysDialogOpen, setIsAPIKeysDialogOpen] = useState(false);
   const [isToolsDialogOpen, setIsToolsDialogOpen] = useState(false);
   const [isLogsDialogOpen, setIsLogsDialogOpen] = useState(false);
@@ -101,6 +104,8 @@ export const useDialogManager = (
     setCrewPlanningOpen,
     isScheduleDialogOpen,
     setScheduleDialogOpen,
+    isTriggersDialogOpen,
+    setTriggersDialogOpen,
     isAPIKeysDialogOpen,
     setIsAPIKeysDialogOpen,
     isToolsDialogOpen,

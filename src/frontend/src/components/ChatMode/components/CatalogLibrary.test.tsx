@@ -1,7 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import CatalogLibrary from './CatalogLibrary';
 import { CatalogItem } from '../api/crews';
+import { useAppStore } from '../store/appStore';
 
 const crews = (n: number): CatalogItem[] =>
   Array.from({ length: n }, (_, i) => ({ id: `c${i}`, name: `Crew ${i}` }));
@@ -30,6 +31,12 @@ const renderLib = (over?: {
 const header = () => screen.getByText('Catalog');
 
 describe('CatalogLibrary', () => {
+  beforeEach(() => {
+    // Expansion lives in the app store now (so the collapsed rail can open it);
+    // reset it or one test's toggle leaks into the next.
+    useAppStore.setState({ catalogOpen: false });
+  });
+
   it('renders nothing when both crews and flows are empty', () => {
     const { container } = render(
       <CatalogLibrary crews={[]} flows={[]} onLoadCrew={vi.fn()} onLoadFlow={vi.fn()} />,
@@ -104,6 +111,18 @@ describe('CatalogLibrary', () => {
     fireEvent.change(search, { target: { value: 'zzz-nothing' } });
     expect(screen.getByText('No matches')).toBeInTheDocument();
     expect(screen.queryByText('Crew 0')).not.toBeInTheDocument();
+  });
+
+  it('caps the unsearched list at 50 rows and says how to see the rest', () => {
+    renderLib({ crews: crews(80) });
+    fireEvent.click(header());
+    expect(screen.getByText('Crew 49')).toBeInTheDocument();
+    expect(screen.queryByText('Crew 50')).toBeNull();
+    expect(screen.getByText('Showing 50 of 80 — search to narrow')).toBeInTheDocument();
+    // A query lifts the cap — filtered results are what the user asked for.
+    fireEvent.change(screen.getByPlaceholderText('Search catalog…'), { target: { value: 'Crew 7' } });
+    expect(screen.getByText('Crew 79')).toBeInTheDocument();
+    expect(screen.queryByText(/search to narrow/)).toBeNull();
   });
 
   it('toggling open then closed hides the items again', () => {

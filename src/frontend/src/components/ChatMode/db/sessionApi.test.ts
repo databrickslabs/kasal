@@ -87,9 +87,33 @@ describe('sessionApi - sessions', () => {
 
     const sessions = await api.listSessions();
 
-    expect(mockGet).toHaveBeenCalledWith('/chat-history/sessions/named');
+    expect(mockGet).toHaveBeenCalledWith('/chat-history/sessions/named', {
+      params: { page: 0, per_page: 100 },
+    });
     expect(sessions).toHaveLength(1);
     expect(sessions[0].title).toBe('A');
+  });
+
+  it('walks every page so the rail reaches the oldest session', async () => {
+    // Backend pages at up to 100/request; a single unpaged GET capped the rail
+    // at the most-recent page. A FULL page must trigger the next fetch; the
+    // short page (here: empty) ends the walk.
+    const wire = (i: number) => ({
+      id: `s${i}`, title: `S${i}`, user_id: 'u', group_id: null,
+      created_at: '2026-06-11T07:00:00Z', updated_at: '2026-06-11T08:00:00Z',
+    });
+    mockGet
+      .mockResolvedValueOnce({ data: Array.from({ length: 100 }, (_, i) => wire(i)) })
+      .mockResolvedValueOnce({ data: [wire(100)] });
+
+    const sessions = await api.listSessions();
+
+    expect(mockGet).toHaveBeenCalledTimes(2);
+    expect(mockGet).toHaveBeenNthCalledWith(2, '/chat-history/sessions/named', {
+      params: { page: 1, per_page: 100 },
+    });
+    expect(sessions).toHaveLength(101);
+    expect(sessions[100].id).toBe('s100');
   });
 
   it('tolerates a session-list response without data', async () => {

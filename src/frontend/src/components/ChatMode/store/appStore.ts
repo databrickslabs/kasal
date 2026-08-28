@@ -92,9 +92,13 @@ interface AppState {
   selectedModel: string;
   sidebarOpen: boolean;
   settingsOpen: boolean;
+  // The rail's Catalog card expansion — in the store (not component state) so
+  // the collapsed rail's catalog icon can open the sidebar WITH it expanded.
+  catalogOpen: boolean;
 }
 
 interface AppActions {
+  setCatalogOpen: (open: boolean) => void;
   init: () => void;
   loadModels: () => Promise<void>;
   loadTools: () => Promise<void>;
@@ -132,6 +136,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   })(),
   sidebarOpen: false,
   settingsOpen: false,
+  catalogOpen: false,
 
   // --- Actions ---
   init: () => {
@@ -249,5 +254,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setSettingsOpen: (open) => set({ settingsOpen: open }),
+  setCatalogOpen: (open) => set({ catalogOpen: open }),
   toggleSettings: () => set((s) => ({ settingsOpen: !s.settingsOpen })),
 }));

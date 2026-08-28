@@ -105,6 +105,7 @@ _OWNED = {
     "skills": {"skill"},
     "tools": {"tool", "group_tool", "schema"},
     "trace": {"execution_trace"},
+    "triggers": {"trigger_queue", "event_subscription"},
 }
 
 #: The ONLY cross-domain pairs left, and all six are the same thing: the

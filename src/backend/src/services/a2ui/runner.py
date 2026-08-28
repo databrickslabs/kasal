@@ -80,7 +80,7 @@ def _emit_surface_event(
     Every outcome, not just the successful one: composition is a series of quiet
     gates (A2UI off for the workspace, no rich intent in the request, a prose
     fallback, a dashboard with no data in it) and each one silently returned
-    plain text. "Why did I not get a presentation?" had no answer anywhere in
+    plain text. "Why did I not get a rich surface?" had no answer anywhere in
     the run — no event, no span, no trace row.
 
     Never raises. Observability must not be able to fail a run, and this one sits
@@ -263,7 +263,7 @@ async def _resolve_config(
 
 
 # Surface kinds a plain-prose answer degrades into (as opposed to explicitly
-# requested rich kinds like presentation/quiz/mindmap). These are only worth an
+# requested rich kinds like quiz/mindmap). These are only worth an
 # envelope when they carry real data — see `compose_surface`.
 _DATA_SURFACE_KINDS = frozenset({"dashboard", "document"})
 
@@ -373,14 +373,6 @@ class _ComposeStreamBridge(ComposeStream):
             self._streamer.feed(buf)
 
     # -- ComposeStream protocol (called from the composer thread) -----------
-    def skeleton(self, surface: Dict[str, Any]) -> None:
-        """Ship the outline's placeholder deck — real titles, no content yet."""
-        try:
-            for msg in surface_to_messages(surface, self._surface_id):
-                self._ship(msg)
-        except Exception as err:  # noqa: BLE001
-            logger.debug(f"[a2ui] skeleton not shipped: {err}")
-
     def attempt(self, n: int) -> None:
         """A surface generation starts. Everything it emits replaces revision n-1."""
         try:
@@ -389,9 +381,7 @@ class _ComposeStreamBridge(ComposeStream):
                 self._last_feed = 0.0
                 self._revision = n
                 self._active = True
-            self._streamer = SurfaceStreamer(
-                self._surface_id, self._ship, revision=n
-            )
+            self._streamer = SurfaceStreamer(self._surface_id, self._ship, revision=n)
         except Exception as err:  # noqa: BLE001
             logger.debug(f"[a2ui] stream attempt not armed: {err}")
 
@@ -457,7 +447,6 @@ async def compose_surface(
     execution_id: Optional[str] = None,
     group_context: Any = None,
     on_delta: Optional[DeltaSink] = None,
-    outline: Optional[List[Dict[str, str]]] = None,
     shell_shipped: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Compose an A2UI surface from ``text`` for the live app.
@@ -473,12 +462,9 @@ async def compose_surface(
             per-deliverable directives (the source of truth). When omitted, falls
             back to the env flag + bundled catalog.
         on_delta: optional sink for A2UI stream messages. Supplied, the surface is
-            shipped progressively as it is generated — a deck's slides appear one
-            by one instead of after the whole (measured 140s+) compose. Omitted,
-            behavior is exactly as before: one surface, at the end.
-        outline: a slide plan already computed by ``a2ui.early`` from a partial
-            answer. Skips the pre-pass here.
-        shell_shipped: the caller already put an instant deck frame on screen. It
+            shipped progressively as it is generated instead of after the whole
+            compose. Omitted, behavior is exactly as before: one surface, at the end.
+        shell_shipped: the caller already put an instant shell frame on screen. It
             has to be RETRACTED on every path that ends without a surface, which
             is why this is threaded in rather than inferred.
 
@@ -487,7 +473,7 @@ async def compose_surface(
     """
     # Returns None for every "no rich surface" path so the caller keeps the result
     # a PLAIN STRING (full back-compat) — the envelope is used ONLY when a genuine
-    # rich surface (presentation/dashboard/mindmap/quiz/…) is produced.
+    # rich surface (dashboard/mindmap/quiz/…) is produced.
     import time as _time
 
     started_at = _time.monotonic()
@@ -496,7 +482,7 @@ async def compose_surface(
         """Take back an instant shell on a path that will deliver no surface.
 
         The shell ships before the agent runs, so it is on screen for every
-        bail-out below — an empty deck frame left behind by a turn that answered
+        bail-out below — an empty frame left behind by a turn that answered
         in prose would be the most visible bug this feature could have.
         """
         if not shell_shipped or on_delta is None:
@@ -540,7 +526,7 @@ async def compose_surface(
     # Skip building an LLM entirely when this turn obviously won't produce a rich
     # surface — keeps plain-prose answers fast (important on a single local model)
     # and leaves the result as a plain string. The agent goal / crew purpose is
-    # folded into the intent signal so a "create a presentation" deliverable fires
+    # folded into the intent signal so a rich deliverable in the purpose fires
     # even when the user's chat prompt itself carries no rich-intent keyword.
     if not wants_rich_surface(text, f"{query}\n{purpose}"):
         await _retract_shell()
@@ -604,8 +590,10 @@ async def compose_surface(
         except Exception as stream_err:  # noqa: BLE001
             # WARNING, not debug: this is the switch that turns the whole feature
             # off, and it failing silently is indistinguishable from a slow model.
-            logger.warning(f"[a2ui] streaming NOT enabled ({stream_err}); "
-                           "the surface will arrive in one piece")
+            logger.warning(
+                f"[a2ui] streaming NOT enabled ({stream_err}); "
+                "the surface will arrive in one piece"
+            )
             bridge = None
             _chunk_handler = None
 
@@ -637,7 +625,7 @@ async def compose_surface(
         text = out if isinstance(out, str) else str(out)
         _attempt["n"] += 1
 
-        # Each composer call gets its own row: a deck costs an outline call plus
+        # Each composer call gets its own row: a compose can cost
         # a surface call plus any correction pass, and they used to be a silent
         # minute at the end of a run.
         if execution_id and _loop is not None:
@@ -703,7 +691,6 @@ async def compose_surface(
             retries=_retries(),
             guidance=guidance,
             stream=bridge,
-            outline=outline,
         )
     except Exception as exc:  # noqa: BLE001 — UI composition must never break a run
         logger.warning(f"[a2ui] compose_surface failed ({exc}); keeping plain text")
@@ -746,7 +733,7 @@ async def compose_surface(
     # the surface. Require an actual data component — Chart/Table/Stat/KeyValue/Grid
     # — for those kinds so plain prose stays in the chat transcript and only genuine
     # graphs/tables become a deliverable. Explicitly-requested rich kinds
-    # (presentation/quiz/mindmap/flashcards/map) are legitimately non-tabular, so
+    # (quiz/mindmap/flashcards/map) are legitimately non-tabular, so
     # they are never gated on data content.
     if surface.get("surfaceKind") in _DATA_SURFACE_KINDS and not _has_data_component(
         surface
