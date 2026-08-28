@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
+import { useExecutionStore } from '../../store/executionStore';
 import { GenerationCompleteData } from '../../types/dispatcher';
 import { postCrewFeedback, CrewNameConflictError } from '../../api/crews';
 import { useSessionStore } from '../../store/sessionStore';
-import { MemoryRecordsBrowser } from '../../../MemoryBackend/MemoryRecordsBrowser';
 import OpenOnCanvasButtons from './OpenOnCanvasButtons';
 
 /**
@@ -59,7 +59,6 @@ const CrewActionsBar: React.FC<CrewActionsBarProps> = ({ data, messageId, onSave
   const [showDownForm, setShowDownForm] = useState(false);
   const [downComment, setDownComment] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [graphOpen, setGraphOpen] = useState(false);
 
   // Answer ("chat") mode runs a generic single assistant, so there is no crew
   // worth cataloging directly. "Save to catalog" instead distills a reusable
@@ -249,8 +248,13 @@ const CrewActionsBar: React.FC<CrewActionsBarProps> = ({ data, messageId, onSave
         {canShowGraph && (
           <button
             type="button"
-            onClick={() => setGraphOpen(true)}
-            title="View this run's memory graph"
+            onClick={() =>
+              useExecutionStore.getState().openPreviewPane({
+                type: 'memory',
+                data: executionId as string,
+                title: 'Run memory',
+              })
+            }
             aria-label="View memory graph"
             className={ICON_BTN}
             style={{
@@ -310,14 +314,6 @@ const CrewActionsBar: React.FC<CrewActionsBarProps> = ({ data, messageId, onSave
         </div>
       )}
 
-      {canShowGraph && graphOpen && (
-        <MemoryRecordsBrowser
-          open={graphOpen}
-          onClose={() => setGraphOpen(false)}
-          initialRunId={executionId}
-          initialView="graph"
-        />
-      )}
     </div>
   );
 };

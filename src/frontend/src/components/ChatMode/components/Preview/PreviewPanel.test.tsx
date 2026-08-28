@@ -35,6 +35,10 @@ vi.mock('../../../../shared/a2ui/lib/download', async (importOriginal) => {
 // style_json parsing is identical to useWorkspaceThemes (covered by
 // useWorkspaceThemes.test.ts). Variable is `mock`-prefixed for vi.mock hoisting.
 let mockA2uiThemes: Record<string, Theme> | null = null;
+vi.mock('./MemoryPane', () => ({
+  default: ({ runId }: { runId: string }) => <div data-testid="memory-pane" data-run={runId} />,
+}));
+
 vi.mock('../../hooks/useA2uiThemes', () => ({
   useA2uiThemes: () => mockA2uiThemes,
 }));
@@ -168,6 +172,15 @@ describe('PreviewPanel component', () => {
     expect(screen.getByText('App')).toBeInTheDocument();
     expect(screen.getByText('UI')).toBeInTheDocument(); // type badge
     expect(screen.getByText('Hello App')).toBeInTheDocument();
+  });
+
+  it("renders a run's memory pane for type 'memory' — no A2UI machinery", () => {
+    renderPanel({ type: 'memory', data: 'job-42', title: 'Run memory' });
+    expect(screen.getByTestId('memory-pane')).toHaveAttribute('data-run', 'job-42');
+    expect(screen.getByText('Run memory')).toBeInTheDocument();
+    // None of the A2UI-only controls apply to a memory view.
+    expect(screen.queryByLabelText('Download')).toBeNull();
+    expect(screen.queryByText('Customize')).toBeNull();
   });
 
   it('uses a provided title over the default', () => {

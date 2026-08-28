@@ -864,6 +864,17 @@ class LightAgentService:
                             extra["results_count"] = count
                         if qms is not None:
                             extra["query_time_ms"] = float(qms)
+                        # Structured ids of the retrieved records. The capped
+                        # prose above can truncate away the tail results, so
+                        # anything reconstructing "what this run recalled"
+                        # (the memory pane) must NOT have to parse content.
+                        rids = [
+                            str(rid)
+                            for rid in (getattr(r, "id", None) for r in (results or []))
+                            if rid
+                        ]
+                        if rids:
+                            extra["record_ids"] = rids
                         out = {
                             "tool_name": "Memory",
                             "content": content,
@@ -916,6 +927,9 @@ class LightAgentService:
                         extra: Dict[str, Any] = {}
                         if sms is not None:
                             extra["save_time_ms"] = float(sms)
+                        rid = getattr(event, "record_id", None)
+                        if rid:
+                            extra["record_id"] = str(rid)
                         out = {
                             "tool_name": "Memory",
                             "content": content,
@@ -1254,11 +1268,26 @@ class LightAgentService:
                     f"[light_agent] Kicking off single agent for execution {execution_id}"
                 )
                 try:
-                    # ── Memory recall — the engine Agent does not consult memory
-                    # itself, so recall here and prepend a capped context block.
-                    # One embedding + one search (no LLM calls); best-effort.
+                    # ── Memory recall — Kasal's engine Agent does not consult
+                    # memory itself, so recall here and prepend a capped context
+                    # block. One embedding + one search (no LLM calls);
+                    # best-effort. The CrewAI engine's agent is the exception:
+                    # there the attach step really does set ``agent.memory``
+                    # (a CrewAI Agent has the field; Kasal's pydantic Agent
+                    # rejects it), and its kickoff recalls on its own — running
+                    # the preamble too re-read the same store moments later
+                    # (two "Memory Read" rows in the trace) and injected the
+                    # same context twice.
                     memory_block = ""
-                    if _agent_memory is not None:
+                    _agent_recalls_itself = (
+                        _agent_memory is not None
+                        and getattr(agent, "memory", None) is _agent_memory
+                    )
+                    if _agent_recalls_itself:
+                        _log(
+                            "Memory recall left to the agent (CrewAI engine consults memory during kickoff)"
+                        )
+                    if _agent_memory is not None and not _agent_recalls_itself:
                         from src.services.memory.hooks import (
                             build_memory_preamble,
                         )
