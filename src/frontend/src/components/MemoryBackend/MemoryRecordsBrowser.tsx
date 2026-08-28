@@ -57,6 +57,25 @@ import { apiClient } from '../../config/api/ApiConfig';
 import { ConceptForceGraph } from './ConceptForceGraph';
 import { runService } from '../../api/execution/ExecutionHistoryService';
 import { Run } from '../../types/execution/run';
+import {
+  BULK_FETCH,
+  CategoryStat,
+  MemoryRecord,
+  RecordsResponse,
+  coOccurrenceEdges,
+  deriveIndex,
+  extractRecalledIds,
+  formatRelative,
+  importanceColor,
+  normalizeCategory,
+  parseCrewFromScope,
+  recordAgent,
+  runWindowFor,
+  timeMs,
+} from './memoryData';
+
+// Public import path kept stable for existing consumers of the record type.
+export type { MemoryRecord } from './memoryData';
 
 // Sentinel run id for the opt-in "show every run at once" (full graph) view.
 const ALL_RUNS = '__all__';
@@ -64,28 +83,6 @@ const ALL_RUNS = '__all__';
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export interface MemoryRecord {
-  id: string | null;
-  content: string;
-  scope: string;
-  categories: string[];
-  importance: number;
-  source?: string | null;
-  private: boolean;
-  metadata: Record<string, unknown>;
-  created_at: string | null;
-  last_accessed: string | null;
-}
-
-interface RecordsResponse {
-  backend: string;
-  records: MemoryRecord[];
-  count: number;
-  // Total records available in the store for the active scope. The browser
-  // pages through them with `offset` until loaded === total.
-  total?: number;
-}
 
 interface MemoryRecordsBrowserProps {
   open: boolean;
@@ -103,191 +100,6 @@ interface MemoryRecordsBrowserProps {
 // Records fetched per page for the card list. We page through the store with
 // `offset` ("Load more") so we never mount thousands of card DOM nodes at once.
 const PAGE_SIZE = 250;
-
-// The concept/graph views need the WHOLE store at once (they aggregate every
-// record into a single visualization that re-runs an expensive force
-// simulation on each data change). So they fetch the entire remainder in ONE
-// request — one round-trip, one simulation — capped at this many records.
-const BULK_FETCH = 5000;
-
-// Memory can be written a little after a run's completed_at; extend the window
-// end by this much so trailing writes still fall inside the run.
-const RUN_END_BUFFER_MS = 2 * 60 * 1000;
-
-/**
- * Parse a timestamp to epoch ms; 0 when missing/invalid.
- *
- * Memory records come from Python `str(datetime)` ("2026-06-21 13:00:00.123456"
- * — space separator + microseconds, which `Date.parse` rejects) while run
- * timestamps are ISO ("2026-06-21T13:02:00"). Both are naive UTC. We normalize
- * both to comparable UTC epochs: space→T, trim fractional seconds to ms, and
- * append 'Z' when no timezone is present (treat as UTC).
- */
-const timeMs = (iso: string | null | undefined): number => {
-  if (!iso) return 0;
-  let s = iso.trim().replace(' ', 'T').replace(/(\.\d{3})\d+/, '$1');
-  const hasTz = /[Zz]$/.test(s) || /[+-]\d{2}:?\d{2}$/.test(s);
-  if (!hasTz) s += 'Z';
-  const t = Date.parse(s);
-  return Number.isNaN(t) ? 0 : t;
-};
-
-/** Normalise a category label so variants collapse to the same key. */
-const normalizeCategory = (raw: string): string =>
-  raw
-    .toLowerCase()
-    .replace(/[_\s]+/g, '-')
-    .replace(/[^a-z0-9-]/g, '')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-    .trim();
-
-/** Extract the agent name from a scope path of the form .../agent/<name>/... */
-const parseAgentFromScope = (scope: string): string | null => {
-  const match = scope.match(/\/agent\/([^/]+)/);
-  return match ? match[1] : null;
-};
-
-/**
- * Which agent wrote this record.
- *
- * The writing agent is stamped into `metadata.agent_role` — the scope path
- * stays the tenant boundary because the Databricks backend filters records on
- * an EXACT scope match. Older records only have the scope form, so fall back
- * to parsing it.
- */
-const recordAgent = (record: MemoryRecord): string | null => {
-  const role = record.metadata?.agent_role;
-  if (typeof role === 'string' && role.trim()) return role.trim();
-  return parseAgentFromScope(record.scope);
-};
-
-/** Extract the crew hash from a scope path of the form .../_crew_<hash>... */
-const parseCrewFromScope = (scope: string): string | null => {
-  const match = scope.match(/_crew_([0-9a-f]+)/i);
-  return match ? match[1] : null;
-};
-
-const formatRelative = (iso: string | null): string => {
-  if (!iso) return '—';
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return iso;
-  const diff = Date.now() - then;
-  const min = 60_000;
-  const hr = 60 * min;
-  const day = 24 * hr;
-  if (diff < min) return 'just now';
-  if (diff < hr) return `${Math.round(diff / min)}m ago`;
-  if (diff < day) return `${Math.round(diff / hr)}h ago`;
-  if (diff < 7 * day) return `${Math.round(diff / day)}d ago`;
-  return new Date(iso).toLocaleDateString();
-};
-
-interface CategoryStat {
-  key: string;          // normalised slug
-  label: string;        // canonical display form (most common variant)
-  variants: Set<string>;
-  count: number;
-  recordIds: Set<string>;
-  totalImportance: number;
-  avgImportance: number;
-}
-
-interface AgentStat {
-  name: string;
-  count: number;
-  crews: Set<string>;
-  totalImportance: number;
-  avgImportance: number;
-}
-
-interface DerivedIndex {
-  categories: Map<string, CategoryStat>;
-  agents: Map<string, AgentStat>;
-  crews: Map<string, number>;
-  coOccurrence: Map<string, Map<string, number>>;
-  avgImportance: number;
-}
-
-function deriveIndex(records: MemoryRecord[]): DerivedIndex {
-  const categories = new Map<string, CategoryStat>();
-  const agents = new Map<string, AgentStat>();
-  const crews = new Map<string, number>();
-  const coOccurrence = new Map<string, Map<string, number>>();
-  let totalImportance = 0;
-
-  for (const record of records) {
-    totalImportance += record.importance;
-    const crew = parseCrewFromScope(record.scope);
-    const agent = recordAgent(record);
-
-    if (crew) {
-      crews.set(crew, (crews.get(crew) ?? 0) + 1);
-    }
-    if (agent) {
-      const stat = agents.get(agent) ?? {
-        name: agent,
-        count: 0,
-        crews: new Set<string>(),
-        totalImportance: 0,
-        avgImportance: 0,
-      };
-      stat.count += 1;
-      stat.totalImportance += record.importance;
-      if (crew) stat.crews.add(crew);
-      stat.avgImportance = stat.totalImportance / stat.count;
-      agents.set(agent, stat);
-    }
-
-    const normalisedInRecord = new Set<string>();
-    for (const raw of record.categories ?? []) {
-      const key = normalizeCategory(raw);
-      if (!key) continue;
-      normalisedInRecord.add(key);
-      const stat = categories.get(key) ?? {
-        key,
-        label: raw,
-        variants: new Set<string>(),
-        count: 0,
-        recordIds: new Set<string>(),
-        totalImportance: 0,
-        avgImportance: 0,
-      };
-      stat.variants.add(raw);
-      stat.count += 1;
-      stat.totalImportance += record.importance;
-      if (record.id) stat.recordIds.add(record.id);
-      // Pick the most frequent raw form as the canonical label.
-      if ([...stat.variants].length === 1 || raw.length < stat.label.length) {
-        stat.label = raw;
-      }
-      stat.avgImportance = stat.totalImportance / stat.count;
-      categories.set(key, stat);
-    }
-
-    // Build symmetric co-occurrence counts.
-    const keys = [...normalisedInRecord];
-    for (let i = 0; i < keys.length; i += 1) {
-      for (let j = i + 1; j < keys.length; j += 1) {
-        const [a, b] = [keys[i], keys[j]];
-        const mapA = coOccurrence.get(a) ?? new Map<string, number>();
-        mapA.set(b, (mapA.get(b) ?? 0) + 1);
-        coOccurrence.set(a, mapA);
-        const mapB = coOccurrence.get(b) ?? new Map<string, number>();
-        mapB.set(a, (mapB.get(a) ?? 0) + 1);
-        coOccurrence.set(b, mapB);
-      }
-    }
-  }
-
-  return {
-    categories,
-    agents,
-    crews,
-    coOccurrence,
-    avgImportance: records.length ? totalImportance / records.length : 0,
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -327,13 +139,6 @@ const StatTile: React.FC<StatTileProps> = ({ label, value, hint }) => (
 interface ImportanceBadgeProps {
   value: number;
 }
-
-const importanceColor = (v: number): string => {
-  if (v >= 0.75) return '#6366f1'; // indigo — high
-  if (v >= 0.6)  return '#3b82f6'; // blue
-  if (v >= 0.45) return '#06b6d4'; // cyan
-  return '#94a3b8';                // slate — low
-};
 
 const ImportanceBadge: React.FC<ImportanceBadgeProps> = ({ value }) => (
   <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
@@ -791,14 +596,7 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
         const resp = await apiClient.get<{
           traces?: Array<{ event_type?: string; output?: unknown }>;
         }>(`/traces/job/${selectedRunId}`);
-        const ids = new Set<string>();
-        for (const tr of resp.data?.traces || []) {
-          if (!/memory_retrieval/.test(tr.event_type || '')) continue;
-          const text =
-            typeof tr.output === 'string' ? tr.output : JSON.stringify(tr.output ?? '');
-          for (const m of text.matchAll(/id='([0-9a-fA-F-]{36})'/g)) ids.add(m[1]);
-        }
-        if (!cancelled) setRecalledIds(ids);
+        if (!cancelled) setRecalledIds(extractRecalledIds(resp.data?.traces));
       } catch {
         if (!cancelled) setRecalledIds(new Set());
       }
@@ -817,33 +615,15 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
 
   // Per-run [start, end] time window. Each run owns only the records written
   // during its OWN execution — start = created_at, end = completed_at (+ buffer
-  // Time window for the selected run, anchored on completed_at.
-  //
-  // IMPORTANT: a run's `created_at` is stored in LOCAL time, while `completed_at`
-  // and memory record `created_at` are UTC — so created_at is NOT comparable to
-  // memory timestamps (it can be hours off). We therefore window on completed_at:
-  // a run owns records written after the previous (older) run finished, up to
-  // its own completion (+ a small buffer for trailing writes). For a still-
-  // running latest run we extend to "now". We test only the SELECTED run's own
-  // window, so runs can't steal each other's records (the old "swap").
-  const runWindow = useMemo(() => {
-    if (selectedRunId === ALL_RUNS || !selectedRunId) return null;
-    const idx = runs.findIndex((r) => r.job_id === selectedRunId);
-    if (idx < 0) return null;
-    const completedMs = (r: Run | undefined) =>
-      r && r.completed_at ? timeMs(r.completed_at) : null;
-    const end = (completedMs(runs[idx]) ?? Date.now()) + RUN_END_BUFFER_MS;
-    // Start = the nearest OLDER run that has a completion time.
-    let start = -Infinity;
-    for (let j = idx + 1; j < runs.length; j++) {
-      const c = completedMs(runs[j]);
-      if (c != null) {
-        start = c;
-        break;
-      }
-    }
-    return { start, end };
-  }, [runs, selectedRunId]);
+  // Time window for the selected run (see runWindowFor for the UTC-vs-local
+  // reasoning) — null for ALL_RUNS / no selection.
+  const runWindow = useMemo(
+    () =>
+      selectedRunId === ALL_RUNS || !selectedRunId
+        ? null
+        : runWindowFor(runs, selectedRunId),
+    [runs, selectedRunId],
+  );
 
   // Default the view to the LATEST run (newest first), like the job history —
   // that's the run you just kicked off. Set once, as soon as runs load.
@@ -1377,19 +1157,7 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
                     count: c.count,
                     avgImportance: c.avgImportance,
                   }))}
-                  edges={(() => {
-                    const seen = new Set<string>();
-                    const out: { source: string; target: string; weight: number }[] = [];
-                    for (const [src, map] of index.coOccurrence.entries()) {
-                      for (const [dst, weight] of map.entries()) {
-                        const key = src < dst ? `${src}|${dst}` : `${dst}|${src}`;
-                        if (seen.has(key)) continue;
-                        seen.add(key);
-                        out.push({ source: src, target: dst, weight });
-                      }
-                    }
-                    return out;
-                  })()}
+                  edges={coOccurrenceEdges(index)}
                   activeIds={selectedCategories}
                   onToggleNode={toggleCategory}
                   importanceColor={importanceColor}

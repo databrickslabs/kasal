@@ -271,7 +271,18 @@ export const ConceptForceGraph: React.FC<Props> = ({
       const p = prevMap.get(n.id);
       if (p) { n.x = p.x; n.y = p.y; n.vx = p.vx; n.vy = p.vy; }
     }
-    g.graphData({ nodes: physicsNodes, links: displayEdges as PhysicsLink[] });
+    // Feed FRESH link objects with string-id endpoints. force-graph MUTATES a
+    // link's source/target from id to the resolved node object — so a reused
+    // link array on a later feed still points at the PREVIOUS feed's node
+    // objects, whose positions never advance again: the nodes sail on while
+    // their edges stay frozen mid-air (the "disconnected graph" bug when a
+    // host re-renders with stable edges but fresh nodes).
+    const links = (displayEdges as PhysicsLink[]).map((e) => ({
+      source: typeof e.source === 'object' ? (e.source as PhysicsNode).id : e.source,
+      target: typeof e.target === 'object' ? (e.target as PhysicsNode).id : e.target,
+      weight: e.weight,
+    }));
+    g.graphData({ nodes: physicsNodes, links: links as PhysicsLink[] });
   }, [physicsNodes, displayEdges]);
 
   // ---- Canvas drawing ----
