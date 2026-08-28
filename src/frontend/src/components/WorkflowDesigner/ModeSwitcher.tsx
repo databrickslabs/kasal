@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import {
   Box,
   IconButton,
-  Tooltip,
   Menu,
   MenuItem,
   ListItemIcon,
@@ -32,6 +31,13 @@ interface ModeOption {
  * (just before the workspace/group selector). A single grid-icon button opens a
  * menu to switch the whole app between the Crew, Flow, and Chat workspaces.
  */
+// Kasal's brand accent (chat.css --accent) — MUI's blue primary reads as a
+// different product dropped into the top bar; these menus follow the app
+// accent instead. CSS vars can't reach here (outside #kasal-chat-root).
+const KASAL_ACCENT = '#FF3621';
+const KASAL_ACCENT_SOFT = 'rgba(255, 54, 33, 0.08)';
+const KASAL_ACCENT_SOFT_HOVER = 'rgba(255, 54, 33, 0.12)';
+
 const ModeSwitcher: React.FC = () => {
   const appMode = useUILayoutStore((s) => s.appMode);
   const setAppMode = useUILayoutStore((s) => s.setAppMode);
@@ -88,30 +94,29 @@ const ModeSwitcher: React.FC = () => {
 
   return (
     <>
-      <Tooltip title={`Workspace mode: ${activeOption.label}`} enterDelay={400} placement="bottom">
-        <IconButton
+      <IconButton
           id="mode-switcher-button"
           aria-controls={open ? 'mode-switcher-menu' : undefined}
           aria-haspopup="true"
           aria-expanded={open ? 'true' : undefined}
           onClick={handleOpen}
           size="small"
+          aria-label={`Workspace mode: ${activeOption.label}`}
           sx={{
             ml: 0.5,
             p: 0.75,
-            borderRadius: 1.5,
-            color: open ? 'primary.main' : 'text.secondary',
-            backgroundColor: open ? 'action.selected' : 'transparent',
+            borderRadius: 2,
+            color: open ? KASAL_ACCENT : 'text.secondary',
+            backgroundColor: open ? KASAL_ACCENT_SOFT : 'transparent',
             transition: 'all 0.2s ease',
             '&:hover': {
               backgroundColor: 'action.hover',
-              color: 'primary.main',
+              color: 'text.primary',
             },
           }}
         >
           <GridIcon fontSize="small" />
         </IconButton>
-      </Tooltip>
 
       <Menu
         id="mode-switcher-menu"
@@ -123,18 +128,24 @@ const ModeSwitcher: React.FC = () => {
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
         slotProps={{
           paper: {
-            elevation: 3,
+            elevation: 0,
             sx: {
-              minWidth: 240,
-              mt: 0.5,
-              filter: 'drop-shadow(0px 2px 8px rgba(0,0,0,0.08))',
+              minWidth: 250,
+              mt: 1,
+              borderRadius: 3,
+              border: '1px solid',
+              borderColor: 'divider',
+              boxShadow: '0 12px 32px rgba(16,24,40,0.10), 0 2px 8px rgba(16,24,40,0.06)',
             },
           },
         }}
-        MenuListProps={{ 'aria-labelledby': 'mode-switcher-button', sx: { py: 0.5 } }}
+        MenuListProps={{ 'aria-labelledby': 'mode-switcher-button', sx: { py: 0.75 } }}
       >
-        <Box sx={{ px: 2, py: 1, borderBottom: 1, borderColor: 'divider' }}>
-          <Typography variant="subtitle2" color="text.secondary">
+        <Box sx={{ px: 2, pt: 1, pb: 0.5 }}>
+          <Typography
+            sx={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}
+            color="text.secondary"
+          >
             Switch Mode
           </Typography>
         </Box>
@@ -146,17 +157,19 @@ const ModeSwitcher: React.FC = () => {
               onClick={() => handleSelect(option.mode)}
               selected={isSelected}
               sx={{
-                minHeight: 52,
-                px: 2,
+                minHeight: 50,
+                mx: 0.75,
+                px: 1.5,
                 py: 1,
+                borderRadius: 2,
                 '&.Mui-selected': {
-                  backgroundColor: 'action.selected',
-                  '&:hover': { backgroundColor: 'action.selected' },
+                  backgroundColor: KASAL_ACCENT_SOFT,
+                  '&:hover': { backgroundColor: KASAL_ACCENT_SOFT_HOVER },
                 },
               }}
             >
               <ListItemIcon
-                sx={{ minWidth: 36, color: isSelected ? 'primary.main' : 'text.secondary' }}
+                sx={{ minWidth: 36, color: isSelected ? KASAL_ACCENT : 'text.secondary' }}
               >
                 {option.icon}
               </ListItemIcon>
@@ -173,7 +186,7 @@ const ModeSwitcher: React.FC = () => {
                 }
                 sx={{ my: 0 }}
               />
-              {isSelected && <CheckIcon fontSize="small" sx={{ color: 'primary.main', ml: 1 }} />}
+              {isSelected && <CheckIcon fontSize="small" sx={{ color: KASAL_ACCENT, ml: 1 }} />}
             </MenuItem>
           );
         })}
