@@ -31,6 +31,8 @@ beforeEach(() => {
   useExecutionStore.setState({ selectedMcpServers: [] });
 });
 
+const openMenu = () => fireEvent.click(screen.getByLabelText('Composer settings and tools'));
+
 describe('ChatInput — typing & send', () => {
   it('types and sends on Enter (no shift)', () => {
     const onSend = vi.fn();
@@ -224,52 +226,80 @@ describe('ChatInput — command history', () => {
   });
 });
 
-describe('ChatInput — model picker', () => {
-  it('opens the picker, selects a model, and closes', () => {
+describe('ChatInput — model picker (inside the "+" menu)', () => {
+  it('opens the menu, expands Model, selects one, and calls onModelChange', () => {
     const onModelChange = vi.fn();
     render(<ChatInput {...baseProps} onModelChange={onModelChange} />);
-    // toggle button shows current model name
-    fireEvent.click(screen.getByText('Model One'));
-    expect(screen.getByText('Model')).toBeInTheDocument(); // dropdown header
-    // both models listed; one with provider, one without
-    const picker = screen.getByText('Model').closest('div')!.parentElement!;
-    fireEvent.click(within(picker).getByText('Model Two'));
+    openMenu();
+    // The row shows the current model as its value.
+    fireEvent.click(screen.getByLabelText('Model'));
+    fireEvent.click(screen.getByText('Model Two'));
     expect(onModelChange).toHaveBeenCalledWith('m2');
   });
 
-  it('outside mousedown closes the model picker', () => {
+  it('outside mousedown closes the whole menu', () => {
     render(<ChatInput {...baseProps} />);
-    fireEvent.click(screen.getByText('Model One'));
-    expect(screen.getByText('Model')).toBeInTheDocument();
+    openMenu();
+    expect(screen.getByLabelText('Model')).toBeInTheDocument();
     fireEvent.mouseDown(document.body);
-    expect(screen.queryByText('Model')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Model')).not.toBeInTheDocument();
   });
 
-  it('mousedown inside the picker does not close it', () => {
+  it('mousedown inside the menu does not close it', () => {
     render(<ChatInput {...baseProps} />);
-    fireEvent.click(screen.getByText('Model One'));
-    const header = screen.getByText('Model');
-    fireEvent.mouseDown(header);
-    // still open
-    expect(screen.getByText('Model')).toBeInTheDocument();
+    openMenu();
+    fireEvent.mouseDown(screen.getByLabelText('Model'));
+    expect(screen.getByLabelText('Model')).toBeInTheDocument();
   });
 
-  it('opening the model picker closes the command list', () => {
-    render(<ChatInput {...baseProps} />);
-    fireEvent.change(ta(), { target: { value: '/help' } });
-    expect(screen.getByText('Commands')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Model One'));
-    expect(screen.queryByText('Commands')).not.toBeInTheDocument();
-  });
-
-  it('falls back to a default display name when the selected model is unknown', () => {
+  it('falls back to the raw key when the selected model is unknown', () => {
     render(<ChatInput {...baseProps} selectedModel="missing" />);
+    openMenu();
     expect(screen.getByText('missing')).toBeInTheDocument();
   });
 
-  it('renders no model controls when models list is empty', () => {
+  it('shows no search box for a short model list', () => {
+    render(<ChatInput {...baseProps} />);
+    openMenu();
+    fireEvent.click(screen.getByLabelText('Model'));
+    expect(screen.queryByLabelText('Search models')).toBeNull();
+    expect(screen.getByText('Model One')).toBeInTheDocument();
+  });
+
+  it('search appears for a long model list, filters it, and clears per visit', () => {
+    const many = Array.from({ length: 9 }, (_, i) => ({
+      key: `k${i}`,
+      name: i === 0 ? 'Claude Sonnet' : `Model ${i}`,
+    })) as ModelConfigResponse[];
+    const onModelChange = vi.fn();
+    render(<ChatInput {...baseProps} models={many} selectedModel="k1" onModelChange={onModelChange} />);
+    openMenu();
+    fireEvent.click(screen.getByLabelText('Model'));
+
+    const search = screen.getByLabelText('Search models');
+    fireEvent.change(search, { target: { value: 'sonnet' } });
+    expect(screen.getByText('Claude Sonnet')).toBeInTheDocument();
+    expect(screen.queryByText('Model 3')).toBeNull();
+
+    // No hits → explicit empty state, not a silently blank list.
+    fireEvent.change(search, { target: { value: 'zzz' } });
+    expect(screen.getByText('No matching models')).toBeInTheDocument();
+
+    // Picking from a filtered list works and returns to the main level.
+    fireEvent.change(search, { target: { value: 'sonnet' } });
+    fireEvent.click(screen.getByText('Claude Sonnet'));
+    expect(onModelChange).toHaveBeenCalledWith('k0');
+
+    // Re-entering the panel starts fresh — the old query must not linger.
+    fireEvent.click(screen.getByLabelText('Model'));
+    expect((screen.getByLabelText('Search models') as HTMLInputElement).value).toBe('');
+    expect(screen.getByText('Model 3')).toBeInTheDocument();
+  });
+
+  it('renders no Model row when the models list is empty', () => {
     render(<ChatInput {...baseProps} models={[]} selectedModel="" />);
-    expect(screen.queryByText('Model One')).not.toBeInTheDocument();
+    openMenu();
+    expect(screen.queryByLabelText('Model')).not.toBeInTheDocument();
   });
 });
 
@@ -394,14 +424,17 @@ describe('ChatInput — knowledge attachments', () => {
     expect(mockUpload).not.toHaveBeenCalled();
   });
 
-  it('clicking the attach button does not throw and shows the count once attached', async () => {
+  it('the Attach files row does not throw, and the "+" badge shows the count', async () => {
     mockUpload.mockResolvedValue({ path: 'p', status: 'success', filename: 'a.txt' });
     const { container } = render(<ChatInput {...baseProps} />);
-    fireEvent.click(screen.getByLabelText('Attach files'));
+    openMenu();
+    fireEvent.click(screen.getByLabelText('Attach files')); // closes the menu, opens the file dialog
     selectFiles([new File(['hi'], 'a.txt'), new File(['yo'], 'b.txt')]);
     await screen.findAllByText('2 B');
-    // attach button shows the count "2"
-    expect(within(screen.getByLabelText('Attach files')).getByText('2')).toBeInTheDocument();
+    // the "+" trigger badges the pending-attachment count
+    expect(
+      within(screen.getByLabelText('Composer settings and tools')).getByText('2'),
+    ).toBeInTheDocument();
     expect(container).toBeTruthy();
   });
 
@@ -621,152 +654,89 @@ describe('ChatInput — pending run mode (loaded catalog crew/flow)', () => {
   });
 });
 
-describe('ChatInput — memory mode toggle (Workspace ⇄ Session)', () => {
-  it('is a switch labelled with the active mode — Workspace memory when enabled', () => {
+describe('ChatInput — memory mode (inside the "+" menu)', () => {
+  it('shows the active memory mode as the row value', () => {
     render(<ChatInput {...baseProps} memoryEnabled />);
-    const toggle = screen.getByRole('switch', { name: 'Memory mode: Teamspace memory' });
-    expect(toggle).toBeTruthy();
-    expect(toggle).toHaveAttribute('aria-checked', 'true');
-    expect(toggle).toHaveTextContent('Teamspace memory');
-    // It is a toggle, not a dropdown — there is no "No memory" option anywhere.
-    expect(screen.queryByText('No memory')).toBeNull();
+    openMenu();
+    expect(screen.getByLabelText('Memory')).toHaveTextContent('Teamspace memory');
   });
 
-  it('shows Session memory (unchecked) when memory is disabled', () => {
+  it('shows Session memory when disabled', () => {
     render(<ChatInput {...baseProps} memoryEnabled={false} />);
-    const toggle = screen.getByRole('switch', { name: 'Memory mode: Session memory' });
-    expect(toggle).toHaveAttribute('aria-checked', 'false');
-    expect(toggle).toHaveTextContent('Session memory');
+    openMenu();
+    expect(screen.getByLabelText('Memory')).toHaveTextContent('Session memory');
   });
 
-  it('clicking the toggle flips memoryEnabled (Workspace → Session and back)', () => {
+  it('picking the other option flips memoryEnabled', () => {
     const onMemoryEnabledChange = vi.fn();
-    const props = { ...baseProps, onMemoryEnabledChange };
-
-    // Workspace active → click → memory OFF (session, chat-history only).
-    const { rerender } = render(<ChatInput {...props} memoryEnabled />);
-    fireEvent.click(screen.getByRole('switch', { name: 'Memory mode: Teamspace memory' }));
+    render(<ChatInput {...baseProps} memoryEnabled onMemoryEnabledChange={onMemoryEnabledChange} />);
+    openMenu();
+    fireEvent.click(screen.getByLabelText('Memory'));
+    fireEvent.click(screen.getByText('Session memory'));
     expect(onMemoryEnabledChange).toHaveBeenLastCalledWith(false);
-
-    // Session active → click → memory ON (workspace-scoped).
-    rerender(<ChatInput {...props} memoryEnabled={false} />);
-    fireEvent.click(screen.getByRole('switch', { name: 'Memory mode: Session memory' }));
-    expect(onMemoryEnabledChange).toHaveBeenLastCalledWith(true);
   });
 });
 
-describe('ChatInput — model picker opens upward', () => {
-  it('opens the dropdown ABOVE the input by default (slide-up), like the other popovers', () => {
-    // Regression: the picker opened downward; once a conversation starts the
-    // input is pinned to the bottom of the screen, so the dropdown must open UP.
-    // The menu is positioned with `position: fixed` (escapes the chat's
-    // overflow-hidden containers), so the open direction is conveyed by the
-    // slide-in animation class rather than bottom-full/top-full.
+describe('ChatInput — the "+" menu opens upward by default', () => {
+  it('uses the slide-up animation, like the other popovers', () => {
     render(<ChatInput {...baseProps} />);
-    fireEvent.click(screen.getByText('Model One'));
-    const popover = screen.getByText('Model').closest('.kasal-popover') as HTMLElement;
+    openMenu();
+    const popover = document.querySelector('.kasal-popover') as HTMLElement;
     expect(popover.className).toContain('animate-slide-up');
     expect(popover.className).not.toContain('animate-slide-down');
   });
 });
 
-describe('ChatInput — answer mode pill', () => {
+describe('ChatInput — answer mode (inside the "+" menu)', () => {
   beforeEach(() => {
     useExecutionStore.getState().setChatModeType('chat');
   });
 
-  it('shows the active (default) mode and opens a dropdown with all three modes', () => {
+  it('shows the active mode and expands to all three', () => {
     render(<ChatInput {...baseProps} />);
-    // Trigger reflects the default answer mode (chat = single light agent).
-    const trigger = screen.getByLabelText('Answer mode: Chat');
-    expect(trigger).toBeTruthy();
-    fireEvent.click(trigger);
-    // Dropdown lists Research + Deep Research too.
-    expect(screen.getByLabelText('Answer mode: Research')).toBeTruthy();
-    expect(screen.getByLabelText('Answer mode: Deep Research')).toBeTruthy();
+    openMenu();
+    const row = screen.getByLabelText('Answer mode');
+    expect(row).toHaveTextContent('Chat');
+    fireEvent.click(row);
+    expect(screen.getByText('Research')).toBeInTheDocument();
+    expect(screen.getByText('Deep Research')).toBeInTheDocument();
   });
 
   it('selecting a mode updates the store', () => {
     render(<ChatInput {...baseProps} />);
-    fireEvent.click(screen.getByLabelText('Answer mode: Chat'));
-    fireEvent.click(screen.getByLabelText('Answer mode: Research'));
+    openMenu();
+    fireEvent.click(screen.getByLabelText('Answer mode'));
+    fireEvent.click(screen.getByText('Research'));
     expect(useExecutionStore.getState().chatModeType).toBe('research');
   });
 
-  it('positions the dropdown with position:fixed so it escapes overflow-hidden containers', () => {
-    // Regression: an `absolute` menu was clipped by the chat's overflow-hidden
-    // <main>/scroll wrappers once the sidebar narrowed them, so the menu vanished
-    // "behind" the sidebar. Fixed positioning is not clipped by ancestor overflow.
-    const { container } = render(<ChatInput {...baseProps} />);
-    fireEvent.click(screen.getByLabelText('Answer mode: Chat'));
-    const popover = container.querySelector('.kasal-popover') as HTMLElement;
-    expect(popover.style.position).toBe('fixed');
-    expect(popover.className).not.toContain('absolute');
-  });
-
-  it('the collapsed pill shows the compact short label ("Deep" for Deep Research)', () => {
-    useExecutionStore.getState().setChatModeType('deep');
+  it('positions the menu with position:fixed so it escapes overflow-hidden containers', () => {
     render(<ChatInput {...baseProps} />);
-    const trigger = screen.getByLabelText('Answer mode: Deep Research');
-    expect(trigger).toHaveTextContent('Deep');
-    expect(trigger).not.toHaveTextContent('Deep Research');
-  });
-
-  it('opens the dropdown upward by default (input pinned to the bottom)', () => {
-    const { container } = render(<ChatInput {...baseProps} />);
-    fireEvent.click(screen.getByLabelText('Answer mode: Chat'));
-    const popover = container.querySelector('.kasal-popover');
-    expect(popover?.className).toContain('animate-slide-up');
-    expect(popover?.className).not.toContain('animate-slide-down');
-  });
-
-  it('opens the dropdown downward when menuPlacement="down" (centered input)', () => {
-    const { container } = render(<ChatInput {...baseProps} menuPlacement="down" />);
-    fireEvent.click(screen.getByLabelText('Answer mode: Chat'));
-    const popover = container.querySelector('.kasal-popover');
-    expect(popover?.className).toContain('animate-slide-down');
-    expect(popover?.className).not.toContain('animate-slide-up');
+    openMenu();
+    const popover = document.querySelector('.kasal-popover') as HTMLElement;
+    expect(popover.style.position).toBe('fixed');
   });
 });
 
-describe('ChatInput — model picker placement (flips with the input position)', () => {
-  // Counterpart to "model picker opens upward" (the default/docked case): when
-  // the input is centered (empty state) the host passes menuPlacement="down" and
-  // the model dropdown must flip BELOW the pill so it isn't clipped at the top.
+describe('ChatInput — "+" menu placement (flips with the input position)', () => {
   it('flips DOWN (slide-down) when menuPlacement="down"', () => {
     render(<ChatInput {...baseProps} menuPlacement="down" />);
-    fireEvent.click(screen.getByText('Model One'));
-    const popover = screen.getByText('Model').closest('.kasal-popover') as HTMLElement;
+    openMenu();
+    const popover = document.querySelector('.kasal-popover') as HTMLElement;
     expect(popover.className).toContain('animate-slide-down');
-    expect(popover.className).not.toContain('animate-slide-up');
   });
 });
 
-describe('ChatInput — forwards menuPlacement to the MCP picker', () => {
-  // The "+" MCP picker must flip in lock-step with the composer's other
-  // popovers, so ChatInput threads its menuPlacement straight through. Asserted
-  // end-to-end through the REAL McpPicker (its menu carries top-full/bottom-full)
-  // rather than a mock, which also proves the prop is actually wired.
-  beforeEach(() => {
-    // The real McpPicker reads appStore.toolNameMap on open; default it so the
-    // Object.values(...) guard never sees undefined.
-    useAppStore.setState({ toolNameMap: {} });
-  });
-
-  it('opens the MCP picker UPWARD by default (bottom-full)', async () => {
+describe('ChatInput — Tools & MCP (inline inside the "+" menu)', () => {
+  it('expanding the Tools row renders the MCP list inline (no nested popover)', () => {
     render(<ChatInput {...baseProps} />);
-    fireEvent.click(screen.getByLabelText('MCP servers'));
-    const menu = await screen.findByLabelText('MCP picker');
-    expect(menu.className).toContain('bottom-full');
-    expect(menu.className).not.toContain('top-full');
-  });
-
-  it('opens the MCP picker DOWNWARD when menuPlacement="down"', async () => {
-    render(<ChatInput {...baseProps} menuPlacement="down" />);
-    fireEvent.click(screen.getByLabelText('MCP servers'));
-    const menu = await screen.findByLabelText('MCP picker');
-    expect(menu.className).toContain('top-full');
-    expect(menu.className).not.toContain('bottom-full');
+    openMenu();
+    fireEvent.click(screen.getByLabelText('Tools & MCP'));
+    const mcp = screen.getByRole('menu', { name: 'MCP picker' });
+    expect(mcp).toBeInTheDocument();
+    // Inline: statically positioned inside the menu, so overflow-hidden
+    // cannot clip it (the invisible-MCP bug).
+    expect((mcp as HTMLElement).className).not.toContain('absolute');
   });
 });
 

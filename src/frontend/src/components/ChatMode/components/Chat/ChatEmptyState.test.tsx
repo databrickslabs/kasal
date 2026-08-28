@@ -34,35 +34,7 @@ const asModel = (key: string, supports_reasoning_effort: boolean) =>
   }) as never;
 
 describe('ChatEmptyState', () => {
-  it('renders the three answer-mode chips', () => {
-    render(<ChatEmptyState onPrefill={vi.fn()} />);
-    expect(screen.getByText('Chat')).toBeInTheDocument();
-    expect(screen.getByText('Research')).toBeInTheDocument();
-    expect(screen.getByText('Deep Research')).toBeInTheDocument();
-  });
-
-  it('selects the answer mode AND seeds a starter prompt when a chip is picked', () => {
-    const onPrefill = vi.fn();
-    render(<ChatEmptyState onPrefill={onPrefill} />);
-
-    fireEvent.click(screen.getByText('Research'));
-    expect(useExecutionStore.getState().chatModeType).toBe('research');
-    expect(onPrefill).toHaveBeenCalledTimes(1);
-    expect(onPrefill.mock.calls[0][0]).toMatch(/Research \[topic\]/i);
-
-    fireEvent.click(screen.getByText('Deep Research'));
-    expect(useExecutionStore.getState().chatModeType).toBe('deep');
-    expect(onPrefill.mock.calls[1][0]).toMatch(/deep-dive analysis/i);
-  });
-
-  it('marks the active answer-mode chip as pressed', () => {
-    useExecutionStore.setState({ chatModeType: 'deep' });
-    render(<ChatEmptyState onPrefill={vi.fn()} />);
-    expect(screen.getByText('Deep Research').closest('button')!).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByText('Chat').closest('button')!).toHaveAttribute('aria-pressed', 'false');
-  });
-
-  it('switches to Agent Builder from the builder bridge', () => {
+        it('switches to Agent Builder from the builder bridge', () => {
     render(<ChatEmptyState onPrefill={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: 'Agent Builder' }));
     expect(setAppMode).toHaveBeenCalledWith('crew');
@@ -100,52 +72,3 @@ describe('ChatEmptyState', () => {
 // A model with no reasoning budget makes Deep Research identical to Research —
 // same crew, same tools, both efforts dropped by the engine. Offering it would
 // promise a difference that cannot happen.
-describe('ChatEmptyState answer modes vs model capability', () => {
-  const pickDeepCard = () =>
-    screen.getByText('Deep Research').closest('button') as HTMLButtonElement;
-
-  it('disables Deep Research for a model with no reasoning budget', () => {
-    useAppStore.setState({
-      models: [asModel('Qwen3-Coder-30B-A3B-Instruct', false)],
-      selectedModel: 'Qwen3-Coder-30B-A3B-Instruct',
-    });
-    render(<ChatEmptyState onPrefill={vi.fn()} />);
-
-    expect(pickDeepCard()).toBeDisabled();
-    expect(pickDeepCard().title).toContain('Qwen3-Coder-30B-A3B-Instruct');
-    expect(screen.getByText('Needs a model with a reasoning budget')).toBeInTheDocument();
-  });
-
-  it('keeps Research enabled there — a crew is a real difference on any model', () => {
-    useAppStore.setState({
-      models: [asModel('Qwen3-Coder-30B-A3B-Instruct', false)],
-      selectedModel: 'Qwen3-Coder-30B-A3B-Instruct',
-    });
-    const onPrefill = vi.fn();
-    render(<ChatEmptyState onPrefill={onPrefill} />);
-
-    const research = screen.getByText('Research').closest('button') as HTMLButtonElement;
-    expect(research).not.toBeDisabled();
-    fireEvent.click(research);
-    expect(onPrefill).toHaveBeenCalled();
-    // ...but it no longer claims reasoning it cannot do.
-    expect(screen.getByText('Full multi-agent crew')).toBeInTheDocument();
-  });
-
-  it('offers both, with the reasoning wording, for a reasoning-capable model', () => {
-    useAppStore.setState({
-      models: [asModel('gpt-5.6-terra', true)],
-      selectedModel: 'gpt-5.6-terra',
-    });
-    render(<ChatEmptyState onPrefill={vi.fn()} />);
-
-    expect(pickDeepCard()).not.toBeDisabled();
-    expect(screen.getByText('Deep tools with maximum reasoning')).toBeInTheDocument();
-    expect(screen.getByText('Full crew with reasoning')).toBeInTheDocument();
-  });
-
-  it('does not disable anything while the model list is still loading', () => {
-    render(<ChatEmptyState onPrefill={vi.fn()} />);
-    expect(pickDeepCard()).not.toBeDisabled();
-  });
-});

@@ -427,4 +427,23 @@ describe('McpPicker', () => {
       expect(screen.getByText('No matching agents')).toBeInTheDocument();
     });
   });
+
+  describe('inline variant (embedded in the composer "+" menu)', () => {
+    it('fetches and lists servers immediately — no trigger button, no popover to open', async () => {
+      // Regression: the fetches were gated on the popover `open` state, which the
+      // inline variant never sets — so it sat on "Loading…" forever.
+      render(<McpPicker variant="inline" />);
+      expect(screen.queryByLabelText('MCP servers')).toBeNull(); // no trigger button
+      await waitFor(() => expect(screen.getByText('My MCP')).toBeInTheDocument());
+      expect(listKasalMcpServers).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText('Loading…')).toBeNull();
+    });
+
+    it('loads Agent Bricks endpoints inline too (when the tool is enabled)', async () => {
+      useAppStore.setState({ toolNameMap: { t1: 'AgentBricksTool' } });
+      render(<McpPicker variant="inline" />);
+      await waitFor(() => expect(screen.getByText('Sales Bot')).toBeInTheDocument());
+      expect(getAgentBricksEndpoints).toHaveBeenCalledTimes(1);
+    });
+  });
 });
