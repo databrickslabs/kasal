@@ -685,3 +685,36 @@ describe('ChatContainer — run activity in the chat ("chat" placement)', () => 
     expect(onShow).toHaveBeenCalledWith({ type: 'text', data: 'Here is your answer.' }, 'job-old');
   });
 });
+
+
+describe('ChatContainer — jump to latest', () => {
+  it('appears when scrolled well above the bottom and jumps on click', () => {
+    window.HTMLElement.prototype.scrollIntoView = vi.fn();
+    const { container } = render(
+      <ChatContainer {...baseProps} messages={[msg('m1', 'hi'), msg('m2', 'hello')]} />,
+    );
+    const scroller = container.querySelector('.overflow-y-auto') as HTMLElement;
+    // jsdom has no layout — stub the metrics of a long, scrolled-up transcript.
+    Object.defineProperty(scroller, 'scrollHeight', { value: 2000, configurable: true });
+    Object.defineProperty(scroller, 'clientHeight', { value: 600, configurable: true });
+    Object.defineProperty(scroller, 'scrollTop', { value: 100, writable: true, configurable: true });
+    fireEvent.scroll(scroller);
+    const btn = screen.getByLabelText('Jump to latest');
+    expect(btn).toBeInTheDocument();
+    fireEvent.click(btn);
+    expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+    expect(screen.queryByLabelText('Jump to latest')).not.toBeInTheDocument();
+  });
+
+  it('stays hidden near the bottom', () => {
+    const { container } = render(
+      <ChatContainer {...baseProps} messages={[msg('m1', 'hi')]} />,
+    );
+    const scroller = container.querySelector('.overflow-y-auto') as HTMLElement;
+    Object.defineProperty(scroller, 'scrollHeight', { value: 700, configurable: true });
+    Object.defineProperty(scroller, 'clientHeight', { value: 600, configurable: true });
+    Object.defineProperty(scroller, 'scrollTop', { value: 80, writable: true, configurable: true });
+    fireEvent.scroll(scroller);
+    expect(screen.queryByLabelText('Jump to latest')).not.toBeInTheDocument();
+  });
+});
