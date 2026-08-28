@@ -65,6 +65,20 @@ export function useRunActivity({ viewIsExecuting }: UseRunActivityArgs) {
     focusStep?: RunStep,
   ) => {
     const st = useExecutionStore.getState();
+    // TOGGLE: the per-run pane icon (no focusStep) closes the pane again when
+    // it is already showing THIS run's activity — same control, both ways.
+    // A step-row click never closes; it retargets the pane to that step.
+    if (
+      !focusStep &&
+      st.previewPaneOpen &&
+      st.activityPlacement === 'preview'
+    ) {
+      st.clearPreview();
+      st.setActivityPlacement('chat');
+      setFocusedRunJobId(null);
+      setFocusedRunStep(null);
+      return;
+    }
     setFocusedRunJobId(jobId ?? null);
     // A step ROW click opens the pane directly on that step's content; the
     // per-run pane icon (no focusStep) opens the run normally.

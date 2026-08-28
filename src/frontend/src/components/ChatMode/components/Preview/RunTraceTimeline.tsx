@@ -69,7 +69,7 @@ function EventIcon({ type }: { type: string }): JSX.Element {
     return <AlertCircle {...common} style={{ color: 'var(--error, #dc2626)' }} />;
   }
   if (type.startsWith('llm')) {
-    return <PlayCircle {...common} style={{ color: 'var(--accent)' }} />;
+    return <PlayCircle {...common} style={{ color: 'var(--text-secondary)' }} />;
   }
   if (type.includes('checkpoint_restored')) {
     return <History {...common} style={{ color: 'var(--text-secondary)' }} />;
@@ -112,13 +112,13 @@ const EventRow: React.FC<EventRowProps> = ({ event, onSelect }) => {
             }
           : undefined
       }
-      className={`flex items-center gap-2 py-1 pl-3 text-xs ${clickable ? 'cursor-pointer hover:opacity-80' : ''}`}
-      style={{ borderLeft: '2px solid var(--border-color)' }}
+      className={`flex items-center gap-2 py-1 pl-3 pr-1 text-xs rounded-md ${clickable ? 'cursor-pointer hover:bg-[var(--bg-rail-hover)]' : ''}`}
+      style={{ borderLeft: '2px solid var(--bg-rail-hover)' }}
     >
       <EventIcon type={event.type} />
       <span
         className="flex-1 min-w-0 truncate"
-        style={{ color: clickable ? 'var(--accent)' : 'var(--text-primary)' }}
+        style={{ color: 'var(--text-primary)' }}
         title={event.description}
       >
         {event.description}
@@ -154,8 +154,7 @@ const AgentBlock: React.FC<AgentBlockProps> = ({ agent, agentIdx, globalStart, o
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-xs"
-        style={{ backgroundColor: 'var(--bg-secondary)' }}
+        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-xs transition-colors hover:bg-[var(--bg-rail-hover)]"
       >
         {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         <span className="font-medium truncate" style={{ color: 'var(--text-primary)' }}>
@@ -163,7 +162,7 @@ const AgentBlock: React.FC<AgentBlockProps> = ({ agent, agentIdx, globalStart, o
         </span>
         <span
           className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full flex-shrink-0"
-          style={{ border: '1px solid var(--border-color)', color: 'var(--text-secondary)' }}
+          style={{ backgroundColor: 'var(--bg-rail-hover)', color: 'var(--text-secondary)' }}
         >
           <Clock size={10} />
           {duration(agent.duration)}
@@ -202,7 +201,7 @@ const AgentBlock: React.FC<AgentBlockProps> = ({ agent, agentIdx, globalStart, o
                   </span>
                   <span
                     className="px-1.5 py-0.5 rounded-full flex-shrink-0"
-                    style={{ border: '1px solid var(--border-color)', color: 'var(--text-secondary)' }}
+                    style={{ backgroundColor: 'var(--bg-rail-hover)', color: 'var(--text-secondary)' }}
                   >
                     {duration(task.duration)}
                   </span>

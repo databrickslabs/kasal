@@ -136,10 +136,10 @@ const RunProgress: React.FC<{
       {/* No `overflow-hidden`: the crew card's Genie-space dropdown is an
           absolutely-positioned popover that must escape the container's bounds.
           The rounded border + bg already round the corners without clipping. */}
-      <div
-        className="rounded-xl"
-        style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}
-      >
+      {/* No card surface at all — the activity sits directly on the stage,
+          exactly like the conversation text around it. Any box (opaque,
+          frosted, bordered) read as a foreign panel against the vignette. */}
+      <div className="rounded-xl">
         <div className="flex items-center gap-2 px-3 py-2">
           {stopping ? (
             <div
@@ -245,7 +245,7 @@ const RunProgress: React.FC<{
           )}
         </div>
         {open && hasTimeline && (
-          <div className="px-4 py-3 max-h-[60vh] overflow-y-auto" style={{ borderTop: '1px solid var(--border-color)' }}>
+          <div className="px-4 pb-3 pt-1 max-h-[60vh] overflow-y-auto">
             {/* Rows with content are clickable: they open that step's output in
                 the preview panel (same master→detail the pane itself offers). */}
             <RunTraceTimeline
@@ -371,11 +371,21 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   useEffect(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
-    const onScroll = () => {
+    const measure = () => {
       setShowJumpToLatest(el.scrollHeight - el.scrollTop - el.clientHeight > 300);
     };
-    el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
+    el.addEventListener('scroll', measure, { passive: true });
+    // Content HEIGHT changes must re-measure too: a collapsing timeline or a
+    // finished stream shrinks scrollHeight without any scroll event, and the
+    // stale flag left the pill floating over an already-bottomed-out view.
+    const ro =
+      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    ro?.observe(el);
+    if (el.firstElementChild) ro?.observe(el.firstElementChild);
+    return () => {
+      el.removeEventListener('scroll', measure);
+      ro?.disconnect();
+    };
   }, []);
   const jumpToLatest = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -522,7 +532,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   if (isEmpty && !isExecuting) {
     return (
       <div className="flex flex-col items-center justify-center h-full px-6">
-        <div className="w-full max-w-3xl">
+        <div className="kasal-landing-hero w-full max-w-3xl">
           {/* Greeting — the rotating composer placeholder advertises what Kasal can
               build (dashboards, presentations, quizzes, …), so no subtitle needed. */}
           <div className="text-center mb-6">
@@ -571,10 +581,10 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
           type="button"
           onClick={jumpToLatest}
           aria-label="Jump to latest"
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium shadow-lg transition-colors hover:opacity-90"
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors hover:opacity-90"
           style={{
             backgroundColor: 'var(--bg-input)',
-            border: '1px solid var(--border-color)',
+            boxShadow: 'var(--shadow-popover)',
             color: 'var(--text-secondary)',
           }}
         >

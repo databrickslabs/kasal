@@ -1337,13 +1337,6 @@ describe('ChatWorkspace component', () => {
     expect(screen.getByTestId('chat-container')).toBeInTheDocument();
     // The sidebar never fully disappears — it collapses to a slim icon rail.
     expect(screen.getByTestId('collapsed-rail')).toBeInTheDocument();
-    expect(screen.getByLabelText('Show chat history')).toBeInTheDocument();
-  });
-
-  it('collapses the sidebar from the panel toggle in its header row', () => {
-    render(<ChatWorkspace />); // sidebarOpen defaults to true in the harness
-    fireEvent.click(screen.getByLabelText('Hide chat history'));
-    expect(h.app.setSidebarOpen).toHaveBeenCalledWith(false);
   });
 
   // --- preview panel controls ---

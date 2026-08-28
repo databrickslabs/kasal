@@ -21,6 +21,7 @@ import { useWorkflowStore } from '../../store/workflow';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { getThemeOptions } from '../../theme/theme';
 import { useAppStore as useChatAppStore } from '../ChatMode/store/appStore';
+import SidebarToggle from '../ChatMode/SidebarToggle';
 import { useThemeManager } from '../../hooks/workflow/useThemeManager';
 import { useErrorManager } from '../../hooks/workflow/useErrorManager';
 import { useFlowManager } from '../../hooks/workflow/useFlowManager';
@@ -1211,6 +1212,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           hideTabsAndButtons={isChatMode}
           isMobile={isMobile}
           forceDark={topStripDark}
+          leftSlot={isChatMode ? <SidebarToggle /> : undefined}
         />,
         )}
 

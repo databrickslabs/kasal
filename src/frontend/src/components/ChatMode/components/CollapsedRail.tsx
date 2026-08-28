@@ -3,12 +3,12 @@ import { useAppStore } from '../store/appStore';
 
 /**
  * The chat sidebar when it is CLOSED: a slim vertical icon rail instead of
- * nothing at all. Keeps the sidebar's key actions one click away — expand the
- * history back open, start a new chat, and the dark/light toggle that
- * otherwise lives in the sidebar footer.
+ * nothing at all. Keeps the sidebar's key actions one click away — start a
+ * new chat, and the dark/light toggle that otherwise lives in the sidebar
+ * footer. (Expanding back is the top-bar SidebarToggle — the one fixed
+ * control for both directions.)
  */
 const CollapsedRail: React.FC<{ onNewChat: () => void }> = ({ onNewChat }) => {
-  const setSidebarOpen = useAppStore((s) => s.setSidebarOpen);
   const isDark = useAppStore((s) => s.theme) === 'dark';
   const toggleTheme = useAppStore((s) => s.toggleTheme);
 
@@ -19,26 +19,8 @@ const CollapsedRail: React.FC<{ onNewChat: () => void }> = ({ onNewChat }) => {
     <aside
       data-testid="collapsed-rail"
       className="w-12 flex flex-col items-center flex-shrink-0 py-3"
-      style={{ backgroundColor: 'var(--bg-rail)', borderRight: '1px solid var(--border-color)' }}
+      style={{ backgroundColor: 'var(--bg-rail)' }}
     >
-      <button
-        type="button"
-        onClick={() => setSidebarOpen(true)}
-        className={iconButton}
-        style={{ color: 'var(--text-secondary)' }}
-        aria-label="Show chat history"
-      >
-        {/* Sidebar-expand glyph: panel with the rail highlighted */}
-        <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.7}>
-          <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
-          <path strokeLinecap="round" d="M9.5 4.5v15" />
-        </svg>
-      </button>
-
-      {/* Window control above, actions below — the hairline keeps the two
-          groups from reading as one undifferentiated icon pile. */}
-      <div className="my-2 w-5 border-t" style={{ borderColor: 'var(--border-color)' }} />
-
       <button
         type="button"
         onClick={onNewChat}

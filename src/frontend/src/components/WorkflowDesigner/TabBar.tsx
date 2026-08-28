@@ -428,10 +428,16 @@ const TabBar: React.FC<TabBarProps> = ({
     <>
       <Box
         sx={{
-          borderBottom: 1,
+          // Chat mode: no divider and NO color of its own — the chat root paints
+          // a fixed full-viewport vignette behind everything, and a transparent
+          // bar lets it through, so bar + sidebar + stage read as one surface.
+          borderBottom: hideTabsAndButtons ? 0 : 1,
           borderColor: 'divider',
-          // #1B1F23 = chat dark --bg-primary, so the bar blends with the chat below
-          backgroundColor: forceDark ? '#1B1F23' : isDarkMode ? '#1a1a1a' : '#ffffff',
+          background: hideTabsAndButtons
+            ? 'transparent'
+            : isDarkMode
+              ? '#1a1a1a'
+              : '#ffffff',
           display: 'flex',
           alignItems: 'center',
           minHeight: isMobile ? '40px' : '48px',

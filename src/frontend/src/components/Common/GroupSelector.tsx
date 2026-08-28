@@ -24,6 +24,12 @@ import { useRunStatusStore } from '../../store/runStatus';
 import { useUserStore } from '../../store/user';
 import { useGroupStore } from '../../store/groups';
 
+// Kasal's brand accent (chat.css --accent) — these menus follow the app
+// accent instead of MUI's blue primary. CSS vars can't reach here.
+const KASAL_ACCENT = '#FF3621';
+const KASAL_ACCENT_SOFT = 'rgba(255, 54, 33, 0.08)';
+const KASAL_ACCENT_SOFT_HOVER = 'rgba(255, 54, 33, 0.12)';
+
 const GroupSelector: React.FC = () => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   // Use Zustand store instead of local state
@@ -173,26 +179,21 @@ const GroupSelector: React.FC = () => {
 
   return (
     <>
-      <Tooltip
-        title={
-          currentGroup.id.startsWith('user_')
-            ? `Personal Space (${currentUser?.email})`
-            : `${currentGroup.name} - Shared Teamspace`
-        }
-        enterDelay={500}
-        leaveDelay={200}
-        disableInteractive
-        placement="bottom"
-      >
-        <IconButton
+      <IconButton
           id="group-selector-button"
           aria-controls={open ? 'group-menu' : undefined}
           aria-haspopup="true"
           aria-expanded={open ? 'true' : undefined}
           onClick={handleClick}
           size="small"
+          aria-label={
+            currentGroup.id.startsWith('user_')
+              ? `Personal Space (${currentUser?.email})`
+              : `${currentGroup.name} - Shared Teamspace`
+          }
           sx={{
             p: 0.5,
+            borderRadius: 2,
             transition: 'background-color 0.2s',
             '&:hover': {
               backgroundColor: 'action.hover',
@@ -201,7 +202,6 @@ const GroupSelector: React.FC = () => {
         >
           {avatarElement}
         </IconButton>
-      </Tooltip>
       <Menu
         id="group-menu"
         anchorEl={anchorEl}
@@ -226,23 +226,28 @@ const GroupSelector: React.FC = () => {
             sx: {
               minWidth: 280,
               maxHeight: 400,
-              mt: 0.5,
+              mt: 1,
+              borderRadius: 3,
+              border: '1px solid',
+              borderColor: 'divider',
+              boxShadow: '0 12px 32px rgba(16,24,40,0.10), 0 2px 8px rgba(16,24,40,0.06)',
               overflow: 'auto',  // Changed from 'visible' to 'auto' for better scrolling
-              filter: 'drop-shadow(0px 2px 8px rgba(0,0,0,0.08))',
             },
           }
         }}
         MenuListProps={{
           'aria-labelledby': 'group-selector-button',
-          sx: { py: 0 }
+          sx: { py: 0.75 }
         }}
       >
-        <Box sx={{ px: 2, py: 1, borderBottom: 1, borderColor: 'divider' }}>
-          <Typography variant="subtitle2" color="text.secondary">
+        <Box sx={{ px: 2, pt: 1, pb: 0.5 }}>
+          <Typography
+            sx={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}
+            color="text.secondary"
+          >
             Switch Teamspace
           </Typography>
         </Box>
-        {groups.length > 0 && <Divider />}
         {groups.map((group) => {
           const isPersonalWorkspace = group.id.startsWith('user_');
           const isSelected = currentGroup?.id === group.id;
@@ -254,12 +259,14 @@ const GroupSelector: React.FC = () => {
               selected={isSelected}
               sx={{
                 minHeight: 48,
-                px: 2,
+                mx: 0.75,
+                px: 1.5,
                 py: 1,
+                borderRadius: 2,
                 '&.Mui-selected': {
-                  backgroundColor: 'action.selected',
+                  backgroundColor: KASAL_ACCENT_SOFT,
                   '&:hover': {
-                    backgroundColor: 'action.selected',
+                    backgroundColor: KASAL_ACCENT_SOFT_HOVER,
                   }
                 }
               }}
@@ -269,14 +276,14 @@ const GroupSelector: React.FC = () => {
                   <HomeIcon
                     fontSize="small"
                     sx={{
-                      color: isSelected ? 'primary.main' : 'text.secondary'
+                      color: isSelected ? KASAL_ACCENT : 'text.secondary'
                     }}
                   />
                 ) : (
                   <GroupsIcon
                     fontSize="small"
                     sx={{
-                      color: isSelected ? 'primary.main' : 'text.secondary'
+                      color: isSelected ? KASAL_ACCENT : 'text.secondary'
                     }}
                   />
                 )}
@@ -294,8 +301,12 @@ const GroupSelector: React.FC = () => {
                       <Chip
                         label="Active"
                         size="small"
-                        color="primary"
-                        sx={{ height: 20 }}
+                        sx={{
+                          height: 20,
+                          fontWeight: 600,
+                          color: KASAL_ACCENT,
+                          backgroundColor: KASAL_ACCENT_SOFT,
+                        }}
                       />
                     )}
                   </Box>
