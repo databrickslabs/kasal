@@ -486,6 +486,10 @@ class MemorySaveCompletedEvent(MemoryBaseEvent):
     metadata: dict[str, Any] | None = None
     agent_role: str | None = None
     save_time_ms: float
+    # The stored record's id — storage assigns it before the event fires, and
+    # carrying it lets a run's memory view resolve exactly which records this
+    # run wrote instead of guessing by time window.
+    record_id: str | None = None
 
 
 class MemorySaveFailedEvent(MemoryBaseEvent):

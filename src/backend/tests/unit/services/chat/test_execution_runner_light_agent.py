@@ -1542,11 +1542,15 @@ async def test_memory_query_emits_memory_retrieval_trace():
     trace_instance.create_trace = AsyncMock()
 
     def _emit(captured):
+        # Three results carry ids, two don't (legacy rows) — the structured
+        # record_ids list keeps exactly the ids, capped content or not.
+        results = [
+            SimpleNamespace(id="00000000-0000-0000-0000-00000000000%d" % i)
+            for i in range(1, 4)
+        ] + [1, 2]
         captured["MemoryQueryCompletedEvent"](
             mock_agent.memory,
-            SimpleNamespace(
-                query="swiss news", results=[1, 2, 3, 4, 5], query_time_ms=12748.6
-            ),
+            SimpleNamespace(query="swiss news", results=results, query_time_ms=12748.6),
         )
 
     result, captured = await _run_with_captured_handlers(
@@ -1560,6 +1564,13 @@ async def test_memory_query_emits_memory_retrieval_trace():
     assert td["trace_metadata"]["results_count"] == 5
     assert td["trace_metadata"]["query_time_ms"] == 12748.6
     assert td["output"]["extra_data"]["results_count"] == 5
+    # The memory pane reconstructs "what this run recalled" from THESE, never
+    # from the capped prose (which truncates away the tail results' ids).
+    assert td["trace_metadata"]["record_ids"] == [
+        "00000000-0000-0000-0000-000000000001",
+        "00000000-0000-0000-0000-000000000002",
+        "00000000-0000-0000-0000-000000000003",
+    ]
 
 
 @pytest.mark.asyncio
@@ -1669,6 +1680,7 @@ async def test_memory_save_emits_memory_write_trace():
                 value="Remember the user likes Switzerland.",
                 metadata={},
                 save_time_ms=14212.6,
+                record_id="11111111-2222-3333-4444-555555555555",
             ),
         )
 
@@ -1682,6 +1694,9 @@ async def test_memory_save_emits_memory_write_trace():
     assert td["event_type"] == "memory_write"
     assert "Switzerland" in td["output"]["content"]
     assert td["trace_metadata"]["save_time_ms"] == 14212.6
+    # The saved record's id — how the memory pane resolves "what this run
+    # wrote" exactly, instead of guessing by completed_at time windows.
+    assert td["trace_metadata"]["record_id"] == "11111111-2222-3333-4444-555555555555"
 
 
 @pytest.mark.asyncio

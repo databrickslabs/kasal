@@ -518,6 +518,7 @@ class Memory(BaseModel):
                     metadata=record.metadata,
                     agent_role=agent_role,
                     save_time_ms=elapsed_ms,
+                    record_id=record.id,
                     source_type="unified_memory",
                 ),
             )
