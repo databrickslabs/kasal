@@ -42,7 +42,7 @@
     "react-joyride": "^2.9.3",
     "react-leaflet": "^4.2.1",
     "react-markdown": "^9.0.1",
-    "react-router-dom": "^6.22.3",
+    "react-router-dom": "^7.18.3",
     "reactflow": "^11.10.3",
     "recharts": "^2.15.4",
     "rehype-raw": "^7.0.0",
@@ -52,7 +52,7 @@
     "styled-components": "^6.1.8",
     "tailwind-merge": "^2.6.1",
     "tree-changes": "^0.5.1",
-    "uuid": "^9.0.1",
+    "uuid": "^14.0.2",
     "yaml": "^2.8.2",
     "zustand": "^4.5.7"
   },
@@ -113,6 +113,8 @@
     "vitest": "^4.0.17"
   },
   "overrides": {
-    "react-floater": "^0.9.4"
+    "react-floater": "^0.9.4",
+    "deepmerge-ts": "^8.0.2",
+    "image-size": "file:./stubs/image-size"
   }
 }
