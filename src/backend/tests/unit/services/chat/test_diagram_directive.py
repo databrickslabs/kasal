@@ -50,3 +50,78 @@ def test_is_idempotent():
 def test_returns_same_dict():
     spec = {"backstory": ""}
     assert apply_diagram_directive(spec) is spec
+
+
+class TestPaletteDrivenTemplate:
+    def test_workspace_palette_colors_the_template(self):
+        from src.services.chat.diagram_directive import apply_diagram_directive
+
+        spec = {"backstory": ""}
+        themes = {
+            "presentation": {
+                "accent": "#AB47BC",
+                "background": "#1A1B2E",
+                "surface": "#F5F2FA",
+                "heading": "#241C33",
+                "text": "#4A4458",
+                "muted": "#8A7F9E",
+            }
+        }
+        apply_diagram_directive(spec, "create a presentation on x", themes=themes)
+        story = spec["backstory"]
+        assert "#AB47BC" in story  # workspace accent, not the default
+        assert "#1A1B2E" in story  # workspace cover background
+        assert "#FF5F46" not in story  # the default accent must be gone
+
+    def test_default_palette_without_themes(self):
+        from src.services.chat.diagram_directive import apply_diagram_directive
+
+        spec = {"backstory": ""}
+        apply_diagram_directive(spec, "create a presentation on x", themes=None)
+        assert "#FF5F46" in spec["backstory"]
+
+    def test_default_theme_key_falls_back(self):
+        from src.services.chat.diagram_directive import apply_diagram_directive
+
+        spec = {"backstory": ""}
+        apply_diagram_directive(
+            spec, "make me slides", themes={"default": {"accent": "#00C853"}}
+        )
+        assert "#00C853" in spec["backstory"]
+
+    def test_light_cover_background_gets_dark_text(self):
+        from src.services.chat.diagram_directive import deck_template
+
+        t = deck_template({"background": "#FFFFFF"})
+        # The cover must not render white-on-white.
+        assert "color:#101418" in t
+
+    def test_incidental_mention_gets_no_deck_template(self):
+        from src.services.chat.diagram_directive import (
+            _DECK_MARKER,
+            apply_diagram_directive,
+        )
+
+        spec = {"backstory": ""}
+        apply_diagram_directive(spec, "how do slide-out panels work?")
+        assert _DECK_MARKER not in spec["backstory"]
+
+
+class TestPaletteHardening:
+    def test_non_dict_palette_never_crashes(self):
+        from src.services.chat.diagram_directive import deck_template
+
+        for bad in ("blue", 42, ["#fff"], True):
+            assert "SLIDE DECK" in deck_template(bad)  # falls back to defaults
+
+    def test_non_color_values_are_rejected(self):
+        from src.services.chat.diagram_directive import deck_template
+
+        t = deck_template({"accent": '#f00" onload="x'})
+        assert "onload" not in t  # a stray quote must not escape a style attr
+        assert "#FF5F46" in t  # default accent used instead
+
+    def test_named_css_colors_are_accepted(self):
+        from src.services.chat.diagram_directive import deck_template
+
+        assert "rebeccapurple" in deck_template({"accent": "rebeccapurple"})

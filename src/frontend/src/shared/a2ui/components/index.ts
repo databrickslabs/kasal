@@ -9,9 +9,8 @@
  * kind of surface they draw. The dependency order is strictly one-way:
  *
  *   values / icons / slideContext   (leaves, no component imports)
- *     -> primitives -> data -> diagrams / geo -> media -> slides -> interactive / mindmap
+ *     -> primitives -> data -> diagrams / geo -> media -> interactive / mindmap
  *
- * Slides render their children through the `render` prop rather than importing
  * the other component modules, which is what keeps the graph acyclic.
  */
 
@@ -38,9 +37,8 @@ export {
 
 export { Table, Chart, Forecast } from './data'
 
-export { Graph, Sequence, Diagram, normDiagramItems } from './diagrams'
+export { Graph, Sequence } from './diagrams'
 export { Kanban } from './kanban'
-export type { DiagramItem } from './diagrams'
 
 export { Album, GeoMap } from './media'
 
@@ -48,7 +46,6 @@ export { Album, GeoMap } from './media'
 // RegionHeatmap shades a GRID of regions, not real geography — see ./geo.tsx.
 export { RegionHeatmap, Sankey } from './geo'
 
-export { Slide, SlideDeck } from './slides'
 // Re-exported here so the public import path stays `components` even though the
 // menu now lives in its own module.
 export { SurfaceDownloadMenu } from './surfaceDownload'

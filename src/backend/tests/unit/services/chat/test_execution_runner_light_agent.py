@@ -611,8 +611,10 @@ def _a2ui_config_and_agent(answer="Hello there!"):
         tasks_yaml={
             "task_t1": {
                 "id": "task_t1",
-                "description": "Make a 3-slide deck",
-                "expected_output": "a deck",
+                # A deck prompt would be HTML-owned (compose skipped) — use a
+                # dashboard ask so the A2UI envelope path is what's exercised.
+                "description": "Make a KPI dashboard",
+                "expected_output": "a dashboard",
             }
         },
     )
@@ -641,9 +643,9 @@ async def test_a2ui_surface_wraps_result_in_envelope():
     ctx = make_group_context(["g1"])
 
     surface = {
-        "surfaceKind": "presentation",
+        "surfaceKind": "dashboard",
         "root": "root",
-        "components": [{"id": "root", "component": "SlideDeck", "children": []}],
+        "components": [{"id": "root", "component": "Grid", "children": []}],
     }
     compose_mock = AsyncMock(return_value=surface)
     update_mock = AsyncMock(return_value=True)

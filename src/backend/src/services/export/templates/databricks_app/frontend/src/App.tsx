@@ -51,7 +51,6 @@ interface Session {
 // silently dropped at render time, so new kinds (flashcards, map, …) must be added.
 const RICH = new Set([
   'document',
-  'presentation',
   'dashboard',
   'mindmap',
   'quiz',
@@ -107,7 +106,6 @@ const resolveTheme = (themes: DeckTheme[], id: string): DeckTheme =>
 // branding palette (mirrors live chat's A2uiSurface). 'document' maps to the
 // closest configurable type ('report'); unknowns fall back to 'default'.
 const SURFACE_TO_DELIVERABLE: Record<string, string> = {
-  presentation: 'presentation',
   dashboard: 'dashboard',
   mindmap: 'mindmap',
   quiz: 'quiz',
@@ -124,7 +122,6 @@ const ROOT_COMPONENT_TO_DELIVERABLE: Record<string, string> = {
   Graph: 'graph',
   Sequence: 'sequence',
   Album: 'album',
-  Diagram: 'diagram',
 }
 
 // The UIConfigurator deliverable that brands a surface: its ROOT component when

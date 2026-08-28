@@ -64,6 +64,16 @@ const uiContent: PreviewContent = { type: 'ui', data: uiDoc };
 
 // A deck whose agent-stamped theme is the WRONG (Default/white) palette — the
 // regression that motivated re-resolving themes from the workspace config.
+const dashSurfaceDoc = JSON.stringify({
+  surfaceKind: 'dashboard',
+  root: 'root',
+  components: [
+    { id: 'root', component: 'Grid', columns: 2, children: ['k1'] },
+    { id: 'k1', component: 'KeyValue', label: 'Revenue', value: '42' },
+  ],
+  dataModel: {},
+});
+
 const deckDoc = JSON.stringify({
   messages: [
     {
@@ -313,12 +323,14 @@ describe('PreviewPanel component', () => {
     expect(onRefine).not.toHaveBeenCalled();
   });
 
-  it('detects the deliverable and shows its content controls (deck → Presentation)', () => {
-    render(<PreviewPanel content={{ type: 'ui', data: deckDoc }} {...baseProps} onRefine={vi.fn()} />);
+  it('detects the deliverable and shows its content controls (dashboard → Dashboard)', () => {
+    render(
+      <PreviewPanel content={{ type: 'ui', data: dashSurfaceDoc }} {...baseProps} onRefine={vi.fn()} />,
+    );
     fireEvent.click(screen.getByText('Customize'));
-    // Friendly title noun + the presentation-specific content control.
-    expect(screen.getByText('Presentation')).toBeInTheDocument();
-    expect(screen.getByLabelText('Target slide count')).toBeInTheDocument();
+    // Friendly title noun + a dashboard-specific content control.
+    expect(screen.getByText('Dashboard')).toBeInTheDocument();
+    expect(screen.getByLabelText('KPI tiles per row')).toBeInTheDocument();
   });
 
   it('closes the Customize panel on Escape in the free-text box without submitting', () => {
@@ -419,20 +431,20 @@ describe('PreviewPanel — workspace palettes theme the surface', () => {
   const STUDIO = THEME_PRESETS.find((p) => p.key === 'studio')!.theme;
 
   it('applies the configured deliverable palette to the surface tokens', () => {
-    mockA2uiThemes = { presentation: STUDIO };
-    const { container } = renderPanel({ type: 'ui', data: deckDoc });
+    mockA2uiThemes = { dashboard: STUDIO };
+    const { container } = renderPanel({ type: 'ui', data: dashSurfaceDoc });
     expect(wrapper(container)?.style.getPropertyValue('--a2-background')).toBe(
       themeToTokens(STUDIO)['--a2-background'],
     );
   });
 
   it('lets a per-surface "Look" override win over the workspace palette', () => {
-    mockA2uiThemes = { presentation: STUDIO };
+    mockA2uiThemes = { dashboard: STUDIO };
     // A new-format surface carrying its own "Look" theme (DARK).
     const overridden = JSON.stringify({
-      surfaceKind: 'presentation',
+      surfaceKind: 'dashboard',
       root: 'root',
-      components: [{ id: 'root', component: 'SlideDeck', children: [] }],
+      components: [{ id: 'root', component: 'Grid', children: [] }],
       theme: DARK,
     });
     const { container } = renderPanel({ type: 'ui', data: overridden });
@@ -447,17 +459,21 @@ describe('PreviewPanel — workspace palettes theme the surface', () => {
 
   it('falls back to built-in tokens when no palette is configured and the surface has no override', () => {
     mockA2uiThemes = null; // disabled / unavailable / malformed config → null
-    const { container } = renderPanel({ type: 'ui', data: deckDoc });
-    // No workspace palette and no embedded override → no --a2-* override applied.
-    expect(wrapper(container)?.style.getPropertyValue('--a2-background')).toBe('');
+    const { container } = renderPanel({ type: 'ui', data: dashSurfaceDoc });
+    // No workspace palette and no embedded override → the BUILT-IN default
+    // tokens apply (dashboard/document kinds always paint their tokens), not
+    // any configured palette.
+    const bg = wrapper(container)?.style.getPropertyValue('--a2-background');
+    expect(bg).toBeTruthy();
+    expect(bg).not.toBe(themeToTokens(STUDIO)['--a2-background']);
   });
 });
 
-describe('PreviewPanel — Download menu (PDF / PowerPoint)', () => {
-  // The single top-toolbar control is a MENU: clicking it opens PDF / PowerPoint
-  // options (replacing the old icon-only PDF button AND the deck's own PowerPoint
+describe('PreviewPanel — Download menu (PDF)', () => {
+  // The single top-toolbar control is a MENU: clicking it opens the PDF
+  // option (replacing the old icon-only PDF button AND the surface's own
   // button, which is suppressed in the pane).
-  const openMenuAndPick = async (label: 'PDF' | 'PowerPoint') => {
+  const openMenuAndPick = async (label: 'PDF') => {
     fireEvent.click(screen.getByLabelText('Download'));
     fireEvent.click(await screen.findByText(label));
   };
@@ -476,15 +492,6 @@ describe('PreviewPanel — Download menu (PDF / PowerPoint)', () => {
     const comps = (surface as { components: unknown[] }).components;
     expect(Array.isArray(comps)).toBe(true);
     expect(comps.length).toBeGreaterThan(0);
-  });
-
-  it('downloads as PowerPoint via the menu, themed, using the preview title', async () => {
-    renderPanel({ ...uiContent, title: 'Oil Report' });
-    await openMenuAndPick('PowerPoint');
-    await waitFor(() => expect(downloadPptxMock).toHaveBeenCalledTimes(1));
-    const [surface, , filename] = downloadPptxMock.mock.calls[0];
-    expect((surface as { components: unknown[] }).components).toBeDefined();
-    expect(filename).toBe('Oil Report.pptx');
   });
 
   it('falls back to the surface kind (not a generic name) when the preview has no title', async () => {

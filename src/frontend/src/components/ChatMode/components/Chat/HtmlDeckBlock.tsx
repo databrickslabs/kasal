@@ -18,6 +18,9 @@ interface HtmlDeckBlockProps {
   code: string;
   /** True while the deck is still being written (unclosed fence). */
   streaming?: boolean;
+  /** True when the message ENDED without closing the fence (output cut off):
+   *  the deck finalizes (paging/download work) but is labelled incomplete. */
+  truncated?: boolean;
 }
 
 // Wrap a slide section on the fixed stage; force the section to the stage size
@@ -31,7 +34,11 @@ function stageFor(section: string): string {
   );
 }
 
-const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({ code, streaming = false }) => {
+const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
+  code,
+  streaming = false,
+  truncated = false,
+}) => {
   const slides = useMemo(() => splitSlides(code), [code]);
   const count = slides.length;
   const [idx, setIdx] = useState(0);
@@ -44,6 +51,35 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({ code, streaming = false }
     if (streaming && count > 0) setIdx(count - 1);
     else setIdx((i) => Math.min(i, Math.max(0, count - 1)));
   }, [streaming, count]);
+
+  const prev = () => setIdx((i) => Math.max(0, i - 1));
+  const next = () => setIdx((i) => Math.min(count - 1, i + 1));
+
+  // Keyboard paging. Fullscreen listens window-wide (the modal owns the
+  // screen); inline, the deck pages while it has focus — it is focusable
+  // (tabIndex) and grabs focus on click, so "click the presentation, then
+  // arrow through it" works. Left/Right, PageUp/PageDown, Home/End.
+  const pageKey = (key: string): (() => void) | null => {
+    if (key === 'ArrowLeft' || key === 'PageUp') return prev;
+    if (key === 'ArrowRight' || key === 'PageDown' || key === ' ') return next;
+    if (key === 'Home') return () => setIdx(0);
+    if (key === 'End') return () => setIdx(Math.max(0, count - 1));
+    return null;
+  };
+
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e: KeyboardEvent) => {
+      const go = pageKey(e.key);
+      if (go) {
+        e.preventDefault();
+        go();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [full, count]);
 
   // Close the download menu on outside click.
   useEffect(() => {
@@ -60,7 +96,9 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({ code, streaming = false }
 
   if (count === 0) return null;
 
-  const label = streaming ? 'Building deck…' : `Slide ${shown + 1} / ${count}`;
+  const label = streaming
+    ? 'Building deck…'
+    : `Slide ${shown + 1} / ${count}${truncated ? ' · incomplete' : ''}`;
   const navBtn =
     'inline-flex items-center justify-center rounded p-0.5 transition-colors ' +
     'hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent';
@@ -85,7 +123,7 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({ code, streaming = false }
         className={navBtn}
         title="Previous slide"
         disabled={shown <= 0}
-        onClick={() => setIdx((i) => Math.max(0, i - 1))}
+        onClick={prev}
       >
         <ChevronLeft size={15} />
       </button>
@@ -94,7 +132,7 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({ code, streaming = false }
         className={navBtn}
         title="Next slide"
         disabled={shown >= count - 1}
-        onClick={() => setIdx((i) => Math.min(count - 1, i + 1))}
+        onClick={next}
       >
         <ChevronRight size={15} />
       </button>
@@ -103,8 +141,20 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({ code, streaming = false }
 
   return (
     <div
-      className="my-2 overflow-hidden rounded-lg border"
+      className="my-2 overflow-hidden rounded-lg border focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
       style={{ borderColor: 'var(--border-color, rgba(0,0,0,0.12))' }}
+      tabIndex={0}
+      role="group"
+      aria-label={`Slide deck, ${count} slides — use arrow keys to navigate`}
+      onClick={(e) => (e.currentTarget as HTMLDivElement).focus({ preventScroll: true })}
+      onKeyDown={(e) => {
+        if (full) return; // the fullscreen listener owns the keys
+        const go = pageKey(e.key);
+        if (go) {
+          e.preventDefault();
+          go();
+        }
+      }}
     >
       <div
         className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs"
@@ -154,7 +204,13 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({ code, streaming = false }
           </div>
         </div>
       </div>
-      <ScaledFrame html={stage} baseWidth={SLIDE_W} fill={false} title="Slide deck" />
+      {/* Clicks inside the iframe never bubble out, so a transparent catcher
+          over the (static) slide takes the click and focuses the deck — that
+          is what makes "click the presentation, then use the arrows" work. */}
+      <div className="relative">
+        <ScaledFrame html={stage} baseWidth={SLIDE_W} fill={false} title="Slide deck" />
+        <div className="absolute inset-0" aria-hidden="true" />
+      </div>
       {full && (
         <FullscreenModal title={label} onClose={() => setFull(false)} toolbar={nav}>
           <ScaledFrame html={stage} baseWidth={SLIDE_W} fill={false} contain title="Slide deck (fullscreen)" />

@@ -65,9 +65,9 @@ describe('MessageContent', () => {
     expect(container.querySelector('pre code')).toBeNull();
   });
 
-  it('labels an unclosed (streaming) ```html block as building', () => {
+  it('labels an unclosed ```html block as building only while streaming', () => {
     const md = 'here:\n```html\n<svg><rect';
-    render(<MessageContent content={md} />);
+    render(<MessageContent content={md} streaming />);
     expect(screen.getByText('Building diagram…')).not.toBeNull();
   });
 
@@ -87,5 +87,25 @@ describe('MessageContent', () => {
     expect(screen.getByText('Slide 1 / 2')).not.toBeNull();
     // Not the diagram card (no %md-sandbox copy affordance for a deck).
     expect(screen.queryByText('Copy %md-sandbox cell')).toBeNull();
+  });
+});
+
+
+describe('unclosed fence lifecycle', () => {
+  const unclosedDeck =
+    'Here is the deck:\n```html\n<section class="slide">One</section>' +
+    '<section class="slide">Two</section><div style="margin-bottom:';
+
+  it('shows Building deck while the message is still streaming', () => {
+    render(<MessageContent content={unclosedDeck} streaming />);
+    expect(screen.getByText('Building deck…')).toBeInTheDocument();
+  });
+
+  it('finalizes a truncated deck when the message has ended', () => {
+    // The fence never closed but the stream is over — the deck must NOT build
+    // forever; it pages normally and is labelled incomplete.
+    render(<MessageContent content={unclosedDeck} />);
+    expect(screen.queryByText('Building deck…')).not.toBeInTheDocument();
+    expect(screen.getByText(/incomplete/)).toBeInTheDocument();
   });
 });

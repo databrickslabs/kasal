@@ -428,7 +428,10 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
                 full output" button; now the full text renders directly, so a
                 verbose step is readable without a click. `content` is the capped
                 preview and is only used when nothing longer exists. */}
-            <MessageContent content={message.fullContent ?? message.content} />
+            <MessageContent
+              content={message.fullContent ?? message.content}
+              streaming={Boolean(message.isStreaming)}
+            />
           </div>
         )}
 

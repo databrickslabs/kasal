@@ -68,16 +68,13 @@ export type UiComponentType =
   | 'Chart'
   | 'Table'
   | 'Quiz'
-  | 'Slides'
-  | 'Slide'
   | 'Album'
   | 'Mindmap'
   | 'Flashcards'
   | 'Map'
   | 'Forecast'
   | 'Graph'
-  | 'Sequence'
-  | 'Diagram';
+  | 'Sequence';
 
 export interface UiComponent {
   id: string;
@@ -108,8 +105,8 @@ export interface UiSurface {
 const VALID_TYPES: ReadonlySet<string> = new Set<UiComponentType>([
   'Text', 'Row', 'Column', 'Card', 'List', 'Divider', 'Image', 'Icon',
   'Badge', 'Button', 'TextField', 'CheckBox', 'Slider', 'ChoicePicker',
-  'Dashboard', 'Stat', 'Chart', 'Table', 'Quiz', 'Slides', 'Slide', 'Album', 'Mindmap', 'Flashcards', 'Map',
-  'Forecast', 'Graph', 'Sequence', 'Diagram',
+  'Dashboard', 'Stat', 'Chart', 'Table', 'Quiz', 'Album', 'Mindmap', 'Flashcards', 'Map',
+  'Forecast', 'Graph', 'Sequence',
 ]);
 
 /** Scan from the first `open` char to its balanced `close` (string-aware) and
@@ -394,7 +391,6 @@ export function findUiSurface(raw: unknown, depth = 0): UiSurface | null {
 // table in ui_emission.py). The first component type present anywhere in the
 // surface decides the deliverable; surfaces with none of these are 'default'.
 const DELIVERABLE_BY_COMPONENT: [UiComponentType, string][] = [
-  ['Slides', 'presentation'],
   ['Quiz', 'quiz'],
   ['Flashcards', 'flashcards'],
   ['Map', 'map'],
@@ -403,7 +399,6 @@ const DELIVERABLE_BY_COMPONENT: [UiComponentType, string][] = [
   ['Forecast', 'forecast'],
   ['Graph', 'graph'],
   ['Sequence', 'sequence'],
-  ['Diagram', 'diagram'],
   ['Dashboard', 'dashboard'],
   ['Table', 'genie'],
 ];
@@ -424,7 +419,8 @@ export function inferSurfaceDeliverable(surface: UiSurface): string {
 // Legacy deliverable key → new surfaceKind. The new catalog has 6 surfaceKinds;
 // deliverables the new renderer has no dedicated container for fall to 'document'.
 const DELIVERABLE_TO_SURFACE_KIND: Record<string, string> = {
-  presentation: 'presentation',
+  // presentation: gone — decks render on the chat HTML path now.
+  presentation: 'document',
   dashboard: 'dashboard',
   mindmap: 'mindmap',
   quiz: 'quiz',

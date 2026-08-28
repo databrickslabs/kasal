@@ -942,8 +942,6 @@ class TestDatabricksAppA2UI:
             "Markdown",
             "Table",
             "Chart",
-            "SlideDeck",
-            "Slide",
             "Mindmap",
             "Quiz",
         ):
@@ -1015,7 +1013,6 @@ class TestDatabricksAppA2UI:
         rich = set(re.findall(r"'([a-z]+)'", m.group(1)))
         expected = {
             "document",
-            "presentation",
             "dashboard",
             "mindmap",
             "quiz",
@@ -1365,7 +1362,6 @@ class TestDatabricksAppA2UI:
             "frontend/src/a2ui/components/primitives.tsx",
             "frontend/src/a2ui/components/data.tsx",
             "frontend/src/a2ui/components/diagrams.tsx",
-            "frontend/src/a2ui/components/slides.tsx",
             "frontend/src/a2ui/A2UIRenderer.tsx",
             "frontend/src/a2ui/registry.tsx",
             "frontend/src/a2ui/resolve.ts",

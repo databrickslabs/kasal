@@ -7,44 +7,24 @@
  * written there first.
  */
 import { useCallback, useContext, useEffect, useRef, useState } from 'react'
-import { ChevronDown, Download, FileText, Presentation, StickyNote } from 'lucide-react'
+import { ChevronDown, Download, FileText } from 'lucide-react'
 import { Button } from '../ui/button'
-import { downloadPptx } from '../lib/download'
-import { DeckThemeContext } from '../lib/deckThemes'
 import { SurfaceContext, SurfaceChromeContext } from '../lib/surfaceContext'
 import { cn } from '../lib/utils'
 
 // ---- SurfaceDownloadMenu (shared download chrome) --------------------------
 // One elegant "Download" dropdown reused by every surface. Self-detects what the
-// surface can export: PDF (any surface, when the host wires `onDownloadPdf`) and
-// PowerPoint (decks only, via the shared DOM-free pptxgenjs export). Renders
+// surface can export: PDF (any surface, when the host wires `onDownloadPdf`). Renders
 // nothing when downloads are suppressed or there's nothing to offer — so it's
 // safe to drop into the renderer for ALL surfaces.
 export function SurfaceDownloadMenu({ className }: { className?: string }) {
   const surface = useContext(SurfaceContext)
-  const theme = useContext(DeckThemeContext)
   const { downloads: showDownloads, onDownloadPdf } = useContext(SurfaceChromeContext)
   const [open, setOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
-  const isDeck = !!surface?.components?.some((c) => c.id === surface.root && c.component === 'SlideDeck')
-  // Export the WHOLE deck (from the surface in context) to PowerPoint. pptxgenjs
-  // is loaded lazily inside downloadPptx, themed to match the on-screen deck.
-  const onPptx = useCallback(async () => {
-    if (!surface || exporting) return
-    setExporting(true)
-    try {
-      await downloadPptx(surface, theme)
-    } catch (err) {
-      console.error('[a2ui] PPTX export failed', err)
-    } finally {
-      setExporting(false)
-    }
-  }, [surface, theme, exporting])
-
   if (!showDownloads) return null
   const options: { key: string; label: string; sub: string; icon: JSX.Element; onClick: () => void }[] = []
   if (onDownloadPdf) options.push({ key: 'pdf', label: 'PDF', sub: 'Portable document', icon: <FileText className="size-4" />, onClick: onDownloadPdf })
-  if (isDeck) options.push({ key: 'pptx', label: 'PowerPoint', sub: 'Editable slides', icon: <Presentation className="size-4" />, onClick: () => void onPptx() })
   if (!options.length) return null
 
   return (

@@ -51,3 +51,27 @@ for full control).
 - **`svg` also works:** a ` ```svg ` block renders the same way.
 - **No backend change** is required — the whole capability is the agent prompt
   plus the frontend renderer.
+
+## ChatMode specifics (routing, palette, trace)
+
+In ChatMode the directive is applied automatically to the light agent, and three
+behaviors are engine-side:
+
+- **Routing is word-boundary matched, not substring.** A turn is owned by the
+  HTML renderer (and A2UI composition disabled) only when the request actually
+  asks for a presentation/slides/deck/diagram — `deck_intent` /
+  `html_owned_intent` in `services/a2ui/compose.py`. Incidental mentions
+  ("how do slide-out panels work?", "what's on deck today?") stay on the normal
+  A2UI path. Deck follow-ups ("make slide 3 blue", "change the title slide")
+  stay on the HTML path.
+- **Deck colors come from the workspace palette.** When the turn is a deck
+  request, the chat service loads the UIConfig themes (Configuration → UI) and
+  the slide-design template is generated from the `presentation` palette
+  (accent/background/surface/text/heading/muted), with auto-contrast cover text
+  — so HTML decks and A2UI decks share one design. Defaults apply only when no
+  palette is configured.
+- **The run's trace records the HTML path.** An `html_intent` trace event marks
+  the moment the renderer takes ownership (and why A2UI is skipped), and an
+  `html_surface` event records what was produced (`rendered`, `deck`, `slides`,
+  `bytes`) — so a deck turn is no longer a single opaque `llm_call` in the
+  timeline.

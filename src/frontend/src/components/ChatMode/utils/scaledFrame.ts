@@ -110,6 +110,62 @@ function heightScript(
 }
 
 /**
+ * Cut streamed/truncated HTML back to a safe parse boundary.
+ *
+ * A partial document can end mid-tag or inside an unclosed attribute quote
+ * (`style="…;margin-bottom:`) — at that point the HTML parser swallows
+ * EVERYTHING that follows, including our wrapper divs and (before this fix)
+ * the injected fit script, whose source then spilled into the page as visible
+ * text. We scan with a tiny state machine and keep only the longest prefix
+ * that ends outside a tag; content truncated inside a raw-text element
+ * (`<style>`/`<script>`) is cut back to before that element, since its close
+ * tag never arrived. Complete documents come back unchanged.
+ */
+export function sanitizePartialHtml(html: string): string {
+  const src = html || '';
+  let safe = 0; // longest prefix ending OUTSIDE a tag (and outside raw text)
+  let inTag = false;
+  let quote: string | null = null;
+  let rawClose: string | null = null; // "</style>" | "</script>" while inside one
+  let rawStart = -1; // where that raw-text element began
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (rawClose) {
+      if (src.slice(i, i + rawClose.length).toLowerCase() === rawClose) {
+        i += rawClose.length - 1;
+        safe = i + 1;
+        rawClose = null;
+        rawStart = -1;
+      }
+      continue;
+    }
+    if (inTag) {
+      if (quote) {
+        if (ch === quote) quote = null;
+      } else if (ch === '"' || ch === "'") {
+        quote = ch;
+      } else if (ch === '>') {
+        inTag = false;
+        safe = i + 1;
+      }
+      continue;
+    }
+    if (ch === '<') {
+      inTag = true;
+      const rest = src.slice(i + 1, i + 8).toLowerCase();
+      if (rest.startsWith('style') || rest.startsWith('script')) {
+        rawClose = rest.startsWith('style') ? '</style>' : '</script>';
+        rawStart = i;
+      }
+    } else {
+      safe = i + 1;
+    }
+  }
+  if (rawClose && rawStart >= 0) return src.slice(0, rawStart);
+  return safe === src.length ? src : src.slice(0, safe);
+}
+
+/**
  * Build the full sandboxed iframe document for a piece of self-contained HTML.
  * Diagrams fill the column (canvas grows to available width, floored at
  * baseWidth); decks pass `{ fill: false }` to keep a fixed slide width.
@@ -131,8 +187,14 @@ export function iframeDoc(html: string, id: string, opts: FrameOpts = {}): strin
     '<style>html,body{margin:0;background:#fff;' +
     'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}' +
     bodyStyle + '#ksz{overflow:hidden;}#kft{transform-origin:top left;}</style>' +
-    '</head><body><div id="ksz"><div id="kft">' + html + '</div></div>' +
-    heightScript(id, baseWidth, fill, upscale, contain) + '</body></html>'
+    // The fit script lives in <head>, BEFORE the content: malformed/partial
+    // content can swallow everything after itself (unclosed quote), and when
+    // the script trailed the content its source rendered as visible text.
+    // It only registers load/resize listeners + retry timers, so running
+    // pre-content is safe (fit() no-ops until the elements exist).
+    heightScript(id, baseWidth, fill, upscale, contain) +
+    '</head><body><div id="ksz"><div id="kft">' + sanitizePartialHtml(html) +
+    '</div></div></body></html>'
   );
 }
 

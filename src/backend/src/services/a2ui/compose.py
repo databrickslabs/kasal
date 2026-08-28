@@ -3,7 +3,7 @@ the live Kasal app and every exported Databricks app.
 
 It turns an agent's plain-text answer into ONE declarative A2UI *surface*
 (``{surfaceKind, root, components[], dataModel}``) that the shared frontend
-renderer draws as rich UI (presentation / dashboard / mindmap / quiz / document /
+renderer draws as rich UI (dashboard / mindmap / quiz / document /
 conversation).
 
 Design constraints (do NOT break — they keep this bundleable into a
@@ -23,7 +23,6 @@ import json
 import logging
 import os
 import re
-import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -41,9 +40,6 @@ class ComposeStream:
     always safe to call.
     """
 
-    def skeleton(self, surface: Dict[str, Any]) -> None:
-        """A placeholder surface is ready — real structure, no content yet."""
-
     def attempt(self, n: int) -> None:
         """A surface generation is about to start; its tokens belong to revision n.
 
@@ -53,49 +49,6 @@ class ComposeStream:
 
     def final(self, surface: Optional[Dict[str, Any]]) -> None:
         """Composition finished. This surface, or None, is authoritative."""
-
-
-#: How long composition may run before the OPTIONAL design-polish pass is
-#: skipped. Correctness retries (an invalid surface, a deck whose body slides
-#: are empty) are NOT bounded by this — those produce a deck the reader cannot
-#: use, so they are worth the wait. The design pass is different: it fires on a
-#: deck that is already valid and already shippable, and only makes it prettier.
-#:
-#: Measured on a real presentation run: outline 6s, first deck 12s, then 63s for
-#: the polish retry — 49s of it before a single token, because the correction
-#: appends the entire previous deck to the prompt and the endpoint has to prefill
-#: it. That turned an 18-second answer into 81 seconds to make a valid deck less
-#: "visually flat".
-#:
-#: So the rule is not "never polish", it is "polish only while it is still cheap
-#: relative to what the reader has already waited". Under budget, nothing changes.
-#: Kasal configures logging, so this reaches ``logs/system.log`` — which is where
-#: anyone asking "why did that take so long" is already looking. ``print`` would
-#: land on uvicorn's stdout instead, i.e. nowhere greppable. In an exported app
-#: (no logging config) an INFO record is simply dropped, which is the right
-#: trade: the diagnosis matters here, and the composer must not import Kasal's
-#: logger — see ``test_compose_portability``.
-logger = logging.getLogger(__name__)
-
-_DESIGN_RETRY_BUDGET_ENV = "A2UI_DESIGN_RETRY_BUDGET_S"
-_DESIGN_RETRY_BUDGET_DEFAULT_S = 25.0
-
-
-def _design_retry_budget_s() -> float:
-    """Seconds of composition after which the polish pass is skipped.
-
-    ``0`` disables the polish pass outright; a negative or unparseable value
-    falls back to the default rather than raising — a malformed environment
-    variable must not be able to break composition.
-    """
-    raw = os.getenv(_DESIGN_RETRY_BUDGET_ENV)
-    if raw is None or not raw.strip():
-        return _DESIGN_RETRY_BUDGET_DEFAULT_S
-    try:
-        value = float(raw)
-    except ValueError:
-        return _DESIGN_RETRY_BUDGET_DEFAULT_S
-    return value if value >= 0 else _DESIGN_RETRY_BUDGET_DEFAULT_S
 
 
 _DEFAULT_CATALOG_PATH = Path(__file__).parent / "catalog.json"
@@ -194,9 +147,6 @@ DELIVERABLE_KEYWORDS = [
     ("network diagram", "graph"),
     ("dependency graph", "graph"),
     ("relationship graph", "graph"),
-    ("presentation", "presentation"),
-    ("slide", "presentation"),
-    ("deck", "presentation"),
     # Board keywords precede "dashboard": a "sprint board" is a Kanban, not a KPI
     # dashboard, and the bare word would otherwise never be reached.
     ("kanban", "kanban"),
@@ -207,19 +157,6 @@ DELIVERABLE_KEYWORDS = [
     ("dashboard", "dashboard"),
     ("kpi", "dashboard"),
     ("metric", "dashboard"),
-    # Diagram-archetype keywords sit AFTER presentation/dashboard (so "a deck with
-    # a timeline" stays a presentation) and after the sequence/network entries
-    # above (so "sequence diagram" keeps routing to Sequence). Bare "diagram" last.
-    ("flowchart", "diagram"),
-    ("flow chart", "diagram"),
-    ("process diagram", "diagram"),
-    ("org chart", "diagram"),
-    ("organization chart", "diagram"),
-    ("timeline", "diagram"),
-    ("roadmap", "diagram"),
-    ("funnel", "diagram"),
-    ("pyramid", "diagram"),
-    ("diagram", "diagram"),
     ("genie", "genie"),
     ("report", "report"),
     ("briefing", "report"),
@@ -348,7 +285,9 @@ def resolve_catalog(
                 # attribute 'items'") — swallowed by compose's broad except, so the
                 # deck silently fell back to plain text on every model. A non-dict
                 # (or empty) ``components`` is not a usable catalog; fall back.
-                components = parsed.get("components") if isinstance(parsed, dict) else None
+                components = (
+                    parsed.get("components") if isinstance(parsed, dict) else None
+                )
                 if isinstance(components, dict) and components:
                     if not parsed.get("surfaceKinds"):
                         parsed["surfaceKinds"] = default_catalog.get("surfaceKinds", [])
@@ -407,375 +346,6 @@ def validate_surface(payload: Any, catalog: Dict[str, Any]) -> bool:
             return False
         ids.add(c["id"])
     return payload.get("root") in ids
-
-
-# Slide variants that are expected to carry a real body in `children`
-# (title/section/quote/stats slides are body-less or KeyValue-only by design).
-_BODY_SLIDE_VARIANTS = (
-    "content",
-    "two-column",
-    "two_column",
-    "twocolumn",
-    "visual",
-    "agenda",
-)
-
-
-def presentation_needs_body(payload: Any) -> bool:
-    """True when a presentation surface is a hollow skeleton — half or more of its
-    body-bearing slides (content / two-column / visual / agenda) have only a
-    kicker+title and no real body, so they render as near-empty slides.
-    title/section/quote/stats slides are body-less by design and don't count.
-    Used to retry (then fall back to a readable markdown document) instead of
-    returning an empty deck.
-    """
-    if not isinstance(payload, dict):
-        return False
-    if str(payload.get("surfaceKind") or "").lower() != "presentation":
-        return False
-    comps = {
-        c.get("id"): c
-        for c in (payload.get("components") or [])
-        if isinstance(c, dict) and c.get("id") is not None
-    }
-
-    def has_content(cid: str) -> bool:
-        child = comps.get(cid)
-        if not isinstance(child, dict):
-            return False
-        comp = child.get("component")
-        if comp in ("Text", "Heading"):
-            return bool(str(child.get("text") or "").strip())
-        if comp == "Markdown":
-            content = child.get("content")
-            return (
-                content.strip() != ""
-                if isinstance(content, str)
-                else content is not None
-            )
-        if comp in ("Slide", "SlideDeck", "Divider"):
-            return False
-        # KeyValue / Chart / Table / Image / Card / Grid / List … = real content
-        return True
-
-    content_slides = [
-        c
-        for c in comps.values()
-        if c.get("component") == "Slide"
-        and str(c.get("variant") or "content").lower() in _BODY_SLIDE_VARIANTS
-    ]
-    if not content_slides:
-        return False
-    empty = sum(
-        1
-        for s in content_slides
-        if not any(has_content(cid) for cid in (s.get("children") or []))
-    )
-    return empty * 2 >= len(content_slides)
-
-
-# Components that read as a "visual" on a slide — drives the deck design lint.
-_VISUAL_COMPONENTS = frozenset(
-    {
-        "Chart",
-        "Diagram",
-        "Table",
-        "Graph",
-        "Sequence",
-        "Forecast",
-        "Map",
-        "Image",
-        "Album",
-        "KeyValue",
-    }
-)
-
-
-def _slide_has_visual(slide: Dict[str, Any], comps: Dict[Any, Dict[str, Any]]) -> bool:
-    """True when a slide is a stats slide or any descendant is a visual component."""
-    if str(slide.get("variant") or "").lower() == "stats":
-        return True
-    seen: set = set()
-    stack = list(slide.get("children") or [])
-    while stack:
-        cid = stack.pop()
-        if cid in seen:
-            continue
-        seen.add(cid)
-        child = comps.get(cid)
-        if not isinstance(child, dict):
-            continue
-        if child.get("component") in _VISUAL_COMPONENTS:
-            return True
-        stack.extend(child.get("children") or [])
-    return False
-
-
-# Citation shapes an answer can carry: a bare URL, a markdown link, or a
-# numbered-reference / "Sources:" section. Used only to decide whether a deck
-# DROPPING attribution is worth a retry — never to invent citations.
-_SOURCE_MARKERS = re.compile(
-    r"https?://|\]\(\s*https?://|^\s*(?:sources?|references?|citations?|bibliography)\s*:",
-    re.IGNORECASE | re.MULTILINE,
-)
-
-
-def answer_cites_sources(text: str) -> bool:
-    """True when the answer being composed carries something citable."""
-    return bool(text) and bool(_SOURCE_MARKERS.search(text))
-
-
-def presentation_design_lint(
-    payload: Any, answer_has_sources: bool = False
-) -> List[str]:
-    """Deterministic design critique of a VALID presentation surface (no LLM).
-
-    Returns human-readable findings when the deck is visually flat, thin, or has
-    dropped attribution the source answer supplied — the cheap analogue of
-    PPTAgent-style reflective evaluation. Findings drive ONE correction retry in
-    ``compose_a2ui``; a deck that stays flat is still returned (text-only slides
-    beat no deck), unlike the hollow-body gate.
-
-    ``answer_has_sources`` says whether the ANSWER being composed carried any
-    citation at all. Without it the attribution check would fire on every deck
-    built from an unsourced answer, where there is nothing to cite and nothing
-    a retry could fix.
-    """
-    if not isinstance(payload, dict):
-        return []
-    if str(payload.get("surfaceKind") or "").lower() != "presentation":
-        return []
-    comps = {
-        c.get("id"): c
-        for c in (payload.get("components") or [])
-        if isinstance(c, dict) and c.get("id") is not None
-    }
-    root = comps.get(payload.get("root"))
-    ordered_ids = list((root or {}).get("children") or [])
-    slides = [
-        comps[cid]
-        for cid in ordered_ids
-        if isinstance(comps.get(cid), dict) and comps[cid].get("component") == "Slide"
-    ]
-    if len(slides) < 6:
-        return []  # short decks are fine text-heavy; don't over-engineer them
-    body_slides = [
-        s
-        for s in slides
-        if str(s.get("variant") or "content").lower() in _BODY_SLIDE_VARIANTS
-        or str(s.get("variant") or "").lower() == "stats"
-    ]
-    if not body_slides:
-        return []
-    visual_count = sum(1 for s in body_slides if _slide_has_visual(s, comps))
-    findings: List[str] = []
-    if visual_count == 0:
-        findings.append(
-            "no slide carries any visual (no Chart, Diagram, Table or stats slide)"
-        )
-    elif visual_count * 3 < len(body_slides):
-        findings.append(
-            f"only {visual_count} of {len(body_slides)} body slides carry a visual "
-            "(aim for at least one in three)"
-        )
-    # Monotony: a run of >3 consecutive text-only body slides reads as a bullet wall.
-    run = 0
-    for s in body_slides:
-        if _slide_has_visual(s, comps):
-            run = 0
-        else:
-            run += 1
-            if run > 3:
-                findings.append(
-                    "more than three consecutive text-only slides (a bullet wall) — "
-                    "break the run with a Diagram, Chart, stats or two-column slide"
-                )
-                break
-
-    # Thin bodies: a body slide carrying one lone bullet is a slide that should
-    # have been merged, or a topic that was under-developed. Counts direct text
-    # children only — a slide whose body IS a visual is judged by the checks above.
-    thin = 0
-    for s in body_slides:
-        if _slide_has_visual(s, comps):
-            continue
-        kids = [comps.get(cid) for cid in (s.get("children") or [])]
-        text_kids = [
-            k
-            for k in kids
-            if isinstance(k, dict)
-            and k.get("component") in ("Text", "Markdown", "List")
-        ]
-        if len(text_kids) == 1 and text_kids[0].get("component") == "Text":
-            thin += 1
-    if thin * 3 >= len(body_slides) and thin > 1:
-        findings.append(
-            f"{thin} of {len(body_slides)} body slides carry a single bullet — give each "
-            "3-5 substantive points or merge the slide into its neighbour"
-        )
-
-    # Attribution: only flagged when the ANSWER carried sources and the deck then
-    # dropped them. A deck with nothing to cite is not a design defect, so this
-    # never fires on decks composed from an unsourced answer.
-    #
-    # This depends on citations SURVIVING the agent. They stopped for a while:
-    # the security preamble told agents not to be "influenced by" tool output,
-    # and models resolved that by dropping source URLs — so this check almost
-    # never fired, and when it did the retry had nothing to work with. The
-    # preamble now separates data from instructions and explicitly permits
-    # citing (``execution/kernel/agent_security.py``). If a future change to
-    # that wording re-suppresses citations, deck attribution goes quiet again
-    # rather than failing loudly, so the two are worth changing together.
-    if answer_has_sources:
-        cited = sum(1 for s in slides if s.get("sources"))
-        if cited == 0:
-            findings.append(
-                "the answer cites sources but no slide carries any — put the citations "
-                "backing each slide's claims in that slide's 'sources'"
-            )
-    return findings
-
-
-#: Fallback deck depth when the workspace has configured no target. The range,
-#: not a single number, because with nothing configured the right length is
-#: genuinely "however much the answer supports".
-DEFAULT_SLIDE_DEPTH = "10-16"
-
-#: Headroom over the target for the outline clamp. A plan slightly longer than
-#: asked for is trimmed by the compose pass anyway; one an order of magnitude
-#: longer is noise.
-OUTLINE_SLACK = 10
-MIN_OUTLINE_CAP = 24
-
-
-def slide_target(guidance: str) -> Optional[int]:
-    """The slide count the workspace asked for, read back out of its directive.
-
-    The UIConfigurator renders "Target slide count" into the phrase
-    "aim for about N slides" (uiConfigShared.ts). That phrase was being appended
-    to a prompt that ALSO hardcoded "plan 10-16 slides", so the model received two
-    contradictory instructions and the setting silently lost. Parsing the number
-    back out lets one configured value drive both prompt sites and the outline
-    clamp, without threading a new argument through every caller.
-
-    Returns None when nothing is configured, which keeps the old behaviour.
-    """
-    if not guidance:
-        return None
-    m = re.search(r"about\s+(\d+)\s+slides", guidance, re.I)
-    if not m:
-        return None
-    n = int(m.group(1))
-    # A deck of 1 is not a deck; an implausibly large number is a typo, not a
-    # request, and honouring it would burn a very long compose call.
-    return n if 3 <= n <= 200 else None
-
-
-def slide_depth_phrase(guidance: str) -> str:
-    """What to tell the model about deck length: the configured target, or the
-    default range when there is none."""
-    target = slide_target(guidance)
-    return f"about {target}" if target else DEFAULT_SLIDE_DEPTH
-
-
-def outline_cap(guidance: str) -> int:
-    """How many planned slides to keep. Derived from the target so a 50-slide
-    request is not silently sliced to the old fixed 24."""
-    target = slide_target(guidance)
-    return max(MIN_OUTLINE_CAP, target + OUTLINE_SLACK) if target else MIN_OUTLINE_CAP
-
-
-def plan_presentation_outline(
-    text: str,
-    query: str,
-    purpose: str,
-    llm_call: LLMCall,
-    guidance: str = "",
-) -> Optional[List[Dict[str, str]]]:
-    """Outline pre-pass for presentations: one small LLM call that plans the deck
-    (slide titles + layout variant + which visual each slide carries) BEFORE the
-    full compose. Two-stage generation is what the strong deck generators do
-    (outline → slides); planning visuals per slide up front is what actually gets
-    diagrams/charts onto slides instead of bullet walls. Returns None on any
-    failure/weak plan so the composer degrades to today's single-pass behavior.
-    """
-    try:
-        prompt = (
-            "You plan a slide deck OUTLINE from an answer's content. Reply with ONE "
-            'JSON object only: {"slides": [{"title": str, "variant": str, '
-            '"visual": str, "focus": str}]}.\n'
-            "variant is one of: title, content, two-column, comparison, visual, "
-            "image-full, stats, agenda, quote, section, kpi-split (headline KPI "
-            "band over a split body), boxes (N equal titled panels), split "
-            "(two regions at an explicit ratio, no text/visual assumption — use "
-            "when the VISUAL leads), hero (big centered "
-            "title + subtitle, keynote style), big-number (one giant metric with "
-            "label and context line), end-card (closing slide, accent background, "
-            "centered takeaway), process (horizontal numbered steps with arrows "
-            "for workflows), icon-cards (grid of feature/benefit cards), "
-            "numbered-list (large numbered items 1-6 with detail for ranked "
-            "points), contrast (before/after or problem/solution in two visually "
-            "distinct panels), callout (a single dominant statement with "
-            "decorative accent treatment), or pillars (3-4 vertical columns for "
-            "frameworks and models). visual names the visual that "
-            "slide carries: "
-            "'chart:<bar|line|pie|area|scatter|radar>', "
-            "'diagram:<process|timeline|cycle|funnel|pyramid|comparison|matrix2x2|hierarchy>', "
-            "'table', 'stats', or 'none'. focus is one short sentence on what the "
-            "slide covers.\n"
-            "Rules: open with a title slide and end with a takeaways slide; give AT "
-            "LEAST one in three body slides a real visual — classify the content: "
-            "steps/phases -> diagram:process, dated milestones -> diagram:timeline, "
-            "loops -> diagram:cycle, narrowing stages -> diagram:funnel, layered "
-            "levels -> diagram:pyramid, two options -> diagram:comparison, two axes "
-            "-> diagram:matrix2x2, org/tree structure -> diagram:hierarchy, numeric "
-            "series -> chart, key figures -> stats; use variant 'comparison' when two "
-            "options are weighed; use variant 'process' for workflows/steps/pipelines (numbered "
-            "horizontal steps with arrows); use variant 'icon-cards' for feature lists or "
-            "benefits (grid of cards with titles/descriptions)."
-            "peers are weighed in TEXT on both sides; never plan two consecutive "
-            "slides with the same variant unless both are 'content'; plan only "
-            "slides the content can genuinely fill.\n"
-            f"DEPTH: plan {slide_depth_phrase(guidance)} slides when the answer supports "
-            "it — split a crowded topic into two focused slides rather than dropping "
-            "material. Plan fewer only when the answer genuinely has less to say; "
-            "never pad with slides the content cannot fill.\n"
-            + (f"Deck purpose: {purpose}\n" if purpose else "")
-            + (f"The user's request: {query}\n" if query else "")
-            + (
-                f"Deliverable settings (defaults the request overrides): {guidance}\n"
-                if guidance
-                else ""
-            )
-        )
-        raw = llm_call(
-            [
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": text or ""},
-            ]
-        )
-        payload = extract_json(raw if isinstance(raw, str) else str(raw))
-        slides = payload.get("slides") if isinstance(payload, dict) else None
-        out: List[Dict[str, str]] = []
-        for s in slides or []:
-            if not isinstance(s, dict):
-                continue
-            title = str(s.get("title") or "").strip()
-            if not title:
-                continue
-            out.append(
-                {
-                    "title": title,
-                    "variant": str(s.get("variant") or "content").strip().lower(),
-                    "visual": str(s.get("visual") or "none").strip().lower(),
-                    "focus": str(s.get("focus") or "").strip(),
-                }
-            )
-        # A plan under 3 slides is weaker than no plan; an absurdly long one is
-        # noise — clamp to a real deck's size.
-        return out[: outline_cap(guidance)] if len(out) >= 3 else None
-    except Exception:  # noqa: BLE001
-        return None
 
 
 def _deref(value: Any, data_model: Dict[str, Any]) -> Any:
@@ -883,110 +453,6 @@ def a2ui_system_prompt(
             },
         }
     )
-    # A presentation example: every content slide has a BODY, and one slide carries
-    # a chart bound to dataModel. This is the structure weaker models most often get
-    # wrong (emitting title-only slides), so showing it concretely matters.
-    pres_example = json.dumps(
-        {
-            "surfaceKind": "presentation",
-            "root": "deck",
-            "components": [
-                {
-                    "id": "deck",
-                    "component": "SlideDeck",
-                    "children": ["s1", "s2", "s3", "s4"],
-                },
-                {
-                    "id": "s1",
-                    "component": "Slide",
-                    "variant": "title",
-                    "kicker": "INTRODUCTION",
-                    "title": "How LLMs Work",
-                    "subtitle": "Understanding large language models",
-                },
-                {
-                    "id": "s2",
-                    "component": "Slide",
-                    "variant": "content",
-                    "kicker": "ARCHITECTURE",
-                    "title": "Transformer Foundation",
-                    "children": ["s2a", "s2b", "s2c"],
-                },
-                {
-                    "id": "s2a",
-                    "component": "Text",
-                    "text": "Self-attention lets every token weigh all others in the sequence.",
-                },
-                {
-                    "id": "s2b",
-                    "component": "Text",
-                    "text": "Positional encodings inject word order into an otherwise order-agnostic model.",
-                },
-                {
-                    "id": "s2c",
-                    "component": "Text",
-                    "text": "Stacked decoder blocks refine the representation layer by layer.",
-                },
-                {
-                    "id": "s3",
-                    "component": "Slide",
-                    "variant": "visual",
-                    "kicker": "SCALE",
-                    "title": "Parameters Over Time",
-                    "children": ["s3c"],
-                },
-                {
-                    "id": "s3c",
-                    "component": "Chart",
-                    "chartType": "bar",
-                    "xKey": "model",
-                    "yKeys": ["params"],
-                    "data": {"path": "/sizes"},
-                },
-                {
-                    "id": "s4",
-                    "component": "Slide",
-                    "variant": "two-column",
-                    "kicker": "TRAINING",
-                    "title": "From Text to Model",
-                    "children": ["s4a", "s4b", "s4d"],
-                },
-                {
-                    "id": "s4a",
-                    "component": "Text",
-                    "text": "Each stage refines the model: scale builds knowledge, tuning builds usefulness.",
-                },
-                {
-                    "id": "s4b",
-                    "component": "Text",
-                    "text": "Alignment is what turns a raw predictor into a safe assistant.",
-                },
-                {
-                    "id": "s4d",
-                    "component": "Diagram",
-                    "archetype": "process",
-                    "items": [
-                        {
-                            "label": "Pretraining",
-                            "detail": "Next-token prediction at scale",
-                        },
-                        {"label": "Fine-tuning", "detail": "Instruction data"},
-                        {"label": "Alignment", "detail": "RLHF"},
-                    ],
-                },
-            ],
-            "dataModel": {
-                "sizes": [
-                    {"model": "GPT-2", "params": 1.5},
-                    {"model": "GPT-3", "params": 175},
-                    {"model": "GPT-4", "params": 1800},
-                ]
-            },
-        }
-    )
-    # A quiz example: REAL questions with plausible distractors and teaching
-    # explanations, and the correct index spread across questions. Weaker models
-    # otherwise emit a description of a quiz or park every answer at one slot.
     quiz_example = json.dumps(
         {
             "surfaceKind": "quiz",
@@ -1036,82 +502,16 @@ def a2ui_system_prompt(
         '2. Shape: {"surfaceKind","root","components":[{"id","component",...props,"children"?}],"dataModel"}.\n'
         "3. components is a FLAT list; nest by listing child ids in a parent's children. root is a component id.\n"
         '4. Put long text / arrays in dataModel and reference them with {"path":"/key"} (JSON pointer).\n'
-        "5. Choose surfaceKind from the USER'S REQUEST first: if they ask for a "
-        "presentation/slides/deck use 'presentation' with a SlideDeck of Slides; for a "
+        "5. Choose surfaceKind from the USER'S REQUEST first: for a "
         "dashboard/metrics/charts use 'dashboard' with Grid+Chart/KeyValue/Table; for a "
         "mind map use 'mindmap'; for a quiz/assessment/test use 'quiz' with ONE Quiz "
         "component. For these SPECIAL deliverables, use a 'dashboard' or 'document' "
-        "surface whose ROOT is the matching component (see rule 11): a photo "
+        "surface whose ROOT is the matching component (see rule 10): a photo "
         "album/image gallery -> ONE Album; a forecast/projection/prediction over time "
         "-> ONE Forecast; a relationship/network/dependency graph -> ONE Graph; a "
-        "sequence/interaction diagram -> ONE Sequence; a flowchart/process/timeline/"
-        "roadmap/funnel/org chart/comparison -> ONE Diagram with the matching "
-        "archetype. Only when NONE of the above fit, use 'document' with Markdown.\n"
-        "6. For presentations build a REAL deck of Slides, each with a 'variant'. Start "
-        "with variant='title' (a short UPPERCASE 'kicker', a strong 'title', a 'subtitle'), "
-        "then the body slides, and end with a closing slide. "
-        "EVERY body slide (variant 'content', 'two-column', 'visual', 'agenda', "
-        "'kpi-split', 'boxes' or 'split') MUST "
-        "carry a BODY in its 'children': for 'content', 3-5 Text nodes (one concise, FULL "
-        "sentence each) OR a Markdown node whose content is 3-5 '- ' bullet lines. A body "
-        "slide with only a kicker+title and no children is INVALID — never emit one. Make "
-        "each bullet substantive (a real fact/insight from the answer), not a single word. "
-        "MAKE THE DECK VISUAL — this is what separates a good deck from a bullet wall. "
-        "Target: at least ONE IN THREE body slides carries a visual, chosen by CLASSIFYING "
-        "the slide's content: steps/phases/workflow -> a Diagram archetype 'process'; dated "
-        "milestones/roadmap -> 'timeline'; a repeating loop -> 'cycle'; narrowing stages/"
-        "conversion -> 'funnel'; layered levels -> 'pyramid'; two options weighed -> "
-        "'comparison'; two evaluation axes -> 'matrix2x2'; org/tree structure -> "
-        "'hierarchy'. Numeric series/breakdowns -> a Chart (chartType 'bar' | 'line' | "
-        "'pie' | 'area' | 'scatter' | 'radar', with 'xKey', 'yKeys', and its 'data' array "
-        'in dataModel referenced by {"path":"/key"}); key figures -> a variant=\'stats\' '
-        "slide whose children are 3-4 KeyValue big numbers (give each an 'icon'); detailed "
-        "rows -> a Table. LAYOUT VARIETY: pair bullets WITH a visual using "
-        "variant='two-column' (children = the Text nodes then the visual node); give a "
-        "dominant Chart/Diagram/Table its own variant='visual' slide; use variant='agenda' "
-        "(children = short Text nodes) for the overview — with 'columns':2 when there "
-        "are more than 8 rows, so a long contents page does not overflow; "
-        "variant='quote' for a punchy "
-        "takeaway (put it in 'title'). Weigh TWO peers — options, vendors, before/after, "
-        "HEADLINE FIGURES PLUS DETAIL on one slide -> variant='kpi-split': put 4-6 KeyValue "
-        "tiles FIRST in 'children', then the body nodes, and set 'ratio' ('60/40' when a "
-        "chart leads, '40/60' when a table does). A SET OF PEER ITEMS that is not two "
-        "— challenges, policy areas, solution or stakeholder maps, scenarios -> "
-        "variant='boxes' with 'columns' 2, 3 or 4 and one Markdown/Text child per "
-        "panel. A LEADING VISUAL beside supporting detail (a map next to a table, a "
-        "diagram next to notes) -> variant='split' with an explicit 'ratio'. "
-        "pros/cons — with variant='comparison': set 'leftLabel' and 'rightLabel' to the "
-        "two things being compared and list the left-hand Text nodes THEN the right-hand "
-        "ones in 'children' (use this, NOT 'two-column', when both sides are text). Open a "
-        "major section with variant='image-full' when the answer supplies a real image URL "
-        "(one Image child, title overlaid). NEVER use the same variant on more than two "
-        "consecutive slides. Use AS MANY slides as the content needs, give each a DISTINCT "
-        "focus, and NEVER cram everything onto one slide. DEPTH: a substantial answer "
-        f"deserves {slide_depth_phrase(guidance)} slides — prefer splitting a crowded "
-        "slide into two focused slides over dropping material; only go shorter when the "
-        "answer genuinely has less to say. "
-        "ATTRIBUTION: when the answer cites sources (URLs, publications, datasets, report "
-        "names), put the ones backing THAT slide's claims in its 'sources' as "
-        '[{"label":"IEA Global EV Outlook 2025","url":"https://..."}] — label is required, '
-        "url optional; 1-3 per slide, on the slides whose facts they support, NOT on every "
-        "slide, and NEVER invent a source or a URL the answer does not contain. Write the "
-        "presenter's script for each body slide into 'notes' (2-4 sentences: what to say, "
-        "the context behind the bullets, the transition to the next slide) — 'notes' is "
-        "never displayed on the slide itself. "
-        # A slide is a fixed frame that gets exported to PDF and PowerPoint, where
-        # there is no scrollbar: content past the bottom is simply absent from the
-        # artefact. The renderer shrinks an overfull slide so nothing is LOST, but
-        # text shrunk to 60% is unreadable at slide distance — so cap it here.
-        "FIT THE FRAME: a slide does not scroll, and it is exported to PDF and "
-        "PowerPoint where anything past the bottom edge is lost. Keep any one "
-        "Markdown to AT MOST 7 bullets of ONE line each (~90 characters, no "
-        "parenthetical asides, no second sentence), a Table to AT MOST 7 rows and 6 "
-        "columns, and a KeyValue 'value' to a bare figure with its unit ('1.4 TWh', "
-        "'34%') — appending a year or qualifier ('34% (2022)') wraps the tile onto "
-        "three lines and pushes its label out. Split a crowded slide into two rather "
-        "than overfilling one. Keep ONE consistent theme — the "
-        "app styles it, so do not specify colors.\n"
-        "7. For a quiz/assessment build ONE Quiz component whose 'questions' is a list of "
+        "sequence/interaction diagram -> ONE Sequence. "
+        "Only when NONE of the above fit, use 'document' with Markdown.\n"
+        "6. For a quiz/assessment build ONE Quiz component whose 'questions' is a list of "
         "REAL, answerable questions — each {question, options:[4 distinct strings], "
         "answer:<0-based index of the correct option>, explanation:<one sentence why>}. "
         "Produce the ACTUAL questions and options (as many as the request asks for, else "
@@ -1126,7 +526,7 @@ def a2ui_system_prompt(
         "option is correct across questions — spread the answer index across 0/1/2/3, never "
         "always the same slot. Put the questions array in dataModel and bind it with "
         '{"path":"/questions"}. The app handles selection, scoring and navigation.\n'
-        "8. For a dashboard build a SYMMETRIC, COHERENT layout, not a random pile of "
+        "7. For a dashboard build a SYMMETRIC, COHERENT layout, not a random pile of "
         "cards. Use a Grid with a CONSISTENT column count and group like with like: "
         "(a) lead with ONE balanced row of KeyValue KPI tiles — pick a count that FILLS "
         "the row evenly (2, 3, or 4 — e.g. 3 or 6 KPIs in a 3-column grid), never leave a "
@@ -1142,22 +542,22 @@ def a2ui_system_prompt(
         "per-site or per-region rows with lat/lng), ADD a Map component as a full-width "
         "cell (placed LAST like a Table) plotting those points — {lat, lng, label?, "
         'value?} in dataModel, bound with {"path":"/points"}; when the geography IS the '
-        "main story, prefer surfaceKind 'map' instead (rule 10). NEVER invent coordinates "
+        "main story, prefer surfaceKind 'map' instead (rule 9). NEVER invent coordinates "
         "— omit the map when the data only names places (e.g. 'US East') without lat/lng.\n"
-        "9. For flashcards/anki build ONE Flashcards component whose 'cards' is a list of "
+        "8. For flashcards/anki build ONE Flashcards component whose 'cards' is a list of "
         "REAL study cards, each {front, back, hint?}: front is a concise prompt "
         "(question / term / cloze), back is the correct answer/definition, hint is an "
         "OPTIONAL nudge. Produce the ACTUAL cards (as many as the request asks for, else "
         "about 12), each testing ONE idea — never a description of a deck. Put the cards "
         'array in dataModel and bind it with {"path":"/cards"}. The app handles flipping, '
         "navigation and shuffle.\n"
-        "10. For a map use surfaceKind 'map' with ONE Map component ONLY WHEN the data has "
+        "9. For a map use surfaceKind 'map' with ONE Map component ONLY WHEN the data has "
         "real latitude/longitude coordinates. points is a list of {lat:<number>, "
         "lng:<number>, label?, value?} — emit the ACTUAL numeric coordinates for each place "
         '(put the array in dataModel, bind with {"path":"/points"}). value is an optional '
         "magnitude that sizes the marker (e.g. count, population). If you do NOT have real "
         "coordinates, use a dashboard or table instead — never invent coordinates.\n"
-        "11. SPECIAL DATA/DIAGRAM COMPONENTS (use inside a 'dashboard' or 'document' surface "
+        "10. SPECIAL DATA COMPONENTS (use inside a 'dashboard' or 'document' surface "
         "when the content fits — a single one may be the surface root):\n"
         "  - Forecast: a time-series prediction with a confidence band. Use it (NOT a plain "
         "Chart) whenever the data has a forecast/predicted value over time, especially with "
@@ -1171,16 +571,7 @@ def a2ui_system_prompt(
         "— actors [names] + messages [{from,to,text,dashed?}].\n"
         "  - Album: a photo carousel for IMAGE galleries — items [{src,caption?,href?}] where "
         "src is a DIRECT image URL. Never put non-image page links in an Album (use a Table).\n"
-        "  - Diagram: a business diagram from a curated ARCHETYPE — the layout is automatic, "
-        "supply ONLY labels. archetype: 'process' (3-6 sequential steps), 'timeline' (dated "
-        "milestones), 'cycle' (repeating loop), 'funnel' (narrowing stages), 'pyramid' "
-        "(layered levels, apex first), 'comparison' (EXACTLY 2 items, each with 'points': "
-        "[strings]), 'matrix2x2' (EXACTLY 4 items in reading order + optional xLabel/yLabel), "
-        "'hierarchy' (items[0] is the root with nested 'children'). items: [{label (2-5 "
-        "words), detail? (one short sentence), value?, points?, children?}]. Use whenever "
-        "content describes steps, phases, structure or comparisons — NOT for numeric series "
-        "(Chart) or entity networks (Graph).\n"
-        "12. ICONS: KeyValue and Card accept an optional 'icon' — pick the closest from: "
+        "11. ICONS: KeyValue and Card accept an optional 'icon' — pick the closest from: "
         "trending-up, trending-down, users, dollar, clock, check, alert, target, zap, "
         "globe, database, server, shield, rocket, lightbulb, chart, calendar, settings, "
         "search, link, cloud, cpu, layers, gauge, award, briefcase, building, star, "
@@ -1201,10 +592,6 @@ def a2ui_system_prompt(
         )
         + "Example of a valid dashboard surface:\n"
         + example
-        + "\nExample of a valid PRESENTATION surface (note EVERY body slide has "
-        "children, one slide is a full-bleed chart, and one pairs bullets with a "
-        "process Diagram in a two-column layout):\n"
-        + pres_example
         + "\nExample of a valid QUIZ surface (real questions, plausible distractors, "
         "answer index varied, teaching explanations):\n" + quiz_example
     )
@@ -1213,15 +600,6 @@ def a2ui_system_prompt(
 # Words in the user's request (or the crew hint) that signal a rich, non-prose
 # surface is wanted — used to decide whether to spend a composer LLM call.
 RICH_INTENT = (
-    "presentation",
-    "slide",
-    "slides",
-    "deck",
-    "slideshow",
-    "powerpoint",
-    "pptx",
-    "ppt",
-    "pitch",
     "dashboard",
     "kpi",
     "metric",
@@ -1274,15 +652,69 @@ RICH_INTENT = (
 
 # Intents that the HTML path owns end-to-end (rendered as self-contained
 # ```html in chat, with fullscreen + export), so A2UI must NOT compose for them.
-HTML_OWNED_INTENT = ("diagram", "slide", "presentation", "deck", "slideshow")
+# Deck intent: word-boundary anchored, never bare substrings. A prompt that
+# merely MENTIONS one of these words ("how do slide-out panels work?") must not
+# hijack the turn away from A2UI — html_owned_intent disables ALL of A2UI for
+# the turn, so a false positive silently costs the palette deck, charts and
+# tables. Branches (each verified against a false-positive battery in
+# test_wants_rich_surface):
+#   - "presentation", except the architecture sense ("presentation layer") and
+#     the formatting sense ("the presentation of this data"); "the presentation"
+#     alone stays a deck follow-up ("make the presentation shorter")
+#   - slideshow/keynote/PowerPoint/ppt(x), and slide/pitch/sales/investor deck
+#     (space, hyphen or joined)
+#   - "slides" as a noun — the verb sense is excluded by its trailing particle
+#     ("the panel slides in", "revenue slides each summer")
+#   - a numbered, spelled-out, possessive or deck-positional single slide
+#     ("slide 3", "slide #2", "slide two", "the slide's title", "a closing
+#     slide", "on one slide") so deck FOLLOW-UPS stay on the HTML path; bare
+#     "a/the slide" is NOT enough ("revenue took a slide") and "slide-"
+#     compounds ("slide-out") are excluded
+#   - bare "deck" only with a topic preposition ("deck about X") or a
+#     making/request verb in the same sentence ("build a deck", "turn this
+#     into a deck", "I need a deck") — and never the idiom "on deck"
+_DECK_INTENT_RE = re.compile(
+    r"(?<!the )\bpresentations?\b(?!\s+layer\b)"
+    r"|\bthe\s+presentations?\b(?!\s+(?:layer|of)\b)"
+    r"|\bslideshows?\b"
+    r"|\bkeynotes?\b"
+    r"|\bpower\s*points?\b"
+    r"|\bpptx?\b"
+    r"|\b(?:slide|pitch|sales|investor)[\s-]*decks?\b"
+    r"|\bslides\b(?!\s+(?:in|out|up|down|into|onto|across|over|open|closed|each|every)\b)"
+    r"|\bslide\s*#?\s*\d+\b"
+    r"|\bslide\s+(?:one|two|three|four|five|six|seven|eight|nine|ten)\b"
+    r"|\bslide['\u2019]s\b"
+    r"|\b(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth"
+    r"|last|next|previous|prev|cover|title|final|closing|opening|intro"
+    r"|another|new|one|single|each|every)\s+slides?\b(?!-)"
+    r"|(?<!on )\bdecks?\s+(?:about|on|for)\b"
+    r"|\b(?:create|make|build|generate|prepare|design|produce|draft|turn|convert"
+    r"|need|want|give\s+me|show\s+me|send\s+me|put\s+together)\b"
+    r"[^.?!\n]{0,60}?(?<!on )\bdecks?\b",
+    re.IGNORECASE,
+)
+# Diagram intent: diagram/flowchart nouns; an explicit "no diagram" opts out.
+# A residual false positive ("explain the architecture diagram") costs only a
+# prose turn without A2UI — accepted, unlike the deck branches above.
+_DIAGRAM_INTENT_RE = re.compile(
+    r"(?<!no )\bdiagrams?\b|\bflow[\s-]*charts?\b", re.IGNORECASE
+)
+
+
+def deck_intent(query: str) -> bool:
+    """True when the request asks for a presentation/slides/deck (word-boundary
+    matched — see ``_DECK_INTENT_RE``). Also used by the chat directive to decide
+    when the rich slide-design template (and the workspace deck palette) apply."""
+    return bool(_DECK_INTENT_RE.search(query or ""))
 
 
 def html_owned_intent(query: str) -> bool:
     """True when the request is for a diagram/slides/presentation — handled by the
     HTML renderer, not A2UI. Used by the chat path to disable A2UI composition
-    (and its early deck shell/outline) for these intents."""
-    intent = (query or "").lower()
-    return any(k in intent for k in HTML_OWNED_INTENT)
+    for these intents (A2UI no longer builds decks or diagrams)."""
+    q = query or ""
+    return bool(_DECK_INTENT_RE.search(q) or _DIAGRAM_INTENT_RE.search(q))
 
 
 def wants_rich_surface(text: str, query: str) -> bool:
@@ -1291,7 +723,7 @@ def wants_rich_surface(text: str, query: str) -> bool:
     Table/Chart. Plain prose renders fine as markdown, so we skip the call.
 
     ``query`` carries the user's request AND (for crew/agent runs) the agent goal
-    / crew purpose, so a "create a presentation" deliverable triggers even when the
+    / crew purpose, so a rich deliverable in the crew goal triggers even when the
     chat prompt itself has no rich-intent keyword."""
     intent = (query or "").lower()
     rich_intent = any(k in intent for k in RICH_INTENT)
@@ -1319,7 +751,6 @@ def compose_a2ui(
     retries: int = 2,
     guidance: str = "",
     stream: Optional[ComposeStream] = None,
-    outline: Optional[List[Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
     """Compose an A2UI surface from the agent's text answer. Generic, never raises.
 
@@ -1332,17 +763,12 @@ def compose_a2ui(
         catalog: pre-loaded catalog; falls back to the bundled ``catalog.json``.
         enabled: master switch; when False returns a markdown surface immediately.
         retries: composer attempts before falling back to markdown.
-        guidance: optional per-deliverable settings sentence (e.g. "aim for ~8
-            slides; ≤4 bullets per slide") appended to the prompt as defaults the
-            request can override. Supplied by the host from its UI config.
-        stream: optional host hook told when a skeleton is ready, when each
-            surface generation starts, and what the final surface is — so the
-            host can render progressively instead of waiting for the return.
-        outline: a slide plan the host already computed (from a PARTIAL answer,
-            while the agent was still writing). Supplied, the pre-pass is
-            skipped — this is a head start, not an extra call — and so is the
-            skeleton emit, since the host shipped it when it planned.
-
+        guidance: optional per-deliverable settings sentence appended to the
+            prompt as defaults the request can override. Supplied by the host
+            from its UI config.
+        stream: optional host hook told when each surface generation starts
+            and what the final surface is — so the host can render progressively
+            instead of waiting for the return.
     Returns:
         A valid A2UI surface dict (a markdown surface on the cheap/fallback paths).
     """
@@ -1375,69 +801,8 @@ def compose_a2ui(
     # two gates agree.
     if not wants_rich_surface(text, f"{query}\n{purpose}"):
         return _done(markdown_surface(text))
-    # A valid-but-visually-flat deck kept as the floor: if the design-lint retry
-    # burns the last attempt, fails, or raises, we ship this instead of falling
-    # all the way back to markdown. Declared outside the try so an exception
-    # mid-retry can't lose an already-composed deck.
-    best: Optional[Dict[str, Any]] = None
-    # Started here, not at function entry: everything above is local work (intent
-    # checks, catalog load) and the budget is about how long the READER has been
-    # waiting on LLM calls.
-    started = time.monotonic()
     try:
-        # Presentation OUTLINE pre-pass (two-stage generation): plan slide titles,
-        # layout variants and per-slide visuals with a small extra LLM call, then
-        # hand the plan to the composer. Skipped for every other deliverable; any
-        # failure degrades to the single-pass behavior. Disable with
-        # A2UI_PRESENTATION_OUTLINE=0.
         user_content = text
-        # A host-supplied outline was planned early and its skeleton already
-        # shipped, so neither is redone here.
-        preplanned = bool(outline)
-        if (
-            infer_deliverable(query) == "presentation"
-            and os.getenv("A2UI_PRESENTATION_OUTLINE", "1") != "0"
-        ):
-            if not preplanned:
-                outline = plan_presentation_outline(
-                    text, query, purpose, llm_call, guidance
-                )
-            if outline:
-                # The deck's SHAPE is knowable now — real titles, real layouts —
-                # long before the slides themselves are written. Show it.
-                if not preplanned:
-                    try:
-                        from .stream import skeleton_from_outline
-
-                        sk = skeleton_from_outline(outline)
-                        if sk:
-                            stream.skeleton(sk)
-                    except Exception:  # noqa: BLE001
-                        pass
-                # Render the plan as a bulleted LIST, never as {"slides":[...]} JSON.
-                # Injecting the plan verbatim as JSON primed the newer models to
-                # ECHO that exact shape back — returning the plan instead of a
-                # SlideDeck surface, which validate_surface rejected, so every deck
-                # fell back to prose ("composer returned prose"). A prose list can't
-                # be mirrored into a valid-looking wrong answer, and the explicit
-                # instruction below pins the required output.
-                plan_lines = "\n".join(
-                    f"- Slide {i + 1}: {s.get('title', '')} "
-                    f"[variant={s.get('variant', 'content')}, "
-                    f"visual={s.get('visual', 'none')}]"
-                    + (f" — {s.get('focus', '')}" if s.get("focus") else "")
-                    for i, s in enumerate(outline)
-                )
-                user_content = (
-                    text
-                    + "\n\n[SLIDE PLAN — a planning pass already chose each slide's "
-                    "title, variant and visual. FOLLOW IT (adjust only where the "
-                    "content genuinely cannot fill a slide). Now BUILD the full A2UI "
-                    "presentation surface (surfaceKind 'presentation', a SlideDeck "
-                    "root, and one Slide component per plan item, each with a real "
-                    "body). Return the SURFACE object, NOT this plan:]\n"
-                    + plan_lines
-                )
         messages: List[Dict[str, str]] = [
             {
                 "role": "system",
@@ -1445,7 +810,6 @@ def compose_a2ui(
             },
             {"role": "user", "content": user_content},
         ]
-        design_retry_done = False
         for attempt_n in range(max(1, retries)):
             # A correction pass regenerates the WHOLE surface, so each attempt is
             # its own revision and supersedes whatever the last one streamed.
@@ -1454,17 +818,7 @@ def compose_a2ui(
             raw_str = raw if isinstance(raw, str) else str(raw)
             payload = extract_json(raw_str)
             if payload and validate_surface(payload, catalog):
-                if presentation_needs_body(payload):
-                    correction = (
-                        "Most body slides have NO body (only a kicker and title), "
-                        "so they render as empty slides. Give EVERY body slide "
-                        "(variant 'content', 'two-column', 'visual' or 'agenda') a "
-                        "real body in its 'children': 3-5 Text nodes (a full "
-                        "sentence each) or a Markdown node with 3-5 '- ' bullet lines, "
-                        "and add a Chart, Diagram or stats slide where the topic has "
-                        "numbers or structure. Reply with ONLY the corrected JSON object."
-                    )
-                elif quiz_needs_work(payload):
+                if quiz_needs_work(payload):
                     correction = (
                         "This quiz is weak or malformed. Return a Quiz whose 'questions' "
                         '(in dataModel, bound by {"path":"/questions"}) is a list of at '
@@ -1476,62 +830,7 @@ def compose_a2ui(
                         "Reply with ONLY the corrected JSON object."
                     )
                 else:
-                    findings = (
-                        presentation_design_lint(
-                            payload, answer_has_sources=answer_cites_sources(text)
-                        )
-                        if not design_retry_done
-                        else []
-                    )
-                    if not findings:
-                        return _done(payload)
-                    # The deck in hand is VALID. Polishing it costs a second full
-                    # generation — the whole deck regenerated, with the previous
-                    # one appended to the prompt — so past the budget the reader
-                    # gets the shippable deck now instead of a prettier one a
-                    # minute later. See _design_retry_budget_s.
-                    budget = _design_retry_budget_s()
-                    elapsed = time.monotonic() - started
-                    if elapsed >= budget:
-                        logger.info(
-                            "[a2ui] design polish skipped after %.1fs (budget "
-                            "%.0fs): shipping the valid deck. Would have "
-                            "addressed: %s",
-                            elapsed,
-                            budget,
-                            "; ".join(findings),
-                        )
-                        return _done(payload)
-                    # ONE reflective design retry (cheap PPTAgent-style critique);
-                    # if the retry can't do better we still ship this valid deck.
-                    design_retry_done = True
-                    best = payload
-                    correction = (
-                        "This deck is valid but visually flat: "
-                        + "; ".join(findings)
-                        + ". Improve it: CLASSIFY slide content into a Diagram "
-                        "(archetype 'process' for steps, 'timeline' for milestones, "
-                        "'cycle' for loops, 'funnel' for narrowing stages, "
-                        "'comparison' for two options, 'matrix2x2' for two axes, "
-                        "'hierarchy' for org/tree structure), add a Chart where "
-                        "there are numeric series, or a variant='stats' slide of "
-                        "KeyValue big numbers; pair bullets with a visual using "
-                        "variant='two-column'. Keep the same content and slide "
-                        "count. Reply with ONLY the corrected JSON object."
-                    )
-            elif isinstance(payload, dict) and "slides" in payload and not payload.get(
-                "surfaceKind"
-            ):
-                # The model returned the slide PLAN ({"slides":[...]}), not a surface.
-                # This is the specific miss that dropped every deck to prose; name it.
-                correction = (
-                    "You returned the slide PLAN, not an A2UI surface. Build the "
-                    "surface: a JSON object with \"surfaceKind\":\"presentation\", "
-                    "\"root\" pointing at a SlideDeck component, and a \"components\" "
-                    "array holding the SlideDeck plus one Slide per plan item (each "
-                    "Slide with a real body). Do NOT return a top-level \"slides\" "
-                    "key. Reply with ONLY that surface JSON object."
-                )
+                    return _done(payload)
             else:
                 correction = (
                     "That was not a valid A2UI surface. Reply with ONLY the corrected "
@@ -1547,5 +846,7 @@ def compose_a2ui(
         # it swallows silently drops the surface to markdown with no way to tell
         # WHY — which is exactly how a streamed-compose failure looked like a weak
         # model. logger reaches logs/system.log; a print only reached stdout.
-        logger.warning("A2UI compose failed (%s); markdown fallback.", exc, exc_info=True)
-    return _done(best if best is not None else markdown_surface(text))
+        logger.warning(
+            "A2UI compose failed (%s); markdown fallback.", exc, exc_info=True
+        )
+    return _done(markdown_surface(text))

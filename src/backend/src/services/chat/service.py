@@ -18,6 +18,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import re
 from typing import Any, Dict, Optional
 
 from src.models.execution_status import ExecutionStatus
@@ -258,14 +259,34 @@ class LightAgentService:
                     "Light agent execution requires a prompt (task description)"
                 )
 
+            group_id = self._resolve_group_id(config, group_context)
+
             # Teach the chat agent to render diagrams/decks as self-contained HTML
             # (see diagram_directive). The rich slide-design template is added only
-            # for presentation/slide requests, so ordinary chat turns stay lean.
+            # for presentation/slide requests, so ordinary chat turns stay lean —
+            # and it is colored by the WORKSPACE deck palette (Configuration -> UI),
+            # loaded here only when the turn actually asks for a deck.
+            from src.services.a2ui.compose import deck_intent, resolve_themes
             from src.services.chat.diagram_directive import apply_diagram_directive
 
-            apply_diagram_directive(agent_spec, prompt)
+            _deck_themes: Optional[Dict[str, Any]] = None
+            if deck_intent(prompt):
+                try:
+                    from src.services.settings.ui import UIConfigService
 
-            group_id = self._resolve_group_id(config, group_context)
+                    async with routed_scoped_session() as _ui_session:
+                        _ui_cfg = await UIConfigService(
+                            _ui_session,
+                            group_id=(group_id if group_id != "default" else None),
+                        ).get_config()
+                    if getattr(_ui_cfg, "enabled", False):
+                        _deck_themes = resolve_themes(
+                            {"style_json": getattr(_ui_cfg, "style_json", None)}
+                        )
+                except Exception as theme_err:  # noqa: BLE001 — defaults still render
+                    logger.debug(f"[light_agent] deck theme load skipped: {theme_err}")
+
+            apply_diagram_directive(agent_spec, prompt, themes=_deck_themes)
             group_email = getattr(group_context, "group_email", None)
             # Diagnostic: MCP servers are workspace-scoped, so the resolved group_id
             # must match the workspace where a server was enabled or MCP resolves to
@@ -996,8 +1017,8 @@ class LightAgentService:
                 _chunk_lock = _threading.Lock()
 
                 # Ship the surface AS IT IS COMPOSED. Defined here, before the
-                # agent runs, because two things need it BEFORE there is an
-                # answer: the instant deck shell and the early outline pass.
+                # agent runs, because the instant shell needs it BEFORE there
+                # is an answer.
                 # skip_replay because the finished surface is the durable record
                 # — a client that reconnects mid-compose gets the whole thing on
                 # completion, so replaying half a deck at it would only fight the
@@ -1035,9 +1056,8 @@ class LightAgentService:
                         )
 
                 # The whole answer as it streams. `_chunk_buf` is drained on
-                # every flush, so the outline head start needs its own copy.
+                # every flush, so late consumers need their own copy.
                 _answer_so_far: list = []
-                _outline_state: Dict[str, Any] = {"task": None}
 
                 # The request's contextvars, captured HERE — in the main
                 # coroutine, where they are actually set. The outline head start
@@ -1053,52 +1073,36 @@ class LightAgentService:
                 _request_ctx = _contextvars.copy_context()
 
                 # Diagram/slides/presentation are owned by the HTML renderer
-                # (self-contained ```html in chat), so A2UI must not compose, ship
-                # a deck shell, or pre-plan an outline for these requests.
+                # (self-contained ```html in chat), so A2UI must not compose or
+                # ship a shell for these requests.
                 from src.services.a2ui.compose import html_owned_intent
 
                 _html_owned = html_owned_intent(prompt)
+                if _html_owned:
+                    # Make the hand-off VISIBLE in the run's trace: without this
+                    # event a deck turn shows one opaque llm_call and nothing
+                    # else, and "why did A2UI not fire?" has no answer in the UI.
+                    try:
+                        _schedule_trace(
+                            _base_trace(
+                                "html_intent",
+                                {
+                                    "owner": "html_renderer",
+                                    "note": (
+                                        "diagram/slides intent — the answer renders "
+                                        "as self-contained HTML; A2UI composition, "
+                                        "shell is disabled for "
+                                        "this turn"
+                                    ),
+                                },
+                                "html_renderer",
+                            )
+                        )
+                    except Exception:  # noqa: BLE001 — tracing must not block the run
+                        pass
 
                 class _HtmlOwnedSkip(Exception):
                     """Control-flow marker: skip A2UI for an HTML-owned intent."""
-
-                def _maybe_plan_outline_early() -> None:
-                    """Plan the deck once enough of the answer exists.
-
-                    The outline is derived from the answer, so it used to wait for
-                    the last token — 13.4s on a measured run, then 8.7s more for
-                    the pass itself, and only THEN could the reader see real slide
-                    titles. It needs the gist, not the ending, so it runs here on
-                    the partial answer and overlaps the rest of the writing.
-                    """
-                    if _html_owned:
-                        return
-                    if _outline_state["task"] is not None:
-                        return
-                    with _chunk_lock:
-                        so_far = "".join(_answer_so_far)
-                    from src.services.a2ui.early import (
-                        outline_headstart_chars,
-                        plan_outline_early,
-                    )
-
-                    if len(so_far) < outline_headstart_chars():
-                        return
-                    _outline_state["task"] = asyncio.create_task(
-                        plan_outline_early(
-                            so_far,
-                            query=prompt,
-                            purpose=str(
-                                agent_spec.get("goal") or agent_spec.get("role") or ""
-                            ),
-                            model=getattr(config, "model", None),
-                            on_delta=_on_a2ui_delta,
-                            group_id=group_id,
-                            execution_id=execution_id,
-                            group_context=group_context,
-                        ),
-                        context=_request_ctx,
-                    )
 
                 async def _flush_chunks() -> None:
                     await asyncio.sleep(0.05)
@@ -1108,7 +1112,6 @@ class LightAgentService:
                         _chunk_buf.clear()
                         seq = _chunk_state["seq"]
                         _chunk_state["seq"] += 1
-                    _maybe_plan_outline_early()
                     if not text:
                         return
                     try:
@@ -1159,7 +1162,7 @@ class LightAgentService:
                 # answer, no outline, so it costs nothing and lands before the
                 # agent writes a word. Everything after this replaces it in place:
                 # the outline's skeleton swaps in real titles, then the composed
-                # slides swap in real content. `shell_shipped` is threaded into
+                # the real surface swaps in. `shell_shipped` is threaded into
                 # compose_surface so a turn that ends up answering in prose
                 # RETRACTS the frame rather than stranding an empty deck.
                 _shell_shipped = False
@@ -1171,7 +1174,9 @@ class LightAgentService:
                             prompt, on_delta=_on_a2ui_delta, group_id=group_id
                         )
                     except Exception as shell_err:  # noqa: BLE001
-                        logger.debug(f"[light_agent] instant shell skipped: {shell_err}")
+                        logger.debug(
+                            f"[light_agent] instant shell skipped: {shell_err}"
+                        )
 
                 event_bus.register_handler(LLMStreamChunkEvent, _on_llm_chunk)
                 event_bus.register_handler(ToolUsageStartedEvent, _on_tool_started)
@@ -1417,18 +1422,6 @@ class LightAgentService:
                 # Bounded: this is an auxiliary LLM call for the UI surface. If it
                 # hangs it must NOT block the terminal status — the prose answer has
                 # already streamed, so on timeout we complete with the plain answer.
-                # Collect the head start, if one was taken. It is the SAME pass
-                # the composer would otherwise run, moved earlier — never an
-                # extra call.
-                _early_outline = None
-                if _outline_state["task"] is not None:
-                    try:
-                        _early_outline = await _outline_state["task"]
-                    except Exception as outline_err:  # noqa: BLE001
-                        logger.debug(
-                            f"[light_agent] early outline unusable: {outline_err}"
-                        )
-
                 surface = await asyncio.wait_for(
                     compose_surface(
                         answer,
@@ -1441,11 +1434,10 @@ class LightAgentService:
                         execution_id=execution_id,
                         group_context=group_context,
                         on_delta=_on_a2ui_delta,
-                        outline=_early_outline,
                         shell_shipped=_shell_shipped,
                     ),
-                    # The model needs headroom to emit a full surface (e.g. a
-                    # multi-slide presentation deck) as valid JSON; 30s and then 60s
+                    # The model needs headroom to emit a full surface as valid
+                    # JSON; 30s and then 60s
                     # were too tight and silently dropped to plain text. Reasoning
                     # models (Kimi K2.7) spend a long thinking pass before the JSON:
                     # measured ~25-45s for the outline call + ~140s for the deck, so
@@ -1462,6 +1454,32 @@ class LightAgentService:
                     )
             except _HtmlOwnedSkip:
                 _log("Diagram/slides/presentation — rendered as HTML; A2UI skipped")
+                try:
+                    _m = re.search(
+                        r"```(?:html|svg)\s*(.*?)```", str(answer or ""), re.S
+                    )
+                    _html_body = _m.group(1) if _m else ""
+                    _slides = len(
+                        re.findall(
+                            r"<section\b[^>]*\bclass\s*=\s*[\"'][^\"']*\bslide\b",
+                            _html_body,
+                            re.I,
+                        )
+                    )
+                    _schedule_trace(
+                        _base_trace(
+                            "html_surface",
+                            {
+                                "rendered": bool(_html_body),
+                                "deck": _slides > 0,
+                                "slides": _slides,
+                                "bytes": len(_html_body),
+                            },
+                            "html_renderer",
+                        )
+                    )
+                except Exception:  # noqa: BLE001 — tracing must not block the run
+                    pass
             except asyncio.TimeoutError:
                 logger.warning(
                     f"[light_agent] a2ui compose timed out for {execution_id}; "

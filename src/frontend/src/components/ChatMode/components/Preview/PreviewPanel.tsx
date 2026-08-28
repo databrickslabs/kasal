@@ -2,9 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { PanelLeft } from 'lucide-react';
 import { DELIVERABLE_LABELS } from '../../../Configuration/uiConfigShared';
 import { toSurface } from '../../utils/surfaceAdapter';
-import { themeToDeck, getDeckTheme, DEFAULT_DECK_THEME_ID } from '../../../../shared/a2ui';
 import type { Surface } from '../../../../shared/a2ui';
-import { downloadPptx } from '../../../../shared/a2ui/lib/download';
 import type { Theme } from '../../../Configuration/uiConfigShared';
 import { downloadSurfacePdf } from '../../utils/surfacePdf';
 import { useA2uiThemes } from '../../hooks/useA2uiThemes';
@@ -133,7 +131,7 @@ export function parsePreviewContent(raw: string): PreviewContent | null {
 const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatCollapsed, onToggleChat, onRefine, onStyleChange, history, index, onNavigate, focusStep, onMoveActivityToChat, embedded }) => {
   const [refineOpen, setRefineOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  // The single top-toolbar download is a menu: PDF or PowerPoint.
+  // The single top-toolbar download is a menu: PDF.
   const [downloadAnchor, setDownloadAnchor] = useState<HTMLElement | null>(null);
   const a2uiThemes = useA2uiThemes();
   // The run's timeline lives in the CHAT, on the left. The pane is where a
@@ -199,33 +197,18 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
     onStyleChange(JSON.stringify(restyled));
   };
 
-  // The deck theme resolved exactly as A2uiSurface does (per-surface "Look"
-  // override → workspace palette → built-in default), so a PowerPoint export
-  // matches the on-screen palette.
-  const deckTheme = useMemo(() => {
-    if (!uiSurface) return undefined;
-    const key = SURFACE_TO_DELIVERABLE[uiSurface.surfaceKind] || 'default';
-    const palette = uiSurface.theme ?? a2uiThemes?.[key];
-    return palette ? themeToDeck(palette) : getDeckTheme(DEFAULT_DECK_THEME_ID);
-  }, [uiSurface, a2uiThemes]);
-
-  // The single top-toolbar download offers PDF or PowerPoint (replacing both the
-  // old icon-only PDF button AND the surface's own "PowerPoint" button, which is
-  // suppressed in the pane via `hideDownloads`). Decks land one slide per page;
-  // other deliverables as one content-sized page (PDF) or slides (PPTX).
+  // The single top-toolbar download offers PDF (replacing the old icon-only
+  // PDF button; the surface's own menu is suppressed in the pane via
+  // `hideDownloads`). Deliverables land as one content-sized page.
   // Name the file after the deliverable's title; fall back to its kind
   // (dashboard, quiz, document, …) so a downloaded dashboard isn't "kasal-app".
   const baseName = content.title || uiSurface?.surfaceKind || 'kasal-app';
-  const runDownload = async (kind: 'pdf' | 'pptx') => {
+  const runDownload = async (kind: 'pdf') => {
     setDownloadAnchor(null);
     if (!uiSurface || downloading) return;
     setDownloading(true);
     try {
-      if (kind === 'pdf') {
-        await downloadSurfacePdf(uiSurface, baseName);
-      } else {
-        await downloadPptx(uiSurface, deckTheme, `${baseName}.pptx`);
-      }
+      await downloadSurfacePdf(uiSurface, baseName);
     } finally {
       setDownloading(false);
     }
@@ -359,7 +342,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
               Customize
             </button>
           )}
-          {/* The download is a small menu (PDF / PowerPoint) anchored under its
+          {/* The download is a small menu (PDF) anchored under its
               button. `downloadAnchor` doubles as the open flag; a transparent
               backdrop catches the click-away to close. A2UI-only — a plain-text
               answer has no surface to export, so the menu hides for text. */}
@@ -400,15 +383,6 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
                     style={{ color: 'var(--text-primary)' }}
                   >
                     PDF
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => runDownload('pptx')}
-                    className="block w-full text-left px-3 py-1.5 text-sm transition-colors hover:bg-[var(--bg-rail-hover)]"
-                    style={{ color: 'var(--text-primary)' }}
-                  >
-                    PowerPoint
                   </button>
                 </div>
               </>

@@ -19,23 +19,15 @@ from src.core.events.bus import event_bus
 from src.services.a2ui import runner
 from src.services.a2ui.stream import apply_messages
 
-# A deck that survives the composer's own correction passes: every body slide
-# carries a real body, or `presentation_needs_body` sends it round the retry loop
-# and a fake LLM that keeps returning the same thing ends at the markdown
-# fallback — which looks like a streaming failure but is a fixture problem.
+# A dashboard with several components, so the stream has real batches to split.
+# (These wiring tests used a deck before presentations left A2UI for the chat
+# HTML path; the streaming mechanics under test are surface-agnostic.)
 DECK = {
-    "surfaceKind": "presentation",
-    "root": "deck",
+    "surfaceKind": "dashboard",
+    "root": "grid",
     "components": [
-        {"id": "deck", "component": "SlideDeck", "children": ["s1", "s2"]},
-        {"id": "s1", "component": "Slide", "variant": "title", "title": "Alps"},
-        {
-            "id": "s2",
-            "component": "Slide",
-            "variant": "content",
-            "title": "Chalets",
-            "children": ["md1"],
-        },
+        {"id": "grid", "component": "Grid", "columns": 2, "children": ["k1", "md1"]},
+        {"id": "k1", "component": "KeyValue", "label": "Chalets", "value": "42"},
         {
             "id": "md1",
             "component": "Markdown",
@@ -47,11 +39,11 @@ DECK = {
 
 CATALOG = {
     "components": {
-        "SlideDeck": {"summary": "deck"},
-        "Slide": {"summary": "slide"},
+        "Grid": {"summary": "grid"},
+        "KeyValue": {"summary": "kv"},
         "Markdown": {"summary": "md"},
     },
-    "surfaceKinds": ["presentation", "conversation"],
+    "surfaceKinds": ["dashboard", "conversation"],
 }
 
 
@@ -83,7 +75,7 @@ class FakeStreamingLLM:
 
 @pytest.fixture
 def wired(monkeypatch):
-    """A2UI on, a catalog the deck validates against, and a fake composer LLM."""
+    """A2UI on, a catalog the surface validates against, and a fake composer LLM."""
     llm = FakeStreamingLLM(json.dumps(DECK))
 
     async def _resolve_config(group_id, query):
@@ -96,9 +88,6 @@ def wired(monkeypatch):
 
     monkeypatch.setattr(runner, "_resolve_config", _resolve_config)
     monkeypatch.setattr(mgr.LLMManager, "get_llm", staticmethod(_get_llm))
-    # The outline pre-pass would consume the same fake LLM and get a deck back
-    # instead of a plan; off here so this test is about the wiring only.
-    monkeypatch.setenv("A2UI_PRESENTATION_OUTLINE", "0")
     return llm
 
 
@@ -110,7 +99,7 @@ async def _compose(**kw):
 
     surface = await runner.compose_surface(
         "Some prose about swiss chalets in the alps.",
-        query="create a presentation of nice swiss houses in the alps",
+        query="build a dashboard of nice swiss houses in the alps",
         on_delta=on_delta,
         **kw,
     )
@@ -123,7 +112,7 @@ async def test_composer_tokens_reach_the_delta_sink(wired):
 
     assert surface == DECK
     assert len(sent) > 1, (
-        "the deck composed but streamed nothing — the chunk handler never "
+        "the surface composed but streamed nothing — the chunk handler never "
         "reached the sink"
     )
     assert apply_messages(sent) == DECK
@@ -136,10 +125,10 @@ async def test_the_llm_is_opted_into_streaming(wired):
 
 
 @pytest.mark.asyncio
-async def test_slides_ship_before_the_surface_is_returned(wired, monkeypatch):
+async def test_components_ship_before_the_surface_is_returned(wired, monkeypatch):
     """The point: components arrive as they are written, not in one lump.
 
-    The rescan throttle has to come off — the fake emits a whole deck in
+    The rescan throttle has to come off — the fake emits a whole surface in
     microseconds, so at the production cadence every chunk lands inside one
     window and the result would be a single batch no matter how well this works.
     """
@@ -147,7 +136,7 @@ async def test_slides_ship_before_the_surface_is_returned(wired, monkeypatch):
     _, sent = await _compose()
     batches = [m for m in sent if "updateComponents" in m]
     assert len(batches) >= 2, "everything arrived in a single batch"
-    # ...and still exactly the deck, however it was split up.
+    # ...and still exactly the surface, however it was split up.
     assert apply_messages(sent) == DECK
 
 
@@ -169,7 +158,7 @@ async def test_streaming_can_be_switched_off(wired, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_a_shell_is_retracted_when_no_surface_is_delivered(wired, monkeypatch):
-    """A prose turn must not strand the instant deck frame on screen."""
+    """A prose turn must not strand the instant shell frame on screen."""
 
     async def _off(group_id, query):
         return False, {}, ""
@@ -190,23 +179,3 @@ async def test_no_retraction_when_no_shell_was_shipped(wired, monkeypatch):
     assert sent == []
 
 
-@pytest.mark.asyncio
-async def test_a_precomputed_outline_skips_the_pre_pass(wired, monkeypatch):
-    """The head start must REPLACE the outline call, never add to it."""
-    monkeypatch.setenv("A2UI_PRESENTATION_OUTLINE", "1")
-    plan = [
-        {"title": "Alps", "variant": "title", "visual": "none", "focus": ""},
-        {"title": "Chalets", "variant": "content", "visual": "none", "focus": ""},
-        {"title": "Takeaways", "variant": "content", "visual": "none", "focus": ""},
-    ]
-    planned = {"n": 0}
-
-    def _spy(*a, **k):
-        planned["n"] += 1
-        return plan
-
-    import src.services.a2ui.compose as compose_mod
-
-    monkeypatch.setattr(compose_mod, "plan_presentation_outline", _spy)
-    await _compose(outline=plan)
-    assert planned["n"] == 0, "the outline pre-pass ran again despite a head start"
