@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { CatalogItem } from '../api/crews';
+import { useAppStore } from '../store/appStore';
 
 interface CatalogLibraryProps {
   crews: CatalogItem[];
@@ -9,6 +10,9 @@ interface CatalogLibraryProps {
 }
 
 type LibraryEntry = CatalogItem & { kind: 'crew' | 'flow' };
+
+/** Unsearched rows rendered at most — past this, the footer says to search. */
+const RENDER_CAP = 50;
 
 /**
  * The collapsible "Catalog" section in the chat rail: the crews and flows
@@ -23,13 +27,13 @@ type LibraryEntry = CatalogItem & { kind: 'crew' | 'flow' };
 const Chevron: React.FC<{ open: boolean }> = ({ open }) => (
   <svg
     className="w-3 h-3 flex-shrink-0 transition-transform"
-    style={{ transform: open ? 'rotate(90deg)' : 'none' }}
+    style={{ transform: open ? 'rotate(180deg)' : 'none' }}
     fill="none"
     viewBox="0 0 24 24"
     stroke="currentColor"
     strokeWidth={2.5}
   >
-    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
   </svg>
 );
 
@@ -50,7 +54,10 @@ const FlowIcon: React.FC = () => (
 );
 
 const CatalogLibrary: React.FC<CatalogLibraryProps> = ({ crews, flows, onLoadCrew, onLoadFlow }) => {
-  const [open, setOpen] = useState(false);
+  // Expansion lives in the app store so the collapsed rail's catalog icon can
+  // open the sidebar with this section already expanded.
+  const open = useAppStore((s) => s.catalogOpen);
+  const setOpen = useAppStore((s) => s.setCatalogOpen);
   const [query, setQuery] = useState('');
 
   const entries: LibraryEntry[] = [
@@ -62,31 +69,38 @@ const CatalogLibrary: React.FC<CatalogLibraryProps> = ({ crews, flows, onLoadCre
   const q = query.trim().toLowerCase();
   const filtered = q ? entries.filter((e) => e.name.toLowerCase().includes(q)) : entries;
   const showSearch = entries.length > 6;
+  // The backend list is unpaginated (every published crew/flow arrives), but a
+  // rail with hundreds of DOM rows helps no one scan — cap the unsearched view
+  // and SAY so, pointing at the search box. A query lifts the cap: filtered
+  // results are what the user asked for.
+  const capped = !q && filtered.length > RENDER_CAP;
+  const visibleEntries = capped ? filtered.slice(0, RENDER_CAP) : filtered;
 
+  // Flat, flush with the rail — a header row styled exactly like RECENT below
+  // it, no card chrome. (A bordered grey card was tried and read as heavier
+  // than the content it holds.)
   return (
-    <div className="px-2 pt-2">
+    <div className="pt-4">
       <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors hover:bg-[var(--bg-rail-hover)]"
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-1.5 !px-3 !py-1.5 text-left transition-colors hover:bg-[var(--bg-rail-hover)]"
         style={{ color: 'var(--text-muted)' }}
         aria-expanded={open}
       >
-        <Chevron open={open} />
-        <span className="text-[10px] font-semibold uppercase tracking-wider flex-1 text-left">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] flex-1">
           Catalog
         </span>
-        <span className="text-[10px] tabular-nums" style={{ color: 'var(--text-muted)' }}>
-          {entries.length}
-        </span>
+        <span className="text-[10px] tabular-nums">{entries.length}</span>
+        <Chevron open={open} />
       </button>
       {open && (
-        <div className="mt-0.5">
+        <div className="px-2 pt-1">
           {showSearch && (
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search catalog…"
-              className="w-[calc(100%-1.5rem)] mx-3 mb-1 px-2 py-1 rounded-md text-[12px] outline-none"
+              className="w-[calc(100%-0.5rem)] mx-1 mb-1 px-2 py-1.5 rounded-md text-[12px] outline-none"
               style={{
                 backgroundColor: 'var(--bg-input)',
                 color: 'var(--text-primary)',
@@ -97,21 +111,27 @@ const CatalogLibrary: React.FC<CatalogLibraryProps> = ({ crews, flows, onLoadCre
           {/* Capped + scrollable so the catalog never pushes the chat session
               list (Recent) off-screen. */}
           <div className="max-h-52 overflow-y-auto">
-            {filtered.map((item) => (
+            {visibleEntries.map((item) => (
               <button
                 key={`${item.kind}-${item.id}`}
                 onClick={() => (item.kind === 'crew' ? onLoadCrew(item.name) : onLoadFlow(item.name))}
-                title={`Open ${item.kind} “${item.name}”`}
-                className="w-full flex items-center gap-2 pl-7 pr-3 py-1.5 my-0.5 rounded-lg text-left transition-colors hover:bg-[var(--bg-rail-hover)]"
+                className="w-full flex items-center gap-2.5 !px-3 !py-1.5 my-0.5 rounded-lg text-left transition-colors hover:bg-[var(--bg-rail-hover)]"
                 style={{ color: 'var(--text-secondary)' }}
               >
                 {item.kind === 'crew' ? <CrewIcon /> : <FlowIcon />}
-                <span className="truncate text-[13px]">{item.name}</span>
+                <span className="truncate flex-1 text-[13px]" style={{ color: 'var(--text-primary)' }}>
+                  {item.name}
+                </span>
               </button>
             ))}
             {filtered.length === 0 && (
-              <div className="pl-7 pr-3 py-1.5 text-[12px]" style={{ color: 'var(--text-muted)' }}>
+              <div className="px-2.5 py-1.5 text-[12px]" style={{ color: 'var(--text-muted)' }}>
                 No matches
+              </div>
+            )}
+            {capped && (
+              <div className="px-3 py-1.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                Showing {RENDER_CAP} of {filtered.length} — search to narrow
               </div>
             )}
           </div>

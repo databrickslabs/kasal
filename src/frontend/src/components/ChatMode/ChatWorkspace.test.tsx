@@ -110,6 +110,9 @@ const h = vi.hoisted(() => {
       loadTools: vi.fn(),
       loadCatalog: vi.fn(async () => {}),
       setSelectedModel: vi.fn(),
+      setSidebarOpen: vi.fn(),
+      catalogOpen: false,
+      setCatalogOpen: vi.fn(),
     },
     theme: { isDarkMode: false },
     streamOpts: {} as Record<string, (...a: unknown[]) => void>,
@@ -1287,7 +1290,7 @@ describe('ChatWorkspace component', () => {
   // --- sidebar interactions ---
   it('New Chat saves state + resets to a blank chat WITHOUT persisting a session', async () => {
     render(<ChatWorkspace />);
-    await act(async () => { fireEvent.click(screen.getByText('New Chat')); });
+    await act(async () => { fireEvent.click(screen.getByLabelText('New chat')); });
     // Lazy creation: the row is created on the first message, not on the button —
     // so no empty "New Chat" lands in the Recent rail.
     expect(h.session.startNewChat).toHaveBeenCalled();
@@ -1328,10 +1331,19 @@ describe('ChatWorkspace component', () => {
     expect(h.session.deleteSession).toHaveBeenCalledWith('s1');
   });
 
-  it('renders the sidebar-closed minimal layout when sidebarOpen is false', () => {
+  it('renders the collapsed icon rail when sidebarOpen is false', () => {
     h.app.sidebarOpen = false;
     render(<ChatWorkspace />);
     expect(screen.getByTestId('chat-container')).toBeInTheDocument();
+    // The sidebar never fully disappears — it collapses to a slim icon rail.
+    expect(screen.getByTestId('collapsed-rail')).toBeInTheDocument();
+    expect(screen.getByLabelText('Show chat history')).toBeInTheDocument();
+  });
+
+  it('collapses the sidebar from the panel toggle in its header row', () => {
+    render(<ChatWorkspace />); // sidebarOpen defaults to true in the harness
+    fireEvent.click(screen.getByLabelText('Hide chat history'));
+    expect(h.app.setSidebarOpen).toHaveBeenCalledWith(false);
   });
 
   // --- preview panel controls ---
@@ -1838,7 +1850,7 @@ describe('ChatWorkspace component', () => {
   it('New Chat and session switch skip saving when there is no current session', async () => {
     h.session.currentSessionId = null;
     render(<ChatWorkspace />);
-    await act(async () => { fireEvent.click(screen.getByText('New Chat')); });
+    await act(async () => { fireEvent.click(screen.getByLabelText('New chat')); });
     expect(h.exec.saveSessionState).not.toHaveBeenCalled();
     expect(h.session.startNewChat).toHaveBeenCalled();
     await act(async () => { fireEvent.click(screen.getByTitle('Two')); });
@@ -2359,10 +2371,9 @@ describe('ChatWorkspace component', () => {
   it('loads a saved crew from the rail library into a fresh session', async () => {
     h.app.savedCrews = [{ id: 'c1', name: 'My Saved Crew' }];
     h.app.savedFlows = [];
+    h.app.catalogOpen = true; // mocked store: pre-expand (no re-render on set)
     render(<ChatWorkspace />);
-    // open the collapsible "Catalog" section
-    fireEvent.click(screen.getByText('Catalog'));
-    await act(async () => { fireEvent.click(screen.getByTitle('Open crew “My Saved Crew”')); });
+    await act(async () => { fireEvent.click(screen.getByText('My Saved Crew')); });
     // saves current state, spins up a new session, restores it, and sends /load
     expect(h.exec.saveSessionState).toHaveBeenCalledWith('s1');
     expect(h.session.createNewSession).toHaveBeenCalled();
@@ -2371,20 +2382,22 @@ describe('ChatWorkspace component', () => {
       '/load crew My Saved Crew', 'm1', undefined, undefined, undefined, 'Open crew: My Saved Crew', undefined,
     );
     h.app.savedCrews = [];
+    h.app.catalogOpen = false;
   });
 
   it('loads a saved flow from the rail library (and skips save when no current session)', async () => {
     h.session.currentSessionId = null;
     h.app.savedCrews = [];
     h.app.savedFlows = [{ id: 'f1', name: 'My Saved Flow' }];
+    h.app.catalogOpen = true; // mocked store: pre-expand (no re-render on set)
     render(<ChatWorkspace />);
-    fireEvent.click(screen.getByText('Catalog'));
-    await act(async () => { fireEvent.click(screen.getByTitle('Open flow “My Saved Flow”')); });
+    await act(async () => { fireEvent.click(screen.getByText('My Saved Flow')); });
     expect(h.exec.saveSessionState).not.toHaveBeenCalled();
     expect(h.dispatcherSend).toHaveBeenCalledWith(
       '/load flow My Saved Flow', 'm1', undefined, undefined, undefined, 'Open flow: My Saved Flow', undefined,
     );
     h.app.savedFlows = [];
+    h.app.catalogOpen = false;
   });
 
   // --- /save overwrite + name-conflict ------------------------------------
