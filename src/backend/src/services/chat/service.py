@@ -258,6 +258,13 @@ class LightAgentService:
                     "Light agent execution requires a prompt (task description)"
                 )
 
+            # Teach the chat agent to render diagrams/decks as self-contained HTML
+            # (see diagram_directive). The rich slide-design template is added only
+            # for presentation/slide requests, so ordinary chat turns stay lean.
+            from src.services.chat.diagram_directive import apply_diagram_directive
+
+            apply_diagram_directive(agent_spec, prompt)
+
             group_id = self._resolve_group_id(config, group_context)
             group_email = getattr(group_context, "group_email", None)
             # Diagnostic: MCP servers are workspace-scoped, so the resolved group_id
@@ -1045,6 +1052,16 @@ class LightAgentService:
 
                 _request_ctx = _contextvars.copy_context()
 
+                # Diagram/slides/presentation are owned by the HTML renderer
+                # (self-contained ```html in chat), so A2UI must not compose, ship
+                # a deck shell, or pre-plan an outline for these requests.
+                from src.services.a2ui.compose import html_owned_intent
+
+                _html_owned = html_owned_intent(prompt)
+
+                class _HtmlOwnedSkip(Exception):
+                    """Control-flow marker: skip A2UI for an HTML-owned intent."""
+
                 def _maybe_plan_outline_early() -> None:
                     """Plan the deck once enough of the answer exists.
 
@@ -1054,6 +1071,8 @@ class LightAgentService:
                     titles. It needs the gist, not the ending, so it runs here on
                     the partial answer and overlaps the rest of the writing.
                     """
+                    if _html_owned:
+                        return
                     if _outline_state["task"] is not None:
                         return
                     with _chunk_lock:
@@ -1144,14 +1163,15 @@ class LightAgentService:
                 # compose_surface so a turn that ends up answering in prose
                 # RETRACTS the frame rather than stranding an empty deck.
                 _shell_shipped = False
-                try:
-                    from src.services.a2ui.early import emit_instant_shell
+                if not _html_owned:
+                    try:
+                        from src.services.a2ui.early import emit_instant_shell
 
-                    _shell_shipped = await emit_instant_shell(
-                        prompt, on_delta=_on_a2ui_delta, group_id=group_id
-                    )
-                except Exception as shell_err:  # noqa: BLE001
-                    logger.debug(f"[light_agent] instant shell skipped: {shell_err}")
+                        _shell_shipped = await emit_instant_shell(
+                            prompt, on_delta=_on_a2ui_delta, group_id=group_id
+                        )
+                    except Exception as shell_err:  # noqa: BLE001
+                        logger.debug(f"[light_agent] instant shell skipped: {shell_err}")
 
                 event_bus.register_handler(LLMStreamChunkEvent, _on_llm_chunk)
                 event_bus.register_handler(ToolUsageStartedEvent, _on_tool_started)
@@ -1387,6 +1407,11 @@ class LightAgentService:
             # by default. Never blocks completion (returns None / markdown on any issue).
             result_payload: Any = answer
             try:
+                # Diagram/slides/presentation are rendered from the agent's own
+                # ```html block — skip A2UI composition entirely for them. (The
+                # generic handler below keeps the plain answer.)
+                if _html_owned:
+                    raise _HtmlOwnedSkip()
                 from src.services.a2ui.runner import compose_surface
 
                 # Bounded: this is an auxiliary LLM call for the UI surface. If it
@@ -1435,6 +1460,8 @@ class LightAgentService:
                     _log(
                         f"Composed A2UI surface: {surface.get('surfaceKind', 'conversation')}"
                     )
+            except _HtmlOwnedSkip:
+                _log("Diagram/slides/presentation — rendered as HTML; A2UI skipped")
             except asyncio.TimeoutError:
                 logger.warning(
                     f"[light_agent] a2ui compose timed out for {execution_id}; "

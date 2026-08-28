@@ -1272,6 +1272,19 @@ RICH_INTENT = (
 )
 
 
+# Intents that the HTML path owns end-to-end (rendered as self-contained
+# ```html in chat, with fullscreen + export), so A2UI must NOT compose for them.
+HTML_OWNED_INTENT = ("diagram", "slide", "presentation", "deck", "slideshow")
+
+
+def html_owned_intent(query: str) -> bool:
+    """True when the request is for a diagram/slides/presentation — handled by the
+    HTML renderer, not A2UI. Used by the chat path to disable A2UI composition
+    (and its early deck shell/outline) for these intents."""
+    intent = (query or "").lower()
+    return any(k in intent for k in HTML_OWNED_INTENT)
+
+
 def wants_rich_surface(text: str, query: str) -> bool:
     """True when a rich surface is worth a composer LLM call: the user asked for
     one this turn, or the answer carries a table worth turning into a real
@@ -1286,6 +1299,11 @@ def wants_rich_surface(text: str, query: str) -> bool:
     has_table = (
         "\n|" in body or "|---" in body or "| -" in body or "<table" in body.lower()
     )
+    # Yield to an agent-authored diagram: a self-contained ```html/```svg block is
+    # rendered directly in chat as a %md-sandbox diagram, so composing an A2UI
+    # surface over it would double-render (or replace) the agent's own drawing.
+    if re.search(r"```(?:html|svg)\s*\n", body, re.IGNORECASE):
+        return False
     return rich_intent or has_table
 
 

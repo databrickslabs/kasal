@@ -1,0 +1,52 @@
+import React, { useMemo } from 'react';
+import { iframeDoc, useScaledFrameHeight } from '../../utils/scaledFrame';
+
+/**
+ * A sandboxed, scale-to-fit iframe for agent-authored HTML. Manages its own
+ * frame id + auto-height (see utils/scaledFrame). Used by the diagram card, the
+ * slide deck, and their fullscreen views.
+ */
+interface ScaledFrameProps {
+  html: string;
+  /** Layout width before scaling (diagrams: column-fill; decks: slide width). */
+  baseWidth?: number;
+  /** Grow the canvas to the column width (diagrams) vs. fixed width (decks). */
+  fill?: boolean;
+  /** Allow scaling up past 1× (fullscreen deck). */
+  upscale?: boolean;
+  /** Fit both width and height, centered — fills the parent's height (fullscreen). */
+  contain?: boolean;
+  title?: string;
+}
+
+const ScaledFrame: React.FC<ScaledFrameProps> = ({
+  html,
+  baseWidth,
+  fill,
+  upscale,
+  contain,
+  title = 'Preview',
+}) => {
+  const { frameId, height } = useScaledFrameHeight();
+  const srcDoc = useMemo(
+    () => iframeDoc(html, frameId, { baseWidth, fill, upscale, contain }),
+    [html, frameId, baseWidth, fill, upscale, contain],
+  );
+  return (
+    <iframe
+      title={title}
+      sandbox="allow-scripts"
+      srcDoc={srcDoc}
+      style={{
+        display: 'block',
+        width: '100%',
+        border: 0,
+        background: '#ffffff',
+        // Contain mode fills its container's height; otherwise auto-heights.
+        height: contain ? '100%' : height,
+      }}
+    />
+  );
+};
+
+export default ScaledFrame;

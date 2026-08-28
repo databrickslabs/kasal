@@ -50,4 +50,42 @@ describe('MessageContent', () => {
     const strong = screen.getByText('bold text');
     expect(strong.tagName.toLowerCase()).toBe('strong');
   });
+
+  it('renders an ```html block as a sandboxed diagram iframe (not a code block)', () => {
+    const md = '```html\n<svg><rect width="10" height="10"/></svg>\n```';
+    const { container } = render(<MessageContent content={md} />);
+
+    const iframe = container.querySelector('iframe');
+    expect(iframe).not.toBeNull();
+    // Sandboxed WITHOUT allow-same-origin — the key isolation guarantee.
+    expect(iframe?.getAttribute('sandbox')).toBe('allow-scripts');
+    // The %md-sandbox copy affordance is present (icon-only button, by title).
+    expect(screen.getByTitle('Copy as a Databricks %md-sandbox notebook cell')).not.toBeNull();
+    // It is NOT rendered as a plain markdown code block.
+    expect(container.querySelector('pre code')).toBeNull();
+  });
+
+  it('labels an unclosed (streaming) ```html block as building', () => {
+    const md = 'here:\n```html\n<svg><rect';
+    render(<MessageContent content={md} />);
+    expect(screen.getByText('Building diagram…')).not.toBeNull();
+  });
+
+  it('still renders a bare (non-html) code fence as a markdown code block', () => {
+    const { container } = render(<MessageContent content={'```\nconst x = 1;\n```'} />);
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.querySelector('pre code')).not.toBeNull();
+  });
+
+  it('renders an ```html deck (slide sections) as a paged deck, not a single diagram', () => {
+    const deck =
+      '```html\n<section class="slide"><h1>One</h1></section>' +
+      '<section class="slide"><h1>Two</h1></section>\n```';
+    const { container } = render(<MessageContent content={deck} />);
+    // Deck renders in an iframe with slide navigation ("Slide 1 / 2").
+    expect(container.querySelector('iframe')).not.toBeNull();
+    expect(screen.getByText('Slide 1 / 2')).not.toBeNull();
+    // Not the diagram card (no %md-sandbox copy affordance for a deck).
+    expect(screen.queryByText('Copy %md-sandbox cell')).toBeNull();
+  });
 });
