@@ -23,14 +23,21 @@ import toast from 'react-hot-toast';
 import { useRunStatusStore } from '../../store/runStatus';
 import { useUserStore } from '../../store/user';
 import { useGroupStore } from '../../store/groups';
+import { useUILayoutStore } from '../../store/uiLayout';
 
-// Kasal's brand accent (chat.css --accent) — these menus follow the app
-// accent instead of MUI's blue primary. CSS vars can't reach here.
+// Kasal's brand accent (chat.css --accent), used ONLY while chat mode is
+// active — the builder canvases are MUI-themed and keep their original
+// primary colors. CSS vars can't reach here (outside #kasal-chat-root).
 const KASAL_ACCENT = '#FF3621';
 const KASAL_ACCENT_SOFT = 'rgba(255, 54, 33, 0.08)';
 const KASAL_ACCENT_SOFT_HOVER = 'rgba(255, 54, 33, 0.12)';
 
 const GroupSelector: React.FC = () => {
+  const appMode = useUILayoutStore((st) => st.appMode);
+  const isChatMode = appMode === 'chat';
+  const accent = isChatMode ? KASAL_ACCENT : 'primary.main';
+  const accentSoft = isChatMode ? KASAL_ACCENT_SOFT : 'action.selected';
+  const accentSoftHover = isChatMode ? KASAL_ACCENT_SOFT_HOVER : 'action.selected';
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   // Use Zustand store instead of local state
   const groups = useGroupStore(s => s.groups);
@@ -264,9 +271,9 @@ const GroupSelector: React.FC = () => {
                 py: 1,
                 borderRadius: 2,
                 '&.Mui-selected': {
-                  backgroundColor: KASAL_ACCENT_SOFT,
+                  backgroundColor: accentSoft,
                   '&:hover': {
-                    backgroundColor: KASAL_ACCENT_SOFT_HOVER,
+                    backgroundColor: accentSoftHover,
                   }
                 }
               }}
@@ -276,14 +283,14 @@ const GroupSelector: React.FC = () => {
                   <HomeIcon
                     fontSize="small"
                     sx={{
-                      color: isSelected ? KASAL_ACCENT : 'text.secondary'
+                      color: isSelected ? accent : 'text.secondary'
                     }}
                   />
                 ) : (
                   <GroupsIcon
                     fontSize="small"
                     sx={{
-                      color: isSelected ? KASAL_ACCENT : 'text.secondary'
+                      color: isSelected ? accent : 'text.secondary'
                     }}
                   />
                 )}
@@ -301,12 +308,17 @@ const GroupSelector: React.FC = () => {
                       <Chip
                         label="Active"
                         size="small"
-                        sx={{
-                          height: 20,
-                          fontWeight: 600,
-                          color: KASAL_ACCENT,
-                          backgroundColor: KASAL_ACCENT_SOFT,
-                        }}
+                        color={isChatMode ? undefined : 'primary'}
+                        sx={
+                          isChatMode
+                            ? {
+                                height: 20,
+                                fontWeight: 600,
+                                color: KASAL_ACCENT,
+                                backgroundColor: KASAL_ACCENT_SOFT,
+                              }
+                            : { height: 20 }
+                        }
                       />
                     )}
                   </Box>
