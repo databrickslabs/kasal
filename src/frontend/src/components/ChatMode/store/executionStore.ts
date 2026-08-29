@@ -971,6 +971,12 @@ export const useExecutionStore = create<ExecutionStore>()(
         previewOwnerSessionId: preserve ? s.previewOwnerSessionId : null,
         previewHistory: preserve ? s.previewHistory : [],
         previewIndex: preserve ? s.previewIndex : 0,
+        // The pane NEVER opens (or stays open) on its own: clearing the content
+        // while leaving the pane open turned it into an empty run monitor the
+        // user did not ask for. A fresh run closes it — opening is always the
+        // user's click; the preserve flow (refine) keeps their open pane.
+        previewPaneOpen: preserve ? s.previewPaneOpen : false,
+        chatCollapsed: preserve ? s.chatCollapsed : false,
         runStartedAt: Date.now(),
       });
     } else {

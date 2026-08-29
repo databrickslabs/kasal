@@ -31,9 +31,11 @@ interface ModeOption {
  * (just before the workspace/group selector). A single grid-icon button opens a
  * menu to switch the whole app between the Crew, Flow, and Chat workspaces.
  */
-// Kasal's brand accent (chat.css --accent) — MUI's blue primary reads as a
-// different product dropped into the top bar; these menus follow the app
-// accent instead. CSS vars can't reach here (outside #kasal-chat-root).
+// Kasal's brand accent (chat.css --accent), used ONLY while chat mode is
+// active — in chat the MUI blue reads as a foreign product, and on the
+// builder canvases the reverse is true (the canvases are MUI-themed, so the
+// menus keep their original primary colors there). CSS vars can't reach
+// here (outside #kasal-chat-root).
 const KASAL_ACCENT = '#FF3621';
 const KASAL_ACCENT_SOFT = 'rgba(255, 54, 33, 0.08)';
 const KASAL_ACCENT_SOFT_HOVER = 'rgba(255, 54, 33, 0.12)';
@@ -73,6 +75,11 @@ const ModeSwitcher: React.FC = () => {
   );
 
   const activeOption = options.find((o) => o.mode === appMode) || options[0];
+  // Chat follows the Kasal accent; the builder canvases keep MUI primary.
+  const isChat = appMode === 'chat';
+  const accent = isChat ? KASAL_ACCENT : 'primary.main';
+  const accentSoft = isChat ? KASAL_ACCENT_SOFT : 'action.selected';
+  const accentSoftHover = isChat ? KASAL_ACCENT_SOFT_HOVER : 'action.selected';
 
   const handleOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -106,8 +113,8 @@ const ModeSwitcher: React.FC = () => {
             ml: 0.5,
             p: 0.75,
             borderRadius: 2,
-            color: open ? KASAL_ACCENT : 'text.secondary',
-            backgroundColor: open ? KASAL_ACCENT_SOFT : 'transparent',
+            color: open ? accent : 'text.secondary',
+            backgroundColor: open ? accentSoft : 'transparent',
             transition: 'all 0.2s ease',
             '&:hover': {
               backgroundColor: 'action.hover',
@@ -163,13 +170,13 @@ const ModeSwitcher: React.FC = () => {
                 py: 1,
                 borderRadius: 2,
                 '&.Mui-selected': {
-                  backgroundColor: KASAL_ACCENT_SOFT,
-                  '&:hover': { backgroundColor: KASAL_ACCENT_SOFT_HOVER },
+                  backgroundColor: accentSoft,
+                  '&:hover': { backgroundColor: accentSoftHover },
                 },
               }}
             >
               <ListItemIcon
-                sx={{ minWidth: 36, color: isSelected ? KASAL_ACCENT : 'text.secondary' }}
+                sx={{ minWidth: 36, color: isSelected ? accent : 'text.secondary' }}
               >
                 {option.icon}
               </ListItemIcon>
@@ -186,7 +193,7 @@ const ModeSwitcher: React.FC = () => {
                 }
                 sx={{ my: 0 }}
               />
-              {isSelected && <CheckIcon fontSize="small" sx={{ color: KASAL_ACCENT, ml: 1 }} />}
+              {isSelected && <CheckIcon fontSize="small" sx={{ color: accent, ml: 1 }} />}
             </MenuItem>
           );
         })}

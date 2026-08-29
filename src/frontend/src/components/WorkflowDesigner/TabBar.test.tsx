@@ -515,6 +515,41 @@ describe('TabBar', () => {
       expect(screen.getByText('Close All Tabs')).toBeInTheDocument();
     });
 
+    it('Close Other Tabs closes every clean tab except the clicked one', () => {
+      storeTabs = [
+        makeTab(),
+        makeTab({ id: 'tab-2', name: 'Tab Two' }),
+        makeTab({ id: 'tab-3', name: 'Tab Three' }),
+      ];
+      mockGetTabsForCurrentGroup.mockReturnValue(storeTabs);
+      renderTabBar();
+      const tab = screen.getByText('Tab One').closest('[role="tab"]')!;
+      fireEvent.contextMenu(tab);
+      fireEvent.click(screen.getByText('Close Other Tabs'));
+      // The kept tab is activated FIRST so focus never routes through a dying tab.
+      expect(mockSetActiveTab).toHaveBeenCalledWith('tab-1');
+      expect(mockCloseTab).toHaveBeenCalledWith('tab-2');
+      expect(mockCloseTab).toHaveBeenCalledWith('tab-3');
+      expect(mockCloseTab).not.toHaveBeenCalledWith('tab-1');
+    });
+
+    it('Close Other Tabs confirms when another tab is dirty', () => {
+      storeTabs = [
+        makeTab(),
+        makeTab({ id: 'tab-2', name: 'Dirty Two', isDirty: true }),
+      ];
+      mockGetTabsForCurrentGroup.mockReturnValue(storeTabs);
+      renderTabBar();
+      const tab = screen.getByText('Tab One').closest('[role="tab"]')!;
+      fireEvent.contextMenu(tab);
+      fireEvent.click(screen.getByText('Close Other Tabs'));
+      expect(mockCloseTab).not.toHaveBeenCalled();
+      expect(screen.getByText('Other tabs have unsaved changes. Close them anyway?')).toBeInTheDocument();
+      fireEvent.click(screen.getByText('Close Others'));
+      expect(mockCloseTab).toHaveBeenCalledWith('tab-2');
+      expect(mockCloseTab).not.toHaveBeenCalledWith('tab-1');
+    });
+
     it('handles rename from context menu', () => {
       openContextMenu();
       fireEvent.click(screen.getByText('Rename'));
