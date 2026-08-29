@@ -123,6 +123,9 @@
   width: 100%;
   height: 100%;
   position: relative;
+  /* Own stacking context so the fixed vignette layer below can sit at
+     z-index:-1 UNDER the content without falling behind the page itself. */
+  isolation: isolate;
   font-family: 'Söhne', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
     Roboto, 'Helvetica Neue', Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -529,7 +532,7 @@
   content: '';
   position: fixed;
   inset: 0;
-  z-index: 0;
+  z-index: -1;
   pointer-events: none;
   background: radial-gradient(
     ellipse 80% 62% at 50% 58%,
@@ -538,8 +541,8 @@
     var(--stage-edge) 100%
   );
 }
-/* Chat content sits above the fixed vignette layer. */
-.kasal-chat-root > * {
-  position: relative;
-  z-index: 1;
-}
+/* No per-child stacking contexts: forcing z-index on every root child made
+   the LATER sibling (main) paint over the sidebar's fixed popovers — the
+   session context menu rendered but hit-tested to the chat scroll area, so
+   Rename/Delete clicks went nowhere. With the vignette at z-index:-1 inside
+   the isolated root, children stack naturally and fixed menus win again. */
