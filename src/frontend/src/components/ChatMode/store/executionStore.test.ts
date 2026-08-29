@@ -406,6 +406,21 @@ describe('executionStore - preview history', () => {
     expect(useExecutionStore.getState().previewHistory).toEqual([a]);
   });
 
+  it('startExecution CLOSES the pane on a fresh run — opening is always a user click', () => {
+    setCurrentSessionId('sess-X');
+    useExecutionStore.setState({ previewPaneOpen: true, chatCollapsed: true });
+    useExecutionStore.getState().startExecution('job-p', 'sess-X');
+    expect(useExecutionStore.getState().previewPaneOpen).toBe(false);
+    expect(useExecutionStore.getState().chatCollapsed).toBe(false);
+  });
+
+  it('startExecution with preservePreview keeps an open pane open (refine flow)', () => {
+    setCurrentSessionId('sess-X');
+    useExecutionStore.setState({ previewPaneOpen: true });
+    useExecutionStore.getState().startExecution('job-q', 'sess-X', { preservePreview: true });
+    expect(useExecutionStore.getState().previewPaneOpen).toBe(true);
+  });
+
   it('startExecution clears preview history', () => {
     setCurrentSessionId('sess-X'); // viewing the run's owner → drives the live slot
     useExecutionStore.setState({ previewHistory: [a, b] as any, previewIndex: 1 });
