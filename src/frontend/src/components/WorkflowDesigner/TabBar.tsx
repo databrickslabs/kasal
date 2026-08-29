@@ -163,6 +163,8 @@ const TabBar: React.FC<TabBarProps> = ({
   });
 
   const [closeAllConfirmDialog, setCloseAllConfirmDialog] = useState(false);
+  // "Close Other Tabs" — the id to KEEP; null while no confirm is pending.
+  const [closeOthersKeepId, setCloseOthersKeepId] = useState<string | null>(null);
 
   const handleTabChange = (_event: React.SyntheticEvent, newValue: string) => {
     if (disabled) {
@@ -195,6 +197,13 @@ const TabBar: React.FC<TabBarProps> = ({
       onLoadCrew();
     }
     handleNewTabMenuClose();
+  };
+
+  const closeOtherTabs = (keepId: string) => {
+    // Activate the kept tab FIRST so closing the current active tab never
+    // bounces focus through a tab that is about to disappear.
+    setActiveTab(keepId);
+    tabs.filter(tab => tab.id !== keepId).forEach(tab => closeTab(tab.id));
   };
 
   const handleCloseTab = (tabId: string, event: React.MouseEvent) => {
@@ -752,6 +761,21 @@ const TabBar: React.FC<TabBarProps> = ({
             Close Tab
           </MenuItem>
         )}
+        {tabs.length > 1 && (
+          <MenuItem onClick={() => {
+            const keepId = contextMenu?.tabId || '';
+            const othersDirty = tabs.some(tab => tab.id !== keepId && tab.isDirty);
+            if (othersDirty) {
+              setCloseOthersKeepId(keepId);
+            } else {
+              closeOtherTabs(keepId);
+            }
+            handleContextMenuClose();
+          }}>
+            <CloseIcon sx={{ mr: 1, fontSize: 18 }} />
+            Close Other Tabs
+          </MenuItem>
+        )}
         {tabs.length > 0 && (
           <>
             <Divider />
@@ -839,7 +863,54 @@ const TabBar: React.FC<TabBarProps> = ({
       </Dialog>
 
       {/* Close All Confirmation Dialog */}
+            {/* Close Other Tabs — confirm when any OTHER tab holds unsaved changes */}
       <Dialog
+        open={closeOthersKeepId !== null}
+        onClose={() => setCloseOthersKeepId(null)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <WarningIcon color="warning" />
+            Close Other Tabs
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Typography>
+            Other tabs have unsaved changes. Close them anyway?
+          </Typography>
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="body2" color="text.secondary">
+              Tabs with unsaved changes:
+            </Typography>
+            <Box sx={{ mt: 1 }}>
+              {tabs
+                .filter(tab => tab.id !== closeOthersKeepId && tab.isDirty)
+                .map(tab => (
+                  <Chip key={tab.id} label={tab.name} size="small" sx={{ mr: 1, mb: 1 }} />
+                ))}
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCloseOthersKeepId(null)} color="inherit">
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              if (closeOthersKeepId) closeOtherTabs(closeOthersKeepId);
+              setCloseOthersKeepId(null);
+            }}
+            color="error"
+            variant="contained"
+          >
+            Close Others
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+<Dialog
         open={closeAllConfirmDialog}
         onClose={() => setCloseAllConfirmDialog(false)}
         maxWidth="sm"
