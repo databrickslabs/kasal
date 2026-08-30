@@ -73,6 +73,10 @@ export interface AgentYaml {
   knowledge_sources?: any[];
   max_context_window_size?: number;
   max_tokens?: number;
+  /** Per-agent LLM overrides from the Agent form; absent = inherit the model. */
+  temperature?: number;
+  thinking_budget_tokens?: number;
+  reasoning_effort?: string;
   /** Injects current date into agent's context for time-sensitive tasks */
   inject_date?: boolean;
   /** Custom date format string (e.g., '%B %d, %Y') */

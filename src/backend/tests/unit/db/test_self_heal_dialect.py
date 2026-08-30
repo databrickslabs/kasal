@@ -131,7 +131,14 @@ class TestPostgresBranchIsTakenForALakebaseConnection:
         transaction and skipping every later step.
         """
         conn = _pg_conn_missing_columns(
-            ["id", "name", "skills", "thinking_budget_tokens", "reasoning_effort"]
+            [
+                "id",
+                "name",
+                "skills",
+                "thinking_budget_tokens",
+                "reasoning_effort",
+                "max_tokens",
+            ]
         )
         await _ensure_agent_columns(conn)
         assert _ddl(conn) == []

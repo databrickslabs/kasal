@@ -787,4 +787,48 @@ describe('JobExecutionService', () => {
       ).rejects.toThrow('No tasks configured');
     });
   });
+
+  // ===========================================================================
+  // Per-agent LLM overrides (Agent form)
+  // ===========================================================================
+
+  describe('per-agent LLM overrides', () => {
+    const runWith = async (agentData: Record<string, unknown>, models: Record<string, unknown> = {}) => {
+      (ModelService.getInstance as Mock).mockReturnValueOnce({
+        getActiveModels: vi.fn().mockResolvedValue(models),
+        getActiveModelsSync: vi.fn().mockReturnValue(models),
+      });
+      const svc = new JobExecutionService();
+      const agentNode = createMockAgentNode('agent-o', { llm: 'kat', ...agentData });
+      const taskNode = createMockTaskNode('task-o');
+      (apiClient.post as Mock).mockResolvedValue({ data: createMockJobResponse() });
+      await svc.executeJob([agentNode, taskNode], [createMockEdge('agent-o', 'task-o')]);
+      const config = (apiClient.post as Mock).mock.calls[0][1];
+      return config.agents_yaml['agent_agent-o'] as AgentYaml;
+    };
+
+    it('does not send LLM overrides from node data — the backend reads the saved agent', async () => {
+      // Node data is a copy, and older code stamped max_tokens onto it (the
+      // catalogue value, or 2000 when the model was unknown). Sending that
+      // would turn a stale stamp into a live override.
+      const agent = await runWith({
+        max_tokens: 2000,
+        temperature: 40,
+        thinking_budget_tokens: 2048,
+        thinking_effort: 'high',
+      });
+      for (const key of ['max_tokens', 'temperature', 'thinking_budget_tokens', 'reasoning_effort']) {
+        expect(key in agent).toBe(false);
+      }
+    });
+
+    it('no longer stamps the model\'s max_output_tokens onto an agent that set none', async () => {
+      // Stamping the catalogue value made "not set" and "set to the model's
+      // value" indistinguishable, so no override could ever apply. The model's
+      // context window is still copied — that one is not an override.
+      const agent = await runWith({}, { kat: { max_output_tokens: 8192, context_window: 131072 } });
+      expect('max_tokens' in agent).toBe(false);
+      expect(agent.max_context_window_size).toBe(131072);
+    });
+  });
 });

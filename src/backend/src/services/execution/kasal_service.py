@@ -30,6 +30,14 @@ from src.services.execution.status import ExecutionStatusService
 from src.services.flow_builder.kasal_flow_service import KasalFlowService
 from src.utils.user_context import GroupContext
 
+#: Per-agent LLM overrides stored on the agent row. NULL = inherit the model.
+_AGENT_LLM_OVERRIDE_FIELDS = (
+    "temperature",
+    "thinking_budget_tokens",
+    "reasoning_effort",
+    "max_tokens",
+)
+
 # Initialize logger
 crew_logger = LoggerManager.get_instance().crew
 
@@ -195,6 +203,18 @@ class KasalExecutionService:
                                     crew_logger.info(
                                         f"Found agent {agent_id} in database"
                                     )
+                                    # The per-agent LLM overrides (form fields, stored
+                                    # on the row) reach a run only through the payload,
+                                    # and the canvas payload never carried them: the
+                                    # temperature and thinking overrides were saved,
+                                    # shown, and ignored at run time. Same rule as
+                                    # tool_configs below — the payload wins when it
+                                    # carries the key; the row fills in what it left out.
+                                    for field in _AGENT_LLM_OVERRIDE_FIELDS:
+                                        if agent_config.get(field) is None:
+                                            value = getattr(db_agent, field, None)
+                                            if value is not None:
+                                                agent_config[field] = value
                                     crew_logger.info(
                                         f"Agent has tool_configs attribute: {hasattr(db_agent, 'tool_configs')}"
                                     )

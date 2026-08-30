@@ -158,6 +158,45 @@ def _apply_thinking_overrides(llm: Any, spec: Dict[str, Any], label: str = "") -
         logger.debug(f"Could not apply thinking overrides for agent {label}: {e}")
 
 
+def _apply_output_cap_override(llm: Any, spec: Dict[str, Any], label: str = "") -> None:
+    """Let an AGENT override the model row's max output tokens.
+
+    Same contract as the temperature and thinking overrides: a value on the
+    agent replaces the model's ``max_output_tokens`` for that agent only; blank
+    inherits. Until this existed the field was accepted end to end and read by
+    nothing — the run payload carried ``max_tokens``, the kernel put it on
+    ``runtime.Agent.max_tokens``, and the LLM kept the catalogue value. Observed
+    on a research run whose wrap-up spent its whole 8,192-token catalogue
+    allowance thinking; the only lever was the workspace-wide model row.
+
+    Written onto whichever field the built client already carries: LLMManager
+    builds GPT-5-family clients with ``max_completion_tokens`` (they reject
+    ``max_tokens``) and everything else with ``max_tokens`` — the split
+    ``core.llm.output_cap`` describes. Overriding the field that is set keeps
+    the request on the parameter the endpoint accepts.
+
+    Never raises: a size preference must not be able to fail an execution.
+    """
+    if llm is None or isinstance(llm, str):
+        return
+    value = spec.get("max_tokens")
+    if value is None:
+        return
+    try:
+        cap = int(value)
+        if cap <= 0:
+            return
+        field = (
+            "max_completion_tokens"
+            if getattr(llm, "max_completion_tokens", None)
+            else "max_tokens"
+        )
+        setattr(llm, field, cap)
+        logger.info(f"Agent {label} overrides max output tokens: {cap} ({field})")
+    except Exception as e:  # noqa: BLE001 — a preference must never fail a run
+        logger.debug(f"Could not apply max output tokens for agent {label}: {e}")
+
+
 def _apply_reasoning_effort_unsafe(llm: Any, spec: Dict[str, Any], label: str) -> None:
     """Body of :func:`_apply_reasoning_effort`; see it for the contract."""
     from src.utils.model_config import (
@@ -303,6 +342,7 @@ async def build_agent_llm(
     # Reasoning = the model's native thinking budget, applied to the agent's own LLM.
     _apply_reasoning_effort(llm, spec, label=label)
     _apply_thinking_overrides(llm, spec, label=label)
+    _apply_output_cap_override(llm, spec, label=label)
 
     # What this agent will actually run with, logged HERE so all three paths
     # report it identically — chat, crew and flow all reach this function, and

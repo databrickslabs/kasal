@@ -39,7 +39,7 @@ import SkillSelector from '../Common/SkillSelector';
 import { Agent, AgentFormProps, KnowledgeSource } from '../../types/workflow/agent';
 import { ModelService } from '../../api/config/ModelService';
 import { Models } from '../../types/config/models';
-import ThinkingFields from '../Common/ThinkingFields';
+import ModelOverrideFields from './ModelOverrideFields';
 import { PerplexityConfig, SerperConfig } from '../../types/workflow/config';
 
 import { GenerateService } from '../../api/workflow/GenerateService';
@@ -106,6 +106,7 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
       backstory: initialData?.backstory || '',
       llm: initialData?.llm || getDefaultModel(),
       temperature: initialData?.temperature || undefined,
+      max_tokens: initialData?.max_tokens ?? undefined,
       tools: initialData?.tools ? initialData.tools.map(id => String(id)) : [],
       skills: initialData?.skills ?? [],
       function_calling_llm: initialData?.function_calling_llm || undefined,
@@ -233,6 +234,10 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
     
     // Make a deep copy of the formData to avoid modifying the original
     const agentToSave = JSON.parse(JSON.stringify(formData));
+    // Blank means "inherit the model's max_output_tokens", and that has to reach
+    // the database: JSON drops undefined, so clearing the field would otherwise
+    // leave the old override in place. null is what the API clears on.
+    agentToSave.max_tokens = formData.max_tokens ?? null;
     
     // Build tool_configs for tools that need configuration
     let updatedToolConfigs = { ...toolConfigs };
@@ -1085,53 +1090,22 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                       </Select>
                     </FormControl>
                   </Grid>
-                  {/* Gated on the SELECTED model. Offering an override for a
-                      parameter the endpoint refuses produces a failed run, not a
-                      fallback: claude-opus-5 and every gpt-5* reject
-                      `temperature` outright. `refused_params` is derived
-                      server-side from measured capability — see backend
-                      core/llm/model_capabilities.py — so this cannot drift from
-                      what the request builder sends. */}
-                  {selectedModelAcceptsParam('temperature') && (
-                  <Grid item xs={12}>
-                    <TextField
-                      fullWidth
-                      type="number"
-                      label="Temperature Override (0-100)"
-                      value={formData.temperature || ''}
-                      onChange={(e) => {
-                        const value = e.target.value ? parseInt(e.target.value) : undefined;
-                        if (value === undefined || (value >= 0 && value <= 100)) {
-                          handleInputChange('temperature', value);
-                        }
-                      }}
-                      helperText="Override the default model temperature. 0 = deterministic, 100 = creative. Leave empty to use model default."
-                      InputProps={{
-                        inputProps: { min: 0, max: 100 }
-                      }}
-                    />
-                  </Grid>
-                  )}
-                  {/* Per-agent thinking override. Blank inherits the model's
-                      workspace default, matching the temperature override above,
-                      and the control shown depends on what THIS model takes:
-                      a token budget, an effort level, or neither. */}
-                  <Grid item xs={12}>
-                    <ThinkingFields
-                      overrideMode
-                      thinkingMode={selectedModel?.thinking_mode}
-                      allowedEfforts={selectedModel?.allowed_efforts}
-                      returnsThinkingText={selectedModel?.returns_thinking_text}
-                      budgetTokens={formData.thinking_budget_tokens ?? null}
-                      onBudgetTokensChange={(value) =>
-                        handleInputChange('thinking_budget_tokens', value ?? undefined)
-                      }
-                      effort={formData.thinking_effort ?? null}
-                      onEffortChange={(value) =>
-                        handleInputChange('thinking_effort', value ?? undefined)
-                      }
-                    />
-                  </Grid>
+                  {/* Per-agent overrides of the model row (temperature, max
+                      output tokens, thinking). Blank inherits the model's
+                      workspace default; which controls appear follows the
+                      SELECTED model's measured capability. */}
+                  <ModelOverrideFields
+                    acceptsTemperature={selectedModelAcceptsParam('temperature')}
+                    temperature={formData.temperature}
+                    maxTokens={formData.max_tokens}
+                    modelMaxOutputTokens={selectedModel?.max_output_tokens}
+                    thinkingMode={selectedModel?.thinking_mode}
+                    allowedEfforts={selectedModel?.allowed_efforts}
+                    returnsThinkingText={selectedModel?.returns_thinking_text}
+                    thinkingBudgetTokens={formData.thinking_budget_tokens}
+                    thinkingEffort={formData.thinking_effort}
+                    onChange={handleInputChange}
+                  />
                   {/* "Function Calling LLM" was removed here. It was a CrewAI-era
                       field that survived the move to Kasal's own runtime and did
                       NOTHING: runtime/agent.py declares it

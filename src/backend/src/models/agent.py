@@ -43,6 +43,12 @@ class Agent(Base):
     #: whichever the new model accepts.
     thinking_budget_tokens = Column(Integer, nullable=True)
     reasoning_effort = Column(String, nullable=True)
+    #: Per-agent max OUTPUT tokens. NULL inherits the model row's
+    #: `max_output_tokens`, the same contract as the overrides above. Applied to
+    #: the agent's own LLM by kernel/agent_builder._apply_output_cap_override on
+    #: whichever field that model takes (`max_tokens`, or `max_completion_tokens`
+    #: for the GPT-5 family). Reasoning tokens count against it.
+    max_tokens = Column(Integer, nullable=True)
     tools = Column(JSON, default=list, nullable=False)
     #: Agent Skills attached to this agent, BY NAME. Names rather than ids
     #: because a skill's name is its identity in the format — it must match the

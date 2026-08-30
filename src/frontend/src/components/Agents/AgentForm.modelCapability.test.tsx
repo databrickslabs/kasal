@@ -12,10 +12,11 @@
  * (backend core/llm/model_capabilities.py) and merely consumed by this form. The
  * fixtures below carry the real measured values.
  */
-import { vi, beforeEach, describe, it, expect } from 'vitest';
+import { vi, beforeEach, describe, it, expect, Mock } from 'vitest';
 import React from 'react';
-import { render, screen, act, waitFor } from '@testing-library/react';
+import { render, screen, act, waitFor, fireEvent } from '@testing-library/react';
 import AgentForm from './AgentForm';
+import { AgentService } from '../../api/workflow/AgentService';
 
 vi.mock('../../api/workflow/AgentService', () => ({
   AgentService: {
@@ -65,6 +66,7 @@ vi.mock('../../api/config/ModelService', () => ({
           name: 'databricks-llama-4-maverick',
           provider: 'databricks',
           enabled: true,
+          max_output_tokens: 8192,
           thinking_mode: null,
           allowed_efforts: [],
           refused_params: [],
@@ -218,3 +220,57 @@ describe('AgentForm — controls follow the selected model', () => {
     });
   });
 });
+
+describe('AgentForm — max output tokens override', () => {
+  const props = { tools: [], onCancel: vi.fn(), onAgentSaved: vi.fn() };
+
+  const renderEditing = async (extra: Record<string, unknown> = {}) => {
+    render(
+      <AgentForm
+        {...props}
+        initialData={{
+          id: 'a1',
+          name: 'A',
+          role: 'R',
+          goal: 'G',
+          backstory: 'B',
+          llm: 'databricks-llama-4-maverick',
+          tools: [],
+          ...extra,
+        } as never}
+      />,
+    );
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 150));
+    });
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('offers the override and names the model ceiling that blank inherits', async () => {
+    await renderEditing();
+    expect(screen.getByLabelText(/Max Output Tokens Override/i)).toBeInTheDocument();
+    expect(screen.getByText(/max_output_tokens \(8192\)/)).toBeInTheDocument();
+  });
+
+  it('saves the typed value, and null when cleared so the row is actually cleared', async () => {
+    (AgentService.updateAgentFull as Mock).mockResolvedValue({ id: 'a1' });
+    await renderEditing({ max_tokens: 16000 });
+    const field = screen.getByLabelText(/Max Output Tokens Override/i) as HTMLInputElement;
+    expect(field.value).toBe('16000');
+
+    fireEvent.change(field, { target: { value: '32000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(AgentService.updateAgentFull).toHaveBeenCalled());
+    expect((AgentService.updateAgentFull as Mock).mock.calls[0][1].max_tokens).toBe(32000);
+
+    fireEvent.change(field, { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(AgentService.updateAgentFull).toHaveBeenCalledTimes(2));
+    // JSON drops undefined; null is what the API clears on.
+    expect((AgentService.updateAgentFull as Mock).mock.calls[1][1].max_tokens).toBeNull();
+  });
+});
+

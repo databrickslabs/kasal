@@ -37,6 +37,14 @@ class AgentBase(BaseModel):
             "another. None inherits the model's value."
         ),
     )
+    max_tokens: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Max output tokens override for this agent's LLM, reasoning included. "
+            "None inherits the model's max_output_tokens."
+        ),
+    )
     tools: List[Any] = Field(default_factory=list)
     #: Agent Skills, by name. See the model for why names rather than ids.
     #:
@@ -214,6 +222,14 @@ class AgentUpdate(BaseModel):
             "against THAT model's accepted values at build time — the scales "
             "differ per model, so 'high' being valid for one says nothing about "
             "another. None inherits the model's value."
+        ),
+    )
+    max_tokens: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Max output tokens override for this agent's LLM, reasoning included. "
+            "None inherits the model's max_output_tokens."
         ),
     )
     tools: Optional[List[Any]] = None

@@ -8,6 +8,7 @@ import pytest
 
 from src.services.execution.kernel.agent_builder import (
     DEFAULT_REASONING_EFFORT,
+    _apply_output_cap_override,
     build_agent,
     build_agent_kwargs,
     build_agent_llm,
@@ -347,17 +348,15 @@ class TestThePlanToolFollowsTheHarness:
     """
 
     def test_kasal_gets_it(self):
-        from src.services.execution.harnesses import bind
+        from src.services.execution.harnesses import active_harness, bind
         from src.services.execution.harnesses.binding import Capability
-        from src.services.execution.harnesses import active_harness
 
         with bind("kasal"):
             assert Capability.AGENT_PLAN in active_harness().capabilities()
 
     def test_crewai_does_not(self):
-        from src.services.execution.harnesses import bind
+        from src.services.execution.harnesses import active_harness, bind
         from src.services.execution.harnesses.binding import Capability
-        from src.services.execution.harnesses import active_harness
 
         with bind("crewai"):
             assert Capability.AGENT_PLAN not in active_harness().capabilities()
@@ -371,3 +370,46 @@ class TestThePlanToolFollowsTheHarness:
 
         source = inspect.getsource(agent_builder)
         assert "Capability.AGENT_PLAN in harness.capabilities()" in source
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _apply_output_cap_override — the per-agent max output tokens override
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestApplyOutputCapOverride:
+    """The Agent form's "Max Output Tokens Override". Until this function
+    existed the field travelled end to end and was read by nothing."""
+
+    class _LLM:
+        def __init__(self, **fields):
+            self.model = "m"
+            for k, v in fields.items():
+                setattr(self, k, v)
+
+    def test_overrides_max_tokens_on_a_plain_model(self):
+        llm = self._LLM(max_tokens=8192)
+        _apply_output_cap_override(llm, {"max_tokens": 16000}, label="a")
+        assert llm.max_tokens == 16000
+
+    def test_overrides_the_field_a_gpt5_client_was_built_with(self):
+        # LLMManager builds GPT-5-family clients with max_completion_tokens
+        # (they reject max_tokens); the override must land on THAT field.
+        llm = self._LLM(max_completion_tokens=128000)
+        _apply_output_cap_override(llm, {"max_tokens": 32000}, label="a")
+        assert llm.max_completion_tokens == 32000
+        assert not hasattr(llm, "max_tokens")
+
+    def test_blank_inherits_the_model_row(self):
+        llm = self._LLM(max_tokens=8192)
+        _apply_output_cap_override(llm, {}, label="a")
+        _apply_output_cap_override(llm, {"max_tokens": None}, label="a")
+        assert llm.max_tokens == 8192
+
+    def test_never_fails_a_run(self):
+        llm = self._LLM(max_tokens=8192)
+        _apply_output_cap_override(llm, {"max_tokens": "not a number"}, label="a")
+        _apply_output_cap_override(llm, {"max_tokens": 0}, label="a")
+        _apply_output_cap_override("string-llm", {"max_tokens": 5}, label="a")
+        _apply_output_cap_override(None, {"max_tokens": 5}, label="a")
+        assert llm.max_tokens == 8192

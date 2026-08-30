@@ -106,7 +106,12 @@ export interface Agent {
   respect_context_window?: boolean;
   reasoning?: boolean;
   max_reasoning_attempts?: number;
-  max_tokens?: number;
+  /**
+   * Max output tokens override for this agent's LLM (reasoning included).
+   * Blank/null inherits the model row's `max_output_tokens`, like `temperature`;
+   * null is sent explicitly on save so clearing the field actually clears it.
+   */
+  max_tokens?: number | null;
   max_context_window_size?: number;
   /** Injects current date into agent's context for time-sensitive tasks (default: true) */
   inject_date?: boolean;

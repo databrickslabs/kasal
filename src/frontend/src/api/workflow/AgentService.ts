@@ -40,7 +40,6 @@ export class AgentService {
         use_system_prompt: true,
         respect_context_window: true,
         memory: true,
-        max_tokens: 2000, // Default max output tokens
         max_context_window_size: 8192, // Default context window size
         max_rpm: 10, // Default RPM to prevent rate limiting
       };
@@ -56,11 +55,7 @@ export class AgentService {
             if (modelConfig.context_window) {
               defaultValues.max_context_window_size = modelConfig.context_window;
             }
-            
-            // Update max_tokens based on model configuration
-            if (modelConfig.max_output_tokens) {
-              defaultValues.max_tokens = modelConfig.max_output_tokens;
-            }
+
           }
         } catch (error) {
           console.error('Error getting models from ModelService:', error);
@@ -93,7 +88,6 @@ export class AgentService {
         use_system_prompt: true,
         respect_context_window: true,
         memory: true,
-        max_tokens: 2000, // Default max output tokens
         max_context_window_size: 8192, // Default context window size
         max_rpm: 10, // Default RPM to prevent rate limiting
       };
@@ -109,11 +103,7 @@ export class AgentService {
             if (modelConfig.context_window) {
               defaultValues.max_context_window_size = modelConfig.context_window;
             }
-            
-            // Update max_tokens based on model configuration
-            if (modelConfig.max_output_tokens) {
-              defaultValues.max_tokens = modelConfig.max_output_tokens;
-            }
+
           }
         } catch (error) {
           console.error('Error getting models from ModelService:', error);
@@ -123,9 +113,6 @@ export class AgentService {
             const modelConfig = fallbackModels[agent.llm];
             if (modelConfig.context_window) {
               defaultValues.max_context_window_size = modelConfig.context_window;
-            }
-            if (modelConfig.max_output_tokens) {
-              defaultValues.max_tokens = modelConfig.max_output_tokens;
             }
           }
         }
@@ -197,22 +184,13 @@ export class AgentService {
             } else if (!agent.max_context_window_size) {
               agent.max_context_window_size = 8192; // Default fallback
             }
-            
-            // Set max_tokens from model configuration
-            if (modelConfig.max_output_tokens) {
-              agent.max_tokens = modelConfig.max_output_tokens;
-            } else if (!agent.max_tokens) {
-              agent.max_tokens = 2000; // Default fallback
-            }
+
           } else {
             // Model not in configuration, set defaults if not already set
             if (!agent.max_context_window_size) {
               agent.max_context_window_size = 8192;
             }
-            
-            if (!agent.max_tokens) {
-              agent.max_tokens = 2000;
-            }
+
           }
         } catch (error) {
           console.error('Error getting models from ModelService:', error);
@@ -227,22 +205,13 @@ export class AgentService {
             } else if (!agent.max_context_window_size) {
               agent.max_context_window_size = 8192;
             }
-            
-            // Set max_tokens from model configuration
-            if (modelConfig.max_output_tokens) {
-              agent.max_tokens = modelConfig.max_output_tokens;
-            } else if (!agent.max_tokens) {
-              agent.max_tokens = 2000;
-            }
+
           } else {
             // Set defaults if not already set
             if (!agent.max_context_window_size) {
               agent.max_context_window_size = 8192;
             }
-            
-            if (!agent.max_tokens) {
-              agent.max_tokens = 2000;
-            }
+
           }
         }
       } else {
@@ -250,10 +219,7 @@ export class AgentService {
         if (!agent.max_context_window_size) {
           agent.max_context_window_size = 8192;
         }
-        
-        if (!agent.max_tokens) {
-          agent.max_tokens = 2000;
-        }
+
       }
       
       // Set up default memory configuration if memory is enabled but embedder_config is missing

@@ -234,6 +234,13 @@ export class JobExecutionService {
               max_retry_limit: agentData.max_retry_limit,
               use_system_prompt: agentData.use_system_prompt,
               respect_context_window: agentData.respect_context_window,
+              // The per-agent LLM overrides (temperature, thinking, max output
+              // tokens) are deliberately NOT read from node data. Node data is
+              // a copy, and older code stamped `max_tokens` onto every agent
+              // with the catalogue value — or 2000 when it could not find the
+              // model — so a saved canvas would send that as a real override.
+              // The backend reads them from the saved agent row instead
+              // (kasal_service enrichment), which is what the Agent form wrote.
               reasoning: agentData.reasoning,
               max_reasoning_attempts: agentData.max_reasoning_attempts,
               embedder_config: agentData.embedder_config,
@@ -253,11 +260,10 @@ export class JobExecutionService {
                 agentConfig.max_context_window_size = modelConfig.context_window;
                 console.log(`Set max_context_window_size=${modelConfig.context_window} for ${agentData.llm}`);
               }
-              // Set max tokens from model configuration
-              if (modelConfig.max_output_tokens) {
-                agentConfig.max_tokens = modelConfig.max_output_tokens;
-                console.log(`Set max_tokens=${modelConfig.max_output_tokens} for ${agentData.llm}`);
-              }
+              // max_tokens is NOT copied from the model here any more. Stamping
+              // the catalogue value onto every agent made "not set" and "set to
+              // the model's value" indistinguishable, so an agent's own override
+              // (or the saved one the backend falls back to) could never apply.
             }
 
             // Remove undefined and null values to keep the YAML clean

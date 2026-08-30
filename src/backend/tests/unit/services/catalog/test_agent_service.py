@@ -910,3 +910,45 @@ async def test_delete_all_for_group_with_agents():
     # Two deletes (tasks then agents) committed on the private connection
     assert iso_session.execute.await_count == 2
     iso_session.commit.assert_awaited_once()
+
+
+# ---- clearing a per-agent LLM override ----
+
+
+@pytest.mark.asyncio
+async def test_update_with_group_check_keeps_an_explicit_null_override():
+    """`max_tokens: null` means "stop overriding, use the model's value", and
+    exclude_none used to drop it with the unset fields — the old override
+    stayed in place and nothing said why."""
+    svc = make_service()
+    agent = make_agent()
+    group_ctx = MagicMock()
+    obj_in = MagicMock()
+    obj_in.model_dump.side_effect = lambda **kw: (
+        {"name": "n", "max_tokens": None, "temperature": None}
+        if kw.get("exclude_unset")
+        else {"name": "n"}
+    )
+    svc.repository.update = AsyncMock(return_value=agent)
+    with patch.object(
+        svc, "get_with_group_check", new_callable=AsyncMock, return_value=agent
+    ):
+        await svc.update_with_group_check("a1", obj_in, group_ctx)
+    svc.repository.update.assert_awaited_once_with(
+        "a1", {"name": "n", "max_tokens": None, "temperature": None}
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_with_group_check_leaves_unsent_overrides_alone():
+    svc = make_service()
+    agent = make_agent()
+    group_ctx = MagicMock()
+    obj_in = MagicMock()
+    obj_in.model_dump.side_effect = lambda **kw: {"name": "n"}
+    svc.repository.update = AsyncMock(return_value=agent)
+    with patch.object(
+        svc, "get_with_group_check", new_callable=AsyncMock, return_value=agent
+    ):
+        await svc.update_with_group_check("a1", obj_in, group_ctx)
+    svc.repository.update.assert_awaited_once_with("a1", {"name": "n"})

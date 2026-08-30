@@ -1252,9 +1252,10 @@ async def _ensure_agent_columns(conn) -> None:
     # (name, sqlite type, postgres type)
     columns = [
         ("skills", "TEXT", "JSONB"),
-        # Per-agent thinking overrides; NULL inherits the model row.
+        # Per-agent thinking / output-token overrides; NULL inherits the model row.
         ("thinking_budget_tokens", "INTEGER", "INTEGER"),
         ("reasoning_effort", "TEXT", "VARCHAR"),
+        ("max_tokens", "INTEGER", "INTEGER"),
     ]
     try:
         if is_sqlite:
@@ -1282,7 +1283,7 @@ async def _ensure_agent_columns(conn) -> None:
                         f"ALTER TABLE agents ADD COLUMN IF NOT EXISTS {name} {pg_type}"
                     )
                     logger.info(f"Added agents.{name} column")
-            logger.info("Ensured agents columns (skills, thinking overrides)")
+            logger.info("Ensured agents columns (skills, thinking/output overrides)")
     except Exception as e:
         logger.warning(f"Could not ensure agents columns: {e}")
 

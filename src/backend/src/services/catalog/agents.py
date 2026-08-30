@@ -18,6 +18,33 @@ from src.utils.user_context import GroupContext
 logger = logging.getLogger(__name__)
 
 
+#: Per-agent LLM overrides whose NULL means "inherit the model row". Clearing
+#: one has to reach the database, and exclude_none drops an explicit null along
+#: with the unset fields — see _keep_explicit_clears.
+_CLEARABLE_OVERRIDES = (
+    "max_tokens",
+    "temperature",
+    "thinking_budget_tokens",
+    "reasoning_effort",
+)
+
+
+def _keep_explicit_clears(obj_in: Any, update_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Put back the override fields the caller SENT as null.
+
+    A partial update dumps with exclude_none so an untouched field stays
+    untouched. For the overrides that is the wrong reading of null: the form
+    sends ``max_tokens: null`` to mean "stop overriding, use the model's
+    value", and dropping it left the old override in place with nothing
+    saying why. Only fields present in the request are affected.
+    """
+    sent = obj_in.model_dump(exclude_unset=True)
+    for field in _CLEARABLE_OVERRIDES:
+        if field in sent and sent[field] is None:
+            update_data[field] = None
+    return update_data
+
+
 class AgentService(BaseService[Agent, AgentCreate]):
     """
     Service for Agent model with business logic.
@@ -185,7 +212,9 @@ class AgentService(BaseService[Agent, AgentCreate]):
             Updated agent if found, else None (with decrypted tool_configs)
         """
         # Exclude unset fields (None) from update
-        update_data = obj_in.model_dump(exclude_none=True)
+        update_data = _keep_explicit_clears(
+            obj_in, obj_in.model_dump(exclude_none=True)
+        )
         if not update_data:
             # No fields to update
             return await self.get(id)
@@ -219,7 +248,9 @@ class AgentService(BaseService[Agent, AgentCreate]):
             return None
 
         # Exclude unset fields (None) from update
-        update_data = obj_in.model_dump(exclude_none=True)
+        update_data = _keep_explicit_clears(
+            obj_in, obj_in.model_dump(exclude_none=True)
+        )
         if not update_data:
             # No fields to update
             return agent

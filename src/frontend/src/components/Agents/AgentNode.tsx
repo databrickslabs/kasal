@@ -139,6 +139,9 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
           memory: data.memory,
           tool_configs: data.tool_configs,
           temperature: typeof data.temperature === 'number' ? data.temperature : undefined,
+          // max_tokens is NOT read from node data: older code stamped it there.
+          thinking_budget_tokens: typeof data.thinking_budget_tokens === 'number' ? data.thinking_budget_tokens : undefined,
+          thinking_effort: typeof data.thinking_effort === 'string' ? data.thinking_effort : undefined,
           function_calling_llm: data.function_calling_llm,
           max_rpm: data.max_rpm,
           max_execution_time: data.max_execution_time,
@@ -239,6 +242,12 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
               respect_context_window: updatedAgent.respect_context_window,
               embedder_config: updatedAgent.embedder_config,
               knowledge_sources: updatedAgent.knowledge_sources,
+              // Per-agent LLM overrides: keep the node in step with the saved
+              // agent, or the next run's payload carries the pre-edit values.
+              temperature: updatedAgent.temperature,
+              max_tokens: updatedAgent.max_tokens,
+              thinking_budget_tokens: updatedAgent.thinking_budget_tokens,
+              thinking_effort: updatedAgent.thinking_effort,
             }
           };
         }

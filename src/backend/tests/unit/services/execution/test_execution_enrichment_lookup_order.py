@@ -209,3 +209,30 @@ async def test_missing_tool_configs_in_the_payload_falls_back_to_the_row():
 
     assert config.agents_yaml[f"agent_{AGENT_UUID}"]["tool_configs"] == BROWSER
     assert config.tasks_yaml[f"task_{TASK_UUID}"]["tool_configs"] == BROWSER
+
+
+# The per-agent LLM overrides live on the agent ROW (Agent form) and the canvas
+# payload never carried them: temperature and the thinking overrides were saved,
+# shown, and ignored at run time; max_tokens joined them. The row fills in what
+# the payload leaves out, and the payload wins when it carries the key.
+@pytest.mark.asyncio
+async def test_agent_llm_overrides_fall_back_to_the_row():
+    config = _config({"max_tokens": 4000}, {})  # payload sets ONE override
+
+    await _enrich(
+        config,
+        db_agent=SimpleNamespace(
+            tool_configs={},
+            temperature=40,
+            thinking_budget_tokens=None,
+            reasoning_effort="high",
+            max_tokens=16000,
+        ),
+        db_task=SimpleNamespace(tool_configs={}),
+    )
+
+    agent = config.agents_yaml[f"agent_{AGENT_UUID}"]
+    assert agent["max_tokens"] == 4000  # payload wins
+    assert agent["temperature"] == 40  # row fills in
+    assert agent["reasoning_effort"] == "high"
+    assert "thinking_budget_tokens" not in agent  # NULL on the row: still absent
