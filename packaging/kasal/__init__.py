@@ -7,4 +7,4 @@ and ``frontend_static/`` (the built React UI). ``kasal.cli`` puts ``_app`` on
 the name never leaks into site-packages.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"

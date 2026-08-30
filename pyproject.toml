@@ -18,7 +18,7 @@
 
 [project]
 name = "kasal"
-version = "0.1.0"
+version = "0.1.1"
 description = "Kasal — AI agent workflow orchestration platform (self-contained server + UI)"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
