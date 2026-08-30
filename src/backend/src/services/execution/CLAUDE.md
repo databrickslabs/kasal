@@ -229,8 +229,5 @@ KasalEngineService              the hub, unchanged: dispatch, status, cancel
   binding, so they run on the selected engine while routing, HITL gates and
   per-crew checkpoints stay in `flow_builder/runtime/`.
 
-See `src/docs/dual-engine-plan.md` for the phases and what is still open.
-
 ## Related
-- `src/docs/dual-engine-plan.md` — the dual-engine plan and its status
 - `src/docs/crewai-engine-refactor-proposal.md` — the earlier refactor record

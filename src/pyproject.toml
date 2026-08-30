@@ -68,7 +68,6 @@ dependencies = [
     # services/execution/runtime/; which of the two executes a run is an
     # operator setting (Configuration -> Engines), resolved once per execution
     # and stamped on the row so a run — and its resume — sticks to one engine.
-    # See src/docs/dual-engine-plan.md.
     #
     # `crewai-tools` is deliberately absent. Kasal has 38 first-party tools and
     # adapts them onto whichever engine is active; crewai-tools would add
