@@ -318,7 +318,10 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
     if (data.taskId) {
       TaskService.updateTask(data.taskId, {
         tools: selectedTools,
-        tool_configs: Object.keys(updatedToolConfigs).length > 0 ? updatedToolConfigs : undefined,
+        // Always an object, never `undefined`: JSON drops undefined keys, so
+        // clearing the last MCP server never reached the database — the row
+        // kept its servers and the next run used them while the badge said 0.
+        tool_configs: updatedToolConfigs,
       }).catch(err => {
         console.error('Failed to persist tool/MCP selection:', err);
         showErrorMessage(

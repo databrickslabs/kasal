@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { Node, Edge } from 'reactflow';
-import { mergeToolConfigs } from './crewExecution';
+import { hiddenMcpServers, mergeToolConfigs } from './crewExecution';
 
 /**
  * Extract and test the node resolution logic used in handleRunClick.
@@ -676,5 +676,38 @@ describe('crewExecution - mergeToolConfigs (pre-run refresh)', () => {
       GenieTool: { spaceId: 'a' },
     });
     expect(mergeToolConfigs(['array'], undefined)).toBeUndefined();
+  });
+});
+
+/**
+ * The other direction of the same bug. A task had the browser MCP attached
+ * (saved), the user removed it on the canvas (badge "MCP: 0"), the save sent
+ * `undefined` and so changed nothing, and the pre-run union put the DB's
+ * servers back: the trace showed browser_web_search while the node said 0.
+ */
+describe('crewExecution - the canvas is the truth for MCP servers', () => {
+  const browser = { MCP_SERVERS: { servers: ['browser'] } };
+
+  it('drops a DB MCP selection the canvas removed', () => {
+    expect(mergeToolConfigs({}, browser)).toEqual({});
+  });
+
+  it('drops it while still picking up other DB-only entries', () => {
+    const db = { ...browser, GenieTool: { spaceId: 'abc' } };
+    expect(mergeToolConfigs({}, db)).toEqual({ GenieTool: { spaceId: 'abc' } });
+  });
+
+  it('keeps the DB selection for a node that never had tool_configs', () => {
+    expect(mergeToolConfigs(undefined, browser)).toEqual(browser);
+  });
+
+  it('reports the servers a run will use that the node does not show', () => {
+    expect(hiddenMcpServers(undefined, mergeToolConfigs(undefined, browser))).toEqual(['browser']);
+  });
+
+  it('reports nothing when the node has a tool_configs object', () => {
+    expect(hiddenMcpServers({}, mergeToolConfigs({}, browser))).toEqual([]);
+    const canvas = { MCP_SERVERS: { servers: ['postgres'] } };
+    expect(hiddenMcpServers(canvas, mergeToolConfigs(canvas, browser))).toEqual([]);
   });
 });

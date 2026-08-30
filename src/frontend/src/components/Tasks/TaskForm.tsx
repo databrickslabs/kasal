@@ -580,7 +580,7 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
         const cleanedFormData: Task = {
           ...formData,
           context: Array.from(formData.context),
-          tool_configs: Object.keys(updatedToolConfigs).length > 0 ? updatedToolConfigs : undefined,
+          tool_configs: updatedToolConfigs, // {} on purpose: undefined is dropped from JSON, leaving stale MCP servers in the DB
           // Ensure top-level markdown is synchronized with config.markdown
           markdown: formData.config.markdown ?? formData.markdown,
           // Sync llm_guardrail to top-level for database persistence

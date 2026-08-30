@@ -202,11 +202,10 @@ class KasalExecutionService:
                                         crew_logger.info(
                                             f"Agent tool_configs value from DB: {db_agent.tool_configs}"
                                         )
-                                        # Prefer YAML tool_configs if present and non-empty, otherwise use database
-                                        if (
-                                            "tool_configs" not in agent_config
-                                            or not agent_config.get("tool_configs")
-                                        ):
+                                        # The payload wins when it CARRIES tool_configs, {} included: the canvas
+                                        # sends {} for a node whose MCP servers were removed, and reading the
+                                        # row instead resurrected its stale MCP_SERVERS. No key -> the row.
+                                        if agent_config.get("tool_configs") is None:
                                             agent_config["tool_configs"] = (
                                                 db_agent.tool_configs or {}
                                             )
@@ -325,11 +324,8 @@ class KasalExecutionService:
                                         crew_logger.info(
                                             f"Task tool_configs value from DB: {db_task.tool_configs}"
                                         )
-                                        # Prefer YAML tool_configs if present and non-empty, otherwise use database
-                                        if (
-                                            "tool_configs" not in task_config
-                                            or not task_config.get("tool_configs")
-                                        ):
+                                        # Same rule as agents: an explicit {} is a decision, not an omission.
+                                        if task_config.get("tool_configs") is None:
                                             task_config["tool_configs"] = (
                                                 db_task.tool_configs or {}
                                             )

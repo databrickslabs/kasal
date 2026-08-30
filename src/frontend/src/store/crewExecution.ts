@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { Node, Edge } from 'reactflow';
 import { jobExecutionService } from '../api/execution/JobExecutionService';
 import { useWorkflowStore } from './workflow';
+import { useErrorStore } from './error';
 import { useTabManagerStore } from './tabManager';
 import { useFlowExecutionStore } from './flowExecutionStore';
 import { Tool } from '../types/workflow/tool';
@@ -27,6 +28,16 @@ import type { ReasoningConfig } from '../types/workflow/crews';
 
 type ToolConfigs = Record<string, unknown>;
 
+const isPlainObject = (v: unknown): v is ToolConfigs =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** The MCP server names in a ``tool_configs`` value, or none. */
+const mcpServersOf = (configs: unknown): string[] => {
+  if (!isPlainObject(configs)) return [];
+  const mcp = configs.MCP_SERVERS as { servers?: unknown } | undefined;
+  return Array.isArray(mcp?.servers) ? mcp.servers.map(String) : [];
+};
+
 /**
  * Merge the canvas node's ``tool_configs`` with the DB row's before a run.
  *
@@ -38,23 +49,46 @@ type ToolConfigs = Record<string, unknown>;
  * tool-less with no error anywhere.
  *
  * Union instead: neither side loses an entry, and on conflict the canvas wins
- * because that is what the user is looking at. The one case not covered is a
- * config the user removed on the canvas while the DB copy still has it — the
- * stale entry survives. That only diverges when a save failed; a successful save
- * updates both sides.
+ * because that is what the user is looking at.
+ *
+ * With one exception to the union: MCP servers. They are the entry the canvas
+ * edits in place (the node's "MCP: n" badge and its quick dialog), so a node
+ * that has a ``tool_configs`` object at all is the whole truth for them —
+ * including "none". The union used to resurrect a selection the user had
+ * removed: the save sent ``undefined`` for an emptied config, JSON dropped the
+ * key, the DB row kept its servers, and the next run called browser tools
+ * while the badge read "MCP: 0". A node with NO ``tool_configs`` (never had
+ * one) still takes the DB's selection, and the refresh then says so — see
+ * ``hiddenMcpServers``.
  */
 export const mergeToolConfigs = (canvas: unknown, db: unknown): ToolConfigs | undefined => {
-  const isPlainObject = (v: unknown): v is ToolConfigs =>
-    typeof v === 'object' && v !== null && !Array.isArray(v);
   const canvasConfigs = isPlainObject(canvas) ? canvas : {};
   const dbConfigs = isPlainObject(db) ? db : {};
-  const merged = { ...dbConfigs, ...canvasConfigs };
+  const merged: ToolConfigs = { ...dbConfigs, ...canvasConfigs };
+  if (isPlainObject(canvas) && !('MCP_SERVERS' in canvasConfigs)) {
+    delete merged.MCP_SERVERS;
+  }
   // Keep the field absent rather than writing an empty object, so a node that
   // never had tool_configs stays that way.
   if (Object.keys(merged).length === 0) {
     return isPlainObject(canvas) || isPlainObject(db) ? merged : undefined;
   }
   return merged;
+};
+
+/**
+ * MCP servers a run will use that the node does not display.
+ *
+ * Only possible when the node has no ``tool_configs`` object at all, so the
+ * merge kept the DB row's selection; a node that has the object is
+ * authoritative for MCP and can hide nothing. The pre-run refresh surfaces
+ * these in the UI: the console warning they used to get was invisible at the
+ * moment it mattered — the badge read "MCP: 0" while the trace showed
+ * ``browser_web_search`` being called.
+ */
+export const hiddenMcpServers = (canvas: unknown, merged: ToolConfigs | undefined): string[] => {
+  const shown = mcpServersOf(canvas);
+  return mcpServersOf(merged).filter((server) => !shown.includes(server));
 };
 
 /**
@@ -368,6 +402,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       // Force refresh tasks from database to get latest tools and configs
       console.log('[CrewExecution] Refreshing task data from database before execution');
       const { TaskService } = await import('../api/workflow/TaskService');
+      // Per task: MCP servers the run will use that its node does not show.
+      const mcpHiddenFromCanvas: string[] = [];
       nodes = await Promise.all(
         nodes.map(async (node) => {
           if (node.type === 'taskNode' && (node.data?.taskId || node.data?.id)) {
@@ -388,6 +424,13 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
                   node.data?.tool_configs,
                   (freshTask as unknown as Record<string, unknown>)?.tool_configs,
                 );
+                const hidden = hiddenMcpServers(node.data?.tool_configs, mergedToolConfigs);
+                if (hidden.length > 0) {
+                  mcpHiddenFromCanvas.push(
+                    `"${freshTask.name}" will run with MCP server(s) ${hidden.join(', ')} saved on ` +
+                    'the task, which its node does not show'
+                  );
+                }
                 return {
                   ...node,
                   data: {
@@ -407,6 +450,13 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
           return node;
         })
       );
+      if (mcpHiddenFromCanvas.length > 0) {
+        // The run proceeds — the DB selection is real — but the user must be
+        // told, in the UI, that it differs from what they are looking at.
+        useErrorStore.getState().showErrorMessage(
+          `${mcpHiddenFromCanvas.join('; ')}. Open the task and save its MCP selection to keep or remove them.`
+        );
+      }
 
       // Log the task nodes
       console.log('[CrewExecution] Task nodes before execution:',

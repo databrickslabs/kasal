@@ -331,7 +331,9 @@ describe('TaskNode', () => {
       await waitFor(() => {
         expect(mockUpdateTask).toHaveBeenCalledWith('task-123', {
           tools: ['tool-a', 'tool-b'],
-          tool_configs: undefined,
+          // `{}`, not `undefined`: an emptied MCP selection must reach the
+          // database, and JSON drops undefined keys.
+          tool_configs: {},
         });
       });
     });
