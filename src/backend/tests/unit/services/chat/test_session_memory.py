@@ -96,10 +96,10 @@ class TestWhatGetsRemembered:
         asked."""
         with (
             patch(
-                "src.services.memory.crew_memory.build_session_memory",
+                "src.services.memory.run.crew_memory.build_session_memory",
                 new=AsyncMock(return_value=MagicMock()),
             ),
-            patch("src.services.memory.hooks.remember_async") as remember,
+            patch("src.services.memory.run.persist.remember_async") as remember,
         ):
             await _save(_service())
 
@@ -113,10 +113,10 @@ class TestWhatGetsRemembered:
     async def test_an_activity_card_is_not_remembered(self):
         with (
             patch(
-                "src.services.memory.crew_memory.build_session_memory",
+                "src.services.memory.run.crew_memory.build_session_memory",
                 new=AsyncMock(return_value=MagicMock()),
             ),
-            patch("src.services.memory.hooks.remember_async") as remember,
+            patch("src.services.memory.run.persist.remember_async") as remember,
         ):
             await _save(_service(), content="[ui-card]")
 
@@ -127,10 +127,10 @@ class TestWhatGetsRemembered:
         """The exchange is the unit; the question is recorded with its answer."""
         with (
             patch(
-                "src.services.memory.crew_memory.build_session_memory",
+                "src.services.memory.run.crew_memory.build_session_memory",
                 new=AsyncMock(return_value=MagicMock()),
             ),
-            patch("src.services.memory.hooks.remember_async") as remember,
+            patch("src.services.memory.run.persist.remember_async") as remember,
         ):
             await _save(_service(), message_type="user", content="a question")
 
@@ -140,10 +140,10 @@ class TestWhatGetsRemembered:
     async def test_an_empty_answer_is_not_remembered(self):
         with (
             patch(
-                "src.services.memory.crew_memory.build_session_memory",
+                "src.services.memory.run.crew_memory.build_session_memory",
                 new=AsyncMock(return_value=MagicMock()),
             ),
-            patch("src.services.memory.hooks.remember_async") as remember,
+            patch("src.services.memory.run.persist.remember_async") as remember,
         ):
             await _save(_service(), content="   ")
 
@@ -156,7 +156,7 @@ class TestItNeverCostsTheAnswer:
         """Memory being down must not fail a message already persisted."""
         service = _service()
         with patch(
-            "src.services.memory.crew_memory.build_session_memory",
+            "src.services.memory.run.crew_memory.build_session_memory",
             new=AsyncMock(side_effect=RuntimeError("backend down")),
         ):
             result = await _save(service)
@@ -170,10 +170,10 @@ class TestItNeverCostsTheAnswer:
         go that is not someone else's store."""
         with (
             patch(
-                "src.services.memory.crew_memory.build_session_memory",
+                "src.services.memory.run.crew_memory.build_session_memory",
                 new=AsyncMock(return_value=MagicMock()),
             ) as build,
-            patch("src.services.memory.hooks.remember_async"),
+            patch("src.services.memory.run.persist.remember_async"),
         ):
             await _save(_service(), group_context=None)
 
@@ -184,10 +184,10 @@ class TestItNeverCostsTheAnswer:
         """`build_session_memory` returns None for the 'Disabled Configuration'."""
         with (
             patch(
-                "src.services.memory.crew_memory.build_session_memory",
+                "src.services.memory.run.crew_memory.build_session_memory",
                 new=AsyncMock(return_value=None),
             ),
-            patch("src.services.memory.hooks.remember_async") as remember,
+            patch("src.services.memory.run.persist.remember_async") as remember,
         ):
             await _save(_service())
 

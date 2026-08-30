@@ -1,4 +1,3 @@
-from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -8,7 +7,6 @@ from src.api.executions_router import (
     create_execution,
     force_stop_execution,
     generate_execution_name,
-    get_execution_status,
     get_execution_status_simple,
     health_check,
     list_executions,
@@ -18,7 +16,6 @@ from src.schemas.execution import (
     CrewConfig,
     ExecutionNameGenerationRequest,
     StopExecutionRequest,
-    StopType,
 )
 
 

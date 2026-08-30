@@ -172,46 +172,32 @@ Two rules, both learned the hard way:
 
 ## Memory Backend
 
-### Schema Layer Usage (CRITICAL)
-**ALWAYS use the centralized schema layer `DatabricksIndexSchemas` for all Databricks Vector Search operations:**
-- Use `DatabricksIndexSchemas.get_schema(memory_type)` to get field definitions
-- Use `DatabricksIndexSchemas.get_search_columns(memory_type)` for search operations
-- Use `DatabricksIndexSchemas.get_column_positions(memory_type)` for result parsing
-- **NEVER hardcode column names or positions** - always reference the schema
-- The schema supports memory types: "short_term", "long_term", "entity", "document"
-- When saving to DatabricksVectorStorage, build records using only fields that exist in the schema
+Memory lives in `src/services/memory/`, organised by lifecycle stage — read the
+package `__init__` first, then `src/docs/MEMORY.md`:
 
-### Repository Pattern Usage (CRITICAL)
-**ALWAYS use the repository pattern for database operations:**
-- Use `DatabricksVectorIndexRepository` for all Vector Search index operations
-- Repository methods handle async operations, authentication, and error handling
-- Available repository methods:
-  - `upsert()` - Insert or update records
-  - `similarity_search()` - Search for similar vectors
-  - `delete_records()` - Delete specific records
-  - `count_documents()` - Count documents with optional filters
-  - `describe_index()` - Get index metadata
-- **NEVER call index client methods directly** - always go through the repository
-- Handle async context properly when calling from sync code (use asyncio.run or ThreadPoolExecutor)
+| Package | Owns |
+|---|---|
+| `config/` | What a teamspace configured: the `memory_backends` rows, which one is active, the Lakebase table (`LakebaseMemoryService`) |
+| `storage/` | Where records live: `LocalStorageBackend` (SQLite, dev) and `LakebaseStorageBackend` (pgvector, prod) behind one `StorageBackend` protocol; `MemoryBackendFactory` builds one from a configuration; `EngineStorageAdapter` lets the engine talk to either |
+| `engine/` | The `Memory` object: `remember` (label, consolidate, save) and `recall` (search, distil, explore); `MemoryRecord` |
+| `run/` | A run's memory: `CrewMemoryService` builds the `Memory` for all three paths; `recall.py` before a task, `persist.py` after it |
+| `maintenance/` | Between runs: dedupe, merge, supersede, forget, and the sweep that schedules them |
 
-### Pydantic Schema Enum Handling (CRITICAL)
-**When working with Pydantic schemas that have `use_enum_values = True`:**
-- Enum fields like `IndexState` are automatically converted to string values
-- **NEVER access `.value` attribute** - the field already contains the string value
-- Example: `index_response.index.state` is already a string like "READY" or "NOT_FOUND"
-- Common mistake: `index_response.index.state.value` will cause "'str' object has no attribute 'value'" error
+Rules that are easy to get wrong:
 
-### Disabled Configuration
-- All memory types disabled = "Disabled Configuration"
-- System ignores it and falls back to default ChromaDB + SQLite
-- Default memory creates storage in `/Library/Application Support/kasal_default_[crew_id]/`
-
-### Crew Memory Persistence
-- Crew ID generated from hash of: agent roles, task names, crew name, model, group_id
-- NOTE: run_name is NOT included - this ensures memory persists across all runs of the same crew structure
-- Same crew configuration (agents, tasks, model) gets same ID across ALL runs
-- Group_id ensures complete tenant isolation
-- Long-Term Memory uses EXACT TEXT MATCH on task_description (engine design, inherited from crewAI)
+- **Every Memory Tuning knob must reach the layer that uses it.** Scoring
+  weights go to the storage backend via `MemoryBackendFactory._scoring_kwargs`;
+  everything else must be a declared field on `engine.Memory` — pydantic drops
+  unknown kwargs silently, which is how five knobs were inert for months.
+- **The crew id is deterministic and never scopes a read.** It hashes agent
+  roles, task names, crew name, model and group — NOT the run name — so memory
+  persists across runs of the same crew structure. Recall scopes by
+  `group_id` (the tenant boundary); `crew_id` is provenance only.
+- **Databricks Vector Search memory is retired.** A `databricks` backend row
+  degrades to the local store; the knowledge/documentation indexes still read
+  their workspace and endpoint from it, so the row must keep parsing.
+- **The "Disabled Configuration"** (all memory types off) is honoured as "no
+  memory" — the run proceeds without recall or persistence.
 
 ## Testing Requirements
 

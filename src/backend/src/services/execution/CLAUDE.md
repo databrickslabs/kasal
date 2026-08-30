@@ -103,9 +103,12 @@ services/
   path has none and must not get one. See `src/docs/CHECKPOINTING.md`.
 - **Guardrails**: build via `GuardrailFactory.create_guardrail` from
   `src.services.guardrails`.
-- **Memory**: `src.services.memory` — `MemoryBackendFactory` + `CrewMemoryService`,
-  with `memory/hooks.py` for recall/persist around a task. See
-  `src/backend/CLAUDE.md` for crew-ID determinism and Vector Search schema rules.
+- **Memory**: `src.services.memory`, organised by lifecycle stage —
+  `config/` (what the teamspace configured), `storage/` (the backends and
+  `MemoryBackendFactory`), `engine/` (the `Memory` object), `run/`
+  (`CrewMemoryService` builds a run's `Memory`; `recall.py` before a task,
+  `persist.py` after it), `maintenance/` (between runs). The package
+  `__init__` is the map; `src/docs/MEMORY.md` is the full account.
 - All work here is async; Databricks calls need User-Agent telemetry
   (`src/backend/CLAUDE.md`).
 

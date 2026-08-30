@@ -170,8 +170,7 @@ def supersede_outdated_facts(memory: Any, scope: str | None = None) -> dict[str,
 
     if stats["superseded"]:
         logger.info(
-            "Memory supersession: retired %d outdated fact(s) "
-            "(scanned %d, scope=%s)",
+            "Memory supersession: retired %d outdated fact(s) (scanned %d, scope=%s)",
             stats["superseded"],
             stats["scanned"],
             scope or "root",

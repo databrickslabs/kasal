@@ -5,8 +5,6 @@
  * everything here is a plain function so both hosts stay in lock-step on what
  * a run's memory IS while styling it their own way.
  */
-import { Run } from '../../types/execution/run';
-
 export interface MemoryRecord {
   id: string | null;
   content: string;
@@ -34,10 +32,6 @@ export interface RecordsResponse {
 // simulation on each data change). So they fetch the entire remainder in ONE
 // request — one round-trip, one simulation — capped at this many records.
 export const BULK_FETCH = 5000;
-
-// Memory can be written a little after a run's completed_at; extend the window
-// end by this much so trailing writes still fall inside the run.
-export const RUN_END_BUFFER_MS = 2 * 60 * 1000;
 
 /**
  * Parse a timestamp to epoch ms; 0 when missing/invalid.
@@ -221,53 +215,6 @@ export const importanceColor = (v: number): string => {
   return '#94a3b8';                // slate — low
 };
 
-/**
- * Time window for a run, anchored on completed_at.
- *
- * IMPORTANT: a run's `created_at` is stored in LOCAL time, while `completed_at`
- * and memory record `created_at` are UTC — so created_at is NOT comparable to
- * memory timestamps (it can be hours off). We therefore window on completed_at:
- * a run owns records written after the previous (older) run finished, up to
- * its own completion (+ a small buffer for trailing writes). For a still-
- * running latest run we extend to "now". We test only the SELECTED run's own
- * window, so runs can't steal each other's records.
- */
-export function runWindowFor(
-  runs: Run[],
-  runId: string,
-): { start: number; end: number } | null {
-  if (!runId) return null;
-  const idx = runs.findIndex((r) => r.job_id === runId);
-  if (idx < 0) return null;
-  const completedMs = (r: Run | undefined) =>
-    r && r.completed_at ? timeMs(r.completed_at) : null;
-  const end = (completedMs(runs[idx]) ?? Date.now()) + RUN_END_BUFFER_MS;
-  // Start = the nearest OLDER run that has a completion time.
-  let start = -Infinity;
-  for (let j = idx + 1; j < runs.length; j++) {
-    const c = completedMs(runs[j]);
-    if (c != null) {
-      start = c;
-      break;
-    }
-  }
-  return { start, end };
-}
-
-/** Records written within the run's window — what the run SAVED. */
-export function recordsSavedInRun(
-  records: MemoryRecord[],
-  runs: Run[],
-  runId: string,
-): MemoryRecord[] {
-  const window = runWindowFor(runs, runId);
-  if (!window) return records;
-  return records.filter((r) => {
-    const t = timeMs(r.created_at);
-    return t > window.start && t <= window.end;
-  });
-}
-
 export interface MemoryTrace {
   event_type?: string;
   output?: unknown;
@@ -322,23 +269,131 @@ export function extractSavedIds(traces: MemoryTrace[] | undefined): Set<string> 
 }
 
 /**
- * Whether this run's traces are NEW-format (memory events stamped with record
- * ids). On such runs an empty extractSavedIds() means the run truly saved
- * nothing (yet — writes land after the answer), and callers must NOT fall
- * back to time-window guessing, which attributes OTHER runs' records to this
- * one. Old-format runs (no stamps anywhere) keep the fallback.
+ * Whitespace-normalised text, the form both a stored record and the trace
+ * copy of it are compared in (the write path collapses whitespace; a trace
+ * body may not).
  */
-export function tracesCarryIds(traces: MemoryTrace[] | undefined): boolean {
+const normalizeContent = (text: unknown): string =>
+  typeof text === 'string' ? text.replace(/\s+/g, ' ').trim() : '';
+
+/** Shortest text worth matching on — below this "same prefix" means nothing. */
+const MIN_CONTENT_MATCH_CHARS = 24;
+
+/** Markers the trace writers append when they cap a body. */
+const TRUNCATION_MARKERS = /(…\[truncated\]|\.\.\.|…)$/;
+
+/**
+ * The bodies a run's memory_write traces recorded — for runs traced BEFORE
+ * the record-id stamps existed, the only exact evidence of what they wrote.
+ * Read from the trace content and the bridge's `value` mirror; capped copies
+ * (4k / 8k chars) are matched as prefixes by contentMatches.
+ */
+export function extractSavedContents(traces: MemoryTrace[] | undefined): string[] {
+  const out = new Set<string>();
   for (const tr of traces || []) {
-    if (!/memory_/.test(tr.event_type || '')) continue;
-    if (structuredIds(tr, 'record_ids').length || structuredIds(tr, 'record_id').length) {
-      return true;
+    if (!/memory_write|memory_save/.test(tr.event_type || '')) continue;
+    const output = tr.output as { content?: unknown; extra_data?: Record<string, unknown> } | null;
+    const candidates: unknown[] = [
+      typeof tr.output === 'string' ? tr.output : output?.content,
+      output?.extra_data?.value,
+      (tr.trace_metadata as Record<string, unknown> | null | undefined)?.value,
+    ];
+    for (const c of candidates) {
+      const text = normalizeContent(c).replace(TRUNCATION_MARKERS, '').trim();
+      if (text.length >= MIN_CONTENT_MATCH_CHARS) out.add(text);
     }
   }
-  return false;
+  return [...out];
 }
 
-/** Symmetric co-occurrence map → unique undirected edge list for the graph. */
+/** A record whose body is (a capped prefix of) one the run's write traces recorded. */
+export function contentMatches(record: MemoryRecord, savedContents: string[]): boolean {
+  const body = normalizeContent(record.content);
+  if (body.length < MIN_CONTENT_MATCH_CHARS) return false;
+  return savedContents.some((saved) => {
+    const n = Math.min(body.length, saved.length);
+    return body.slice(0, n) === saved.slice(0, n);
+  });
+}
+
+/** What a run's traces establish about its memory, read once from one fetch. */
+export interface RunTraceFacts {
+  /** Ids the run's memory_retrieval traces carry. */
+  recalledIds: Set<string>;
+  /** Ids the run's memory_write traces carry (runs traced after the id stamps). */
+  savedIds: Set<string>;
+  /** Bodies the run's memory_write traces recorded (the pre-id evidence). */
+  savedContents: string[];
+}
+
+export const EMPTY_RUN_TRACE_FACTS: RunTraceFacts = {
+  recalledIds: new Set(),
+  savedIds: new Set(),
+  savedContents: [],
+};
+
+export function runTraceFacts(traces: MemoryTrace[] | undefined): RunTraceFacts {
+  return {
+    recalledIds: extractRecalledIds(traces),
+    savedIds: extractSavedIds(traces),
+    savedContents: extractSavedContents(traces),
+  };
+}
+
+/**
+ * Maintenance output, not something the run wrote. End-of-run consolidation
+ * (chat, agent builder and flow builder all schedule it) re-saves MERGED
+ * records under the run that happened to trigger it — the memory_write trace
+ * is real, so the id lands in `savedIds`, but the content spans other runs.
+ * "What this run saved" excludes it; the record's own provenance is the
+ * authority, which keeps the rule identical across all three paths.
+ */
+export const isConsolidation = (r: MemoryRecord): boolean =>
+  (r.source || '').toLowerCase() === 'consolidation';
+
+export type RunMemoryMode = 'saved' | 'recalled';
+
+/**
+ * A record that names the execution that wrote it — the strongest evidence
+ * there is. Chat stamps `execution_id` on its records' metadata; crew/flow
+ * task outputs are gaining the same stamp. Consolidation output never has it.
+ */
+export const writtenByRun = (r: MemoryRecord, runId: string | undefined): boolean =>
+  Boolean(runId) && r.metadata?.execution_id === runId;
+
+/**
+ * Records scoped to ONE run under a mode — the single place both the chat
+ * memory pane and the Memory Browser dialog derive it, so they cannot disagree.
+ *
+ * recalled: records whose ids the run's memory_retrieval traces carry.
+ * saved:    ONLY what the evidence proves the run wrote — a record stamped
+ *           with this run's execution_id, a record id its memory_write traces
+ *           carry, or (runs traced before the id stamps) the recorded body.
+ *           No such evidence means nothing saved, and that shows EMPTY: a run
+ *           that has only just started, recalled nothing, or runs without
+ *           memory must not inherit other runs' records. (A completed_at time
+ *           window used to fill that gap; for the oldest run in a workspace it
+ *           was the entire store, and for a running one, whatever chat wrote
+ *           meanwhile.)
+ */
+export function recordsForRun(
+  records: MemoryRecord[],
+  mode: RunMemoryMode,
+  facts: RunTraceFacts,
+  runId?: string,
+): MemoryRecord[] {
+  if (mode === 'recalled') {
+    if (facts.recalledIds.size === 0) return [];
+    return records.filter((r) => r.id && facts.recalledIds.has(r.id));
+  }
+  const byId = (r: MemoryRecord) => Boolean(r.id && facts.savedIds.has(r.id));
+  const byBody = (r: MemoryRecord) =>
+    facts.savedIds.size === 0 && contentMatches(r, facts.savedContents);
+  return records.filter(
+    (r) => !isConsolidation(r) && (writtenByRun(r, runId) || byId(r) || byBody(r)),
+  );
+}
+
 export function coOccurrenceEdges(
   index: DerivedIndex,
 ): { source: string; target: string; weight: number }[] {

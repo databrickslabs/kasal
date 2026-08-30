@@ -6,7 +6,6 @@ batch_convert_measures endpoints by calling handler functions directly
 with a mocked KPIConversionService.
 """
 
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest

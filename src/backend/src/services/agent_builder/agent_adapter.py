@@ -5,9 +5,7 @@ Utilities for Agent configuration, validation, and setup.
 
 This module provides helper functions for working with CrewAI agents.
 """
-import os
-import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 

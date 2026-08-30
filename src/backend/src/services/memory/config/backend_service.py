@@ -4,21 +4,19 @@ Memory backend service - facade for all memory backend operations.
 This module acts as a facade that delegates to specialized services for different operations.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from src.core.logger import LoggerManager
 from src.models.memory_backend import MemoryBackend
 from src.schemas.memory_backend import (
-    DatabricksMemoryConfig,
     MemoryBackendConfig,
     MemoryBackendCreate,
-    MemoryBackendType,
     MemoryBackendUpdate,
 )
 
 # Import specialized services
-from src.services.memory.backend_base_service import MemoryBackendBaseService
-from src.services.memory.config_service import MemoryConfigService
+from src.services.memory.config.backend_base_service import MemoryBackendBaseService
+from src.services.memory.config.config_service import MemoryConfigService
 
 logger = LoggerManager.get_instance().system
 
@@ -129,7 +127,7 @@ class MemoryBackendService:
 
     def _get_lakebase_service(self, instance_name: Optional[str] = None):
         """Create a LakebaseMemoryService for the given instance."""
-        from src.services.memory.lakebase_service import LakebaseMemoryService
+        from src.services.memory.config.lakebase_service import LakebaseMemoryService
 
         return LakebaseMemoryService(instance_name=instance_name)
 

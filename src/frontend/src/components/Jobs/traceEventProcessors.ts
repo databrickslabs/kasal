@@ -61,6 +61,19 @@ export function isMemoryLabelling(metadata: Record<string, unknown> | null): boo
 /**
  * Extract extra_data from output or trace
  */
+/** The recall query a memory_retrieval trace carries (trace_metadata or output.extra_data). */
+export function memoryQuery(
+  metadata: Record<string, unknown> | null | undefined,
+  extra: Record<string, unknown> | null | undefined,
+): string {
+  const q = metadata?.query ?? extra?.query;
+  return typeof q === 'string' ? q.replace(/\s+/g, ' ').trim() : '';
+}
+
+const QUERY_CLIP = 80;
+export const clipQuery = (q: string): string =>
+  q.length > QUERY_CLIP ? `${q.slice(0, QUERY_CLIP)}…` : q;
+
 export function extractExtraData(trace: Trace): Record<string, unknown> | undefined {
   // Check output.extra_data first
   if (trace.output && typeof trace.output === 'object' && 'extra_data' in trace.output) {
@@ -369,6 +382,14 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
     let description = formattedType ? `Memory Read (${formattedType})` : 'Memory Read';
     if (resultsCount > 0) {
       description += ` — ${resultsCount} results`;
+    }
+    // The query the recall ran against the store — on the row itself, so a
+    // reader sees WHAT was asked without opening the detail panel (which
+    // shows it in full). Same key on every path: the crew/flow bridge and the
+    // chat handlers both stamp `query`.
+    const query = memoryQuery(metadata, extra);
+    if (query) {
+      description += ` · "${clipQuery(query)}"`;
     }
 
     return { type: 'memory_retrieval', description, durationMs: queryTime };

@@ -22,15 +22,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.services.memory import hooks
 from src.services.memory.engine import MemoryRecord
-from src.services.memory.hooks import (
-    build_memory_preamble,
-    clear_pending_memory,
-    flush_memory_writes,
-    pending_memory_for,
-    remember_async,
-)
+from src.services.memory.run import pending as pending_module
+from src.services.memory.run.pending import clear_pending_memory, pending_memory_for
+from src.services.memory.run.persist import flush_memory_writes, remember_async
+from src.services.memory.run.recall import build_memory_preamble
 
 SCOPE = "/group_a"
 
@@ -197,9 +193,9 @@ class TestItStaysBounded:
         release = threading.Event()
         memory = _memory(on_write=lambda *a, **k: release.wait(10))
         try:
-            for i in range(hooks._MAX_PENDING_RECORDS + 20):
+            for i in range(pending_module._MAX_PENDING_RECORDS + 20):
                 remember_async(memory, f"note {i}", source="crew_task")
-            assert len(pending_memory_for(SCOPE)) <= hooks._MAX_PENDING_RECORDS
+            assert len(pending_memory_for(SCOPE)) <= pending_module._MAX_PENDING_RECORDS
         finally:
             release.set()
 

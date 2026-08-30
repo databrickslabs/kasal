@@ -12,10 +12,9 @@ Covers:
 - test_lakebase_connection: missing instance_name returns 400
 """
 
-import asyncio
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -26,7 +25,6 @@ from src.api.database_management_router import (
     get_database_info,
     import_database,
     list_backups,
-    migrate_to_lakebase,
     migrate_to_lakebase_stream,
 )
 from src.api.database_management_router import (

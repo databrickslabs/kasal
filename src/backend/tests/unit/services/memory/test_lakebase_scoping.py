@@ -21,7 +21,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.services.memory.engine import MemoryRecord
-from src.services.memory.lakebase_storage_backend import LakebaseStorageBackend
+from src.services.memory.storage.lakebase import LakebaseStorageBackend
 
 
 def _backend(workspace_wide: bool = True) -> LakebaseStorageBackend:
@@ -47,7 +47,7 @@ async def _capture_delete(backend, **kwargs):
     session = AsyncMock()
     session.execute = AsyncMock()
     with patch(
-        "src.services.memory.lakebase_storage_backend.get_lakebase_session",
+        "src.services.memory.storage.lakebase.get_lakebase_session",
         return_value=_session_ctx(session),
     ):
         await backend.adelete(**kwargs)
@@ -149,7 +149,7 @@ class TestWriteTagging:
         session = AsyncMock()
         session.execute = AsyncMock()
         with patch(
-            "src.services.memory.lakebase_storage_backend.get_lakebase_session",
+            "src.services.memory.storage.lakebase.get_lakebase_session",
             return_value=_session_ctx(session),
         ):
             await backend.asave(

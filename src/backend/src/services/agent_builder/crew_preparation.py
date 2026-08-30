@@ -19,11 +19,9 @@ from src.services.execution.config.crew_config_builder import CrewConfigBuilder
 from src.services.execution.config.embedder_config_builder import EmbedderConfigBuilder
 from src.services.execution.config.manager_config_builder import ManagerConfigBuilder
 from src.services.execution.harnesses import active_harness
-from src.services.memory.backend_factory import MemoryBackendFactory
 
 # Import new service classes
-from src.services.memory.crew_memory import CrewMemoryService
-from src.utils.databricks_url_utils import DatabricksURLUtils
+from src.services.memory.run.crew_memory import CrewMemoryService
 
 logger = LoggerManager.get_instance().crew
 
@@ -898,9 +896,11 @@ class CrewPreparation:
             )
 
             # 4. Configure embedder
-            crew_kwargs, custom_embedder, embedder_config = (
-                await embedder_builder.configure_embedder(crew_kwargs)
-            )
+            (
+                crew_kwargs,
+                custom_embedder,
+                embedder_config,
+            ) = await embedder_builder.configure_embedder(crew_kwargs)
             self.custom_embedder = custom_embedder
             self.embedder_config = embedder_config
 
@@ -941,8 +941,7 @@ class CrewPreparation:
                     "backend_type": "default",
                 }
                 logger.info(
-                    "Created default memory backend configuration "
-                    "(local SQLite store)"
+                    "Created default memory backend configuration (local SQLite store)"
                 )
 
             # 6. Generate crew ID and setup storage
@@ -1203,9 +1202,9 @@ class CrewPreparation:
             # seams. Recall: a context provider runs at each task's context
             # assembly (query = description + runtime context tail). Persist:
             # an output sink fires for every completed task, fire-and-forget.
-            from src.services.memory.hooks import (
+            from src.services.memory.run.persist import make_memory_output_sink
+            from src.services.memory.run.recall import (
                 make_memory_context_provider,
-                make_memory_output_sink,
                 request_from_inputs,
             )
 
@@ -1220,7 +1219,9 @@ class CrewPreparation:
             memory_provider = make_memory_context_provider(
                 crew_memory, request_from_inputs(self.config.get("inputs"))
             )
-            memory_sink = make_memory_output_sink(crew_memory)
+            memory_sink = make_memory_output_sink(
+                crew_memory, execution_id=self.config.get("execution_id")
+            )
             engine.wire_memory(self.crew, provider=memory_provider, sink=memory_sink)
             if memory_provider is not None or memory_sink is not None:
                 logger.info("Memory recall provider + persist sink attached to crew")
@@ -1233,12 +1234,10 @@ class CrewPreparation:
                 # Drain in-flight memory writes so the final task's save (and
                 # its "Memory Write" trace span) survives process teardown,
                 # then run the bounded LLM-free dedupe pass.
-                from src.services.memory.hooks import (
-                    flush_memory_writes,
-                )
-                from src.services.memory.maintenance import (
+                from src.services.memory.maintenance.passes import (
                     run_memory_maintenance,
                 )
+                from src.services.memory.run.persist import flush_memory_writes
 
                 await asyncio.to_thread(flush_memory_writes, 15.0)
                 await asyncio.to_thread(run_memory_maintenance, crew_memory)

@@ -13,26 +13,19 @@ import pytest
 from src.api.engine_config_router import (
     create_engine_config,
     delete_engine_config,
-    get_engine_config,
     get_engine_config_by_key,
     get_engine_config_service,
     get_engine_configs_by_type,
-    get_kasal_flow_enabled,
-    get_otel_app_telemetry_enabled,
-    set_kasal_flow_enabled,
-    set_otel_app_telemetry_enabled,
     toggle_engine_config,
     update_config_value,
     update_engine_config,
 )
-from src.core.exceptions import ForbiddenError, KasalError, NotFoundError
+from src.core.exceptions import NotFoundError
 from src.schemas.engine_config import (
     EngineConfigCreate,
     EngineConfigToggleUpdate,
     EngineConfigUpdate,
     EngineConfigValueUpdate,
-    KasalFlowConfigUpdate,
-    OtelAppTelemetryConfigUpdate,
 )
 
 

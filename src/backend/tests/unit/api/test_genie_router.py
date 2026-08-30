@@ -6,7 +6,6 @@ execute_genie_query, and send_genie_message by calling handler functions
 directly with mocked GenieService objects.
 """
 
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

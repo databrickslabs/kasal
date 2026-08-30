@@ -317,6 +317,39 @@ class TestGetTraceMethods:
         assert "ID >" not in sql
 
     @pytest.mark.asyncio
+    async def test_get_by_job_id_event_type_prefix_filters_in_sql(
+        self, repository, mock_session, mock_traces
+    ):
+        """The memory views read only a run's memory_* rows: the prefix must
+        land in the WHERE clause (an escaped LIKE), not be applied after the
+        page was cut — the writes land last and fell off long runs."""
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = mock_traces
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        await repository.get_by_job_id(
+            "test-job-123", limit=50, offset=0, event_type_prefix="memory_"
+        )
+
+        stmt = mock_session.execute.call_args[0][0]
+        sql = str(stmt).upper()
+        assert "EVENT_TYPE LIKE" in sql
+        assert "ESCAPE" in sql  # the underscore is literal, not a wildcard
+
+    @pytest.mark.asyncio
+    async def test_get_by_job_id_without_prefix_has_no_event_type_filter(
+        self, repository, mock_session, mock_traces
+    ):
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = mock_traces
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        await repository.get_by_job_id("test-job-123", limit=50, offset=0)
+
+        sql = str(mock_session.execute.call_args[0][0]).upper()
+        assert "LIKE" not in sql
+
+    @pytest.mark.asyncio
     async def test_get_state_events_filters_event_types_in_sql(
         self, repository, mock_session, mock_traces
     ):

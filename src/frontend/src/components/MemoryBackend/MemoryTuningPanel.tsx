@@ -48,7 +48,15 @@ const TUNING_SLIDERS: SliderSpec[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    help: 'How strongly recall favors vector similarity (default 0.5).',
+    help: 'How strongly recall favors vector similarity (default 0.6).',
+  },
+  {
+    key: 'keyword_weight',
+    label: 'Keyword weight',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    help: 'How strongly recall favors query terms that appear verbatim in a memory (default 0.15).',
   },
   {
     key: 'recency_weight',
@@ -56,7 +64,7 @@ const TUNING_SLIDERS: SliderSpec[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    help: 'How strongly recall favors recently-created memories (default 0.3).',
+    help: 'How strongly recall favors recently-created memories (default 0.15).',
   },
   {
     key: 'importance_weight',
@@ -64,7 +72,7 @@ const TUNING_SLIDERS: SliderSpec[] = [
     min: 0,
     max: 1,
     step: 0.05,
-    help: 'How strongly recall favors LLM-inferred importance (default 0.2).',
+    help: 'How strongly recall favors LLM-inferred importance (default 0.1).',
   },
   {
     key: 'relevance_threshold',
@@ -78,12 +86,65 @@ const TUNING_SLIDERS: SliderSpec[] = [
       'recency/importance blend.',
   },
   {
+    key: 'recall_min_score',
+    label: 'Recall score floor',
+    min: 0,
+    max: 1,
+    step: 0.01,
+    help:
+      'Blended score (similarity + keyword + recency + importance) below which a recall ' +
+      'returns nothing. Left untouched it follows the embedder in use: 0.75 with the ' +
+      'Databricks embedder, 0.62 with the local Ollama fallback. Lower it if reads come ' +
+      'back empty for memories you know are there.',
+  },
+  {
+    key: 'confidence_threshold_high',
+    label: 'Confidence — stop exploring at',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    help:
+      'Best-hit score at or above which recall is satisfied and runs no exploration ' +
+      'round (default 0.8).',
+  },
+  {
+    key: 'confidence_threshold_low',
+    label: 'Confidence — explore below',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    help:
+      'Best-hit score below which recall spends its exploration budget on alternative ' +
+      'queries (default 0.5).',
+  },
+  {
+    key: 'complex_query_threshold',
+    label: 'Complex-query threshold',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    help:
+      'Query complexity (0–1, judged by the query-analysis call) at or above which recall ' +
+      'explores even when the best hit sits between the two confidence bounds (default 0.7).',
+  },
+  {
     key: 'consolidation_threshold',
     label: 'Consolidation threshold',
     min: 0,
     max: 1,
     step: 0.05,
-    help: 'Similarity above which save-time consolidation merges records (default 0.85).',
+    help:
+      'Similarity at or above which a new memory is merged INTO the closest existing one ' +
+      'at save time instead of being stored beside it (default 0.85; 0 disables). The merge ' +
+      'is a rewrite by the memory LLM, so without one the pass is skipped.',
+  },
+  {
+    key: 'default_importance',
+    label: 'Default importance',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    help: 'Importance given to a memory when neither the writer nor the analysis supplies one (default 0.5).',
   },
 ];
 
@@ -137,8 +198,8 @@ export const MemoryTuningPanel: React.FC = () => {
         <Box>
           <Typography variant="subtitle1">Memory Tuning</Typography>
           <Typography variant="caption" color="text.secondary">
-            Advanced — composite-score weights, consolidation threshold, and recall
-            speed (exploration budget, query-analysis threshold, memory LLM).
+            Advanced — composite-score weights and floor, recall depth (query
+            distillation, exploration rounds), save-time consolidation, memory LLM.
           </Typography>
         </Box>
       </AccordionSummary>
@@ -188,6 +249,25 @@ export const MemoryTuningPanel: React.FC = () => {
             <TextField
               fullWidth
               type="number"
+              label="Consolidation limit"
+              value={
+                tuning.consolidation_limit ??
+                MEMORY_TUNING_DEFAULTS.consolidation_limit
+              }
+              onChange={(e) =>
+                updateCognitiveConfig({
+                  consolidation_limit: parseInt(e.target.value, 10) || 0,
+                })
+              }
+              helperText="How many nearest existing memories a new one is compared against at save time (0 disables consolidation)."
+              inputProps={{ min: 0 }}
+            />
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <TextField
+              fullWidth
+              type="number"
               label="Exploration budget"
               value={
                 tuning.exploration_budget ??
@@ -219,10 +299,11 @@ export const MemoryTuningPanel: React.FC = () => {
                 });
               }}
               helperText={
-                'Recall runs an extra LLM call to distill queries longer than this many ' +
-                'characters. Task descriptions usually exceed the 200-char default, so that ' +
-                'call fires on nearly every task. Raise it high (e.g. 100000) to skip it and ' +
-                'save ~1–3s per recall; 0 always runs it.'
+                'Recall runs one memory-LLM call to distill queries at least this many ' +
+                'characters long into a short search query (the plain search still runs too). ' +
+                'Task descriptions usually exceed the 200-char default, so that call fires on ' +
+                'nearly every task. Raise it high (e.g. 100000) to skip it and save ~1–3s per ' +
+                'recall; 0 always runs it.'
               }
               inputProps={{ min: 0 }}
             />

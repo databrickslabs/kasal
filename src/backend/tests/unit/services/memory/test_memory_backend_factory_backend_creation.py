@@ -9,24 +9,21 @@ Updated for app-modes refactoring:
   memory backend, so only its cases live here now.
 """
 
-import sys
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from src.schemas.memory_backend import (
-    DatabricksMemoryConfig,
     LakebaseMemoryConfig,
     MemoryBackendConfig,
     MemoryBackendType,
 )
-from src.services.memory.backend_factory import MemoryBackendFactory
+from src.services.memory.storage.factory import MemoryBackendFactory
 
 # ─── create_memory_backends LAKEBASE extra cases ──────────────────────────────
 
 
 class TestLakebaseBackendCases:
-
     @pytest.mark.asyncio
     async def test_lakebase_without_instance_name(self):
         """Lakebase backend works without instance_name (defaults to None)."""
@@ -47,7 +44,7 @@ class TestLakebaseBackendCases:
         with patch.dict(
             "sys.modules",
             {
-                "src.services.memory.lakebase_storage_backend": MagicMock(
+                "src.services.memory.storage.lakebase": MagicMock(
                     LakebaseStorageBackend=MagicMock(side_effect=capture)
                 )
             },
@@ -78,7 +75,7 @@ class TestLakebaseBackendCases:
         with patch.dict(
             "sys.modules",
             {
-                "src.services.memory.lakebase_storage_backend": MagicMock(
+                "src.services.memory.storage.lakebase": MagicMock(
                     LakebaseStorageBackend=MagicMock(side_effect=capture)
                 )
             },
@@ -108,7 +105,7 @@ class TestLakebaseBackendCases:
         with patch.dict(
             "sys.modules",
             {
-                "src.services.memory.lakebase_storage_backend": MagicMock(
+                "src.services.memory.storage.lakebase": MagicMock(
                     LakebaseStorageBackend=MagicMock(side_effect=capture)
                 )
             },

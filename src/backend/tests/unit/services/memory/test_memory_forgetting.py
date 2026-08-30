@@ -20,13 +20,13 @@ from src.services.memory.engine import (
     Memory,
     MemoryRecord,
 )
-from src.services.memory.engine_storage_adapter import EngineStorageAdapter
-from src.services.memory.forgetting import (
+from src.services.memory.maintenance.forgetting import (
     forget_expired_memories,
     forgetting_enabled,
     retention_settings,
 )
-from src.services.memory.local_storage_backend import LocalMemoryStorage
+from src.services.memory.storage.adapter import EngineStorageAdapter
+from src.services.memory.storage.local import LocalStorageBackend
 
 
 def _embedder(texts):
@@ -35,7 +35,7 @@ def _embedder(texts):
 
 @pytest.fixture
 def memory(tmp_path):
-    backend = LocalMemoryStorage(tmp_path / "m.db", embedder=_embedder)
+    backend = LocalStorageBackend(tmp_path / "m.db", embedder=_embedder)
     return Memory(
         storage=EngineStorageAdapter(backend), root_scope="/g1", analyze_on_save=False
     )
@@ -216,14 +216,14 @@ class TestSafety:
 
 class TestOrchestration:
     def test_forgetting_is_part_of_the_full_pass(self, memory):
-        from src.services.memory.maintenance import run_memory_maintenance
+        from src.services.memory.maintenance.passes import run_memory_maintenance
 
         _save(memory, "stale chatter", age_days=400, importance=0.1)
 
         assert run_memory_maintenance(memory)["forgotten"] == 1
 
     def test_full_pass_reports_zero_when_disabled(self, memory, monkeypatch):
-        from src.services.memory.maintenance import run_memory_maintenance
+        from src.services.memory.maintenance.passes import run_memory_maintenance
 
         monkeypatch.setenv("KASAL_MEMORY_FORGETTING", "false")
         _save(memory, "stale chatter", age_days=400, importance=0.1)

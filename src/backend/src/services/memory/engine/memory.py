@@ -1,31 +1,28 @@
-"""Memory — unified memory with native interception and context propagation.
+"""``Memory`` — one object per run: ``remember`` and ``recall``.
 
-Authored module; surface validated against the kasal_engine datamodel.
+``remember`` runs on a serialised save thread so a caller never waits: it
+labels the record with the memory LLM (categories, importance, kind,
+entities — what the Memory Browser's concept views are built from), folds it
+into a near-duplicate the store already holds (``consolidation``), saves it
+through the ``StorageBackend``, and emits the ``MemorySave*`` events that
+become the run's "Memory Write" trace rows. ``save_hooks`` receive the records
+that landed.
 
-Engine-native fixes for kasal's memory patches:
-- **save_hooks** (native requirement #2): callbacks receive the saved
-  MemoryRecords after every remember/remember_many — no method wrapping.
-- **Context propagation**: saves run on a serialized pool via
-  ``contextvars.copy_context()``, so the ambient ``event_context`` (and any
-  kasal ContextVar) reaches the MemorySave/Query events emitted from the
-  save thread — no event ``__init__`` patching.
-- **Save-time analysis**: one small LLM pass per record fills ``categories``,
-  ``importance`` and extracted entities (``analyze_on_save``, needs ``llm``).
-  This is what the Memory Browser's concept/graph views are built
-  from — without it every record persists with an empty tag list and the graph
-  is blank. It runs on the save thread, so it never touches a run's hot path,
-  and any failure degrades to an unlabelled record rather than a failed save.
+``recall`` is one search with a score floor — plus, per the Memory Tuning
+knobs declared as fields below, distillation of a long query and exploration
+of alternatives (``recall_planner``). ``mode="raw"`` is the plain search.
 
-Storage is duck-typed through StorageBackend; kasal plugs its
-Databricks/Lakebase backends in as ``Memory(storage=backend)``.
+Saves run under ``contextvars.copy_context()`` so the ambient event context
+(which task, which agent) reaches the events emitted from the save thread.
+Storage is duck-typed through ``StorageBackend``; ``InMemoryStorage`` is the
+test double, the real stores live in ``services.memory.storage``.
 """
 
 import concurrent.futures
 import contextvars
-import json
 import logging
-import re
 import os
+import re
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -44,7 +41,9 @@ from src.core.events.types import (
     MemorySaveStartedEvent,
 )
 
-from .analyze import MemoryAnalysis
+from .analyze import MemoryAnalysis, extract_json_object
+from .consolidation import consolidate_on_save
+from .recall_planner import deep_recall
 from .types import KIND_EPISODIC, MemoryRecord, ScopeInfo
 
 logger = logging.getLogger(__name__)
@@ -97,23 +96,7 @@ def _clean_categories(values: list[str]) -> list[str]:
     return cleaned[:_MAX_CATEGORIES]
 
 
-def _extract_json_object(text: str) -> Any:
-    """Parse the first JSON object in ``text`` (models wrap it in prose/fences)."""
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        stripped = re.sub(r"^```[a-zA-Z]*\n?|```$", "", stripped).strip()
-    try:
-        return json.loads(stripped)
-    except json.JSONDecodeError:
-        pass
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start == -1 or end <= start:
-        return None
-    try:
-        return json.loads(stripped[start : end + 1])
-    except json.JSONDecodeError:
-        return None
+_extract_json_object = extract_json_object
 
 
 class StorageBackend(ABC):
@@ -259,27 +242,41 @@ class InMemoryStorage(StorageBackend):
             }
 
 
-def _default_recall_min_score() -> float:
-    """Blended-score floor applied when a recall caller passes no threshold.
+# Fused-score floor (semantic + keyword + recency + importance, see
+# LocalStorageBackend.search) below which a recall returns nothing. 0.75 was
+# calibrated against live data with the Databricks embedder (see recall()).
+# Ollama's nomic-embed-text compresses the cosine scale: measured live, a run's
+# own previous task output scored 0.72 raw / 0.68 fused against the task
+# description that produced it, while unrelated records sat at 0.58-0.63 raw /
+# <=0.60 fused — so its floor sits between those clusters. Providers not listed
+# keep the calibrated default.
+DEFAULT_RECALL_MIN_SCORE = 0.75
+RECALL_MIN_SCORE_BY_EMBEDDER: dict[str, float] = {"ollama": 0.62}
 
-    The score is the storage backends' fused ranking (semantic + keyword +
-    recency + importance, see LocalStorageBackend.search). 0.75 is calibrated
-    against live data (see recall()); override per deployment with
-    KASAL_MEMORY_RECALL_MIN_SCORE when a different embedder shifts the scale.
+
+def default_recall_min_score(embedder_provider: str | None = None) -> float:
+    """Blended-score floor for a recall that passes no threshold.
+
+    Precedence: KASAL_MEMORY_RECALL_MIN_SCORE (deployment override) → the floor
+    for ``embedder_provider`` → the calibrated default. A teamspace's explicit
+    Memory Tuning value is applied by the caller (``Memory.recall_min_score``)
+    and never reaches here.
     """
     raw = os.getenv("KASAL_MEMORY_RECALL_MIN_SCORE")
-    if raw is None:
-        return 0.75
-    try:
-        return max(0.0, float(raw))
-    except ValueError:
-        return 0.75
+    if raw is not None:
+        try:
+            return max(0.0, float(raw))
+        except ValueError:
+            pass
+    if embedder_provider:
+        return RECALL_MIN_SCORE_BY_EMBEDDER.get(
+            embedder_provider.lower(), DEFAULT_RECALL_MIN_SCORE
+        )
+    return DEFAULT_RECALL_MIN_SCORE
 
 
-class MemoryConfig(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    root_scope: str | None = None
+def _default_recall_min_score() -> float:
+    return default_recall_min_score()
 
 
 class Memory(BaseModel):
@@ -308,8 +305,54 @@ class Memory(BaseModel):
         default=0.5,
         description="Importance used when neither the caller nor analysis supplies one.",
     )
+    recall_min_score: float | None = Field(
+        default=None,
+        description=(
+            "Fused-score floor for recalls that pass no threshold. Set by "
+            "CrewMemoryService from the teamspace's Memory Tuning or the "
+            "resolved embedder's default; None falls back to "
+            "default_recall_min_score()."
+        ),
+    )
 
-    _config: MemoryConfig = PrivateAttr(default_factory=MemoryConfig)
+    # ── Memory Tuning knobs (Configuration > Memory) ──
+    # Declared as fields so a value set in the panel can never be dropped by
+    # pydantic again; each is read by the code that implements it —
+    # recall_planner (query analysis / exploration) and consolidation
+    # (save-time merge). Defaults match the panel's placeholders.
+    consolidation_threshold: float = Field(
+        default=0.85,
+        description="Similarity at/above which a new record is merged into an "
+        "existing one at save time (0 disables). See engine/consolidation.py.",
+    )
+    consolidation_limit: int = Field(
+        default=5,
+        description="How many nearest records save-time consolidation compares.",
+    )
+    confidence_threshold_high: float = Field(
+        default=0.8,
+        description="Best hit score at/above which recall stops exploring.",
+    )
+    confidence_threshold_low: float = Field(
+        default=0.5,
+        description="Best hit score below which recall explores alternatives.",
+    )
+    complex_query_threshold: float = Field(
+        default=0.7,
+        description="Query complexity (0-1, from analysis) at/above which recall "
+        "explores even when the best hit is between the two confidence bounds.",
+    )
+    exploration_budget: int = Field(
+        default=1,
+        description="LLM-driven rounds of alternative queries when confidence is "
+        "low (0 = shallow search only).",
+    )
+    query_analysis_threshold: int = Field(
+        default=200,
+        description="Queries at least this many chars long are distilled by the "
+        "memory LLM into a short search query before the search (0 = always).",
+    )
+
     _pool: concurrent.futures.ThreadPoolExecutor | None = PrivateAttr(default=None)
 
     def model_post_init(self, __context: Any) -> None:
@@ -521,10 +564,21 @@ class Memory(BaseModel):
                     ),
                 )
             )
+        # Save-time consolidation: a record that says what a stored one already
+        # says is folded into that record instead of being inserted beside it
+        # (Memory Tuning: consolidation threshold / limit).
+        to_insert: list[MemoryRecord] = []
+        consolidated: list[MemoryRecord] = []
+        for record in records:
+            folded = consolidate_on_save(self, record, effective_scope)
+            if folded is not None:
+                consolidated.append(folded)
+            else:
+                to_insert.append(record)
         try:
-            saved = self.storage.save(records)
+            saved = self.storage.save(to_insert) if to_insert else []
         except Exception as e:
-            for record in records:
+            for record in to_insert:
                 event_bus.emit(
                     self,
                     MemorySaveFailedEvent(
@@ -537,7 +591,8 @@ class Memory(BaseModel):
                 )
             raise
         elapsed_ms = (time.perf_counter() - start) * 1000
-        for record in saved:
+        landed = [*saved, *consolidated]
+        for record in landed:
             event_bus.emit(
                 self,
                 MemorySaveCompletedEvent(
@@ -551,10 +606,10 @@ class Memory(BaseModel):
             )
         for hook in self.save_hooks:
             try:
-                hook(saved)
+                hook(landed)
             except Exception:
                 logger.exception("memory save hook %r failed", hook)
-        return saved
+        return landed
 
     def add_save_hook(self, hook: Callable[[list[MemoryRecord]], None]) -> None:
         self.save_hooks.append(hook)
@@ -567,20 +622,34 @@ class Memory(BaseModel):
         limit: int = 10,
         scope: str | None = None,
         score_threshold: float | None = None,
+        mode: str = "auto",
     ) -> list[MemoryRecord]:
+        """Records relevant to ``query``, best first.
+
+        ``mode="auto"`` applies the Memory Tuning knobs: a long query is
+        distilled into a search query, and alternatives are explored when the
+        shallow result is weak (``recall_planner``). ``mode="raw"`` is one plain
+        vector search with the literal text — what the write-time duplicate
+        check needs, since a distilled version of the content it is about to
+        write is the wrong thing to compare.
+        """
         # Nearest-neighbour search always returns SOMETHING — nearest is not
         # near. Without a floor, a query about a topic the store has never seen
         # returns the k least-unrelated records, and callers inject them as
         # context. Knowledge search stops the same failure with the same rule
         # (services/knowledge/search_guard.py: KNOWLEDGE_MIN_SCORE) — this is
         # that stopping rule for memory (measured live: "genie ontology" over
-        # a news-only store
-        # recalled 18 news records at blended scores 0.56-0.74, and the
-        # model wove "Lebanon news" into the diagram). Related recalls in the same
-        # store scored 0.77-0.91, so the default floor sits between the two
-        # clusters. Callers may pass an explicit threshold — 0.0 disables.
+        # a news-only store recalled 18 news records at blended scores
+        # 0.56-0.74, and the model wove "Lebanon news" into the diagram).
+        # Related recalls in the same store scored 0.77-0.91, so the default
+        # floor sits between the two clusters. Callers may pass an explicit
+        # threshold — 0.0 disables.
         if score_threshold is None:
-            score_threshold = _default_recall_min_score()
+            score_threshold = (
+                self.recall_min_score
+                if self.recall_min_score is not None
+                else _default_recall_min_score()
+            )
         start = time.perf_counter()
         event_bus.emit(
             self,
@@ -591,13 +660,32 @@ class Memory(BaseModel):
                 source_type="unified_memory",
             ),
         )
-        try:
-            results = self.storage.search(
-                query,
+        effective_scope = scope or self.root_scope
+
+        def _search(text: str) -> list[MemoryRecord]:
+            return self.storage.search(
+                text,
                 limit=limit,
-                scope=scope or self.root_scope,
+                scope=effective_scope,
                 score_threshold=score_threshold,
             )
+
+        distilled: str | None = None
+        rounds = 0
+        try:
+            if mode == "raw":
+                results = _search(query)
+            else:
+                outcome = deep_recall(
+                    self, query, limit=limit, scope=effective_scope, search=_search
+                )
+                results = outcome.records
+                rounds = outcome.rounds
+                if (
+                    outcome.plan.analyzed
+                    and outcome.plan.query.lower() != query.lower()
+                ):
+                    distilled = outcome.plan.query
         except Exception as e:
             event_bus.emit(
                 self,
@@ -618,6 +706,8 @@ class Memory(BaseModel):
                 limit=limit,
                 score_threshold=score_threshold,
                 query_time_ms=(time.perf_counter() - start) * 1000,
+                distilled_query=distilled,
+                exploration_rounds=rounds,
                 source_type="unified_memory",
             ),
         )

@@ -26,7 +26,7 @@ from typing import Any
 import numpy as np
 
 from src.services.memory.engine import KIND_EPISODIC, MemoryRecord, ScopeInfo
-from src.services.memory.engine_storage_adapter import embed_text
+from src.services.memory.storage.adapter import embed_text
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +84,7 @@ def _from_blob(blob: bytes | None) -> np.ndarray | None:
     return np.frombuffer(blob, dtype=np.float32)
 
 
-class LocalMemoryStorage:
+class LocalStorageBackend:
     """SQLite-backed local memory store (crewAI-1.x storage protocol)."""
 
     def __init__(
@@ -267,6 +267,9 @@ class LocalMemoryStorage:
                 + self.IMPORTANCE_WEIGHT * record.importance
             )
             if score >= min_score:
+                # Advisory: the semantic component on its own, so save-time
+                # consolidation can compare meaning rather than the blend.
+                record.metadata["semantic"] = round(float(semantic), 4)
                 scored.append((record, score))
         scored.sort(key=lambda pair: (pair[1], pair[0].importance), reverse=True)
         return scored[:limit]

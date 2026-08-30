@@ -2,8 +2,6 @@
 Unit tests for crews export router.
 """
 
-import io
-import zipfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -16,12 +14,10 @@ from src.api.crews_export_router import (
     get_deployment_service,
     get_deployment_status,
     get_export_service,
-    router,
 )
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.schemas.crew_export import (
     CrewExportRequest,
-    CrewExportResponse,
     DeploymentRequest,
     DeploymentResponse,
     DeploymentStatus,

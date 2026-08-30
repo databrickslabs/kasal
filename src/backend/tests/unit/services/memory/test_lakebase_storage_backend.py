@@ -15,8 +15,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.services.memory.engine import MemoryRecord
-from src.services.memory.lakebase_storage_backend import LakebaseStorageBackend
-from src.services.memory.pg_codec import to_aware_utc
+from src.services.memory.storage.lakebase import LakebaseStorageBackend
+from src.services.memory.storage.pg_codec import to_aware_utc
 
 
 def _make_lakebase_ctx(mock_session):
@@ -72,7 +72,7 @@ class TestSaveTimestampTz:
         )
 
         with patch(
-            "src.services.memory.lakebase_storage_backend.get_lakebase_session",
+            "src.services.memory.storage.lakebase.get_lakebase_session",
             return_value=_make_lakebase_ctx(session),
         ):
             await backend.asave([record])
@@ -118,7 +118,7 @@ class TestHybridSearchSql:
 
         mock_session.execute = _execute
         with patch(
-            "src.services.memory.lakebase_storage_backend.get_lakebase_session",
+            "src.services.memory.storage.lakebase.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             asyncio.run(backend.asearch(query_embedding=[0.1, 0.2, 0.3, 0.4], **kwargs))

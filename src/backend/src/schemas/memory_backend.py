@@ -27,31 +27,40 @@ class MemoryBackendType(str, Enum):
 
 
 class MemoryTuningConfig(BaseModel):
-    """Recall-scoring knobs for a teamspace's memory.
+    """Memory Tuning knobs for a teamspace's memory (Configuration > Memory).
 
-    These map 1:1 to ``crewai.memory.Memory`` constructor parameters. Defaults
-    mirror upstream. Any value left ``None`` is omitted so CrewAI's own
-    defaults apply.
+    The scoring weights, half-life and relevance threshold reach the storage
+    backend (``MemoryBackendFactory._scoring_kwargs``); everything else is a
+    declared field of the engine's ``Memory`` (``CrewMemoryService``
+    forwards them), so no value set here is ever silently dropped. Any value
+    left ``None`` is omitted and the code default applies.
     """
 
-    # Composite score weights (should roughly sum to 1.0).
+    # Composite score weights (semantic + keyword + recency + importance —
+    # should roughly sum to 1.0).
     semantic_weight: Optional[float] = Field(
         None,
         ge=0.0,
         le=1.0,
-        description="Weight for semantic similarity in recall (default 0.5).",
+        description="Weight for semantic similarity in recall (default 0.6).",
+    )
+    keyword_weight: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Weight for query-term overlap in recall (default 0.15).",
     )
     recency_weight: Optional[float] = Field(
         None,
         ge=0.0,
         le=1.0,
-        description="Weight for recency decay in recall (default 0.3).",
+        description="Weight for recency decay in recall (default 0.15).",
     )
     importance_weight: Optional[float] = Field(
         None,
         ge=0.0,
         le=1.0,
-        description="Weight for explicit importance in recall (default 0.2).",
+        description="Weight for explicit importance in recall (default 0.1).",
     )
     recency_half_life_days: Optional[int] = Field(
         None,
@@ -66,6 +75,18 @@ class MemoryTuningConfig(BaseModel):
             "Minimum semantic similarity for a memory to be recalled at all "
             "(default 0.35). Applied before recency/importance blending, so "
             "unrelated memories are never pulled into the context."
+        ),
+    )
+    recall_min_score: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Blended-score floor below which a recall returns nothing. Left "
+            "unset, the floor follows the embedder in use: 0.75 with the "
+            "Databricks embedder, 0.62 with the local Ollama fallback "
+            "(KASAL_MEMORY_RECALL_MIN_SCORE overrides that default per "
+            "deployment)."
         ),
     )
 
@@ -160,7 +181,7 @@ class DatabricksMemoryConfig(BaseModel):
     memory_index: str = Field(
         ...,
         description=(
-            "Index for Kasal memory " "(catalog.schema.index). Must use UNIFIED_SCHEMA."
+            "Index for Kasal memory (catalog.schema.index). Must use UNIFIED_SCHEMA."
         ),
     )
 

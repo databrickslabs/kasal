@@ -13,8 +13,7 @@ This module orchestrates flow building using several specialized sub-modules:
 The FlowBuilder class coordinates these modules to construct complete CrewAI flows.
 """
 
-import logging
-from typing import Any, Dict, Final, List, Optional, Union
+from typing import Any, Dict, Final, Optional
 
 from pydantic import BaseModel
 
@@ -663,7 +662,9 @@ class FlowBuilder:
         # Is this run continuing ITSELF (a gate approved, a pause released), or
         # resuming a checkpoint written by a DIFFERENT run? Only the second can
         # have been edited in between — see CrewSkipPolicy.decide.
-        this_job_id = (callbacks or {}).get("job_id") if isinstance(callbacks, dict) else None
+        this_job_id = (
+            (callbacks or {}).get("job_id") if isinstance(callbacks, dict) else None
+        )
         same_execution = bool(
             resume_from_execution_id
             and this_job_id

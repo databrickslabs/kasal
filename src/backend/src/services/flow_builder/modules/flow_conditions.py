@@ -249,8 +249,9 @@ class MatchList(list):
         # that is a substring test; on a projection the natural reading is "any
         # element is (or contains) this". Support both, at any depth.
         return self._any(
-            lambda a, b: a == b
-            or (isinstance(a, str) and isinstance(b, str) and b in a),
+            lambda a, b: (
+                a == b or (isinstance(a, str) and isinstance(b, str) and b in a)
+            ),
             needle,
         )
 
@@ -586,8 +587,8 @@ class ConditionState:
 #: through the condition builder unchanged.
 _WHERE_OPS: Final = {
     "": lambda a, b: _casefold(a) == _casefold(b) if isinstance(a, str) else a == b,
-    "ne": lambda a, b: not (
-        _casefold(a) == _casefold(b) if isinstance(a, str) else a == b
+    "ne": lambda a, b: (
+        not (_casefold(a) == _casefold(b) if isinstance(a, str) else a == b)
     ),
     "gt": lambda a, b: a > b,
     "gte": lambda a, b: a >= b,
@@ -596,8 +597,9 @@ _WHERE_OPS: Final = {
     "contains": lambda a, b: (
         _casefold(b) in _casefold(a) if isinstance(a, str) else b in a
     ),
-    "startswith": lambda a, b: isinstance(a, str)
-    and _casefold(a).startswith(_casefold(b)),
+    "startswith": lambda a, b: (
+        isinstance(a, str) and _casefold(a).startswith(_casefold(b))
+    ),
     "endswith": lambda a, b: isinstance(a, str) and _casefold(a).endswith(_casefold(b)),
 }
 

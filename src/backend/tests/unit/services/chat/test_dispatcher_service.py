@@ -13,12 +13,12 @@ Covers:
 """
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.core.cache import intent_cache
-from src.schemas.dispatcher import DispatcherRequest, DispatcherResponse, IntentType
+from src.schemas.dispatcher import DispatcherRequest
 from src.services.chat.dispatcher import DispatcherService
 
 
@@ -86,7 +86,6 @@ class _BareTrace:
 
 
 class TestCreate:
-
     @patch("src.services.chat.dispatcher.TemplateService")
     @patch("src.services.chat.dispatcher.LLMLogService")
     @patch("src.services.chat.dispatcher.CrewGenerationService")
@@ -118,7 +117,6 @@ class TestCreate:
 
 
 class TestAnalyzeMessageSemantics:
-
     def setup_method(self):
         self.svc = _build_service()
 
@@ -214,7 +212,6 @@ class TestAnalyzeMessageSemantics:
 
 
 class TestLogLlmInteraction:
-
     @pytest.mark.asyncio
     async def test_success_path(self):
         svc = _build_service()
@@ -305,7 +302,6 @@ class TestMaybeEnableMlflowTracing:
 
 
 class TestDetectIntent:
-
     @pytest.mark.asyncio
     async def test_successful_intent_detection(self):
         svc = _build_service()
@@ -1216,7 +1212,6 @@ class TestDispatch:
 
 
 class TestDispatchWithMlflow:
-
     @pytest.mark.asyncio
     async def test_mlflow_trace_inputs_set(self):
         svc = _build_service()
@@ -1539,7 +1534,6 @@ class TestDispatchWithMlflow:
 
 
 class TestDispatcherResponseStructure:
-
     @pytest.mark.asyncio
     async def test_combined_response_structure(self):
         svc = _build_service()
@@ -1575,7 +1569,6 @@ class TestDispatcherResponseStructure:
 
 
 class TestKeywordSets:
-
     def test_task_action_words_are_lowercase(self):
         for word in DispatcherService.TASK_ACTION_WORDS:
             assert word == word.lower()
@@ -1622,7 +1615,6 @@ class TestKeywordSets:
 
 
 class TestEdgeCases:
-
     @pytest.mark.asyncio
     async def test_dispatch_with_no_group_context(self):
         svc = _build_service()
@@ -1865,7 +1857,6 @@ class TestEdgeCases:
 
 
 class TestBuildToolCatalog:
-
     def test_formats_tools_correctly(self):
         tools = [
             {"title": "SerperDevTool", "description": "Search the web"},
@@ -1897,7 +1888,6 @@ class TestBuildToolCatalog:
 
 
 class TestDetectIntentWithTools:
-
     @pytest.mark.asyncio
     async def test_suggested_tools_parsed_and_validated(self):
         """LLM response with suggested_tools should be parsed and validated."""
@@ -1977,7 +1967,6 @@ class TestDetectIntentWithTools:
     @pytest.mark.asyncio
     async def test_cache_key_differs_with_different_tools(self):
         """Cache key should be different when different tools are available."""
-        import hashlib
 
         svc = _build_service()
         svc.template_service.get_template_content = AsyncMock(return_value="prompt")
@@ -2068,7 +2057,6 @@ class TestDetectIntentWithTools:
 
 
 class TestDispatchWithSuggestedTools:
-
     def _make_intent_result(self, intent, suggested_tools=None, **kwargs):
         result = {
             "intent": intent,
@@ -2282,7 +2270,6 @@ class TestDispatchWithSuggestedTools:
 
 
 class TestSlashCommandDetection:
-
     # --- Bare commands (no qualifier) show usage help ---
 
     def test_bare_list_shows_help(self):
@@ -2462,7 +2449,6 @@ class TestSlashCommandDetection:
 
 
 class TestCatalogDispatch:
-
     def _make_intent_result(self, intent, confidence=1.0, args=""):
         return {
             "intent": intent,
@@ -2760,7 +2746,6 @@ class TestCatalogDispatch:
 
 
 class TestFlowSlashCommandDetection:
-
     def test_list_flows(self):
         result = DispatcherService._detect_slash_command("/list flows")
         assert result is not None
@@ -2826,7 +2811,6 @@ class TestFlowSlashCommandDetection:
 
 
 class TestFlowDispatch:
-
     def _make_intent_result(self, intent, confidence=1.0, args=""):
         return {
             "intent": intent,
@@ -3072,7 +3056,6 @@ class TestFlowDispatch:
 
 
 class TestDeleteSlashCommandDetection:
-
     def test_bare_delete_shows_help(self):
         result = DispatcherService._detect_slash_command("/delete")
         assert result is not None
@@ -3153,7 +3136,6 @@ class TestDeleteSlashCommandDetection:
 
 
 class TestCatalogDeleteDispatch:
-
     def _make_intent_result(self, intent, confidence=1.0, args=""):
         return {
             "intent": intent,
@@ -3331,7 +3313,6 @@ class TestCatalogDeleteDispatch:
 
 
 class TestFlowDeleteDispatch:
-
     def _make_intent_result(self, intent, confidence=1.0, args=""):
         return {
             "intent": intent,
@@ -3707,10 +3688,8 @@ class TestDispatchStreamingCrewAndToolResolution:
 
 
 class TestMlflowImportFallback:
-
     def test_mlflow_import_error_sets_flags(self):
         """When mlflow import fails, _HAS_MLFLOW=False and _mlflow=None."""
-        import importlib
         import sys
 
         # Save original state
@@ -3748,7 +3727,6 @@ class TestMlflowImportFallback:
 
 
 class TestCallLlmWithRetry:
-
     @pytest.mark.asyncio
     async def test_retryable_error_retries_and_raises(self):
         """Retryable errors trigger backoff retries, then raise after exhaustion."""
@@ -3824,7 +3802,6 @@ class TestCallLlmWithRetry:
 
 
 class TestCircuitBreaker:
-
     def test_check_circuit_breaker_open_within_reset_time(self):
         """Circuit breaker returns True (open) when failures exceed threshold within reset time."""
         import time as time_mod
@@ -3989,7 +3966,6 @@ class TestCircuitBreaker:
 
 
 class TestIntentCacheHit:
-
     @pytest.mark.asyncio
     async def test_cache_hit_returns_cached_result(self):
         """When a cached result exists, detect_intent returns it with source='cache'."""
@@ -4034,7 +4010,6 @@ class TestIntentCacheHit:
 
 
 class TestExecuteCrewWithRunName:
-
     def _make_intent_result(self, intent, args=""):
         return {
             "intent": intent,
@@ -4190,7 +4165,6 @@ class TestExecuteCrewWithRunName:
 
 
 class TestExecuteFlowWithRunName:
-
     def _make_intent_result(self, intent, args=""):
         return {
             "intent": intent,
@@ -4369,7 +4343,6 @@ class TestExecuteFlowWithRunName:
 
 
 class TestCatalogHelpBranches:
-
     @pytest.mark.asyncio
     async def test_catalog_help_command_help_branch(self):
         """When extracted_info has command_help, show only the command-specific usage."""

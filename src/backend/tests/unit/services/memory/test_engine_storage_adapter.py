@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.services.memory.engine import MemoryRecord
-from src.services.memory.engine_storage_adapter import (
+from src.services.memory.storage.adapter import (
     EngineStorageAdapter,
     build_litellm_embedder,
     embed_text,
@@ -324,7 +324,7 @@ class TestQueryBoilerplateSymmetry:
     def test_query_is_stripped_before_embedding(self):
         from unittest.mock import MagicMock
 
-        from src.services.memory.engine_storage_adapter import EngineStorageAdapter
+        from src.services.memory.storage.adapter import EngineStorageAdapter
 
         backend = MagicMock()
         backend.search.return_value = []

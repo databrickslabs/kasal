@@ -15,7 +15,7 @@ silently, forever, and the symptom reads as "memory isn't very good" rather than
 
 Alembic does not manage Lakebase, so this is the equivalent of the ``_ensure_*``
 helpers in ``db/session.py``: idempotent, additive, and run automatically. The
-local SQLite backend already self-heals in ``LocalMemoryStorage._migrate_columns``
+local SQLite backend already self-heals in ``LocalStorageBackend._migrate_columns``
 — this is the same guarantee for the backend that actually matters in production.
 
 Runs at most once per process per table: one cheap ``information_schema`` lookup
@@ -106,8 +106,7 @@ async def ensure_memory_columns(session: Any, table_name: str) -> None:
         for column, ddl in missing:
             await session.execute(
                 text(
-                    f"ALTER TABLE {table_name} "
-                    f"ADD COLUMN IF NOT EXISTS {column} {ddl}"
+                    f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {column} {ddl}"
                 )
             )
         if missing:

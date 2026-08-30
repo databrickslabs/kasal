@@ -249,7 +249,7 @@ def run_crew_in_process(
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
 
-        except Exception as cleanup_error:
+        except Exception:
             # Ignore cleanup errors in signal handler
             pass
 
@@ -911,7 +911,7 @@ def run_crew_in_process(
                                 )
                                 for j, source in enumerate(ks):
                                     async_logger.info(
-                                        f"[JOB_CONFIGURATION]       Source {j+1}: {source}"
+                                        f"[JOB_CONFIGURATION]       Source {j + 1}: {source}"
                                     )
                             else:
                                 async_logger.info(
@@ -1347,13 +1347,12 @@ def run_crew_in_process(
                 # sink fires from _finish_task for every completed task,
                 # fire-and-forget ("Memory Write" rows). Best-effort.
                 try:
-                    from src.services.memory.hooks import (
+                    from src.services.execution.harnesses import active_harness
+                    from src.services.memory.run.persist import make_memory_output_sink
+                    from src.services.memory.run.recall import (
                         make_memory_context_provider,
-                        make_memory_output_sink,
                         request_from_inputs,
                     )
-
-                    from src.services.execution.harnesses import active_harness
 
                     # Through the binding — see crew_preparation for why.
                     engine = active_harness()
@@ -1364,7 +1363,9 @@ def run_crew_in_process(
                     memory_provider = make_memory_context_provider(
                         crew_memory, request_from_inputs(inputs)
                     )
-                    memory_sink = make_memory_output_sink(crew_memory)
+                    memory_sink = make_memory_output_sink(
+                        crew_memory, execution_id=execution_id
+                    )
                     engine.wire_memory(crew, provider=memory_provider, sink=memory_sink)
                     if memory_provider is not None or memory_sink is not None:
                         async_logger.info(
@@ -1428,9 +1429,7 @@ def run_crew_in_process(
                     # otherwise die with the interpreter — losing both the
                     # stored memory and its "Memory Write" trace span.
                     try:
-                        from src.services.memory.hooks import (
-                            flush_memory_writes,
-                        )
+                        from src.services.memory.run.persist import flush_memory_writes
 
                         still_pending = await asyncio.to_thread(
                             flush_memory_writes, 15.0
@@ -1442,7 +1441,7 @@ def run_crew_in_process(
                             )
                         # Sleep-time maintenance: bounded, LLM-free dedupe of
                         # the group scope now that this run's writes landed.
-                        from src.services.memory.maintenance import (
+                        from src.services.memory.maintenance.passes import (
                             run_memory_maintenance,
                         )
 
@@ -2132,7 +2131,6 @@ class ProcessCrewExecutor:
         )
 
         try:
-
             # Wait for the process to complete, draining result_queue concurrently.
             #
             # CRITICAL: Never call process.join() before draining result_queue.
@@ -2622,7 +2620,7 @@ class ProcessCrewExecutor:
                 # Still write the JobConfiguration log
             else:
                 logger.info(
-                    f"Found {len(logs_to_write)-1} logs for execution {exec_id_short} in crew.log"
+                    f"Found {len(logs_to_write) - 1} logs for execution {exec_id_short} in crew.log"
                 )
 
             # Route through get_smart_db_session so logs land in

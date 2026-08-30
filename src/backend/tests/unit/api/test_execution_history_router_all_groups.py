@@ -2,7 +2,6 @@
 Unit tests for execution_history_router module.
 """
 
-from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 

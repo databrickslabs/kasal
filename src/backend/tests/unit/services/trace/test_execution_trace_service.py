@@ -284,7 +284,35 @@ class TestGetTracesByJobId:
         )
 
         assert result is not None
-        mock_trace_repo.get_by_job_id.assert_awaited_once_with("job-abc-123", 50, 0, 41)
+        mock_trace_repo.get_by_job_id.assert_awaited_once_with(
+            "job-abc-123", 50, 0, 41, None
+        )
+
+    @pytest.mark.asyncio
+    async def test_event_type_prefix_is_forwarded_and_skips_run_id_fallback(
+        self, service, mock_history_repo, mock_trace_repo
+    ):
+        """The memory views ask for a run's memory_* rows only. An empty
+        answer is a true one ("this run has no memory rows"); the legacy
+        run_id fallback cannot apply the filter and must not fire."""
+        execution = _make_execution_obj(id=10)
+        mock_history_repo.get_run_summary_by_job_id = AsyncMock(return_value=execution)
+        mock_trace_repo.get_by_job_id = AsyncMock(return_value=[])
+        mock_trace_repo.get_by_run_id = AsyncMock(return_value=[_make_trace_obj()])
+
+        result = await service.get_traces_by_job_id(
+            group_context=None,
+            job_id="job-abc-123",
+            limit=15000,
+            event_type_prefix="memory_",
+        )
+
+        mock_trace_repo.get_by_job_id.assert_awaited_once_with(
+            "job-abc-123", 15000, 0, 0, "memory_"
+        )
+        assert result is not None
+        assert len(result.traces) == 0
+        mock_trace_repo.get_by_run_id.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_since_id_empty_result_skips_run_id_fallback(

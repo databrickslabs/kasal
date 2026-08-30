@@ -309,6 +309,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         limit: Optional[int] = None,
         offset: Optional[int] = 0,
         since_id: Optional[int] = None,
+        event_type_prefix: Optional[str] = None,
     ) -> List[ExecutionTrace]:
         """
         Get execution traces by job_id.
@@ -319,6 +320,11 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             offset: Number of traces to skip
             since_id: Only return traces with id greater than this (incremental
                 cursor for pollers — avoids re-reading the whole trace set)
+            event_type_prefix: Only traces whose event_type starts with this.
+                The memory views need a run's ``memory_*`` rows and nothing
+                else; without the filter they had to page the whole trace set
+                (LLM prompts included) or accept the default page cutting the
+                writes off the end of a long run.
 
         Returns:
             List of ExecutionTrace records
@@ -335,6 +341,14 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
 
             if since_id:
                 stmt = stmt.where(ExecutionTrace.id > since_id)
+            if event_type_prefix:
+                # autoescape: "memory_" must mean the literal underscore, not
+                # LIKE's any-one-char wildcard.
+                stmt = stmt.where(
+                    ExecutionTrace.event_type.startswith(
+                        event_type_prefix, autoescape=True
+                    )
+                )
             if offset is not None:
                 stmt = stmt.offset(offset)
             if limit is not None:
@@ -604,6 +618,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         limit: Optional[int] = None,
         offset: Optional[int] = 0,
         since_id: Optional[int] = None,
+        event_type_prefix: Optional[str] = None,
     ) -> List[ExecutionTrace]:
         """
         Get execution traces by job_id.
@@ -613,11 +628,15 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             limit: Maximum number of traces to return
             offset: Number of traces to skip
             since_id: Incremental cursor — only traces with id greater than this
+            event_type_prefix: Only traces whose event_type starts with this
+                (e.g. ``memory_`` for a run's memory reads and writes)
 
         Returns:
             List of ExecutionTrace records
         """
-        return await self._get_by_job_id(job_id, limit, offset, since_id)
+        return await self._get_by_job_id(
+            job_id, limit, offset, since_id, event_type_prefix
+        )
 
     async def get_by_group_ids(
         self,

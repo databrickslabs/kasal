@@ -33,7 +33,6 @@ class TestCreateTaskErrorPath:
         """create_task wraps service exception in 500 HTTPException."""
         svc = AsyncMock()
         svc.create_with_group = AsyncMock(side_effect=Exception("DB connection failed"))
-        from src.schemas.task import TaskCreate
 
         task_in = TaskCreate(
             name="T", description="d", expected_output="o", agent_id=None

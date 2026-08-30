@@ -22,17 +22,20 @@ import re
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import text
 
 from src.core.logger import LoggerManager
 from src.db.lakebase_session import get_lakebase_session
-from src.services.memory.bridge_loop import run_on_bridge_loop
 from src.services.memory.engine import MemoryRecord, ScopeInfo
-from src.services.memory.lakebase_schema import ensure_memory_columns, needs_check
-from src.services.memory.pg_codec import (
+from src.services.memory.storage.bridge_loop import run_on_bridge_loop
+from src.services.memory.storage.lakebase_schema import (
+    ensure_memory_columns,
+    needs_check,
+)
+from src.services.memory.storage.pg_codec import (
     loads_or_empty,
     parse_datetime,
     to_aware_utc,
@@ -506,7 +509,7 @@ class LakebaseStorageBackend:
                            1.0 - (embedding <=> CAST(:query_embedding AS vector))
                                AS semantic
                     FROM {self.table_name}
-                    WHERE {' AND '.join(where)}
+                    WHERE {" AND ".join(where)}
                     ORDER BY embedding <=> CAST(:query_embedding AS vector) ASC
                     LIMIT :candidate_limit
                 ) AS c

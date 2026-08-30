@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.repositories.memory_maintenance_repository import MemoryMaintenanceRepository
-from src.services.memory.sweep import (
+from src.services.memory.maintenance.sweep import (
     _maintain_group,
     build_group_memory,
     sweep_enabled,
@@ -171,7 +171,7 @@ class TestSweepTick:
             session_patch,
             repo_patch,
             patch(
-                "src.services.memory.sweep._maintain_group",
+                "src.services.memory.maintenance.sweep._maintain_group",
                 new=AsyncMock(return_value=("ok", {"deleted": 1}, None)),
             ),
         ):
@@ -197,7 +197,7 @@ class TestSweepTick:
         with (
             session_patch,
             repo_patch,
-            patch("src.services.memory.sweep._maintain_group", new=_fake),
+            patch("src.services.memory.maintenance.sweep._maintain_group", new=_fake),
         ):
             result = await sweep_memory_maintenance()
 
@@ -228,7 +228,7 @@ class TestMaintainGroup:
         """Skipped whole rather than half-maintained: the merge and supersession
         passes re-save records and therefore need an embedder."""
         with patch(
-            "src.services.memory.sweep.build_group_memory",
+            "src.services.memory.maintenance.sweep.build_group_memory",
             new=AsyncMock(return_value=None),
         ):
             status, stats, error = await _maintain_group("g1")
@@ -241,11 +241,11 @@ class TestMaintainGroup:
     async def test_maintenance_failure_is_reported_not_raised(self):
         with (
             patch(
-                "src.services.memory.sweep.build_group_memory",
+                "src.services.memory.maintenance.sweep.build_group_memory",
                 new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
-                "src.services.memory.maintenance.run_memory_maintenance",
+                "src.services.memory.maintenance.passes.run_memory_maintenance",
                 side_effect=RuntimeError("pass exploded"),
             ),
         ):
@@ -258,11 +258,11 @@ class TestMaintainGroup:
     async def test_stats_are_returned_for_the_watermark(self):
         with (
             patch(
-                "src.services.memory.sweep.build_group_memory",
+                "src.services.memory.maintenance.sweep.build_group_memory",
                 new=AsyncMock(return_value=MagicMock()),
             ),
             patch(
-                "src.services.memory.maintenance.run_memory_maintenance",
+                "src.services.memory.maintenance.passes.run_memory_maintenance",
                 return_value={"deleted": 4, "superseded": 1},
             ),
         ):
@@ -280,14 +280,15 @@ class TestBuildGroupMemory:
         service.fetch_memory_backend_config = AsyncMock(return_value=None)
 
         with patch(
-            "src.services.memory.crew_memory.CrewMemoryService", return_value=service
+            "src.services.memory.run.crew_memory.CrewMemoryService",
+            return_value=service,
         ):
             assert await build_group_memory("g1") is None
 
     @pytest.mark.asyncio
     async def test_construction_failure_is_swallowed(self):
         with patch(
-            "src.services.memory.crew_memory.CrewMemoryService",
+            "src.services.memory.run.crew_memory.CrewMemoryService",
             side_effect=RuntimeError("no credentials"),
         ):
             assert await build_group_memory("g1") is None

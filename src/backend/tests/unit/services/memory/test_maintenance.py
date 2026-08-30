@@ -5,10 +5,10 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from src.services.memory.engine import Memory
-from src.services.memory.engine_storage_adapter import EngineStorageAdapter
-from src.services.memory.hooks import flush_memory_writes, remember_async
-from src.services.memory.local_storage_backend import LocalMemoryStorage
-from src.services.memory.maintenance import consolidate_memory
+from src.services.memory.maintenance.passes import consolidate_memory
+from src.services.memory.run.persist import flush_memory_writes, remember_async
+from src.services.memory.storage.adapter import EngineStorageAdapter
+from src.services.memory.storage.local import LocalStorageBackend
 
 
 def _embedder(texts):
@@ -17,8 +17,15 @@ def _embedder(texts):
 
 class TestConsolidateEndToEnd:
     def test_dedupes_repeated_records_keeps_one(self, tmp_path):
-        backend = LocalMemoryStorage(tmp_path / "m.db", embedder=_embedder)
-        memory = Memory(storage=EngineStorageAdapter(backend), root_scope="/g1")
+        backend = LocalStorageBackend(tmp_path / "m.db", embedder=_embedder)
+        memory = Memory(
+            storage=EngineStorageAdapter(backend),
+            root_scope="/g1",
+            # The stub embedder gives every text the same vector, so save-time
+            # consolidation would fold every write into the first; off, so the
+            # maintenance pass under test is what dedupes.
+            consolidation_threshold=0,
+        )
         for _ in range(3):
             memory.remember("User: what was Q2 revenue? Assistant: $4.2M")
             time.sleep(0.01)  # distinct created_at ordering
@@ -31,8 +38,15 @@ class TestConsolidateEndToEnd:
         assert backend.count("/g1") == 2
 
     def test_whitespace_and_case_variants_are_duplicates(self, tmp_path):
-        backend = LocalMemoryStorage(tmp_path / "m.db", embedder=_embedder)
-        memory = Memory(storage=EngineStorageAdapter(backend), root_scope="/g1")
+        backend = LocalStorageBackend(tmp_path / "m.db", embedder=_embedder)
+        memory = Memory(
+            storage=EngineStorageAdapter(backend),
+            root_scope="/g1",
+            # The stub embedder gives every text the same vector, so save-time
+            # consolidation would fold every write into the first; off, so the
+            # maintenance pass under test is what dedupes.
+            consolidation_threshold=0,
+        )
         memory.remember("Swiss  market GREW 4%")
         memory.remember("swiss market grew 4%")
 
@@ -50,8 +64,15 @@ class TestConsolidateEndToEnd:
         (LangMem's `store.asearch(..., limit=5)`, Mem0's five neighbours per
         fact, Graphiti's MinHash tier); Kasal now does too.
         """
-        backend = LocalMemoryStorage(tmp_path / "m.db", embedder=_embedder)
-        memory = Memory(storage=EngineStorageAdapter(backend), root_scope="/g1")
+        backend = LocalStorageBackend(tmp_path / "m.db", embedder=_embedder)
+        memory = Memory(
+            storage=EngineStorageAdapter(backend),
+            root_scope="/g1",
+            # The stub embedder gives every text the same vector, so save-time
+            # consolidation would fold every write into the first; off, so the
+            # maintenance pass under test is what dedupes.
+            consolidation_threshold=0,
+        )
         remember_async(memory, "same content", source="crew_task")
         assert flush_memory_writes(timeout=10.0) == 0
         remember_async(memory, "same content", source="crew_task")
@@ -89,7 +110,7 @@ class TestConsolidateGuards:
 class TestCognitiveWeightPlumbing:
     def test_factory_maps_cognitive_config_to_scoring_kwargs(self):
         from src.schemas.memory_backend import MemoryBackendConfig
-        from src.services.memory.backend_factory import (
+        from src.services.memory.storage.factory import (
             MemoryBackendFactory,
         )
 
@@ -114,7 +135,7 @@ class TestCognitiveWeightPlumbing:
 
     def test_factory_omits_unset_fields(self):
         from src.schemas.memory_backend import MemoryBackendConfig
-        from src.services.memory.backend_factory import (
+        from src.services.memory.storage.factory import (
             MemoryBackendFactory,
         )
 
@@ -122,7 +143,7 @@ class TestCognitiveWeightPlumbing:
         assert MemoryBackendFactory._scoring_kwargs(config) == {}
 
     def test_local_backend_ctor_overrides(self, tmp_path):
-        store = LocalMemoryStorage(
+        store = LocalStorageBackend(
             tmp_path / "m.db",
             embedder=_embedder,
             semantic_weight=0.9,
@@ -131,7 +152,7 @@ class TestCognitiveWeightPlumbing:
         assert store.SEMANTIC_WEIGHT == 0.9
         assert store.RECENCY_HALF_LIFE_DAYS == 7.0
         # Untouched knobs keep the class defaults.
-        assert store.KEYWORD_WEIGHT == LocalMemoryStorage.KEYWORD_WEIGHT
+        assert store.KEYWORD_WEIGHT == LocalStorageBackend.KEYWORD_WEIGHT
 
 
 class _FakeLLM:
@@ -145,8 +166,15 @@ class _FakeLLM:
 
 
 def _memory_with_records(tmp_path, n, llm=None):
-    backend = LocalMemoryStorage(tmp_path / "m.db", embedder=_embedder)
-    memory = Memory(storage=EngineStorageAdapter(backend), root_scope="/g1", llm=llm)
+    backend = LocalStorageBackend(tmp_path / "m.db", embedder=_embedder)
+    memory = Memory(
+        storage=EngineStorageAdapter(backend),
+        root_scope="/g1",
+        llm=llm,
+        # The stub embedder gives every text the same vector; save-time
+        # consolidation off so the maintenance merge under test is what acts.
+        consolidation_threshold=0,
+    )
     for i in range(n):
         memory.remember(f"unique fact number {i}")
     return memory, backend
@@ -154,7 +182,7 @@ def _memory_with_records(tmp_path, n, llm=None):
 
 class TestMergeSimilarMemories:
     def test_merges_clusters_and_replaces_records(self, tmp_path):
-        from src.services.memory.maintenance import (
+        from src.services.memory.maintenance.passes import (
             merge_similar_memories,
         )
 
@@ -175,7 +203,7 @@ class TestMergeSimilarMemories:
         assert merged and merged[0].content == "merged fact"
 
     def test_skips_below_min_records(self, tmp_path):
-        from src.services.memory.maintenance import (
+        from src.services.memory.maintenance.passes import (
             merge_similar_memories,
         )
 
@@ -186,7 +214,7 @@ class TestMergeSimilarMemories:
         assert not llm.prompts, "LLM should not run under the record threshold"
 
     def test_skips_without_llm(self, tmp_path):
-        from src.services.memory.maintenance import (
+        from src.services.memory.maintenance.passes import (
             merge_similar_memories,
         )
 
@@ -194,7 +222,7 @@ class TestMergeSimilarMemories:
         assert merge_similar_memories(memory)["merged_clusters"] == 0
 
     def test_env_kill_switch(self, tmp_path, monkeypatch):
-        from src.services.memory.maintenance import (
+        from src.services.memory.maintenance.passes import (
             merge_similar_memories,
         )
 
@@ -205,7 +233,7 @@ class TestMergeSimilarMemories:
         assert not llm.prompts
 
     def test_malformed_llm_reply_is_noop(self, tmp_path):
-        from src.services.memory.maintenance import (
+        from src.services.memory.maintenance.passes import (
             merge_similar_memories,
         )
 
@@ -217,7 +245,7 @@ class TestMergeSimilarMemories:
         assert backend.count("/g1") == before
 
     def test_invalid_indices_are_ignored(self, tmp_path):
-        from src.services.memory.maintenance import (
+        from src.services.memory.maintenance.passes import (
             merge_similar_memories,
         )
 
@@ -233,7 +261,7 @@ class TestMergeSimilarMemories:
 
 class TestRunMemoryMaintenance:
     def test_combines_dedupe_and_merge_stats(self, tmp_path):
-        from src.services.memory.maintenance import (
+        from src.services.memory.maintenance.passes import (
             run_memory_maintenance,
         )
 

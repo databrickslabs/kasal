@@ -52,7 +52,8 @@ def _patch_config(config):
     svc = MagicMock()
     svc.get_active_config = AsyncMock(return_value=config)
     return patch(
-        "src.services.memory.config_service.MemoryConfigService", return_value=svc
+        "src.services.memory.config.config_service.MemoryConfigService",
+        return_value=svc,
     )
 
 
@@ -87,7 +88,8 @@ class TestResolveLakebaseInstance:
         svc = MagicMock()
         svc.get_active_config = AsyncMock(side_effect=RuntimeError("boom"))
         with patch(
-            "src.services.memory.config_service.MemoryConfigService", return_value=svc
+            "src.services.memory.config.config_service.MemoryConfigService",
+            return_value=svc,
         ):
             inst = await resolve_lakebase_instance(MagicMock(), "g1")
         assert inst is None
@@ -270,7 +272,7 @@ class TestKnowledgeRoutingObservability:
         svc.get_active_config = AsyncMock(side_effect=RuntimeError("boom"))
         with (
             patch(
-                "src.services.memory.config_service.MemoryConfigService",
+                "src.services.memory.config.config_service.MemoryConfigService",
                 return_value=svc,
             ),
             span_patch,

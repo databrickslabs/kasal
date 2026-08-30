@@ -44,7 +44,7 @@ class DocumentationEmbeddingService:
 
             # Use the injected session or get a new one
             # Memory backends are MemoryBackendService's domain.
-            from src.services.memory.backend_service import MemoryBackendService
+            from src.services.memory.config.backend_service import MemoryBackendService
 
             if self.session:
                 all_backends = await MemoryBackendService(self.session).get_all()

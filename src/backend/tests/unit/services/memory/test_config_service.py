@@ -13,10 +13,9 @@ import pytest
 from src.models.memory_backend import MemoryBackend
 from src.schemas.memory_backend import (
     DatabricksMemoryConfig,
-    MemoryBackendConfig,
     MemoryBackendType,
 )
-from src.services.memory.config_service import MemoryConfigService
+from src.services.memory.config.config_service import MemoryConfigService
 
 
 @pytest.fixture

@@ -5,7 +5,7 @@ Tests core CRUD operations for memory backend configurations.
 """
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -17,7 +17,7 @@ from src.schemas.memory_backend import (
     MemoryBackendType,
     MemoryBackendUpdate,
 )
-from src.services.memory.backend_base_service import MemoryBackendBaseService
+from src.services.memory.config.backend_base_service import MemoryBackendBaseService
 
 
 @pytest.fixture

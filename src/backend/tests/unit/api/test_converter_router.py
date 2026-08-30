@@ -13,15 +13,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.converter_router import get_converter_service, router
-from src.schemas.conversion import (
-    ConversionHistoryListResponse,
-    ConversionHistoryResponse,
-    ConversionJobListResponse,
-    ConversionJobResponse,
-    ConversionStatistics,
-    SavedConfigurationListResponse,
-    SavedConfigurationResponse,
-)
 
 
 # Mock responses

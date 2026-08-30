@@ -193,6 +193,11 @@ export function buildTraceEntry(
     // made long recalls show 0.0s). Matches the Job-History trace's "Memory Read".
     const memoryDurationMs =
       num(metadata, 'query_time_ms') ?? num(metadata, 'retrieval_time_ms') ?? durationMs;
+    // The query the recall ran — same `query` key the crew/flow bridge and the
+    // chat handlers stamp — leads the detail so the reader sees what was asked
+    // before what came back.
+    const rawQuery = metadata.query ?? extra.query;
+    const query = typeof rawQuery === 'string' ? rawQuery.replace(/\s+/g, ' ').trim() : '';
     return {
       kind: 'tool_result',
       // Same label so consecutive recalls group under one "Memory" line.
@@ -200,7 +205,7 @@ export function buildTraceEntry(
       sublabel: 'context retrieved',
       durationMs: memoryDurationMs,
       source: eventSource || undefined,
-      detail: content,
+      detail: query ? `Query: ${query}\n\n${content}` : content,
       timestamp: now,
     };
   }

@@ -1,27 +1,55 @@
-"""
-Crew memory service for handling memory backend configuration and setup.
+"""``CrewMemoryService`` — from a teamspace's configuration to a run's ``Memory``.
 
-This service centralizes all memory-related logic including:
-- Memory backend configuration fetching
-- Crew ID generation
-- Storage directory setup
-- Memory component configuration
-- Memory tracing and context setup
+One service, used by all three execution paths, in this order:
+
+1. ``fetch_memory_backend_config`` — the active ``memory_backends`` row (or
+   the local default when the teamspace has none).
+2. ``generate_crew_id`` / ``setup_storage_directory`` — the deterministic crew
+   id (agents, tasks, model, group — never the run name) and the per-teamspace
+   store directory.
+3. ``create_unified_storage`` — a ``StorageBackend`` from the configuration:
+   Lakebase, or ``None`` for the local SQLite default, which
+   ``_create_local_storage`` then builds with the resolved embedder and the
+   Memory Tuning scoring weights.
+4. ``resolve_memory_llm_override`` — the memory LLM the panel chose, fully
+   configured, or ``None`` to use the crew's own model.
+5. ``configure_crew_memory_components`` — builds the ``Memory`` from
+   ``_build_memory_kwargs`` (root scope, embedder, LLM, every engine-side
+   tuning knob, the recall floor chosen for the embedder in use) and attaches
+   it to every agent.
+6. ``attach_memory_trace_context`` / ``attach_tools_trace_context`` — trace
+   attribution so memory and tool rows land under the right task.
+
+Chat calls the same steps in-process (``chat/service.py``); Agent Builder and
+Flow Builder call them inside their subprocess.
 """
 
 import hashlib
 import json
-import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from src.core.logger import LoggerManager
 from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
-from src.services.memory.backend_factory import MemoryBackendFactory
-from src.utils.memory_paths import local_memory_root, local_memory_store_dir
+from src.services.memory.storage.factory import MemoryBackendFactory
+from src.utils.memory_paths import local_memory_store_dir
 
 logger = LoggerManager.get_instance().crew
+
+
+def _embedder_provider(custom_embedder: Any, embedder_config: Any) -> Optional[str]:
+    """Which embedding provider a run resolved — the key the recall floor is chosen by.
+
+    A resolved custom embedder (a callable / ``embed_documents`` object) is the
+    Databricks one; otherwise the crew's provider-dict embedder names itself.
+    """
+    if callable(custom_embedder) or hasattr(custom_embedder, "embed_documents"):
+        return "databricks"
+    if isinstance(embedder_config, dict):
+        provider = embedder_config.get("provider")
+        return str(provider) if provider else None
+    return None
 
 
 class CrewMemoryService:
@@ -53,7 +81,7 @@ class CrewMemoryService:
         logger.info("=" * 80)
         try:
             from src.db.session import routed_scoped_session
-            from src.services.memory.backend_service import MemoryBackendService
+            from src.services.memory.config.backend_service import MemoryBackendService
 
             async with routed_scoped_session() as session:
                 service = MemoryBackendService(session)
@@ -455,7 +483,7 @@ class CrewMemoryService:
             crew_kwargs["memory"] = False
             return crew_kwargs
 
-        from src.services.memory.engine_storage_adapter import (
+        from src.services.memory.storage.adapter import (
             EngineStorageAdapter,
         )
 
@@ -521,11 +549,11 @@ class CrewMemoryService:
         override the hybrid-scoring defaults.
         """
         try:
-            from src.services.memory.engine_storage_adapter import (
+            from src.services.memory.storage.adapter import (
                 build_litellm_embedder,
             )
-            from src.services.memory.local_storage_backend import (
-                LocalMemoryStorage,
+            from src.services.memory.storage.local import (
+                LocalStorageBackend,
             )
             from src.utils.storage_paths import db_storage_path
 
@@ -551,7 +579,7 @@ class CrewMemoryService:
 
             db_path = Path(db_storage_path()) / "memory.db"
             logger.info("Local memory storage at %s", db_path)
-            from src.services.memory.backend_factory import (
+            from src.services.memory.storage.factory import (
                 MemoryBackendFactory,
             )
 
@@ -560,7 +588,7 @@ class CrewMemoryService:
                 if memory_config is not None
                 else {}
             )
-            return LocalMemoryStorage(db_path, embedder=embedder, **scoring_kwargs)
+            return LocalStorageBackend(db_path, embedder=embedder, **scoring_kwargs)
         except Exception as exc:  # noqa: BLE001 — memory must never break a run
             self.last_memory_error = f"{type(exc).__name__}: {exc}"
             logger.warning("Local memory storage unavailable: %s", exc)
@@ -639,11 +667,12 @@ class CrewMemoryService:
             if memory_llm is not None:
                 kwargs["llm"] = memory_llm
 
+        # Only fields ``Memory`` declares. The scoring weights, half-life and
+        # relevance threshold belong to the STORAGE backend and reach it via
+        # MemoryBackendFactory._scoring_kwargs — handing them to Memory would
+        # be a silent drop (pydantic ignores unknown kwargs), which is exactly
+        # what these knobs used to suffer.
         for key in (
-            "recency_weight",
-            "semantic_weight",
-            "importance_weight",
-            "recency_half_life_days",
             "consolidation_threshold",
             "consolidation_limit",
             "default_importance",
@@ -655,6 +684,21 @@ class CrewMemoryService:
         ):
             if key in tuning_dict and tuning_dict[key] is not None:
                 kwargs[key] = tuning_dict[key]
+
+        # Recall floor. The teamspace's explicit value wins; otherwise the
+        # default for the embedder this run actually resolved — Ollama's
+        # nomic-embed-text compresses the cosine scale, so the Databricks-
+        # calibrated 0.75 rejected a run's own previous output (measured 0.68).
+        # Decided HERE, where the embedder is known, so chat, agent builder and
+        # flow builder — on either harness — apply the same floor.
+        from src.services.memory.engine.memory import default_recall_min_score
+
+        floor = tuning_dict.get("recall_min_score")
+        if floor is None:
+            floor = default_recall_min_score(
+                _embedder_provider(custom_embedder, crew_kwargs.get("embedder"))
+            )
+        kwargs["recall_min_score"] = float(floor)
         return kwargs
 
     def _resolve_memory_llm(self, crew_kwargs: Dict[str, Any]) -> Optional[Any]:

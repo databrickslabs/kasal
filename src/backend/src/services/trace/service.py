@@ -147,6 +147,7 @@ class ExecutionTraceService:
         offset: int = 0,
         since_id: int = 0,
         preview_chars: int = 0,
+        event_type_prefix: Optional[str] = None,
     ) -> ExecutionTraceResponseByJobId:
         """
         Get traces for an execution by job_id with pagination and authorization.
@@ -163,6 +164,9 @@ class ExecutionTraceService:
                 (see row_view.preview_trace). 0 returns them whole. The timeline
                 asks for previews because it renders one-line labels; a row's
                 full text is fetched only when someone opens it.
+            event_type_prefix: Only rows whose event_type starts with this. The
+                memory views ask for ``memory_`` so a run's reads and writes
+                come back whole, without paging through its LLM payloads.
 
         Returns:
             ExecutionTraceResponseByJobId with traces for the execution if authorized
@@ -207,14 +211,16 @@ class ExecutionTraceService:
 
             # Get traces using repository - direct lookup by job_id
             traces = await self.repository.get_by_job_id(
-                job_id, limit, offset, since_id
+                job_id, limit, offset, since_id, event_type_prefix
             )
 
             # If no traces found using the direct job_id field, try via the run_id
             # (for backward compatibility). Full reads only: with a cursor,
             # "no new traces" is the NORMAL result of most polls — falling back
-            # would add a pointless second query per empty tick.
-            if not traces and not since_id:
+            # would add a pointless second query per empty tick. Filtered reads
+            # skip it too: "no memory rows" is a true answer, and the fallback
+            # cannot apply the filter.
+            if not traces and not since_id and not event_type_prefix:
                 logger.debug(
                     f"No traces found directly with job_id {job_id}, trying via run_id lookup"
                 )

@@ -6,7 +6,7 @@ SchemaService dependencies.
 
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
@@ -20,7 +20,7 @@ from src.api.schemas_router import (
     router,
     update_schema,
 )
-from src.schemas.schema import SchemaCreate, SchemaListResponse, SchemaUpdate
+from src.schemas.schema import SchemaCreate, SchemaUpdate
 from src.utils.user_context import GroupContext
 
 

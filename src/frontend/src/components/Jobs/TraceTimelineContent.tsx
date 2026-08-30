@@ -1048,16 +1048,32 @@ const TraceTimelineContent = memo<TraceTimelineContentProps>(({
                       if (typeof output === 'object' && output !== null) {
                         const outputObj = output as Record<string, unknown>;
                         const extraData = outputObj.extra_data as Record<string, unknown> | undefined;
-                        const query = extraData?.query || outputObj.query;
+                        // The bridge / chat handlers put the same `query` in
+                        // extra_data and trace_metadata; the panel shows it IN FULL —
+                        // a recall query is usually the task description, and a
+                        // 200-char cut hid most of it.
+                        const query = extraData?.query || outputObj.query || selectedEvent.extraData?.query;
                         if (query) {
                           return (
                             <Box sx={{ mb: 1, p: 1, bgcolor: 'action.hover', borderRadius: 1 }}>
                               <Typography variant="caption" color="text.secondary" display="block">
-                                Query:
+                                Query run against memory:
                               </Typography>
-                              <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
-                                {String(query).substring(0, 200)}{String(query).length > 200 ? '...' : ''}
+                              <Typography
+                                variant="body2"
+                                sx={{ fontFamily: 'monospace', fontSize: '0.85rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+                              >
+                                {String(query)}
                               </Typography>
+                              {extraData?.distilled_query ? (
+                                <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                                  Distilled to:{' '}
+                                  <span style={{ fontFamily: 'monospace' }}>{String(extraData.distilled_query)}</span>
+                                  {extraData.exploration_rounds
+                                    ? ` · ${String(extraData.exploration_rounds)} exploration round(s)`
+                                    : ''}
+                                </Typography>
+                              ) : null}
                             </Box>
                           );
                         }

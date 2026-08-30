@@ -418,7 +418,7 @@ async def _create_task_patched(task_key, task_config, agent, **kwargs):
             "src.services.databricks.workspace.service.DatabricksService"
         ) as mock_db_svc,
         patch(
-            "src.services.memory.backend_service.MemoryBackendService"
+            "src.services.memory.config.backend_service.MemoryBackendService"
         ) as mock_mem_svc,
     ):
 
@@ -531,7 +531,7 @@ class TestCreateTaskBasic:
                 "src.services.databricks.workspace.service.DatabricksService"
             ) as mock_db_svc,
             patch(
-                "src.services.memory.backend_service.MemoryBackendService"
+                "src.services.memory.config.backend_service.MemoryBackendService"
             ) as mock_mem_svc,
         ):
 
@@ -576,7 +576,7 @@ class TestCreateTaskToolResolution:
                 "src.services.databricks.workspace.service.DatabricksService"
             ) as mock_db_svc,
             patch(
-                "src.services.memory.backend_service.MemoryBackendService"
+                "src.services.memory.config.backend_service.MemoryBackendService"
             ) as mock_mem_svc,
             patch(
                 "src.services.agent_builder.task_adapter.resolve_tool_ids_to_names",
@@ -629,7 +629,7 @@ class TestCreateTaskToolResolution:
                 "src.services.databricks.workspace.service.DatabricksService"
             ) as mock_db_svc,
             patch(
-                "src.services.memory.backend_service.MemoryBackendService"
+                "src.services.memory.config.backend_service.MemoryBackendService"
             ) as mock_mem_svc,
             patch(
                 "src.services.agent_builder.task_adapter.resolve_tool_ids_to_names",
@@ -683,7 +683,7 @@ class TestCreateTaskToolResolution:
                 "src.services.databricks.workspace.service.DatabricksService"
             ) as mock_db_svc,
             patch(
-                "src.services.memory.backend_service.MemoryBackendService"
+                "src.services.memory.config.backend_service.MemoryBackendService"
             ) as mock_mem_svc,
             patch(
                 "src.services.agent_builder.task_adapter.resolve_tool_ids_to_names",
@@ -737,7 +737,7 @@ class TestCreateTaskToolResolution:
                 "src.services.databricks.workspace.service.DatabricksService"
             ) as mock_db_svc,
             patch(
-                "src.services.memory.backend_service.MemoryBackendService"
+                "src.services.memory.config.backend_service.MemoryBackendService"
             ) as mock_mem_svc,
         ):
 
@@ -791,7 +791,7 @@ class TestCreateTaskToolResolution:
                 "src.services.databricks.workspace.service.DatabricksService"
             ) as mock_db_svc,
             patch(
-                "src.services.memory.backend_service.MemoryBackendService"
+                "src.services.memory.config.backend_service.MemoryBackendService"
             ) as mock_mem_svc,
             patch(
                 "src.services.agent_builder.task_adapter.resolve_tool_ids_to_names",
@@ -840,7 +840,7 @@ class TestCreateTaskGuardrail:
                 "src.services.databricks.workspace.service.DatabricksService"
             ) as mock_db_svc,
             patch(
-                "src.services.memory.backend_service.MemoryBackendService"
+                "src.services.memory.config.backend_service.MemoryBackendService"
             ) as mock_mem_svc,
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
@@ -897,7 +897,7 @@ class TestCreateTaskGuardrail:
                 "src.services.databricks.workspace.service.DatabricksService"
             ) as mock_db_svc,
             patch(
-                "src.services.memory.backend_service.MemoryBackendService"
+                "src.services.memory.config.backend_service.MemoryBackendService"
             ) as mock_mem_svc,
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
@@ -948,7 +948,7 @@ class TestCreateTaskGuardrail:
                 "src.services.databricks.workspace.service.DatabricksService"
             ) as mock_db_svc,
             patch(
-                "src.services.memory.backend_service.MemoryBackendService"
+                "src.services.memory.config.backend_service.MemoryBackendService"
             ) as mock_mem_svc,
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
@@ -1019,7 +1019,7 @@ class TestCreateTaskGuardrail:
                 "src.services.databricks.workspace.service.DatabricksService"
             ) as mock_db_svc,
             patch(
-                "src.services.memory.backend_service.MemoryBackendService"
+                "src.services.memory.config.backend_service.MemoryBackendService"
             ) as mock_mem_svc,
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
@@ -1094,7 +1094,7 @@ class TestCreateTaskGuardrail:
                 "src.services.databricks.workspace.service.DatabricksService"
             ) as mock_db_svc,
             patch(
-                "src.services.memory.backend_service.MemoryBackendService"
+                "src.services.memory.config.backend_service.MemoryBackendService"
             ) as mock_mem_svc,
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
@@ -1151,7 +1151,7 @@ class TestCreateTaskGuardrail:
                 "src.services.databricks.workspace.service.DatabricksService"
             ) as mock_db_svc,
             patch(
-                "src.services.memory.backend_service.MemoryBackendService"
+                "src.services.memory.config.backend_service.MemoryBackendService"
             ) as mock_mem_svc,
             patch_build(
                 "src.services.execution.kernel.task_builder", "guardrail"
@@ -1200,7 +1200,7 @@ class TestCreateTaskGuardrail:
                 "src.services.databricks.workspace.service.DatabricksService"
             ) as mock_db_svc,
             patch(
-                "src.services.memory.backend_service.MemoryBackendService"
+                "src.services.memory.config.backend_service.MemoryBackendService"
             ) as mock_mem_svc,
             patch_build(
                 "src.services.execution.kernel.task_builder", "guardrail"
@@ -1266,7 +1266,7 @@ class TestCreateTaskGuardrail:
                 "src.services.databricks.workspace.service.DatabricksService"
             ) as mock_db_svc,
             patch(
-                "src.services.memory.backend_service.MemoryBackendService"
+                "src.services.memory.config.backend_service.MemoryBackendService"
             ) as mock_mem_svc,
             patch_build(
                 "src.services.execution.kernel.task_builder", "guardrail"
@@ -1329,7 +1329,7 @@ class TestCreateTaskGuardrail:
                 "src.services.databricks.workspace.service.DatabricksService"
             ) as mock_db_svc,
             patch(
-                "src.services.memory.backend_service.MemoryBackendService"
+                "src.services.memory.config.backend_service.MemoryBackendService"
             ) as mock_mem_svc,
             patch_build(
                 "src.services.execution.kernel.task_builder", "guardrail"
@@ -1395,7 +1395,7 @@ class TestCreateTaskGuardrail:
                 "src.services.databricks.workspace.service.DatabricksService"
             ) as mock_db_svc,
             patch(
-                "src.services.memory.backend_service.MemoryBackendService"
+                "src.services.memory.config.backend_service.MemoryBackendService"
             ) as mock_mem_svc,
             patch_build(
                 "src.services.execution.kernel.task_builder", "guardrail"
@@ -1451,7 +1451,7 @@ class TestCreateTaskGuardrail:
                 "src.services.databricks.workspace.service.DatabricksService"
             ) as mock_db_svc,
             patch(
-                "src.services.memory.backend_service.MemoryBackendService"
+                "src.services.memory.config.backend_service.MemoryBackendService"
             ) as mock_mem_svc,
             patch_build(
                 "src.services.execution.kernel.task_builder", "guardrail"
@@ -1503,7 +1503,7 @@ class TestCreateTaskGuardrail:
                 "src.services.databricks.workspace.service.DatabricksService"
             ) as mock_db_svc,
             patch(
-                "src.services.memory.backend_service.MemoryBackendService"
+                "src.services.memory.config.backend_service.MemoryBackendService"
             ) as mock_mem_svc,
             patch(
                 "src.services.databricks.volumes.volume_callback.DatabricksVolumeCallback"
@@ -1546,7 +1546,7 @@ class TestCreateTaskGuardrail:
                 "src.services.databricks.workspace.service.DatabricksService"
             ) as mock_db_svc,
             patch(
-                "src.services.memory.backend_service.MemoryBackendService"
+                "src.services.memory.config.backend_service.MemoryBackendService"
             ) as mock_mem_svc,
         ):
 
@@ -1592,7 +1592,7 @@ class TestCreateTaskDatabricksVolumeAutoCallback:
                 "src.services.databricks.workspace.service.DatabricksService"
             ) as mock_db_svc,
             patch(
-                "src.services.memory.backend_service.MemoryBackendService"
+                "src.services.memory.config.backend_service.MemoryBackendService"
             ) as mock_mem_svc,
             patch(
                 "src.services.databricks.volumes.volume_callback.DatabricksVolumeCallback"
@@ -1652,7 +1652,7 @@ class TestCreateTaskDatabricksVolumeAutoCallback:
                 "src.services.databricks.workspace.service.DatabricksService"
             ) as mock_db_svc,
             patch(
-                "src.services.memory.backend_service.MemoryBackendService"
+                "src.services.memory.config.backend_service.MemoryBackendService"
             ) as mock_mem_svc,
         ):
 

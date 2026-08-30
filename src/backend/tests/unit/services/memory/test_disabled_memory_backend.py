@@ -5,8 +5,6 @@ Simplified tests that don't require importing the actual crew_preparation module
 """
 
 import os
-import sys
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -14,12 +12,6 @@ import pytest
 os.environ["DATABASE_TYPE"] = "sqlite"
 os.environ["SQLITE_DB_PATH"] = ":memory:"
 os.environ["LOG_DIR"] = "/tmp/test_logs"
-
-from src.schemas.memory_backend import (
-    DatabricksMemoryConfig,
-    MemoryBackendConfig,
-    MemoryBackendType,
-)
 
 
 class TestDisabledMemoryBackendSimple:

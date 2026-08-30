@@ -6,24 +6,22 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiClient } from '../../../config/api/ApiConfig';
-import { runService } from '../../../api/execution/ExecutionHistoryService';
-import { Run } from '../../../types/execution/run';
 import {
   BULK_FETCH,
   DerivedIndex,
+  EMPTY_RUN_TRACE_FACTS,
   MemoryRecord,
   RecordsResponse,
   MemoryTrace,
+  RunMemoryMode,
+  RunTraceFacts,
   coOccurrenceEdges,
   deriveIndex,
-  extractRecalledIds,
-  extractSavedIds,
-  recordsSavedInRun,
-  timeMs,
-  tracesCarryIds,
+  recordsForRun,
+  runTraceFacts,
 } from '../../MemoryBackend/memoryData';
 
-export type MemoryMode = 'saved' | 'recalled';
+export type MemoryMode = RunMemoryMode;
 
 export interface RunMemory {
   loading: boolean;
@@ -43,10 +41,7 @@ export function useRunMemory(runId: string): RunMemory {
   const [error, setError] = useState<string | null>(null);
   const [backend, setBackend] = useState('');
   const [allRecords, setAllRecords] = useState<MemoryRecord[]>([]);
-  const [runs, setRuns] = useState<Run[]>([]);
-  const [recalledIds, setRecalledIds] = useState<Set<string>>(new Set());
-  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
-  const [idStamped, setIdStamped] = useState(false);
+  const [traceFacts, setTraceFacts] = useState<RunTraceFacts>(EMPTY_RUN_TRACE_FACTS);
   const [mode, setMode] = useState<MemoryMode>('saved');
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -56,32 +51,27 @@ export function useRunMemory(runId: string): RunMemory {
     setError(null);
     (async () => {
       try {
-        // One bulk read (the graph aggregates everything anyway), the runs list
-        // for the run's time window, and the run's retrieval traces — the three
-        // sources the browser dialog uses, fetched together.
-        runService.invalidateRunsCache();
-        const [recordsResp, runsResp, tracesResp] = await Promise.all([
+        // One bulk read (the graph aggregates everything anyway) and the run's
+        // memory traces — the two sources the browser dialog uses, fetched
+        // together. The traces are the ONLY thing that scopes records to the
+        // run; there is no time window to feed a runs list into.
+        const [recordsResp, tracesResp] = await Promise.all([
           apiClient.get<RecordsResponse>('/memory-backend/records', {
             params: { limit: BULK_FETCH, offset: 0 },
           }),
-          runService.getRuns(100),
+          // Only the run's memory_* rows, and ALL of them: the default page is
+          // 100 rows oldest-first, and a long run's memory_write rows land
+          // last — cut off, the run would look like it saved nothing.
           apiClient
-            .get<{ traces?: MemoryTrace[] }>(`/traces/job/${runId}`)
+            .get<{ traces?: MemoryTrace[] }>(`/traces/job/${runId}`, {
+              params: { limit: 15000, event_type_prefix: 'memory_' },
+            })
             .catch(() => ({ data: { traces: [] as MemoryTrace[] } })),
         ]);
         if (cancelled) return;
         setAllRecords(recordsResp.data.records || []);
         setBackend(recordsResp.data.backend || '');
-        // Newest first — runWindowFor scans FORWARD from the run's index to
-        // find the nearest older completed run, so the order is load-bearing.
-        setRuns(
-          [...(runsResp?.runs ?? [])].sort(
-            (a, b) => timeMs(b.created_at) - timeMs(a.created_at),
-          ),
-        );
-        setRecalledIds(extractRecalledIds(tracesResp.data?.traces));
-        setSavedIds(extractSavedIds(tracesResp.data?.traces));
-        setIdStamped(tracesCarryIds(tracesResp.data?.traces));
+        setTraceFacts(runTraceFacts(tracesResp.data?.traces));
       } catch (err: unknown) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : String(err));
@@ -96,22 +86,12 @@ export function useRunMemory(runId: string): RunMemory {
     };
   }, [runId, reloadKey]);
 
-  const records = useMemo(() => {
-    if (mode === 'recalled') {
-      if (recalledIds.size === 0) return [];
-      return allRecords.filter((r) => r.id && recalledIds.has(r.id));
-    }
-    // Saved: exact when the run's memory_write traces carry record ids. A
-    // NEW-format run (any id-stamped memory trace) with no write ids truly
-    // saved nothing YET — writes land after the answer — and must show empty
-    // rather than fall back. The completed_at window remains only for
-    // old-format runs, whose traces predate the id stamps.
-    if (savedIds.size > 0) {
-      return allRecords.filter((r) => r.id && savedIds.has(r.id));
-    }
-    if (idStamped) return [];
-    return recordsSavedInRun(allRecords, runs, runId);
-  }, [allRecords, runs, runId, mode, recalledIds, savedIds, idStamped]);
+  // The saved/recalled rule lives in recordsForRun — shared with the Memory
+  // Browser dialog, so the pane and the dialog answer identically.
+  const records = useMemo(
+    () => recordsForRun(allRecords, mode, traceFacts, runId),
+    [allRecords, mode, traceFacts, runId],
+  );
 
   const index = useMemo(() => deriveIndex(records), [records]);
   const edges = useMemo(() => coOccurrenceEdges(index), [index]);

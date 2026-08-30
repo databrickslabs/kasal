@@ -107,6 +107,46 @@ describe('extractOutputForDisplay', () => {
   });
 });
 
+// memory_retrieval processor — the recall query on the row
+// ============================================================================
+
+describe('memory_retrieval processor', () => {
+  const longQuery =
+    'Search for and gather the latest news stories from Switzerland published today. Identify the top 5-7 most significant stories';
+
+  it('shows the query the recall ran, clipped, on the row itself', () => {
+    // Crew/flow bridge shape: `query` in trace_metadata (and mirrored in extra_data).
+    const trace = makeTrace({
+      event_type: 'memory_retrieval',
+      output: { content: '[]', extra_data: { query: longQuery, results_count: 0 } },
+      trace_metadata: JSON.stringify({ query: longQuery, results_count: 0, query_time_ms: 305 }),
+    });
+    const result = EVENT_PROCESSORS['memory_retrieval'](trace)!;
+    expect(result.description).toBe(`Memory Read · "${longQuery.slice(0, 80)}…"`);
+    expect(result.durationMs).toBe(305);
+  });
+
+  it('keeps the results count ahead of the query and reads the chat-path shape too', () => {
+    // Chat handlers put the same keys in extra_data; metadata may lack them.
+    const trace = makeTrace({
+      event_type: 'memory_retrieval',
+      output: { content: '[...]', extra_data: { query: 'swiss  news\ntoday', results_count: 3 } },
+    });
+    const result = EVENT_PROCESSORS['memory_retrieval'](trace)!;
+    expect(result.description).toBe('Memory Read — 3 results · "swiss news today"');
+  });
+
+  it('is unchanged for traces written before the query was stamped', () => {
+    const trace = makeTrace({
+      event_type: 'memory_retrieval',
+      output: { content: '[]' },
+      trace_metadata: JSON.stringify({ results_count: 0 }),
+    });
+    expect(EVENT_PROCESSORS['memory_retrieval'](trace)!.description).toBe('Memory Read');
+  });
+});
+
+// ============================================================================
 // ============================================================================
 // memory_retrieval_completed processor
 // ============================================================================

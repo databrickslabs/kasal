@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.services.memory.crew_memory import CrewMemoryService
+from src.services.memory.run.crew_memory import CrewMemoryService
 
 _LAKEBASE_CONFIG = {
     "backend_type": "lakebase",
@@ -25,7 +25,7 @@ async def _factory_kwargs(config: dict) -> dict:
     """Build storage for ``config`` and return what reached the factory."""
     service = CrewMemoryService(config)
     with patch(
-        "src.services.memory.crew_memory.MemoryBackendFactory.create_unified_storage",
+        "src.services.memory.run.crew_memory.MemoryBackendFactory.create_unified_storage",
         new_callable=AsyncMock,
     ) as factory:
         await service.create_unified_storage(

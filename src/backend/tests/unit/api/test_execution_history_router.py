@@ -372,7 +372,6 @@ class TestCheckExecutionExists:
         self, client, mock_execution_history_service, mock_group_context
     ):
         """Test execution existence check re-raising HTTPException."""
-        from fastapi import HTTPException
 
         mock_execution_history_service.check_execution_exists.side_effect = (
             HTTPException(status_code=403, detail="Forbidden")
@@ -431,7 +430,6 @@ class TestGetExecutionById:
         self, client, mock_execution_history_service, mock_group_context
     ):
         """Test getting execution by ID re-raising HTTPException."""
-        from fastapi import HTTPException
 
         mock_execution_history_service.get_execution_by_id.side_effect = HTTPException(
             status_code=403, detail="Forbidden"
@@ -574,7 +572,6 @@ class TestGetExecutionDebugOutputs:
         self, client, mock_execution_history_service, mock_group_context
     ):
         """Test getting debug outputs re-raising HTTPException."""
-        from fastapi import HTTPException
 
         mock_execution_history_service.get_debug_outputs.side_effect = HTTPException(
             status_code=403, detail="Forbidden"
@@ -673,7 +670,6 @@ class TestDeleteExecution:
         self, client, mock_execution_history_service, mock_group_context
     ):
         """Test deleting execution re-raising HTTPException."""
-        from fastapi import HTTPException
 
         mock_execution_history_service.delete_execution.side_effect = HTTPException(
             status_code=403, detail="Forbidden"
@@ -742,7 +738,6 @@ class TestDeleteExecutionByJobId:
         self, client, mock_execution_history_service, mock_group_context
     ):
         """Test deleting execution by job ID re-raising HTTPException."""
-        from fastapi import HTTPException
 
         mock_execution_history_service.delete_execution_by_job_id.side_effect = (
             HTTPException(status_code=403, detail="Forbidden")

@@ -13,7 +13,7 @@ import pytest
 from fastapi import APIRouter, FastAPI, Query, Request
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
-from starlette.datastructures import Headers
+
 from tests.unit.route_utils import route_paths
 
 # Create a mock router for testing without importing the actual module
@@ -401,7 +401,6 @@ class TestSSEHeadersConfig:
 
 import importlib
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

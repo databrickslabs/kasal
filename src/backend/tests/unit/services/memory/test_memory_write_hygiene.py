@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.services.memory.write_hygiene import (
+from src.services.memory.run.write_hygiene import (
     MODE_ANNOTATE,
     MODE_OFF,
     MODE_QUARANTINE,
@@ -90,7 +90,7 @@ class TestVerdict:
 
     def test_detector_failure_fails_open(self, monkeypatch):
         """A broken safety net is not a reason to drop a real memory."""
-        import src.services.memory.write_hygiene as module
+        import src.services.memory.run.write_hygiene as module
 
         monkeypatch.setattr(
             module,
@@ -111,12 +111,13 @@ class TestWriteBoundary:
         return memory
 
     def _flush(self):
-        from src.services.memory.hooks import flush_memory_writes
+        from src.services.memory.run.persist import flush_memory_writes
 
         flush_memory_writes(timeout=5.0)
 
     def test_injected_content_is_not_persisted(self):
-        from src.services.memory.hooks import clear_pending_memory, remember_async
+        from src.services.memory.run.pending import clear_pending_memory
+        from src.services.memory.run.persist import remember_async
 
         memory = self._memory()
         remember_async(memory, _INJECTION, source="crew_task")
@@ -128,11 +129,11 @@ class TestWriteBoundary:
     def test_quarantined_content_never_reaches_the_pending_overlay(self):
         """The overlay is read by the very next task, so a quarantined record
         leaking into it would defeat the point of not persisting it."""
-        from src.services.memory.hooks import (
+        from src.services.memory.run.pending import (
             clear_pending_memory,
             pending_memory_for,
-            remember_async,
         )
+        from src.services.memory.run.persist import remember_async
 
         clear_pending_memory()
         remember_async(self._memory(), _INJECTION, source="crew_task")
@@ -140,7 +141,8 @@ class TestWriteBoundary:
         assert pending_memory_for("/g1") == []
 
     def test_clean_content_is_persisted_unchanged(self):
-        from src.services.memory.hooks import clear_pending_memory, remember_async
+        from src.services.memory.run.pending import clear_pending_memory
+        from src.services.memory.run.persist import remember_async
 
         memory = self._memory()
         remember_async(memory, _CLEAN, source="chat")
@@ -152,7 +154,8 @@ class TestWriteBoundary:
         clear_pending_memory()
 
     def test_flagged_but_allowed_content_carries_the_finding(self, monkeypatch):
-        from src.services.memory.hooks import clear_pending_memory, remember_async
+        from src.services.memory.run.pending import clear_pending_memory
+        from src.services.memory.run.persist import remember_async
 
         monkeypatch.setenv("KASAL_MEMORY_WRITE_SCREENING", MODE_ANNOTATE)
         memory = self._memory()
@@ -165,7 +168,8 @@ class TestWriteBoundary:
         clear_pending_memory()
 
     def test_screening_off_restores_previous_behaviour(self, monkeypatch):
-        from src.services.memory.hooks import clear_pending_memory, remember_async
+        from src.services.memory.run.pending import clear_pending_memory
+        from src.services.memory.run.persist import remember_async
 
         monkeypatch.setenv("KASAL_MEMORY_WRITE_SCREENING", MODE_OFF)
         memory = self._memory()

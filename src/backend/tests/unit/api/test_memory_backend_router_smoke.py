@@ -7,8 +7,7 @@ Updated for app-modes:
 - get_lakebase_entity_data uses memory_table (not entity_table)
 """
 
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 

@@ -167,7 +167,6 @@ async def test_upload_knowledge_file_default_group_id():
 async def test_upload_knowledge_file_bad_agent_ids_json():
     """Invalid JSON for agent_ids raises BadRequestError."""
     from src.api.databricks_knowledge_router import upload_knowledge_file
-    from src.core.exceptions import BadRequestError
 
     svc = AsyncMock()
     file_mock = MagicMock()

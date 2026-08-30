@@ -113,7 +113,7 @@ def _browse_default_records(
 ) -> Tuple[List[Dict[str, Any]], int]:
     """Read records from the LOCAL SQLite memory store for the group.
 
-    Opens the SAME ``LocalMemoryStorage`` the runtime writes through — the
+    Opens the SAME ``LocalStorageBackend`` the runtime writes through — the
     ``memory.db`` under the group's store directory.
 
     It used to set ``CREWAI_STORAGE_DIR`` and construct a bare ``Memory()``,
@@ -129,7 +129,7 @@ def _browse_default_records(
     from pathlib import Path
 
     try:
-        from src.services.memory.local_storage_backend import LocalMemoryStorage
+        from src.services.memory.storage.local import LocalStorageBackend
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Default memory browse failed (local storage missing): %s", exc)
         return [], 0
@@ -159,7 +159,7 @@ def _browse_default_records(
                 if not db_path.is_file():
                     logger.info("[memory/records] No memory.db in %s", storage_dir)
                     continue
-                storage = LocalMemoryStorage(db_path)
+                storage = LocalStorageBackend(db_path)
                 # True store count for this scope, so the client knows whether
                 # more pages exist beyond the one being returned.
                 if hasattr(storage, "count"):
@@ -324,7 +324,7 @@ def _delete_default_records(
     """Wipe the local SQLite store for the group on the backend host.
 
     With ``scope``, deletes only records matching that prefix through the same
-    ``LocalMemoryStorage`` the runtime writes — previously it built a bare
+    ``LocalStorageBackend`` the runtime writes — previously it built a bare
     ``Memory()`` under ``CREWAI_STORAGE_DIR``, which since crewAI's removal is an
     in-process dict, so a scoped delete silently removed nothing and reported 0.
     Without ``scope`` the whole group store directory is removed.
@@ -344,7 +344,7 @@ def _delete_default_records(
     # intact in each store.
     if scope:
         try:
-            from src.services.memory.local_storage_backend import LocalMemoryStorage
+            from src.services.memory.storage.local import LocalStorageBackend
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning(
                 "Default memory delete failed (local storage missing): %s", exc
@@ -355,7 +355,7 @@ def _delete_default_records(
                 db_path = storage_dir / "memory.db"
                 if not db_path.is_file():
                     continue
-                storage = LocalMemoryStorage(db_path)
+                storage = LocalStorageBackend(db_path)
                 if not hasattr(storage, "delete"):
                     continue
                 result = storage.delete(scope_prefix=scope)

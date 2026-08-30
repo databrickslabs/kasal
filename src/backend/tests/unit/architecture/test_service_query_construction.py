@@ -21,8 +21,6 @@ A service may still hold a session for TRANSACTION control (`commit`,
 import ast
 import pathlib
 
-import pytest
-
 #: `<session>.execute(...)` and friends — running a query.
 _QUERY_METHODS = {"execute", "scalar", "scalars", "stream"}
 #: `select(...)`, `text("SELECT …")` — building one.
@@ -33,11 +31,11 @@ _EXEMPT = (
     # DDL and connection management: there is no repository for CREATE SCHEMA,
     # GRANT, or a migration. These services ARE the database layer.
     "services/databricks/lakebase/",
-    "services/memory/lakebase_",
+    "services/memory/config/lakebase_service.py",
     # Storage backends implement the engine's StorageBackend interface directly
     # against SQL; a repository in front of them would have one caller and no
     # invariants to protect.
-    "_storage_backend.py",
+    "services/memory/storage/",
     # Shipped verbatim into exported apps, which have no repository layer at all.
     # The other linters skip this tree too (see pyproject.toml).
     "services/export/templates/",

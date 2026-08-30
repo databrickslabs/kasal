@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.services.memory.engine import KIND_SEMANTIC, MemoryRecord
-from src.services.memory.lakebase_storage_backend import (
+from src.services.memory.storage.lakebase import (
     _RECORD_COLUMNS,
     LakebaseStorageBackend,
 )
@@ -46,7 +46,7 @@ async def _capture(coro_factory):
         fetchall=MagicMock(return_value=[]), fetchone=MagicMock(return_value=None)
     )
     with patch(
-        "src.services.memory.lakebase_storage_backend.get_lakebase_session",
+        "src.services.memory.storage.lakebase.get_lakebase_session",
         return_value=_session_ctx(session),
     ):
         await coro_factory(session)

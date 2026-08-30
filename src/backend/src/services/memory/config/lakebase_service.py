@@ -5,7 +5,6 @@ Handles table initialization, connection testing, and statistics
 for the Lakebase pgvector memory backend.
 """
 
-import logging
 from typing import Any, Dict, Optional
 
 from src.core.logger import LoggerManager

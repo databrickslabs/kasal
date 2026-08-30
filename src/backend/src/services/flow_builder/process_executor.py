@@ -252,7 +252,7 @@ def run_flow_in_process(
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
 
-        except Exception as cleanup_error:
+        except Exception:
             # Ignore cleanup errors in signal handler
             pass
 
@@ -693,17 +693,16 @@ def run_flow_in_process(
                         )
 
                     # Execute the flow (wrapped in MLflow root trace if tracing is ready)
-                    from src.services.otel_tracing.mlflow_setup import (
-                        execute_with_mlflow_trace_async,
-                        post_execution_mlflow_cleanup,
-                    )
-
                     # The active engine's event bridge — same contract as the
                     # crew subprocess. A flow's crews run on the selected
                     # engine, so under CrewAI this is what carries their
                     # lifecycle events to the Kasal bus (and therefore to the
                     # checkpoint recorder and the trace).
                     from src.services.execution.harnesses import active_harness
+                    from src.services.otel_tracing.mlflow_setup import (
+                        execute_with_mlflow_trace_async,
+                        post_execution_mlflow_cleanup,
+                    )
 
                     with active_harness().event_bridge():
                         result = await execute_with_mlflow_trace_async(
@@ -818,9 +817,7 @@ def run_flow_in_process(
                     # down — the flow crews' output-sink saves are fire-and-forget
                     # and would otherwise die with the interpreter.
                     try:
-                        from src.services.memory.hooks import (
-                            flush_memory_writes,
-                        )
+                        from src.services.memory.run.persist import flush_memory_writes
 
                         still_pending = await asyncio.to_thread(
                             flush_memory_writes, 15.0
@@ -835,7 +832,7 @@ def run_flow_in_process(
                         # reached through the registry rather than off a `crew`
                         # handle — without this, flow-only workspaces never
                         # consolidated and accumulated duplicates forever.
-                        from src.services.memory.maintenance import (
+                        from src.services.memory.maintenance.passes import (
                             run_registered_memory_maintenance,
                         )
 
@@ -1159,7 +1156,9 @@ def run_flow_in_process(
                 # orphaning its asyncpg connection (the residual [FLOW]
                 # "non-checked-in connection" leak). Independent of `loop`.
                 try:
-                    from src.services.memory.bridge_loop import shutdown_bridge_loop
+                    from src.services.memory.storage.bridge_loop import (
+                        shutdown_bridge_loop,
+                    )
 
                     shutdown_bridge_loop(timeout=5.0)
                 except Exception:
@@ -2047,7 +2046,7 @@ class ProcessFlowExecutor:
                 # Still write the header log
             else:
                 logger.info(
-                    f"Found {len(logs_to_write)-1} logs for execution {exec_id_short} in flow.log"
+                    f"Found {len(logs_to_write) - 1} logs for execution {exec_id_short} in flow.log"
                 )
 
             # Route through get_smart_db_session so logs land in

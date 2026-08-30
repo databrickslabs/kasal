@@ -17,12 +17,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.services.memory.engine import MemoryRecord
-from src.services.memory.lakebase_schema import (
+from src.services.memory.storage.lakebase import LakebaseStorageBackend
+from src.services.memory.storage.lakebase_schema import (
     _ADDED_COLUMNS,
     ensure_memory_columns,
     reset_schema_cache,
 )
-from src.services.memory.lakebase_storage_backend import LakebaseStorageBackend
 
 _LEGACY_COLUMNS = [
     ("id",),
@@ -207,7 +207,7 @@ class TestBackendUsesIt:
         record = MemoryRecord(content="x", embedding=[0.1, 0.2, 0.3, 0.4])
 
         with patch(
-            "src.services.memory.lakebase_storage_backend.get_lakebase_session",
+            "src.services.memory.storage.lakebase.get_lakebase_session",
             return_value=self._ctx(session),
         ):
             await self._backend().asave([record])
@@ -224,7 +224,7 @@ class TestBackendUsesIt:
         session = _session(_LEGACY_COLUMNS)
 
         with patch(
-            "src.services.memory.lakebase_storage_backend.get_lakebase_session",
+            "src.services.memory.storage.lakebase.get_lakebase_session",
             return_value=self._ctx(session),
         ):
             await self._backend().asearch(query_embedding=[0.1, 0.2, 0.3, 0.4])
@@ -236,7 +236,7 @@ class TestBackendUsesIt:
         session = _session(_LEGACY_COLUMNS)
 
         with patch(
-            "src.services.memory.lakebase_storage_backend.get_lakebase_session",
+            "src.services.memory.storage.lakebase.get_lakebase_session",
             return_value=self._ctx(session),
         ):
             await self._backend().adelete(record_ids=["r1"])
@@ -257,7 +257,7 @@ class TestBackendUsesIt:
             return self._ctx(session)
 
         with patch(
-            "src.services.memory.lakebase_storage_backend.get_lakebase_session",
+            "src.services.memory.storage.lakebase.get_lakebase_session",
             side_effect=_open,
         ):
             await self._backend().asave(
@@ -281,7 +281,7 @@ class TestBackendUsesIt:
 
         backend = self._backend()
         with patch(
-            "src.services.memory.lakebase_storage_backend.get_lakebase_session",
+            "src.services.memory.storage.lakebase.get_lakebase_session",
             side_effect=_open,
         ):
             await backend.adelete(record_ids=["r1"])

@@ -64,7 +64,7 @@ def _patches(*, disabled_config=False, storage=MagicMock(), sets_memory=True):
 
     return (
         patch.multiple(
-            "src.services.memory.crew_memory",
+            "src.services.memory.run.crew_memory",
             CrewMemoryService=MagicMock(return_value=mem_service),
         ),
         patch(

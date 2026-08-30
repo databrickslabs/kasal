@@ -19,11 +19,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.services.memory import maintenance
 from src.services.memory.engine import Memory
-from src.services.memory.engine_storage_adapter import EngineStorageAdapter
-from src.services.memory.local_storage_backend import LocalMemoryStorage
-from src.services.memory.maintenance import (
+from src.services.memory.maintenance import passes as maintenance
+from src.services.memory.maintenance.passes import (
     clear_registered_memories,
     maybe_run_memory_maintenance,
     register_memory_for_maintenance,
@@ -32,6 +30,8 @@ from src.services.memory.maintenance import (
     run_registered_memory_maintenance,
     schedule_maintenance_after_writes,
 )
+from src.services.memory.storage.adapter import EngineStorageAdapter
+from src.services.memory.storage.local import LocalStorageBackend
 
 
 @pytest.fixture(autouse=True)
@@ -48,8 +48,14 @@ def _embedder(texts):
 
 
 def _memory(tmp_path, root_scope="/g1", name="m.db"):
-    backend = LocalMemoryStorage(tmp_path / name, embedder=_embedder)
-    return Memory(storage=EngineStorageAdapter(backend), root_scope=root_scope)
+    backend = LocalStorageBackend(tmp_path / name, embedder=_embedder)
+    return Memory(
+        storage=EngineStorageAdapter(backend),
+        root_scope=root_scope,
+        # The stub embedder gives every text the same vector; save-time
+        # consolidation off so the maintenance pass under test is what acts.
+        consolidation_threshold=0,
+    )
 
 
 def _with_duplicates(memory, text="User: q? Assistant: a", copies=3):
@@ -113,7 +119,7 @@ class TestRunAfterWrites:
         memory = _with_duplicates(_memory(tmp_path))
         calls = []
         with patch(
-            "src.services.memory.hooks.flush_memory_writes",
+            "src.services.memory.run.persist.flush_memory_writes",
             side_effect=lambda *a, **k: calls.append("flush") or 0,
         ):
             stats = await run_maintenance_after_writes(memory, min_interval_s=0)
@@ -126,7 +132,7 @@ class TestRunAfterWrites:
         """A skipped turn must cost nothing — no flush, no listing."""
         memory = _with_duplicates(_memory(tmp_path))
         await run_maintenance_after_writes(memory)
-        with patch("src.services.memory.hooks.flush_memory_writes") as flush:
+        with patch("src.services.memory.run.persist.flush_memory_writes") as flush:
             stats = await run_maintenance_after_writes(memory)
 
         flush.assert_not_called()
@@ -228,7 +234,7 @@ class TestRegistry:
         assert run_registered_memory_maintenance()["deleted"] == 2
 
     def test_registry_is_bounded(self, tmp_path):
-        from src.services.memory import maintenance
+        from src.services.memory.maintenance import passes as maintenance
 
         for index in range(maintenance._REGISTRY_LIMIT + 5):
             register_memory_for_maintenance(

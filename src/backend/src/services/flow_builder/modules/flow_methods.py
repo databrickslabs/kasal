@@ -198,7 +198,7 @@ async def configure_flow_crew_memory(
     from src.services.execution.config.embedder_config_builder import (
         EmbedderConfigBuilder,
     )
-    from src.services.memory.crew_memory import CrewMemoryService
+    from src.services.memory.run.crew_memory import CrewMemoryService
 
     model = None
     if agents and getattr(agents[0], "llm", None) is not None:
@@ -283,7 +283,7 @@ async def configure_flow_crew_memory(
         # drains the write pool has no reference to any of them — so without
         # this a flow-only workspace would never consolidate its memory.
         try:
-            from src.services.memory.maintenance import (
+            from src.services.memory.maintenance.passes import (
                 register_memory_for_maintenance,
             )
 
@@ -409,10 +409,8 @@ def attach_memory_seams(crew: Any, crew_label: str, request: str | None = None) 
     Best-effort by design: a broken memory backend must never break a flow.
     """
     try:
-        from src.services.memory.hooks import (
-            make_memory_context_provider,
-            make_memory_output_sink,
-        )
+        from src.services.memory.run.persist import make_memory_output_sink
+        from src.services.memory.run.recall import make_memory_context_provider
 
         # Through the binding — see crew_preparation for why.
         engine = active_harness()
@@ -899,7 +897,7 @@ class FlowMethodFactory:
 
                 logger.info(f"📝 Total tasks: {len(task_list)}")
                 logger.info(
-                    f"⏱️ Calling crew.kickoff_async() with {CREW_KICKOFF_TIMEOUT_SECONDS/60:.0f} minute timeout..."
+                    f"⏱️ Calling crew.kickoff_async() with {CREW_KICKOFF_TIMEOUT_SECONDS / 60:.0f} minute timeout..."
                 )
 
                 # Flow state IS the crew's inputs — this is what interpolates
@@ -1033,7 +1031,7 @@ class FlowMethodFactory:
                     f"❌ Crew '{crew_name}' execution timed out after {elapsed_time:.2f} seconds (limit: {CREW_KICKOFF_TIMEOUT_SECONDS:.0f}s)"
                 )
                 raise TimeoutError(
-                    f"Crew '{crew_name}' execution timed out after {CREW_KICKOFF_TIMEOUT_SECONDS/60:.0f} minutes"
+                    f"Crew '{crew_name}' execution timed out after {CREW_KICKOFF_TIMEOUT_SECONDS / 60:.0f} minutes"
                 )
             except Exception as e:
                 elapsed_time = time.time() - start_time if "start_time" in dir() else 0
@@ -1720,7 +1718,7 @@ class FlowMethodFactory:
                     )
 
                 logger.info(
-                    f"⏱️ Calling listener crew.kickoff_async() with {CREW_KICKOFF_TIMEOUT_SECONDS/60:.0f} minute timeout..."
+                    f"⏱️ Calling listener crew.kickoff_async() with {CREW_KICKOFF_TIMEOUT_SECONDS / 60:.0f} minute timeout..."
                 )
 
                 # The SECOND crew call site (listener crews). Same reason.

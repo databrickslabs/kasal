@@ -1,25 +1,38 @@
-"""Memory: what a crew remembers, where it is stored, and how it is maintained.
+"""Memory — what a teamspace's agents remember, and how.
 
-This was split across two homes. The engine held the storage backends, the
-vector store, the backend factory, maintenance, and the service that builds a
-run's Memory (4,688 lines); ``src/services`` held the backend configuration,
-the config service and the Lakebase service (1,598 lines). One concept, two
-places, and the engine half unreachable from anything that was not a crew run.
+Read this package by lifecycle stage; each subpackage is one stage:
 
-Memory is a capability. A chat turn recalls and persists exactly as a crew does
-— the light path already reuses these building blocks — and crew generation or
-an exported app could too. The storage backends implement ``kasal_engine``'s
-``StorageBackend`` interface and speak its ``MemoryRecord``/``ScopeInfo``
-types, but that is a LIBRARY dependency, the same kind as a tool's ``BaseTool``:
-it says what a backend must look like, not that a crew must be running.
+    config/       what the teamspace configured (the ``memory_backends`` rows):
+                  which backend, the embedder, the Memory Tuning knobs
+    storage/      where records live: LocalStorageBackend (SQLite, dev) and
+                  LakebaseStorageBackend (pgvector, prod) behind one protocol,
+                  the factory that builds one from a configuration, and the
+                  adapter that lets the engine talk to either
+    engine/       the ``Memory`` object itself — ``remember`` (classify,
+                  consolidate, store) and ``recall`` (search, distil, explore)
+                  over a ``MemoryRecord``
+    run/          a run's memory: ``CrewMemoryService`` builds a ``Memory`` for
+                  Chat, Agent Builder or Flow Builder; ``recall`` injects a
+                  context block before a task; ``persist`` writes the result
+                  after it, through the ``pending`` overlay and the
+                  ``write_hygiene`` screen
+    maintenance/  keeping the store small and true between runs: dedupe,
+                  merge, supersede, forget — and the sweep that schedules them
+    text.py       normalisation both sides and the storage adapter share
 
-``hooks`` is the run-side half: recall before a task, persist after it, driven
-off the event bus. It says WHEN memory is touched during a run; the rest of this
-package says what memory is.
+A record's path through a run: ``run.recall`` asks ``engine.Memory.recall``,
+which searches ``storage`` — then the task runs — then ``run.persist`` hands
+the output to ``engine.Memory.remember``, which labels it, folds it into a
+near-duplicate if one exists, and saves it through ``storage``. Later,
+``maintenance`` tidies what accumulated.
+
+Memory is a capability, not a path: a chat turn recalls and persists exactly
+as a crew does, and nothing here imports a path package. The full account,
+including every tuning knob, is ``src/docs/MEMORY.md``.
 """
 
-from src.services.memory.backend_factory import MemoryBackendFactory
-from src.services.memory.crew_memory import CrewMemoryService
+from src.services.memory.run.crew_memory import CrewMemoryService
+from src.services.memory.storage.factory import MemoryBackendFactory
 
 __all__ = [
     "CrewMemoryService",

@@ -803,7 +803,7 @@ class TestCrewPreparation:
                 return_value=mock_crew,
             ),
             patch(
-                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -835,7 +835,7 @@ class TestCrewPreparation:
                 return_value=None,
             ),
             patch(
-                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -874,7 +874,7 @@ class TestCrewPreparation:
                 return_value=None,
             ),
             patch(
-                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -914,7 +914,7 @@ class TestCrewPreparation:
                 return_value=mock_crew,
             ) as mock_crew_class,
             patch(
-                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -942,7 +942,7 @@ class TestCrewPreparation:
                 "src.services.agent_builder.crew_preparation.handle_crew_error"
             ) as mock_handle_error,
             patch(
-                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -973,7 +973,7 @@ class TestCrewPreparation:
             ),
             patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
             patch(
-                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -1004,7 +1004,7 @@ class TestCrewPreparation:
             ),
             patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
             patch(
-                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -1040,7 +1040,7 @@ class TestCrewPreparation:
             ),
             patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
             patch(
-                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -1076,7 +1076,7 @@ class TestCrewPreparation:
                 return_value=None,
             ),
             patch(
-                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -1107,7 +1107,7 @@ class TestCrewPreparation:
                 return_value=None,
             ),
             patch(
-                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -1148,7 +1148,7 @@ class TestCrewPreparation:
             ),
             patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
             patch(
-                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -1179,7 +1179,7 @@ class TestCrewPreparation:
             patch.dict("os.environ", {}, clear=True),
             patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
             patch(
-                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -1213,7 +1213,7 @@ class TestCrewPreparation:
             patch.dict("os.environ", {}, clear=True),
             patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
             patch(
-                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -1246,7 +1246,7 @@ class TestCrewPreparation:
             ),
             patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
             patch(
-                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -1364,7 +1364,7 @@ class TestCrewPreparation:
                 "src.repositories.databricks_config_repository.DatabricksConfigRepository"
             ) as mock_databricks_repo,
             patch(
-                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -1420,7 +1420,7 @@ class TestCrewPreparation:
                 return_value=None,
             ),
             patch(
-                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -1504,7 +1504,7 @@ class TestCrewPreparation:
                 return_value=None,
             ),
             patch(
-                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -1572,7 +1572,7 @@ class TestCrewPreparation:
                 return_value=None,
             ),
             patch(
-                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                "src.services.memory.run.crew_memory.CrewMemoryService.fetch_memory_backend_config",
                 new_callable=AsyncMock,
                 return_value=None,
             ),

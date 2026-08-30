@@ -17,7 +17,7 @@ read their workspace/endpoint from. Only memory stopped using it.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from src.core.logger import LoggerManager
 from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
@@ -118,11 +118,10 @@ class MemoryBackendFactory:
         table_name = lakebase_cfg.memory_table
         if not table_name:
             raise ValueError(
-                "LakebaseMemoryConfig.memory_table is required for the unified "
-                "memory."
+                "LakebaseMemoryConfig.memory_table is required for the unified memory."
             )
 
-        from src.services.memory.lakebase_storage_backend import (
+        from src.services.memory.storage.lakebase import (
             LakebaseStorageBackend,
         )
 
@@ -151,8 +150,7 @@ class MemoryBackendFactory:
     def _scoring_kwargs(config: MemoryBackendConfig) -> Dict[str, Any]:
         """Map the UI's memory tuning knobs onto hybrid-scoring ctor params.
 
-        Values left unset in the config fall through to the backend defaults
-        (keyword_weight has no UI knob yet and always uses the default).
+        Values left unset in the config fall through to the backend defaults.
         """
         tuning = getattr(config, "cognitive_config", None)
         if tuning is None:
@@ -160,6 +158,7 @@ class MemoryBackendFactory:
         kwargs: Dict[str, Any] = {}
         for field in (
             "semantic_weight",
+            "keyword_weight",
             "recency_weight",
             "importance_weight",
             "recency_half_life_days",

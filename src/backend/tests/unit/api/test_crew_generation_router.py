@@ -5,7 +5,7 @@ Tests the /crew/create-crew POST endpoint and /crew/create-crew-streaming
 POST endpoint with mocked CrewGenerationService and dependency overrides.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import FastAPI

@@ -15,7 +15,7 @@ Key changes in the new API:
   services, so it cannot simply be rejected).
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -25,7 +25,7 @@ from src.schemas.memory_backend import (
     MemoryBackendConfig,
     MemoryBackendType,
 )
-from src.services.memory.backend_factory import MemoryBackendFactory
+from src.services.memory.storage.factory import MemoryBackendFactory
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Default backend — create_unified_storage
@@ -137,7 +137,7 @@ class TestCreateUnifiedStorageLakebase:
         with patch.dict(
             "sys.modules",
             {
-                "src.services.memory.lakebase_storage_backend": MagicMock(
+                "src.services.memory.storage.lakebase": MagicMock(
                     LakebaseStorageBackend=mock_lakebase_cls
                 )
             },
@@ -180,7 +180,7 @@ class TestCreateMemoryBackendsLakebase:
         with patch.dict(
             "sys.modules",
             {
-                "src.services.memory.lakebase_storage_backend": MagicMock(
+                "src.services.memory.storage.lakebase": MagicMock(
                     LakebaseStorageBackend=mock_lakebase_cls
                 )
             },
@@ -211,7 +211,7 @@ class TestCreateMemoryBackendsLakebase:
         with patch.dict(
             "sys.modules",
             {
-                "src.services.memory.lakebase_storage_backend": MagicMock(
+                "src.services.memory.storage.lakebase": MagicMock(
                     LakebaseStorageBackend=MagicMock(side_effect=capture)
                 )
             },
@@ -234,7 +234,7 @@ class TestCreateMemoryBackendsLakebase:
         with patch.dict(
             "sys.modules",
             {
-                "src.services.memory.lakebase_storage_backend": MagicMock(
+                "src.services.memory.storage.lakebase": MagicMock(
                     LakebaseStorageBackend=MagicMock(return_value=mock_backend)
                 )
             },

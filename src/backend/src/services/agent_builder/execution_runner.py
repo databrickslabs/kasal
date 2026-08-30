@@ -150,7 +150,7 @@ async def run_crew_in_process(
             )
             f.write(f"Execution ID: {execution_id}\n")
             f.write(f"Has config: {config is not None}\n")
-    except Exception as debug_error:
+    except Exception:
         pass  # Ignore debug errors
 
     try:

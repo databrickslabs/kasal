@@ -6,10 +6,9 @@ generating connections between agents/tasks and testing API keys.
 """
 
 import logging
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from src.dependencies.admin_auth import (

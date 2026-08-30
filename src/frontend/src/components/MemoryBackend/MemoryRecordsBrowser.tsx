@@ -62,15 +62,17 @@ import {
   CategoryStat,
   MemoryRecord,
   RecordsResponse,
+  EMPTY_RUN_TRACE_FACTS,
+  RunTraceFacts,
   coOccurrenceEdges,
   deriveIndex,
-  extractRecalledIds,
   formatRelative,
   importanceColor,
   normalizeCategory,
   parseCrewFromScope,
   recordAgent,
-  runWindowFor,
+  recordsForRun,
+  runTraceFacts,
   timeMs,
 } from './memoryData';
 
@@ -484,10 +486,12 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
   // ALL_RUNS is the opt-in full graph across every run.
   const [runs, setRuns] = useState<Run[]>([]);
   const [runsLoaded, setRunsLoaded] = useState(false);
-  // For a selected run: 'saved' = what it persisted (records in its window);
-  // 'recalled' = what it READ (record ids from its memory_retrieval traces).
+  // For a selected run: 'saved' = what it WROTE (record ids from its
+  // memory_write traces); 'recalled' = what it READ (record ids from its
+  // memory_retrieval traces). Both resolved by recordsForRun, shared with the
+  // chat memory pane.
   const [memoryMode, setMemoryMode] = useState<'saved' | 'recalled'>('saved');
-  const [recalledIds, setRecalledIds] = useState<Set<string>>(new Set());
+  const [traceFacts, setTraceFacts] = useState<RunTraceFacts>(EMPTY_RUN_TRACE_FACTS);
   // When opened scoped to a specific run (e.g. from a ChatMode message), start
   // on that run; otherwise '' lets the latest run-with-memory be auto-picked.
   const [selectedRunId, setSelectedRunId] = useState<string>(initialRunId || '');
@@ -582,23 +586,27 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
   }, [open, loadRuns]);
 
   // For the selected run, pull the record ids it RECALLED from its
-  // memory_retrieval traces (the trace content embeds id='<uuid>' for each
-  // retrieved MemoryRecord). We then look those ids up in the loaded store
-  // records to build the "Recalled" graph with full categories.
+  // memory_retrieval / memory_write traces. The ids (and, for runs traced
+  // before the id stamps, the written bodies) are looked up in the loaded
+  // store records to build the "Saved" and "Recalled" views.
   useEffect(() => {
     if (!open || !selectedRunId || selectedRunId === ALL_RUNS) {
-      setRecalledIds(new Set());
+      setTraceFacts(EMPTY_RUN_TRACE_FACTS);
       return;
     }
     let cancelled = false;
     (async () => {
       try {
+        // Only the run's memory_* rows, and ALL of them — the default page is
+        // 100 rows oldest-first and a long run's memory_write rows land last.
         const resp = await apiClient.get<{
           traces?: Array<{ event_type?: string; output?: unknown }>;
-        }>(`/traces/job/${selectedRunId}`);
-        if (!cancelled) setRecalledIds(extractRecalledIds(resp.data?.traces));
+        }>(`/traces/job/${selectedRunId}`, {
+          params: { limit: 15000, event_type_prefix: 'memory_' },
+        });
+        if (!cancelled) setTraceFacts(runTraceFacts(resp.data?.traces));
       } catch {
-        if (!cancelled) setRecalledIds(new Set());
+        if (!cancelled) setTraceFacts(EMPTY_RUN_TRACE_FACTS);
       }
     })();
     return () => {
@@ -612,18 +620,6 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
   // open, pull the entire remaining store in a SINGLE request — one round-trip,
   // one simulation — instead of dozens of 250-record pages. Cards view stays
   // manually paged ("Load more") to avoid mounting thousands of card nodes.
-
-  // Per-run [start, end] time window. Each run owns only the records written
-  // during its OWN execution — start = created_at, end = completed_at (+ buffer
-  // Time window for the selected run (see runWindowFor for the UTC-vs-local
-  // reasoning) — null for ALL_RUNS / no selection.
-  const runWindow = useMemo(
-    () =>
-      selectedRunId === ALL_RUNS || !selectedRunId
-        ? null
-        : runWindowFor(runs, selectedRunId),
-    [runs, selectedRunId],
-  );
 
   // Default the view to the LATEST run (newest first), like the job history —
   // that's the run you just kicked off. Set once, as soon as runs load.
@@ -651,18 +647,8 @@ export const MemoryRecordsBrowser: React.FC<MemoryRecordsBrowserProps> = ({
   // so picking a run focuses the whole browser on that run.
   const scopedRecords = useMemo(() => {
     if (selectedRunId === ALL_RUNS || !selectedRunId) return records;
-    if (memoryMode === 'recalled') {
-      // What the run READ: records whose ids appear in its retrieval traces.
-      if (recalledIds.size === 0) return [];
-      return records.filter((r) => r.id && recalledIds.has(r.id));
-    }
-    // What the run SAVED: records written within its window.
-    if (!runWindow) return records;
-    return records.filter((r) => {
-      const t = timeMs(r.created_at);
-      return t > runWindow.start && t <= runWindow.end;
-    });
-  }, [records, selectedRunId, memoryMode, recalledIds, runWindow]);
+    return recordsForRun(records, memoryMode, traceFacts, selectedRunId);
+  }, [records, selectedRunId, memoryMode, traceFacts]);
 
   const index = useMemo(() => deriveIndex(scopedRecords), [scopedRecords]);
 

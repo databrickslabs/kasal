@@ -714,11 +714,8 @@ class TestGroupRouter:
 
     def test_get_group_stats_success(self, client, mock_db_session, mock_group_context):
         """Test successful group statistics retrieval."""
-        from fastapi import FastAPI
 
         from src.api.group_router import get_group_stats
-        from src.core.dependencies import SessionDep
-        from src.dependencies.admin_auth import AdminUserDep
 
         # Test the function directly since route ordering prevents proper testing via HTTP
         with patch("src.api.group_router.GroupService") as mock_service_class:

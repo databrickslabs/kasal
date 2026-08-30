@@ -4,13 +4,11 @@ Generated from the kasal_engine datamodel — do not edit by hand.
 Edit the component/component_member rows and re-run generator/generate.py.
 """
 
-import json
 import uuid
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal, Self
-from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -448,6 +446,11 @@ class MemoryQueryCompletedEvent(MemoryBaseEvent):
     limit: int
     score_threshold: float | None = None
     query_time_ms: float
+    # Recall planning (Memory Tuning): the short query the memory LLM distilled
+    # a long one into, and how many exploration rounds ran — so a trace shows
+    # what was actually searched, not only what was asked.
+    distilled_query: str | None = None
+    exploration_rounds: int = 0
 
 
 class MemoryQueryFailedEvent(MemoryBaseEvent):

@@ -36,7 +36,7 @@ def attach_execution_trace_context(
     try:
         svc = service
         if svc is None:
-            from src.services.memory.crew_memory import CrewMemoryService
+            from src.services.memory.run.crew_memory import CrewMemoryService
 
             svc = CrewMemoryService({"group_id": group_id, "execution_id": job_id})
         # memory_backend_config is unused by attach_memory_trace_context

@@ -6,16 +6,13 @@ current user operations, admin operations, and external identities.
 """
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.enums import UserRole, UserStatus
-from src.models.user import User
-from src.schemas.user import UserUpdate
 
 
 # Mock user model

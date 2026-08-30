@@ -24,8 +24,8 @@ from src.services.memory.engine import (
     Memory,
     MemoryRecord,
 )
-from src.services.memory.engine_storage_adapter import EngineStorageAdapter
-from src.services.memory.local_storage_backend import LocalMemoryStorage
+from src.services.memory.storage.adapter import EngineStorageAdapter
+from src.services.memory.storage.local import LocalStorageBackend
 
 
 def _embedder(texts):
@@ -33,7 +33,7 @@ def _embedder(texts):
 
 
 def _store(tmp_path, name="m.db"):
-    return LocalMemoryStorage(tmp_path / name, embedder=_embedder)
+    return LocalStorageBackend(tmp_path / name, embedder=_embedder)
 
 
 def _memory(tmp_path, name="m.db", llm=None):
@@ -42,6 +42,9 @@ def _memory(tmp_path, name="m.db", llm=None):
         root_scope="/g1",
         llm=llm,
         analyze_on_save=llm is not None,
+        # The stub embedder gives every text the same vector; save-time
+        # consolidation off so the behaviour under test is what acts.
+        consolidation_threshold=0,
     )
 
 
@@ -156,7 +159,7 @@ class TestKindSurvivesStorage:
         conn.commit()
         conn.close()
 
-        backend = LocalMemoryStorage(path, embedder=_embedder)
+        backend = LocalStorageBackend(path, embedder=_embedder)
         records = backend.list_records(scope_prefix="/g1")
 
         assert [r.content for r in records] == ["a pre-existing memory"]
@@ -218,7 +221,7 @@ class TestRecallReservesDurableSlots:
     """
 
     def _select(self, records, limit=6):
-        from src.services.memory.hooks import _select_records
+        from src.services.memory.run.recall import _select_records
 
         return _select_records(_Mem(), records, limit)
 
@@ -255,7 +258,7 @@ class TestRecallReservesDurableSlots:
 
     def test_preamble_includes_a_low_ranked_fact(self, tmp_path):
         """End to end through build_memory_preamble, not just the helper."""
-        from src.services.memory.hooks import build_memory_preamble
+        from src.services.memory.run.recall import build_memory_preamble
 
         memory = _memory(tmp_path)
         for index in range(10):

@@ -6,7 +6,7 @@ CRUD operations, job management, and schedule toggling.
 """
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException

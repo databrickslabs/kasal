@@ -110,6 +110,7 @@ async def get_traces_by_job_id(
     offset: int = Query(0, ge=0),
     since_id: int = Query(0, ge=0),
     preview_chars: int = Query(0, ge=0, le=100000),
+    event_type_prefix: Optional[str] = Query(None, min_length=1, max_length=64),
 ):
     """
     Get traces for an execution by job_id.
@@ -126,6 +127,9 @@ async def get_traces_by_job_id(
         preview_chars: Trim each row's long text to this many characters,
             recording their true sizes (see trace.row_view). 0 (the default)
             returns them whole, so existing callers are unaffected.
+        event_type_prefix: Return only traces whose event_type starts with
+            this (e.g. ``memory_`` for the run's memory reads and writes).
+            Unset returns every event type, as before.
 
     Returns:
         ExecutionTraceResponseByJobId with traces for the execution
@@ -137,6 +141,7 @@ async def get_traces_by_job_id(
         offset=offset,
         since_id=since_id,
         preview_chars=preview_chars,
+        event_type_prefix=event_type_prefix,
     )
     if not result:
         raise NotFoundError(

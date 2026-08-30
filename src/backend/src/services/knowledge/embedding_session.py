@@ -141,7 +141,7 @@ async def resolve_lakebase_instance(
     """
     try:
         from src.schemas.memory_backend import MemoryBackendType
-        from src.services.memory.config_service import MemoryConfigService
+        from src.services.memory.config.config_service import MemoryConfigService
 
         config = await MemoryConfigService(app_session).get_active_config(group_id)
         backend_type = getattr(config, "backend_type", None) if config else None

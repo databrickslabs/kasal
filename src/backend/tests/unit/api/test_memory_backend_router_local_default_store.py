@@ -17,7 +17,6 @@ from src.schemas.memory_backend import (
     MemoryBackendConfig,
     MemoryBackendCreate,
     MemoryBackendType,
-    MemoryBackendUpdate,
 )
 
 # ---------------------------------------------------------------------------
@@ -779,7 +778,7 @@ class TestLocalDefaultStoreReadDelete:
                 return_value=store,
             ),
             patch(
-                "src.services.memory.local_storage_backend.LocalMemoryStorage",
+                "src.services.memory.storage.local.LocalStorageBackend",
                 return_value=storage,
             ),
             patch(
@@ -829,7 +828,7 @@ class TestLocalDefaultStoreReadDelete:
                 return_value=store,
             ),
             patch(
-                "src.services.memory.local_storage_backend.LocalMemoryStorage",
+                "src.services.memory.storage.local.LocalStorageBackend",
                 return_value=storage,
             ),
         ):

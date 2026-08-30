@@ -14,11 +14,9 @@ from fastapi.testclient import TestClient
 
 from src.api.task_generation_router import router
 from src.core.dependencies import get_group_context
-from src.core.exceptions import KasalError
 from src.db.database_router import get_smart_db_session
 from src.schemas.task_generation import (
     AdvancedConfig,
-    TaskGenerationRequest,
     TaskGenerationResponse,
 )
 from src.utils.user_context import GroupContext

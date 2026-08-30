@@ -1,9 +1,9 @@
-"""Memory analysis models — tolerant of malformed LLM JSON by design.
+"""What the memory LLM says about a record — tolerant of malformed JSON.
 
-Authored module; surface validated against the kasal_engine datamodel.
-Native requirement #5: kasal wrapped crewAI's analyze models with tolerant
-variants (stringified-JSON coercion, malformed-metadata fallback); here the
-tolerance is built in, so the wrapper dies. Every model coerces:
+``MemoryAnalysis`` is the save-time labelling reply (categories, importance,
+kind, extracted entities); ``extract_json_object`` is how every LLM reply in
+this package is read. Models are lenient by design, because a reply that does
+not parse must degrade to an unlabelled record, never to a failed save:
 
 - a JSON *string* where an object/list is expected (LLMs love to nest
   stringified JSON) — parsed and used;
@@ -13,6 +13,7 @@ tolerance is built in, so the wrapper dies. Every model coerces:
 
 import json
 import logging
+import re
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -32,6 +33,25 @@ def _coerce_json(value: Any) -> Any:
             except json.JSONDecodeError:
                 return value
     return value
+
+
+def extract_json_object(text: str) -> Any:
+    """Parse the first JSON object in ``text`` (models wrap it in prose/fences)."""
+    stripped = (text or "").strip()
+    if stripped.startswith("```"):
+        stripped = re.sub(r"^```[a-zA-Z]*\n?|```$", "", stripped).strip()
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError:
+        pass
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start == -1 or end <= start:
+        return None
+    try:
+        return json.loads(stripped[start : end + 1])
+    except json.JSONDecodeError:
+        return None
 
 
 def _coerce_str_list(value: Any) -> list[str]:
@@ -104,78 +124,3 @@ class MemoryAnalysis(BaseModel):
         if value is not None:
             logger.warning("dropping malformed extracted_metadata: %.200r", value)
         return ExtractedMetadata()
-
-
-class QueryAnalysis(BaseModel):
-    """LLM output for analyzing a recall query."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    keywords: list[str] = Field(default_factory=list)
-    suggested_scopes: list[str] = Field(default_factory=list)
-    complexity: str = "simple"
-    recall_queries: list[str] = Field(default_factory=list)
-    time_filter: str | None = None
-
-    @field_validator("keywords", "suggested_scopes", "recall_queries", mode="before")
-    @classmethod
-    def _tolerant_lists(cls, value: Any) -> list[str]:
-        return _coerce_str_list(value)
-
-    @field_validator("complexity", mode="before")
-    @classmethod
-    def _tolerant_complexity(cls, value: Any) -> str:
-        return value if value in ("simple", "complex") else "simple"
-
-
-class ExtractedMemories(BaseModel):
-    """LLM output for extracting discrete memories from raw content."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    memories: list[str] = Field(default_factory=list)
-
-    @field_validator("memories", mode="before")
-    @classmethod
-    def _tolerant_memories(cls, value: Any) -> list[str]:
-        return _coerce_str_list(value)
-
-
-class ConsolidationAction(BaseModel):
-    """A single action in a consolidation plan."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    action: str = "keep"
-    record_ids: list[str] = Field(default_factory=list)
-    merged_content: str | None = None
-
-    @field_validator("record_ids", mode="before")
-    @classmethod
-    def _tolerant_ids(cls, value: Any) -> list[str]:
-        return _coerce_str_list(value)
-
-
-class ConsolidationPlan(BaseModel):
-    """A consolidation plan over memory records."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    actions: list[ConsolidationAction] = Field(default_factory=list)
-
-    @field_validator("actions", mode="before")
-    @classmethod
-    def _tolerant_actions(cls, value: Any) -> Any:
-        value = _coerce_json(value)
-        if isinstance(value, list):
-            kept = []
-            for item in value:
-                item = _coerce_json(item)
-                if isinstance(item, (dict, ConsolidationAction)):
-                    kept.append(item)
-                else:
-                    logger.warning(
-                        "dropping malformed consolidation action: %.100r", item
-                    )
-            return kept
-        return []

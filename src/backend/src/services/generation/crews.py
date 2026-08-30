@@ -368,7 +368,7 @@ class CrewGenerationService(
             if not primary_group_id:
                 return False
             from src.models.memory_backend import MemoryBackendTypeEnum
-            from src.services.memory.backend_service import MemoryBackendService
+            from src.services.memory.config.backend_service import MemoryBackendService
 
             # Memory backends are MemoryBackendService's domain.
             mem_svc = MemoryBackendService(session)

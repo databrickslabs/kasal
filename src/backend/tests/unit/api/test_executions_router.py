@@ -14,13 +14,12 @@ import pytest
 from src.api.executions_router import (
     create_execution,
     debug_context,
-    force_stop_execution,
     get_execution_service,
     get_execution_status,
     list_executions,
     stop_execution,
 )
-from src.core.exceptions import ForbiddenError, NotFoundError
+from src.core.exceptions import NotFoundError
 from src.schemas.execution import (
     CrewConfig,
     StopExecutionRequest,

@@ -13,7 +13,7 @@ from src.api.memory_backend import (
     lakebase_router,
     records_router,
 )
-from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
+from src.core.exceptions import ForbiddenError, NotFoundError
 
 
 class AdminCtx:

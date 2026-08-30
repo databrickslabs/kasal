@@ -102,7 +102,9 @@ class CompleteGenerationMixin:
             # Filter out Databricks knowledge tool if no Databricks memory is configured for this group
             try:
                 from src.models.memory_backend import MemoryBackendTypeEnum
-                from src.services.memory.backend_service import MemoryBackendService
+                from src.services.memory.config.backend_service import (
+                    MemoryBackendService,
+                )
 
                 primary_group_id = (
                     group_context.primary_group_id if group_context else None

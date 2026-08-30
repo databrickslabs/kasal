@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from src.services.memory.crew_memory import CrewMemoryService
+from src.services.memory.run.crew_memory import CrewMemoryService
 
 
 @pytest.fixture

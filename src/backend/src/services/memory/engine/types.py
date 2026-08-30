@@ -12,15 +12,11 @@ volume, and must stay current — and must be RETIRED when it stops being true
 rather than merely out-ranked by something newer.
 """
 
-import json
-import uuid
-from collections.abc import Sequence
-from datetime import datetime, timezone
-from enum import Enum
-from typing import Any, Literal, Self
+from datetime import datetime
+from typing import Any
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 # Memory kinds. Deliberately plain strings rather than an Enum: these cross
 # the JSONB/SQLite/pydantic boundary constantly, and a ``str, Enum`` renders as

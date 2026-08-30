@@ -5,7 +5,7 @@ Tests the functionality of flow execution management endpoints.
 """
 
 import uuid
-from unittest.mock import ANY, AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 from fastapi import FastAPI, HTTPException

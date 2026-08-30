@@ -794,7 +794,7 @@ class FlowRunnerService:
                         "execution_id": execution_id,
                     }
 
-            except FlowPausedForApprovalException as pause_exc:
+            except FlowPausedForApprovalException:
                 # Re-raise to handle at top level (shouldn't happen but just in case)
                 raise
 

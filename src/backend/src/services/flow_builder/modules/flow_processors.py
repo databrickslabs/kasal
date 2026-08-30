@@ -474,7 +474,7 @@ class FlowProcessorManager:
                                 crew_task_objects[-1]
                             ]  # Wait for previous task
                             logger.info(
-                                f"Task {task_id} will wait for previous task {task_ids[task_idx-1]} (sequential)"
+                                f"Task {task_id} will wait for previous task {task_ids[task_idx - 1]} (sequential)"
                             )
 
                         # Store the actual task object by task_id
@@ -713,7 +713,7 @@ class FlowProcessorManager:
                         if not matched_node and len(task_nodes) == 1:
                             matched_node = task_nodes[0]
                             logger.info(
-                                f"  ID mismatch fallback: using sole task node (flow task_id={task_id}, crew node={matched_node.get('id','')})"
+                                f"  ID mismatch fallback: using sole task node (flow task_id={task_id}, crew node={matched_node.get('id', '')})"
                             )
                             # Force re-creation from node data so tool_configs come from current crew node,
                             # not from a stale DB record for the mismatched task_id

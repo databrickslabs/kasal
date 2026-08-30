@@ -154,7 +154,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _reset_lakebase_schema_cache():
-    from src.services.memory.lakebase_schema import reset_schema_cache
+    from src.services.memory.storage.lakebase_schema import reset_schema_cache
 
     reset_schema_cache()
     yield

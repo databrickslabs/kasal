@@ -5,7 +5,6 @@ dependencies. Permission checks are tested by supplying GroupContext objects
 with different role configurations.
 """
 
-from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 

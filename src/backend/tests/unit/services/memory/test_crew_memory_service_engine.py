@@ -7,13 +7,9 @@ Tests cover:
 - create_memory_backends with error handling
 """
 
-import hashlib
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
-
-from src.services.memory.crew_memory import CrewMemoryService
+from src.services.memory.run.crew_memory import CrewMemoryService
 
 
 class TestGenerateCrewIdGroupIsolation:

@@ -6,14 +6,16 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from src.services.memory.engine import MemoryRecord
-from src.services.memory.hooks import (
-    MEMORY_BLOCK_HEADER,
-    build_memory_preamble,
+from src.services.memory.run.persist import (
     flush_memory_writes,
     format_turn_for_memory,
-    inject_task_memory,
     register_task_output_persistence,
     remember_async,
+)
+from src.services.memory.run.recall import (
+    MEMORY_BLOCK_HEADER,
+    build_memory_preamble,
+    inject_task_memory,
 )
 
 
@@ -251,6 +253,36 @@ class TestTaskOutputPersistence:
         assert metadata["task_name"] == "research"
         assert metadata["task_description"] == "Find facts"
         assert memory.remember.call_args.kwargs["agent_role"] == "Researcher"
+
+    def _sink_write(self, memory, **sink_kwargs):
+        from src.services.memory.run.persist import make_memory_output_sink
+
+        done = threading.Event()
+        memory.remember.side_effect = lambda *a, **k: done.set()
+        sink = make_memory_output_sink(memory, **sink_kwargs)
+        _crew, task = self._crew(memory)
+        sink(task=task, output=SimpleNamespace(raw="42 facts found", agent="R"))
+        assert done.wait(timeout=5), "task output never persisted"
+        return memory.remember.call_args.kwargs["metadata"]
+
+    def test_record_is_stamped_with_the_run_that_wrote_it(self):
+        # The wiring site passes the id (both crew paths do) …
+        metadata = self._sink_write(MagicMock(), execution_id="job-42")
+        assert metadata["execution_id"] == "job-42"
+
+    def test_run_stamp_falls_back_to_the_execution_context(self):
+        # … and the flow path is covered by the subprocess's execution
+        # context, which the bootstrap sets before any crew runs.
+        from src.services.execution.logs.context import execution_logging_context
+
+        with execution_logging_context("job-ctx"):
+            metadata = self._sink_write(MagicMock())
+        assert metadata["execution_id"] == "job-ctx"
+
+    def test_no_run_stamp_outside_a_run(self):
+        metadata = self._sink_write(MagicMock())
+        assert "execution_id" not in metadata
+        assert metadata["task_name"] == "research"
 
     def test_foreign_task_is_ignored(self):
         from src.core.events import TaskCompletedEvent, event_bus

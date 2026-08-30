@@ -29,7 +29,7 @@ async def test_no_active_config_falls_back_to_default_and_wires_memory():
     Memory and the memory tools fail with "CHROMA_OPENAI_API_KEY is not set"."""
     configured = {"memory": MagicMock(name="Memory")}
     with (
-        patch("src.services.memory.crew_memory.CrewMemoryService") as MockSvc,
+        patch("src.services.memory.run.crew_memory.CrewMemoryService") as MockSvc,
         patch(
             "src.services.execution.config.embedder_config_builder.EmbedderConfigBuilder"
         ) as MockEmb,
@@ -80,7 +80,7 @@ async def test_backend_config_wires_unified_memory():
     configured_kwargs = {"memory": MagicMock(name="Memory")}
 
     with (
-        patch("src.services.memory.crew_memory.CrewMemoryService") as MockSvc,
+        patch("src.services.memory.run.crew_memory.CrewMemoryService") as MockSvc,
         patch(
             "src.services.execution.config.embedder_config_builder.EmbedderConfigBuilder"
         ) as MockEmb,
@@ -128,7 +128,7 @@ async def test_backend_config_error_falls_back_gracefully():
         "lakebase_config": {"memory_table": "crew_memory"},
     }
     with (
-        patch("src.services.memory.crew_memory.CrewMemoryService") as MockSvc,
+        patch("src.services.memory.run.crew_memory.CrewMemoryService") as MockSvc,
         patch(
             "src.services.execution.config.embedder_config_builder.EmbedderConfigBuilder"
         ) as MockEmb,

@@ -170,8 +170,8 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
 
         async def _record() -> None:
             try:
-                from src.services.memory.crew_memory import build_session_memory
-                from src.services.memory.hooks import (
+                from src.services.memory.run.crew_memory import build_session_memory
+                from src.services.memory.run.persist import (
                     format_turn_for_memory,
                     remember_async,
                 )

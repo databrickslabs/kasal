@@ -14,9 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.schemas.powerbi_config import (
-    DAXQueryRequest,
     DAXQueryResponse,
-    PowerBIConfigCreate,
 )
 
 

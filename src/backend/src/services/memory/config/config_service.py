@@ -5,11 +5,9 @@ This module handles the logic for determining which memory backend configuration
 is active for a given context.
 """
 
-import os
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from src.core.logger import LoggerManager
-from src.models.memory_backend import MemoryBackend
 from src.repositories.memory_backend_repository import MemoryBackendRepository
 from src.schemas.memory_backend import (
     DatabricksMemoryConfig,

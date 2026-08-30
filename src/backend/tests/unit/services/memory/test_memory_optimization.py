@@ -5,7 +5,7 @@ Tests that memory is automatically disabled for agents that don't need it,
 such as validators, formatters, and other stateless operations.
 """
 
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 

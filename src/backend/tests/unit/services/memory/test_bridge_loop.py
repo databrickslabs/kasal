@@ -9,8 +9,8 @@ connection -> "Event loop is closed" / GC "non-checked-in connection".
 import threading
 from unittest.mock import patch
 
-import src.services.memory.bridge_loop as bl
-from src.services.memory.bridge_loop import (
+import src.services.memory.storage.bridge_loop as bl
+from src.services.memory.storage.bridge_loop import (
     get_bridge_loop,
     run_on_bridge_loop,
     shutdown_bridge_loop,

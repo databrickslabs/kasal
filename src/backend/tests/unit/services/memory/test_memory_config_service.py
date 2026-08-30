@@ -46,7 +46,7 @@ def make_backend(
 
 
 def make_service():
-    from src.services.memory.config_service import MemoryConfigService
+    from src.services.memory.config.config_service import MemoryConfigService
 
     svc = MemoryConfigService(session=AsyncMock())
     svc.repository = AsyncMock()

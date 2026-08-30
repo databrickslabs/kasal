@@ -1,16 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import {
+  EMPTY_RUN_TRACE_FACTS,
   MemoryRecord,
   coOccurrenceEdges,
+  contentMatches,
+  extractSavedContents,
   extractSavedIds,
-  tracesCarryIds,
   deriveIndex,
   extractRecalledIds,
-  recordsSavedInRun,
-  runWindowFor,
+  isConsolidation,
+  recordsForRun,
+  runTraceFacts,
   timeMs,
 } from './memoryData';
-import { Run } from '../../types/execution/run';
 
 const rec = (over: Partial<MemoryRecord>): MemoryRecord => ({
   id: 'r1',
@@ -62,33 +64,6 @@ describe('coOccurrenceEdges', () => {
   });
 });
 
-describe('runWindowFor / recordsSavedInRun', () => {
-  // Runs newest-first, as the callers store them.
-  const runs = [
-    { job_id: 'new', completed_at: '2026-06-21T14:00:00' },
-    { job_id: 'old', completed_at: '2026-06-21T12:00:00' },
-  ] as unknown as Run[];
-
-  it('windows a run between the previous completion and its own (+buffer)', () => {
-    const w = runWindowFor(runs, 'new');
-    expect(w).not.toBeNull();
-    expect(w!.start).toBe(timeMs('2026-06-21T12:00:00'));
-    expect(w!.end).toBeGreaterThan(timeMs('2026-06-21T14:00:00'));
-  });
-
-  it('scopes records to the run that wrote them', () => {
-    const inNew = rec({ id: 'x', created_at: '2026-06-21 13:30:00' });
-    const inOld = rec({ id: 'y', created_at: '2026-06-21 11:30:00' });
-    expect(recordsSavedInRun([inNew, inOld], runs, 'new')).toEqual([inNew]);
-    expect(recordsSavedInRun([inNew, inOld], runs, 'old')).toEqual([inOld]);
-  });
-
-  it('returns everything when the run is unknown (no window)', () => {
-    const all = [rec({ id: 'x' }), rec({ id: 'y' })];
-    expect(recordsSavedInRun(all, runs, 'missing')).toEqual(all);
-  });
-});
-
 describe('extractRecalledIds', () => {
   it('prefers structured record_ids (trace_metadata AND output.extra_data)', () => {
     // The trace CONTENT is capped at 8k chars — the tail results' ids fall off
@@ -132,22 +107,139 @@ describe('extractSavedIds', () => {
   });
 });
 
+describe('extractSavedContents', () => {
+  it('collects the written bodies from memory_write traces, whitespace-normalised', () => {
+    const bodies = extractSavedContents([
+      // crew/flow bridge: content + a `value` mirror of the same text
+      {
+        event_type: 'memory_write',
+        output: { content: 'Swiss News Report —\n\nAarau shooting, five injured.' },
+        trace_metadata: { value: 'Swiss News Report — Aarau shooting, five injured.' },
+      },
+      // chat path: capped body carries the truncation marker
+      { event_type: 'memory_write', output: { content: 'User: create a presentation on…[truncated]' } },
+      // not a write; too short to mean anything
+      { event_type: 'memory_retrieval', output: { content: 'Swiss News Report — Aarau shooting, five injured.' } },
+      { event_type: 'memory_write', output: { content: 'ok' } },
+    ]);
+    expect(bodies).toEqual([
+      'Swiss News Report — Aarau shooting, five injured.',
+      'User: create a presentation on',
+    ]);
+  });
+  it('is empty for no traces', () => {
+    expect(extractSavedContents(undefined)).toEqual([]);
+  });
+});
 
-describe('tracesCarryIds', () => {
-  it('detects new-format runs by any id-stamped memory trace', () => {
-    expect(
-      tracesCarryIds([
-        { event_type: 'memory_retrieval', trace_metadata: { record_ids: ['a'] } },
-      ]),
-    ).toBe(true);
-    expect(
-      tracesCarryIds([{ event_type: 'memory_write', trace_metadata: { record_id: 'w' } }]),
-    ).toBe(true);
+describe('contentMatches', () => {
+  const saved = ['Swiss News Report — Aarau shooting, five injured. Federal Council'];
+  it('matches a record whose body is the traced text, or a capped prefix of it', () => {
+    expect(contentMatches(rec({ content: 'Swiss News Report — Aarau shooting, five injured. Federal Council' }), saved)).toBe(true);
+    // The trace copy is capped; the stored record runs on.
+    expect(contentMatches(rec({ content: 'Swiss News Report — Aarau shooting, five injured. Federal Council kept quotas' }), saved)).toBe(true);
+    expect(contentMatches(rec({ content: 'Swiss News Report —\n\nAarau shooting, five injured. Federal Council' }), saved)).toBe(true);
+  });
+  it('rejects other bodies and anything too short to be evidence', () => {
+    expect(contentMatches(rec({ content: 'Rony Fahed is a Lebanese former basketball player' }), saved)).toBe(false);
+    expect(contentMatches(rec({ content: 'Swiss News' }), saved)).toBe(false);
+  });
+});
+
+describe('runTraceFacts', () => {
+  it('reads recalled ids, saved ids and saved bodies from one trace list', () => {
+    const facts = runTraceFacts([
+      { event_type: 'memory_retrieval', trace_metadata: { record_ids: ['a'] } },
+      { event_type: 'memory_write', trace_metadata: { record_id: 'w' }, output: { content: 'The Federal Council kept the 2026 quotas unchanged.' } },
+    ]);
+    expect([...facts.recalledIds]).toEqual(['a']);
+    expect([...facts.savedIds]).toEqual(['w']);
+    expect(facts.savedContents).toEqual(['The Federal Council kept the 2026 quotas unchanged.']);
+  });
+  it('is the empty shape for no traces', () => {
+    expect(runTraceFacts(undefined)).toEqual(EMPTY_RUN_TRACE_FACTS);
+  });
+});
+
+describe('recordsForRun', () => {
+  const wrote = rec({
+    id: 'w1',
+    created_at: '2026-06-21 11:59:00',
+    source: 'crew_task',
+    content: 'Swiss News Report — Aarau shooting, five injured. Federal Council kept quotas.',
+  });
+  const merged = rec({
+    id: 'm1',
+    created_at: '2026-06-21 11:59:30',
+    source: 'consolidation',
+    metadata: { merged_from: 2 },
+    content: 'Rony Fahed is a Lebanese former professional basketball player.',
+  });
+  const chatMeanwhile = rec({
+    id: 'c1',
+    created_at: '2026-06-21 11:59:45',
+    source: 'chat',
+    content: 'User: create a presentation on the latest news from switzerland',
+  });
+  const store = [wrote, merged, chatMeanwhile];
+
+  it("saved = exactly the ids the run's memory_write traces carry", () => {
+    const facts = runTraceFacts([{ event_type: 'memory_write', trace_metadata: { record_id: 'w1' } }]);
+    expect(recordsForRun(store, 'saved', facts)).toEqual([wrote]);
   });
 
-  it('is false for old-format traces and non-memory events', () => {
-    expect(tracesCarryIds([{ event_type: 'memory_retrieval', output: "id='x'" }])).toBe(false);
-    expect(tracesCarryIds([{ event_type: 'llm_call', trace_metadata: { record_id: 'x' } }])).toBe(false);
-    expect(tracesCarryIds(undefined)).toBe(false);
+  it('saved excludes consolidation output even when its write is traced under the run', () => {
+    // End-of-run maintenance re-saves MERGED records under the run that
+    // triggered it — the "Rony Fahed" record in a run about Swiss news.
+    const facts = runTraceFacts([
+      { event_type: 'memory_write', trace_metadata: { record_id: 'w1' } },
+      { event_type: 'memory_write', trace_metadata: { record_id: 'm1' } },
+    ]);
+    expect(recordsForRun(store, 'saved', facts)).toEqual([wrote]);
+  });
+
+  it('saved is EMPTY when the run has written nothing — never other runs\' records', () => {
+    // A run that has only just started, or whose recalls all came back
+    // empty, has no id-stamped trace. It must NOT inherit what chat wrote in
+    // the meantime (the "2 records · presentation creation" phantom).
+    expect(recordsForRun(store, 'saved', EMPTY_RUN_TRACE_FACTS)).toEqual([]);
+    const emptyRecall = runTraceFacts([
+      { event_type: 'memory_retrieval', trace_metadata: { results_count: 0 } },
+    ]);
+    expect(recordsForRun(store, 'saved', emptyRecall)).toEqual([]);
+  });
+
+  it('saved falls back to the traced body for runs written before the id stamps — minus consolidation', () => {
+    const facts = runTraceFacts([
+      { event_type: 'memory_write', output: { content: 'Swiss News Report — Aarau shooting, five injured.' } },
+      { event_type: 'memory_write', output: { content: 'Rony Fahed is a Lebanese former professional basketball player.' } },
+    ]);
+    expect(recordsForRun(store, 'saved', facts)).toEqual([wrote]);
+  });
+
+  it('saved includes a record stamped with this run\'s execution_id, even with no traces', () => {
+    const stamped = rec({
+      id: 's1',
+      source: 'chat',
+      metadata: { execution_id: 'run-9' },
+      content: 'User: hi there Assistant: Hi! How can I help you today?',
+    });
+    expect(recordsForRun([...store, stamped], 'saved', EMPTY_RUN_TRACE_FACTS, 'run-9')).toEqual([stamped]);
+    expect(recordsForRun([...store, stamped], 'saved', EMPTY_RUN_TRACE_FACTS, 'other')).toEqual([]);
+  });
+
+  it('recalled = the ids the retrieval traces carry, empty when none', () => {
+    const facts = runTraceFacts([{ event_type: 'memory_retrieval', trace_metadata: { record_ids: ['c1', 'm1'] } }]);
+    expect(recordsForRun(store, 'recalled', facts)).toEqual([merged, chatMeanwhile]);
+    expect(recordsForRun(store, 'recalled', EMPTY_RUN_TRACE_FACTS)).toEqual([]);
+  });
+});
+
+describe('isConsolidation', () => {
+  it("keys off the record's own source, case-insensitively", () => {
+    expect(isConsolidation(rec({ source: 'consolidation' }))).toBe(true);
+    expect(isConsolidation(rec({ source: 'Consolidation' }))).toBe(true);
+    expect(isConsolidation(rec({ source: 'crew_task' }))).toBe(false);
+    expect(isConsolidation(rec({ source: null }))).toBe(false);
   });
 });

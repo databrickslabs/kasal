@@ -1,6 +1,6 @@
 """A test file should live where the module it tests lives.
 
-`tests/unit/services/memory/test_hooks.py` tests `src/services/memory/hooks.py`.
+`tests/unit/services/memory/test_hooks.py` tests `src/services/memory/run/`.
 When that holds, "is this module tested?" has a mechanical answer; when it
 drifts, the only way to find out is to grep and read — and that is how coverage
 gaps hide.
@@ -83,7 +83,6 @@ _BASELINE = {
     "services/execution/test_process_log_queue.py",
     "services/guardrails/test_guardrail_events.py",
     "services/guardrails/test_guardrail_trace_integration.py",
-    "services/memory/test_disabled_memory_backend.py",
     "services/memory/test_memory_optimization.py",
     "services/mlflow/test_mlflow_trace_label.py",
     "test_chat_history_workflow.py",

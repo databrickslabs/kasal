@@ -1,14 +1,10 @@
 """Unit tests for memory backend router."""
 
-import atexit
 import os
-import sys
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 # Set database type to sqlite for testing
 os.environ["DATABASE_TYPE"] = "sqlite"
@@ -25,13 +21,11 @@ from src.models.memory_backend import MemoryBackend
 # Import only what we need for testing
 from src.schemas.memory_backend import (
     DatabricksMemoryConfig,
-    MemoryBackendConfig,
     MemoryBackendCreate,
-    MemoryBackendResponse,
     MemoryBackendType,
     MemoryBackendUpdate,
 )
-from src.services.memory.backend_service import MemoryBackendService
+from src.services.memory.config.backend_service import MemoryBackendService
 
 
 @pytest.fixture

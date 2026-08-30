@@ -5,7 +5,6 @@ service dependencies. Permission checks verify that only admin and editor
 roles can create, update, and delete API keys.
 """
 
-from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 

@@ -14,15 +14,26 @@ export enum MemoryBackendType {
   LAKEBASE = 'lakebase', // Lakebase pgvector
 }
 
-/** Recall-scoring knobs for a teamspace's memory. */
+/**
+ * Memory Tuning knobs for a teamspace's memory. Every field here reaches the
+ * layer that uses it — the scoring ones the storage backend, the rest the
+ * engine's `Memory` — so a value set in the panel is never silently dropped.
+ */
 export interface MemoryTuningConfig {
-  // Composite score weights (should roughly sum to 1.0).
+  // Composite score weights (semantic + keyword + recency + importance —
+  // should roughly sum to 1.0).
   semantic_weight?: number;
+  keyword_weight?: number;
   recency_weight?: number;
   importance_weight?: number;
   recency_half_life_days?: number;
   /** Minimum semantic similarity for a memory to be recalled at all (default 0.35). */
   relevance_threshold?: number;
+  /**
+   * Blended-score floor below which a recall returns nothing. Unset = the
+   * embedder's own default (0.75 Databricks, 0.62 local Ollama fallback).
+   */
+  recall_min_score?: number;
 
   // Consolidation.
   consolidation_threshold?: number;
@@ -114,15 +125,21 @@ export const DEFAULT_LAKEBASE_CONFIG: LakebaseMemoryConfig = {
   tables_initialized: false,
 };
 
-/** Upstream CrewAI defaults, mirrored here so the UI can show them as placeholders. */
+/**
+ * The EFFECTIVE defaults — what the backend applies when a knob is unset —
+ * so an untouched slider shows the value that is actually in force
+ * (local_storage_backend.LocalMemoryStorage and engine/memory.Memory).
+ */
 export const MEMORY_TUNING_DEFAULTS: Required<
   Pick<
     MemoryTuningConfig,
     | 'semantic_weight'
+    | 'keyword_weight'
     | 'recency_weight'
     | 'importance_weight'
     | 'recency_half_life_days'
     | 'relevance_threshold'
+    | 'recall_min_score'
     | 'consolidation_threshold'
     | 'consolidation_limit'
     | 'default_importance'
@@ -133,11 +150,13 @@ export const MEMORY_TUNING_DEFAULTS: Required<
     | 'query_analysis_threshold'
   >
 > = {
-  semantic_weight: 0.5,
-  recency_weight: 0.3,
-  importance_weight: 0.2,
+  semantic_weight: 0.6,
+  keyword_weight: 0.15,
+  recency_weight: 0.15,
+  importance_weight: 0.1,
   recency_half_life_days: 30,
   relevance_threshold: 0.35,
+  recall_min_score: 0.75,
   consolidation_threshold: 0.85,
   consolidation_limit: 5,
   default_importance: 0.5,

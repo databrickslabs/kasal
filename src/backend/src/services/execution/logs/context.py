@@ -67,6 +67,16 @@ def set_execution_context(execution_id: str):
     _execution_context.set(execution_id)
 
 
+def current_execution_id() -> Optional[str]:
+    """The execution id of the current context, or None outside a run.
+
+    Set by the subprocess bootstrap for crew and flow runs and propagated
+    through ``contextvars.copy_context`` into the memory writer pool, so a
+    task-output persist can stamp the record with the run that wrote it.
+    """
+    return _execution_context.get()
+
+
 def clear_execution_context():
     """
     Clear the execution context for the current context (works with async/await).

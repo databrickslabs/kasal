@@ -31,14 +31,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.services.memory.hooks import (
-    _select_records,
-    build_memory_preamble,
-    clear_pending_memory,
-    flush_memory_writes,
-    make_memory_output_sink,
-    says_the_same,
-)
+from src.services.memory.run.pending import clear_pending_memory
+from src.services.memory.run.persist import flush_memory_writes, make_memory_output_sink
+from src.services.memory.run.recall import _select_records, build_memory_preamble
+from src.services.memory.text import says_the_same
 
 
 @pytest.fixture(autouse=True)

@@ -7,8 +7,7 @@ This module provides utility functions for working with CrewAI tasks.
 import json
 import os
 import traceback
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, List, Optional, Type
 
 from pydantic import BaseModel
 
@@ -513,7 +512,7 @@ async def create_task(
             from src.services.databricks.workspace.config_provider import (
                 DatabricksConfigProvider,
             )
-            from src.services.memory.backend_service import MemoryBackendService
+            from src.services.memory.config.backend_service import MemoryBackendService
 
             databricks_config = await DatabricksConfigProvider.get()
 

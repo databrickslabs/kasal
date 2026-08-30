@@ -1,9 +1,9 @@
-"""Tests for LocalMemoryStorage — SQLite + cosine local memory backend."""
+"""Tests for LocalStorageBackend — SQLite + cosine local memory backend."""
 
 from datetime import datetime, timedelta, timezone
 
 from src.services.memory.engine import MemoryRecord
-from src.services.memory.local_storage_backend import LocalMemoryStorage
+from src.services.memory.storage.local import LocalStorageBackend
 
 
 def _stub_embedder(texts):
@@ -19,8 +19,8 @@ def _stub_embedder(texts):
     return vectors
 
 
-def _store(tmp_path, embedder=_stub_embedder) -> LocalMemoryStorage:
-    return LocalMemoryStorage(tmp_path / "memory.db", embedder=embedder)
+def _store(tmp_path, embedder=_stub_embedder) -> LocalStorageBackend:
+    return LocalStorageBackend(tmp_path / "memory.db", embedder=embedder)
 
 
 def _save(store, content, scope="/g1", **kwargs):
@@ -184,7 +184,7 @@ class TestRelevanceGate:
         assert [r.content for r, _ in results] == ["cat facts"]
 
     def test_threshold_override(self, tmp_path):
-        store = LocalMemoryStorage(
+        store = LocalStorageBackend(
             tmp_path / "m.db", embedder=_stub_embedder, relevance_threshold=0.0
         )
         record = MemoryRecord(content="anything", scope="/g1")

@@ -22,7 +22,7 @@ import pytest
 
 import src.services.memory.engine
 from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
-from src.services.memory.crew_memory import CrewMemoryService
+from src.services.memory.run.crew_memory import CrewMemoryService
 
 
 class TestDefaultBackendNoEmbedderDisablesMemory:
@@ -101,7 +101,7 @@ class TestDefaultBackendNoEmbedderDisablesMemory:
         # succeeds, we just check memory is NOT forcibly set to False by the guard.
         # Patch Memory to avoid real OpenAI calls.
         with patch(
-            "src.services.memory.crew_memory.CrewMemoryService.configure_crew_memory_components"
+            "src.services.memory.run.crew_memory.CrewMemoryService.configure_crew_memory_components"
         ) as mock_cfg:
             mock_cfg.return_value = {
                 "memory": True,

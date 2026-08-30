@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 from src.services.execution.runtime.crew import Crew
 from src.services.memory.engine import MemoryRecord
-from src.services.memory.hooks import (
+from src.services.memory.run.recall import (
     MEMORY_BLOCK_HEADER,
     make_memory_context_provider,
     request_from_inputs,
@@ -140,7 +140,7 @@ class TestCrewOutputSinks:
 
 class TestMakeMemoryOutputSink:
     def test_none_for_sentinel_memory(self):
-        from src.services.memory.hooks import make_memory_output_sink
+        from src.services.memory.run.persist import make_memory_output_sink
 
         assert make_memory_output_sink(None) is None
         assert make_memory_output_sink(False) is None
@@ -149,7 +149,7 @@ class TestMakeMemoryOutputSink:
     def test_sink_persists_task_output(self):
         import threading
 
-        from src.services.memory.hooks import make_memory_output_sink
+        from src.services.memory.run.persist import make_memory_output_sink
 
         done = threading.Event()
         memory = MagicMock()
@@ -177,7 +177,7 @@ class TestMakeMemoryOutputSink:
     def test_sink_skips_empty_output(self):
         import time as _time
 
-        from src.services.memory.hooks import make_memory_output_sink
+        from src.services.memory.run.persist import make_memory_output_sink
 
         memory = MagicMock()
         sink = make_memory_output_sink(memory)

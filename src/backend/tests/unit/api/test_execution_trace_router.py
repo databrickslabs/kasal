@@ -5,7 +5,7 @@ Tests the functionality of execution trace/debugging endpoints.
 """
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -590,6 +590,31 @@ class TestExecutionTraceRouter:
                 # "from the beginning"; preview_chars=0 is "do not trim".
                 since_id=0,
                 preview_chars=0,
+                event_type_prefix=None,
+            )
+
+    def test_get_traces_by_job_id_forwards_event_type_prefix(
+        self, client, mock_group_context
+    ):
+        """The memory views fetch a run's memory_* rows only, uncapped."""
+        with patch(
+            "src.api.execution_trace_router.ExecutionTraceService.get_traces_by_job_id"
+        ) as mock_get_traces:
+            mock_get_traces.return_value = {"job_id": "job-123", "traces": []}
+
+            response = client.get(
+                "/traces/job/job-123?event_type_prefix=memory_&limit=15000"
+            )
+
+            assert response.status_code == 200
+            mock_get_traces.assert_called_once_with(
+                group_context=mock_group_context,
+                job_id="job-123",
+                limit=15000,
+                offset=0,
+                since_id=0,
+                preview_chars=0,
+                event_type_prefix="memory_",
             )
 
     # Test high limit acceptance (limit up to 15000)
@@ -609,6 +634,7 @@ class TestExecutionTraceRouter:
                 offset=0,
                 since_id=0,
                 preview_chars=0,
+                event_type_prefix=None,
             )
 
     def test_get_traces_rejects_limit_over_max(self, client, mock_group_context):

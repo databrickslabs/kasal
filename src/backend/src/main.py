@@ -263,7 +263,10 @@ async def lifespan(app: FastAPI):
     async def _memory_sweep_loop():
         import asyncio as _a
 
-        from src.services.memory.sweep import sweep_enabled, sweep_memory_maintenance
+        from src.services.memory.maintenance.sweep import (
+            sweep_enabled,
+            sweep_memory_maintenance,
+        )
 
         # Same shape as the knowledge sweep: stay off the critical path while
         # the app takes its first requests, then tick steadily.

@@ -60,8 +60,8 @@ from src.services.memory.engine import (
     KIND_PROCEDURAL,
     KIND_SEMANTIC,
 )
-from src.services.memory.forgetting import forget_expired_memories
-from src.services.memory.supersession import supersede_outdated_facts
+from src.services.memory.maintenance.forgetting import forget_expired_memories
+from src.services.memory.maintenance.supersession import supersede_outdated_facts
 
 logger = logging.getLogger(__name__)
 
@@ -402,7 +402,7 @@ async def run_maintenance_after_writes(
     if not _claim_maintenance_slot(_scope_key(memory, scope), interval):
         return dict(_SKIPPED)
     try:
-        from src.services.memory.hooks import flush_memory_writes
+        from src.services.memory.run.persist import flush_memory_writes
 
         await asyncio.to_thread(flush_memory_writes, flush_timeout)
         return await asyncio.to_thread(run_memory_maintenance, memory, scope)

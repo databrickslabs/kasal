@@ -6,17 +6,14 @@ dependencies and TestClient for list-view integration tests.
 
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 from src.api.documentation_embeddings_router import (
     create_documentation_embedding,
     delete_documentation_embedding,
     get_documentation_embedding,
-    get_documentation_embedding_service,
     get_documentation_embeddings,
     get_recent_documentation_embeddings,
     router,
@@ -25,7 +22,6 @@ from src.api.documentation_embeddings_router import (
 from src.core.exceptions import NotFoundError
 from src.schemas.documentation_embedding import DocumentationEmbeddingCreate
 from src.utils.user_context import GroupContext
-from tests.unit.api.conftest import register_exception_handlers
 
 
 def gc():

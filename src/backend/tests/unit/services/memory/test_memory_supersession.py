@@ -13,17 +13,15 @@ one, ordering could invert. Nothing is deleted — the retired record stays so
 
 from datetime import datetime, timedelta, timezone
 
-import pytest
-
 from src.services.memory.engine import (
     KIND_EPISODIC,
     KIND_SEMANTIC,
     Memory,
     MemoryRecord,
 )
-from src.services.memory.engine_storage_adapter import EngineStorageAdapter
-from src.services.memory.local_storage_backend import LocalMemoryStorage
-from src.services.memory.supersession import supersede_outdated_facts
+from src.services.memory.maintenance.supersession import supersede_outdated_facts
+from src.services.memory.storage.adapter import EngineStorageAdapter
+from src.services.memory.storage.local import LocalStorageBackend
 
 
 def _embedder(texts):
@@ -41,7 +39,7 @@ class _FakeLLM:
 
 
 def _memory(tmp_path, llm=None, name="m.db"):
-    backend = LocalMemoryStorage(tmp_path / name, embedder=_embedder)
+    backend = LocalStorageBackend(tmp_path / name, embedder=_embedder)
     return Memory(
         storage=EngineStorageAdapter(backend),
         root_scope="/g1",
@@ -243,7 +241,7 @@ class TestGating:
 
 class TestRunMemoryMaintenanceIntegration:
     def test_supersession_is_part_of_the_full_pass(self, tmp_path):
-        from src.services.memory.maintenance import run_memory_maintenance
+        from src.services.memory.maintenance.passes import run_memory_maintenance
 
         llm = _FakeLLM('[{"current": 0, "outdated": [1]}]')
         memory = _memory(tmp_path, llm=llm)
@@ -257,12 +255,12 @@ class TestRunMemoryMaintenanceIntegration:
     def test_merge_prompt_forbids_merging_contradictions(self):
         """The merge pass preserves every distinct detail, which is right for
         fragments and would destroy a supersession if applied to a conflict."""
-        from src.services.memory.maintenance import _MERGE_PROMPT
+        from src.services.memory.maintenance.passes import _MERGE_PROMPT
 
         assert "CONTRADICTIONS ARE NOT FRAGMENTS" in _MERGE_PROMPT
 
     def test_merged_records_keep_the_most_durable_kind(self):
-        from src.services.memory.maintenance import _merged_kind
+        from src.services.memory.maintenance.passes import _merged_kind
 
         episodic = MemoryRecord(content="a", kind=KIND_EPISODIC)
         semantic = MemoryRecord(content="b", kind=KIND_SEMANTIC)

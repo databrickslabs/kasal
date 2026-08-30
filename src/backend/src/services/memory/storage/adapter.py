@@ -2,7 +2,7 @@
 
 ``Memory.recall`` speaks the engine ``StorageBackend`` protocol —
 ``search(query: str, limit, scope, score_threshold)`` — while the real
-backends (:class:`LakebaseStorageBackend`, :class:`LocalMemoryStorage`) keep the
+backends (:class:`LakebaseStorageBackend`, :class:`LocalStorageBackend`) keep the
 crewAI-1.x protocol where the CALLER embeds the query first:
 ``search(query_embedding, scope_prefix, ..., min_score)``. This adapter absorbs
 that mismatch in one place:
@@ -15,8 +15,9 @@ that mismatch in one place:
 * maps the record-id oriented ``update``/``delete`` onto the filter-oriented
   backend methods.
 
-Keeping this app-side means the vendored ``kasal_engine`` package needs no
-hand edits (its datamodel is regenerated upstream).
+It also exposes what recall planning needs from a store without knowing its
+kind: ``has_records`` (skip model calls on an empty scope) and
+``embedding_for`` (the cached query embedding).
 """
 
 from __future__ import annotations
@@ -158,6 +159,15 @@ class EngineStorageAdapter(StorageBackend):
                 self._query_cache.popitem(last=False)
         return vector
 
+    def embedding_for(self, text: str) -> list[float] | None:
+        """The (cached) query embedding of ``text``; None when embedding fails."""
+        return self._embed_query(text)
+
+    def has_records(self, scope: str | None) -> bool:
+        """Whether ``scope`` holds anything — the cached probe, made public so
+        recall planning can skip its LLM calls on an empty store."""
+        return self._scope_has_records(scope)
+
     # ------------------------------------------------------------------
     # StorageBackend protocol (engine side)
     # ------------------------------------------------------------------
@@ -203,7 +213,7 @@ class EngineStorageAdapter(StorageBackend):
         # too — a scaffolded query against clean records scores low enough for
         # the recall floor to reject everything (observed live: four runs in a
         # row recalled 0 over a store full of matches).
-        from src.services.memory.boilerplate import strip_run_boilerplate
+        from src.services.memory.text import strip_run_boilerplate
 
         query = strip_run_boilerplate(query) or query
         vector = self._embed_query(query)

@@ -841,112 +841,22 @@ class LightAgentService:
                 # ── Memory tracing (Memory Read / Context Retrieved / Write) ──
                 # Scoped to THIS run's Memory instance (the bus source), mirroring
                 # the field extraction the crew/flow OTel bridge uses so the Jobs
-                # timeline renders identical rows.
-                def _matches_memory(source) -> bool:
-                    return _agent_memory is not None and source is _agent_memory
+                # timeline renders identical rows. The handlers live in
+                # chat/memory_trace_handlers.py; the names below are what the
+                # bus registration and the save hook bind.
+                from src.services.chat.memory_trace_handlers import (
+                    MemoryTraceHandlers,
+                )
 
-                def _cap(text: str, n: int = 8000) -> str:
-                    return text if len(text) <= n else text[:n] + "…[truncated]"
-
-                def _on_memory_query(source, event) -> None:
-                    try:
-                        if not _matches_memory(source):
-                            return
-                        results = getattr(event, "results", None)
-                        count = (
-                            len(results) if isinstance(results, (list, tuple)) else None
-                        )
-                        qms = getattr(event, "query_time_ms", None)
-                        content = "" if results is None else _cap(str(results))
-                        extra: Dict[str, Any] = {}
-                        if count is not None:
-                            extra["results_count"] = count
-                        if qms is not None:
-                            extra["query_time_ms"] = float(qms)
-                        # Structured ids of the retrieved records. The capped
-                        # prose above can truncate away the tail results, so
-                        # anything reconstructing "what this run recalled"
-                        # (the memory pane) must NOT have to parse content.
-                        rids = [
-                            str(rid)
-                            for rid in (getattr(r, "id", None) for r in (results or []))
-                            if rid
-                        ]
-                        if rids:
-                            extra["record_ids"] = rids
-                        out = {
-                            "tool_name": "Memory",
-                            "content": content,
-                            "extra_data": extra,
-                        }
-                        td = _base_trace("memory_retrieval", out, "Memory")
-                        td["trace_metadata"].update(extra)
-                        _log(
-                            f"Memory read: {count if count is not None else '?'} result(s)"
-                        )
-                        _schedule_trace(td)
-                    except Exception as h_err:  # noqa: BLE001
-                        logger.debug(
-                            f"[light_agent] memory-query trace skipped: {h_err}"
-                        )
-
-                def _on_memory_retrieval(source, event) -> None:
-                    try:
-                        if not _matches_memory(source):
-                            return
-                        mc = getattr(event, "memory_content", None)
-                        content = str(mc).strip() if mc else ""
-                        if not content:
-                            content = "(no memories matched the query)"
-                        content = _cap(content)
-                        rms = getattr(event, "retrieval_time_ms", None)
-                        extra: Dict[str, Any] = {}
-                        if rms is not None:
-                            extra["retrieval_time_ms"] = float(rms)
-                        out = {
-                            "tool_name": "Memory",
-                            "content": content,
-                            "extra_data": extra,
-                        }
-                        td = _base_trace("memory_retrieval_completed", out, "Memory")
-                        td["trace_metadata"].update(extra)
-                        _schedule_trace(td)
-                    except Exception as h_err:  # noqa: BLE001
-                        logger.debug(
-                            f"[light_agent] memory-retrieval trace skipped: {h_err}"
-                        )
-
-                def _on_records_saved(records) -> None:
-                    # Save-hook on THIS run's Memory instance (see
-                    # Memory.add_save_hook) — NOT a bus handler: the bus
-                    # handlers are unregistered in kickoff's finally, and the
-                    # chat turn persist (remember_async) is submitted AFTER
-                    # that, so a bus handler structurally never saw chat-path
-                    # writes and the trace had no "Memory Write" row. The hook
-                    # fires inside Memory.remember whenever the write actually
-                    # lands — mid-kickoff (CrewAI-engine self-saves) or after
-                    # completion — and the instance scoping replaces
-                    # _matches_memory.
-                    try:
-                        for record in records or []:
-                            content = _cap(str(getattr(record, "content", "") or ""))
-                            extra: Dict[str, Any] = {}
-                            rid = getattr(record, "id", None)
-                            if rid:
-                                extra["record_id"] = str(rid)
-                            out = {
-                                "tool_name": "Memory",
-                                "content": content,
-                                "extra_data": extra,
-                            }
-                            td = _base_trace("memory_write", out, "Memory")
-                            td["trace_metadata"].update(extra)
-                            _log("Memory write")
-                            _schedule_trace(td)
-                    except Exception as h_err:  # noqa: BLE001
-                        logger.debug(
-                            f"[light_agent] memory-save trace skipped: {h_err}"
-                        )
+                _memory_traces = MemoryTraceHandlers(
+                    agent_memory=_agent_memory,
+                    base_trace=_base_trace,
+                    schedule_trace=_schedule_trace,
+                    log=_log,
+                )
+                _on_memory_query = _memory_traces.on_memory_query
+                _on_memory_retrieval = _memory_traces.on_memory_retrieval
+                _on_records_saved = _memory_traces.on_records_saved
 
                 # ── Agent lifecycle tracing (fires even with NO tools) ──────
                 # The LiteAgent events are emitted with the AGENT instance as the bus
@@ -1046,7 +956,6 @@ class LightAgentService:
                 async def _on_a2ui_delta(msg: Dict[str, Any]) -> None:
                     try:
                         from src.core.sse_manager import SSEEvent, sse_manager
-
                         from src.services.a2ui.stream import is_snapshot
 
                         seq = _delta_seq["n"]
@@ -1295,9 +1204,7 @@ class LightAgentService:
                             "Memory recall left to the agent (CrewAI engine consults memory during kickoff)"
                         )
                     if _agent_memory is not None and not _agent_recalls_itself:
-                        from src.services.memory.hooks import (
-                            build_memory_preamble,
-                        )
+                        from src.services.memory.run.recall import build_memory_preamble
 
                         memory_block = await asyncio.to_thread(
                             build_memory_preamble, _agent_memory, prompt
@@ -1379,7 +1286,7 @@ class LightAgentService:
                 # ── Memory persist — fire-and-forget (never blocks the answer).
                 # The engine Agent does not auto-save; store the compact turn.
                 if _agent_memory is not None and (answer or "").strip():
-                    from src.services.memory.hooks import (
+                    from src.services.memory.run.persist import (
                         format_turn_for_memory,
                         remember_async,
                     )
@@ -1400,7 +1307,7 @@ class LightAgentService:
                 # far too frequent to maintain on every one, hence the throttle.
                 if _agent_memory is not None:
                     try:
-                        from src.services.memory.maintenance import (
+                        from src.services.memory.maintenance.passes import (
                             schedule_maintenance_after_writes,
                         )
 
@@ -2082,7 +1989,7 @@ class LightAgentService:
             from src.services.execution.config.embedder_config_builder import (
                 EmbedderConfigBuilder,
             )
-            from src.services.memory.crew_memory import CrewMemoryService
+            from src.services.memory.run.crew_memory import CrewMemoryService
 
             user_token = getattr(group_context, "access_token", None)
 
@@ -2112,9 +2019,11 @@ class LightAgentService:
 
             # Embedder (Databricks/Lakebase need a custom one; default → None).
             embedder_builder = EmbedderConfigBuilder(mem_config, user_token)
-            crew_kwargs, custom_embedder, _embedder_config = (
-                await embedder_builder.configure_embedder(crew_kwargs)
-            )
+            (
+                crew_kwargs,
+                custom_embedder,
+                _embedder_config,
+            ) = await embedder_builder.configure_embedder(crew_kwargs)
 
             # Backend config from DB → default (local SQLite) fallback.
             memory_backend_config = await memory_service.fetch_memory_backend_config()

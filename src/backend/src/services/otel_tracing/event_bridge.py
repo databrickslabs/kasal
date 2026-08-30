@@ -1091,6 +1091,12 @@ class OTelEventBridge:
         query = getattr(event, "query", None)
         if query:
             span.set_attribute("kasal.extra.query", _safe_str(query, 500))
+        distilled = getattr(event, "distilled_query", None)
+        if distilled:
+            span.set_attribute("kasal.extra.distilled_query", _safe_str(distilled, 500))
+        rounds = getattr(event, "exploration_rounds", None)
+        if rounds:
+            span.set_attribute("kasal.extra.exploration_rounds", int(rounds))
         value = getattr(event, "value", None)
         if value:
             span.set_attribute("kasal.extra.value", _safe_str(value, 4000))
@@ -1169,6 +1175,26 @@ class OTelEventBridge:
         if results is not None:
             if isinstance(results, (list, tuple)):
                 span.set_attribute("kasal.extra.results_count", len(results))
+                # The ids of the records recall returned, structured. The
+                # rendered content is capped, which can cut the tail results'
+                # ids off it — so "what did this run READ" must not be parsed
+                # back out of prose. Same key the chat path stamps itself.
+                record_ids = [
+                    str(rid) for rid in (getattr(r, "id", None) for r in results) if rid
+                ]
+                if record_ids:
+                    span.set_attribute("kasal.extra.record_ids", record_ids)
+
+        # ── Memory record identity (save completed) ──
+        # Storage assigns the id before the event fires and the engine carries
+        # it on MemorySaveCompletedEvent. Stamping it here is what lets a
+        # run's memory view resolve EXACTLY which records the run wrote — on
+        # the crew and flow paths, whose only trace writer is this bridge —
+        # instead of guessing by time window. The chat path writes the same
+        # key from its save hook (chat/service.py), so all three paths agree.
+        record_id = getattr(event, "record_id", None)
+        if record_id:
+            span.set_attribute("kasal.extra.record_id", str(record_id))
 
         # ── Memory metadata (save completed) ──
         # CrewAI 1.14+ unified Memory emits ``MemorySaveCompletedEvent`` with

@@ -34,7 +34,7 @@ from src.services.knowledge.documentation_embedding import DocumentationEmbeddin
 # ---------------------------------------------------------------------------
 _SVC = "src.services.knowledge.documentation_embedding"
 
-_MEMORY_BACKEND_REPO = "src.services.memory.backend_service.MemoryBackendService"
+_MEMORY_BACKEND_REPO = "src.services.memory.config.backend_service.MemoryBackendService"
 _EMBEDDING_QUEUE = f"{_SVC}.embedding_queue"
 
 # Local imports inside methods - must patch at SOURCE modules

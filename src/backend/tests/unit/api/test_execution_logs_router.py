@@ -5,8 +5,7 @@ using direct async function calls with mocked service dependencies.
 """
 
 from datetime import datetime
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI, HTTPException

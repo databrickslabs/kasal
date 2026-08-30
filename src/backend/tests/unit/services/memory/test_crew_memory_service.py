@@ -12,10 +12,10 @@ Covers:
 - restore_storage_directory
 """
 
-import os
 import importlib.util
+import os
 import sys
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -89,9 +89,9 @@ _crewai_mock.utilities.paths.db_storage_path = MagicMock(
 # TestConfigureCrewMemoryComponents cases therefore only passed when some
 # earlier test in this file had already imported it, which made the class fail
 # whenever it was run on its own. Loading it here makes that explicit.
-import src.services.memory.engine_storage_adapter  # noqa: E402,F401
+import src.services.memory.storage.adapter  # noqa: E402,F401
 from src.schemas.memory_backend import MemoryBackendType
-from src.services.memory.crew_memory import CrewMemoryService
+from src.services.memory.run.crew_memory import CrewMemoryService
 
 for _mod_name, _original in _originals.items():
     if _original is None:
@@ -118,7 +118,7 @@ class TestFetchMemoryBackendConfig:
         with patch("src.db.session.routed_scoped_session") as mock_ctx:
             mock_ctx.return_value.__aenter__.return_value = mock_session
             with patch(
-                "src.services.memory.backend_service.MemoryBackendService",
+                "src.services.memory.config.backend_service.MemoryBackendService",
                 return_value=mock_service,
             ):
                 result = await service.fetch_memory_backend_config()
@@ -137,7 +137,7 @@ class TestFetchMemoryBackendConfig:
         with patch("src.db.session.routed_scoped_session") as mock_ctx:
             mock_ctx.return_value.__aenter__.return_value = mock_session
             with patch(
-                "src.services.memory.backend_service.MemoryBackendService",
+                "src.services.memory.config.backend_service.MemoryBackendService",
                 return_value=mock_service,
             ):
                 result = await service.fetch_memory_backend_config()
@@ -162,7 +162,7 @@ class TestFetchMemoryBackendConfig:
         with patch("src.db.session.routed_scoped_session") as mock_ctx:
             mock_ctx.return_value.__aenter__.return_value = mock_session
             with patch(
-                "src.services.memory.backend_service.MemoryBackendService",
+                "src.services.memory.config.backend_service.MemoryBackendService",
                 return_value=mock_service,
             ):
                 result = await service.fetch_memory_backend_config()
@@ -198,7 +198,7 @@ class TestFetchMemoryBackendConfig:
         with patch("src.db.session.routed_scoped_session") as mock_ctx:
             mock_ctx.return_value.__aenter__.return_value = mock_session
             with patch(
-                "src.services.memory.backend_service.MemoryBackendService",
+                "src.services.memory.config.backend_service.MemoryBackendService",
                 return_value=mock_service,
             ):
                 result = await service.fetch_memory_backend_config()
@@ -233,9 +233,9 @@ class TestSetupStorageDirectory:
     def _do_setup_storage(self, service, crew_id, backend_config, mock_path):
         """Helper that patches the crewai paths import properly."""
         with (
-            patch("src.services.memory.crew_memory.Path") as MockPath,
+            patch("src.services.memory.run.crew_memory.Path") as MockPath,
             patch(
-                "src.services.memory.crew_memory.db_storage_path",
+                "src.services.memory.run.crew_memory.db_storage_path",
                 return_value="/tmp/test",
                 create=True,
             ),
@@ -296,7 +296,7 @@ class TestSetupStorageDirectory:
 
         with (
             patch.dict(os.environ, {"KASAL_MEMORY_DIR": mem_root}),
-            patch("src.services.memory.crew_memory.Path") as MockPath,
+            patch("src.services.memory.run.crew_memory.Path") as MockPath,
         ):
             MockPath.return_value = mock_path
             with patch.dict("sys.modules", {}):
@@ -366,7 +366,7 @@ class TestSetupStorageDirectory:
     def test_root_scope_is_always_group_scoped(self):
         """root_scope is ALWAYS /<group> — session_id no longer narrows semantic
         memory (per-session recall is owned by the chat-history preamble)."""
-        from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
+        from src.schemas.memory_backend import MemoryBackendConfig
 
         cfg = MemoryBackendConfig(backend_type=MemoryBackendType.DEFAULT)
         ws = CrewMemoryService({"group_id": "grp"})._build_memory_kwargs(
@@ -387,7 +387,7 @@ class TestSetupStorageDirectory:
         mock_path.exists.return_value = False
         mock_path.absolute.return_value = mock_path
 
-        with patch("src.services.memory.crew_memory.Path") as MockPath:
+        with patch("src.services.memory.run.crew_memory.Path") as MockPath:
             MockPath.return_value = mock_path
             with patch.dict("sys.modules", {}):
                 service.setup_storage_directory(
@@ -406,7 +406,7 @@ class TestSetupStorageDirectory:
         mock_file.is_dir.return_value = False
         mock_path.iterdir.return_value = [mock_file]
 
-        with patch("src.services.memory.crew_memory.Path") as MockPath:
+        with patch("src.services.memory.run.crew_memory.Path") as MockPath:
             MockPath.return_value = mock_path
             with patch.dict("sys.modules", {}):
                 service.setup_storage_directory(
@@ -420,7 +420,7 @@ class TestSetupStorageDirectory:
         mock_path.absolute.return_value = mock_path
         mock_path.iterdir.side_effect = PermissionError("no access")
 
-        with patch("src.services.memory.crew_memory.Path") as MockPath:
+        with patch("src.services.memory.run.crew_memory.Path") as MockPath:
             MockPath.return_value = mock_path
             with patch.dict("sys.modules", {}):
                 service.setup_storage_directory(
@@ -449,7 +449,7 @@ class TestCreateMemoryBackends:
         }
 
         with patch(
-            "src.services.memory.crew_memory.MemoryBackendFactory.create_unified_storage",
+            "src.services.memory.run.crew_memory.MemoryBackendFactory.create_unified_storage",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ) as mock_factory:
@@ -474,7 +474,7 @@ class TestCreateMemoryBackends:
         }
 
         with patch(
-            "src.services.memory.crew_memory.MemoryBackendFactory.create_unified_storage",
+            "src.services.memory.run.crew_memory.MemoryBackendFactory.create_unified_storage",
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ) as mock_factory:
@@ -497,7 +497,7 @@ class TestCreateMemoryBackends:
         }
 
         with patch(
-            "src.services.memory.crew_memory.MemoryBackendFactory.create_unified_storage",
+            "src.services.memory.run.crew_memory.MemoryBackendFactory.create_unified_storage",
             new_callable=AsyncMock,
             return_value=None,  # DEFAULT backend returns None
         ) as mock_factory:
@@ -521,7 +521,6 @@ class TestConfigureCrewMemoryComponents:
 
     def _make_memory_config(self, backend_type_str):
         """Create a MemoryBackendConfig-like MagicMock for the given type."""
-        from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
 
         cfg = MagicMock()
         cfg.backend_type = MemoryBackendType(backend_type_str)

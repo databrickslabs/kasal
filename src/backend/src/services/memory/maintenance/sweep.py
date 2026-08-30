@@ -75,7 +75,7 @@ async def build_group_memory(group_id: str) -> Any:
         from src.services.execution.config.embedder_config_builder import (
             EmbedderConfigBuilder,
         )
-        from src.services.memory.crew_memory import CrewMemoryService
+        from src.services.memory.run.crew_memory import CrewMemoryService
 
         config: dict[str, Any] = {
             "group_id": group_id,
@@ -194,7 +194,7 @@ async def _maintain_group(group_id: str) -> tuple[str, dict, str | None]:
     if memory is None:
         return "unavailable", {}, "no usable memory backend or embedder"
     try:
-        from src.services.memory.maintenance import run_memory_maintenance
+        from src.services.memory.maintenance.passes import run_memory_maintenance
 
         # The passes are synchronous (storage backends bridge to async
         # internally), so keep them off this loop.

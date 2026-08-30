@@ -60,7 +60,7 @@ LLM_MODULE = "src.services.llm.manager.LLMManager"
 # Knowledge search reads via DocumentationEmbeddingRepository(model=KnowledgeEmbedding).
 DOC_SVC_MODULE = "src.repositories.documentation_embedding_repository.DocumentationEmbeddingRepository"
 DVS_MODULE = "src.services.memory.databricks_vector_storage.DatabricksVectorStorage"
-MBS_MODULE = "src.services.memory.backend_service.MemoryBackendService"
+MBS_MODULE = "src.services.memory.config.backend_service.MemoryBackendService"
 MBC_MODULE = "src.schemas.memory_backend.MemoryBackendConfig"
 MBT_MODULE = "src.schemas.memory_backend.MemoryBackendType"
 
