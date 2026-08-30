@@ -52,8 +52,10 @@ DIAGRAM_DIRECTIVE = (
     "\n"
     "When the user asks for a presentation, slides, or a deck, output a single "
     '```html block of <section class="slide">…</section> elements (one per '
-    "slide, 6–10 slides). Follow the slide-design example below if one is "
-    "provided. For every other request, answer normally in prose/markdown."
+    "slide, 6–10 slides). ALL slides go inside that ONE block — never one "
+    "```html block per slide, and never --- separators between slides. Follow "
+    "the slide-design example below if one is provided. For every other "
+    "request, answer normally in prose/markdown."
 )
 
 # A concrete, polished example the model extends. Everything is styled INSIDE

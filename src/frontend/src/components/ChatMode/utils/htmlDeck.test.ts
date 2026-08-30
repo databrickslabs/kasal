@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { isDeck, splitSlides } from './htmlDeck';
+import type { DiagramSegment } from './mdSandboxDiagram';
+import { isDeck, mergeDeckSegments, splitSlides } from './htmlDeck';
 
 describe('isDeck', () => {
   it('detects a slide section', () => {
@@ -44,3 +45,60 @@ describe('splitSlides', () => {
     expect(splitSlides('<div>nope</div>')).toEqual([]);
   });
 });
+
+describe('mergeDeckSegments', () => {
+  const slide = (n: number) => `<section class="slide">S${n}</section>`;
+  const deckSeg = (code: string, closed = true) =>
+    ({ type: 'diagram', code, lang: 'html', closed }) as DiagramSegment;
+  const textSeg = (text: string) => ({ type: 'text', text }) as DiagramSegment;
+
+  it('collapses one-fence-per-slide answers into a single deck', () => {
+    // Observed live: "create a presentation" arrived as eight ```html fences
+    // separated by --- lines, rendering as eight "Slide 1 / 1" cards.
+    const merged = mergeDeckSegments([
+      deckSeg(slide(1)),
+      textSeg('\n---\n'),
+      deckSeg(slide(2)),
+      textSeg('\n\n'),
+      deckSeg(slide(3)),
+    ]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].type).toBe('diagram');
+    const code = (merged[0] as { code: string }).code;
+    expect(splitSlides(code)).toHaveLength(3);
+  });
+
+  it('keeps decks apart when real prose sits between them', () => {
+    const merged = mergeDeckSegments([
+      deckSeg(slide(1)),
+      textSeg('Here is a second, unrelated deck:'),
+      deckSeg(slide(2)),
+    ]);
+    expect(merged).toHaveLength(3);
+  });
+
+  it('does not merge a non-deck diagram into a deck', () => {
+    const merged = mergeDeckSegments([
+      deckSeg(slide(1)),
+      textSeg('---'),
+      deckSeg('<svg viewBox="0 0 10 10"></svg>'),
+    ]);
+    expect(merged).toHaveLength(3); // separator text survives when no deck follows
+  });
+
+  it('a merged deck still streams while its last fence is unclosed', () => {
+    const merged = mergeDeckSegments([
+      deckSeg(slide(1)),
+      textSeg('---'),
+      deckSeg('<section class="slide">building…', false),
+    ]);
+    expect(merged).toHaveLength(1);
+    expect((merged[0] as { closed: boolean }).closed).toBe(false);
+  });
+
+  it('leaves a single well-formed deck untouched', () => {
+    const seg = deckSeg(slide(1) + slide(2));
+    expect(mergeDeckSegments([textSeg('intro'), seg])).toEqual([textSeg('intro'), seg]);
+  });
+});
+

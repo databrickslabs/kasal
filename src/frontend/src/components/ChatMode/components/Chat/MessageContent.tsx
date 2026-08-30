@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { containsMarkdown } from '../../utils/markdown';
 import { hasDiagram, splitDiagramSegments } from '../../utils/mdSandboxDiagram';
-import { isDeck } from '../../utils/htmlDeck';
+import { isDeck, mergeDeckSegments } from '../../utils/htmlDeck';
 import HtmlDiagramBlock from './HtmlDiagramBlock';
 import HtmlDeckBlock from './HtmlDeckBlock';
 
@@ -41,7 +41,9 @@ const MessageContent: React.FC<MessageContentProps> = React.memo(
   // A ```html / ```svg block is rendered as a live diagram (sandboxed iframe)
   // instead of a code block, and can be copied as a Databricks %md-sandbox cell.
   // An unclosed fence (streaming) renders a live "building" preview.
-  const segments = splitDiagramSegments(content);
+  // Consecutive deck fences separated only by whitespace/`---` are ONE deck
+  // — models intermittently emit a fence per slide (see mergeDeckSegments).
+  const segments = mergeDeckSegments(splitDiagramSegments(content));
   if (hasDiagram(segments)) {
     return (
       <>
