@@ -12,6 +12,15 @@ vi.mock('../../store/sessionStore', () => ({
   useSessionStore: { getState: () => ({ updateMessage }) },
 }));
 const postCrewFeedback = vi.fn(async () => ({}));
+const createScheduleFromExecution = vi.fn(async () => ({ name: 'T schedule' }));
+vi.mock('../../../../api/execution/ScheduleService', () => ({
+  ScheduleService: {
+    createScheduleFromExecution: (...a: unknown[]) => createScheduleFromExecution(...a),
+    listSchedules: vi.fn(async () => []),
+    toggleSchedule: vi.fn(async () => ({})),
+    deleteSchedule: vi.fn(async () => undefined),
+  },
+}));
 vi.mock('../../api/crews', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../../api/crews')>();
   return { ...mod, postCrewFeedback: (...a: unknown[]) => postCrewFeedback(...a) };
@@ -346,3 +355,41 @@ describe('CrewActionsBar', () => {
     expect(onSaveAnswerToCatalog).not.toHaveBeenCalled();
   });
 });
+
+
+describe('CrewActionsBar — run this on a schedule', () => {
+  it('offers Schedule only when the message anchors a run', () => {
+    render(<CrewActionsBar data={DATA} messageId="m1" />);
+    expect(screen.queryByText('Schedule')).toBeNull();
+  });
+
+  it('hides Schedule from chat-only users — they cannot see the runs it creates', async () => {
+    const { usePermissionStore } = await import('../../../../store/permissions');
+    usePermissionStore.setState({ allowAgentBuilder: false, allowFlowBuilder: false });
+    render(<CrewActionsBar data={DATA} messageId="m1" executionId="job-uuid-1" />);
+    expect(screen.queryByText('Schedule')).toBeNull();
+    usePermissionStore.setState({ allowAgentBuilder: true, allowFlowBuilder: true });
+  });
+
+  it('creates a schedule from the run and shows Scheduled', async () => {
+    createScheduleFromExecution.mockClear();
+    render(
+      <CrewActionsBar data={DATA} messageId="m1" executionId="job-uuid-1" />,
+    );
+    fireEvent.click(screen.getByText('Schedule'));
+    // The dialog opens with a prefilled name and a default cadence.
+    const dialog = screen.getByRole('dialog', { name: 'Run this on a schedule' });
+    expect(dialog).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Create schedule'));
+    await waitFor(() =>
+      expect(createScheduleFromExecution).toHaveBeenCalledWith(
+        expect.objectContaining({
+          execution_id: 'job-uuid-1',
+          cron_expression: '0 9 * * *',
+        }),
+      ),
+    );
+    await waitFor(() => expect(screen.getByText('Scheduled')).toBeInTheDocument());
+  });
+});
+

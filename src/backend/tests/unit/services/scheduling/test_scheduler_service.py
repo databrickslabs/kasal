@@ -637,3 +637,45 @@ class TestCreateScheduleFromExecution:
         ):
             with pytest.raises(BadRequestError):
                 await service.create_schedule_from_execution(schedule_data)
+
+
+class TestScheduleFromChatExecution:
+    """A chat turn runs as execution_type 'agent' with crew-shaped inputs; the
+    schedule trigger dispatches crew or flow — so it is stored as a crew."""
+
+    @pytest.mark.asyncio
+    async def test_agent_execution_is_scheduled_as_a_crew(self):
+        service = _make_service()
+        mock_execution = MagicMock()
+        mock_execution.execution_type = "agent"
+        mock_execution.inputs = {
+            "agents_yaml": {"agent1": {"role": "Assistant", "llm": "kat"}},
+            "tasks_yaml": {"task1": {"description": "Respond"}},
+            "inputs": {},
+        }
+        service.execution_service.get_execution_record = AsyncMock(
+            return_value=mock_execution
+        )
+        service.repository.create = AsyncMock(return_value=MagicMock())
+
+        schedule_data = MagicMock()
+        # Chat anchors messages by job id, so the id arrives as a UUID string.
+        schedule_data.execution_id = "2d0d43ed-fa8e-4381-bd47-048e459bacd9"
+        schedule_data.cron_expression = "0 9 * * *"
+        schedule_data.name = "Lebanon briefing"
+        schedule_data.is_active = True
+
+        with patch(
+            "src.services.scheduling.scheduler.calculate_next_run_from_last",
+            return_value=datetime.now(timezone.utc),
+        ):
+            with patch(
+                "src.schemas.schedule.ScheduleResponse.model_validate",
+                return_value=MagicMock(),
+            ):
+                await service.create_schedule_from_execution(schedule_data)
+
+        created = service.repository.create.call_args.args[0]
+        assert created["execution_type"] == "crew"
+        assert created["agents_yaml"] == mock_execution.inputs["agents_yaml"]
+        assert created["model"] == "kat"

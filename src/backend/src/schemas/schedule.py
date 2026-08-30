@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -78,7 +78,13 @@ class ScheduleCreateFromExecution(BaseModel):
 
     name: str = Field(..., description="Name of the scheduled job")
     cron_expression: str = Field(..., description="Cron expression for schedule timing")
-    execution_id: int = Field(..., description="ID of the execution to use as template")
+    execution_id: Union[int, str] = Field(
+        ...,
+        description=(
+            "The execution to use as template: its integer id, or its job id "
+            "(UUID) — chat anchors messages by job id, the runs table by row id."
+        ),
+    )
     is_active: bool = Field(default=True, description="Whether the schedule is active")
 
 

@@ -7,6 +7,7 @@ import { fetchEnabledTools, ToolInfo } from '../api/tools';
 import { fetchWorkspaces, Workspace } from '../api/workspaces';
 import { listSavedCrews, listSavedFlows, CatalogItem } from '../api/crews';
 import { PublicationService } from '../../../api/workflow/PublicationService';
+import { ScheduleService, Schedule } from '../../../api/execution/ScheduleService';
 
 const CONFIG_STORAGE_KEY = 'kasal-chat-config';
 const MODEL_STORAGE_KEY = 'kasal-chat-model';
@@ -95,10 +96,15 @@ interface AppState {
   // The rail's Catalog card expansion — in the store (not component state) so
   // the collapsed rail's catalog icon can open the sidebar WITH it expanded.
   catalogOpen: boolean;
+  /** The workspace's schedules, for the rail's Schedules section. */
+  schedules: Schedule[];
+  schedulesOpen: boolean;
 }
 
 interface AppActions {
   setCatalogOpen: (open: boolean) => void;
+  setSchedulesOpen: (open: boolean) => void;
+  loadSchedules: () => Promise<void>;
   init: () => void;
   loadModels: () => Promise<void>;
   loadTools: () => Promise<void>;
@@ -137,6 +143,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   sidebarOpen: false,
   settingsOpen: false,
   catalogOpen: false,
+  schedules: [],
+  schedulesOpen: false,
 
   // --- Actions ---
   init: () => {
@@ -255,5 +263,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setSettingsOpen: (open) => set({ settingsOpen: open }),
   setCatalogOpen: (open) => set({ catalogOpen: open }),
+  setSchedulesOpen: (open) => set({ schedulesOpen: open }),
+
+  loadSchedules: async () => {
+    // Best-effort like loadCatalog: a failed read leaves the section as it
+    // was rather than emptying it under the user.
+    try {
+      const schedules = await ScheduleService.listSchedules();
+      set({ schedules });
+    } catch {
+      /* endpoint unavailable — keep whatever is shown */
+    }
+  },
   toggleSettings: () => set((s) => ({ settingsOpen: !s.settingsOpen })),
 }));

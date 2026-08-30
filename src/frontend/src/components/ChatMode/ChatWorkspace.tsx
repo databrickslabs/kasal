@@ -13,6 +13,7 @@ import { startGenerationStream } from './utils/generationStreamManager';
 import { GenerationCompleteData } from './types/dispatcher';
 import ChatContainer from './components/Chat/ChatContainer';
 import CatalogLibrary from './components/CatalogLibrary';
+import ScheduleLibrary from './components/ScheduleLibrary';
 import CollapsedRail from './components/CollapsedRail';
 import PreviewPanel from './components/Preview/PreviewPanel';
 import PreviewSkeleton, { shouldShowPreviewSkeleton } from './components/Preview/PreviewSkeleton';
@@ -479,6 +480,9 @@ const ChatWorkspace: React.FC = () => {
             onLoadCrew={(name) => handleLoadFromLibrary('crew', name)}
             onLoadFlow={(name) => handleLoadFromLibrary('flow', name)}
           />
+
+          {/* Schedules — created from a run's clock action, managed here */}
+          <ScheduleLibrary />
 
           {/* Section label */}
           {sessions.length > 0 && (

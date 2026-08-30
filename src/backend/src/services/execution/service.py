@@ -513,7 +513,7 @@ class ExecutionService:
         return await ExecutionHistoryRepository(session).insert(run, commit=commit)
 
     async def get_execution_record(
-        self, execution_id: int, group_ids: Optional[List[str]] = None
+        self, execution_id: "int | str", group_ids: Optional[List[str]] = None
     ) -> Optional[Any]:
         """The raw ``ExecutionHistory`` row for one run, scoped to ``group_ids``.
 
@@ -528,7 +528,9 @@ class ExecutionService:
         group context exists; None is for local/non-multitenant use only.
 
         Args:
-            execution_id: integer primary key of the run
+            execution_id: integer primary key of the run, or its job id (UUID
+                string) — chat anchors messages by job id, so "schedule this
+                run" arrives with one; both resolve to the same row
             group_ids: groups the caller may see, or None to skip filtering
 
         Returns:
@@ -539,25 +541,14 @@ class ExecutionService:
         )
 
         session = self._require_session("get_execution_record")
-        return await ExecutionHistoryRepository(session).get_execution_by_id(
-            execution_id, group_ids=group_ids
+        repository = ExecutionHistoryRepository(session)
+        if isinstance(execution_id, str) and not execution_id.isdigit():
+            return await repository.get_execution_by_job_id(
+                execution_id, group_ids=group_ids
+            )
+        return await repository.get_execution_by_id(
+            int(execution_id), group_ids=group_ids
         )
-
-    async def get_execution(self, execution_id: int) -> Dict[str, Any]:
-        """
-        Get details of a specific execution
-
-        Args:
-            execution_id: ID of the execution to retrieve
-
-        Returns:
-            Dictionary with execution details
-        """
-        try:
-            return await self.kasal_execution_service.get_flow_execution(execution_id)
-        except Exception as e:
-            logger.error(f"Error getting execution: {str(e)}", exc_info=True)
-            raise KasalError(detail=f"Error getting execution: {str(e)}")
 
     async def get_executions_by_flow(self, flow_id: uuid.UUID) -> Dict[str, Any]:
         """

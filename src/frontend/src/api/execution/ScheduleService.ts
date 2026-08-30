@@ -68,9 +68,25 @@ export interface ScheduleCreate {
   model?: string;
 }
 
+export interface ScheduleCreateFromExecution {
+  name: string;
+  cron_expression: string;
+  /** Integer run id, or the run's job id (UUID) — chat anchors messages by job id. */
+  execution_id: number | string;
+  is_active?: boolean;
+}
+
 export class ScheduleService {
   static async createSchedule(schedule: ScheduleCreate): Promise<Schedule> {
     const response = await apiClient.post<Schedule>('/schedules', schedule);
+    return response.data;
+  }
+
+  /** Schedule a re-run of an existing execution: its stored config is the template. */
+  static async createScheduleFromExecution(
+    schedule: ScheduleCreateFromExecution,
+  ): Promise<Schedule> {
+    const response = await apiClient.post<Schedule>('/schedules/from-execution', schedule);
     return response.data;
   }
 

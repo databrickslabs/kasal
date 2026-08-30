@@ -141,6 +141,12 @@ class SchedulerService:
             execution_type = getattr(execution, "execution_type", None) or inputs.get(
                 "execution_type", "crew"
             )
+            # A chat turn runs as execution_type "agent", but its stored inputs
+            # are crew-shaped (agents_yaml + tasks_yaml for the one assistant),
+            # and the schedule trigger dispatches crew or flow. Schedule it as
+            # the crew it re-runs as.
+            if execution_type == "agent":
+                execution_type = "crew"
 
             # Try to get model from inputs first, then from agent configs
             model = inputs.get("model")
