@@ -528,7 +528,7 @@ const GroupManagement: React.FC = () => {
       {/* Main Content Area - Always show workspaces */}
         <Grid container spacing={3}>
           {/* Workspaces List */}
-          <Grid item xs={12} lg={8}>
+          <Grid item xs={12} lg={7}>
             <Card>
               <CardHeader
                 title={
@@ -645,17 +645,18 @@ const GroupManagement: React.FC = () => {
           </Grid>
 
           {/* Group Users Panel */}
-          <Grid item xs={12} lg={4}>
+          <Grid item xs={12} lg={5}>
             <Card sx={{ height: 'fit-content', position: 'sticky', top: 16 }}>
               <CardHeader
                 title={
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
                     <PersonIcon />
-                    <Typography variant="h6">
+                    <Typography variant="h6" noWrap sx={{ minWidth: 0 }}>
                       {selectedGroup ? `${selectedGroup.name} Members` : 'Select a Teamspace'}
                     </Typography>
                   </Box>
                 }
+                sx={{ '& .MuiCardHeader-content': { minWidth: 0 } }}
                 action={
                   selectedGroup && (
                     <Button

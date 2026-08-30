@@ -56,10 +56,9 @@ import SkillsConfiguration from './Skills/SkillsConfiguration';
 import EnginesConfiguration from './Engines';
 import { MemoryConfiguration } from '../MemoryBackend';
 import DatabaseManagement from './DatabaseManagement';
-import GroupManagement from './GroupManagement';
+import AccessManagement from './AccessManagement';
 import UIConfigurator from './UIConfigurator';
 import WorkspaceOverview from './WorkspaceOverview';
-import UserPermissionManagement from './UserPermissionManagement';
 // import DSPyConfiguration from './DSPyConfiguration'; // Temporarily disabled
 import { LANGUAGES } from '../../config/i18n/config';
 
@@ -188,8 +187,11 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
 
     // System admin-only sections (manage entire system)
     if (isSystemAdmin) {
+      // Access = the old Teamspaces + User Permissions screens combined: one
+      // People lens (global flags + per-teamspace role chips) and the
+      // space-lifecycle lens.
       baseNavItems.push({
-        label: t('configuration.workspaces.tab', { defaultValue: 'Teamspaces' }),
+        label: t('configuration.access.tab', { defaultValue: 'Access' }),
         icon: <WorkspacesIcon fontSize="small" />,
         index: currentIndex++,
         group: 'system'
@@ -226,12 +228,6 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
       baseNavItems.push({
         label: t('configuration.remoteAgents.global', { defaultValue: 'Remote Agents (Global)' }),
         icon: <HubIcon fontSize="small" />,
-        index: currentIndex++,
-        group: 'system'
-      });
-      baseNavItems.push({
-        label: t('configuration.userPermissions.tab', { defaultValue: 'User Permissions' }),
-        icon: <SettingsIcon fontSize="small" />,
         index: currentIndex++,
         group: 'system'
       });
@@ -693,11 +689,11 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
               );
             }
 
-            // Workspaces (System Admin only)
-            if (item.label === t('configuration.workspaces.tab', { defaultValue: 'Teamspaces' })) {
+            // Access (System Admin only) — People + Teamspaces lenses
+            if (item.label === t('configuration.access.tab', { defaultValue: 'Access' })) {
               return (
                 <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <GroupManagement />
+                  <AccessManagement />
                 </ContentPanel>
               );
             }
@@ -765,14 +761,6 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
             //   );
             // }
 
-            // User Permission Management (System Admin only)
-            if (item.label === t('configuration.userPermissions.tab', { defaultValue: 'User Permissions' })) {
-              return (
-                <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <UserPermissionManagement />
-                </ContentPanel>
-              );
-            }
 
             // Database Management (Admin only)
             if (item.label === t('configuration.database.tab', { defaultValue: 'Database Management' })) {
