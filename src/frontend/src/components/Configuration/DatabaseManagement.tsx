@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Autocomplete,
   Box,
   Button,
@@ -23,12 +26,8 @@ import {
   Card,
   CardContent,
   FormControl,
-  InputLabel,
   Select,
-  MenuItem,
   FormHelperText,
-  Tabs,
-  Tab,
   Divider,
   FormControlLabel,
   RadioGroup,
@@ -39,6 +38,7 @@ import {
   CloudUpload as UploadIcon,
   CloudDownload as DownloadIcon,
   Refresh as RefreshIcon,
+  ExpandMore as ExpandMoreIcon,
   Storage as StorageIcon,
   OpenInNew as OpenInNewIcon,
   CheckCircle as CheckIcon,
@@ -170,30 +170,10 @@ interface LakebaseInstanceOption {
   type?: 'provisioned' | 'autoscaling';
 }
 
-interface TabPanelProps {
-  children?: React.ReactNode;
-  index: number;
-  value: number;
-}
-
 interface FailedTableDetail {
   table: string;
   error_type: string;
   error_message: string;
-}
-
-function TabPanel(props: TabPanelProps) {
-  const { children, value, index, ...other } = props;
-  return (
-    <div
-      role="tabpanel"
-      hidden={value !== index}
-      id={`database-tabpanel-${index}`}
-      {...other}
-    >
-      {value === index && <Box sx={{ py: 2 }}>{children}</Box>}
-    </div>
-  );
 }
 
 const DatabaseManagement: React.FC = () => {
@@ -229,7 +209,6 @@ const DatabaseManagement: React.FC = () => {
   const [importDialog, setImportDialog] = useState(false);
   const [selectedBackup, setSelectedBackup] = useState<string | null>(null);
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
-  const [tabValue, setTabValue] = useState(0);
 
   // Migration logs dialog state
   const [migrationLogsDialog, setMigrationLogsDialog] = useState(false);
@@ -431,10 +410,6 @@ const DatabaseManagement: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
-    setTabValue(newValue);
   };
 
   const formatDate = (dateStr: string) => {
@@ -769,20 +744,26 @@ const DatabaseManagement: React.FC = () => {
 
   return (
     <Box>
-      <Typography variant="h6" sx={{ mb: 3 }}>
+      <Typography variant="h6" fontWeight={600} sx={{ mb: 0.5 }}>
         Database Management
       </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
+        Status and maintenance, Databricks import/export, and the Lakebase
+        backend — one page, each in its own collapsible section.
+      </Typography>
 
-      <Paper sx={{ mb: 3 }}>
-        <Tabs value={tabValue} onChange={handleTabChange}>
-          <Tab label="General" icon={<StorageIcon />} />
-          <Tab label="Databricks Import/Export" icon={<CloudIcon />} />
-          {showLakebase && <Tab label="Lakebase" icon={<DataObjectIcon />} />}
-        </Tabs>
-      </Paper>
-
-      {/* General Tab */}
-      <TabPanel value={tabValue} index={0}>
+      {/* General — open by default; the others fold away until needed. */}
+      <Accordion defaultExpanded disableGutters variant="outlined" sx={{ borderRadius: 2, '&:before': { display: 'none' } }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <StorageIcon fontSize="small" color="primary" />
+            <Typography fontWeight={600}>General</Typography>
+            <Typography variant="caption" color="text.secondary">
+              status, backups &amp; maintenance
+            </Typography>
+          </Box>
+        </AccordionSummary>
+        <AccordionDetails>
         {loading && !databaseInfo && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 4, justifyContent: 'center' }}>
             <CircularProgress size={24} />
@@ -1000,10 +981,20 @@ const DatabaseManagement: React.FC = () => {
             </Button>
           </DialogActions>
         </Dialog>
-      </TabPanel>
+        </AccordionDetails>
+      </Accordion>
 
-      {/* Databricks Import/Export Tab */}
-      <TabPanel value={tabValue} index={1}>
+      <Accordion disableGutters variant="outlined" sx={{ mt: 1.5, borderRadius: 2, '&:before': { display: 'none' } }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <CloudIcon fontSize="small" color="primary" />
+            <Typography fontWeight={600}>Databricks Import / Export</Typography>
+            <Typography variant="caption" color="text.secondary">
+              move the database to and from a volume
+            </Typography>
+          </Box>
+        </AccordionSummary>
+        <AccordionDetails>
         <Card>
           <CardContent>
             <Typography variant="h6" gutterBottom>
@@ -1114,10 +1105,21 @@ const DatabaseManagement: React.FC = () => {
             )}
           </CardContent>
         </Card>
-      </TabPanel>
+        </AccordionDetails>
+      </Accordion>
 
-      {/* Lakebase Tab - Memory Backend Style */}
-      {showLakebase && <TabPanel value={tabValue} index={2}>
+      {showLakebase && (
+      <Accordion disableGutters variant="outlined" sx={{ mt: 1.5, borderRadius: 2, '&:before': { display: 'none' } }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <DataObjectIcon fontSize="small" color="primary" />
+            <Typography fontWeight={600}>Lakebase</Typography>
+            <Typography variant="caption" color="text.secondary">
+              managed Postgres backend
+            </Typography>
+          </Box>
+        </AccordionSummary>
+        <AccordionDetails>
         <Paper sx={{ p: 3 }}>
           {!configLoaded ? (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 4, justifyContent: 'center' }}>
@@ -1635,7 +1637,9 @@ const DatabaseManagement: React.FC = () => {
           </>
           )}
         </Paper>
-      </TabPanel>}
+        </AccordionDetails>
+      </Accordion>
+      )}
 
       {/* Export Dialog */}
       <Dialog open={exportDialog} onClose={() => setExportDialog(false)} maxWidth="sm" fullWidth>

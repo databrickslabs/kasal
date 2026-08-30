@@ -1,18 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import {
   Box,
+  Chip,
   Typography,
   Switch,
   FormControlLabel,
   Paper,
-  Divider,
   Alert,
   Stack,
   CircularProgress,
   RadioGroup,
   Radio,
   FormControl,
-  FormLabel,
   Select,
   MenuItem,
   InputLabel,
@@ -121,224 +120,132 @@ const EnginesConfiguration: React.FC = () => {
 
   return (
     <Box>
-      <Box sx={{
-        display: 'flex',
-        alignItems: 'center',
-        mb: 3
-      }}>
-        <EngineeringIcon sx={{ mr: 1, color: 'primary.main', fontSize: '1.2rem' }} />
-        <Typography variant="h6" fontWeight="medium">
-          Engines Configuration
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+        <EngineeringIcon sx={{ color: 'primary.main', fontSize: '1.2rem' }} />
+        <Typography variant="h6" fontWeight={600}>
+          Engines
         </Typography>
       </Box>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
+        Execution engines and their features — disabled features hide their UI.
+      </Typography>
 
       {error && (
-        <Alert severity="error" sx={{ mb: 3 }}>
+        <Alert severity="error" sx={{ mb: 2 }}>
           {error}
         </Alert>
       )}
 
-      <Alert
-        severity="info"
-        sx={{ mb: 3 }}
-      >
-        Configure execution engines and their features. Disabling features will hide related UI components.
-      </Alert>
+      <Stack spacing={2}>
+        {/* The DEFAULT harness. A run may name its own beside the model; this
+            is what applies when it does not — scheduled and API runs. */}
+        <HarnessSelector />
 
-      {/* The DEFAULT harness. A run may name its own beside the model; this is
-          what applies when it does not — scheduled and API-triggered runs. */}
-      <HarnessSelector />
-
-      {/* Input Variables Collection Mode */}
-      <Paper elevation={1} sx={{ p: 3, mt: 3 }}>
-        <Stack spacing={2}>
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-            <SmartToyIcon sx={{ mr: 1, color: 'primary.main', fontSize: '1.2rem' }} />
-            <Typography variant="subtitle1" fontWeight="medium">
-              Input Variables Collection
+        {/* Input variables collection */}
+        <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+            <SmartToyIcon sx={{ color: 'primary.main', fontSize: '1.1rem' }} />
+            <Typography variant="subtitle1" fontWeight={600}>
+              Input Variables
             </Typography>
           </Box>
-
-          <FormControl component="fieldset">
-            <FormLabel component="legend">
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                Choose how to collect input variables when executing workflows with variables
-              </Typography>
-            </FormLabel>
-            <RadioGroup
-              value={inputMode}
-              onChange={(e) => setInputMode(e.target.value as 'dialog' | 'chat')}
-            >
-              <FormControlLabel
-                value="dialog"
-                control={<Radio color="primary" />}
-                label={
-                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <InputIcon sx={{ mr: 1, fontSize: '1rem' }} />
-                    <Box>
-                      <Typography variant="body2" fontWeight="medium">
-                        Dialog Mode
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        Show a popup dialog to collect all variable values before execution
-                      </Typography>
-                    </Box>
-                  </Box>
-                }
-              />
-              <FormControlLabel
-                value="chat"
-                control={<Radio color="primary" />}
-                label={
-                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <ChatIcon sx={{ mr: 1, fontSize: '1rem' }} />
-                    <Box>
-                      <Typography variant="body2" fontWeight="medium">
-                        Chat Mode
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        Collect variable values through conversational prompts in the chat (Coming Soon)
-                      </Typography>
-                    </Box>
-                  </Box>
-                }
-              />
-            </RadioGroup>
-          </FormControl>
-
-          <Alert severity="info" sx={{ mt: 2 }}>
-            {inputMode === 'dialog'
-              ? 'When variables are detected in your workflow, a dialog will appear to collect all values at once.'
-              : 'When variables are detected, the chat will guide you through providing values one by one.'}
-          </Alert>
-        </Stack>
-      </Paper>
-
-      {/* App Telemetry (OpenTelemetry) Section */}
-      <Paper sx={{ p: 2, mt: 3 }} elevation={1}>
-        <Box sx={{
-          display: 'flex',
-          alignItems: 'center',
-          mb: 2
-        }}>
-          <EngineeringIcon sx={{ mr: 1, color: 'primary.main', fontSize: '1.1rem' }} />
-          <Typography variant="subtitle1" fontWeight="medium">
-            App Telemetry (Preview)
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            How variable values are collected when a workflow declares them.
           </Typography>
-        </Box>
-
-        <Divider sx={{ mb: 2 }} />
-
-        <Stack spacing={2}>
-          <Box>
+          <RadioGroup
+            row
+            value={inputMode}
+            onChange={(e) => setInputMode(e.target.value as 'dialog' | 'chat')}
+          >
             <FormControlLabel
-              control={
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                  <Switch
-                    checked={otelEnabled}
-                    onChange={handleOtelToggle}
-                    color="primary"
-                    disabled={otelSyncing}
-                  />
-                  {otelSyncing && (
-                    <CircularProgress size={16} sx={{ ml: 1 }} />
-                  )}
-                </Box>
-              }
+              value="dialog"
+              control={<Radio size="small" color="primary" />}
               label={
-                <Box>
-                  <Typography variant="body2" fontWeight="medium">
-                    Enable Structured OTel Log Export
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Send structured OpenTelemetry logs to Unity Catalog tables for monitoring and analysis.
-                    Requires App Telemetry to be enabled in the Databricks App settings.
-                  </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                  <InputIcon sx={{ fontSize: '1rem' }} />
+                  <Typography variant="body2">Dialog — collect all values up front</Typography>
                 </Box>
               }
             />
-          </Box>
+            <FormControlLabel
+              value="chat"
+              disabled
+              control={<Radio size="small" color="primary" />}
+              label={
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                  <ChatIcon sx={{ fontSize: '1rem' }} />
+                  <Typography variant="body2">Conversational prompts</Typography>
+                </Box>
+              }
+            />
+          </RadioGroup>
+        </Paper>
 
+        {/* App telemetry (OTel) */}
+        <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography variant="subtitle1" fontWeight={600}>
+              App Telemetry
+            </Typography>
+            <Chip size="small" label="Preview" variant="outlined" sx={{ height: 20 }} />
+            {otelSyncing && <CircularProgress size={14} />}
+            <Box sx={{ flex: 1 }} />
+            <Switch
+              checked={otelEnabled}
+              onChange={handleOtelToggle}
+              color="primary"
+              disabled={otelSyncing}
+              inputProps={{ 'aria-label': 'Enable structured OTel log export' }}
+            />
+          </Box>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
+            Structured OTel logs to Unity Catalog (the <code>otel_logs</code> table) via the
+            destination in Databricks App settings — which must have App Telemetry enabled.
+          </Typography>
           {otelEnabled && (
-            <>
-              <FormControl size="small" sx={{ mt: 1, minWidth: 180 }}>
-                <InputLabel id="otel-log-level-label">Log Level</InputLabel>
-                <Select
-                  labelId="otel-log-level-label"
-                  value={otelLogLevel}
-                  label="Log Level"
-                  onChange={handleOtelLogLevelChange}
-                  disabled={otelSyncing}
-                >
-                  <MenuItem value="DEBUG">DEBUG</MenuItem>
-                  <MenuItem value="INFO">INFO</MenuItem>
-                  <MenuItem value="WARNING">WARNING</MenuItem>
-                  <MenuItem value="ERROR">ERROR</MenuItem>
-                </Select>
-                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
-                  Minimum severity of log records exported via OTel
-                </Typography>
-              </FormControl>
-              <Alert severity="info" sx={{ mt: 1 }}>
-                Structured log records (with severity, trace context, and resource attributes) will be
-                exported via OTLP to the telemetry destination configured in Databricks App settings.
-                Logs are written to the <code>otel_logs</code> table in the configured Unity Catalog schema.
-              </Alert>
-            </>
+            <FormControl size="small" sx={{ mt: 1.5, minWidth: 180 }}>
+              <InputLabel id="otel-log-level-label">Log level</InputLabel>
+              <Select
+                labelId="otel-log-level-label"
+                value={otelLogLevel}
+                label="Log level"
+                onChange={handleOtelLogLevelChange}
+                disabled={otelSyncing}
+              >
+                <MenuItem value="DEBUG">DEBUG</MenuItem>
+                <MenuItem value="INFO">INFO</MenuItem>
+                <MenuItem value="WARNING">WARNING</MenuItem>
+                <MenuItem value="ERROR">ERROR</MenuItem>
+              </Select>
+            </FormControl>
           )}
-        </Stack>
-      </Paper>
+        </Paper>
 
-      {/* Event Triggers Section */}
-      <Paper sx={{ p: 2, mt: 3 }} elevation={1}>
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-          <EngineeringIcon sx={{ mr: 1, color: 'primary.main', fontSize: '1.1rem' }} />
-          <Typography variant="subtitle1" fontWeight="medium">
-            Event Triggers (Preview)
-          </Typography>
-        </Box>
-
-        <Divider sx={{ mb: 2 }} />
-
-        <Stack spacing={2}>
-          <Box>
-            <FormControlLabel
-              control={
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                  <Switch
-                    checked={eventTriggersEnabled}
-                    onChange={handleEventTriggersToggle}
-                    color="primary"
-                    disabled={eventTriggersSyncing}
-                  />
-                  {eventTriggersSyncing && (
-                    <CircularProgress size={16} sx={{ ml: 1 }} />
-                  )}
-                </Box>
-              }
-              label={
-                <Box>
-                  <Typography variant="body2" fontWeight="medium">
-                    Enable Event Triggers
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Let a crew/flow emit an event when it finishes and trigger
-                    another when that event fires. When on, the background consumer
-                    drains the queue; when off, nothing is dispatched.
-                  </Typography>
-                </Box>
-              }
+        {/* Event triggers */}
+        <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography variant="subtitle1" fontWeight={600}>
+              Event Triggers
+            </Typography>
+            <Chip size="small" label="Preview" variant="outlined" sx={{ height: 20 }} />
+            {eventTriggersSyncing && <CircularProgress size={14} />}
+            <Box sx={{ flex: 1 }} />
+            <Switch
+              checked={eventTriggersEnabled}
+              onChange={handleEventTriggersToggle}
+              color="primary"
+              disabled={eventTriggersSyncing}
+              inputProps={{ 'aria-label': 'Enable event triggers' }}
             />
           </Box>
-
-          {!eventTriggersEnabled && (
-            <Alert severity="info" sx={{ mt: 1 }}>
-              Event triggers are disabled. Fired and emitted events stay queued
-              (nothing runs) until you enable this.
-            </Alert>
-          )}
-        </Stack>
-      </Paper>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
+            A finished crew/flow can emit an event that triggers another.
+            {eventTriggersEnabled
+              ? ' The background consumer is draining the queue.'
+              : ' Currently off — fired events stay queued until enabled.'}
+          </Typography>
+        </Paper>
+      </Stack>
     </Box>
   );
 };
