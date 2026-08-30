@@ -1,5 +1,6 @@
 import React from 'react';
 import { useExecutionStore } from '../../store/executionStore';
+import { usePermissionStore } from '../../../../store/permissions';
 import { useAppStore } from '../../store/appStore';
 import { useUILayoutStore } from '../../../../store/uiLayout';
 import { useFlowConfigStore } from '../../../../store/flowConfig';
@@ -40,6 +41,12 @@ const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({ onPrefill }) => {
   // every other piece of state, so the chips and the composer's mode pill agree
   // about what the selected model can actually do.
 
+  // Chat-only users (operators) get no builder bridge — the canvases they
+  // cannot enter must not be advertised.
+  const allowAgentBuilder = usePermissionStore((s) => s.allowAgentBuilder);
+  const allowFlowBuilder = usePermissionStore((s) => s.allowFlowBuilder);
+  const canUseBuilders = allowAgentBuilder || allowFlowBuilder;
+
   return (
     <div className="w-full mt-4" data-testid="chat-empty-state">
       {/* Builder bridge — Agent/Flow Builder are otherwise hidden behind the
@@ -47,8 +54,10 @@ const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({ onPrefill }) => {
           (crews vs sequenced multi-crew orchestration). Two tidy lines: the
           builder guidance, then a separate docs line, so neither reads run-on. */}
       <div className="text-center text-xs leading-relaxed space-y-1" style={{ color: 'var(--text-muted)' }}>
+        {canUseBuilders && (
         <div>
-          Want to design it yourself? Build a crew in the{' '}
+          Want to design it yourself?{' '}
+          {allowAgentBuilder && (<>Build a crew in the{' '}
           <button
             type="button"
             onClick={() => setAppMode('crew')}
@@ -58,9 +67,10 @@ const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({ onPrefill }) => {
           >
             Agent Builder
           </button>
-          {kasalFlowEnabled && (
+          </>)}
+          {kasalFlowEnabled && allowFlowBuilder && (
             <>
-              {' '}or sequence crews into a workflow in the{' '}
+              {allowAgentBuilder ? ' or sequence' : 'Sequence'} crews into a workflow in the{' '}
               <button
                 type="button"
                 onClick={() => setAppMode('flow')}
@@ -74,6 +84,7 @@ const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({ onPrefill }) => {
           )}
           .
         </div>
+        )}
         <div>
           New to Kasal?{' '}
           <a

@@ -16,6 +16,10 @@ export interface Group {
 
 export interface GroupWithRole extends Group {
   user_role?: 'ADMIN' | 'EDITOR' | 'OPERATOR';
+  /** EFFECTIVE per-surface capabilities for the current user (override or
+   *  role-derived; operator defaults to false). */
+  allow_agent_builder?: boolean;
+  allow_flow_builder?: boolean;
 }
 
 export interface GroupUser {
@@ -25,6 +29,9 @@ export interface GroupUser {
   email: string;
   role: 'admin' | 'editor' | 'operator';
   status: 'active' | 'inactive' | 'suspended';
+  /** Overrides; null/undefined = derived from the role. */
+  allow_agent_builder?: boolean | null;
+  allow_flow_builder?: boolean | null;
   joined_at: string;
   auto_created: boolean;
   created_at: string;
@@ -50,6 +57,8 @@ export interface AssignUserRequest {
 export interface UpdateGroupUserRequest {
   role?: 'admin' | 'editor' | 'operator';
   status?: 'active' | 'inactive' | 'suspended';
+  allow_agent_builder?: boolean;
+  allow_flow_builder?: boolean;
 }
 
 export class GroupService {

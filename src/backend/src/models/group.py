@@ -128,6 +128,14 @@ class GroupUser(Base):
     role: Mapped[str] = mapped_column(String(50), nullable=False, default="USER")
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="ACTIVE")
 
+    # Per-surface capability OVERRIDES. NULL means "derived from the role"
+    # (operator -> no builders, editor/admin -> builders); an explicit True or
+    # False set from the Access screen wins over the role. Two named booleans
+    # rather than a JSON blob: the set of gated surfaces is tiny and stable,
+    # and named columns keep the override auditable in plain SQL.
+    allow_agent_builder: Mapped[bool | None] = mapped_column(nullable=True)
+    allow_flow_builder: Mapped[bool | None] = mapped_column(nullable=True)
+
     # Membership tracking
     joined_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.now(timezone.utc)

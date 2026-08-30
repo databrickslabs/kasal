@@ -3,6 +3,7 @@ import { GenerationCompleteData } from '../../types/dispatcher';
 import { buildCrewGraph, deriveCrewName, normalizeGeneration, CrewNameConflictError } from '../../api/crews';
 import { useUILayoutStore } from '../../../../store/uiLayout';
 import { useExecutionStore } from '../../store/executionStore';
+import { usePermissionStore } from '../../../../store/permissions';
 
 /**
  * Two actions that load a generated/saved crew straight onto a builder canvas:
@@ -38,9 +39,18 @@ const OpenOnCanvasButtons: React.FC<OpenOnCanvasButtonsProps> = ({
   ensureSaved,
   disabled,
 }) => {
+  // Capability-gated per surface: no Agent Builder capability hides the crew
+  // button, no Flow Builder capability hides the flow button.
+  const allowAgentBuilder = usePermissionStore((s) => s.allowAgentBuilder);
+  const allowFlowBuilder = usePermissionStore((s) => s.allowFlowBuilder);
+  const canUseBuilders = allowAgentBuilder || allowFlowBuilder;
   const setAppMode = useUILayoutStore((s) => s.setAppMode);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  if (!canUseBuilders) {
+    return null;
+  }
 
   const handleOpenAgentBuilder = () => {
     setError(null);
@@ -120,6 +130,7 @@ const OpenOnCanvasButtons: React.FC<OpenOnCanvasButtonsProps> = ({
 
   return (
     <>
+      {allowAgentBuilder && (
       <button
         type="button"
         onClick={handleOpenAgentBuilder}
@@ -137,7 +148,9 @@ const OpenOnCanvasButtons: React.FC<OpenOnCanvasButtonsProps> = ({
         </svg>
         Open in Agent Builder
       </button>
+      )}
 
+      {allowFlowBuilder && (
       <button
         type="button"
         onClick={handleOpenFlowBuilder}
@@ -154,6 +167,7 @@ const OpenOnCanvasButtons: React.FC<OpenOnCanvasButtonsProps> = ({
         </svg>
         Open in Flow Builder
       </button>
+      )}
 
       {error && (
         <span className="text-[11px]" style={{ color: '#ef4444' }}>{error}</span>

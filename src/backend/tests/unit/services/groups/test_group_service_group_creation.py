@@ -238,6 +238,8 @@ async def test_list_group_users_email_fallback(monkeypatch):
                     status=GUStatus.ACTIVE,
                     joined_at=datetime.utcnow(),
                     auto_created=True,
+                    allow_agent_builder=None,
+                    allow_flow_builder=None,
                     created_at=datetime.utcnow(),
                     updated_at=datetime.utcnow(),
                     group=SimpleNamespace(status=GStatus.ACTIVE),

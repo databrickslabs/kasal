@@ -15,6 +15,7 @@ import {
   ChatBubbleOutline as ChatIcon,
   Check as CheckIcon,
 } from '@mui/icons-material';
+import { usePermissionStore } from '../../store/permissions';
 import { useUILayoutStore, AppMode } from '../../store/uiLayout';
 import { useFlowConfigStore } from '../../store/flowConfig';
 import { useTabManagerStore } from '../../store/tabManager';
@@ -74,6 +75,18 @@ const ModeSwitcher: React.FC = () => {
     (opt) => opt.mode !== 'flow' || kasalFlowEnabled,
   );
 
+  // Capability-gated per surface (Access screen / role default) — a user
+  // without a builder doesn't see its entry, and a one-entry menu is no
+  // menu, so the switcher hides itself entirely.
+  const allowAgent = usePermissionStore((st) => st.allowAgentBuilder);
+  const allowFlow = usePermissionStore((st) => st.allowFlowBuilder);
+  const visibleOptions = options.filter(
+    (o) =>
+      o.mode === 'chat' ||
+      (o.mode === 'crew' && allowAgent) ||
+      (o.mode === 'flow' && allowFlow),
+  );
+
   const activeOption = options.find((o) => o.mode === appMode) || options[0];
   // Chat follows the Kasal accent; the builder canvases keep MUI primary.
   const isChat = appMode === 'chat';
@@ -98,6 +111,10 @@ const ModeSwitcher: React.FC = () => {
     setAppMode(mode);
     handleClose();
   };
+
+  if (visibleOptions.length < 2) {
+    return null;
+  }
 
   return (
     <>
@@ -156,7 +173,7 @@ const ModeSwitcher: React.FC = () => {
             Switch Mode
           </Typography>
         </Box>
-        {options.map((option) => {
+        {visibleOptions.map((option) => {
           const isSelected = option.mode === appMode;
           return (
             <MenuItem

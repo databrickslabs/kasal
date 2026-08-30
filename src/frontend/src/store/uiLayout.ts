@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { UILayoutState } from '../utils/CanvasLayoutManager';
+import { usePermissionStore } from './permissions';
 
 /**
  * Top-level workspace mode for the whole app, switched via the grid button in
@@ -87,6 +88,17 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
 
   // Actions
   setAppMode: (mode: AppMode) => {
+    // The ONE funnel every mode entrance calls (ModeSwitcher, the empty-state
+    // bridge links, OpenOnCanvasButtons, FlowBackLink). Guarding here means a
+    // chat-only user (operator) cannot reach a builder canvas through ANY
+    // entrance, current or future — the visible affordances are additionally
+    // hidden at their sites, but this is the enforcement.
+    if (mode === 'crew' && !usePermissionStore.getState().canUseAgentBuilder()) {
+      return;
+    }
+    if (mode === 'flow' && !usePermissionStore.getState().canUseFlowBuilder()) {
+      return;
+    }
     // Keep the legacy areFlowsVisible flag in sync: the flow canvas and several
     // layout effects still key off it. Flow mode shows the flow canvas; crew and
     // chat modes hide it.

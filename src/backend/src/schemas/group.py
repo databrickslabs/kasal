@@ -86,6 +86,16 @@ class GroupWithRoleResponse(GroupResponse):
     user_role: Optional[GroupUserRole] = Field(
         None, description="Current user's role in this group"
     )
+    # EFFECTIVE surface capabilities for the current user in this group —
+    # membership override when set, otherwise derived from the role
+    # (operator -> False, editor/admin -> True). The frontend permission
+    # store gates the Agent/Flow Builder surfaces on these.
+    allow_agent_builder: Optional[bool] = Field(
+        None, description="Whether this user may use the Agent Builder here"
+    )
+    allow_flow_builder: Optional[bool] = Field(
+        None, description="Whether this user may use the Flow Builder here"
+    )
 
 
 class GroupUserBase(BaseModel):
@@ -129,6 +139,15 @@ class GroupUserUpdateRequest(BaseModel):
     status: Optional[GroupUserStatus] = Field(
         None, description="User status in the group"
     )
+    # Capability overrides. Omitted = untouched; explicit true/false = set.
+    # (Reverting to role-derived requires clearing the column — deliberately
+    # not expressible here yet; changing the role re-establishes intent.)
+    allow_agent_builder: Optional[bool] = Field(
+        None, description="Override: may use the Agent Builder in this group"
+    )
+    allow_flow_builder: Optional[bool] = Field(
+        None, description="Override: may use the Flow Builder in this group"
+    )
 
 
 class GroupUserResponse(GroupUserBase):
@@ -138,6 +157,12 @@ class GroupUserResponse(GroupUserBase):
     group_id: str = Field(..., description="Group identifier")
     user_id: str = Field(..., description="User identifier")
     email: str = Field(..., description="User email address")
+    allow_agent_builder: Optional[bool] = Field(
+        None, description="Override: may use the Agent Builder (None = from role)"
+    )
+    allow_flow_builder: Optional[bool] = Field(
+        None, description="Override: may use the Flow Builder (None = from role)"
+    )
     joined_at: datetime = Field(..., description="When user joined the group")
     auto_created: bool = Field(..., description="Whether association was auto-created")
     created_at: datetime = Field(..., description="Association creation timestamp")

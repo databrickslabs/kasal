@@ -33,6 +33,18 @@ const asModel = (key: string, supports_reasoning_effort: boolean) =>
     updated_at: '',
   }) as never;
 
+describe('ChatEmptyState — chat-only users', () => {
+  it('hides the builder bridge when no builder capability (docs line stays)', async () => {
+    const { usePermissionStore } = await import('../../../../store/permissions');
+    usePermissionStore.setState({ allowAgentBuilder: false, allowFlowBuilder: false });
+    render(<ChatEmptyState onPrefill={() => {}} />);
+    expect(screen.queryByText('Agent Builder')).toBeNull();
+    expect(screen.queryByText('Flow Builder')).toBeNull();
+    expect(screen.getByText('Check the docs')).toBeInTheDocument();
+    usePermissionStore.setState({ allowAgentBuilder: true, allowFlowBuilder: true });
+  });
+});
+
 describe('ChatEmptyState', () => {
         it('switches to Agent Builder from the builder bridge', () => {
     render(<ChatEmptyState onPrefill={vi.fn()} />);

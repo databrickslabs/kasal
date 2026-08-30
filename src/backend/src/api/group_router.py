@@ -109,13 +109,17 @@ async def list_my_groups(
     """
     # Use injected service
 
-    # Get user's groups with their roles
-    groups_with_roles = await service.get_user_groups_with_roles(current_user.id)
+    # Full membership rows: role plus the per-surface capability overrides.
+    memberships = await service.get_user_memberships(current_user.id)
 
-    # Convert to response objects with user counts and roles
+    # Convert to response objects with user counts, roles and EFFECTIVE
+    # capabilities (override wins; otherwise derived from the role —
+    # operator is chat-only by default).
     response_groups = []
-    for group, user_role in groups_with_roles:
-        # Get user count for this group
+    for membership in memberships:
+        group = membership.group
+        user_role = membership.role
+        role_default = str(user_role or "").lower() != "operator"
         user_count = await service.get_group_user_count(group.id)
 
         group_dict = {
@@ -129,6 +133,16 @@ async def list_my_groups(
             "updated_at": group.updated_at,
             "user_count": user_count,
             "user_role": user_role,
+            "allow_agent_builder": (
+                membership.allow_agent_builder
+                if membership.allow_agent_builder is not None
+                else role_default
+            ),
+            "allow_flow_builder": (
+                membership.allow_flow_builder
+                if membership.allow_flow_builder is not None
+                else role_default
+            ),
         }
         response_groups.append(GroupWithRoleResponse(**group_dict))
 
@@ -439,6 +453,8 @@ async def update_group_user(
         "created_at": group_user.created_at,
         "updated_at": group_user.updated_at,
         "email": email,
+        "allow_agent_builder": group_user.allow_agent_builder,
+        "allow_flow_builder": group_user.allow_flow_builder,
     }
 
     logger.info(f"Updated user {user_id} in group {group_id} by {admin_user.email}")
