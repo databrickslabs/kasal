@@ -292,18 +292,25 @@ class ProgressiveGenerationMixin:
                         plan_tasks = plan_tasks[-1:]
                     else:
                         plan_tasks = plan_tasks[:max_tasks]
-                if not plan_agents:
-                    await sse_manager.broadcast_to_job(
-                        generation_id,
-                        SSEEvent(
-                            data={
-                                "type": "generation_failed",
-                                "error": "Plan returned no agents",
-                            },
-                            event="generation_failed",
-                        ),
+                if not plan_agents or not plan_tasks:
+                    # An empty plan is the planner saying "nothing to build" —
+                    # the message was conversational ("hi there" has no action
+                    # verbs to become tasks). Failing here surfaced as
+                    # "Planning failed" on a greeting; answer instead, with the
+                    # same single-responder shape the chat fast path uses.
+                    logger.info(
+                        f"PROGRESSIVE [{generation_id}]: empty plan — "
+                        "degrading to a single responder"
                     )
-                    return
+                    plan_agents = [{"name": "Assistant"}]
+                    plan_tasks = [
+                        {
+                            "name": "Chat response",
+                            "assigned_agent": "Assistant",
+                            "context": [],
+                        }
+                    ]
+                    process_type = "sequential"
 
                 # Re-assign orphaned tasks to valid agents and clean stale context refs
                 valid_agent_names = {a.get("name") for a in plan_agents}
@@ -1208,10 +1215,15 @@ class ProgressiveGenerationMixin:
 
         plan = robust_json_parser(content)
 
-        if not isinstance(plan.get("agents"), list) or len(plan["agents"]) == 0:
+        # Malformed output (missing/typed-wrong lists) is still an error, but a
+        # VALID plan with zero agents is an answer — "there is nothing to
+        # build" (a greeting has no action verbs). The caller decides what an
+        # empty plan means; raising here turned every conversational message
+        # in research mode into "Planning failed".
+        if not isinstance(plan.get("agents"), list):
             raise BadRequestError("Plan returned no agents")
 
-        if not isinstance(plan.get("tasks"), list) or len(plan["tasks"]) == 0:
+        if not isinstance(plan.get("tasks"), list):
             raise BadRequestError("Plan returned no tasks")
 
         return plan

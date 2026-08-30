@@ -1703,10 +1703,12 @@ class TestProgressiveGeneration:
 
     @pytest.mark.asyncio
     async def test_generate_crew_plan_no_agents_raises(self):
-        """BadRequestError when plan has no agents."""
+        """Malformed agents (not a list) raise; an EMPTY list returns — the
+        caller decides what an empty plan means (it degrades to a single
+        responder instead of failing a greeting)."""
         request = Mock()
         request.prompt = "empty crew"
-        plan_dict = {"agents": [], "tasks": [{"name": "T"}]}
+        plan_dict = {"agents": "nope", "tasks": [{"name": "T"}]}
 
         with (
             patch("src.services.generation.crew.progressive.TemplateService") as ts,
@@ -1723,12 +1725,12 @@ class TestProgressiveGeneration:
 
     @pytest.mark.asyncio
     async def test_generate_crew_plan_no_tasks_raises(self):
-        """BadRequestError when plan has no tasks."""
+        """Malformed tasks (not a list) raise; empty lists return."""
         request = Mock()
         request.prompt = "no tasks crew"
         plan_dict = {
             "agents": [{"name": "A", "role": "R"}],
-            "tasks": [],
+            "tasks": "nope",
         }
 
         with (
@@ -2565,7 +2567,7 @@ class TestProgressiveGeneration:
 
     @pytest.mark.asyncio
     async def test_create_crew_progressive_empty_plan(self):
-        """Broadcasts generation_failed when plan has no agents."""
+        """An empty plan degrades to a single responder, never generation_failed."""
         request = self._make_progressive_request()
         gen_id = "gen-empty"
 
@@ -2578,13 +2580,12 @@ class TestProgressiveGeneration:
         with self._progressive_patches(plan=empty_plan) as m:
             await self.service.create_crew_progressive(request, None, gen_id)
 
+            # An empty plan is "nothing to build" — the run DEGRADES to a
+            # single responder (the chat fast-path shape) instead of failing
+            # the whole generation over a conversational message.
             calls = m["sse"].broadcast_to_job.call_args_list
             event_types = [c.args[1].data["type"] for c in calls]
-            assert "generation_failed" in event_types
-            fail_event = next(
-                c for c in calls if c.args[1].data["type"] == "generation_failed"
-            )
-            assert "no agents" in fail_event.args[1].data["error"].lower()
+            assert "generation_failed" not in event_types
 
     @pytest.mark.asyncio
     async def test_create_crew_progressive_agent_error_continues(self):
