@@ -45,8 +45,11 @@ packages = ["packaging/kasal"]
 "src/frontend_static" = "kasal/_app/frontend_static"
 
 # The sdist carries only what the wheel build needs — never node_modules or
-# the dev tree. Installing from sdist requires src/frontend_static to be
-# present (i.e. build from a checkout via src/package_pip.py).
+# the dev tree. frontend_static is a gitignored build artifact, and hatchling
+# honours .gitignore for plain includes — a bare include pattern silently
+# dropped it and `uv build` (wheel-from-sdist) then failed with "Forced
+# include not found". force-include bypasses the VCS ignore, which is also
+# why the wheel's own mapping works.
 [tool.hatch.build.targets.sdist]
 include = [
   "pyproject.toml",
@@ -55,6 +58,8 @@ include = [
   "packaging/kasal/**",
   "src/backend/pyproject.toml",
   "src/backend/src/**",
-  "src/frontend_static/**",
 ]
 exclude = ["**/__pycache__", "**/.DS_Store"]
+
+[tool.hatch.build.targets.sdist.force-include]
+"src/frontend_static" = "src/frontend_static"
