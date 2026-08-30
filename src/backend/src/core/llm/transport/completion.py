@@ -10,7 +10,6 @@ ImportError is raised on first use if it is missing.
 import logging
 import os
 import re
-import time
 from collections.abc import Callable
 from typing import Any, Literal
 
@@ -60,11 +59,11 @@ from .response_parsing import (
 )
 from .rpm import throttle
 from .tool_rounds import (
+    NO_ANSWER_MARKUP_ONLY,
     RepeatGuard,
+    answer_without_markup,
     run_chat_round,
     run_responses_round,
-    salvage_last_assistant_text,
-    strip_tool_markup,
     stub_repeated_chat_round,
     stub_repeated_responses_round,
 )
@@ -603,11 +602,12 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
             raise error from wrapup_failed
         # The wrap-up must not hand back un-executed tool-call markup either —
         # that is exactly the state a degenerate model is stuck in when the
-        # budget goes. Fall back to the last real assistant text.
-        cleaned = strip_tool_markup(text)
-        if cleaned != (text or "").strip():
-            text = cleaned or salvage_last_assistant_text(conversation)
-        if not (text and text.strip()):
+        # budget goes. The nested call() has already replaced markup-only text
+        # with NO_ANSWER_MARKUP_ONLY, which counts as "said nothing" here: with
+        # nothing real to fall back on, the budget error is raised as before,
+        # and its partial is what the degrade path keeps.
+        text = answer_without_markup(text, conversation, when_nothing_real="")
+        if not text.strip() or text == NO_ANSWER_MARKUP_ONLY:
             raise error
         logger.warning("budget spent (%s); answered from what was gathered", error)
         return text, usage, LLMCallType.LLM_CALL
@@ -678,11 +678,8 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
                 content, usage, self._reasoning_text[reasoning_mark:]
             )
             # A "final answer" that is un-executed tool-call markup is not an
-            # answer. Strip it; if nothing is left, the last real assistant
-            # text (the sentence before the loop degenerated) beats XML soup.
-            cleaned = strip_tool_markup(answer)
-            if cleaned != (answer or "").strip():
-                answer = cleaned or salvage_last_assistant_text(conversation) or answer
+            # answer; see answer_without_markup for what stands in for it.
+            answer = answer_without_markup(answer, conversation)
             return answer, usage, call_type
         return self._answer_within_budget(
             rounds_exhausted(rounds, self.model, conversation), conversation, usage
@@ -1045,9 +1042,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
             answer = self._answer_or_recover(
                 text, usage, self._reasoning_text[reasoning_mark:]
             )
-            cleaned = strip_tool_markup(answer)
-            if cleaned != (answer or "").strip():
-                answer = cleaned or salvage_last_assistant_text(conversation) or answer
+            answer = answer_without_markup(answer, conversation)
             return answer, usage, call_type
         return self._answer_within_budget(
             rounds_exhausted(rounds, self.model, conversation), conversation, usage

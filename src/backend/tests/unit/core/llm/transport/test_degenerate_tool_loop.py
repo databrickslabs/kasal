@@ -9,9 +9,18 @@ then called ``browser_close`` twenty more times — every result
 transport as an answer).
 """
 
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+
+from src.core.llm.transport.completion import OpenAICompletion
+from src.core.llm.transport.exceptions import ExecutionBudgetExceededError
 from src.core.llm.transport.tool_rounds import (
+    NO_ANSWER_MARKUP_ONLY,
     REPEATED_RESULT,
     RepeatGuard,
+    answer_without_markup,
     calls_signature,
     salvage_last_assistant_text,
     strip_tool_markup,
@@ -67,7 +76,14 @@ class TestStubbedRound:
         tools = [m for m in conversation if m.get("role") == "tool"]
         assert len(tools) == 1
         assert tools[0]["content"] == REPEATED_RESULT
+
+    def test_stub_message_fits_both_loops_it_stops(self):
+        # The browser_close loop: the work is done, so answer. The plan loop:
+        # nothing has been done, so the model must be pointed at OTHER work,
+        # and told to say what it could not do rather than answer with nothing.
         assert "final answer" in REPEATED_RESULT
+        assert "DIFFERENT call" in REPEATED_RESULT
+        assert "could not do" in REPEATED_RESULT
 
 
 class TestMarkupNeverBecomesTheAnswer:
@@ -113,3 +129,192 @@ class TestMarkupNeverBecomesTheAnswer:
             == ""
         )
         assert salvage_last_assistant_text([]) == ""
+
+
+# The second observed leak. An agent whose only tool was ``todo`` (the task
+# named web search; the MCP search tool was deliberately not attached) wrote
+# its plan, then re-sent the identical write every round: nothing else to
+# call. The guard stubbed rounds 3 and 4, dropped the tools, and the model
+# wrote its fifth ``todo`` call as plain text. Every assistant turn had
+# ``content=None`` — the model put all its prose in the reasoning channel — so
+# there was nothing to salvage, and the ``or answer`` fallback returned the
+# markup. It was persisted as the task output and written to memory.
+TODO_MARKUP = (
+    "<tool_call>\n<function=todo>\n<parameter=todos>\n"
+    '[{"content": "Search for latest Lebanon news", "id": "1", '
+    '"status": "in_progress"}]\n</parameter>\n</function>\n</tool_call>'
+)
+
+
+class TestAnswerWithoutMarkup:
+    def test_clean_answer_is_returned_untouched(self):
+        assert answer_without_markup("  A fine answer.  ", []) == "  A fine answer.  "
+
+    def test_prose_mixed_with_markup_keeps_the_prose(self):
+        assert (
+            answer_without_markup("Here is the plan.\n" + TODO_MARKUP, [])
+            == "Here is the plan."
+        )
+
+    def test_markup_alone_salvages_earlier_assistant_text(self):
+        conversation = [
+            {"role": "assistant", "content": "Now I'll gather the headlines."},
+            {"role": "tool", "tool_call_id": "c1", "content": "Plan (0/1)"},
+        ]
+        assert (
+            answer_without_markup(TODO_MARKUP, conversation)
+            == "Now I'll gather the headlines."
+        )
+
+    def test_markup_alone_with_nothing_real_never_returns_the_markup(self):
+        conversation = [
+            {"role": "system", "content": "you are a researcher"},
+            {"role": "user", "content": "gather the news"},
+            {"role": "assistant", "content": None},  # prose went to reasoning
+            {"role": "tool", "tool_call_id": "c1", "content": "Plan (0/1)"},
+        ]
+        answer = answer_without_markup(TODO_MARKUP, conversation)
+        assert answer == NO_ANSWER_MARKUP_ONLY
+        assert "<tool_call>" not in answer
+
+    def test_the_stand_in_can_be_empty_for_callers_that_raise(self):
+        assert answer_without_markup(TODO_MARKUP, [], when_nothing_real="") == ""
+
+    def test_none_is_an_empty_answer(self):
+        assert answer_without_markup(None, []) == ""
+
+
+# ---------------------------------------------------------------------------
+# The whole loop, replayed against the transport with a fake client.
+# ---------------------------------------------------------------------------
+
+MODEL = "some-unregistered-selfhosted-model-v9"
+TODO_SCHEMA = [
+    {
+        "type": "function",
+        "function": {
+            "name": "todo",
+            "description": "Track your plan.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+]
+TODO_ARGS = '{"todos": [{"id": "1", "content": "Search", "status": "in_progress"}]}'
+
+
+class _Agent:
+    def __init__(self, max_iter: int = 25):
+        self.role = "researcher"
+        self.id = "agent-1"
+        self.max_context_window_size = 131072
+        self.respect_context_window = True
+        self.max_rpm = None
+        self.max_iter = max_iter
+        self.max_execution_time = None
+
+
+def _llm() -> OpenAICompletion:
+    llm = OpenAICompletion(model=MODEL, api_key="x", max_tokens=8192)
+    object.__setattr__(llm, "_client", MagicMock())
+    return llm
+
+
+def _todo_call(call_id: str):
+    """A round in which the model calls ``todo`` and says nothing."""
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                finish_reason="tool_calls",
+                message=SimpleNamespace(
+                    content=None,
+                    tool_calls=[
+                        SimpleNamespace(
+                            id=call_id,
+                            function=SimpleNamespace(name="todo", arguments=TODO_ARGS),
+                        )
+                    ],
+                ),
+            )
+        ],
+        usage=None,
+    )
+
+
+def _text(content: str):
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                finish_reason="stop",
+                message=SimpleNamespace(content=content, tool_calls=None),
+            )
+        ],
+        usage=None,
+    )
+
+
+def _messages():
+    return [
+        {"role": "system", "content": "You are a researcher. Keep a plan with todo."},
+        {"role": "user", "content": "Gather today's news about Lebanon."},
+    ]
+
+
+class TestThePlanOnlyLoopEndToEnd:
+    def test_markup_written_after_the_tools_were_dropped_is_not_the_answer(self):
+        llm = _llm()
+        executed = []
+
+        # A plain function, not a MagicMock: the transport reads
+        # ``result_as_answer`` off the callable, and a mock answers every
+        # attribute with something truthy.
+        def todo(**kwargs):
+            executed.append(kwargs)
+            return "Plan (0/1)"
+
+        create = llm.client.chat.completions.create
+        create.side_effect = [
+            _todo_call("c1"),
+            _todo_call("c2"),
+            _todo_call("c3"),  # repeat 2: stubbed, not executed
+            _todo_call("c4"),  # repeat 3: stubbed, tools dropped
+            _text(TODO_MARKUP),  # no tools left, so the call comes out as text
+        ]
+
+        answer = llm.call(
+            _messages(),
+            tools=TODO_SCHEMA,
+            available_functions={"todo": todo},
+            from_agent=_Agent(),
+        )
+
+        assert answer == NO_ANSWER_MARKUP_ONLY
+        assert "<tool_call>" not in answer
+        assert len(executed) == 2, "the guard executes a batch twice, never more"
+        assert create.call_count == 5
+        # The fifth request went out with no tools — the guard's last resort.
+        assert not create.call_args_list[-1].kwargs.get("tools")
+        # And the stub the model saw pointed it at other work / an honest answer.
+        sent = create.call_args_list[-1].kwargs["messages"]
+        stubs = [
+            m
+            for m in sent
+            if m.get("role") == "tool" and m["content"] == REPEATED_RESULT
+        ]
+        assert len(stubs) == 2
+
+    def test_the_budget_wrap_up_still_raises_when_nothing_real_was_said(self):
+        # Two rounds allowed, both spent on the plan write; the wrap-up call
+        # then answers in markup. No sentinel here: the budget error carries
+        # the partial and the degrade path decides — as before this change.
+        llm = _llm()
+        create = llm.client.chat.completions.create
+        create.side_effect = [_todo_call("c1"), _todo_call("c2"), _text(TODO_MARKUP)]
+
+        with pytest.raises(ExecutionBudgetExceededError):
+            llm.call(
+                _messages(),
+                tools=TODO_SCHEMA,
+                available_functions={"todo": lambda **kw: "Plan (0/1)"},
+                from_agent=_Agent(max_iter=2),
+            )
+        assert create.call_count == 3

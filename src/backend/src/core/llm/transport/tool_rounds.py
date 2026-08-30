@@ -26,6 +26,7 @@ just returned would poison the transcript for anything that later reuses it
 (the guardrail retry path, or a wrap-up call on the same list).
 """
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -192,14 +193,28 @@ def run_responses_round(
 #   1. RepeatGuard — identical call batches stop being executed after the
 #      second repeat; the model gets a stub result telling it to answer, and
 #      one more repeat after that drops the tools entirely.
-#   2. strip_tool_markup / salvage_last_assistant_text — un-executed tool-call
-#      syntax never leaves the transport as an answer.
+#   2. answer_without_markup (over strip_tool_markup and
+#      salvage_last_assistant_text) — un-executed tool-call syntax never leaves
+#      the transport as an answer, not even when there is nothing to put in its
+#      place.
 
 #: Told to the model instead of re-running a call it has already made with the
 #: same arguments. Phrased as a tool result, like SKIPPED_RESULT.
+#:
+#: It used to say only "STOP calling tools — write your complete final answer
+#: now", which is right for the browser_close loop it was written against (the
+#: work was done; the model just would not stop) and wrong for the other loop
+#: that trips this guard: an agent re-sending the same plan write because the
+#: step the plan calls for needs a tool it does not have. There it was an order
+#: to answer a research task with no research, and the model obeyed — with
+#: nothing — instead of saying what it could not do. The message now covers
+#: both: do different work if there is any, and otherwise answer honestly.
 REPEATED_RESULT = (
     "Not executed: you have already made this exact call and its result will "
-    "not change. STOP calling tools — write your complete final answer now."
+    "not change, so do not send it again. If the task still needs work, do "
+    "that work with a DIFFERENT call — one that fetches or changes something "
+    "new. If there is nothing left that you can do, write your complete final "
+    "answer now, and say plainly what you could not do and why."
 )
 
 
@@ -291,14 +306,12 @@ def stub_repeated_responses_round(
 #: Un-executed tool-call syntax, in the shapes self-hosted function-calling
 #: models emit as plain text when they degenerate: <tool_call>...</tool_call>
 #: blocks and stray <function=...>/<parameter=...> fragments.
-import re as _re
-
-_TOOL_MARKUP_RE = _re.compile(
+_TOOL_MARKUP_RE = re.compile(
     r"<tool_call>[\s\S]*?(?:</tool_call>|$)"
     r"|</?function[^>]*>"
     r"|</?parameter[^>]*>"
     r"|</?tool_call>",
-    _re.IGNORECASE,
+    re.IGNORECASE,
 )
 
 
@@ -326,3 +339,49 @@ def salvage_last_assistant_text(conversation: list[dict[str, Any]]) -> str:
             if cleaned:
                 return cleaned
     return ""
+
+
+#: What a turn yields when its final text was nothing but un-executed tool-call
+#: markup and no earlier turn said anything real either. Phrased for whoever
+#: READS the answer — the next task, the guardrail, the memory store — because
+#: the turn is over and the model will not see it. It names what happened,
+#: which the markup it replaces never did.
+NO_ANSWER_MARKUP_ONLY = (
+    "No answer was produced: the agent's final turn was tool-call markup that "
+    "could not be executed, and nothing it said earlier could stand in for an "
+    "answer."
+)
+
+
+def answer_without_markup(
+    answer: str | None,
+    conversation: list[dict[str, Any]],
+    *,
+    when_nothing_real: str = NO_ANSWER_MARKUP_ONLY,
+) -> str:
+    """The turn's answer with un-executed tool-call markup taken out.
+
+    In order: the answer untouched when it carried no markup; the prose that
+    survives when markup was mixed into text; the last real assistant text of
+    the turn when the final text was markup alone; and ``when_nothing_real``
+    when all of those are empty.
+
+    That last step is the reason this is one function and not three copies of
+    the same four lines. Each copy ended ``... or answer``, which handed back
+    the very markup the chain existed to remove whenever there was nothing
+    else — and there is nothing else precisely when a model has put every word
+    into the reasoning channel and every action into tool calls. Observed: an
+    agent whose only tool was ``todo`` re-sent its plan until the RepeatGuard
+    dropped the tools, wrote the next ``todo`` call as plain text, and that
+    ``<tool_call>`` block was persisted as the task output and written to
+    long-term memory, from which the next run recalled it.
+
+    The wrap-up call after a spent budget passes ``when_nothing_real=""`` and
+    treats ``NO_ANSWER_MARKUP_ONLY`` itself as nothing, so it can go on raising
+    the budget error, whose ``partial`` the degrade path keeps — a better
+    outcome there than a sentence.
+    """
+    cleaned = strip_tool_markup(answer)
+    if cleaned == (answer or "").strip():
+        return answer or ""
+    return cleaned or salvage_last_assistant_text(conversation) or when_nothing_real
