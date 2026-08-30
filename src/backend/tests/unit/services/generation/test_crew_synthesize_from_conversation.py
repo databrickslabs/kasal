@@ -2,8 +2,8 @@
 
 Covers ``CrewGenerationService.synthesize_crew_from_conversation`` and its
 ``_build_conversation_transcript`` helper: distilling a reusable, MULTI-STEP
-crew from the WHOLE chat conversation (gather info → build dashboard → …),
-weighted so every user step survives a long/bloated conversation.
+crew from the USER's own requests (gather info → build dashboard → …). The
+assistant's replies are deliberately never sent to the LLM.
 """
 
 from types import SimpleNamespace
@@ -62,7 +62,7 @@ class TestBuildConversationTranscript:
         assert out == ""
 
     @pytest.mark.asyncio
-    async def test_includes_user_and_assistant_turns_in_order(self):
+    async def test_includes_only_the_users_own_turns_in_order(self):
         svc = _build_service()
         msgs = [
             _msg("user", "gather oil data"),
@@ -72,8 +72,9 @@ class TestBuildConversationTranscript:
         with _patch_history(msgs):
             out = await svc._build_conversation_transcript("s1", _gc())
         assert "User: gather oil data" in out
-        assert "Assistant: here is the data" in out
         assert "User: now build a dashboard" in out
+        # The assistant's replies never reach the transcript.
+        assert "Assistant" not in out and "here is the data" not in out
         # Chronological order preserved (step 1 before step 2).
         assert out.index("gather oil data") < out.index("now build a dashboard")
 
@@ -92,9 +93,9 @@ class TestBuildConversationTranscript:
         assert out == "User: real ask"
 
     @pytest.mark.asyncio
-    async def test_keeps_all_user_steps_dropping_oldest_assistant_under_budget(self):
-        """A multi-step chat dominated (by char count) by huge assistant outputs
-        must still keep BOTH user steps — the crew has to cover every step."""
+    async def test_huge_assistant_outputs_never_reach_the_transcript(self):
+        """A 20KB deck or report is deliverable bytes, not workflow — and it may
+        carry third-party content. Only the user's steps go to the LLM."""
         svc = _build_service()
         big = "x" * 5000
         msgs = [
@@ -104,9 +105,20 @@ class TestBuildConversationTranscript:
             _msg("assistant", big),
         ]
         with _patch_history(msgs):
-            out = await svc._build_conversation_transcript("s1", _gc(), max_chars=2000)
+            out = await svc._build_conversation_transcript("s1", _gc())
         assert "User: step one gather" in out
         assert "User: step two dashboard" in out
+        assert "x" * 50 not in out
+        assert len(out) < 200
+
+    @pytest.mark.asyncio
+    async def test_a_very_long_user_turn_is_capped(self):
+        svc = _build_service()
+        with _patch_history([_msg("user", "y" * 5000)]):
+            out = await svc._build_conversation_transcript("s1", _gc())
+        assert out.startswith("User: " + "y" * 100)
+        assert out.endswith("…")
+        assert len(out) < 900
 
     @pytest.mark.asyncio
     async def test_returns_empty_when_no_usable_entries(self):
@@ -131,7 +143,7 @@ class TestSynthesizeCrewFromConversation:
     @pytest.mark.asyncio
     async def test_distills_multistep_crew_via_create_crew_complete(self):
         svc = _build_service()
-        transcript = "User: gather data\nAssistant: ok\nUser: build dashboard"
+        transcript = "User: gather data\nUser: build dashboard"
         created = {"agents": [{"id": "a1"}], "tasks": [{"id": "t1"}, {"id": "t2"}]}
         with (
             patch.object(
@@ -161,3 +173,6 @@ class TestSynthesizeCrewFromConversation:
         lowered = request.prompt.lower()
         assert "every distinct step" in lowered
         assert "single generic task" in lowered
+        # And the prompt announces what it carries: the user's requests alone.
+        assert "user requests:" in lowered
+        assert "deliberately not included" in lowered

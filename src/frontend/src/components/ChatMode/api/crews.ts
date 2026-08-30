@@ -335,8 +335,9 @@ export async function saveGeneratedCrew(
  * Distill a reusable crew (agent + task) from a chat session's conversation.
  *
  * ChatMode answer ("chat") turns run a generic single assistant, so saving that
- * to the catalog stores nothing specific. This asks the backend to read the
- * conversation for `sessionId` and synthesize an agent + task that capture what
+ * to the catalog stores nothing specific. This asks the backend to read YOUR
+ * requests for `sessionId` (only the user's turns — assistant replies are not
+ * sent to the LLM) and synthesize an agent + task that capture what
  * the user actually asked for. The created entities come back with DB ids in the
  * GenerationCompleteData shape, so the chat renders them as a proposal the user
  * confirms (bookmarks) via the normal `saveGeneratedCrew` path.

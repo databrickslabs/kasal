@@ -1,7 +1,7 @@
 """Crew synthesis from a chat transcript (``POST /crew/from-conversation``)."""
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from src.core.exceptions import BadRequestError, KasalError
 from src.schemas.crew import (
@@ -27,7 +27,8 @@ class ConversationGenerationMixin:
 
         ChatMode answer/"chat" turns run a GENERIC single assistant (see
         ``_run_chat_fast_path``), so bookmarking that to the catalog saves nothing
-        specific. This reads the ENTIRE conversation for ``session_id`` and asks
+        specific. This reads the USER's own requests for ``session_id`` — and
+        ONLY those: the assistant's replies never leave the workspace — and asks
         the LLM to design a crew that reproduces the full workflow the user went
         through — one task per distinct step (e.g. gather info → build dashboard),
         chained in order — then persists it via the normal crew-creation path.
@@ -55,23 +56,24 @@ class ConversationGenerationMixin:
             )
 
         prompt = (
-            "Below is the FULL conversation between a USER and an AI ASSISTANT across "
-            "a chat session. It may contain SEVERAL distinct requests in sequence "
+            "Below are the USER's requests from a chat session, in order. The "
+            "assistant's replies are deliberately NOT included — only what the "
+            "user asked for. There may be SEVERAL distinct requests in sequence "
             "(for example: first gathering information, then building a dashboard "
             "from it).\n\n"
-            "Design a reusable crew that reproduces this ENTIRE workflow on its own, "
-            "WITHOUT the back-and-forth. Cover EVERY distinct step the user went "
-            "through, in order: create a separate task for each step (and an agent "
+            "Design a reusable crew that fulfils this entire workflow on its own, "
+            "WITHOUT the back-and-forth. Cover EVERY distinct step the user asked "
+            "for, in order: create a separate task for each step (and an agent "
             "suited to it), and chain them so each later task builds on the output of "
-            "the earlier ones (use task context/dependencies). Do NOT collapse a "
-            "multi-step conversation into a single generic task — if the user did N "
+            "the earlier ones (use task context/dependencies). Do NOT collapse "
+            "multiple requests into a single generic task — if the user asked for N "
             "things, the crew should have tasks covering all N.\n\n"
             "Base each agent's role/goal/backstory and each task's description/"
-            "expected_output on what the USER actually asked for and the answers that "
-            "satisfied them — be specific to the domain and deliverables in this "
-            "conversation, NOT a generic 'helpful assistant'. Each task description "
-            "must state its objective clearly enough to run standalone.\n\n"
-            f"Conversation:\n{transcript}"
+            "expected_output on what the USER actually asked for — be specific to "
+            "the domain and deliverables in these requests, NOT a generic 'helpful "
+            "assistant'. Each task description must state its objective clearly "
+            "enough to run standalone.\n\n"
+            f"User requests:\n{transcript}"
         )
         request = CrewGenerationRequest(prompt=prompt, model=model)
         logger.info(
@@ -84,22 +86,20 @@ class ConversationGenerationMixin:
         self,
         session_id: str,
         group_context: Optional[GroupContext],
-        max_chars: int = 12000,
     ) -> str:
-        """The session's USER/ASSISTANT turns as a transcript, weighted so EVERY
-        user step survives.
+        """The session's USER turns — the user's own prompts, nothing else.
 
-        Group-scoped (tenant isolation) and best-effort: returns ``""`` when there
-        is no session, no group, or no usable content. Placeholder rows
-        ("Thinking...", "[ui-card]") are skipped and each turn is capped.
+        The assistant's replies are deliberately NOT included. They are mostly
+        deliverable bytes (a 20KB report or slide deck) that balloon the LLM
+        payload without describing the workflow, they can carry third-party
+        content the user never wrote, and the user's request alone is what a
+        distilled task must reproduce. Every user turn is kept (each capped at
+        {cap} chars) so a multi-step session distills into a multi-task crew;
+        the fetch itself is bounded (last 200 messages).
 
-        Why the weighting (vs. a flat "most recent ``max_chars``" window): a chat
-        that goes "gather info → build a dashboard" is dominated, by character
-        count, by the large ASSISTANT outputs (the dashboard/report). A flat tail
-        clamp would drop the early, short USER request ("gather info …") — exactly
-        the step the distilled crew must still cover. So ALL user turns are kept
-        (each capped), assistant turns are capped harder, and when over budget the
-        OLDEST assistant turns are dropped first; user turns are never dropped.
+        Group-scoped (tenant isolation) and best-effort: returns ``""`` when
+        there is no session, no group, or no usable content. Placeholder rows
+        ("Thinking...", "[ui-card]") are skipped.
         """
         group_ids = list(getattr(group_context, "group_ids", None) or [])
         primary = getattr(group_context, "primary_group_id", None)
@@ -117,37 +117,14 @@ class ConversationGenerationMixin:
 
         placeholders = {"thinking...", "[ui-card]", ""}
         user_cap = 800
-        assistant_cap = 500
-        # (role, "User: ..."/"Assistant: ..." line) in chronological order.
-        entries: List[Tuple[str, str]] = []
+        lines: List[str] = []
         for m in messages:
-            mtype = getattr(m, "message_type", "")
-            if mtype not in ("user", "assistant"):
+            if getattr(m, "message_type", "") != "user":
                 continue
             content = (getattr(m, "content", "") or "").strip()
             if content.lower() in placeholders or content.startswith("[ui-card]"):
                 continue
-            cap = user_cap if mtype == "user" else assistant_cap
-            if len(content) > cap:
-                content = content[:cap] + "…"
-            label = "User" if mtype == "user" else "Assistant"
-            entries.append((mtype, f"{label}: {content}"))
-
-        if not entries:
-            return ""
-
-        # Enforce the budget by dropping the OLDEST assistant turns first; never
-        # drop a user turn (each one is a step the crew must still cover).
-        def _total(items: List[Tuple[str, str]]) -> int:
-            return sum(len(line) + 1 for _, line in items)
-
-        selected = list(entries)
-        while selected and _total(selected) > max_chars:
-            drop_at = next(
-                (i for i, (role, _) in enumerate(selected) if role == "assistant"), None
-            )
-            if drop_at is None:
-                break  # only user turns remain — keep them even if slightly over
-            selected.pop(drop_at)
-
-        return "\n".join(line for _, line in selected)
+            if len(content) > user_cap:
+                content = content[:user_cap] + "…"
+            lines.append(f"User: {content}")
+        return "\n".join(lines)

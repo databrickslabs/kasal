@@ -168,7 +168,7 @@ const CrewActionsBar: React.FC<CrewActionsBarProps> = ({ data, messageId, onSave
             isChatMode
               ? answerSaved
                 ? 'Saved to catalog'
-                : 'Distill a reusable crew from this conversation and save it'
+                : 'Distill a reusable crew from your requests in this conversation and save it'
               : savedId
                 ? `Saved as “${savedName}”`
                 : 'Save this crew to the catalog'
