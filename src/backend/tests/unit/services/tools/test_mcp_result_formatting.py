@@ -111,6 +111,21 @@ def test_structured_content_preferred_as_json():
     assert json.loads(out) == {"rows": [{"a": 1}], "count": 1}
 
 
+def test_structured_content_keeps_non_ascii_literal():
+    """``json.dumps`` escapes non-ASCII by default: one Cyrillic letter becomes
+    the six characters ``\\u0412`` and about five tokens. A run whose searches
+    surfaced Russian pages paid 129k tokens for tool results worth 56k and
+    overflowed its window. The model reads UTF-8; send it the text."""
+    text = "Купить видеокарту — Zürich"
+    result = SimpleNamespace(
+        structuredContent={"result": text}, content=[], isError=False
+    )
+    out = _format_mcp_tool_result(result)
+    assert text in out
+    assert "\\u" not in out
+    assert json.loads(out) == {"result": text}
+
+
 def test_error_flag_is_surfaced():
     result = SimpleNamespace(content=[_text("boom")], isError=True)
     assert _format_mcp_tool_result(result) == "Tool error: boom"

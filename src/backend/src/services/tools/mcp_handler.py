@@ -122,7 +122,13 @@ def _format_mcp_tool_result(result) -> str:
     structured = getattr(result, "structuredContent", None)
     if structured is not None:
         try:
-            return _flag(json.dumps(structured, default=str))
+            # ensure_ascii=False: the default turns every non-ASCII character
+            # into ``\uXXXX`` — six characters and ~5 tokens for one letter. A
+            # run whose searches surfaced Russian pages paid 129k tokens for
+            # tool results worth 56k, overflowed a 131k window and died; and at
+            # 1.4 chars/token the escaped form also hid from the context trim,
+            # which assumes 3.4. The model reads UTF-8.
+            return _flag(json.dumps(structured, ensure_ascii=False, default=str))
         except Exception:
             return _flag(str(structured))
 

@@ -202,7 +202,7 @@ def _sized_llm(model="gpt-4o", window=28672, max_tokens=8192):
 def test_input_budget_leaves_room_for_the_output_request():
     """What the server will accept as a prompt is window - max_tokens, not
     0.85 x window."""
-    from src.core.llm.transport.completion import _WINDOW_SAFETY_TOKENS
+    from src.core.llm.transport.context_window import _WINDOW_SAFETY_TOKENS
 
     llm = _sized_llm(window=28672, max_tokens=8192)
 
@@ -247,7 +247,7 @@ def test_the_estimate_errs_high_rather_than_low():
 def test_the_clamp_keeps_a_reserve_so_equality_cannot_tip_over():
     """Both failures were one token over: the maths was right up to the chat
     template's own scaffolding, which nothing counts client-side."""
-    from src.core.llm.transport.completion import _WINDOW_SAFETY_TOKENS
+    from src.core.llm.transport.context_window import _WINDOW_SAFETY_TOKENS
 
     llm = _sized_llm(window=28672, max_tokens=8192)
     messages = [{"role": "user", "content": "R" * 60000}]

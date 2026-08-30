@@ -18,7 +18,6 @@ from pydantic import BaseModel, PrivateAttr
 
 from src.core.events.bus import event_bus
 from src.core.events.types import (
-    ContextCompactionEvent,
     LLMCallType,
     LLMReasoningChunkEvent,
     LLMStreamChunkEvent,
@@ -37,7 +36,8 @@ from .budget import (
     rounds_exhausted,
     wrapup_conversation,
 )
-from .constants import CONTEXT_WINDOW_USAGE_RATIO, LLM_CONTEXT_WINDOW_SIZES
+from .context_recovery import MAX_REJECTIONS_PER_ROUND
+from .context_window import ContextWindowBudget
 from .exceptions import (
     LLMContextLengthExceededError,
     is_context_length_exceeded,
@@ -71,39 +71,6 @@ from .tool_rounds import (
 
 logger = logging.getLogger(__name__)
 
-
-#: Characters per token assumed when estimating a prompt's size.
-#:
-#: chars/4 is the prose rule of thumb; tool-calling conversations are JSON and
-#: tokenize denser. Measured against vLLM's own count on two rejected Qwen
-#: requests, chars/4 was ~15% low. 3.4 covers that without being so pessimistic
-#: that a normal turn gets compacted for nothing.
-_CHARS_PER_TOKEN = 3.4
-
-#: Tokens held back from every budget calculation.
-#:
-#: Servers count a few tokens nobody models client-side: the chat template's
-#: role scaffolding and the generation prompt appended after the last message.
-#: Both observed failures overflowed by EXACTLY one token — the budget maths was
-#: right up to that scaffolding — so the reserve exists to make equality safe
-#: rather than to cover a large error.
-_WINDOW_SAFETY_TOKENS = 128
-
-#: How much of the input budget the trim will actually fill.
-#:
-#: Not a second derate of the window — a discount on our own ESTIMATE, which
-#: undercounts whenever the content is denser than ``_CHARS_PER_TOKEN`` assumes
-#: (German compounds, CJK, base64, minified JSON). The output clamp already
-#: reserves 15% for the same drift; this is that reservation applied to the
-#: other half of the same budget.
-#:
-#: 0.8 rather than the clamp's 0.85, and the difference is load-bearing. Work
-#: the failing run's numbers with a REGISTERED window: 131,072 - 8,192 output
-#: - 128 scaffolding = 122,752, and 122,752 estimated tokens is ~131,389 real
-#: ones at the 2.7 chars/token that content actually measured — still over the
-#: server's 131,072, so 0.85 would have kept the bug for any model whose window
-#: is known. 0.8 gives ~123,700, which fits.
-_TRIM_ESTIMATE_MARGIN = 0.8
 
 # OpenAI's GPT-5.6 line refuses `reasoning_effort` on /v1/chat/completions when
 # the request also carries function tools:
@@ -205,7 +172,7 @@ def valid_thinking_efforts(model_name: str | None) -> tuple[str, ...]:
     return allowed_efforts(model_name)
 
 
-class OpenAICompletion(BaseLLM):
+class OpenAICompletion(ContextWindowBudget, BaseLLM):
     llm_type: Literal["openai"] = "openai"
 
     model: str = "gpt-4o"
@@ -250,6 +217,12 @@ class OpenAICompletion(BaseLLM):
     #: LLMCallCompletedEvent so the trace records it once per call instead of
     #: once per delta. Reset per call, like _finish_reason.
     _reasoning_text: str = PrivateAttr(default="")
+    #: How far the server's token count has been observed to exceed the
+    #: chars-per-token estimate on THIS model's traffic — 1.0 until a rejection
+    #: teaches otherwise. Divides the trim budget so the proactive trim fires
+    #: where the server actually draws the line instead of every few rounds
+    #: later. Only ever grows; see ``_compact_after_rejection``.
+    _estimate_correction: float = PrivateAttr(default=1.0)
 
     def _add_reasoning(self, reasoning: str) -> None:
         """Accumulate a reasoning delta.
@@ -639,297 +612,6 @@ class OpenAICompletion(BaseLLM):
         logger.warning("budget spent (%s); answered from what was gathered", error)
         return text, usage, LLMCallType.LLM_CALL
 
-    def _estimate_tokens(
-        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None
-    ) -> int:
-        """Rough token count for a message list (chars/4), tools included.
-
-        Deliberately ONE estimator for both directions — the input trim below and
-        the output clamp in ``_prepare_completion_params`` are two halves of the
-        same budget (``prompt + max_tokens <= window``), and two different
-        estimates of "how big is this prompt" can disagree enough to trim what
-        did not need trimming while still overflowing the request.
-
-        Tool/function schemas count toward the server-side prompt, so they are
-        included when given.
-
-        Divides by ``_CHARS_PER_TOKEN`` rather than a flat 4: the classic chars/4
-        rule is calibrated on prose, and these conversations are mostly tool JSON
-        — braces, quotes, ids and numbers all tokenize denser than English. Two
-        observed vLLM rejections had the server counting 15% more tokens than
-        chars/4 predicted, both overflowing by exactly one token. The estimate is
-        a BUDGETING input, so it must err high; an over-estimate compacts a
-        little early, an under-estimate fails the request outright.
-        """
-        total = 0
-        for message in messages:
-            if not isinstance(message, dict):
-                continue
-            for key in ("content", "output"):
-                value = message.get(key)
-                if isinstance(value, str):
-                    total += len(value)
-                elif isinstance(value, list):
-                    # Structured content blocks (e.g. cache_control parts).
-                    total += len(str(value))
-            if message.get("tool_calls"):
-                total += len(str(message["tool_calls"]))
-        if tools:
-            total += len(str(tools))
-        return int(total / _CHARS_PER_TOKEN)
-
-    def _raw_context_window(self) -> int:
-        """The model's FULL advertised window, 0 when unknown.
-
-        ``get_context_window_size()`` returns the 0.85-derated figure used for
-        trimming decisions. The output clamp needs the real number: the limit it
-        protects against is the server's own ``prompt + max_tokens <=
-        max-model-len``, and derating twice would shrink outputs for no reason.
-        """
-        if not self._model_window_is_known():
-            return 0
-        return int(self.get_context_window_size() / CONTEXT_WINDOW_USAGE_RATIO)
-
-    def _clamp_output_budget(self, params: dict[str, Any]) -> None:
-        """Shrink the requested output so ``prompt + max_tokens`` fits the window.
-
-        Servers that enforce the sum (vLLM and other self-hosted OpenAI-compatible
-        backends, notably) return a 400 — "passed N input and requested M output"
-        — rather than truncating. ``max_tokens`` comes from the model config's
-        ``max_output_tokens`` and knows nothing about the ACTUAL prompt size, so a
-        large prompt plus a full output request overflows.
-
-        Only ever reduces, never grows, and no-ops when the window is unknown or
-        the request already fits — so a model with room to spare is untouched.
-
-        The margin is generous on purpose: a chars/4 estimate systematically
-        UNDERCOUNTS a real tokenizer (observed 1-5% on Qwen, varying with
-        content), and vLLM 400s on a one-token overrun. Tight margins (256, then
-        1024/5%) each came up short in practice; 15% with a 2048 floor covers the
-        drift. A small model cannot do both a huge prompt and a huge output — this
-        trades output headroom for never 400ing.
-        """
-        key = (
-            "max_completion_tokens"
-            if "max_completion_tokens" in params
-            else "max_tokens"
-        )
-        want = params.get(key)
-        window = self._raw_context_window()
-        if not want or not window:
-            return
-        input_tokens = self._estimate_tokens(
-            params.get("messages") or [], params.get("tools")
-        )
-        margin = max(2048, int(input_tokens * 0.15))
-        allowed = window - input_tokens - margin - _WINDOW_SAFETY_TOKENS
-        if allowed < want:
-            params[key] = max(256, allowed)
-            logger.warning(
-                "output clamp: model=%s input~=%d + %s=%d > window=%d; clamped to %d",
-                self.model,
-                input_tokens,
-                key,
-                want,
-                window,
-                params[key],
-            )
-
-    def _model_window_is_known(self) -> bool:
-        """Does LLM_CONTEXT_WINDOW_SIZES actually know this model?
-
-        Mirrors BaseLLM.get_context_window_size's exact-then-substring lookup.
-        Needed because that method returns DEFAULT_CONTEXT_WINDOW_SIZE for an
-        unknown model, indistinguishable from a model genuinely sized at 8192.
-        """
-        if self.model in LLM_CONTEXT_WINDOW_SIZES:
-            return True
-        return any(
-            self.model.startswith(key) or key in self.model
-            for key in LLM_CONTEXT_WINDOW_SIZES
-        )
-
-    def _effective_context_window(self, from_agent: Any = None) -> int:
-        """Window to trim against.
-
-        The model table stays authoritative when it KNOWS the model — an agent
-        may only claim a window the provider cannot honour, and trimming too
-        late is a hard request failure rather than a degraded one.
-
-        It is the UNKNOWN case that needs help: an unregistered model silently
-        gets DEFAULT_CONTEXT_WINDOW_SIZE (8192 → 6963 after the 0.85 derate).
-        For a self-hosted model that can be off by 4x, so the trim shreds tool
-        results the agent still needs. ``src.services.llm.manager`` registers every
-        configured model at import and covers the common path, but nothing
-        guarantees it ran — a direct engine embedding, or a model added to an
-        agent but not to MODEL_CONFIGS, both land here. When the table has no
-        opinion, the agent's explicitly configured size is the better estimate
-        than a hardcoded 8192.
-        """
-        if not self._model_window_is_known():
-            configured = (
-                getattr(from_agent, "max_context_window_size", None)
-                if from_agent
-                else None
-            )
-            if isinstance(configured, int) and configured > 0:
-                return int(configured * CONTEXT_WINDOW_USAGE_RATIO)
-        return self.get_context_window_size()
-
-    def _input_budget(self, from_agent: Any = None) -> int:
-        """How many prompt tokens may actually be sent. 0 when unknown.
-
-        The server enforces ``prompt + max_tokens <= window``, so the room for
-        the PROMPT is the window minus the output we are about to ask for — not
-        the 0.85-derated window the trim used to compare against.
-
-        The difference is what made a run unrecoverable. With a 28,672 window and
-        an 8,192 output request, compaction triggered at 24,371 (0.85 x window)
-        while the server would only serve 20,480. A conversation between those
-        two numbers was too big to serve and too small to compact: every attempt
-        was rejected, the agent retried at the same size, and the run looped
-        until it failed.
-
-        Falls back to the derated window when no output size is configured —
-        there is no reservation to subtract, and the derate remains a sane
-        default.
-        """
-        reserved_output = self.max_completion_tokens or self.max_tokens or 0
-        if not reserved_output:
-            return self._effective_context_window(from_agent)
-
-        raw = self._raw_context_window()
-        if not raw:
-            # Window unknown to the table: _effective_context_window may still
-            # have the agent's own figure, which is already derated.
-            return self._effective_context_window(from_agent)
-
-        budget = raw - reserved_output - _WINDOW_SAFETY_TOKENS
-        # A configured output larger than the window itself would leave nothing.
-        # Keep a floor so the trim degrades to "compact hard" instead of "delete
-        # every tool result and still be over".
-        return max(budget, int(raw * 0.25))
-
-    def _trim_budget(self, from_agent: Any = None) -> int:
-        """``_input_budget`` with room for the estimator being wrong.
-
-        The estimate is chars/``_CHARS_PER_TOKEN``, and it is a GUESS. The output
-        clamp has always allowed for that with a 15% margin; the trim compared
-        against the raw budget, so the two halves of one budget disagreed by
-        exactly the amount the estimator drifts.
-
-        What that cost, on a run whose whole point was tool output: a German /
-        Swiss job search tokenized nearer 2.7 chars per token than 3.4, so an
-        111,411-token ceiling meant roughly 140,000 real ones. The server's limit
-        was 131,072. Every round the trim decided the conversation fit; the
-        request was rejected; nothing was ever compacted, and the run died with
-        52 tool results (~900,000 characters) it was allowed to stub and never
-        did.
-
-        Erring low costs a little context the agent could have kept. Erring high
-        costs the entire run.
-        """
-        budget = self._input_budget(from_agent)
-        if not budget:
-            return 0
-        return int(budget * _TRIM_ESTIMATE_MARGIN)
-
-    def _trim_conversation_to_window(
-        self,
-        conversation: list[dict[str, Any]],
-        from_agent: Any = None,
-        tools: list[dict[str, Any]] | None = None,
-    ) -> None:
-        """Best-effort in-place trim so a tool-heavy turn cannot overflow the
-        context window (which previously failed the whole run): once the
-        estimated size exceeds what the server will actually accept as a prompt
-        (see ``_input_budget``), the OLDEST tool results are replaced with a stub
-        — never the system prompt, user messages, or tool_call structure (pairing
-        must survive). Honors Agent.respect_context_window (default on).
-
-        Compaction is lossy, so every trim that actually drops something emits a
-        ContextCompactionEvent — it used to happen with no trace at all, which
-        made the resulting re-query loop impossible to diagnose from the UI.
-
-        ``tools`` is not optional in spirit: the schemas count toward the
-        server-side prompt, and leaving them out is what let a 139,516-token
-        request reach a 131,072-token server while this method concluded, every
-        round, that the conversation fit. The estimator has always accepted them
-        — the output clamp passes them, this call site did not — which is the
-        exact disagreement ``_estimate_tokens`` documents as the thing to avoid.
-        """
-        if (
-            from_agent is not None
-            and getattr(from_agent, "respect_context_window", True) is False
-        ):
-            return
-        window = self._trim_budget(from_agent)
-        if not window:
-            return
-
-        def estimated_tokens() -> int:
-            return self._estimate_tokens(conversation, tools)
-
-        tokens_before = estimated_tokens()
-        if tokens_before <= window:
-            return
-        stub = "[earlier tool result trimmed to fit the context window]"
-        compacted = 0
-        for message in conversation:
-            is_tool_result = (
-                message.get("role") == "tool"
-                or message.get("type") == "function_call_output"
-            )
-            if not is_tool_result:
-                continue
-            key = "content" if message.get("role") == "tool" else "output"
-            if message.get(key) == stub:
-                continue
-            message[key] = stub
-            compacted += 1
-            if estimated_tokens() <= window:
-                break
-        if compacted:
-            self._emit_compaction(
-                tokens_before=tokens_before,
-                tokens_after=estimated_tokens(),
-                window=window,
-                messages_compacted=compacted,
-                from_agent=from_agent,
-            )
-
-    def _emit_compaction(
-        self,
-        *,
-        tokens_before: int,
-        tokens_after: int,
-        window: int,
-        messages_compacted: int,
-        from_agent: Any = None,
-    ) -> None:
-        """Announce a compaction on the event bus. Never raises — observability
-        must not be able to fail a run."""
-        try:
-            event_bus.emit(
-                self,
-                ContextCompactionEvent(
-                    model=self.model,
-                    from_agent=from_agent,
-                    strategy="tool_result_stub",
-                    tokens_before=tokens_before,
-                    tokens_after=tokens_after,
-                    window=window,
-                    messages_compacted=messages_compacted,
-                    reason=(
-                        f"conversation reached ~{tokens_before} tokens against a "
-                        f"{window}-token budget; {messages_compacted} of the oldest "
-                        f"tool result(s) replaced with a stub"
-                    ),
-                ),
-            )
-        except Exception:  # noqa: BLE001
-            pass
-
     def _call_completions_api(
         self,
         conversation: list[dict[str, Any]],
@@ -954,26 +636,9 @@ class OpenAICompletion(BaseLLM):
             # deliberation and return the model's own tool ARGUMENTS as the
             # answer. Verified against a two-round tool call.
             reasoning_mark = len(self._reasoning_text)
-            params = self._prepare_completion_params(conversation, tools)
-            if self.stream:
-                content, usage, function_calls = self._stream_chat_completion(params)
-            else:
-                response = self.client.chat.completions.create(**params)
-                usage = self._extract_chat_token_usage(response)
-                self._track_token_usage_internal(usage)
-                function_calls = self._extract_function_calls_from_response(response)
-                # Same block-list shape as the streaming path: without this the
-                # reasoning blocks became part of the returned "answer".
-                content, reasoning = split_message_content(response.choices[0].message)
-                if reasoning:
-                    self._add_reasoning(reasoning)
-                    event_bus.emit(
-                        self,
-                        LLMReasoningChunkEvent(model=self.model, reasoning=reasoning),
-                    )
-                self._finish_reason = getattr(
-                    response.choices[0], "finish_reason", None
-                )
+            content, usage, function_calls = self._request_chat_round(
+                conversation, tools, from_agent
+            )
             if function_calls and not available_functions and self.delegate_tool_calls:
                 # The caller runs its own tool loop; give it the decision.
                 # Falling through here returns "" — a tool-call response has no
@@ -1022,6 +687,51 @@ class OpenAICompletion(BaseLLM):
         return self._answer_within_budget(
             rounds_exhausted(rounds, self.model, conversation), conversation, usage
         )
+
+    def _request_chat_round(
+        self,
+        conversation: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        from_agent: Any = None,
+    ) -> tuple[str, dict[str, Any] | None, list[dict[str, Any]]]:
+        """One chat request → ``(content, usage, function_calls)``.
+
+        Retried behind forced compaction when the server rejects the prompt as
+        too long (``_compact_after_rejection``); any other error propagates on
+        the first attempt. The params are rebuilt per attempt because the output
+        clamp is sized from the messages that were just stubbed.
+        """
+        rejections = 0
+        while True:
+            params = self._prepare_completion_params(conversation, tools)
+            try:
+                if self.stream:
+                    return self._stream_chat_completion(params)
+                response = self.client.chat.completions.create(**params)
+            except Exception as e:
+                rejections += 1
+                if (
+                    rejections > MAX_REJECTIONS_PER_ROUND
+                    or not self._compact_after_rejection(
+                        conversation, from_agent, tools, e
+                    )
+                ):
+                    raise
+                continue
+            usage = self._extract_chat_token_usage(response)
+            self._track_token_usage_internal(usage)
+            function_calls = self._extract_function_calls_from_response(response)
+            # Same block-list shape as the streaming path: without this the
+            # reasoning blocks became part of the returned "answer".
+            content, reasoning = split_message_content(response.choices[0].message)
+            if reasoning:
+                self._add_reasoning(reasoning)
+                event_bus.emit(
+                    self,
+                    LLMReasoningChunkEvent(model=self.model, reasoning=reasoning),
+                )
+            self._finish_reason = getattr(response.choices[0], "finish_reason", None)
+            return content, usage, function_calls
 
     def _answer_or_recover(self, content: str, usage: Any, reasoning: str) -> str:
         """The answer, salvaged from the reasoning channel if it went there.
@@ -1300,9 +1010,7 @@ class OpenAICompletion(BaseLLM):
             # Where THIS round's thinking starts — same reason as the chat
             # path: _reasoning_text is reset per CALL but appended per ROUND.
             reasoning_mark = len(self._reasoning_text)
-            response = self.client.responses.create(
-                **self._prepare_responses_params(conversation, tools)
-            )
+            response = self._request_responses_round(conversation, tools, from_agent)
             usage = self._extract_responses_token_usage(response)
             self._track_token_usage_internal(usage)
             text, function_calls = self._handle_responses(response)
@@ -1344,6 +1052,29 @@ class OpenAICompletion(BaseLLM):
         return self._answer_within_budget(
             rounds_exhausted(rounds, self.model, conversation), conversation, usage
         )
+
+    def _request_responses_round(
+        self,
+        conversation: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        from_agent: Any = None,
+    ) -> Any:
+        """One Responses request — the chat path's twin, same recovery."""
+        rejections = 0
+        while True:
+            try:
+                return self.client.responses.create(
+                    **self._prepare_responses_params(conversation, tools)
+                )
+            except Exception as e:
+                rejections += 1
+                if (
+                    rejections > MAX_REJECTIONS_PER_ROUND
+                    or not self._compact_after_rejection(
+                        conversation, from_agent, tools, e
+                    )
+                ):
+                    raise
 
     def _handle_responses(
         self,

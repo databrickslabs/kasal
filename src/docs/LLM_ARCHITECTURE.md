@@ -40,7 +40,9 @@ The engine is where a request becomes HTTP. It is model-agnostic and tenant-agno
 | Module | Responsibility |
 |--------|----------------|
 | `base.py` | `BaseLLM`: the `call()` contract, LLM event emission, token-usage accumulation for `Crew.token_usage`, structured-output validation, copy/deepcopy semantics. |
-| `completion.py` | `OpenAICompletion`: the OpenAI SDK client, chat-completions and Responses API loops, tool-call rounds, streaming, context-window trimming and the output clamp, per-model parameter rules. |
+| `completion.py` | `OpenAICompletion`: the OpenAI SDK client, chat-completions and Responses API loops, tool-call rounds, streaming, per-model parameter rules. |
+| `context_window.py` | `ContextWindowBudget`, mixed into `OpenAICompletion`: the one token estimate (chars ÷ 3.4), the output clamp so `prompt + max_tokens` fits, the pre-request trim that stubs the oldest tool results, and the post-rejection recovery — when the server refuses a prompt the estimate said fit, stub by the server's own count, learn the ratio for the rest of the run, and retry the same round without re-running any tool. |
+| `context_recovery.py` | The pure helpers under that recovery: the stub text, reading the server's token count out of its error message (llama.cpp, vLLM, OpenAI and Anthropic phrasings), and the oldest-first stubbing shared with the trim. |
 | `llm.py` | `LLM`: the class kasal instantiates. Normalizes provider prefixes (`databricks/…`, `openai/…`). |
 | `instructor.py` | `InternalInstructor`: structured output by prompting, with per-call credentials. |
 | `constants.py` | Context-window sizes and the usage ratio. |
@@ -102,7 +104,7 @@ Building an LLM for an agent runs down the layers in order:
 2. The provider branch resolves credentials and a base URL — Databricks resolves OBO, then PAT, then service principal, and fails closed if none work.
 3. Parameters the endpoint accepts are set, and parameters it rejects are **omitted**. A GPT-5-family model is built with no `temperature`; a Kimi model likewise.
 4. The right class is chosen: `DatabricksRetryLLM` for Databricks chat models, `DatabricksResponsesLLM` for the Responses API, `VLLMFunctionCallingLLM` for self-hosted vLLM, plain `LLM` otherwise.
-5. The engine sends it: trim the conversation if it approaches the window, clamp the output budget so `prompt + max_tokens` fits, run tool-call rounds, emit `LLMCallStartedEvent` / `LLMCallCompletedEvent`, accumulate usage.
+5. The engine sends it: trim the conversation if it approaches the window, clamp the output budget so `prompt + max_tokens` fits, run tool-call rounds, emit `LLMCallStartedEvent` / `LLMCallCompletedEvent`, accumulate usage. If the server still rejects the prompt as too long — the estimate is a chars-per-token guess, and JSON-escaped Cyrillic once measured 1.4 against the assumed 3.4 — the round is retried behind a compaction sized by the server's own count (`ContextCompactionEvent`, strategy `tool_result_stub_after_rejection`); only when nothing is left to stub does `LLMContextLengthExceededError` reach the executor.
 6. `usage_telemetry` sees the completion event and forwards token counts.
 
 ## Why the layering is drawn here
