@@ -95,8 +95,15 @@ class TestDegradePolicyPassthrough:
         assert task.guardrail_on_exhausted == "degrade"
         assert task.on_budget_exceeded == "degrade"
 
-    async def test_default_is_still_raise(self):
-        """Every path that does not opt in keeps today's behaviour."""
+    async def test_defaults(self):
+        """A guardrail rejection is a verdict on the answer and still raises;
+        a spent budget degrades — the run keeps the partial, annotated."""
         task = Task(**await build_task_args(_config(), None, []))
         assert task.guardrail_on_exhausted == "raise"
+        assert task.on_budget_exceeded == "degrade"
+
+    async def test_an_explicit_raise_for_the_budget_is_honoured(self):
+        task = Task(
+            **await build_task_args(_config(on_budget_exceeded="raise"), None, [])
+        )
         assert task.on_budget_exceeded == "raise"

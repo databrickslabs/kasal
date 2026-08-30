@@ -31,6 +31,7 @@ from .base import BaseLLM
 from .budget import (
     check_deadline,
     exhausted_mid_round,
+    partial_from_reasoning,
     resolve_execution_budget,
     rounds_exhausted,
     wrapup_conversation,
@@ -38,6 +39,7 @@ from .budget import (
 from .context_recovery import MAX_REJECTIONS_PER_ROUND
 from .context_window import ContextWindowBudget
 from .exceptions import (
+    ExecutionBudgetExceededError,
     LLMContextLengthExceededError,
     is_context_length_exceeded,
 )
@@ -592,25 +594,64 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         (``early_stopping_method="generate"``) both spend one call here instead.
 
         No tools are passed, so the round loop returns immediately and cannot
-        recurse. If this call fails or says nothing, the original budget error
-        is raised as before and the degrade path still keeps the partial.
+        recurse. Three outcomes, in order of preference:
+
+        1. The wrap-up answers — that text is the answer.
+        2. It ran out of OUTPUT tokens while still deliberating (observed on a
+           25-round research task: 8,192 completion tokens, the compiled list
+           sitting in the reasoning channel, content empty) — one more call,
+           told not to deliberate. Models that then write into ``content``
+           answer here; the rest reach step 3.
+        3. Neither produced answer text — the budget error is raised as before,
+           now carrying the wrap-up's REASONING as its partial when there is
+           any. It is the model's own draft of the answer, and a Task with
+           ``on_budget_exceeded='degrade'`` keeps it, annotated, instead of the
+           run dying with nothing after every search succeeded.
         """
-        try:
-            text = self.call(wrapup_conversation(conversation))
-        except Exception as wrapup_failed:
-            logger.warning("wrap-up call after %s failed: %s", error, wrapup_failed)
-            raise error from wrapup_failed
-        # The wrap-up must not hand back un-executed tool-call markup either —
-        # that is exactly the state a degenerate model is stuck in when the
-        # budget goes. The nested call() has already replaced markup-only text
-        # with NO_ANSWER_MARKUP_ONLY, which counts as "said nothing" here: with
-        # nothing real to fall back on, the budget error is raised as before,
-        # and its partial is what the degrade path keeps.
-        text = answer_without_markup(text, conversation, when_nothing_real="")
-        if not text.strip() or text == NO_ANSWER_MARKUP_ONLY:
+        text = self._wrapup_call(conversation, error, direct=False)
+        draft, why = self._reasoning_text, self._finish_reason
+        if not text and why == "length":
+            logger.warning(
+                "wrap-up after %s ran out of output tokens before writing an "
+                "answer; retrying once, told to answer directly",
+                error,
+            )
+            text = self._wrapup_call(conversation, error, direct=True)
+            # Keep whichever attempt drafted more; the retry may think less.
+            if len(self._reasoning_text or "") > len(draft or ""):
+                draft, why = self._reasoning_text, self._finish_reason
+        if not text:
+            recovered = partial_from_reasoning(draft, why)
+            if recovered and isinstance(error, ExecutionBudgetExceededError):
+                error.partial = "\n\n".join(p for p in (error.partial, recovered) if p)
+                logger.warning(
+                    "wrap-up after %s produced no answer text; carrying %d chars "
+                    "of its reasoning as the partial answer",
+                    error,
+                    len(recovered),
+                )
             raise error
         logger.warning("budget spent (%s); answered from what was gathered", error)
         return text, usage, LLMCallType.LLM_CALL
+
+    def _wrapup_call(
+        self, conversation: list[dict[str, Any]], error: Exception, *, direct: bool
+    ) -> str:
+        """One tool-less wrap-up call: its answer text, or '' when it said
+        nothing real. A call that FAILS raises the budget error, as before.
+
+        Un-executed tool-call markup does not count as an answer either — that
+        is exactly the state a degenerate model is stuck in when the budget
+        goes. The nested call() has already replaced markup-only text with
+        NO_ANSWER_MARKUP_ONLY, which reads as '' here.
+        """
+        try:
+            text = self.call(wrapup_conversation(conversation, direct=direct))
+        except Exception as wrapup_failed:
+            logger.warning("wrap-up call after %s failed: %s", error, wrapup_failed)
+            raise error from wrapup_failed
+        text = answer_without_markup(text, conversation, when_nothing_real="")
+        return "" if text == NO_ANSWER_MARKUP_ONLY else text.strip()
 
     def _call_completions_api(
         self,

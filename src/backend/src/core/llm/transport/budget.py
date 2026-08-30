@@ -11,6 +11,7 @@ import time
 from typing import Any
 
 from .exceptions import ExecutionBudgetExceededError
+from .response_parsing import REDACTED_REASONING
 
 #: Tool-calling rounds allowed when no agent supplies a cap.
 #:
@@ -123,15 +124,59 @@ FORCE_FINAL_ANSWER = (
 )
 
 
+#: The second, and last, wrap-up attempt — sent only after the first spent its
+#: whole OUTPUT allowance deliberating and produced no answer text. Observed on
+#: a 25-round research task: 8,192 completion tokens, the compiled list sitting
+#: in the reasoning channel, ``content`` empty. Reasoning counts against the
+#: output budget, so the instruction is not "answer" but "stop thinking".
+FORCE_FINAL_ANSWER_DIRECTLY = (
+    "Your previous attempt ran out of output before writing any answer, because "
+    "it kept deliberating. Do not think it over again. Write the answer "
+    "immediately, starting with the first line of the deliverable, and keep it "
+    "compact — a shorter answer that finishes beats a longer one that is cut "
+    "off. State briefly what is missing or unverified."
+)
+
+
 def wrapup_conversation(
-    conversation: list[dict[str, Any]],
+    conversation: list[dict[str, Any]], *, direct: bool = False
 ) -> list[dict[str, Any]]:
     """``conversation`` plus the stop-and-answer instruction, as a new list.
 
     A copy, not an append: the caller's list is still the live conversation the
-    partial answer is read from if this last call also fails.
+    partial answer is read from if this last call also fails. ``direct`` selects
+    the second attempt's wording (see ``FORCE_FINAL_ANSWER_DIRECTLY``).
     """
-    return [*conversation, {"role": "user", "content": FORCE_FINAL_ANSWER}]
+    instruction = FORCE_FINAL_ANSWER_DIRECTLY if direct else FORCE_FINAL_ANSWER
+    return [*conversation, {"role": "user", "content": instruction}]
+
+
+def partial_from_reasoning(reasoning: str | None, finish_reason: str | None) -> str:
+    """A degraded partial answer lifted from the model's REASONING channel.
+
+    For the wrap-up only, when neither attempt produced answer text.
+    ``answer_from_reasoning`` is deliberately conservative — thinking prose
+    passed off as an ANSWER would replace a visible empty result with a
+    plausible wrong one — and this does not loosen it: the text travels as the
+    budget error's ``partial``, which the degrade path prints under its own
+    "⚠️ Truncated" banner, and this adds a second one naming the source. A draft
+    the model wrote while compiling its answer, labelled as a draft, beats
+    losing every search the run made to an empty string.
+
+    '' when there is no reasoning, or only the redaction flag.
+    """
+    text = (reasoning or "").strip()
+    if not text or text == REDACTED_REASONING:
+        return ""
+    why = (
+        "it ran out of output tokens while still deliberating"
+        if finish_reason == "length"
+        else "it produced no answer text"
+    )
+    return (
+        f"> ⚠️ Recovered from the model's reasoning: {why}, so this is its "
+        "working draft, not a finished answer.\n\n" + text
+    )
 
 
 def rounds_exhausted(

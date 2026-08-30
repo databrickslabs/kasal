@@ -147,6 +147,17 @@ async def build_task_args(
                 continue
             task_args[field] = task_config[field]
 
+    # A blown execution budget (tool rounds or wall clock) DEGRADES by default
+    # on Kasal's paths. The transport already spends a wrap-up call to answer
+    # from what was gathered; when even that yields nothing, keeping the
+    # annotated partial beats killing the run and every task that already
+    # finished — which is what "raise" did to a 25-round research task whose
+    # wrap-up spent its whole output allowance thinking. The runtime's own
+    # default stays "raise" (library semantics); a task config may still say
+    # so. guardrail_on_exhausted keeps "raise": a judge's rejection is a
+    # verdict on the answer, a spent budget is not.
+    task_args.setdefault("on_budget_exceeded", "degrade")
+
     return task_args
 
 
