@@ -982,10 +982,6 @@ class LightAgentService:
                             f"[light_agent] a2ui_delta broadcast skipped: {sse_err}"
                         )
 
-                # The whole answer as it streams. `_chunk_buf` is drained on
-                # every flush, so late consumers need their own copy.
-                _answer_so_far: list = []
-
                 # The request's contextvars, captured HERE — in the main
                 # coroutine, where they are actually set. The outline head start
                 # is spawned from the token-flush callback, which the LLM worker
@@ -1065,12 +1061,16 @@ class LightAgentService:
                     try:
                         if _agent_llm is None or source is not _agent_llm:
                             return
+                        # Only the agent's OWN turn is the answer: memory's recall
+                        # planner, labelling and LLM guardrails stream on this same
+                        # object and name no agent — their JSON was typed as the reply.
+                        if getattr(event, "from_agent", None) is not agent:
+                            return
                         text = getattr(event, "chunk", "") or ""
                         if not text or _main_loop is None:
                             return
                         with _chunk_lock:
                             _chunk_buf.append(text)
-                            _answer_so_far.append(text)
                             if _chunk_state["scheduled"]:
                                 return
                             _chunk_state["scheduled"] = True

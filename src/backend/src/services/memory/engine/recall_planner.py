@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 from .analyze import extract_json_object
@@ -82,13 +83,29 @@ class RecallOutcome:
     best_score: float | None = None
 
 
+def _today_line() -> str:
+    """The date, for a prompt that has to write dates.
+
+    The planner wrote "Lebanon news today 2025" in 2026: without this it uses
+    the year it remembers, and a memory query carrying the wrong year misses
+    the notes it was written to find. Same wording as the agents' own date
+    block, kept short.
+    """
+    today = datetime.now(timezone.utc)
+    return (
+        f"\nToday is {today:%Y-%m-%d}. This is later than your training data: "
+        f"when a query needs a year, use {today.year} or omit the year — never "
+        "a year you recall."
+    )
+
+
 def _llm_call(llm: Any, system: str, user: str) -> Any:
     call = getattr(llm, "call", None)
     if not callable(call):
         return None
     return call(
         [
-            {"role": "system", "content": system},
+            {"role": "system", "content": system + _today_line()},
             {"role": "user", "content": user},
         ]
     )

@@ -309,33 +309,49 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         from_agent: Any = None,
         response_model: type[BaseModel] | None = None,
     ) -> str:
-        conversation = self._normalize_messages(messages)
-        self._emit_call_started_event(conversation, tools, from_task, from_agent)
-        try:
-            if self.api == "responses":
-                text, usage, call_type = self._call_responses_api(
-                    conversation, tools, available_functions, from_agent=from_agent
-                )
-            else:
-                text, usage, call_type = self._call_completions_api(
-                    conversation, tools, available_functions, from_agent=from_agent
-                )
-        except LLMContextLengthExceededError:
-            raise
-        except Exception as e:
-            self._emit_call_failed_event(str(e), from_task, from_agent)
-            if is_context_length_exceeded(e):
-                raise LLMContextLengthExceededError(str(e)) from e
-            raise
+        # Attribution for every delta this call streams — see BaseLLM._call_scope.
+        with self._attributed(from_task, from_agent):
+            conversation = self._normalize_messages(messages)
+            self._emit_call_started_event(conversation, tools, from_task, from_agent)
+            try:
+                if self.api == "responses":
+                    text, usage, call_type = self._call_responses_api(
+                        conversation, tools, available_functions, from_agent=from_agent
+                    )
+                else:
+                    text, usage, call_type = self._call_completions_api(
+                        conversation, tools, available_functions, from_agent=from_agent
+                    )
+            except LLMContextLengthExceededError:
+                raise
+            except Exception as e:
+                self._emit_call_failed_event(str(e), from_task, from_agent)
+                if is_context_length_exceeded(e):
+                    raise LLMContextLengthExceededError(str(e)) from e
+                raise
 
-        if isinstance(text, list):
-            # Tool calls handed back for the caller to execute
-            # (``delegate_tool_calls``). Not an answer: stop words, structured
-            # output and the empty-answer recovery all describe TEXT. The
-            # completed event still fires, carrying what the model DECIDED, so
-            # the trace shows the round rather than a gap where one happened.
+            if isinstance(text, list):
+                # Tool calls handed back for the caller to execute
+                # (``delegate_tool_calls``). Not an answer: stop words, structured
+                # output and the empty-answer recovery all describe TEXT. The
+                # completed event still fires, carrying what the model DECIDED, so
+                # the trace shows the round rather than a gap where one happened.
+                self._emit_call_completed_event(
+                    f"[tool_calls] {', '.join(c.get('name', '?') for c in text)}",
+                    call_type,
+                    usage,
+                    conversation,
+                    from_task,
+                    from_agent,
+                    finish_reason=self._finish_reason,
+                    reasoning=self._reasoning_text or None,
+                )
+                return text
+
+            if self.supports_stop_words():
+                text = self._apply_stop_words(text)
             self._emit_call_completed_event(
-                f"[tool_calls] {', '.join(c.get('name', '?') for c in text)}",
+                text,
                 call_type,
                 usage,
                 conversation,
@@ -344,30 +360,16 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
                 finish_reason=self._finish_reason,
                 reasoning=self._reasoning_text or None,
             )
+            # `response_model` was accepted and ignored here, so structured-output
+            # callers got a JSON *string* and their
+            # `isinstance(r, Model) or Model.model_validate(r)` fell back silently.
+            # DatabricksRetryLLM compensated with a private coercion, which meant the
+            # feature worked on exactly one provider. Honour it for all of them; the
+            # helper returns the text unchanged when it does not parse, so the
+            # caller's own fallback still applies.
+            if response_model is not None:
+                return self._validate_structured_output(text, response_model)
             return text
-
-        if self.supports_stop_words():
-            text = self._apply_stop_words(text)
-        self._emit_call_completed_event(
-            text,
-            call_type,
-            usage,
-            conversation,
-            from_task,
-            from_agent,
-            finish_reason=self._finish_reason,
-            reasoning=self._reasoning_text or None,
-        )
-        # `response_model` was accepted and ignored here, so structured-output
-        # callers got a JSON *string* and their
-        # `isinstance(r, Model) or Model.model_validate(r)` fell back silently.
-        # DatabricksRetryLLM compensated with a private coercion, which meant the
-        # feature worked on exactly one provider. Honour it for all of them; the
-        # helper returns the text unchanged when it does not parse, so the
-        # caller's own fallback still applies.
-        if response_model is not None:
-            return self._validate_structured_output(text, response_model)
-        return text
 
     # --------------------------- chat completions ---------------------------
 
@@ -888,10 +890,15 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
                     )
             if text:
                 chunks.append(text)
+                chunk_task, chunk_agent = self._call_attribution()
                 event_bus.emit(
                     self,
                     LLMStreamChunkEvent(
-                        model=self.model, chunk=text, chunk_index=chunk_index
+                        model=self.model,
+                        chunk=text,
+                        chunk_index=chunk_index,
+                        from_task=chunk_task,
+                        from_agent=chunk_agent,
                     ),
                 )
                 chunk_index += 1

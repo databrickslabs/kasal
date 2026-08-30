@@ -245,3 +245,17 @@ class TestMemoryRecallModes:
         )
         assert (memory.complex_query_threshold, memory.exploration_budget) == (0.6, 2)
         assert (memory.query_analysis_threshold, memory.default_importance) == (50, 0.3)
+
+
+class TestThePlannerKnowsTheDate:
+    def test_the_analysis_prompt_names_today(self):
+        # Without it the planner wrote "Lebanon news today 2025" in 2026 —
+        # the year it remembers — and a query with the wrong year misses the
+        # notes it exists to find.
+        from datetime import datetime, timezone
+
+        llm = _FakeLLM(ANALYSIS)
+        analyze_query(llm, LONG_TASK)
+        system = llm.calls[0][0]["content"]
+        assert f"Today is {datetime.now(timezone.utc):%Y-%m-%d}" in system
+        assert str(datetime.now(timezone.utc).year) in system

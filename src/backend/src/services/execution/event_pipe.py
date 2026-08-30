@@ -289,6 +289,12 @@ class EventPipeWriter:
         text = getattr(event, "chunk", "") or ""
         if not text or self._closed:
             return
+        # Only an agent's own turn is live typing. Memory's recall planner,
+        # memory labelling and LLM guardrails call the same streamed LLM
+        # object and name no agent; their JSON used to scroll through the run
+        # view as if an agent had written it.
+        if getattr(event, "from_agent", None) is None:
+            return
         frame = None
         with self._lock:
             self._chunk_buf.append(text)

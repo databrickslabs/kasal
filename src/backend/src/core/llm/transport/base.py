@@ -19,7 +19,8 @@ import logging
 import re
 import threading
 from collections.abc import Callable
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
@@ -120,6 +121,32 @@ class BaseLLM(BaseModel):
     #: Why the model stopped on the most recent call ("stop", "length",
     #: "tool_calls", …), carried from the response to the completed event.
     _finish_reason: str | None = PrivateAttr(default=None)
+    #: Who the CURRENT call is for — ``(from_task, from_agent)`` — so a
+    #: streamed delta can say whose turn it belongs to. Thread-local because
+    #: one LLM object is shared: the agent answers on a worker thread while
+    #: memory labelling runs on the save thread. Set by ``call()``; a nested
+    #: call that names nobody (the budget wrap-up) inherits the outer one, a
+    #: top-level call that names nobody is an internal call — memory's recall
+    #: planner, memory labelling, an LLM guardrail — and stays unattributed.
+    _call_scope: threading.local = PrivateAttr(default_factory=threading.local)
+
+    @contextmanager
+    def _attributed(self, from_task: Any, from_agent: Any) -> Iterator[None]:
+        scope = self._call_scope
+        outer = getattr(scope, "attribution", None)
+        scope.attribution = (
+            (from_task, from_agent)
+            if (from_task is not None or from_agent is not None)
+            else outer
+        )
+        try:
+            yield
+        finally:
+            scope.attribution = outer
+
+    def _call_attribution(self) -> tuple[Any, Any]:
+        """``(from_task, from_agent)`` of the call running on this thread."""
+        return getattr(self._call_scope, "attribution", None) or (None, None)
 
     def call(
         self,
@@ -383,6 +410,7 @@ class BaseLLM(BaseModel):
         cloned = self.model_copy(update=fields)
         cloned._usage = dict(self._usage)
         cloned._usage_lock = threading.Lock()
+        cloned._call_scope = threading.local()
         for attr in ("_client", "_async_client"):
             if hasattr(cloned, attr):
                 object.__setattr__(cloned, attr, None)
