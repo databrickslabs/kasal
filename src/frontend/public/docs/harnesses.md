@@ -84,7 +84,7 @@ Three places, in increasing order of detail:
 
 ## Where the two differ
 
-Both harnesses implement the same declared capabilities, with two exceptions.
+Both harnesses implement the same declared capabilities, with one exception.
 The list is in `services/execution/harnesses/binding.py` (`Capability`) and each
 binding declares its own, so the difference is a fact of the code rather than a
 note in a document.
@@ -99,7 +99,37 @@ note in a document.
 | Hierarchical process | yes | yes | |
 | Flows | yes | yes | |
 | **Agent plan** (`todo`) | yes | **no** | Written for Kasal's executor — one tool call per round, the plan carried in the conversation that executor owns. CrewAI's agent executor plans its own way; given both, one run called `todo` 28 times without writing a single item |
-| **Export** | yes | **no** | An exported Databricks App vendors the Kasal runtime so it needs no third-party framework. Shipping CrewAI into exported apps is a separate project |
+| **Export** | yes | yes | Two different bundles — see below |
+
+### Exporting on either runtime
+
+A crew tuned against CrewAI's executor should deploy onto CrewAI's executor, so
+each harness exports its own bundle. Both are self-contained Databricks Apps that
+run with Kasal switched off entirely — that is the point of an export.
+
+|  | Kasal bundle | CrewAI bundle |
+| --- | --- | --- |
+| Agent / Task / Crew | the vendored Kasal runtime | `crewai`, pinned exactly |
+| LLM calls, tools, events | Kasal's vendored transport | **the same** |
+| Third-party agent framework | none | `crewai==1.15.16` |
+
+The second row is the one that matters. A CrewAI bundle ships CrewAI **on top of**
+Kasal's transport, not instead of it — the same arrangement the platform runs. If
+the exported app called models through CrewAI's own LLM stack it would be an app
+nobody has tested, missing the endpoint fixes Kasal's handlers carry, and the
+first Databricks 400 would land in a customer's workspace rather than in yours.
+
+Everything that differs between the two bundles is in one file,
+`agent_server/runtime_binding.py`, and `agent.py` imports `Agent`, `Task`,
+`Crew` and `Process` from it without knowing which it got. The runtime is chosen
+at EXPORT time and stamped into that file; there is no switch inside a deployed
+app, because a bundle ships one runtime's dependencies.
+
+The export follows the configured harness by default. `POST /export/databricks-app`
+takes `runtime` (`"kasal"` or `"crewai"`) to override it — export is a deliberate
+act, so an explicit request wins. Asking for a runtime nothing can produce gets a
+working Kasal bundle plus a note saying so, in the response metadata and in the
+bundle README; it is never a refusal.
 
 ### Behavioural differences that are not capabilities
 

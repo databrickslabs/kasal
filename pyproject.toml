@@ -1,0 +1,60 @@
+# Packaging for `pip install kasal` — the whole app in one wheel.
+#
+# The backend's top-level import package is `src` (thousands of `from src.…`
+# imports), which must never be installed as a top-level module. The wheel
+# therefore ships the backend tree UNDER the `kasal` package
+# (kasal/_app/src + kasal/_app/frontend_static) and the `kasal` CLI puts
+# kasal/_app on sys.path before importing `src.main` — the app runs unchanged,
+# and site-packages gains exactly one top-level name: `kasal`.
+#
+# Dependencies are NOT duplicated here: hatch_build.py reads them from
+# src/backend/pyproject.toml at build time, so the backend stays the single
+# source of truth.
+#
+# Build with `python src/package_pip.py` (builds the frontend, cleans
+# __pycache__, runs `uv build --wheel`, smoke-tests the wheel). This file does
+# not affect the Databricks App deploy: src/deploy.py stages
+# src/backend/pyproject.toml + uv.lock into its own bundle.
+
+[project]
+name = "kasal"
+version = "0.1.0"
+description = "Kasal — AI agent workflow orchestration platform (self-contained server + UI)"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dynamic = ["dependencies"]
+
+[project.urls]
+Repository = "https://github.com/nehmetohme/kasal"
+
+[project.scripts]
+kasal = "kasal.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata.hooks.custom]
+path = "hatch_build.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["packaging/kasal"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/backend/src" = "kasal/_app/src"
+"src/frontend_static" = "kasal/_app/frontend_static"
+
+# The sdist carries only what the wheel build needs — never node_modules or
+# the dev tree. Installing from sdist requires src/frontend_static to be
+# present (i.e. build from a checkout via src/package_pip.py).
+[tool.hatch.build.targets.sdist]
+include = [
+  "pyproject.toml",
+  "hatch_build.py",
+  "README.md",
+  "packaging/kasal/**",
+  "src/backend/pyproject.toml",
+  "src/backend/src/**",
+  "src/frontend_static/**",
+]
+exclude = ["**/__pycache__", "**/.DS_Store"]
