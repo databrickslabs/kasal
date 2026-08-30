@@ -122,6 +122,11 @@ const ROLE_PERMISSIONS: Record<UserRole, PermissionType[]> = {
 interface PermissionState {
   // State
   userRole: UserRole | null;
+  /** EFFECTIVE surface capabilities for the CURRENT teamspace — membership
+   *  override when set, otherwise derived from the role. Personal
+   *  workspaces and unresolved roles do not restrict. */
+  allowAgentBuilder: boolean;
+  allowFlowBuilder: boolean;
   permissions: Set<PermissionType>;
   isLoading: boolean;
   error: string | null;
@@ -156,6 +161,14 @@ interface PermissionState {
   isEditor: () => boolean;
   isOperator: () => boolean;
   isWorkspaceAdmin: () => boolean;
+  /** Whether this user may enter the Agent/Flow Builder canvases in the
+   *  current teamspace. Operators are chat-only: the role ladder already
+   *  withholds authoring permissions (AGENT_CREATE/CREW_CREATE); this is the
+   *  same policy applied to the SURFACES. A null role (still resolving, or a
+   *  personal workspace) does not restrict. */
+  canUseBuilders: () => boolean;
+  canUseAgentBuilder: () => boolean;
+  canUseFlowBuilder: () => boolean;
   getVisibleMenuItems: () => string[];
   getDisabledFeatures: () => string[];
 }
@@ -166,6 +179,8 @@ export const usePermissionStore = create<PermissionState>()(
       (set, get) => ({
         // Initial state
         userRole: null,
+        allowAgentBuilder: true,
+        allowFlowBuilder: true,
         permissions: new Set(),
         isLoading: false,
         error: null,
@@ -238,6 +253,8 @@ export const usePermissionStore = create<PermissionState>()(
 
               set({
                 userRole: effectiveRole,
+                allowAgentBuilder: true,
+                allowFlowBuilder: true,
                 permissions: new Set(rolePermissions),
                 isLoading: false,
                 lastUpdated: Date.now(),
@@ -255,11 +272,17 @@ export const usePermissionStore = create<PermissionState>()(
                 if (targetGroup?.user_role) {
                   const role = targetGroup.user_role.toLowerCase() as UserRole;
                   const rolePermissions = ROLE_PERMISSIONS[role];
+                  const roleDefault = role !== 'operator';
 
                   console.log(`Permission loaded: ${role} permissions for group ${targetGroupId}`);
 
                   set({
                     userRole: role,
+                    // The backend sends the EFFECTIVE values (override or
+                    // role-derived); older backends without the fields fall
+                    // back to the role here.
+                    allowAgentBuilder: targetGroup.allow_agent_builder ?? roleDefault,
+                    allowFlowBuilder: targetGroup.allow_flow_builder ?? roleDefault,
                     permissions: new Set(rolePermissions),
                     isLoading: false,
                     lastUpdated: Date.now(),
@@ -420,6 +443,17 @@ export const usePermissionStore = create<PermissionState>()(
         },
 
         // Role check helpers
+        canUseAgentBuilder: () => get().allowAgentBuilder,
+        canUseFlowBuilder: () => get().allowFlowBuilder,
+        canUseBuilders: () => {
+          // Either surface. The TEAMSPACE capability governs the teamspace UX
+          // — deliberately no system-admin bypass: an admin restricted in a
+          // teamspace sees what that restriction means (and can lift it from
+          // the Access screen). A bypass also made the feature untestable for
+          // exactly the people configuring it.
+          const { allowAgentBuilder, allowFlowBuilder } = get();
+          return allowAgentBuilder || allowFlowBuilder;
+        },
         isAdmin: () => get().userRole === 'admin',
         isEditor: () => get().userRole === 'editor',
         isOperator: () => get().userRole === 'operator',
@@ -474,6 +508,8 @@ export const usePermissionStore = create<PermissionState>()(
         name: 'permission-store-v2', // Updated to force cache refresh after 3-tier migration
         partialize: (state) => ({
           userRole: state.userRole,
+          allowAgentBuilder: state.allowAgentBuilder,
+          allowFlowBuilder: state.allowFlowBuilder,
           lastUpdated: state.lastUpdated,
         }),
       }

@@ -21,6 +21,7 @@ import { useWorkflowStore } from '../../store/workflow';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { getThemeOptions } from '../../theme/theme';
 import { useAppStore as useChatAppStore } from '../ChatMode/store/appStore';
+import { usePermissionStore } from '../../store/permissions';
 import SidebarToggle from '../ChatMode/SidebarToggle';
 import { useThemeManager } from '../../hooks/workflow/useThemeManager';
 import { useErrorManager } from '../../hooks/workflow/useErrorManager';
@@ -1165,6 +1166,21 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
   // Chat mode swaps the crew/flow canvas for the embedded chat workspace.
   const isChatMode = appMode === 'chat';
+  // Chat-only users (operators) must never stand on a builder canvas — not on
+  // boot (appMode is persisted in localStorage and may say 'crew'), and not
+  // after switching into a teamspace where their role is operator while a
+  // canvas is open. setAppMode's own guard allows the corrective move to chat.
+  const allowAgentBuilder = usePermissionStore((s) => s.allowAgentBuilder);
+  const allowFlowBuilder = usePermissionStore((s) => s.allowFlowBuilder);
+  useEffect(() => {
+    const blocked =
+      (appMode === 'crew' && !allowAgentBuilder) ||
+      (appMode === 'flow' && !allowFlowBuilder);
+    if (blocked) {
+      useUILayoutStore.getState().setAppMode('chat');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appMode, allowAgentBuilder, allowFlowBuilder]);
   // Chat carries its own (chat-scoped) dark theme. The top strip (TabBar +
   // GroupSelector) sits OUTSIDE #kasal-chat-root, so when chat is dark it
   // stayed white. Re-theme just that strip with a dark MUI theme.

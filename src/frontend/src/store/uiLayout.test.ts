@@ -101,6 +101,25 @@ describe('uiLayout store — initial state', () => {
   });
 });
 
+describe('uiLayout store — per-surface capability guard', () => {
+  it('refuses each builder mode independently by capability', async () => {
+    const { usePermissionStore } = await import('./permissions');
+    usePermissionStore.setState({ allowAgentBuilder: false, allowFlowBuilder: false });
+    useUILayoutStore.getState().setAppMode('chat');
+    useUILayoutStore.getState().setAppMode('crew');
+    expect(useUILayoutStore.getState().appMode).toBe('chat');
+    useUILayoutStore.getState().setAppMode('flow');
+    expect(useUILayoutStore.getState().appMode).toBe('chat');
+    // Flow allowed while Agent Builder stays blocked — independent gates.
+    usePermissionStore.setState({ allowFlowBuilder: true });
+    useUILayoutStore.getState().setAppMode('flow');
+    expect(useUILayoutStore.getState().appMode).toBe('flow');
+    useUILayoutStore.getState().setAppMode('crew');
+    expect(useUILayoutStore.getState().appMode).toBe('flow');
+    usePermissionStore.setState({ allowAgentBuilder: true, allowFlowBuilder: true });
+  });
+});
+
 describe('uiLayout store — appMode / areFlowsVisible sync', () => {
   beforeEach(() => localStorage.clear());
 

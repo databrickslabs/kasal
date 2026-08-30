@@ -18,6 +18,27 @@ vi.mock('../../store/flowConfig', () => ({
   useFlowConfigStore: () => ({ kasalFlowEnabled: mockFlowEnabled }),
 }));
 
+describe('ModeSwitcher — capability-gated entries', () => {
+  it('no capabilities → no switcher at all (one entry is no menu)', async () => {
+    const { usePermissionStore } = await import('../../store/permissions');
+    usePermissionStore.setState({ allowAgentBuilder: false, allowFlowBuilder: false });
+    const { container } = render(<ModeSwitcher />);
+    expect(container.firstChild).toBeNull();
+    usePermissionStore.setState({ allowAgentBuilder: true, allowFlowBuilder: true });
+  });
+
+  it('a single capability shows only that builder beside Chat', async () => {
+    const { usePermissionStore } = await import('../../store/permissions');
+    usePermissionStore.setState({ allowAgentBuilder: true, allowFlowBuilder: false });
+    render(<ModeSwitcher />);
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.getByText('Agent Builder')).toBeInTheDocument();
+    expect(screen.queryByText('Flow Builder')).toBeNull();
+    expect(screen.getByText('Chat')).toBeInTheDocument();
+    usePermissionStore.setState({ allowFlowBuilder: true });
+  });
+});
+
 describe('ModeSwitcher', () => {
   beforeEach(() => {
     setAppMode.mockClear();

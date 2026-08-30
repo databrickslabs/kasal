@@ -164,12 +164,12 @@ describe('DatabaseManagement', () => {
     });
   });
 
-  it('renders tab labels', async () => {
+  it('renders the three section headers on one page', async () => {
     renderWithProviders(<DatabaseManagement />);
 
     await waitFor(() => {
       expect(screen.getByText('General')).toBeInTheDocument();
-      expect(screen.getByText('Databricks Import/Export')).toBeInTheDocument();
+      expect(screen.getByText('Databricks Import / Export')).toBeInTheDocument();
       expect(screen.getByText('Lakebase')).toBeInTheDocument();
     });
   });

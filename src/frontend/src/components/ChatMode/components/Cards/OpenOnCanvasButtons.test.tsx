@@ -34,6 +34,18 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe('OpenOnCanvasButtons — chat-only users', () => {
+  it('renders nothing when both builder capabilities are off', async () => {
+    const { usePermissionStore } = await import('../../../../store/permissions');
+    usePermissionStore.setState({ allowAgentBuilder: false, allowFlowBuilder: false });
+    const { container } = render(
+      <OpenOnCanvasButtons crewId="c1" flowId={undefined} />,
+    );
+    expect(container.firstChild).toBeNull();
+    usePermissionStore.setState({ allowAgentBuilder: true, allowFlowBuilder: true });
+  });
+});
+
 describe('OpenOnCanvasButtons — Open in Agent Builder', () => {
   it('carries the chat-selected MCP servers onto the canvas crew (tasks + agents)', () => {
     const events: CanvasEvent[] = [];

@@ -166,6 +166,21 @@ class GroupService:
             and gu.group.status == GroupStatus.ACTIVE
         ]
 
+    async def get_user_memberships(self, user_id: str) -> List["GroupUser"]:
+        """Active memberships (full rows, ``.group`` loaded) for a user.
+
+        The my-groups endpoint reads role AND the per-surface capability
+        overrides off each row; the (group, role) tuple shape of
+        ``get_user_groups_with_roles`` stays untouched for its other callers.
+        """
+        group_users = await self.group_user_repo.get_groups_by_user(user_id)
+        return [
+            gu
+            for gu in group_users
+            if gu.status == GroupUserStatus.ACTIVE
+            and gu.group.status == GroupStatus.ACTIVE
+        ]
+
     async def get_user_groups_with_roles(self, user_id: str) -> List[tuple]:
         """
         Get all groups a user belongs to along with their role in each group.
@@ -341,6 +356,8 @@ class GroupService:
                 "email": email,
                 "role": group_user.role,
                 "status": group_user.status,
+                "allow_agent_builder": getattr(group_user, "allow_agent_builder", None),
+                "allow_flow_builder": getattr(group_user, "allow_flow_builder", None),
                 "joined_at": group_user.joined_at,
                 "auto_created": group_user.auto_created,
                 "created_at": group_user.created_at,
