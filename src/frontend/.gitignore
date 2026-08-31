@@ -5,6 +5,9 @@
 /.pnp
 .pnp.js
 
+# local npm registry config (internal proxy URL — never commit to public repo)
+.npmrc
+
 # testing
 /coverage
 
