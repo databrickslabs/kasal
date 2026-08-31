@@ -482,20 +482,23 @@ class TestEnsureDatabricksConfigColumns:
         assert conn.exec_driver_sql.await_count == 1
 
     @pytest.mark.asyncio
-    async def test_postgres_uses_add_column_if_not_exists(self):
-        """Non-SQLite URI -> single idempotent ADD COLUMN IF NOT EXISTS, no PRAGMA."""
+    async def test_postgres_reads_the_catalogue_then_adds_if_not_exists(self):
+        """PostgreSQL -> information_schema read first, then ONE idempotent
+        ADD COLUMN IF NOT EXISTS for the missing column, and no PRAGMA."""
         from src.db.self_heal.columns import _ensure_databricks_config_columns
 
         conn = MagicMock()
-        conn.exec_driver_sql = AsyncMock(return_value=MagicMock())
+        conn.engine.dialect.name = "postgresql"
+        catalogue = MagicMock()
+        catalogue.fetchall = MagicMock(return_value=[("id",), ("workspace_url",)])
+        conn.exec_driver_sql = AsyncMock(side_effect=[catalogue, MagicMock()])
 
-        with patch("src.db.self_heal.dialect.settings") as mock_settings:
-            mock_settings.DATABASE_URI = "postgresql+asyncpg://u" ":p@h/db"
-            await _ensure_databricks_config_columns(conn)
+        await _ensure_databricks_config_columns(conn)
 
         sql_calls = [c.args[0] for c in conn.exec_driver_sql.await_args_list]
-        assert len(sql_calls) == 1
-        assert "ADD COLUMN IF NOT EXISTS ai_gateway_enabled" in sql_calls[0]
+        assert "information_schema.columns" in sql_calls[0]
+        assert len(sql_calls) == 2
+        assert "ADD COLUMN IF NOT EXISTS ai_gateway_enabled" in sql_calls[1]
         assert not any("PRAGMA" in s for s in sql_calls)
 
     @pytest.mark.asyncio
