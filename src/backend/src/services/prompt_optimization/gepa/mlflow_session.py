@@ -23,6 +23,7 @@ blocking MLflow calls run in a worker thread:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from contextlib import contextmanager
@@ -68,6 +69,17 @@ async def resolve_mlflow_backend(
             "MLFLOW_TRACKING_URI"
         )
         if uri and not uri.startswith("databricks"):
+            from src.services.mlflow import local as _local
+
+            # Same "fail soft" rule the tracing path applies (mlflow_setup): a
+            # dev box with no server listening must fail in the 2 s TCP probe,
+            # not in mlflow's ~4-minute retry storm — which parked one worker
+            # thread per Optimize-dialog poll.
+            if not await asyncio.to_thread(_local.is_reachable, uri):
+                logger.info(
+                    "[judges] no MLflow server at %s; judge operation skipped", uri
+                )
+                return None
             exp = os.environ.get("MLFLOW_EXPERIMENT_NAME") or "kasal"
             return MLflowBackend(kind="local", experiment=exp, uri=uri)
 

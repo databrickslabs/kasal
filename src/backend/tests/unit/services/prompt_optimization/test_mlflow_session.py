@@ -18,10 +18,25 @@ class TestResolveBackend:
         monkeypatch.setenv("MCP_SERVER_ENABLED", "true")
         monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5555")
         monkeypatch.delenv("KASAL_LAUNCH_MLFLOW_TRACKING_URI", raising=False)
-        backend = await ms.resolve_mlflow_backend(MagicMock(), MagicMock())
+        with patch("src.services.mlflow.local.is_reachable", return_value=True):
+            backend = await ms.resolve_mlflow_backend(MagicMock(), MagicMock())
         assert backend is not None
         assert backend.kind == "local"
         assert backend.uri == "http://127.0.0.1:5555"
+
+    @pytest.mark.asyncio
+    async def test_local_none_when_no_server_is_listening(self, monkeypatch):
+        """A configured-but-down local server is no backend at all — the 2 s
+        probe fails instead of mlflow's minutes-long retry storm."""
+        monkeypatch.setenv("MCP_SERVER_ENABLED", "true")
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5555")
+        monkeypatch.delenv("KASAL_LAUNCH_MLFLOW_TRACKING_URI", raising=False)
+        with patch(
+            "src.services.mlflow.local.is_reachable", return_value=False
+        ) as probe:
+            backend = await ms.resolve_mlflow_backend(MagicMock(), None)
+        assert backend is None
+        probe.assert_called_once_with("http://127.0.0.1:5555")
 
     @pytest.mark.asyncio
     async def test_none_when_no_backend(self, monkeypatch):

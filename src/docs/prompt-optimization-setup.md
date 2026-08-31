@@ -124,26 +124,20 @@ do not align any judge: only grades given *for a judge* align that judge. Align
 again whenever you have graded more answers — each alignment starts from the
 grades, not from the previous alignment.
 
-### Models
+### Which models it uses
 
-Alignment needs a reflection model (writes the guidelines) and an embedding
-model (matches answers to guidelines). On a Databricks MLflow backend the
-defaults are the optimizer's judge model and `databricks-gte-large-en` (1024
-dimensions). Override them, or set them for a local MLflow backend, with:
-
-| Variable | Meaning | Example |
-|---|---|---|
-| `KASAL_MEMALIGN_REFLECTION_MODEL` | LiteLLM model URI that writes the guidelines | `databricks:/databricks-claude-sonnet-4`, `ollama:/qwen3:30b` |
-| `KASAL_MEMALIGN_EMBEDDING_MODEL` | LiteLLM embedding-model URI | `databricks:/databricks-gte-large-en`, `ollama:/nomic-embed-text` |
-| `KASAL_MEMALIGN_EMBEDDING_DIM` | Embedding dimension (default 1024 on Databricks, 768 locally) | `768` |
-
-A bare Databricks endpoint name is accepted and becomes `databricks:/<name>`.
-On a local MLflow backend the two model variables are required.
+Nothing here is configured by environment variable. Alignment distils
+guidelines with the **judge's own model** — the one chosen for it when the
+judge was created or edited in the Optimize dialog — and embeds the graded
+answers with the **embedder the crew's agents carry** (Agent form; Kasal's
+default embedder when none is set). Both go through Kasal's LLM manager, so
+the provider, endpoint and API key are the ones configured in the UI.
 
 | Symptom | Cause | Fix |
 |---|---|---|
 | `No graded evaluation answers for this judge yet` | Grades were logged under **Overall quality** or under another judge | Grade a few answers with this judge selected, then align |
-| `Set KASAL_MEMALIGN_REFLECTION_MODEL …` | Local MLflow backend without model overrides | Set the variables above |
+| `This judge has no model` | A judge registered without one | Edit the judge, pick a model, align again |
+| `Embedding failed with the crew's embedder` | The embedder on the crew's agents (or the default) is not reachable | Fix the embedder on the Agent form, then align again |
 | Alignment succeeds with no guidelines | The judge already agreed with every grade | Nothing to fix — grade more answers, especially ones you disagree with |
 
 ## Related

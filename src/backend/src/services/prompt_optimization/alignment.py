@@ -21,87 +21,68 @@ LLMManager (deliberately — never via mlflow's model client), reading
 ``instructions``, so the semantic memory reaches GEPA scoring unchanged;
 episodic retrieval stays inside mlflow's own judge invocation.
 
-Model routing: MemAlign's distillation and embeddings run inside DSPy/LiteLLM,
-NOT through LLMManager, so they need LiteLLM-resolvable URIs. On Databricks
-``databricks:/<endpoint>`` resolves through the workspace auth mlflow_session
-already exports. On a local server the URIs come from the environment
-(``KASAL_MEMALIGN_REFLECTION_MODEL`` / ``KASAL_MEMALIGN_EMBEDDING_MODEL``,
-e.g. ``ollama:/qwen3:8b`` and ``ollama:/nomic-embed-text``).
+Model routing: nothing here is configured by environment. The judge grades
+with the model chosen for it in the Optimize dialog, so alignment distils with
+that same model; the graded answers are embedded with the embedder the crew's
+agents carry (Agent form). Both go through LLMManager — see
+``gepa/memalign_bridge``.
 """
 
 import asyncio
+import json
 import logging
-import os
+import uuid
+from collections import Counter
 from typing import Any, Dict, List, Optional
 
+from src.services.prompt_optimization.gepa.judge_model import (
+    _stored_judge_model_to_key,
+)
+from src.services.prompt_optimization.gepa.memalign_bridge import (
+    memalign_via_llm_manager,
+)
 from src.services.prompt_optimization.gepa.mlflow_session import (
     mlflow_session,
     resolve_mlflow_backend,
 )
-from src.utils.user_context import GroupContext
+from src.utils.user_context import GroupContext, UserContext
 
 logger = logging.getLogger(__name__)
 
-#: Workspace embedding endpoint used on Databricks when none is given.
-DATABRICKS_EMBEDDING_MODEL = "databricks-gte-large-en"
-DATABRICKS_EMBEDDING_DIM = 1024
 #: Similar past examples retrieved per judgment (MemAlign's k).
 RETRIEVAL_K = 5
 #: Eval traces scanned for grades — the same window list_crew_evals uses.
 TRACE_WINDOW = 200
 
 
-def memalign_models(
-    backend: Any,
-    reflection_model: Optional[str] = None,
-    embedding_model: Optional[str] = None,
-    embedding_dim: Optional[int] = None,
-) -> Dict[str, Any]:
-    """Resolve the LiteLLM-facing model URIs MemAlign will call.
-
-    Explicit arguments win. A value that already carries a ``scheme:/`` is
-    used verbatim; a bare Kasal model key is wrapped for the backend. On a
-    local server nothing can be guessed — the judge keys are routed by
-    LLMManager, which DSPy does not go through — so the environment must say.
+async def crew_embedder_config(
+    session: Any, crew_id: str, group_context: Optional[GroupContext]
+) -> Optional[Dict[str, Any]]:
+    """The embedder the crew's agents are configured with (Agent form), or
+    ``None`` for LLMManager's default. Agents may disagree; the most common
+    configuration wins. Crews and agents are catalog's domain, so this goes
+    through their services — the group check lives there.
     """
+    from src.services.catalog.agents import AgentService
+    from src.services.catalog.crews import CrewService
 
-    def _uri(value: Optional[str], env: str, databricks_default: Optional[str]) -> str:
-        chosen = value or os.environ.get(env) or ""
-        if ":/" in chosen:
-            return chosen
-        if getattr(backend, "kind", "") == "databricks":
-            key = chosen or databricks_default or ""
-            if key:
-                return f"databricks:/{key}"
-        raise ValueError(
-            f"MemAlign needs a LiteLLM-resolvable model URI: set {env} "
-            "(e.g. 'ollama:/qwen3:8b' or 'openai:/gpt-4.1-mini') or pass one "
-            "explicitly. On Databricks a bare endpoint name is enough."
-        )
-
-    reflection = _uri(
-        reflection_model,
-        "KASAL_MEMALIGN_REFLECTION_MODEL",
-        os.environ.get("GEPA_JUDGE_MODEL"),
-    )
-    embedding = _uri(
-        embedding_model, "KASAL_MEMALIGN_EMBEDDING_MODEL", DATABRICKS_EMBEDDING_MODEL
-    )
-    if embedding_dim is None:
-        env_dim = os.environ.get("KASAL_MEMALIGN_EMBEDDING_DIM")
-        if env_dim:
-            embedding_dim = int(env_dim)
-        elif embedding.startswith("databricks:/"):
-            embedding_dim = DATABRICKS_EMBEDDING_DIM
-        else:
-            # nomic-embed-text and most small open embedders; a mismatch only
-            # costs retrieval quality, never a failed alignment.
-            embedding_dim = 768
-    return {
-        "reflection_lm": reflection,
-        "embedding_model": embedding,
-        "embedding_dim": int(embedding_dim),
-    }
+    try:
+        crew_key = uuid.UUID(str(crew_id))
+    except (ValueError, AttributeError):
+        return None
+    crew = await CrewService(session).get_by_group(crew_key, group_context)
+    if crew is None:
+        return None
+    agent_service = AgentService(session)
+    seen: List[str] = []
+    for agent_id in crew.agent_ids or []:
+        agent = await agent_service.get_with_group_check(agent_id, group_context)
+        config = getattr(agent, "embedder_config", None) if agent else None
+        if isinstance(config, dict) and config:
+            seen.append(json.dumps(config, sort_keys=True))
+    if not seen:
+        return None
+    return json.loads(Counter(seen).most_common(1)[0][0])
 
 
 def has_human_feedback(trace: Any, judge_name: str) -> bool:
@@ -140,9 +121,6 @@ class JudgeAlignmentMixin:
         name: str,
         crew_id: str,
         group_context: Optional[GroupContext] = None,
-        reflection_model: Optional[str] = None,
-        embedding_model: Optional[str] = None,
-        embedding_dim: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Align one of the crew's judges to the human grades on its eval traces.
 
@@ -153,16 +131,21 @@ class JudgeAlignmentMixin:
         scores with it, no further wiring.
 
         Returns what was learned, for the UI: the distilled guidelines, how
-        many graded answers were used, and the judge's registry name.
+        many graded answers were used, the model that distilled them and the
+        judge's registry name.
         """
         backend = await resolve_mlflow_backend(self.session, group_context)
         if not backend:
             raise ValueError("Judge alignment requires MLflow (Databricks or local).")
         prefix = self._crew_judge_prefix(crew_id)
         full_name = name if name.startswith(prefix) else f"{prefix}{name}"
-        models = memalign_models(
-            backend, reflection_model, embedding_model, embedding_dim
+        embedder_config = await crew_embedder_config(
+            self.session, crew_id, group_context
         )
+        # Captured on the request: the bridge submits LLMManager calls back to
+        # THIS loop from MemAlign's threads, under this user's context.
+        loop = asyncio.get_running_loop()
+        user_token = UserContext.get_user_token()
 
         def _align() -> Dict[str, Any]:
             import mlflow
@@ -171,6 +154,12 @@ class JudgeAlignmentMixin:
 
             with mlflow_session(backend):
                 judge = get_scorer(name=full_name)
+                model = _stored_judge_model_to_key(getattr(judge, "model", None))
+                if not model:
+                    raise ValueError(
+                        "This judge has no model. Edit it, pick the model it "
+                        "grades with, then align."
+                    )
                 traces = mlflow.search_traces(
                     filter_string=f"tags.kasal_crew_id = '{crew_id}'",
                     max_results=TRACE_WINDOW,
@@ -182,9 +171,12 @@ class JudgeAlignmentMixin:
                         "No graded evaluation answers for this judge yet. Grade a "
                         "few answers with this judge selected, then align."
                     )
-                optimizer = MemAlignOptimizer(retrieval_k=RETRIEVAL_K, **models)
-                aligned = optimizer.align(judge, graded)
-                aligned.register()
+                with memalign_via_llm_manager(
+                    loop, model, embedder_config, group_context, user_token
+                ) as models:
+                    optimizer = MemAlignOptimizer(retrieval_k=RETRIEVAL_K, **models)
+                    aligned = optimizer.align(judge, graded)
+                    aligned.register()
                 dump = aligned.model_dump()
                 guidelines = [
                     str(g.get("guideline_text", "")).strip()
@@ -192,8 +184,9 @@ class JudgeAlignmentMixin:
                     if isinstance(g, dict)
                 ]
                 logger.info(
-                    "Aligned judge %s from %d graded answers: %d guidelines",
+                    "Aligned judge %s with %s from %d graded answers: %d guidelines",
                     full_name,
+                    model,
                     len(graded),
                     len(guidelines),
                 )
@@ -202,7 +195,7 @@ class JudgeAlignmentMixin:
                     "full_name": full_name,
                     "traces_used": len(graded),
                     "guidelines": [g for g in guidelines if g],
-                    "models": models,
+                    "model": model,
                 }
 
         return await asyncio.to_thread(_align)

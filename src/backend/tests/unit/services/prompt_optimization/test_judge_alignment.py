@@ -14,8 +14,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.services.prompt_optimization.alignment import (
+    crew_embedder_config,
     has_human_feedback,
-    memalign_models,
 )
 from src.services.prompt_optimization.service import PromptOptimizationService
 
@@ -32,43 +32,6 @@ def _trace(trace_id, assessments):
         info=SimpleNamespace(trace_id=trace_id, assessments=assessments),
         search_assessments=lambda: assessments,
     )
-
-
-class TestMemalignModels:
-    def test_databricks_wraps_bare_keys_and_defaults_the_embedder(self, monkeypatch):
-        monkeypatch.delenv("KASAL_MEMALIGN_REFLECTION_MODEL", raising=False)
-        monkeypatch.delenv("KASAL_MEMALIGN_EMBEDDING_MODEL", raising=False)
-        monkeypatch.delenv("KASAL_MEMALIGN_EMBEDDING_DIM", raising=False)
-        monkeypatch.setenv("GEPA_JUDGE_MODEL", "databricks-claude-haiku-4-5")
-        m = memalign_models(SimpleNamespace(kind="databricks"))
-        assert m == {
-            "reflection_lm": "databricks:/databricks-claude-haiku-4-5",
-            "embedding_model": "databricks:/databricks-gte-large-en",
-            "embedding_dim": 1024,
-        }
-
-    def test_local_needs_litellm_uris_from_the_environment(self, monkeypatch):
-        monkeypatch.delenv("KASAL_MEMALIGN_REFLECTION_MODEL", raising=False)
-        with pytest.raises(ValueError, match="KASAL_MEMALIGN_REFLECTION_MODEL"):
-            memalign_models(SimpleNamespace(kind="local"))
-        monkeypatch.setenv("KASAL_MEMALIGN_REFLECTION_MODEL", "ollama:/qwen3:8b")
-        monkeypatch.setenv("KASAL_MEMALIGN_EMBEDDING_MODEL", "ollama:/nomic-embed-text")
-        monkeypatch.delenv("KASAL_MEMALIGN_EMBEDDING_DIM", raising=False)
-        m = memalign_models(SimpleNamespace(kind="local"))
-        assert m["reflection_lm"] == "ollama:/qwen3:8b"
-        assert m["embedding_model"] == "ollama:/nomic-embed-text"
-        assert m["embedding_dim"] == 768  # small open embedder default
-
-    def test_explicit_arguments_win_and_uris_pass_through(self, monkeypatch):
-        monkeypatch.setenv("KASAL_MEMALIGN_REFLECTION_MODEL", "ollama:/qwen3:8b")
-        m = memalign_models(
-            SimpleNamespace(kind="local"),
-            reflection_model="openai:/gpt-4.1-mini",
-            embedding_model="openai:/text-embedding-3-small",
-            embedding_dim=512,
-        )
-        assert m["reflection_lm"] == "openai:/gpt-4.1-mini"
-        assert m["embedding_dim"] == 512
 
 
 class TestHasHumanFeedback:
@@ -98,12 +61,21 @@ def _no_session(backend):
 
 
 class TestAlignJudge:
+    @staticmethod
+    def _bridge(armed):
+        @contextmanager
+        def fake(loop, model, embedder_config, group_context=None, user_token=None):
+            armed.update(model=model, embedder_config=embedder_config, loop=loop)
+            yield {
+                "reflection_lm": "openai:/kasal-llm-manager",
+                "embedding_model": "openai:/kasal-embedder",
+                "embedding_dim": 4,
+            }
+
+        return fake
+
     @pytest.mark.asyncio
-    async def test_aligns_from_graded_traces_and_registers_the_next_version(
-        self, monkeypatch
-    ):
-        monkeypatch.setenv("KASAL_MEMALIGN_REFLECTION_MODEL", "ollama:/qwen3:8b")
-        monkeypatch.setenv("KASAL_MEMALIGN_EMBEDDING_MODEL", "ollama:/nomic-embed-text")
+    async def test_aligns_with_the_judges_own_model_through_llm_manager(self):
         judge_name = f"{PREFIX}accuracy"
         traces = [
             _trace("graded", [_assessment(judge_name, "HUMAN")]),
@@ -111,6 +83,7 @@ class TestAlignJudge:
             _trace("other-judge", [_assessment(f"{PREFIX}tone", "HUMAN")]),
         ]
         base_judge = MagicMock(name="judge")
+        base_judge.model = "openai:/qwen-30b"  # stored as a URI, invoked as a key
         aligned = MagicMock(name="aligned")
         aligned.model_dump.return_value = {
             "semantic_memory": [
@@ -121,6 +94,7 @@ class TestAlignJudge:
         optimizer = MagicMock()
         optimizer.align.return_value = aligned
         optimizer_cls = MagicMock(return_value=optimizer)
+        armed = {}
 
         svc = _service()
         with (
@@ -132,6 +106,14 @@ class TestAlignJudge:
             ),
             patch(
                 "src.services.prompt_optimization.alignment.mlflow_session", _no_session
+            ),
+            patch(
+                "src.services.prompt_optimization.alignment.crew_embedder_config",
+                new=AsyncMock(return_value={"provider": "ollama"}),
+            ),
+            patch(
+                "src.services.prompt_optimization.alignment.memalign_via_llm_manager",
+                self._bridge(armed),
             ),
             patch("mlflow.search_traces", return_value=traces),
             patch(
@@ -147,26 +129,28 @@ class TestAlignJudge:
         aligned_traces = optimizer.align.call_args.args[1]
         assert [t.info.trace_id for t in aligned_traces] == ["graded"]
         assert optimizer.align.call_args.args[0] is base_judge
-        # MemAlign is configured from the resolved URIs.
+        # The judge's OWN model (chosen in the UI) distils, via LLMManager, and
+        # the crew's embedder embeds — nothing read from the environment.
+        assert armed["model"] == "qwen-30b"
+        assert armed["embedder_config"] == {"provider": "ollama"}
         kwargs = optimizer_cls.call_args.kwargs
-        assert kwargs["reflection_lm"] == "ollama:/qwen3:8b"
-        assert kwargs["embedding_model"] == "ollama:/nomic-embed-text"
+        assert kwargs["reflection_lm"] == "openai:/kasal-llm-manager"
+        assert kwargs["embedding_dim"] == 4
         assert kwargs["retrieval_k"] == 5
         # Registered under the same name: the next GEPA run scores with it.
         aligned.register.assert_called_once_with()
         assert result["full_name"] == judge_name
         assert result["name"] == "accuracy"
         assert result["traces_used"] == 1
+        assert result["model"] == "qwen-30b"
         assert result["guidelines"] == ["Prefer certified views over raw tables."]
 
     @pytest.mark.asyncio
-    async def test_no_graded_answers_is_a_clear_error_not_an_mlflow_one(
-        self, monkeypatch
-    ):
-        monkeypatch.setenv("KASAL_MEMALIGN_REFLECTION_MODEL", "ollama:/qwen3:8b")
-        monkeypatch.setenv("KASAL_MEMALIGN_EMBEDDING_MODEL", "ollama:/nomic-embed-text")
+    async def test_no_graded_answers_is_a_clear_error_not_an_mlflow_one(self):
         svc = _service()
         optimizer_cls = MagicMock()
+        judge = MagicMock()
+        judge.model = "openai:/qwen-30b"
         with (
             patch(
                 "src.services.prompt_optimization.alignment.resolve_mlflow_backend",
@@ -177,13 +161,43 @@ class TestAlignJudge:
             patch(
                 "src.services.prompt_optimization.alignment.mlflow_session", _no_session
             ),
+            patch(
+                "src.services.prompt_optimization.alignment.crew_embedder_config",
+                new=AsyncMock(return_value=None),
+            ),
             patch("mlflow.search_traces", return_value=[_trace("t", [])]),
-            patch("mlflow.genai.scorers.get_scorer", return_value=MagicMock()),
+            patch("mlflow.genai.scorers.get_scorer", return_value=judge),
             patch("mlflow.genai.judges.optimizers.MemAlignOptimizer", optimizer_cls),
         ):
             with pytest.raises(ValueError, match="Grade a few answers"):
                 await svc.align_judge(f"{PREFIX}accuracy", CREW)
         optimizer_cls.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_judge_without_a_model_cannot_be_aligned(self):
+        svc = _service()
+        judge = MagicMock()
+        judge.model = None
+        with (
+            patch(
+                "src.services.prompt_optimization.alignment.resolve_mlflow_backend",
+                new=AsyncMock(
+                    return_value=SimpleNamespace(kind="local", experiment="e")
+                ),
+            ),
+            patch(
+                "src.services.prompt_optimization.alignment.mlflow_session", _no_session
+            ),
+            patch(
+                "src.services.prompt_optimization.alignment.crew_embedder_config",
+                new=AsyncMock(return_value=None),
+            ),
+            patch("mlflow.search_traces") as search,
+            patch("mlflow.genai.scorers.get_scorer", return_value=judge),
+        ):
+            with pytest.raises(ValueError, match="no model"):
+                await svc.align_judge("accuracy", CREW)
+        search.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_requires_an_mlflow_backend(self):
@@ -194,6 +208,42 @@ class TestAlignJudge:
         ):
             with pytest.raises(ValueError, match="requires MLflow"):
                 await svc.align_judge("accuracy", CREW)
+
+
+class TestCrewEmbedderConfig:
+    @pytest.mark.asyncio
+    async def test_most_common_agent_embedder_wins(self):
+        crew = SimpleNamespace(agent_ids=["a1", "a2", "a3", "a4"])
+        ollama = {"provider": "ollama", "config": {"model": "nomic-embed-text"}}
+        agents = {
+            "a1": SimpleNamespace(embedder_config=ollama),
+            "a2": SimpleNamespace(embedder_config={"provider": "databricks"}),
+            "a3": SimpleNamespace(embedder_config=dict(ollama)),
+            "a4": SimpleNamespace(embedder_config=None),
+        }
+        crew_service = MagicMock()
+        crew_service.get_by_group = AsyncMock(return_value=crew)
+        agent_service = MagicMock()
+        agent_service.get_with_group_check = AsyncMock(
+            side_effect=lambda i, _g: agents.get(i)
+        )
+        with (
+            patch("src.services.catalog.crews.CrewService", return_value=crew_service),
+            patch(
+                "src.services.catalog.agents.AgentService", return_value=agent_service
+            ),
+        ):
+            config = await crew_embedder_config(MagicMock(), CREW, MagicMock())
+        assert config == ollama
+
+    @pytest.mark.asyncio
+    async def test_none_for_a_missing_crew_or_a_malformed_id(self):
+        crew_service = MagicMock()
+        crew_service.get_by_group = AsyncMock(return_value=None)
+        with patch("src.services.catalog.crews.CrewService", return_value=crew_service):
+            assert await crew_embedder_config(MagicMock(), CREW, None) is None
+            assert await crew_embedder_config(MagicMock(), "not-a-uuid", None) is None
+        crew_service.get_by_group.assert_awaited_once()
 
 
 class TestGradesAreAttributedToTheJudge:

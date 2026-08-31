@@ -251,24 +251,13 @@ class TestJudgeEndpoints:
             await align_judge("acc", {}, _group(), MagicMock())
 
     @pytest.mark.asyncio
-    async def test_align_judge_passes_through_with_model_overrides(self, service):
+    async def test_align_judge_passes_the_crew_and_group_through(self, service):
         service.align_judge = AsyncMock(return_value={"guidelines": ["g1"]})
-        result = await align_judge(
-            "acc",
-            {
-                "crew_id": "c1",
-                "reflection_model": "ollama:/qwen3:8b",
-                "embedding_dim": "768",
-            },
-            _group(),
-            MagicMock(),
-        )
+        group = _group()
+        result = await align_judge("acc", {"crew_id": "c1"}, group, MagicMock())
         assert result == {"guidelines": ["g1"]}
-        args, kwargs = service.align_judge.await_args
-        assert args[0] == "acc" and args[1] == "c1"
-        assert kwargs["reflection_model"] == "ollama:/qwen3:8b"
-        assert kwargs["embedding_model"] is None
-        assert kwargs["embedding_dim"] == 768
+        # No model knobs on the wire: the judge's own model (UI) is used.
+        service.align_judge.assert_awaited_once_with("acc", "c1", group)
 
     @pytest.mark.asyncio
     async def test_align_judge_turns_service_errors_into_400(self, service):
