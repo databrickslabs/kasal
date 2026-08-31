@@ -156,8 +156,9 @@ class TestSPNFromEnv:
         assert result.auth_method == "service_principal"
 
     @pytest.mark.asyncio
-    async def test_spn_strips_pat_before_sdk_call(self):
-        """PAT env vars are stripped before WorkspaceClient to avoid dual-auth conflict."""
+    async def test_spn_keeps_pat_in_env_and_names_its_auth_type(self):
+        """The SP client names auth_type="oauth-m2m"; the PAT env vars stay for
+        every other thread (popping them raced — issue #8)."""
         import sys
 
         mock_mlflow_mod = _mlflow_mock()
@@ -171,6 +172,7 @@ class TestSPNFromEnv:
             captured_env_during_call["DATABRICKS_API_KEY"] = os.environ.get(
                 "DATABRICKS_API_KEY"
             )
+            captured_env_during_call["auth_type"] = _kwargs.get("auth_type")
             return _mock_workspace_client()
 
         mock_wc_cls = MagicMock(side_effect=_capturing_wc)
@@ -201,8 +203,9 @@ class TestSPNFromEnv:
             )
 
         # PAT should have been stripped during SDK call
-        assert captured_env_during_call["DATABRICKS_TOKEN"] is None
-        assert captured_env_during_call["DATABRICKS_API_KEY"] is None
+        assert captured_env_during_call["DATABRICKS_TOKEN"] == "dapi-old-pat"
+        assert captured_env_during_call["DATABRICKS_API_KEY"] is not None
+        assert captured_env_during_call["auth_type"] == "oauth-m2m"
         assert result.auth_method == "service_principal"
 
     @pytest.mark.asyncio

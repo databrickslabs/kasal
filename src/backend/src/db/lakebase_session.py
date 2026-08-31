@@ -194,21 +194,16 @@ class LakebaseSessionFactory:
 
             if client_id and client_secret and host:
                 logger.info("[LAKEBASE SESSION] Using SPN OAuth (client credentials)")
-                # Strip PAT vars to prevent SDK dual-auth conflict (oauth + pat)
-                # Same pattern as mlflow_setup.py
-                _pat_backup = {}
-                for _k in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY"):
-                    if _k in os.environ:
-                        _pat_backup[_k] = os.environ.pop(_k)
-                try:
-                    with_product(f"{KASAL_BASE}_{KasalProduct.LAKEBASE}", VERSION)
-                    self._workspace_client = WorkspaceClient(
-                        host=host,
-                        client_id=client_id,
-                        client_secret=client_secret,
-                    )
-                finally:
-                    os.environ.update(_pat_backup)
+                # auth_type names the credentials passed, so a PAT in the env
+                # cannot conflict — and nothing is popped from the process env
+                # (that pop raced every other thread; issue #8).
+                with_product(f"{KASAL_BASE}_{KasalProduct.LAKEBASE}", VERSION)
+                self._workspace_client = WorkspaceClient(
+                    host=host,
+                    client_id=client_id,
+                    client_secret=client_secret,
+                    auth_type="oauth-m2m",
+                )
                 logger.info(
                     "[LAKEBASE SESSION] SPN WorkspaceClient created successfully"
                 )

@@ -207,6 +207,7 @@ class TestGetWorkspaceClient:
                 host="https://example.com",
                 client_id="test-client-id",
                 client_secret="test-secret",
+                auth_type="oauth-m2m",
             )
 
     @pytest.mark.asyncio
@@ -247,7 +248,10 @@ class TestGetWorkspaceClient:
         # SPN path still taken using the CACHED creds — no PAT fallback, no ValueError.
         assert result is mock_ws
         mock_cls.assert_called_once_with(
-            host="https://ws.example.com", client_id="cid", client_secret="secret"
+            host="https://ws.example.com",
+            client_id="cid",
+            client_secret="secret",
+            auth_type="oauth-m2m",
         )
 
     @pytest.mark.asyncio
@@ -1561,7 +1565,9 @@ class TestMissingCoverage:
     """Tests targeting the remaining uncovered lines/branches."""
 
     @pytest.mark.asyncio
-    async def test_spn_oauth_strips_pat_env_vars(self, monkeypatch):
+    async def test_spn_oauth_keeps_pat_env_vars_and_names_its_auth_type(
+        self, monkeypatch
+    ):
         """Line 87: PAT env vars are stripped (popped) while creating SPN client."""
         from src.db.lakebase_session import LakebaseSessionFactory
 
@@ -1575,17 +1581,20 @@ class TestMissingCoverage:
         captured = {}
 
         def fake_ws(**kwargs):
-            # During WorkspaceClient construction the PAT vars must be removed
+            # The client names its own auth_type, so the PAT vars STAY for
+            # every other thread (popping them raced — issue #8).
             captured["DATABRICKS_TOKEN"] = os.environ.get("DATABRICKS_TOKEN")
             captured["DATABRICKS_API_KEY"] = os.environ.get("DATABRICKS_API_KEY")
+            captured["auth_type"] = kwargs.get("auth_type")
             return MagicMock()
 
         with patch("src.db.lakebase_session.WorkspaceClient", side_effect=fake_ws):
             await factory._get_workspace_client()
 
         # They were popped during construction
-        assert captured["DATABRICKS_TOKEN"] is None
-        assert captured["DATABRICKS_API_KEY"] is None
+        assert captured["DATABRICKS_TOKEN"] == "pat-token"
+        assert captured["DATABRICKS_API_KEY"] == "api-key"
+        assert captured["auth_type"] == "oauth-m2m"
         # And restored afterwards
         assert os.environ.get("DATABRICKS_TOKEN") == "pat-token"
         assert os.environ.get("DATABRICKS_API_KEY") == "api-key"

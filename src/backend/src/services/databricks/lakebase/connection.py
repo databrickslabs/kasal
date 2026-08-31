@@ -84,18 +84,15 @@ class LakebaseConnectionService(BaseService):
                 )
                 # Set custom User-Agent for Lakebase operations
                 with_product(f"{KASAL_BASE}_{KasalProduct.LAKEBASE}", VERSION)
-                _pat_backup = {}
-                for _k in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY"):
-                    if _k in os.environ:
-                        _pat_backup[_k] = os.environ.pop(_k)
-                try:
-                    self._workspace_client = WorkspaceClient(
-                        host=host,
-                        client_id=client_id,
-                        client_secret=client_secret,
-                    )
-                finally:
-                    os.environ.update(_pat_backup)
+                # auth_type names the credentials passed, so a PAT in the env
+                # cannot conflict — nothing is popped from the process env
+                # (that pop raced every other thread; issue #8).
+                self._workspace_client = WorkspaceClient(
+                    host=host,
+                    client_id=client_id,
+                    client_secret=client_secret,
+                    auth_type="oauth-m2m",
+                )
                 logger.info("[LAKEBASE AUTH] SPN WorkspaceClient created successfully")
                 return self._workspace_client
 

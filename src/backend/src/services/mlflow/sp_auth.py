@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from contextlib import contextmanager
 from typing import Dict, Iterator, Optional
 
@@ -81,7 +82,17 @@ def derive_sp_bearer(host: str, client_id: str, client_secret: str) -> Optional[
     try:
         from databricks.sdk import WorkspaceClient
 
-        w = WorkspaceClient(host=host, client_id=client_id, client_secret=client_secret)
+        # auth_type names the credentials passed, so neither a PAT in the env
+        # nor a pinned DATABRICKS_AUTH_TYPE from a concurrent window can
+        # redirect this client (issue #8: with the env pinned to "pat" and the
+        # PAT momentarily absent, the exchange failed with "cannot configure
+        # default credentials").
+        w = WorkspaceClient(
+            host=host,
+            client_id=client_id,
+            client_secret=client_secret,
+            auth_type="oauth-m2m",
+        )
         headers: Dict[str, str] = w.config.authenticate() or {}
         bearer = headers.get("Authorization", "")
         return bearer[len("Bearer ") :] if bearer.startswith("Bearer ") else None
@@ -90,9 +101,58 @@ def derive_sp_bearer(host: str, client_id: str, client_secret: str) -> Optional[
         return None
 
 
+_PIN_LOCK = threading.RLock()
+_PIN_DEPTH = 0
+#: SWAP_KEYS as they were before the FIRST active window; restored by the last.
+_PIN_ORIGINAL: Dict[str, Optional[str]] = {}
+
+
+@contextmanager
+def _pinned(
+    *, host: Optional[str] = None, token: Optional[str] = None
+) -> Iterator[None]:
+    """Pin token auth for the duration of a window, reference-counted.
+
+    Windows run on worker threads and overlap (a judge listing, a GEPA
+    prompt registration and a tracing setup can all be active at once). Each
+    used to save and restore the env independently, so the last one out
+    restored the FIRST one's intermediate state — which is how a stale
+    ``DATABRICKS_AUTH_TYPE=pat`` outlived every window (issue #8). Now the
+    first window snapshots :data:`SWAP_KEYS`, later ones only apply their
+    values, and the snapshot is restored when the last window exits.
+    """
+    global _PIN_DEPTH
+    with _PIN_LOCK:
+        if _PIN_DEPTH == 0:
+            _PIN_ORIGINAL.clear()
+            _PIN_ORIGINAL.update({k: os.environ.get(k) for k in SWAP_KEYS})
+        _PIN_DEPTH += 1
+        if host is not None:
+            os.environ["DATABRICKS_HOST"] = host
+        if token is not None:
+            os.environ["DATABRICKS_TOKEN"] = token
+        # The SDK then uses DATABRICKS_TOKEN, skips its "more than one
+        # authorization method" validation, and a bare WorkspaceClient() built
+        # in the window (MLflow's get_trace warehouse resolution) uses the
+        # token rather than oauth-m2m.
+        os.environ["DATABRICKS_AUTH_TYPE"] = "pat"
+    try:
+        yield
+    finally:
+        with _PIN_LOCK:
+            _PIN_DEPTH -= 1
+            if _PIN_DEPTH == 0:
+                for key, value in _PIN_ORIGINAL.items():
+                    if value is not None:
+                        os.environ[key] = value
+                    elif key in os.environ:
+                        del os.environ[key]
+                _PIN_ORIGINAL.clear()
+
+
 @contextmanager
 def pat_auth_env() -> Iterator[bool]:
-    """Pin ``DATABRICKS_AUTH_TYPE=pat`` for the duration, WITHOUT stripping the
+    """Pin ``DATABRICKS_AUTH_TYPE=pat`` for the duration, WITHOUT touching the
     OAuth SP creds.
 
     Use around calls that internally build a bare ``WorkspaceClient()`` AND also
@@ -101,59 +161,36 @@ def pat_auth_env() -> Iterator[bool]:
     resolves a SQL warehouse via a bare client (which dies under the app-injected
     ``oauth-m2m`` when no m2m creds resolve), while ``predict_fn`` executes the
     crew whose LLM auth may fall back to SPN. Pinning ``auth_type=pat``
-    disambiguates for the bare client (it uses ``DATABRICKS_TOKEN``) without
-    removing the creds the crew path might use — the same disambiguation the
-    explicit ``WorkspaceClient(..., auth_type="pat")`` in ``databricks_auth`` uses.
+    disambiguates for the bare client (it uses ``DATABRICKS_TOKEN``) — the same
+    disambiguation the explicit ``WorkspaceClient(..., auth_type="pat")`` in
+    ``databricks_auth`` uses.
 
     Yields ``True`` when a token is present to pin against, ``False`` (no-op)
-    otherwise. Restores the original ``DATABRICKS_AUTH_TYPE`` after.
+    otherwise.
     """
     if not os.environ.get("DATABRICKS_TOKEN"):
         yield False
         return
-    saved = os.environ.get("DATABRICKS_AUTH_TYPE")
-    try:
-        os.environ["DATABRICKS_AUTH_TYPE"] = "pat"
+    with _pinned():
         yield True
-    finally:
-        if saved is not None:
-            os.environ["DATABRICKS_AUTH_TYPE"] = saved
-        elif "DATABRICKS_AUTH_TYPE" in os.environ:
-            del os.environ["DATABRICKS_AUTH_TYPE"]
 
 
 @contextmanager
 def single_auth_env(
     *, host: Optional[str] = None, token: Optional[str] = None
 ) -> Iterator[None]:
-    """Present ``token`` as the SINGLE Databricks auth method for one call.
+    """Present ``token`` as the Databricks auth method for one call.
 
-    Sets ``DATABRICKS_TOKEN`` (and ``DATABRICKS_HOST`` when given), pins
-    ``DATABRICKS_AUTH_TYPE=pat``, and restores every :data:`SWAP_KEYS` var
-    afterwards. The OAuth SP variables are NOT removed — see the module
-    docstring: the pinned auth type already makes the SDK ignore them, and
-    removing them starved every concurrent reader of the process env. Use when
-    a bearer is ALREADY in hand (e.g. an ``AuthContext.token`` derived earlier).
-    For the derive-from-ambient-creds case, use :func:`sp_single_auth`.
+    Sets ``DATABRICKS_TOKEN`` (and ``DATABRICKS_HOST`` when given) and pins
+    ``DATABRICKS_AUTH_TYPE=pat``; the original :data:`SWAP_KEYS` come back when
+    the last overlapping window exits. The OAuth SP variables are NOT removed —
+    see the module docstring: the pinned auth type already makes the SDK ignore
+    them, and removing them starved every concurrent reader of the process env.
+    Use when a bearer is ALREADY in hand (e.g. an ``AuthContext.token`` derived
+    earlier). For the derive-from-ambient-creds case, use :func:`sp_single_auth`.
     """
-    saved = {k: os.environ.get(k) for k in SWAP_KEYS}
-    try:
-        if host is not None:
-            os.environ["DATABRICKS_HOST"] = host
-        if token is not None:
-            os.environ["DATABRICKS_TOKEN"] = token
-        # Pin token auth: the SDK then uses DATABRICKS_TOKEN and skips its
-        # "more than one authorization method" validation, and a bare
-        # WorkspaceClient() built during the window (MLflow's get_trace
-        # warehouse resolution) uses the token rather than oauth-m2m.
-        os.environ["DATABRICKS_AUTH_TYPE"] = "pat"
+    with _pinned(host=host, token=token):
         yield
-    finally:
-        for key, value in saved.items():
-            if value is not None:
-                os.environ[key] = value
-            elif key in os.environ:
-                del os.environ[key]
 
 
 @contextmanager

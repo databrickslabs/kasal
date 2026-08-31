@@ -414,22 +414,21 @@ async def configure_mlflow_in_subprocess(
 
             alog.info("[SUBPROCESS] SDK imported OK")
 
-            # Temporarily strip PAT/API-KEY from env to prevent
-            # SDK dual-auth conflict (oauth + pat)
-            _pat_backup = {}
-            for _k in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY"):
-                if _k in os.environ:
-                    _pat_backup[_k] = os.environ.pop(_k)
-            try:
-                from databricks.sdk.useragent import with_product
+            from databricks.sdk.useragent import with_product
 
-                from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
+            from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
 
-                with_product(f"{KASAL_BASE}_{KasalProduct.MLFLOW}", VERSION)
-                w = _WC(host=host, client_id=client_id, client_secret=client_secret)
-                headers = w.config.authenticate()
-            finally:
-                os.environ.update(_pat_backup)
+            with_product(f"{KASAL_BASE}_{KasalProduct.MLFLOW}", VERSION)
+            # auth_type names the credentials passed: a PAT in the env, or a
+            # DATABRICKS_AUTH_TYPE inherited from the parent mid-window, can
+            # no longer redirect this client. Nothing is popped from the env.
+            w = _WC(
+                host=host,
+                client_id=client_id,
+                client_secret=client_secret,
+                auth_type="oauth-m2m",
+            )
+            headers = w.config.authenticate()
 
             alog.info("[SUBPROCESS] authenticate() returned OK")
             auth_header = headers.get("Authorization", "")

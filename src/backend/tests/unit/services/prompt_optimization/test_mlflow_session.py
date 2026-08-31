@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.services.mlflow import sp_auth
 from src.services.prompt_optimization.gepa import mlflow_session as ms
 from src.services.prompt_optimization.gepa.registry_errors import (
     is_permission_denied,
@@ -196,3 +197,65 @@ class TestGrantHint:
         assert "ai_specialist.kasal" in hint
         assert "USE CATALOG ON CATALOG ai_specialist" in hint
         assert "MANAGE" in hint
+
+
+class TestPinsAreReferenceCounted:
+    """Windows overlap across worker threads; restoring independently left a
+    stale DATABRICKS_AUTH_TYPE=pat behind (issue #8)."""
+
+    def test_nested_windows_restore_the_original_only_once(self, monkeypatch):
+        monkeypatch.setenv("DATABRICKS_AUTH_TYPE", "oauth-m2m")
+        monkeypatch.setenv("DATABRICKS_CLIENT_ID", "cid")
+        monkeypatch.delenv("DATABRICKS_TOKEN", raising=False)
+        with sp_auth.single_auth_env(token="a"):
+            with sp_auth.single_auth_env(token="b"):
+                assert os.environ["DATABRICKS_TOKEN"] == "b"
+            # The inner exit must not restore the outer's intermediate state.
+            assert os.environ["DATABRICKS_AUTH_TYPE"] == "pat"
+            assert "DATABRICKS_TOKEN" in os.environ
+            assert os.environ["DATABRICKS_CLIENT_ID"] == "cid"  # never popped
+        assert os.environ["DATABRICKS_AUTH_TYPE"] == "oauth-m2m"
+        assert "DATABRICKS_TOKEN" not in os.environ
+
+    def test_windows_on_two_threads_leave_no_pin_behind(self, monkeypatch):
+        import threading
+
+        monkeypatch.setenv("DATABRICKS_AUTH_TYPE", "oauth-m2m")
+        monkeypatch.delenv("DATABRICKS_TOKEN", raising=False)
+        a_entered, b_done = threading.Event(), threading.Event()
+
+        def window_a():
+            with sp_auth.single_auth_env(token="a"):
+                a_entered.set()
+                b_done.wait(5)
+
+        thread = threading.Thread(target=window_a)
+        thread.start()
+        assert a_entered.wait(5)
+        with sp_auth.single_auth_env(token="b"):
+            pass
+        # B left while A is still active: the pin stays.
+        assert os.environ["DATABRICKS_AUTH_TYPE"] == "pat"
+        b_done.set()
+        thread.join(5)
+        assert os.environ["DATABRICKS_AUTH_TYPE"] == "oauth-m2m"
+        assert "DATABRICKS_TOKEN" not in os.environ
+
+    def test_pat_auth_env_shares_the_same_counter(self, monkeypatch):
+        monkeypatch.setenv("DATABRICKS_AUTH_TYPE", "oauth-m2m")
+        monkeypatch.setenv("DATABRICKS_TOKEN", "pat")
+        with sp_auth.pat_auth_env() as active:
+            assert active is True
+            with sp_auth.single_auth_env(token="bearer"):
+                pass
+            assert os.environ["DATABRICKS_AUTH_TYPE"] == "pat"
+        assert os.environ["DATABRICKS_AUTH_TYPE"] == "oauth-m2m"
+        assert os.environ["DATABRICKS_TOKEN"] == "pat"
+
+    def test_derive_sp_bearer_names_its_auth_type(self):
+        with patch("databricks.sdk.WorkspaceClient") as wc:
+            wc.return_value.config.authenticate.return_value = {
+                "Authorization": "Bearer tok"
+            }
+            assert sp_auth.derive_sp_bearer("https://h", "cid", "sec") == "tok"
+        assert wc.call_args.kwargs["auth_type"] == "oauth-m2m"

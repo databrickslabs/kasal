@@ -173,6 +173,7 @@ class TestGetWorkspaceClient:
                 host="https://example.com",
                 client_id="spn-id",
                 client_secret="spn-secret",
+                auth_type="oauth-m2m",
             )
 
     @pytest.mark.asyncio
@@ -450,9 +451,11 @@ class TestGetWorkspaceClientSpnPatBackup:
         def _fake_ws(**kwargs):
             import os as _os
 
-            # During the SDK call, PAT vars must be removed
+            # The client names its own auth_type, so the PAT vars stay in the
+            # env for every other thread (popping them raced — issue #8).
             captured["token_present"] = "DATABRICKS_TOKEN" in _os.environ
             captured["api_key_present"] = "DATABRICKS_API_KEY" in _os.environ
+            captured["kwargs"] = kwargs
             return MagicMock()
 
         with (
@@ -465,9 +468,11 @@ class TestGetWorkspaceClientSpnPatBackup:
             result = await svc.get_workspace_client()
 
             assert result is svc._workspace_client
-            assert captured["token_present"] is False
-            assert captured["api_key_present"] is False
-            # restored afterwards
+            assert captured["token_present"] is True
+            assert captured["api_key_present"] is True
+            assert captured["kwargs"]["auth_type"] == "oauth-m2m"
+            assert captured["kwargs"]["client_id"] == "spn-id"
+            # still there afterwards
             assert os.environ["DATABRICKS_TOKEN"] == "pat-token"
             assert os.environ["DATABRICKS_API_KEY"] == "api-key"
 

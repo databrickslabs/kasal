@@ -152,17 +152,17 @@ def _setup_sync(
     try:
         from databricks.sdk import WorkspaceClient as _WC
 
-        # Temporarily strip PAT/API-KEY so the SDK does not raise on dual-auth
-        # (oauth + pat). This runs in the main server process, so restore them.
-        _pat_backup = {}
-        for _k in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY"):
-            if _k in os.environ:
-                _pat_backup[_k] = os.environ.pop(_k)
-        try:
-            w = _WC(host=host, client_id=client_id, client_secret=client_secret)
-            headers = w.config.authenticate()
-        finally:
-            os.environ.update(_pat_backup)
+        # auth_type names the credentials passed, so neither a PAT in the env
+        # nor a DATABRICKS_AUTH_TYPE pinned by a concurrent MLflow window can
+        # redirect this client — and nothing is popped from the process env
+        # (a pop here raced every other thread; issue #8).
+        w = _WC(
+            host=host,
+            client_id=client_id,
+            client_secret=client_secret,
+            auth_type="oauth-m2m",
+        )
+        headers = w.config.authenticate()
 
         auth_header = headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
