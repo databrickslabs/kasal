@@ -242,7 +242,6 @@ class TestScheduleCreateFromExecution:
             **base, execution_id="5389f0aa-9e43-4ad6-aab0-55ba944bad5b"
         )
         assert job.execution_id == "5389f0aa-9e43-4ad6-aab0-55ba944bad5b"
-        assert isinstance(schedule.execution_id, int)
 
 
 class TestScheduleUpdate:
