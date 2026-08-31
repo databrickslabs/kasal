@@ -178,3 +178,19 @@ async def _ensure_databricks_config_columns(conn) -> None:
         "databricksconfig",
         [("ai_gateway_enabled", "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false")],
     )
+
+
+async def _ensure_group_users_columns(conn) -> None:
+    """group_users.allow_agent_builder / allow_flow_builder — the per-membership
+    builder-capability overrides (NULL derives from the role). They shipped with
+    an Alembic migration only, which never runs at startup, so on any database
+    older than the columns every load of a membership failed and teamspace
+    resolution 500'd on each request."""
+    await ensure_columns(
+        conn,
+        "group_users",
+        [
+            ("allow_agent_builder", "BOOLEAN", "BOOLEAN"),
+            ("allow_flow_builder", "BOOLEAN", "BOOLEAN"),
+        ],
+    )

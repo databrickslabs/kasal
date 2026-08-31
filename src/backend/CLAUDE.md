@@ -74,6 +74,10 @@ shared machinery in `services/execution/` (hub, kernel, config, logs). See
 - Always create Alembic migrations for model changes
 - Use `alembic revision --autogenerate` to create migrations
 - Test migrations on SQLite before applying to PostgreSQL
+- **A migration alone does nothing at runtime.** Alembic is not run at startup and
+  `create_all` never ALTERs an existing table. A column added to an existing table
+  also needs a step in `src/db/self_heal/columns.py` (a new table: `tables.py`) —
+  that is what heals existing SQLite, PostgreSQL and Lakebase installs.
 
 ### Connection Management
 - When dealing with asyncpg and multiple event loops, asyncpg connections can conflict

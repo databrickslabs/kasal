@@ -13,6 +13,7 @@ from src.db.self_heal.columns import (
     _ensure_databricks_config_columns,
     _ensure_documentation_embeddings_columns,
     _ensure_execution_history_columns,
+    _ensure_group_users_columns,
     _ensure_modelconfig_columns,
     _ensure_ui_config_columns,
 )
@@ -113,6 +114,7 @@ async def run_schema_self_heal(conn) -> None:
         _ensure_memory_maintenance_table,
         _ensure_agent_columns,
         _ensure_crew_columns,
+        _ensure_group_users_columns,
         _ensure_execution_history_columns,
         _ensure_ui_config_columns,
         _ensure_modelconfig_columns,
