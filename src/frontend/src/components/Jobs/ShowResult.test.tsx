@@ -221,6 +221,28 @@ describe('ShowResult renders HTML surfaces the way the chat does', () => {
     expect(screen.getByText('Slide 1 / 2')).toBeInTheDocument();
   });
 
+  it("renders the crew {text: …} envelope's fenced deck", () => {
+    const deck =
+      'Deck below.\n\n```html\n<section class="slide"><h1>One</h1></section>\n' +
+      '<section class="slide"><h1>Two</h1></section>\n```';
+    render(<ShowResult open={true} onClose={vi.fn()} result={{ text: deck }} run={baseRun} />);
+    expect(screen.getByText('Slide 1 / 2')).toBeInTheDocument();
+  });
+
+  it('renders an UNFENCED slide-deck deliverable as a paged deck too', () => {
+    const raw =
+      '<section class="slide"><h1>One</h1></section>\n<section class="slide"><h1>Two</h1></section>';
+    render(<ShowResult open={true} onClose={vi.fn()} result={{ output: raw }} run={baseRun} />);
+    expect(screen.getByText('Slide 1 / 2')).toBeInTheDocument();
+  });
+
+  it('leaves a full standalone HTML document to the sandboxed page renderer', () => {
+    const doc =
+      '<!DOCTYPE html><html><body><section class="slide">A</section><section class="slide">B</section></body></html>';
+    render(<ShowResult open={true} onClose={vi.fn()} result={{ output: doc }} run={baseRun} />);
+    expect(screen.queryByText('Slide 1 / 2')).toBeNull();
+  });
+
   it('shows the raw fence again when the user switches to the code view', () => {
     const deck =
       '```html\n<section class="slide"><h1>One</h1></section>\n<section class="slide"><h1>Two</h1></section>\n```';
