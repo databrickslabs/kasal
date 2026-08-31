@@ -2,7 +2,7 @@
 Unit tests for CrewAppDeploymentService (one-click Databricks Apps deploy).
 """
 
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -59,7 +59,7 @@ def _patch_deploy_pat(pat_groups, capture=None):
       - ApiKeysService.find_by_name → returns a fake DATABRICKS_API_KEY only for
         the group_ids in ``pat_groups``;
       - EncryptionUtils.decrypt_value → returns a fake token;
-      - the workspace-host lookup and _clean_environment;
+      - the workspace-host lookup;
       - WorkspaceClient (so no real SDK client is built).
 
     ``capture`` (optional dict) receives ``groups`` = the group_ids tried, in order.
@@ -90,7 +90,6 @@ def _patch_deploy_pat(pat_groups, capture=None):
             side_effect=lambda v: f"pat-token-{v}",
         ),
         patch("src.utils.databricks_auth._databricks_auth", dbx),
-        patch("src.utils.databricks_auth._clean_environment", lambda: nullcontext()),
         patch("databricks.sdk.WorkspaceClient", MagicMock()),
         patch.object(CrewAppDeploymentService, "_run_deployment", new=AsyncMock()),
     ):

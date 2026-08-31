@@ -164,8 +164,12 @@ class TestSpSingleAuth:
         with sp_auth.sp_single_auth() as active:
             assert active is True
             assert os.environ["DATABRICKS_TOKEN"] == "sp-bearer"
-            assert "DATABRICKS_CLIENT_ID" not in os.environ
-            assert "DATABRICKS_CLIENT_SECRET" not in os.environ
+            # The OAuth SP variables stay: the pinned auth type is what makes
+            # the SDK ignore them, and stripping them starved every concurrent
+            # reader of the process env (issue #8).
+            assert os.environ["DATABRICKS_CLIENT_ID"] == "cid"
+            assert os.environ["DATABRICKS_CLIENT_SECRET"] == "csec"
+            assert os.environ["DATABRICKS_AUTH_TYPE"] == "pat"
         # restored
         assert os.environ["DATABRICKS_CLIENT_ID"] == "cid"
         assert os.environ["DATABRICKS_TOKEN"] == "stale-pat"

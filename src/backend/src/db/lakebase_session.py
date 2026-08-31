@@ -98,7 +98,7 @@ def _unavailable_message(instance_name: str, w, orig: Exception) -> str:
 
 # Cached SPN credentials, captured the first time all three env vars are present.
 # CRITICAL (deployed Databricks Apps): the crew subprocess is multi-threaded and
-# src.utils.databricks_auth._clean_environment() temporarily POPS
+# an env-swapping auth helper used to temporarily POP
 # DATABRICKS_CLIENT_ID/SECRET/HOST from the PROCESS-GLOBAL os.environ during
 # every workspace-client creation. The knowledge search runs in a CrewAI tool
 # worker thread; if it reads os.getenv() during another thread's strip window it
@@ -120,12 +120,12 @@ def _resolve_spn_creds() -> tuple:
             client_id=client_id, client_secret=client_secret, host=host
         )
         return client_id, client_secret, host
-    # One or more were stripped by a concurrent _clean_environment(); use cache.
+    # One or more were stripped by a concurrent env swap; use the cache.
     cached = _SPN_CREDS_CACHE
     if cached.get("client_id") and cached.get("client_secret") and cached.get("host"):
         logger.info(
             "[LAKEBASE SESSION] SPN env vars transiently absent (concurrent "
-            "_clean_environment strip); using cached SPN credentials"
+            "env swap); using cached SPN credentials"
         )
         return cached["client_id"], cached["client_secret"], cached["host"]
     return client_id, client_secret, host
@@ -133,7 +133,7 @@ def _resolve_spn_creds() -> tuple:
 
 # Eager snapshot at import: the crew subprocess inherits the app's SPN env from
 # its parent, so the creds are present here BEFORE any crew thread starts
-# running _clean_environment() — capturing them now guarantees the cache is
+# running an env swap — capturing them now guarantees the cache is
 # populated even if the very first Lakebase auth races with a strip window.
 _resolve_spn_creds()
 
@@ -188,7 +188,7 @@ class LakebaseSessionFactory:
         try:
             # Priority 1: SPN OAuth — required when deployed as a Databricks App.
             # Resolved race-safe (see _resolve_spn_creds): a concurrent
-            # _clean_environment() strip in another crew thread must not make us
+            # env strip in another crew thread must not make us
             # fall through to PAT and fail.
             client_id, client_secret, host = _resolve_spn_creds()
 

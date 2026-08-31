@@ -431,39 +431,15 @@ class AuthContext:
         Returns:
             Configured WorkspaceClient instance
         """
-        # Clean environment to prevent SDK conflicts
-        with _clean_environment():
-            return WorkspaceClient(host=self.workspace_url, token=self.token)
+        # auth_type="pat" pins token auth explicitly: the SDK then ignores the
+        # OAuth SP variables that may also be in the env, so nothing has to be
+        # stripped from the process-global environment (issue #8).
+        return WorkspaceClient(
+            host=self.workspace_url, token=self.token, auth_type="pat"
+        )
 
     def __repr__(self) -> str:
         return f"AuthContext(method={self.auth_method}, user={self.user_identity or 'service'})"
-
-
-@contextlib.contextmanager
-def _clean_environment():
-    """
-    Context manager to temporarily clean Databricks environment variables.
-    This prevents SDK conflicts when creating clients with explicit credentials.
-    """
-    old_env = {}
-    env_vars_to_clean = [
-        "DATABRICKS_TOKEN",
-        "DATABRICKS_API_KEY",
-        "DATABRICKS_CLIENT_ID",
-        "DATABRICKS_CLIENT_SECRET",
-        "DATABRICKS_CONFIG_FILE",
-        "DATABRICKS_CONFIG_PROFILE",
-    ]
-
-    for var in env_vars_to_clean:
-        if var in os.environ:
-            old_env[var] = os.environ.pop(var)
-
-    try:
-        yield
-    finally:
-        # Restore environment variables
-        os.environ.update(old_env)
 
 
 class DatabricksAuth:
@@ -738,15 +714,16 @@ class DatabricksAuth:
             # SDK's Config.authenticate() returns a callable that produces a headers dict
             # e.g. {"Authorization": "Bearer <token>"}
             try:
-                # Temporarily strip PAT/API-KEY from env to prevent
-                # SDK dual-auth conflict (oauth + pat)
-                with _clean_environment():
-                    w = WorkspaceClient(
-                        host=self._workspace_host,
-                        client_id=self._client_id,
-                        client_secret=self._client_secret,
-                    )
-                    headers = w.config.authenticate()
+                # auth_type="oauth-m2m" pins the SP credentials explicitly, so
+                # the PAT that may also be in the env is ignored without
+                # stripping it (a strip here raced every other thread — #8).
+                w = WorkspaceClient(
+                    host=self._workspace_host,
+                    client_id=self._client_id,
+                    client_secret=self._client_secret,
+                    auth_type="oauth-m2m",
+                )
+                headers = w.config.authenticate()
 
                 auth_header = (
                     headers.get("Authorization", "")

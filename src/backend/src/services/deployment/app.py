@@ -197,7 +197,7 @@ class CrewAppDeploymentService:
         from databricks.sdk.useragent import with_product
 
         from src.services.settings.api_keys import ApiKeysService
-        from src.utils.databricks_auth import _clean_environment, _databricks_auth
+        from src.utils.databricks_auth import _databricks_auth
         from src.utils.encryption_utils import EncryptionUtils
         from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
 
@@ -271,10 +271,8 @@ class CrewAppDeploymentService:
         logger.info(
             "Databricks Apps deploy authenticating via PAT (group=%s)", found_gid
         )
-        # _clean_environment strips SPN env vars (CLIENT_ID/SECRET) so the SDK
-        # can't hijack the client — the deploy runs with auth_type="pat".
-        with _clean_environment():
-            return WorkspaceClient(host=host, token=pat_token, auth_type="pat")
+        # auth_type="pat" pins token auth explicitly; the SPN env vars can stay.
+        return WorkspaceClient(host=host, token=pat_token, auth_type="pat")
 
     def get_status(self, deployment_id: str) -> Optional[AppDeploymentStatusResponse]:
         record = self._deployments.get(deployment_id)

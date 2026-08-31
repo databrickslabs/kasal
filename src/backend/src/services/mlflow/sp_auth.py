@@ -20,9 +20,20 @@ compatibility. With BOTH present the Databricks SDK refuses to choose —
 — and MLflow falls back to "legacy authentication", so the registry/tracing call
 is NOT made as the app SP that holds the Unity Catalog grant, yielding a
 misleading ``PERMISSION_DENIED`` (or ``Invalid Token``) even after the correct
-grant. The fix: present the SP's own bearer token as the SINGLE method (set
-``DATABRICKS_TOKEN``, remove the OAuth env vars) for the duration of the call,
-restoring the original env afterwards.
+grant. The fix: present the SP's own bearer token as the method to use (set
+``DATABRICKS_TOKEN`` and pin ``DATABRICKS_AUTH_TYPE=pat``) for the duration of
+the call, restoring the original env afterwards.
+
+The OAuth variables are deliberately LEFT IN PLACE. The SDK raises "more than
+one authorization method" only when no auth type is chosen
+(``Config._validate``); an explicit ``DATABRICKS_AUTH_TYPE`` is enough. An
+earlier version also popped ``DATABRICKS_CLIENT_ID``/``SECRET`` from the
+process-global env for the whole window — and because these windows run on
+worker threads (a judge listing on Unity Catalog is many REST calls long),
+every concurrent reader saw ``spn_id=no, spn_cred=no``: the dispatcher and chat
+kickoff skipped MLflow tracing, a crew subprocess spawned in the window
+inherited the stripped env for its lifetime, and Lakebase engine creation
+failed with "cannot configure default credentials" (issue #8).
 """
 
 from __future__ import annotations
@@ -117,8 +128,11 @@ def single_auth_env(
 ) -> Iterator[None]:
     """Present ``token`` as the SINGLE Databricks auth method for one call.
 
-    Sets ``DATABRICKS_TOKEN`` (and ``DATABRICKS_HOST`` when given), removes the
-    OAuth env vars, and restores every :data:`SWAP_KEYS` var afterwards. Use when
+    Sets ``DATABRICKS_TOKEN`` (and ``DATABRICKS_HOST`` when given), pins
+    ``DATABRICKS_AUTH_TYPE=pat``, and restores every :data:`SWAP_KEYS` var
+    afterwards. The OAuth SP variables are NOT removed — see the module
+    docstring: the pinned auth type already makes the SDK ignore them, and
+    removing them starved every concurrent reader of the process env. Use when
     a bearer is ALREADY in hand (e.g. an ``AuthContext.token`` derived earlier).
     For the derive-from-ambient-creds case, use :func:`sp_single_auth`.
     """
@@ -128,12 +142,10 @@ def single_auth_env(
             os.environ["DATABRICKS_HOST"] = host
         if token is not None:
             os.environ["DATABRICKS_TOKEN"] = token
-        os.environ.pop("DATABRICKS_API_KEY", None)
-        os.environ.pop("DATABRICKS_CLIENT_ID", None)
-        os.environ.pop("DATABRICKS_CLIENT_SECRET", None)
-        # Pin token auth so a bare WorkspaceClient() built during the window
-        # (MLflow's get_trace warehouse resolution) uses the PAT, not the
-        # app-injected oauth-m2m it can no longer satisfy.
+        # Pin token auth: the SDK then uses DATABRICKS_TOKEN and skips its
+        # "more than one authorization method" validation, and a bare
+        # WorkspaceClient() built during the window (MLflow's get_trace
+        # warehouse resolution) uses the token rather than oauth-m2m.
         os.environ["DATABRICKS_AUTH_TYPE"] = "pat"
         yield
     finally:
@@ -164,9 +176,8 @@ def sp_single_auth() -> Iterator[bool]:
 
     if bearer:
         logger.info(
-            "MLflow call: authenticating as the app service principal via a single "
-            "token method (OAuth creds temporarily removed to avoid the SDK's "
-            "'more than one authorization method' error)."
+            "MLflow call: authenticating as the app service principal via its "
+            "bearer token (auth type pinned to 'pat'; OAuth creds left in place)."
         )
         with single_auth_env(token=bearer):
             yield True

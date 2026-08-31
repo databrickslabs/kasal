@@ -14,7 +14,6 @@ import pytest
 from src.utils.databricks_auth import (
     AuthContext,
     DatabricksAuth,
-    _clean_environment,
     _databricks_auth,
     extract_user_token_from_request,
     get_auth_context,
@@ -113,7 +112,9 @@ class TestAuthContext:
         mock_wc.return_value = MagicMock()
         ctx = AuthContext(token="tok", workspace_url="https://h.com", auth_method="pat")
         client = ctx.get_workspace_client()
-        mock_wc.assert_called_once_with(host="https://h.com", token="tok")
+        mock_wc.assert_called_once_with(
+            host="https://h.com", token="tok", auth_type="pat"
+        )
         assert client is mock_wc.return_value
 
     def test_repr_with_identity(self):
@@ -133,44 +134,54 @@ class TestAuthContext:
         assert "service" in repr(ctx)
 
 
-# ── _clean_environment ─────────────────────────────────
+# ── explicit auth_type instead of stripping the env (issue #8) ───────
+class TestNoEnvironmentStripping:
+    @patch("src.utils.databricks_auth.WorkspaceClient")
+    def test_get_workspace_client_pins_pat_and_leaves_env_alone(
+        self, mock_wc, monkeypatch
+    ):
+        monkeypatch.setenv("DATABRICKS_CLIENT_ID", "cid")
+        monkeypatch.setenv("DATABRICKS_CLIENT_SECRET", "sec")
+        seen = {}
 
+        def build(**kw):
+            seen.update(kw, client_id_env=os.environ.get("DATABRICKS_CLIENT_ID"))
+            return MagicMock()
 
-class TestCleanEnvironment:
-    def test_cleans_and_restores(self):
-        os.environ["DATABRICKS_TOKEN"] = "secret"
-        os.environ["DATABRICKS_CLIENT_ID"] = "cid"
-        with _clean_environment():
-            assert "DATABRICKS_TOKEN" not in os.environ
-            assert "DATABRICKS_CLIENT_ID" not in os.environ
-        assert os.environ["DATABRICKS_TOKEN"] == "secret"
-        assert os.environ["DATABRICKS_CLIENT_ID"] == "cid"
-        os.environ.pop("DATABRICKS_TOKEN", None)
-        os.environ.pop("DATABRICKS_CLIENT_ID", None)
+        mock_wc.side_effect = build
+        AuthContext(
+            token="t", workspace_url="https://h.com", auth_method="pat"
+        ).get_workspace_client()
+        assert seen["auth_type"] == "pat" and seen["token"] == "t"
+        # The SPN variables stay visible to every other thread while the
+        # client is built — nothing is popped from the process env.
+        assert seen["client_id_env"] == "cid"
 
-    def test_restores_on_exception(self):
-        os.environ["DATABRICKS_TOKEN"] = "val"
-        try:
-            with _clean_environment():
-                assert "DATABRICKS_TOKEN" not in os.environ
-                raise ValueError("boom")
-        except ValueError:
-            pass
-        assert os.environ["DATABRICKS_TOKEN"] == "val"
-        os.environ.pop("DATABRICKS_TOKEN", None)
+    @pytest.mark.asyncio
+    @patch("src.utils.databricks_auth.WorkspaceClient")
+    async def test_sp_token_exchange_pins_oauth_and_keeps_the_pat_in_env(
+        self, mock_wc, monkeypatch
+    ):
+        monkeypatch.setenv("DATABRICKS_TOKEN", "user-pat")
+        seen = {}
 
-    def test_no_vars_set(self):
-        for v in [
-            "DATABRICKS_TOKEN",
-            "DATABRICKS_API_KEY",
-            "DATABRICKS_CLIENT_ID",
-            "DATABRICKS_CLIENT_SECRET",
-            "DATABRICKS_CONFIG_FILE",
-            "DATABRICKS_CONFIG_PROFILE",
-        ]:
-            os.environ.pop(v, None)
-        with _clean_environment():
-            pass
+        def build(**kw):
+            seen.update(kw, token_env=os.environ.get("DATABRICKS_TOKEN"))
+            client = MagicMock()
+            client.config.authenticate.return_value = {
+                "Authorization": "Bearer sp-bearer"
+            }
+            return client
+
+        mock_wc.side_effect = build
+        auth = DatabricksAuth()
+        auth._workspace_host = "https://h.com"
+        auth._client_id = "cid"
+        auth._client_secret = "sec"
+        token = await auth._get_service_principal_token()
+        assert token == "sp-bearer"
+        assert seen["auth_type"] == "oauth-m2m" and seen["client_id"] == "cid"
+        assert seen["token_env"] == "user-pat"  # not stripped during the exchange
 
 
 # ── _load_config ───────────────────────────────────────
@@ -1083,14 +1094,11 @@ class TestGetAuthContext:
                     new_callable=AsyncMock,
                     return_value=True,
                 ),
-                patch("src.utils.databricks_auth._clean_environment") as mc,
                 patch(
                     "src.utils.databricks_auth.WorkspaceClient",
                     return_value=mock_client,
                 ),
             ):
-                mc.return_value.__enter__ = Mock(return_value=None)
-                mc.return_value.__exit__ = Mock(return_value=False)
                 result = await get_auth_context(user_token="user_tok")
             assert result.auth_method == "obo" and result.user_identity == "u@x.com"
         finally:
@@ -1113,14 +1121,11 @@ class TestGetAuthContext:
                     new_callable=AsyncMock,
                     return_value=True,
                 ),
-                patch("src.utils.databricks_auth._clean_environment") as mc,
                 patch(
                     "src.utils.databricks_auth.WorkspaceClient",
                     return_value=mock_client,
                 ),
             ):
-                mc.return_value.__enter__ = Mock(return_value=None)
-                mc.return_value.__exit__ = Mock(return_value=False)
                 result = await get_auth_context(user_token="tok")
             assert result.user_identity == "app-123"
         finally:
@@ -1144,7 +1149,6 @@ class TestGetAuthContext:
                     new_callable=AsyncMock,
                     return_value=True,
                 ),
-                patch("src.utils.databricks_auth._clean_environment") as mc,
                 patch(
                     "src.utils.databricks_auth.WorkspaceClient",
                     side_effect=Exception("obo fail"),
@@ -1155,8 +1159,6 @@ class TestGetAuthContext:
                 ),
                 patch("src.utils.user_context.UserContext") as mock_uc,
             ):
-                mc.return_value.__enter__ = Mock(return_value=None)
-                mc.return_value.__exit__ = Mock(return_value=False)
                 mock_uc.get_group_context.return_value = None
                 result = await get_auth_context(user_token="tok")
             # Falls through to PAT (no group_id) then SPN (no creds) -> None
