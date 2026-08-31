@@ -65,6 +65,7 @@ const JUDGES = [
     full_name: 'crew_88ab4478823c__accuracy',
     crew_id: '88ab4478823c',
     instructions: 'Assigned criteria for {{ outputs }}',
+    url: 'http://127.0.0.1:5555/#/prompts/kasal_judge__crew_88ab4478823c__accuracy',
   },
   // Library original of the assigned judge — must NOT appear in the menu.
   { name: 'accuracy', full_name: 'accuracy', crew_id: null, instructions: 'lib copy' },
@@ -317,5 +318,15 @@ describe('background run failures', () => {
       await screen.findByText('Penalise listings outside the German-speaking side'),
     ).toBeInTheDocument();
     expect(service.listJudges.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('links an assigned judge to its page in MLflow', async () => {
+    renderDialog();
+    const link = await screen.findByRole('link', { name: 'Open accuracy in MLflow' });
+    expect(link).toHaveAttribute(
+      'href',
+      'http://127.0.0.1:5555/#/prompts/kasal_judge__crew_88ab4478823c__accuracy',
+    );
+    expect(link).toHaveAttribute('target', '_blank');
   });
 });

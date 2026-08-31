@@ -29,6 +29,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import GavelIcon from '@mui/icons-material/Gavel';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'react-hot-toast';
@@ -674,6 +675,20 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
                     </IconButton>
                   </span>
                 </Tooltip>
+                {j.url && (
+                  <Tooltip title="Open this judge in MLflow">
+                    <IconButton
+                      size="small"
+                      component="a"
+                      href={j.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`Open ${j.name} in MLflow`}
+                    >
+                      <OpenInNewIcon sx={{ fontSize: 15 }} />
+                    </IconButton>
+                  </Tooltip>
+                )}
               </Box>
             ))}
             {libraryJudges.length > 0 && (

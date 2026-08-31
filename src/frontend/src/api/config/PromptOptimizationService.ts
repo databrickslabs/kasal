@@ -56,6 +56,9 @@ export interface LLMJudge {
   crew_id?: string | null;
   model?: string | null;
   instructions?: string;
+  /** Where the judge lives in the MLflow UI (prompt page locally, the
+   *  experiment's Prompts tab on Databricks); null when no UI is reachable. */
+  url?: string | null;
 }
 
 /** What aligning a judge to its human grades (MemAlign) distilled. */

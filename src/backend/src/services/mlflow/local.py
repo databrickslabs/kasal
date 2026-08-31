@@ -190,3 +190,14 @@ def traces_url(
     if trace_id:
         url += f"?selectedEvaluationId={trace_id}"
     return url
+
+
+def prompt_url(base_uri: str, prompt_name: str) -> str:
+    """A deep link to a prompt in an OSS MLflow UI (``/#/prompts/<name>``).
+
+    Prompts are registry-wide in the OSS UI, so no experiment id is needed;
+    on Databricks they are reached through an experiment's Prompts tab instead.
+    """
+    from urllib.parse import quote
+
+    return f"{base_uri.rstrip('/')}/#/prompts/{quote(prompt_name, safe='')}"

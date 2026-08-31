@@ -223,6 +223,16 @@ def clean_env(monkeypatch):
 
 
 class TestConfigureMlflowInSubprocess:
+    @pytest.fixture(autouse=True)
+    def _no_local_server(self, monkeypatch):
+        # These cases exercise Databricks-side failures. A dev MLflow server
+        # that happens to be listening on the default local URI must not turn
+        # them into a successful LOCAL setup (observed: all four went green
+        # the day a server ran on 127.0.0.1:5555).
+        monkeypatch.setattr(
+            "src.services.mlflow.local.is_reachable", lambda uri, timeout=2.0: False
+        )
+
     @pytest.mark.asyncio
     async def test_returns_disabled_when_mlflow_not_enabled(self):
         db_config = MagicMock()

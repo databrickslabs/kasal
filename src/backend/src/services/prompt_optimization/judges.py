@@ -10,18 +10,99 @@ movement: every method still reads ``self`` exactly as it did in the single
 """
 
 import asyncio
+import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.services.prompt_optimization.config import DEFAULT_TARGET_MODEL
+from src.services.prompt_optimization.gepa.judge_model import (
+    _stored_judge_model_to_key,
+)
 from src.services.prompt_optimization.gepa.mlflow_session import (
     mlflow_session,
     resolve_mlflow_backend,
 )
 from src.services.prompt_optimization.judge_registry import (
     JudgeRegistry,
+    JudgeSpec,
     uc_schema_of,
 )
 from src.utils.user_context import GroupContext
+
+logger = logging.getLogger(__name__)
+
+#: Registries whose legacy scorer judges were already carried over (per
+#: process): the scorer registry is read once per backend, not per listing.
+_LEGACY_IMPORTED: set = set()
+
+
+def _import_legacy_judges(
+    registry: JudgeRegistry, known: List[JudgeSpec], key: Tuple[str, ...]
+) -> List[JudgeSpec]:
+    """Carry judges over from the MLflow scorer registry, where they lived
+    before they became prompts, so nothing a user created disappears from
+    the dialog. Read-only on the scorer side (deleting there is what needs
+    the Databricks job permission), skips names that already have a prompt,
+    and skips anything without instructions (built-in monitoring scorers are
+    not judges). Best-effort: a backend that cannot list scorers has nothing
+    to import."""
+    if key in _LEGACY_IMPORTED:
+        return []
+    try:
+        from mlflow.genai.scorers import list_scorers
+
+        scorers = list(list_scorers() or [])
+    except Exception as exc:  # noqa: BLE001 — absence of the old registry is fine
+        logger.debug("[judges] legacy scorer registry not readable: %s", exc)
+        return []
+    have = {spec.full_name for spec in known}
+    imported: List[JudgeSpec] = []
+    for scorer in scorers:
+        name = str(getattr(scorer, "name", "") or "").strip()
+        instructions = (getattr(scorer, "instructions", "") or "").strip()
+        if not name or name in have or not instructions:
+            continue
+        imported.append(
+            registry.save(
+                name,
+                instructions,
+                _stored_judge_model_to_key(getattr(scorer, "model", None)),
+                commit_message="imported from the MLflow scorer registry",
+            )
+        )
+        have.add(name)
+    _LEGACY_IMPORTED.add(key)
+    if imported:
+        logger.info(
+            "[judges] imported %d judge(s) from the scorer registry: %s",
+            len(imported),
+            ", ".join(s.full_name for s in imported),
+        )
+    return imported
+
+
+def _judge_link(backend: Any, registry_uri: str) -> Any:
+    """``prompt name -> URL`` into the MLflow UI where the judge lives: the
+    OSS Prompts page locally; on Databricks the crew-traces experiment's
+    Prompts tab (the documented way to reach UC prompts)."""
+    if getattr(backend, "kind", "") != "databricks":
+        from src.services.mlflow import local
+
+        return lambda prompt_name: local.prompt_url(registry_uri, prompt_name)
+    workspace_url = str(
+        getattr(getattr(backend, "auth", None), "workspace_url", "") or ""
+    )
+    experiment_id = ""
+    try:
+        import mlflow
+
+        experiment = mlflow.get_experiment_by_name(getattr(backend, "experiment", ""))
+        experiment_id = str(getattr(experiment, "experiment_id", "") or "")
+    except Exception as exc:  # noqa: BLE001 — a link is a convenience
+        logger.debug("[judges] no experiment id for the prompt link: %s", exc)
+    if not (workspace_url and experiment_id):
+        return lambda prompt_name: None
+    tab = f"{workspace_url.rstrip('/')}/ml/experiments/{experiment_id}/prompts"
+    return lambda prompt_name: tab
 
 
 class JudgeOperationsMixin:
@@ -166,7 +247,19 @@ class JudgeOperationsMixin:
         def _list() -> List[Dict[str, Any]]:
             with mlflow_session(backend):
                 registry = JudgeRegistry(registry_uri, uc_schema)
-                return [spec.as_dict() for spec in registry.list()]
+                specs = registry.list()
+                specs += _import_legacy_judges(
+                    registry,
+                    specs,
+                    (registry_uri, uc_schema or "", str(backend.experiment)),
+                )
+                link = _judge_link(backend, registry_uri)
+                rows = []
+                for spec in specs:
+                    row = spec.as_dict()
+                    row["url"] = link(registry.prompt_name(spec.full_name))
+                    rows.append(row)
+                return rows
 
         return await asyncio.to_thread(_list)
 
