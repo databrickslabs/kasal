@@ -21,6 +21,7 @@ import pytest
 router_module = importlib.import_module("src.api.prompt_optimization_router")
 from src.api.prompt_optimization_router import (
     add_eval_feedback,
+    align_judge,
     apply_run,
     assign_judge,
     cancel_run,
@@ -175,8 +176,17 @@ class TestEvalEndpoints:
         )
         assert result == {"ok": True}
         service.add_eval_feedback.assert_awaited_once_with(
-            "t1", 7.0, "good", "german side", group
+            "t1", 7.0, "good", "german side", group, judge=None
         )
+
+    @pytest.mark.asyncio
+    async def test_add_eval_feedback_attributes_the_grade_to_a_judge(self, service):
+        service.add_eval_feedback = AsyncMock(return_value=True)
+        group = _group()
+        await add_eval_feedback(
+            "t1", {"value": 4, "judge": "crew_x__tone"}, group, MagicMock()
+        )
+        assert service.add_eval_feedback.await_args.kwargs["judge"] == "crew_x__tone"
 
     @pytest.mark.asyncio
     async def test_add_eval_feedback_rejects_non_numeric_value(self, service):
@@ -234,6 +244,39 @@ class TestJudgeEndpoints:
         service.assign_judge = AsyncMock(return_value={"full_name": "crew_x__acc"})
         result = await assign_judge("acc", {"crew_id": "c1"}, _group(), MagicMock())
         assert result["full_name"] == "crew_x__acc"
+
+    @pytest.mark.asyncio
+    async def test_align_judge_requires_crew_id(self, service):
+        with pytest.raises(BadRequestError, match="crew_id"):
+            await align_judge("acc", {}, _group(), MagicMock())
+
+    @pytest.mark.asyncio
+    async def test_align_judge_passes_through_with_model_overrides(self, service):
+        service.align_judge = AsyncMock(return_value={"guidelines": ["g1"]})
+        result = await align_judge(
+            "acc",
+            {
+                "crew_id": "c1",
+                "reflection_model": "ollama:/qwen3:8b",
+                "embedding_dim": "768",
+            },
+            _group(),
+            MagicMock(),
+        )
+        assert result == {"guidelines": ["g1"]}
+        args, kwargs = service.align_judge.await_args
+        assert args[0] == "acc" and args[1] == "c1"
+        assert kwargs["reflection_model"] == "ollama:/qwen3:8b"
+        assert kwargs["embedding_model"] is None
+        assert kwargs["embedding_dim"] == 768
+
+    @pytest.mark.asyncio
+    async def test_align_judge_turns_service_errors_into_400(self, service):
+        service.align_judge = AsyncMock(
+            side_effect=ValueError("No graded evaluation answers")
+        )
+        with pytest.raises(BadRequestError, match="No graded"):
+            await align_judge("acc", {"crew_id": "c1"}, _group(), MagicMock())
 
     @pytest.mark.asyncio
     async def test_update_judge_passes_changes(self, service):

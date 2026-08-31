@@ -52,6 +52,7 @@ from src.schemas.template import PromptTemplateUpdate
 from src.services.catalog.templates import TemplateService
 from src.services.prompt_optimization import (  # noqa: E402,F401
     CrewRunnerMixin,
+    JudgeAlignmentMixin,
     JudgeOperationsMixin,
     RunRegistryMixin,
     TemplateRunnerMixin,
@@ -161,6 +162,7 @@ class PromptOptimizationService(
     TemplateRunnerMixin,
     CrewRunnerMixin,
     JudgeOperationsMixin,
+    JudgeAlignmentMixin,
     RunRegistryMixin,
 ):
     """Service for optimizing seeded prompt templates against logged usage."""

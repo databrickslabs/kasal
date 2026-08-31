@@ -139,6 +139,7 @@ async def add_eval_feedback(
             body.get("comment"),
             body.get("expectation"),
             group_context,
+            judge=(str(body.get("judge") or "").strip() or None),
         )
     except ValueError as e:
         raise BadRequestError(str(e))
@@ -185,6 +186,32 @@ async def assign_judge(
         raise BadRequestError("crew_id is required")
     try:
         return await service.assign_judge(name, crew_id, group_context)
+    except ValueError as e:
+        raise BadRequestError(str(e))
+
+
+@router.post("/judges/{name}/align")
+async def align_judge(
+    name: str, body: dict, group_context: GroupContextDep, session: SessionDep
+):
+    """MemAlign: align a crew's judge to the human grades on its evaluation
+    answers: {crew_id, reflection_model?, embedding_model?, embedding_dim?}.
+    Registers the aligned judge as the next version under the same name, so
+    the crew's next optimization run scores with it."""
+    service = PromptOptimizationService(session)
+    crew_id = str(body.get("crew_id") or "")
+    if not crew_id:
+        raise BadRequestError("crew_id is required")
+    dim = body.get("embedding_dim")
+    try:
+        return await service.align_judge(
+            name,
+            crew_id,
+            group_context,
+            reflection_model=body.get("reflection_model") or None,
+            embedding_model=body.get("embedding_model") or None,
+            embedding_dim=int(dim) if dim is not None else None,
+        )
     except ValueError as e:
         raise BadRequestError(str(e))
 

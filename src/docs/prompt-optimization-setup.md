@@ -97,6 +97,55 @@ run; UC grants take effect for new authorization checks without redeploying Kasa
 | An admin **user** can register prompts but the deployed app cannot | The user is a workspace/metastore admin (bypasses the check); the SP is not and lacks `MANAGE` | Grant the SP `MANAGE` explicitly — do not rely on the user's success as proof the SP is configured |
 | Still denied after granting `MANAGE` | Grant targeted the wrong principal (user / display name / wrong catalog), or Prompt Registry preview is off | Confirm `SHOW GRANTS` rows are on the SP **applicationId** and the configured catalog; enable Prompt Registry on the **Previews** page |
 
+## Aligning judges to your grades (MemAlign)
+
+Kasal's LLM judges score every candidate prompt set GEPA tries. A judge is
+written in plain language, so it carries its author's assumptions: a judge asked
+for "accurate listings" does not know that *your* team treats a listing outside
+the German-speaking side as wrong. Aligning a judge teaches it that from the
+grades you already give in the Optimize dialog, using MLflow's MemAlign
+optimizer — the judge replays the graded answers, compares its verdicts with
+yours, and distils the disagreements into short guidelines that become part of
+its instructions.
+
+In the crew catalog, open **Optimize**:
+
+1. **Assign** a judge to the crew (or create one).
+2. Under **Evaluation answers**, expand an answer, set **Grading for** to that
+   judge, grade it, and say why. The grade is stored on the answer's trace as
+   human feedback *in the judge's name*.
+3. After grading a few answers, press the wand next to the judge chip
+   (**Align**). Kasal registers the aligned judge as a new version of the same
+   name and lists what it learned.
+4. Run **Optimize** — GEPA now scores candidates with the aligned judge.
+
+Grades given under **Overall quality** feed the optimizer's own reflection but
+do not align any judge: only grades given *for a judge* align that judge. Align
+again whenever you have graded more answers — each alignment starts from the
+grades, not from the previous alignment.
+
+### Models
+
+Alignment needs a reflection model (writes the guidelines) and an embedding
+model (matches answers to guidelines). On a Databricks MLflow backend the
+defaults are the optimizer's judge model and `databricks-gte-large-en` (1024
+dimensions). Override them, or set them for a local MLflow backend, with:
+
+| Variable | Meaning | Example |
+|---|---|---|
+| `KASAL_MEMALIGN_REFLECTION_MODEL` | LiteLLM model URI that writes the guidelines | `databricks:/databricks-claude-sonnet-4`, `ollama:/qwen3:30b` |
+| `KASAL_MEMALIGN_EMBEDDING_MODEL` | LiteLLM embedding-model URI | `databricks:/databricks-gte-large-en`, `ollama:/nomic-embed-text` |
+| `KASAL_MEMALIGN_EMBEDDING_DIM` | Embedding dimension (default 1024 on Databricks, 768 locally) | `768` |
+
+A bare Databricks endpoint name is accepted and becomes `databricks:/<name>`.
+On a local MLflow backend the two model variables are required.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `No graded evaluation answers for this judge yet` | Grades were logged under **Overall quality** or under another judge | Grade a few answers with this judge selected, then align |
+| `Set KASAL_MEMALIGN_REFLECTION_MODEL …` | Local MLflow backend without model overrides | Set the variables above |
+| Alignment succeeds with no guidelines | The judge already agreed with every grade | Nothing to fix — grade more answers, especially ones you disagree with |
+
 ## Related
 
 - [MLflow tracing setup](./mlflow-tracing-setup.md): the sibling MLflow feature (traces, not prompts)

@@ -58,6 +58,18 @@ export interface LLMJudge {
   instructions?: string;
 }
 
+/** What aligning a judge to its human grades (MemAlign) distilled. */
+export interface JudgeAlignment {
+  /** Display name (crew prefix stripped). */
+  name: string;
+  /** Registry name of the newly registered judge version. */
+  full_name: string;
+  /** Graded evaluation answers the alignment learned from. */
+  traces_used: number;
+  /** Plain-language guidelines now folded into the judge's instructions. */
+  guidelines: string[];
+}
+
 export interface CrewEval {
   trace_id: string;
   timestamp_ms?: number | null;
@@ -133,12 +145,15 @@ export class PromptOptimizationService {
   }
 
   /** Grade an evaluation answer (Feedback) and/or state what it SHOULD have
-   *  contained (Expectation) — both stored as MLflow assessments. */
+   *  contained (Expectation) — both stored as MLflow assessments. With
+   *  `judge` (registry name) the grade is also stored in that judge's name,
+   *  which is what lets the judge be aligned to it later. */
   static async addEvalFeedback(
     traceId: string,
     value?: number,
     comment?: string,
     expectation?: string,
+    judge?: string,
   ): Promise<boolean> {
     const response = await apiClient.post<{ ok: boolean }>(
       `/prompt-optimization/crew-evals/${traceId}/feedback`,
@@ -146,6 +161,7 @@ export class PromptOptimizationService {
         value: value ?? undefined,
         comment: comment || undefined,
         expectation: expectation || undefined,
+        judge: judge || undefined,
       },
       { headers: { 'Content-Type': 'application/json' } },
     );
@@ -180,6 +196,18 @@ export class PromptOptimizationService {
   static async assignJudge(name: string, crewId: string): Promise<LLMJudge> {
     const response = await apiClient.post<LLMJudge>(
       `/prompt-optimization/judges/${encodeURIComponent(name)}/assign`,
+      { crew_id: crewId },
+      { headers: { 'Content-Type': 'application/json' } },
+    );
+    return response.data;
+  }
+
+  /** Align a crew judge to the grades given with it selected (MemAlign):
+   *  distils where the judge disagreed with the grader into guidelines and
+   *  registers them as a new version of the same judge. */
+  static async alignJudge(name: string, crewId: string): Promise<JudgeAlignment> {
+    const response = await apiClient.post<JudgeAlignment>(
+      `/prompt-optimization/judges/${encodeURIComponent(name)}/align`,
       { crew_id: crewId },
       { headers: { 'Content-Type': 'application/json' } },
     );

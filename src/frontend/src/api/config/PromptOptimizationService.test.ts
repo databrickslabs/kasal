@@ -114,6 +114,18 @@ describe('addEvalFeedback', () => {
     );
   });
 
+  it('names the judge the grade speaks to, in registry form', async () => {
+    mockPost.mockResolvedValueOnce({ data: { ok: true } });
+    await PromptOptimizationService.addEvalFeedback(
+      't1',
+      3,
+      'mixed languages',
+      undefined,
+      'crew_x__accuracy',
+    );
+    expect(mockPost.mock.calls[0][1]).toMatchObject({ value: 3, judge: 'crew_x__accuracy' });
+  });
+
   it('strips empty optional fields to undefined', async () => {
     mockPost.mockResolvedValueOnce({ data: { ok: true } });
     await PromptOptimizationService.addEvalFeedback('t1', undefined, '', '');
@@ -176,6 +188,19 @@ describe('judges', () => {
       { crew_id: 'crew-1' },
       JSON_HEADERS,
     );
+  });
+
+  it('alignJudge posts the crew id under the encoded judge name', async () => {
+    mockPost.mockResolvedValueOnce({
+      data: { name: 'acc', full_name: 'crew_x__acc', traces_used: 2, guidelines: ['g1'] },
+    });
+    const result = await PromptOptimizationService.alignJudge('crew_x__acc', 'crew-1');
+    expect(mockPost).toHaveBeenCalledWith(
+      '/prompt-optimization/judges/crew_x__acc/align',
+      { crew_id: 'crew-1' },
+      JSON_HEADERS,
+    );
+    expect(result.guidelines).toEqual(['g1']);
   });
 
   it('updateJudge PUTs changes and strips empty fields', async () => {

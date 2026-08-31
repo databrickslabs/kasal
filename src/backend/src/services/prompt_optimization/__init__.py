@@ -15,6 +15,7 @@ Shared, non-duplicable pieces live beside them: ``run_state`` (the process-wide
 catalogue). The GEPA thread bridge lives in ``services/gepa/reflection.py``.
 """
 
+from src.services.prompt_optimization.alignment import JudgeAlignmentMixin
 from src.services.prompt_optimization.crew_runner import CrewRunnerMixin
 from src.services.prompt_optimization.judges import JudgeOperationsMixin
 from src.services.prompt_optimization.runs import RunRegistryMixin
@@ -23,6 +24,7 @@ from src.services.prompt_optimization.template_runner import TemplateRunnerMixin
 __all__ = [
     "CrewRunnerMixin",
     "JudgeOperationsMixin",
+    "JudgeAlignmentMixin",
     "RunRegistryMixin",
     "TemplateRunnerMixin",
 ]

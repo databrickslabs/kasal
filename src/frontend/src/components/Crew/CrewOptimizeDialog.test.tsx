@@ -43,6 +43,7 @@ vi.mock('../../api/config/PromptOptimizationService', () => ({
     addEvalFeedback: vi.fn(),
     createJudge: vi.fn(),
     assignJudge: vi.fn(),
+    alignJudge: vi.fn(),
     updateJudge: vi.fn(),
     deleteJudge: vi.fn(),
   },
@@ -298,5 +299,23 @@ describe('background run failures', () => {
         screen.getAllByText(/Permission denied to update prompt in schema kasal/).length,
       ).toBeGreaterThan(0),
     );
+  });
+  it('aligns an assigned judge to its grades and lists what it learned', async () => {
+    service.alignJudge.mockResolvedValue({
+      name: 'accuracy',
+      full_name: 'crew_88ab4478823c__accuracy',
+      traces_used: 3,
+      guidelines: ['Penalise listings outside the German-speaking side'],
+    });
+    renderDialog();
+    await userEvent.click(await screen.findByRole('button', { name: 'Align accuracy' }));
+    await waitFor(() =>
+      expect(service.alignJudge).toHaveBeenCalledWith('crew_88ab4478823c__accuracy', CREW_ID),
+    );
+    // The aligned judge is a new version of the same name — the list refreshes.
+    expect(
+      await screen.findByText('Penalise listings outside the German-speaking side'),
+    ).toBeInTheDocument();
+    expect(service.listJudges.mock.calls.length).toBeGreaterThan(1);
   });
 });

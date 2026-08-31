@@ -7,16 +7,9 @@ movement: every method still reads ``self`` exactly as it did in the single
 """
 
 import asyncio
-import hashlib
-import logging
-import os
 import re
-import threading
-import uuid
-from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from src.core.exceptions import BadRequestError
 from src.services.prompt_optimization.config import DEFAULT_TARGET_MODEL
 from src.services.prompt_optimization.gepa.mlflow_session import (
     mlflow_session,
@@ -83,11 +76,17 @@ class JudgeOperationsMixin:
         comment: Optional[str] = None,
         expectation: Optional[str] = None,
         group_context: Optional[GroupContext] = None,
+        judge: Optional[str] = None,
     ) -> bool:
         """Attach human assessments to an eval trace — a grade (Feedback:
         judgment of what WAS produced) and/or an expectation (ground truth of
         what SHOULD have been produced). Both are harvested into the judge's
-        rubric on the next optimization run."""
+        rubric on the next optimization run.
+
+        ``judge`` (a crew-scoped registry name) additionally records the grade
+        under THAT judge's name, sourced HUMAN. That pair is what MemAlign
+        matches when aligning the judge (see alignment.py): a grade logged only
+        as ``human_grade`` is harvested by GEPA but invisible to alignment."""
         if value is None and not (expectation or "").strip():
             raise ValueError("Provide a grade, an expectation, or both")
         backend = await resolve_mlflow_backend(self.session, group_context)
@@ -99,15 +98,26 @@ class JudgeOperationsMixin:
 
         def _log() -> bool:
             import mlflow
+            from mlflow.entities import AssessmentSource, AssessmentSourceType
 
+            # Explicitly HUMAN: mlflow's default source is not, and MemAlign
+            # only learns from human-sourced assessments.
+            source = AssessmentSource(
+                source_type=AssessmentSourceType.HUMAN,
+                source_id=(getattr(group_context, "group_email", None) or "kasal"),
+            )
             with mlflow_session(backend):
                 if value is not None:
-                    mlflow.log_feedback(
-                        trace_id=trace_id,
-                        name="human_grade",
-                        value=max(0.0, min(10.0, float(value))),
-                        rationale=(comment or "").strip() or None,
-                    )
+                    grade = max(0.0, min(10.0, float(value)))
+                    rationale = (comment or "").strip() or None
+                    for feedback_name in filter(None, ["human_grade", judge]):
+                        mlflow.log_feedback(
+                            trace_id=trace_id,
+                            name=feedback_name,
+                            value=grade,
+                            rationale=rationale,
+                            source=source,
+                        )
                 if (expectation or "").strip():
                     mlflow.log_expectation(
                         trace_id=trace_id,

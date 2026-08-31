@@ -34,6 +34,7 @@ import remarkGfm from 'remark-gfm';
 import { toast } from 'react-hot-toast';
 import {
   CrewEval,
+  JudgeAlignment,
   LLMJudge,
   PromptOptimizationRun,
   PromptOptimizationService,
@@ -156,6 +157,8 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
   const [evalExpectation, setEvalExpectation] = useState<Record<string, string>>({});
   const [evalJudge, setEvalJudge] = useState<Record<string, string>>({});
   const [submittingEval, setSubmittingEval] = useState<string | null>(null);
+  const [aligning, setAligning] = useState<string | null>(null);
+  const [alignments, setAlignments] = useState<Record<string, JudgeAlignment>>({});
 
   // Custom LLM judges (registered scorers) — created here, used automatically.
   const [judges, setJudges] = useState<LLMJudge[]>([]);
@@ -335,14 +338,17 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
     setSubmittingEval(traceId);
     try {
       // Judge attribution rides in the comment so the harvesting step can
-      // tell WHICH judge's criteria this grade speaks to.
+      // tell WHICH judge's criteria this grade speaks to — and goes out as the
+      // judge's registry name so the grade can later ALIGN that judge.
       const judge = evalJudge[traceId] || 'overall';
+      const selected = assignedJudges.find((j) => j.name === judge);
       const note = evalComment[traceId] || '';
       await PromptOptimizationService.addEvalFeedback(
         traceId,
         grade,
         judge === 'overall' ? note || undefined : `[judge: ${judge}] ${note}`.trim(),
         expectation || undefined,
+        selected ? selected.full_name || selected.name : undefined,
       );
       toast.success('Assessment saved — the next run will use it');
       await refreshEvals();
@@ -387,6 +393,30 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
       await refreshJudges();
     } catch {
       setError('Failed to unassign judge');
+    }
+  };
+
+  const handleAlignJudge = async (judge: LLMJudge) => {
+    if (!crewId) return;
+    const fullName = judge.full_name || judge.name;
+    setAligning(fullName);
+    setError(null);
+    try {
+      const result = await PromptOptimizationService.alignJudge(fullName, crewId);
+      setAlignments((prev) => ({ ...prev, [fullName]: result }));
+      await refreshJudges();
+      toast.success(
+        `Judge "${judge.name}" aligned to ${result.traces_used} graded answer${
+          result.traces_used === 1 ? '' : 's'
+        }`,
+      );
+    } catch (e: unknown) {
+      const detail =
+        (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        'Failed to align the judge';
+      setError(detail);
+    } finally {
+      setAligning(null);
     }
   };
 
@@ -612,17 +642,39 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
               title="Grades every deliverable 0-10 on completeness, specificity, and fidelity to the expected outputs"
             />
             {assignedJudges.map((j) => (
-              <Chip
+              <Box
                 key={j.full_name || j.name}
-                size="small"
-                color="primary"
-                variant="outlined"
-                clickable
-                label={j.name}
-                title={`${j.instructions || ''}\n\nClick to edit this judge.`}
-                onClick={() => openEditJudge(j)}
-                onDelete={() => handleUnassignJudge(j.full_name || j.name)}
-              />
+                sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25 }}
+              >
+                <Chip
+                  size="small"
+                  color="primary"
+                  variant="outlined"
+                  clickable
+                  label={j.name}
+                  title={`${j.instructions || ''}\n\nClick to edit this judge.`}
+                  onClick={() => openEditJudge(j)}
+                  onDelete={() => handleUnassignJudge(j.full_name || j.name)}
+                />
+                <Tooltip
+                  title={`Align "${j.name}" to the grades you gave with it selected: it learns where it disagreed with you and scores like you from then on`}
+                >
+                  <span>
+                    <IconButton
+                      size="small"
+                      aria-label={`Align ${j.name}`}
+                      disabled={aligning !== null}
+                      onClick={() => void handleAlignJudge(j)}
+                    >
+                      {aligning === (j.full_name || j.name) ? (
+                        <CircularProgress size={14} />
+                      ) : (
+                        <AutoFixHighIcon sx={{ fontSize: 16 }} />
+                      )}
+                    </IconButton>
+                  </span>
+                </Tooltip>
+              </Box>
             ))}
             {libraryJudges.length > 0 && (
               <>
@@ -703,6 +755,40 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
               {showJudgeForm ? 'Cancel' : '+ Create judge'}
             </Button>
           </Box>
+          {Object.values(alignments).map((a) => (
+            <Alert
+              key={a.full_name}
+              severity="success"
+              variant="outlined"
+              sx={{ mt: 1 }}
+              onClose={() =>
+                setAlignments((prev) => {
+                  const rest = { ...prev };
+                  delete rest[a.full_name];
+                  return rest;
+                })
+              }
+            >
+              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                {a.name} learned from {a.traces_used} graded answer
+                {a.traces_used === 1 ? '' : 's'}
+              </Typography>
+              {a.guidelines.length > 0 ? (
+                <Box component="ul" sx={{ m: 0, mt: 0.5, pl: 2 }}>
+                  {a.guidelines.map((g, i) => (
+                    <Typography key={`${a.full_name}-${i}`} component="li" variant="body2">
+                      {g}
+                    </Typography>
+                  ))}
+                </Box>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  No new guidelines — the judge already agreed with your grades. Grade more
+                  answers with it selected and align again.
+                </Typography>
+              )}
+            </Alert>
+          ))}
           {showJudgeForm && (
             <Box sx={{ mt: 1.5 }}>
               <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 1 }}>
