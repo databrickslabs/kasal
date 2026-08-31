@@ -32,6 +32,24 @@ def _prompts(*names):
     return [SimpleNamespace(name=n) for n in names]
 
 
+def _versions(*numbers, uc=False):
+    """search_prompt_versions result: a list on OSS, a response proto carrying
+    ``prompt_versions`` on Unity Catalog (versions arrive as strings there)."""
+    items = [SimpleNamespace(version=(str(n) if uc else n)) for n in numbers]
+    return SimpleNamespace(prompt_versions=items) if uc else items
+
+
+def _client(versions=(3,), uc=False, template="criteria"):
+    client = MagicMock()
+    client.search_prompt_versions.return_value = _versions(*versions, uc=uc)
+    client.load_prompt.side_effect = (
+        lambda name, version=None, allow_missing=False: _version(
+            f"{template} of {name}", version=int(version)
+        )
+    )
+    return client
+
+
 class TestNaming:
     def test_prompt_names_carry_the_prefix_and_the_uc_schema(self):
         assert jr.JudgeRegistry("http://x", client=MagicMock()).prompt_name("acc") == (
@@ -87,14 +105,11 @@ class TestGuidelines:
 
 class TestReads:
     def test_list_pages_filters_by_crew_and_skips_foreign_prompts(self):
-        client = MagicMock()
+        client = _client(versions=(1, 3, 2))
         client.search_prompts.side_effect = [
             _Page(_prompts("kasal_judge__lib", "kasal_crew_88ab_grp"), token="t2"),
             _Page(_prompts("kasal_judge__crew_88ab4478823c__lib")),
         ]
-        client.load_prompt.side_effect = lambda name, allow_missing: _version(
-            f"criteria of {name}"
-        )
         registry = jr.JudgeRegistry("http://x", client=client)
 
         everything = registry.list()
@@ -123,12 +138,37 @@ class TestReads:
             "catalog = 'main' AND schema = 'kasal'"
         )
 
+    def test_load_resolves_the_newest_version_explicitly(self):
+        """Never `load_prompt(name)` without a version: that asks the store for
+        an alias called "latest", which Unity Catalog does not have."""
+        client = _client(versions=(1, 3, 2))
+        spec = jr.JudgeRegistry("http://x", client=client).load("acc")
+        assert spec.version == 3
+        client.load_prompt.assert_called_once_with(
+            "kasal_judge__acc", version=3, allow_missing=True
+        )
+
+    def test_load_reads_unity_catalogs_version_response(self):
+        client = _client(versions=(4, 12), uc=True)
+        registry = jr.JudgeRegistry("databricks-uc", "main.kasal", client=client)
+        spec = registry.load("acc")
+        assert spec.version == 12
+        client.load_prompt.assert_called_once_with(
+            "main.kasal.kasal_judge__acc", version=12, allow_missing=True
+        )
+
     def test_load_returns_none_when_missing(self):
         client = MagicMock()
-        client.load_prompt.return_value = None
+        client.search_prompt_versions.return_value = []
         assert jr.JudgeRegistry("http://x", client=client).load("ghost") is None
-        client.load_prompt.assert_called_once_with(
-            "kasal_judge__ghost", allow_missing=True
+        client.load_prompt.assert_not_called()
+        # Unity Catalog raises for an unknown prompt instead of returning nothing.
+        client.search_prompt_versions.side_effect = RuntimeError(
+            "RESOURCE_DOES_NOT_EXIST: prompt does not exist"
+        )
+        assert (
+            jr.JudgeRegistry("databricks-uc", "main.kasal", client=client).load("ghost")
+            is None
         )
 
     def test_as_dict_is_what_the_dialog_reads(self):
@@ -173,20 +213,18 @@ class TestWrites:
 
     def test_delete_is_false_for_a_missing_judge(self):
         client = MagicMock()
-        client.load_prompt.return_value = None
+        client.search_prompt_versions.return_value = []
         assert jr.JudgeRegistry("http://x", client=client).delete("ghost") is False
         client.delete_prompt.assert_not_called()
 
     def test_delete_locally_drops_the_prompt_with_its_versions(self):
-        client = MagicMock()
-        client.load_prompt.return_value = _version("x", version=3)
+        client = _client(versions=(1, 2, 3))
         assert jr.JudgeRegistry("http://x", client=client).delete("acc") is True
         client.delete_prompt_version.assert_not_called()
         client.delete_prompt.assert_called_once_with("kasal_judge__acc")
 
     def test_delete_on_uc_removes_every_version_first_and_tolerates_gaps(self):
-        client = MagicMock()
-        client.load_prompt.return_value = _version("x", version=3)
+        client = _client(versions=(1, 3), uc=True)
         client.delete_prompt_version.side_effect = [
             None,
             RuntimeError("RESOURCE_DOES_NOT_EXIST: version 2 does not exist"),

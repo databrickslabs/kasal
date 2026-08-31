@@ -194,11 +194,41 @@ class JudgeRegistry:
                 out.append(spec)
         return out
 
+    def _latest_version_number(self, name: str) -> Optional[int]:
+        """Newest version number of a prompt, or None when it does not exist.
+
+        Resolved explicitly rather than via ``load_prompt(name)``: without a
+        version that call asks the store for an ALIAS named "latest", which
+        the OSS server treats as "newest" but Unity Catalog looks up literally
+        — no such alias, so every judge read as missing there. The two stores
+        also return different shapes here (a list of versions vs. a response
+        proto carrying ``prompt_versions``); both are read.
+        """
+        try:
+            result = self._client.search_prompt_versions(name, max_results=PAGE_SIZE)
+        except Exception as exc:  # noqa: BLE001 — UC raises for an unknown prompt
+            text = str(exc).lower()
+            if "not exist" in text or "not found" in text:
+                return None
+            raise
+        items = getattr(result, "prompt_versions", None)
+        if items is None:
+            items = list(result or [])
+        numbers = []
+        for item in items:
+            try:
+                numbers.append(int(getattr(item, "version", None)))
+            except (TypeError, ValueError):
+                continue
+        return max(numbers) if numbers else None
+
     def load(self, full_name: str) -> Optional[JudgeSpec]:
-        """The judge's latest version, or None."""
-        version = self._client.load_prompt(
-            self.prompt_name(full_name), allow_missing=True
-        )
+        """The judge's newest version, or None."""
+        name = self.prompt_name(full_name)
+        number = self._latest_version_number(name)
+        if number is None:
+            return None
+        version = self._client.load_prompt(name, version=number, allow_missing=True)
         return None if version is None else self._spec(full_name, version)
 
     @staticmethod
@@ -240,14 +270,14 @@ class JudgeRegistry:
     def delete(self, full_name: str) -> bool:
         """Delete the judge with all its versions. False when it does not exist."""
         name = self.prompt_name(full_name)
-        latest = self._client.load_prompt(name, allow_missing=True)
+        latest = self._latest_version_number(name)
         if latest is None:
             return False
         try:
             if self._uc_schema:
                 # UC refuses to delete a prompt that still has versions; the
                 # OSS registry drops them with the prompt.
-                for number in range(1, int(latest.version) + 1):
+                for number in range(1, latest + 1):
                     try:
                         self._client.delete_prompt_version(name, str(number))
                     except Exception as exc:  # noqa: BLE001 — gaps are fine
