@@ -132,10 +132,8 @@ Nothing beyond what crew optimization already needs:
 - **Local development:** the MLflow server the backend was launched against is
   running (for example `mlflow server --host 127.0.0.1 --port 5555 …`); judges
   appear on its Prompts page.
-- **After upgrading:** judges created before this change lived in the MLflow
-  scorer registry; the first time the dialog lists judges they are imported
-  into the prompt registry automatically (the scorer entries are left as they
-  are). Each judge chip links to its page in MLflow.
+- Each judge chip links to the judge's page in MLflow (the Prompts page of a
+  local server; the experiment's Prompts tab on Databricks).
 
 Monitoring — scoring a published crew's live traffic on a schedule — is a
 separate, later step and is not part of the Optimize dialog.

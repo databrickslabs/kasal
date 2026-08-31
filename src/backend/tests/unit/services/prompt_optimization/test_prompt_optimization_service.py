@@ -874,21 +874,11 @@ class _FakeJudgeStore:
                 return True
 
         self.registry_cls = Registry
-        self.legacy_scorers = []  # what the OLD scorer registry still holds
         mlflow = types.ModuleType("mlflow")
         mlflow.get_tracking_uri = lambda: "prev://"
         mlflow.set_tracking_uri = lambda uri: None
         mlflow.set_experiment = lambda name: store.experiments.append(name)
-        genai = types.ModuleType("mlflow.genai")
-        scorers = types.ModuleType("mlflow.genai.scorers")
-        scorers.list_scorers = lambda: list(store.legacy_scorers)
-        genai.scorers = scorers
-        mlflow.genai = genai
-        self.modules = {
-            "mlflow": mlflow,
-            "mlflow.genai": genai,
-            "mlflow.genai.scorers": scorers,
-        }
+        self.modules = {"mlflow": mlflow}
 
 
 @pytest.fixture()
@@ -900,9 +890,6 @@ def fake_mlflow(monkeypatch):
         monkeypatch.setitem(sys.modules, name, module)
     monkeypatch.setattr(
         "src.services.prompt_optimization.judges.JudgeRegistry", store.registry_cls
-    )
-    monkeypatch.setattr(
-        "src.services.prompt_optimization.judges._LEGACY_IMPORTED", set()
     )
     # The local backend is probed before use; these tests own no server.
     monkeypatch.setattr(
@@ -1047,45 +1034,6 @@ class TestJudgeLifecycle:
         await svc.create_judge("lib", "Library judge for {{ outputs }}.")
         (row,) = await svc.list_judges()
         assert row["url"] == "http://127.0.0.1:5555/#/prompts/kasal_judge__lib"
-
-    @pytest.mark.asyncio
-    async def test_list_imports_legacy_scorer_judges_once(self, fake_mlflow):
-        """Judges created before they became prompts still show up: the first
-        listing carries them over from the scorer registry, later ones don't
-        re-read it, and non-judge scorers (no instructions) are ignored."""
-        fake_mlflow.legacy_scorers = [
-            SimpleNamespace(
-                name="citation",
-                instructions="Cite {{ outputs }}",
-                model="openai:/qwen-30b",
-            ),
-            SimpleNamespace(
-                name="crew_cbd780c99397__citation",
-                instructions="Cite {{ outputs }}",
-                model="databricks:/kimi",
-            ),
-            SimpleNamespace(name="Safety", instructions="", model=None),
-        ]
-        svc = _judge_service()
-        await svc.create_judge("citation", "Newer criteria for {{ outputs }}.")
-        fake_mlflow.registered.clear()
-
-        judges = await svc.list_judges()
-        by_full = {j["full_name"]: j for j in judges}
-        # The existing prompt wins; only the missing name is imported, with
-        # the scorer's model URI reduced to the Kasal key.
-        assert [n for n, _, _ in fake_mlflow.registered] == [
-            "crew_cbd780c99397__citation"
-        ]
-        assert by_full["crew_cbd780c99397__citation"]["model"] == "kimi"
-        assert "Newer criteria" in by_full["citation"]["instructions"]
-        assert "Safety" not in by_full
-
-        fake_mlflow.legacy_scorers.append(
-            SimpleNamespace(name="late", instructions="x {{ outputs }}", model=None)
-        )
-        await svc.list_judges()
-        assert len(fake_mlflow.registered) == 1  # not re-read in this process
 
     @pytest.mark.asyncio
     async def test_every_operation_pins_the_experiment(self, fake_mlflow):
