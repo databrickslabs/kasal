@@ -29,6 +29,7 @@ from src.api.prompt_optimization_router import (
     delete_judge,
     get_run,
     list_crew_evals,
+    judge_registry_info,
     list_judges,
     list_runs,
     revert_run,
@@ -249,6 +250,24 @@ class TestJudgeEndpoints:
     async def test_align_judge_requires_crew_id(self, service):
         with pytest.raises(BadRequestError, match="crew_id"):
             await align_judge("acc", {}, _group(), MagicMock())
+
+    @pytest.mark.asyncio
+    async def test_list_judges_turns_registry_errors_into_400(self, service):
+        service.list_judges = AsyncMock(
+            side_effect=ValueError("registry needs a catalog and schema")
+        )
+        with pytest.raises(BadRequestError, match="catalog and schema"):
+            await list_judges(_group(), MagicMock())
+
+    @pytest.mark.asyncio
+    async def test_judge_registry_info_passes_through(self, service):
+        service.judge_registry_info = AsyncMock(
+            return_value={"kind": "local", "location": "http://127.0.0.1:5555"}
+        )
+        group = _group()
+        result = await judge_registry_info(group, MagicMock())
+        assert result["location"] == "http://127.0.0.1:5555"
+        service.judge_registry_info.assert_awaited_once_with(group)
 
     @pytest.mark.asyncio
     async def test_align_judge_passes_the_crew_and_group_through(self, service):

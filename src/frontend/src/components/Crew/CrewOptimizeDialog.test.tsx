@@ -37,6 +37,7 @@ vi.mock('../../api/config/PromptOptimizationService', () => ({
     listRuns: vi.fn(),
     listCrewEvals: vi.fn(),
     listJudges: vi.fn(),
+    judgeRegistryInfo: vi.fn(),
     startCrewOptimization: vi.fn(),
     cancelRun: vi.fn(),
     applyRun: vi.fn(),
@@ -130,6 +131,11 @@ beforeEach(() => {
   service.listRuns.mockResolvedValue(RUNS);
   service.listCrewEvals.mockResolvedValue(EVALS);
   service.listJudges.mockResolvedValue(JUDGES);
+  service.judgeRegistryInfo.mockResolvedValue({
+    kind: 'local',
+    location: 'http://127.0.0.1:5555',
+    url: 'http://127.0.0.1:5555/#/prompts',
+  });
   getEnabledModels.mockResolvedValue({ 'qwen-30b': {} });
 });
 
@@ -328,5 +334,19 @@ describe('background run failures', () => {
       'http://127.0.0.1:5555/#/prompts/kasal_judge__crew_88ab4478823c__accuracy',
     );
     expect(link).toHaveAttribute('target', '_blank');
+  });
+
+  it('says where judges live and surfaces a registry failure instead of an empty list', async () => {
+    service.listJudges.mockRejectedValue({
+      response: { data: { detail: 'Prompt optimization uses the managed MLflow (Unity Catalog) prompt registry' } },
+    });
+    renderDialog();
+    expect(
+      await screen.findByText(/Unity Catalog\) prompt registry/),
+    ).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'http://127.0.0.1:5555' })).toHaveAttribute(
+      'href',
+      'http://127.0.0.1:5555/#/prompts',
+    );
   });
 });

@@ -177,6 +177,42 @@ class JudgeOperationsMixin:
         registry_uri, sample_name = await self._resolve_registry("judge", group_context)
         return registry_uri, uc_schema_of(registry_uri, sample_name)
 
+    async def judge_registry_info(
+        self, group_context: Optional[GroupContext] = None
+    ) -> Dict[str, Any]:
+        """Where this group's judges live, for the dialog to say so — and, when
+        nothing resolves, WHY (an empty judge list and an unreachable registry
+        must not look the same)."""
+        backend = await resolve_mlflow_backend(self.session, group_context)
+        if not backend:
+            return {
+                "kind": None,
+                "location": None,
+                "url": None,
+                "message": (
+                    "No MLflow backend for this workspace: configure a Databricks "
+                    "workspace (Prompt Registry preview + schema grants), or launch "
+                    "Kasal against a local MLflow server."
+                ),
+            }
+        try:
+            registry_uri, uc_schema = await self._judge_registry_target(group_context)
+        except ValueError as exc:
+            return {
+                "kind": backend.kind,
+                "location": None,
+                "url": None,
+                "message": str(exc),
+            }
+        location = f"Unity Catalog {uc_schema}" if uc_schema else registry_uri
+        if backend.kind == "databricks":
+            url = await asyncio.to_thread(
+                lambda: _judge_link(backend, registry_uri)("")  # the Prompts tab
+            )
+        else:
+            url = f"{registry_uri.rstrip('/')}/#/prompts"
+        return {"kind": backend.kind, "location": location, "url": url, "message": None}
+
     async def list_judges(
         self, group_context: Optional[GroupContext] = None
     ) -> List[Dict[str, Any]]:
@@ -188,6 +224,7 @@ class JudgeOperationsMixin:
         """
         backend = await resolve_mlflow_backend(self.session, group_context)
         if not backend:
+            logger.warning("[judges] no MLflow backend for this group; nothing to list")
             return []
         registry_uri, uc_schema = await self._judge_registry_target(group_context)
 
@@ -200,6 +237,13 @@ class JudgeOperationsMixin:
                     row = spec.as_dict()
                     row["url"] = link(registry.prompt_name(spec.full_name))
                     rows.append(row)
+                logger.info(
+                    "[judges] %d judge(s) in %s registry %s%s",
+                    len(rows),
+                    backend.kind,
+                    registry_uri,
+                    f" ({uc_schema})" if uc_schema else "",
+                )
                 return rows
 
         return await asyncio.to_thread(_list)

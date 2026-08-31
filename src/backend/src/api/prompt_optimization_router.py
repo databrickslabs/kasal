@@ -148,9 +148,20 @@ async def add_eval_feedback(
 
 @router.get("/judges")
 async def list_judges(group_context: GroupContextDep, session: SessionDep):
-    """List registered LLM judges (local MLflow scorer registry)."""
+    """List the judges in the MLflow prompt registry."""
     service = PromptOptimizationService(session)
-    return {"judges": await service.list_judges(group_context)}
+    try:
+        return {"judges": await service.list_judges(group_context)}
+    except ValueError as e:
+        raise BadRequestError(str(e))
+
+
+@router.get("/judges/registry")
+async def judge_registry_info(group_context: GroupContextDep, session: SessionDep):
+    """Where this workspace's judges live (kind, location, UI url) — or why
+    no registry resolves. Lets the Optimize dialog show the reason instead of
+    an empty judge list."""
+    return await PromptOptimizationService(session).judge_registry_info(group_context)
 
 
 @router.post("/judges")

@@ -36,6 +36,7 @@ import { toast } from 'react-hot-toast';
 import {
   CrewEval,
   JudgeAlignment,
+  JudgeRegistryInfo,
   LLMJudge,
   PromptOptimizationRun,
   PromptOptimizationService,
@@ -208,11 +209,21 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
     }
   }, [crewId]);
 
+  const [judgeRegistry, setJudgeRegistry] = useState<JudgeRegistryInfo | null>(null);
   const refreshJudges = useCallback(async () => {
     try {
       setJudges(await PromptOptimizationService.listJudges());
-    } catch {
+    } catch (e: unknown) {
+      // An unreachable registry must not read as "no judges yet".
       setJudges([]);
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data
+        ?.detail;
+      setError(detail || 'Judges could not be loaded from the MLflow prompt registry');
+    }
+    try {
+      setJudgeRegistry(await PromptOptimizationService.judgeRegistryInfo());
+    } catch {
+      setJudgeRegistry(null);
     }
   }, []);
 
@@ -635,7 +646,29 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
             <GavelIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
             <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
               Judges
+              {judgeRegistry?.location && (
+                <>
+                  {' · '}
+                  {judgeRegistry.url ? (
+                    <a
+                      href={judgeRegistry.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: 'inherit' }}
+                    >
+                      {judgeRegistry.location}
+                    </a>
+                  ) : (
+                    judgeRegistry.location
+                  )}
+                </>
+              )}
             </Typography>
+            {judgeRegistry && !judgeRegistry.kind && (
+              <Typography variant="caption" color="warning.main">
+                {judgeRegistry.message}
+              </Typography>
+            )}
             <Chip
               size="small"
               variant="outlined"

@@ -1036,6 +1036,27 @@ class TestJudgeLifecycle:
         assert row["url"] == "http://127.0.0.1:5555/#/prompts/kasal_judge__lib"
 
     @pytest.mark.asyncio
+    async def test_registry_info_says_where_judges_live(self, fake_mlflow):
+        svc = _judge_service()
+        info = await svc.judge_registry_info()
+        assert info == {
+            "kind": "local",
+            "location": "http://127.0.0.1:5555",
+            "url": "http://127.0.0.1:5555/#/prompts",
+            "message": None,
+        }
+
+    @pytest.mark.asyncio
+    async def test_registry_info_explains_a_missing_backend(
+        self, fake_mlflow, monkeypatch
+    ):
+        monkeypatch.setenv("MCP_SERVER_ENABLED", "false")
+        svc = _judge_service()
+        info = await svc.judge_registry_info()
+        assert info["kind"] is None and "No MLflow backend" in info["message"]
+        assert await svc.list_judges() == []
+
+    @pytest.mark.asyncio
     async def test_every_operation_pins_the_experiment(self, fake_mlflow):
         svc = _judge_service()
         await svc.create_judge("a", "b {{ outputs }}")

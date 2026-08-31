@@ -61,6 +61,17 @@ export interface LLMJudge {
   url?: string | null;
 }
 
+/** Where the workspace's judges live (MLflow prompt registry), or why none resolves. */
+export interface JudgeRegistryInfo {
+  kind: 'local' | 'databricks' | null;
+  /** "Unity Catalog <catalog.schema>" on Databricks, the server URL locally. */
+  location: string | null;
+  /** The registry's Prompts page in the MLflow UI. */
+  url?: string | null;
+  /** Set when no registry resolves — shown to the user in place of the judges. */
+  message?: string | null;
+}
+
 /** What aligning a judge to its human grades (MemAlign) distilled. */
 export interface JudgeAlignment {
   /** Display name (crew prefix stripped). */
@@ -171,7 +182,15 @@ export class PromptOptimizationService {
     return Boolean(response.data?.ok);
   }
 
-  /** LLM judges registered on the local MLflow experiment. */
+  /** Where this workspace's judges live, or why no registry resolves. */
+  static async judgeRegistryInfo(): Promise<JudgeRegistryInfo> {
+    const response = await apiClient.get<JudgeRegistryInfo>(
+      '/prompt-optimization/judges/registry',
+    );
+    return response.data;
+  }
+
+  /** LLM judges in the MLflow prompt registry. */
   static async listJudges(): Promise<LLMJudge[]> {
     const response = await apiClient.get<{ judges: LLMJudge[] }>(
       '/prompt-optimization/judges',
