@@ -1,6 +1,8 @@
+import type { ReactElement } from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { A2uiSurface } from './A2uiSurface';
+import { useAppStore } from '../../store/appStore';
 
 // Mock the shared renderer + its theme contexts so this unit test never pulls in
 // the heavy ESM render stack (react-markdown / recharts). We only verify the
@@ -127,5 +129,48 @@ describe('A2uiSurface', () => {
     fireEvent.click(screen.getByLabelText('Open in preview pane'));
     expect(onExpand).toHaveBeenCalledTimes(1);
     expect(parentClick).not.toHaveBeenCalled();
+  });
+
+  describe('blending with the chat host', () => {
+    const wrapperOf = (ui: ReactElement) =>
+      render(ui).container.querySelector('.kasal-a2ui') as HTMLElement;
+
+    it('an un-branded document takes the chat palette and a transparent background', () => {
+      h.themes = null;
+      const wrapper = wrapperOf(<A2uiSurface surface={surface} blendWithHost />);
+      // themeToTokens is mocked to echo the resolved palette's background.
+      expect(wrapper.style.getPropertyValue('--a2-background')).toBe('#FFFFFF');
+      expect(wrapper.style.backgroundColor).toBe('transparent');
+    });
+
+    it('follows the chat mode: dark chat, dark palette', () => {
+      h.themes = null;
+      useAppStore.setState({ theme: 'dark' });
+      try {
+        const wrapper = wrapperOf(<A2uiSurface surface={surface} blendWithHost />);
+        expect(wrapper.style.getPropertyValue('--a2-background')).toBe('#1B1F23');
+        expect(wrapper.style.backgroundColor).toBe('transparent');
+      } finally {
+        useAppStore.setState({ theme: 'light' });
+      }
+    });
+
+    it('a configured workspace palette still paints its own background', () => {
+      h.themes = { default: { background: '#333333' } };
+      try {
+        const wrapper = wrapperOf(<A2uiSurface surface={surface} blendWithHost />);
+        expect(wrapper.style.getPropertyValue('--a2-background')).toBe('#333333');
+        expect(wrapper.style.backgroundColor).toBe('hsl(var(--a2-background))');
+      } finally {
+        h.themes = null;
+      }
+    });
+
+    it('hosts that do not opt in keep the painted white default', () => {
+      h.themes = null;
+      const wrapper = wrapperOf(<A2uiSurface surface={surface} />);
+      expect(wrapper.style.getPropertyValue('--a2-background')).toBe('#FFFFFF');
+      expect(wrapper.style.backgroundColor).toBe('hsl(var(--a2-background))');
+    });
   });
 });

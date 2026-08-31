@@ -313,6 +313,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
         return (
           <div className="mt-3">
             <A2uiSurface
+              blendWithHost
               surface={a2uiSurface}
               onExpand={() =>
                 useExecutionStore.getState().openPreviewPane(

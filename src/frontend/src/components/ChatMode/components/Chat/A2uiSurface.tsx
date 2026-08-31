@@ -11,7 +11,13 @@ import {
   type Surface,
 } from '../../../../shared/a2ui';
 import { useA2uiThemes } from '../../hooks/useA2uiThemes';
-import { THEME_PRESETS, DEFAULT_THEME, type Theme } from '../../../Configuration/uiConfigShared';
+import {
+  THEME_PRESETS,
+  DEFAULT_THEME,
+  CHAT_HOST_PALETTES,
+  type Theme,
+} from '../../../Configuration/uiConfigShared';
+import { useAppStore } from '../../store/appStore';
 
 /** A per-surface palette persisted by the preview's "Customize → Look" restyle.
  *  Stored on the surface (the composer never emits it) so it survives reload/PDF. */
@@ -85,7 +91,26 @@ export const A2uiSurface: React.FC<{
   /** Fit a deck to the available HEIGHT (letterbox, no vertical scroll). The host
    *  must give this surface a bounded-height flex parent (the preview pane does). */
   fit?: boolean;
-}> = ({ surface, className, palette, onExpand, hideDownloads, onDownloadPdf, onRestyle, fit }) => {
+  /** Blend an UN-branded dashboard/document surface into the host instead of
+   *  painting it white: its tokens come from the chat's own palette for the
+   *  current mode and its background is transparent, so diagrams/tables sit on
+   *  the chat vignette like the rest of the thread. A configured workspace
+   *  palette or a per-surface Look still paints as before. The chat thread and
+   *  preview pane pass this; the PDF rasterizer must not (a PDF page needs a
+   *  solid background). */
+  blendWithHost?: boolean;
+}> = ({
+  surface,
+  className,
+  palette,
+  onExpand,
+  hideDownloads,
+  onDownloadPdf,
+  onRestyle,
+  fit,
+  blendWithHost,
+}) => {
+  const chatMode = useAppStore((s) => s.theme);
   const a2uiThemes = useA2uiThemes();
   const [lookOpen, setLookOpen] = useState(false);
   // Prefer a component-level deliverable when the surface's ROOT is a
@@ -99,25 +124,40 @@ export const A2uiSurface: React.FC<{
   // Precedence: explicit prop → per-surface "Look" override → workspace palette.
   const override = palette ?? (surface as ThemedSurface).theme;
   const deckPalette = override ?? a2uiThemes?.[deliverableKey];
-  // Token-themed kinds (dashboard/document — where graphs/tables live) must default
-  // to the LIGHT DEFAULT_THEME (white background) rather than inheriting the chat
-  // root's `--a2-*` tokens, which are DARK when the chat is in dark mode. An
-  // unconfigured/disabled workspace yields no palette (useA2uiThemes → null), so
-  // without this a graph surface would render dark-on-dark by default. Deck-themed
-  // and presentation kinds keep their existing (null → inherit / deck) behavior.
+  // Token-themed kinds (dashboard/document — where graphs/tables live) must not
+  // inherit the chat root's `--a2-*` tokens, which are DARK when the chat is in
+  // dark mode: an unconfigured/disabled workspace yields no palette
+  // (useA2uiThemes → null) and a graph surface would render dark-on-dark. So an
+  // un-branded surface gets an explicit fallback palette: the chat's own colors
+  // for the current mode when the host asked to blend (transparent background —
+  // the surface sits on the chat vignette like the rest of the thread), else the
+  // light DEFAULT_THEME painted white. Deck-themed and presentation kinds keep
+  // their existing (null → inherit / deck) behavior.
   const isTokenThemed =
     surface.surfaceKind === 'dashboard' || surface.surfaceKind === 'document';
+  const configuredPalette = override ?? a2uiThemes?.[deliverableKey] ?? a2uiThemes?.default;
+  const blends = Boolean(blendWithHost) && isTokenThemed && !configuredPalette;
   const tokenPalette =
-    override ??
-    a2uiThemes?.[deliverableKey] ??
-    a2uiThemes?.default ??
-    (isTokenThemed ? DEFAULT_THEME : null);
+    configuredPalette ??
+    (isTokenThemed
+      ? blends
+        ? CHAT_HOST_PALETTES[chatMode === 'dark' ? 'dark' : 'light']
+        : DEFAULT_THEME
+      : null);
   // Memoized: parents re-render per trace tick, and a fresh theme object /
   // context value each render forces every themed child inside the surface to
   // re-render even when nothing about the surface changed.
+  // Diagrams (Graph/Sequence) inside a token-themed surface draw with the deck
+  // theme's fg/bg (label fill, node stroke), so it must follow the SAME palette
+  // as the surface's tokens — not the dark built-in deck default.
   const deckTheme = useMemo(
-    () => (deckPalette ? themeToDeck(deckPalette) : getDeckTheme(DEFAULT_DECK_THEME_ID)),
-    [deckPalette],
+    () =>
+      deckPalette
+        ? themeToDeck(deckPalette)
+        : isTokenThemed && tokenPalette
+          ? themeToDeck(tokenPalette)
+          : getDeckTheme(DEFAULT_DECK_THEME_ID),
+    [deckPalette, isTokenThemed, tokenPalette],
   );
   const tokenStyle = useMemo(
     () => (tokenPalette ? (themeToTokens(tokenPalette) as React.CSSProperties) : undefined),
@@ -152,10 +192,16 @@ export const A2uiSurface: React.FC<{
     surface.surfaceKind === 'quiz' ||
     surface.surfaceKind === 'flashcards' ||
     surface.surfaceKind === 'mindmap';
+  // A blended surface leaves the background to the host (the chat vignette):
+  // its tokens already match the chat's palette, so cards, tables and diagram
+  // strokes read correctly on it in both modes.
   const surfaceBgStyle: React.CSSProperties = deckThemed
     ? { backgroundColor: deckTheme.bg, color: deckTheme.fg }
-    : tokenStyle && (surface.surfaceKind === 'dashboard' || surface.surfaceKind === 'document')
-      ? { backgroundColor: 'hsl(var(--a2-background))', color: 'hsl(var(--a2-foreground))' }
+    : tokenStyle && isTokenThemed
+      ? {
+          backgroundColor: blends ? 'transparent' : 'hsl(var(--a2-background))',
+          color: 'hsl(var(--a2-foreground))',
+        }
       : {};
   // Apply a preset Look instantly: stamp the picked palette onto the surface
   // (the renderer reads surface.theme as the override) and hand the restyled

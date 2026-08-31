@@ -85,6 +85,32 @@ export const THEME_PRESETS: { key: string; label: string; theme: Theme }[] = [
 
 export const DEFAULT_THEME: Theme = THEME_PRESETS[0].theme;
 
+/** The Kasal chat's own colors per mode, as a branding palette — what an
+ *  un-branded dashboard/document surface adopts when it is asked to blend
+ *  with the chat instead of sitting on it as a white block (the chat page is a
+ *  soft vignette, so a flat white rectangle reads as foreign). Values mirror
+ *  `ChatMode/chat.css` (--bg-primary / --bg-secondary / --text-primary /
+ *  --text-secondary); keep the two in step. */
+export const CHAT_HOST_PALETTES: Record<'light' | 'dark', Theme> = {
+  light: {
+    ...DEFAULT_THEME,
+    background: '#FFFFFF',
+    surface: '#F5F7FA',
+    text: '#1B1F23',
+    heading: '#1B1F23',
+    muted: '#5A6872',
+  },
+  dark: {
+    ...DEFAULT_THEME,
+    accent: '#38BDF8',
+    background: '#1B1F23',
+    surface: '#232930',
+    text: '#E8ECEF',
+    heading: '#E8ECEF',
+    muted: '#A0AAB4',
+  },
+};
+
 export const normalizeTheme = (t: Partial<Theme> | undefined): Theme => ({ ...DEFAULT_THEME, ...(t || {}) });
 
 /** Branding tokens carried on the surface, set by the agent from the workspace

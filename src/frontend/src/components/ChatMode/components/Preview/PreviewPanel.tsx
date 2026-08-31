@@ -513,6 +513,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
           fitDeck ? (
             <div className="flex-1 min-h-0 flex p-3">
               <A2uiSurface
+                blendWithHost
                 key={`ui-${index ?? 0}-${displayData.length}`}
                 surface={uiSurface}
                 hideDownloads={hideSurfaceDownloads}
@@ -526,6 +527,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
             // edge and leave a vast empty band when the pane is wide (fullscreen).
             <div className="mx-auto w-full max-w-6xl p-4 sm:p-6">
               <A2uiSurface
+                blendWithHost
                 key={`ui-${index ?? 0}-${displayData.length}`}
                 surface={uiSurface}
                 hideDownloads={hideSurfaceDownloads}
