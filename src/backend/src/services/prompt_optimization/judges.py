@@ -1,19 +1,25 @@
 """Judge lifecycle: listing, creating, assigning and deleting the judges a
 run is graded by, plus the eval feedback loop.
 
+Judges are stored in the MLflow Prompt Registry (see ``judge_registry``) and
+invoked on demand through LLMManager — never registered as MLflow scorers.
+
 Mixed into ``PromptOptimizationService`` rather than composed, so this is pure
 movement: every method still reads ``self`` exactly as it did in the single
 3,031-line file, and the public surface is unchanged.
 """
 
 import asyncio
-import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.services.prompt_optimization.config import DEFAULT_TARGET_MODEL
 from src.services.prompt_optimization.gepa.mlflow_session import (
     mlflow_session,
     resolve_mlflow_backend,
+)
+from src.services.prompt_optimization.judge_registry import (
+    JudgeRegistry,
+    uc_schema_of,
 )
 from src.utils.user_context import GroupContext
 
@@ -134,58 +140,33 @@ class JudgeOperationsMixin:
         encoded in the name — no schema change, survives restarts)."""
         return f"crew_{str(crew_id).replace('-', '')[:12]}__"
 
-    @staticmethod
-    def _judge_model_uri(backend: Any, model_key: str) -> str:
-        """Wrap a Kasal model key in the provider URI make_judge().register()
-        accepts for this backend. Databricks REQUIRES 'databricks:/'; a local
-        server accepts 'openai:/'. Either scheme is stripped back to the key on
-        invocation (see _stored_judge_model_to_key), so this is inert at runtime."""
-        scheme = (
-            "databricks" if getattr(backend, "kind", "") == "databricks" else "openai"
-        )
-        return f"{scheme}:/{model_key}"
+    async def _judge_registry_target(
+        self, group_context: Optional[GroupContext]
+    ) -> Tuple[str, Optional[str]]:
+        """Where this group's judge prompts live: ``(registry_uri, uc_schema)``.
+        Resolved exactly like GEPA's crew prompts — Unity Catalog needs the
+        three-level prefix, a local server does not."""
+        registry_uri, sample_name = await self._resolve_registry("judge", group_context)
+        return registry_uri, uc_schema_of(registry_uri, sample_name)
 
     async def list_judges(
         self, group_context: Optional[GroupContext] = None
     ) -> List[Dict[str, Any]]:
-        """List LLM judges registered on the active MLflow experiment.
+        """List the judges in the prompt registry.
 
         Names starting with a crew prefix ('crew_<id>__') are ASSIGNED to that
         crew; others are shared library judges. `name` is the display name,
-        `full_name` the registry name.
+        `full_name` the identity.
         """
         backend = await resolve_mlflow_backend(self.session, group_context)
         if not backend:
             return []
+        registry_uri, uc_schema = await self._judge_registry_target(group_context)
 
         def _list() -> List[Dict[str, Any]]:
             with mlflow_session(backend):
-                from mlflow.genai.scorers import list_scorers
-
-                out = []
-                for s in list_scorers() or []:
-                    full_name = getattr(s, "name", "?")
-                    crew_id = None
-                    display = full_name
-                    match = re.match(r"^crew_([0-9a-f]{1,12})__(.+)$", full_name)
-                    if match:
-                        crew_id = match.group(1)
-                        display = match.group(2)
-                    out.append(
-                        {
-                            "name": display,
-                            "full_name": full_name,
-                            "crew_id": crew_id,
-                            "model": getattr(s, "model", None),
-                            # Full text (bounded): the edit dialog round-trips
-                            # this — a truncated copy would corrupt the judge
-                            # on save.
-                            "instructions": (getattr(s, "instructions", "") or "")[
-                                :4000
-                            ],
-                        }
-                    )
-                return out
+                registry = JudgeRegistry(registry_uri, uc_schema)
+                return [spec.as_dict() for spec in registry.list()]
 
         return await asyncio.to_thread(_list)
 
@@ -197,11 +178,12 @@ class JudgeOperationsMixin:
         crew_id: Optional[str] = None,
         group_context: Optional[GroupContext] = None,
     ) -> Dict[str, Any]:
-        """Create + register an MLflow LLM judge from Kasal (no MLflow UI needed).
+        """Create an LLM judge from Kasal (no MLflow UI needed).
 
         `instructions` is plain-language criteria; it must reference the answer
         via the {{ outputs }} template variable (added automatically when
-        missing). `model` is a Kasal model key, resolved to a judge model URI.
+        missing). `model` is a Kasal model key — the judge is invoked through
+        LLMManager, so the key is stored as-is.
         """
         backend = await resolve_mlflow_backend(self.session, group_context)
         if not backend:
@@ -218,39 +200,31 @@ class JudgeOperationsMixin:
             raise ValueError("Judge instructions are required")
         if "{{ outputs }}" not in text and "{{outputs}}" not in text:
             text += "\n\nThe answer to evaluate:\n{{ outputs }}"
-        # The judge is INVOKED through LLMManager with the plain Kasal model
-        # key; the URI wrapper only satisfies make_judge's shape and is stripped
-        # back on invocation. On Databricks, make_judge().register() REQUIRES a
-        # 'databricks:/' provider ("judge model must use Databricks as a model
-        # provider"); a local server accepts 'openai:/'.
-        model_uri = self._judge_model_uri(backend, model or DEFAULT_TARGET_MODEL)
+        model_key = model or DEFAULT_TARGET_MODEL
         scoped_name = (
             f"{self._crew_judge_prefix(crew_id)}{safe_name}" if crew_id else None
         )
+        registry_uri, uc_schema = await self._judge_registry_target(group_context)
 
         def _create() -> Dict[str, Any]:
             with mlflow_session(backend):
-                from mlflow.genai.judges import make_judge
-
-                # ALWAYS register the shared library original; when created
-                # from a crew's dialog, ALSO register the crew-scoped copy
-                # (auto-assign). Registering only the scoped copy made the
-                # judge invisible in every other crew's Assign menu — there
-                # was no library original to assign (observed live).
+                registry = JudgeRegistry(registry_uri, uc_schema)
+                # ALWAYS save the shared library original; when created from a
+                # crew's dialog, ALSO save the crew-scoped copy (auto-assign).
+                # Saving only the scoped copy made the judge invisible in every
+                # other crew's Assign menu — there was no library original to
+                # assign (observed live).
                 for reg_name in filter(None, [safe_name, scoped_name]):
-                    judge = make_judge(
-                        name=reg_name,
-                        instructions=text,
-                        model=model_uri,
-                        # Numeric verdicts — categorical words ('Satisfactory')
-                        # are lossier to fold into an aggregate score.
-                        feedback_value_type=float,
+                    registry.save(
+                        reg_name,
+                        text,
+                        model_key,
+                        commit_message="created in Kasal's Optimize dialog",
                     )
-                    judge.register()
                 return {
                     "name": safe_name,
                     "full_name": scoped_name or safe_name,
-                    "model": model_uri,
+                    "model": model_key,
                 }
 
         return await asyncio.to_thread(_create)
@@ -258,26 +232,26 @@ class JudgeOperationsMixin:
     async def assign_judge(
         self, name: str, crew_id: str, group_context: Optional[GroupContext] = None
     ) -> Dict[str, Any]:
-        """Assign a shared library judge to a crew by registering a crew-scoped
-        copy (same instructions/model) under the crew's name prefix."""
+        """Assign a shared library judge to a crew by saving a crew-scoped copy
+        (same instructions/model) under the crew's name prefix."""
         backend = await resolve_mlflow_backend(self.session, group_context)
         if not backend:
             raise ValueError("Judge assignment requires MLflow (Databricks or local).")
+        registry_uri, uc_schema = await self._judge_registry_target(group_context)
 
         def _assign() -> Dict[str, Any]:
             with mlflow_session(backend):
-                from mlflow.genai.judges import make_judge
-                from mlflow.genai.scorers import get_scorer
-
-                source = get_scorer(name=name)
+                registry = JudgeRegistry(registry_uri, uc_schema)
+                source = registry.load(name)
+                if source is None:
+                    raise ValueError(f"Judge '{name}' is not in the library.")
                 scoped_name = f"{self._crew_judge_prefix(crew_id)}{name}"
-                judge = make_judge(
-                    name=scoped_name,
-                    instructions=getattr(source, "instructions", "") or "",
-                    model=getattr(source, "model", None),
-                    feedback_value_type=float,
+                registry.save(
+                    scoped_name,
+                    source.instructions,
+                    source.model,
+                    commit_message=f"assigned from library judge '{name}'",
                 )
-                judge.register()
                 return {"name": name, "full_name": scoped_name, "crew_id": crew_id}
 
         return await asyncio.to_thread(_assign)
@@ -291,13 +265,12 @@ class JudgeOperationsMixin:
     ) -> Dict[str, Any]:
         """Update a judge's instructions and/or model.
 
-        `name` is the FULL registry name (library judge, or a crew-scoped
+        `name` is the FULL identity (library judge, or a crew-scoped
         'crew_<id>__name' copy — editing an assigned copy changes what that
-        crew's runs use). MLflow scorers are versioned: registering under the
-        same name creates a new version and get_scorer/list_scorers return the
-        latest (verified live against the local registry). Omitted fields keep
-        their current values. Editing a library judge does NOT touch copies
-        already assigned to crews — those are snapshots taken at assign time.
+        crew's runs use). Saving under the same name creates a new prompt
+        version, and reads return the latest. Omitted fields keep their current
+        values. Editing a library judge does NOT touch copies already assigned
+        to crews — those are snapshots taken at assign time.
         """
         backend = await resolve_mlflow_backend(self.session, group_context)
         if not backend:
@@ -305,32 +278,26 @@ class JudgeOperationsMixin:
         new_text = (instructions or "").strip()
         if not new_text and not model:
             raise ValueError("Nothing to update: provide instructions and/or a model")
-        # Plain Kasal model key, wrapped in the provider URI this backend's
-        # make_judge().register() accepts (databricks:/ on Databricks) —
-        # invocation goes through LLMManager (see _stored_judge_model_to_key).
-        model_uri: Optional[str] = (
-            self._judge_model_uri(backend, model) if model else None
-        )
+        registry_uri, uc_schema = await self._judge_registry_target(group_context)
 
         def _update() -> Dict[str, Any]:
             with mlflow_session(backend):
-                from mlflow.genai.judges import make_judge
-                from mlflow.genai.scorers import get_scorer
-
-                current = get_scorer(name=name)
-                text = new_text or (getattr(current, "instructions", "") or "").strip()
+                registry = JudgeRegistry(registry_uri, uc_schema)
+                current = registry.load(name)
+                if current is None:
+                    raise ValueError(f"Judge '{name}' not found.")
+                text = new_text or current.instructions.strip()
                 if not text:
                     raise ValueError("Judge instructions are required")
                 if "{{ outputs }}" not in text and "{{outputs}}" not in text:
                     text += "\n\nThe answer to evaluate:\n{{ outputs }}"
-                final_model = model_uri or getattr(current, "model", None)
-                judge = make_judge(
-                    name=name,
-                    instructions=text,
-                    model=final_model,
-                    feedback_value_type=float,
+                final_model = model or current.model
+                registry.save(
+                    name,
+                    text,
+                    final_model,
+                    commit_message="edited in Kasal's Optimize dialog",
                 )
-                judge.register()
                 return {"name": name, "model": final_model}
 
         return await asyncio.to_thread(_update)
@@ -338,16 +305,14 @@ class JudgeOperationsMixin:
     async def delete_judge(
         self, name: str, group_context: Optional[GroupContext] = None
     ) -> bool:
-        """Delete a registered judge by name."""
+        """Delete a judge (all versions) by its full identity."""
         backend = await resolve_mlflow_backend(self.session, group_context)
         if not backend:
             raise ValueError("Judge deletion requires MLflow (Databricks or local).")
+        registry_uri, uc_schema = await self._judge_registry_target(group_context)
 
         def _delete() -> bool:
             with mlflow_session(backend):
-                from mlflow.genai.scorers import delete_scorer
-
-                delete_scorer(name=name, version="all")
-                return True
+                return JudgeRegistry(registry_uri, uc_schema).delete(name)
 
         return await asyncio.to_thread(_delete)

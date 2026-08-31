@@ -824,70 +824,76 @@ class TestJudgeValueToGrade:
         assert svc_module._judge_value_to_grade("gibberish verdict") is None
 
 
-class _FakeMlflowRegistry:
-    """Fake mlflow + mlflow.genai.{judges,scorers} module tree that records
-    registrations so judge-lifecycle tests never touch a real server."""
+class _FakeJudgeStore:
+    """In-memory stand-in for JudgeRegistry, plus the bare `mlflow` module
+    mlflow_session needs. Records what the service saved and deleted and which
+    experiments it pinned, so judge-lifecycle tests never touch a registry."""
 
     def __init__(self):
         import types
 
-        self.registered = []  # (name, instructions, model)
+        from src.services.prompt_optimization.judge_registry import JudgeSpec
+
+        self.registered = []  # (full_name, instructions, model)
         self.deleted = []
         self.experiments = []
-        self.scorers = {}
+        self.targets = []  # (registry_uri, uc_schema) per registry construction
+        self.specs = {}
+        store = self
 
-        registry = self
+        class Registry:
+            def __init__(self, registry_uri, uc_schema=None, client=None):
+                store.targets.append((registry_uri, uc_schema))
 
-        class _Judge:
-            def __init__(self, name, instructions, model):
-                self.name = name
-                self.instructions = instructions
-                self.model = model
+            def list(self, crew_prefix=None):
+                return [
+                    spec
+                    for name, spec in store.specs.items()
+                    if not crew_prefix or name.startswith(crew_prefix)
+                ]
 
-            def register(self):
-                registry.registered.append((self.name, self.instructions, self.model))
-                registry.scorers[self.name] = self
+            def load(self, full_name):
+                return store.specs.get(full_name)
 
+            def save(self, full_name, instructions, model, commit_message=None):
+                spec = JudgeSpec(
+                    full_name, instructions, model, version=len(store.registered) + 1
+                )
+                store.specs[full_name] = spec
+                store.registered.append((full_name, instructions, model))
+                return spec
+
+            def delete(self, full_name):
+                store.deleted.append(full_name)
+                store.specs.pop(full_name, None)
+                return True
+
+        self.registry_cls = Registry
         mlflow = types.ModuleType("mlflow")
         mlflow.get_tracking_uri = lambda: "prev://"
         mlflow.set_tracking_uri = lambda uri: None
-        mlflow.set_experiment = lambda name: registry.experiments.append(name)
-
-        genai = types.ModuleType("mlflow.genai")
-        judges = types.ModuleType("mlflow.genai.judges")
-        judges.make_judge = (
-            lambda name, instructions, model, feedback_value_type: _Judge(
-                name, instructions, model
-            )
-        )
-        scorers = types.ModuleType("mlflow.genai.scorers")
-        scorers.get_scorer = lambda name: registry.scorers[name]
-        scorers.delete_scorer = lambda name, version: registry.deleted.append(
-            (name, version)
-        )
-        scorers.list_scorers = lambda: list(registry.scorers.values())
-        mlflow.genai = genai
-        genai.judges = judges
-        genai.scorers = scorers
-        self.modules = {
-            "mlflow": mlflow,
-            "mlflow.genai": genai,
-            "mlflow.genai.judges": judges,
-            "mlflow.genai.scorers": scorers,
-        }
+        mlflow.set_experiment = lambda name: store.experiments.append(name)
+        self.modules = {"mlflow": mlflow}
 
 
 @pytest.fixture()
 def fake_mlflow(monkeypatch):
     import sys
 
-    registry = _FakeMlflowRegistry()
-    for name, module in registry.modules.items():
+    store = _FakeJudgeStore()
+    for name, module in store.modules.items():
         monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.setattr(
+        "src.services.prompt_optimization.judges.JudgeRegistry", store.registry_cls
+    )
+    # The local backend is probed before use; these tests own no server.
+    monkeypatch.setattr(
+        "src.services.mlflow.local.is_reachable", lambda uri, timeout=2.0: True
+    )
     monkeypatch.setenv("MCP_SERVER_ENABLED", "true")
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5555")
     monkeypatch.delenv("KASAL_LAUNCH_MLFLOW_TRACKING_URI", raising=False)
-    return registry
+    return store
 
 
 def _judge_service():
@@ -896,9 +902,7 @@ def _judge_service():
 
 class TestJudgeLifecycle:
     @pytest.mark.asyncio
-    async def test_create_from_crew_registers_library_and_scoped_copy(
-        self, fake_mlflow
-    ):
+    async def test_create_from_crew_saves_library_and_scoped_copy(self, fake_mlflow):
         svc = _judge_service()
         crew_id = "88ab4478-823c-4f12-b1ca-8e74c568995e"
         result = await svc.create_judge(
@@ -909,12 +913,23 @@ class TestJudgeLifecycle:
         assert result["full_name"] == "crew_88ab4478823c__accuracy"
         # {{ outputs }} template variable auto-appended when missing
         assert "{{ outputs }}" in fake_mlflow.registered[0][1]
+        # The model is the plain Kasal key — invoked through LLMManager, so no
+        # provider URI wrapper is stored any more.
+        assert result["model"] == svc_module.DEFAULT_TARGET_MODEL
+        assert fake_mlflow.registered[0][2] == svc_module.DEFAULT_TARGET_MODEL
 
     @pytest.mark.asyncio
-    async def test_create_without_crew_registers_library_only(self, fake_mlflow):
+    async def test_create_without_crew_saves_library_only(self, fake_mlflow):
         svc = _judge_service()
         await svc.create_judge("style", "Judge style of {{ outputs }}.")
         assert [n for n, _, _ in fake_mlflow.registered] == ["style"]
+
+    @pytest.mark.asyncio
+    async def test_judges_go_to_the_resolved_registry(self, fake_mlflow):
+        svc = _judge_service()
+        await svc.create_judge("style", "Judge style of {{ outputs }}.")
+        # Local mode: the launch tracking URI, no UC schema prefix.
+        assert fake_mlflow.targets == [("http://127.0.0.1:5555", None)]
 
     @pytest.mark.asyncio
     async def test_create_validates_inputs(self, fake_mlflow):
@@ -944,9 +959,8 @@ class TestJudgeLifecycle:
         assert name == "acc"
         assert "New criteria." in instructions
         assert "{{ outputs }}" in instructions
-        # unchanged from creation (the wrapped default Kasal key)
-        assert model == f"openai:/{svc_module.DEFAULT_TARGET_MODEL}"
-        assert result["model"] == f"openai:/{svc_module.DEFAULT_TARGET_MODEL}"
+        assert model == svc_module.DEFAULT_TARGET_MODEL  # unchanged from creation
+        assert result["model"] == svc_module.DEFAULT_TARGET_MODEL
 
     @pytest.mark.asyncio
     async def test_update_model_keeps_instructions(self, fake_mlflow):
@@ -955,7 +969,7 @@ class TestJudgeLifecycle:
         fake_mlflow.registered.clear()
         await svc.update_judge("acc", model="deepseek-v4-pro", group_context=_group())
         name, instructions, model = fake_mlflow.registered[0]
-        assert model == "openai:/deepseek-v4-pro"
+        assert model == "deepseek-v4-pro"
         assert "Keep these criteria" in instructions
 
     @pytest.mark.asyncio
@@ -963,6 +977,13 @@ class TestJudgeLifecycle:
         svc = _judge_service()
         with pytest.raises(ValueError, match="Nothing to update"):
             await svc.update_judge("acc")
+
+    @pytest.mark.asyncio
+    async def test_update_of_an_unknown_judge_is_a_clear_error(self, fake_mlflow):
+        svc = _judge_service()
+        with pytest.raises(ValueError, match="not found"):
+            await svc.update_judge("ghost", instructions="x")
+        assert fake_mlflow.registered == []
 
     @pytest.mark.asyncio
     async def test_assign_copies_source_into_crew_scope(self, fake_mlflow):
@@ -973,15 +994,22 @@ class TestJudgeLifecycle:
             "shared", "11112222-3333-4444-5555-666677778888"
         )
         assert result["full_name"] == "crew_111122223333__shared"
-        name, instructions, _ = fake_mlflow.registered[0]
+        name, instructions, model = fake_mlflow.registered[0]
         assert name == "crew_111122223333__shared"
         assert "Shared criteria" in instructions
+        assert model == svc_module.DEFAULT_TARGET_MODEL
 
     @pytest.mark.asyncio
-    async def test_delete_removes_all_versions(self, fake_mlflow):
+    async def test_assign_of_an_unknown_judge_is_a_clear_error(self, fake_mlflow):
+        svc = _judge_service()
+        with pytest.raises(ValueError, match="not in the library"):
+            await svc.assign_judge("ghost", "11112222-3333-4444-5555-666677778888")
+
+    @pytest.mark.asyncio
+    async def test_delete_removes_the_judge(self, fake_mlflow):
         svc = _judge_service()
         assert await svc.delete_judge("obsolete") is True
-        assert fake_mlflow.deleted == [("obsolete", "all")]
+        assert fake_mlflow.deleted == ["obsolete"]
 
     @pytest.mark.asyncio
     async def test_list_splits_library_and_crew_judges(self, fake_mlflow):
@@ -993,6 +1021,7 @@ class TestJudgeLifecycle:
         assert by_full["lib"]["crew_id"] is None
         assert by_full["crew_aaaabbbbcccc__lib"]["crew_id"] == "aaaabbbbcccc"
         assert by_full["crew_aaaabbbbcccc__lib"]["name"] == "lib"
+        assert by_full["lib"]["model"] == svc_module.DEFAULT_TARGET_MODEL
 
     @pytest.mark.asyncio
     async def test_every_operation_pins_the_experiment(self, fake_mlflow):

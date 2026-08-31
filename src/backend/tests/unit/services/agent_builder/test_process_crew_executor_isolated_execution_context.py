@@ -720,14 +720,49 @@ class TestProcessCrewExecutorAdvancedStaticMethods:
             assert True
 
     def test_kill_orphan_crew_processes(self):
-        """Test kill_orphan_crew_processes static method"""
-        # Should not raise an exception
-        try:
-            ProcessCrewExecutor.kill_orphan_crew_processes()
-            assert True
-        except Exception as e:
-            # If it fails due to missing dependencies, that's acceptable
-            assert "psutil" in str(e) or "import" in str(e).lower()
+        """kill_orphan_crew_processes terminates what the scan matches — and
+        the scan MUST be faked. Unpatched, this test ran the real scanner,
+        which terminates every Python process with ppid 1 older than a minute
+        (a nohup'd MLflow server) and anything spawned via multiprocessing
+        (uvicorn's --reload worker). It killed both on a dev machine."""
+        old_orphan = Mock()
+        old_orphan.info = {
+            "pid": 4242,
+            "name": "python3.11",
+            "cmdline": ["python", "-c", "from multiprocessing.spawn import spawn_main"],
+            "ppid": 1,
+            "create_time": 0.0,
+        }
+        old_orphan.create_time.return_value = 0.0  # epoch: ancient
+        young = Mock()
+        young.info = {
+            "pid": 4243,
+            "name": "python3.11",
+            "cmdline": ["python", "-c", "from multiprocessing.spawn import spawn_main"],
+            "ppid": 1,
+            "create_time": 0.0,
+        }
+        import time
+
+        young.create_time.return_value = time.time()  # under a minute old
+        unrelated = Mock()
+        unrelated.info = {
+            "pid": 4244,
+            "name": "node",
+            "cmdline": ["node", "server.js"],
+            "ppid": 500,
+            "create_time": 0.0,
+        }
+        with patch(
+            "psutil.process_iter", return_value=[old_orphan, young, unrelated]
+        ) as scan:
+            killed = ProcessCrewExecutor.kill_orphan_crew_processes()
+
+        scan.assert_called_once()
+        assert killed == 1
+        old_orphan.terminate.assert_called_once_with()
+        young.terminate.assert_not_called()
+        unrelated.terminate.assert_not_called()
 
     def test_should_use_process_static_method(self):
         """Test should_use_process static method from ExecutionMode"""

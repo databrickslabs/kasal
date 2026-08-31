@@ -97,6 +97,48 @@ run; UC grants take effect for new authorization checks without redeploying Kasa
 | An admin **user** can register prompts but the deployed app cannot | The user is a workspace/metastore admin (bypasses the check); the SP is not and lacks `MANAGE` | Grant the SP `MANAGE` explicitly — do not rely on the user's success as proof the SP is configured |
 | Still denied after granting `MANAGE` | Grant targeted the wrong principal (user / display name / wrong catalog), or Prompt Registry preview is off | Confirm `SHOW GRANTS` rows are on the SP **applicationId** and the configured catalog; enable Prompt Registry on the **Previews** page |
 
+## Judges
+
+A judge is three things — a name, plain-language criteria that reference the
+answer as `{{ outputs }}`, and the Kasal model that applies them. Kasal runs
+judges **on demand**: GEPA grades every candidate with the crew's assigned
+judges, and aligning a judge distils your grades with the judge's own model —
+both through Kasal's LLM manager, never through MLflow's model client.
+
+Judge definitions live in the **MLflow Prompt Registry** as versioned prompts:
+`kasal_judge__<name>` for a library judge, `kasal_judge__crew_<id>__<name>`
+for a crew's copy, each version tagged with its model and crew. On Databricks
+that is Unity Catalog — the same catalog, schema and grants the crew prompts
+above use, so there is nothing extra to set up. On a local MLflow server it is
+the OSS registry.
+
+They are deliberately **not** MLflow scheduled scorers (`make_judge().register()`).
+On Databricks that registry is the experiment's *monitoring job*: every write
+patches the job's scorer list, which needs job permissions the app's service
+principal does not hold, and an existing name cannot be re-registered at all.
+Kasal has no monitoring use for judges. If you ever want live-traffic scoring,
+that is a separate, admin-gated step: grant the app SP `CAN MANAGE` on the
+experiment's monitoring job and attach the judge there.
+
+### Setup checklist for judges
+
+Nothing beyond what crew optimization already needs:
+
+- **Databricks:** the Prompt Registry preview is enabled on the workspace
+  **Previews** page, and the app's service principal holds `USE CATALOG` on the
+  configured catalog and `USE SCHEMA`, `CREATE FUNCTION`, `EXECUTE`, `MANAGE` on
+  the configured schema (see the grants above). Judges then appear in the
+  crew-traces experiment's **Prompts** tab as `kasal_judge__…`.
+- **Local development:** the MLflow server the backend was launched against is
+  running (for example `mlflow server --host 127.0.0.1 --port 5555 …`); judges
+  appear on its Prompts page.
+- **Once, after upgrading:** judges created before this change lived in the
+  scorer registry and do not appear in the dialog — re-create them (name,
+  criteria, model).
+
+Monitoring — scoring a published crew's live traffic on a schedule — is a
+separate, later step and is not part of the Optimize dialog.
+
 ## Aligning judges to your grades (MemAlign)
 
 Kasal's LLM judges score every candidate prompt set GEPA tries. A judge is
@@ -115,8 +157,8 @@ In the crew catalog, open **Optimize**:
    judge, grade it, and say why. The grade is stored on the answer's trace as
    human feedback *in the judge's name*.
 3. After grading a few answers, press the wand next to the judge chip
-   (**Align**). Kasal registers the aligned judge as a new version of the same
-   name and lists what it learned.
+   (**Align**). Kasal saves the aligned criteria as a new version of the judge's
+   prompt and lists what it learned.
 4. Run **Optimize** — GEPA now scores candidates with the aligned judge.
 
 Grades given under **Overall quality** feed the optimizer's own reflection but

@@ -45,6 +45,12 @@ from src.services.prompt_optimization.gepa.mlflow_session import (
     mlflow_session,
     resolve_mlflow_backend,
 )
+from src.services.prompt_optimization.judge_registry import (
+    JudgeRegistry,
+    strip_guidelines,
+    uc_schema_of,
+    with_guidelines,
+)
 from src.utils.user_context import GroupContext, UserContext
 
 logger = logging.getLogger(__name__)
@@ -124,15 +130,17 @@ class JudgeAlignmentMixin:
     ) -> Dict[str, Any]:
         """Align one of the crew's judges to the human grades on its eval traces.
 
-        ``name`` is the judge as assigned to the crew (its crew-scoped registry
-        name, or the bare name — the prefix is added). Registering the aligned
-        judge under the same name creates a new version, which is what
-        ``get_scorer``/``list_scorers`` return — so the next optimization run
-        scores with it, no further wiring.
+        ``name`` is the judge as assigned to the crew (its crew-scoped identity,
+        or the bare name — the prefix is added). The aligned instructions are
+        saved as the next version of the judge's prompt, which is what every
+        read returns — so the next optimization run scores with it, no further
+        wiring. Each alignment starts from the grades, not from the previous
+        alignment: it distils against the base instructions and replaces the
+        guideline block wholesale.
 
         Returns what was learned, for the UI: the distilled guidelines, how
         many graded answers were used, the model that distilled them and the
-        judge's registry name.
+        judge's identity.
         """
         backend = await resolve_mlflow_backend(self.session, group_context)
         if not backend:
@@ -142,6 +150,8 @@ class JudgeAlignmentMixin:
         embedder_config = await crew_embedder_config(
             self.session, crew_id, group_context
         )
+        registry_uri, sample_name = await self._resolve_registry("judge", group_context)
+        uc_schema = uc_schema_of(registry_uri, sample_name)
         # Captured on the request: the bridge submits LLMManager calls back to
         # THIS loop from MemAlign's threads, under this user's context.
         loop = asyncio.get_running_loop()
@@ -149,17 +159,32 @@ class JudgeAlignmentMixin:
 
         def _align() -> Dict[str, Any]:
             import mlflow
+            from mlflow.genai.judges import make_judge
             from mlflow.genai.judges.optimizers import MemAlignOptimizer
-            from mlflow.genai.scorers import get_scorer
 
             with mlflow_session(backend):
-                judge = get_scorer(name=full_name)
-                model = _stored_judge_model_to_key(getattr(judge, "model", None))
+                registry = JudgeRegistry(registry_uri, uc_schema)
+                spec = registry.load(full_name)
+                if spec is None:
+                    raise ValueError(
+                        f"Judge '{full_name}' is not assigned to this crew."
+                    )
+                model = _stored_judge_model_to_key(spec.model)
                 if not model:
                     raise ValueError(
                         "This judge has no model. Edit it, pick the model it "
                         "grades with, then align."
                     )
+                base, _previous = strip_guidelines(spec.instructions)
+                # The judge object MemAlign works on: built in memory, never
+                # registered. The model URI is inert (invocation goes through
+                # LLMManager); its name is what the human grades are filed under.
+                judge = make_judge(
+                    name=full_name,
+                    instructions=base,
+                    model=f"openai:/{model}",
+                    feedback_value_type=float,
+                )
                 traces = mlflow.search_traces(
                     filter_string=f"tags.kasal_crew_id = '{crew_id}'",
                     max_results=TRACE_WINDOW,
@@ -176,7 +201,6 @@ class JudgeAlignmentMixin:
                 ) as models:
                     optimizer = MemAlignOptimizer(retrieval_k=RETRIEVAL_K, **models)
                     aligned = optimizer.align(judge, graded)
-                    aligned.register()
                 dump = aligned.model_dump()
                 guidelines = [
                     str(g.get("guideline_text", "")).strip()
@@ -190,12 +214,23 @@ class JudgeAlignmentMixin:
                     len(graded),
                     len(guidelines),
                 )
+                guidelines = [g for g in guidelines if g]
+                saved = registry.save(
+                    full_name,
+                    with_guidelines(base, guidelines),
+                    model,
+                    commit_message=(
+                        f"MemAlign: {len(guidelines)} guidelines from "
+                        f"{len(graded)} graded answers"
+                    ),
+                )
                 return {
                     "name": full_name[len(prefix) :],
                     "full_name": full_name,
                     "traces_used": len(graded),
-                    "guidelines": [g for g in guidelines if g],
+                    "guidelines": guidelines,
                     "model": model,
+                    "version": saved.version,
                 }
 
         return await asyncio.to_thread(_align)

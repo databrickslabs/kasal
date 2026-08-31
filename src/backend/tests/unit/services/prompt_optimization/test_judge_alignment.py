@@ -17,6 +17,7 @@ from src.services.prompt_optimization.alignment import (
     crew_embedder_config,
     has_human_feedback,
 )
+from src.services.prompt_optimization.judge_registry import JudgeSpec, with_guidelines
 from src.services.prompt_optimization.service import PromptOptimizationService
 
 CREW = "88ab4478-823c-4c4f-9c2e-000000000000"
@@ -61,6 +62,9 @@ def _no_session(backend):
 
 
 class TestAlignJudge:
+    JUDGE = f"{PREFIX}accuracy"
+    BASE = "Rate the accuracy of {{ outputs }}."
+
     @staticmethod
     def _bridge(armed):
         @contextmanager
@@ -74,29 +78,31 @@ class TestAlignJudge:
 
         return fake
 
-    @pytest.mark.asyncio
-    async def test_aligns_with_the_judges_own_model_through_llm_manager(self):
-        judge_name = f"{PREFIX}accuracy"
-        traces = [
-            _trace("graded", [_assessment(judge_name, "HUMAN")]),
-            _trace("ungraded", []),
-            _trace("other-judge", [_assessment(f"{PREFIX}tone", "HUMAN")]),
-        ]
-        base_judge = MagicMock(name="judge")
-        base_judge.model = "openai:/qwen-30b"  # stored as a URI, invoked as a key
-        aligned = MagicMock(name="aligned")
-        aligned.model_dump.return_value = {
-            "semantic_memory": [
-                {"guideline_text": "Prefer certified views over raw tables."},
-                {"guideline_text": ""},
-            ]
-        }
-        optimizer = MagicMock()
-        optimizer.align.return_value = aligned
-        optimizer_cls = MagicMock(return_value=optimizer)
-        armed = {}
+    @staticmethod
+    def _registry(specs, saved):
+        class Registry:
+            def __init__(self, registry_uri, uc_schema=None, client=None):
+                saved.append(("target", registry_uri, uc_schema))
 
+            def load(self, full_name):
+                return specs.get(full_name)
+
+            def save(self, full_name, instructions, model, commit_message=None):
+                saved.append((full_name, instructions, model, commit_message))
+                return JudgeSpec(full_name, instructions, model, version=7)
+
+        return Registry
+
+    @staticmethod
+    def _service_with_registry():
         svc = _service()
+        svc._resolve_registry = AsyncMock(
+            return_value=("http://127.0.0.1:5555", "kasal_judge_grp")
+        )
+        return svc
+
+    @contextmanager
+    def _patched(self, specs, saved, traces, optimizer_cls, make_judge, armed):
         with (
             patch(
                 "src.services.prompt_optimization.alignment.resolve_mlflow_backend",
@@ -115,89 +121,110 @@ class TestAlignJudge:
                 "src.services.prompt_optimization.alignment.memalign_via_llm_manager",
                 self._bridge(armed),
             ),
-            patch("mlflow.search_traces", return_value=traces),
             patch(
-                "mlflow.genai.scorers.get_scorer", return_value=base_judge
-            ) as get_scorer,
+                "src.services.prompt_optimization.alignment.JudgeRegistry",
+                self._registry(specs, saved),
+            ),
+            patch("mlflow.search_traces", return_value=traces),
+            patch("mlflow.genai.judges.make_judge", make_judge),
             patch("mlflow.genai.judges.optimizers.MemAlignOptimizer", optimizer_cls),
         ):
+            yield
+
+    @pytest.mark.asyncio
+    async def test_aligns_with_the_judges_own_model_and_saves_the_next_version(self):
+        traces = [
+            _trace("graded", [_assessment(self.JUDGE, "HUMAN")]),
+            _trace("ungraded", []),
+            _trace("other-judge", [_assessment(f"{PREFIX}tone", "HUMAN")]),
+        ]
+        # A previously aligned judge: its old guideline block must not leak
+        # into the base MemAlign distils against, nor survive the re-align.
+        specs = {
+            self.JUDGE: JudgeSpec(
+                self.JUDGE, with_guidelines(self.BASE, ["old guideline"]), "qwen-30b"
+            )
+        }
+        saved, armed = [], {}
+        base_judge = MagicMock(name="judge")
+        make_judge = MagicMock(return_value=base_judge)
+        aligned = MagicMock(name="aligned")
+        aligned.model_dump.return_value = {
+            "semantic_memory": [
+                {"guideline_text": "Prefer certified views over raw tables."},
+                {"guideline_text": ""},
+            ]
+        }
+        optimizer = MagicMock()
+        optimizer.align.return_value = aligned
+        optimizer_cls = MagicMock(return_value=optimizer)
+
+        svc = self._service_with_registry()
+        with self._patched(specs, saved, traces, optimizer_cls, make_judge, armed):
             result = await svc.align_judge("accuracy", CREW)
 
-        # Bare name → the crew-scoped registry name.
-        get_scorer.assert_called_once_with(name=judge_name)
+        # Built in memory from the prompt — never registered as a scorer.
+        make_judge.assert_called_once_with(
+            name=self.JUDGE,
+            instructions=self.BASE,
+            model="openai:/qwen-30b",
+            feedback_value_type=float,
+        )
+        aligned.register.assert_not_called()
         # Only the trace with a HUMAN assessment for THIS judge is aligned on.
         aligned_traces = optimizer.align.call_args.args[1]
         assert [t.info.trace_id for t in aligned_traces] == ["graded"]
         assert optimizer.align.call_args.args[0] is base_judge
-        # The judge's OWN model (chosen in the UI) distils, via LLMManager, and
-        # the crew's embedder embeds — nothing read from the environment.
+        # The judge's OWN model (chosen in the UI) distils via LLMManager, the
+        # crew's embedder embeds — nothing read from the environment.
         assert armed["model"] == "qwen-30b"
         assert armed["embedder_config"] == {"provider": "ollama"}
         kwargs = optimizer_cls.call_args.kwargs
         assert kwargs["reflection_lm"] == "openai:/kasal-llm-manager"
         assert kwargs["embedding_dim"] == 4
         assert kwargs["retrieval_k"] == 5
-        # Registered under the same name: the next GEPA run scores with it.
-        aligned.register.assert_called_once_with()
-        assert result["full_name"] == judge_name
+        # Saved as the next prompt version: base + the fresh guideline block.
+        full_name, instructions, model, commit = saved[-1]
+        assert full_name == self.JUDGE and model == "qwen-30b"
+        assert instructions == with_guidelines(
+            self.BASE, ["Prefer certified views over raw tables."]
+        )
+        assert "old guideline" not in instructions
+        assert "1 guidelines from 1 graded answers" in commit
+        assert result["full_name"] == self.JUDGE
         assert result["name"] == "accuracy"
         assert result["traces_used"] == 1
         assert result["model"] == "qwen-30b"
+        assert result["version"] == 7
         assert result["guidelines"] == ["Prefer certified views over raw tables."]
 
     @pytest.mark.asyncio
     async def test_no_graded_answers_is_a_clear_error_not_an_mlflow_one(self):
-        svc = _service()
-        optimizer_cls = MagicMock()
-        judge = MagicMock()
-        judge.model = "openai:/qwen-30b"
-        with (
-            patch(
-                "src.services.prompt_optimization.alignment.resolve_mlflow_backend",
-                new=AsyncMock(
-                    return_value=SimpleNamespace(kind="local", experiment="e")
-                ),
-            ),
-            patch(
-                "src.services.prompt_optimization.alignment.mlflow_session", _no_session
-            ),
-            patch(
-                "src.services.prompt_optimization.alignment.crew_embedder_config",
-                new=AsyncMock(return_value=None),
-            ),
-            patch("mlflow.search_traces", return_value=[_trace("t", [])]),
-            patch("mlflow.genai.scorers.get_scorer", return_value=judge),
-            patch("mlflow.genai.judges.optimizers.MemAlignOptimizer", optimizer_cls),
+        specs = {self.JUDGE: JudgeSpec(self.JUDGE, self.BASE, "qwen-30b")}
+        saved, optimizer_cls = [], MagicMock()
+        svc = self._service_with_registry()
+        with self._patched(
+            specs, saved, [_trace("t", [])], optimizer_cls, MagicMock(), {}
         ):
             with pytest.raises(ValueError, match="Grade a few answers"):
-                await svc.align_judge(f"{PREFIX}accuracy", CREW)
+                await svc.align_judge(self.JUDGE, CREW)
         optimizer_cls.assert_not_called()
+        assert [entry for entry in saved if entry[0] != "target"] == []
 
     @pytest.mark.asyncio
     async def test_a_judge_without_a_model_cannot_be_aligned(self):
-        svc = _service()
-        judge = MagicMock()
-        judge.model = None
-        with (
-            patch(
-                "src.services.prompt_optimization.alignment.resolve_mlflow_backend",
-                new=AsyncMock(
-                    return_value=SimpleNamespace(kind="local", experiment="e")
-                ),
-            ),
-            patch(
-                "src.services.prompt_optimization.alignment.mlflow_session", _no_session
-            ),
-            patch(
-                "src.services.prompt_optimization.alignment.crew_embedder_config",
-                new=AsyncMock(return_value=None),
-            ),
-            patch("mlflow.search_traces") as search,
-            patch("mlflow.genai.scorers.get_scorer", return_value=judge),
-        ):
+        specs = {self.JUDGE: JudgeSpec(self.JUDGE, self.BASE, None)}
+        svc = self._service_with_registry()
+        with self._patched(specs, [], [], MagicMock(), MagicMock(), {}):
             with pytest.raises(ValueError, match="no model"):
                 await svc.align_judge("accuracy", CREW)
-        search.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_judge_not_assigned_to_the_crew_cannot_be_aligned(self):
+        svc = self._service_with_registry()
+        with self._patched({}, [], [], MagicMock(), MagicMock(), {}):
+            with pytest.raises(ValueError, match="not assigned"):
+                await svc.align_judge("accuracy", CREW)
 
     @pytest.mark.asyncio
     async def test_requires_an_mlflow_backend(self):

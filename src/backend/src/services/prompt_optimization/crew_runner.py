@@ -310,8 +310,8 @@ class CrewRunnerMixin:
                     f"{len(human_requirements)} distilled human requirements"
                 )
 
-            # CUSTOM JUDGES: LLM judges registered on the active MLflow
-            # experiment (created in Kasal's Optimize dialog) participate in
+            # CUSTOM JUDGES: the crew's judges from the MLflow prompt registry
+            # (created in Kasal's Optimize dialog) participate in
             # scoring alongside the built-in judge — users author evaluation
             # criteria there and optimization honors them automatically. Works
             # on both backends: local server (dev) and Databricks managed MLflow,
@@ -319,43 +319,31 @@ class CrewRunnerMixin:
             registered_scorers: List[Any] = []
             if crew_id:
                 try:
-                    from mlflow.genai.scorers import list_scorers
-
                     # Only judges ASSIGNED to this crew (scoped by name prefix)
                     # participate — the shared library is inert until assigned.
-                    # Called on the mixin that DEFINES it. This used to say
-                    # PromptOptimizationService._crew_judge_prefix, a name never
-                    # imported here, so it raised NameError the moment a crew_id
-                    # was present — silently disabling per-crew judge scoping.
-                    # `self` is not an option either: the enclosing
-                    # _execute_crew_optimization_sync is a @staticmethod.
+                    # Read from the prompt registry the run already resolved
+                    # (registry_uri + the crew prompt's UC prefix); never from the
+                    # scorer registry, which on Databricks is the monitoring job.
+                    from src.services.prompt_optimization.judge_registry import (
+                        JudgeRegistry,
+                        uc_schema_of,
+                    )
                     from src.services.prompt_optimization.judges import (
                         JudgeOperationsMixin,
                     )
 
-                    crew_prefix = (
-                        JudgeOperationsMixin._crew_judge_prefix(crew_id)
-                        if crew_id
-                        else None
-                    )
-                    registered_scorers = [
-                        s
-                        for s in (list_scorers() or [])
-                        if crew_prefix
-                        and str(getattr(s, "name", "")).startswith(crew_prefix)
-                    ]
+                    registered_scorers = JudgeRegistry(
+                        registry_uri, uc_schema_of(registry_uri, prompt_name)
+                    ).list(JudgeOperationsMixin._crew_judge_prefix(crew_id))
                     if registered_scorers:
                         logger.info(
-                            "Crew optimization: using registered MLflow judges: "
-                            + ", ".join(
-                                getattr(s, "name", "?") for s in registered_scorers
-                            )
+                            "Crew optimization: using the crew's judges: "
+                            + ", ".join(s.name for s in registered_scorers)
                         )
                 except Exception as scorer_err:
                     logger.warning(
                         f"Could not load registered MLflow judges: {scorer_err}"
                     )
-
             expected_keys = set(field_keys)
 
             def _apply_fields(fields: Dict[str, str]):

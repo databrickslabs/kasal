@@ -181,22 +181,6 @@ class TestSpSingleAuth:
             assert active is False
 
 
-class TestJudgeModelUri:
-    """make_judge().register() needs databricks:/ on Databricks, openai:/ local."""
-
-    def test_databricks_prefix(self):
-        from src.services.prompt_optimization.judges import JudgeOperationsMixin
-
-        b = ms.MLflowBackend(kind="databricks", experiment="/Shared/x")
-        assert JudgeOperationsMixin._judge_model_uri(b, "m") == "databricks:/m"
-
-    def test_local_prefix(self):
-        from src.services.prompt_optimization.judges import JudgeOperationsMixin
-
-        b = ms.MLflowBackend(kind="local", experiment="kasal", uri="http://x")
-        assert JudgeOperationsMixin._judge_model_uri(b, "m") == "openai:/m"
-
-
 class TestGrantHint:
     def test_permission_denied_detection(self):
         assert is_permission_denied(Exception("PERMISSION_DENIED: nope"))
