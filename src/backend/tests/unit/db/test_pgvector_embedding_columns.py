@@ -31,8 +31,10 @@ import pytest
 # metadata-derived table list — which would make this suite pass while the real
 # app still missed the column.
 import src.db.all_models  # noqa: F401
-
-from src.db.session import _ensure_pgvector_embedding_columns, _vector_embedding_tables
+from src.db.self_heal.vectors import (
+    _ensure_pgvector_embedding_columns,
+    _vector_embedding_tables,
+)
 
 
 def _conn(dialect: str = "postgresql", pgvector: bool = True) -> MagicMock:
@@ -167,9 +169,9 @@ class TestItRunsOnEveryStartup:
         """Otherwise the column only ever appears on a freshly created table."""
         import inspect
 
-        import src.db.session as session_module
+        import src.db.self_heal.columns as columns_module
 
-        source = inspect.getsource(session_module)
+        source = inspect.getsource(columns_module)
         assert "_ensure_pgvector_embedding_columns(conn)" in source
 
 
@@ -185,7 +187,7 @@ class TestTheLogTellsTheTruth:
 
     async def test_success_is_logged_only_when_everything_applied(self):
         conn = _conn()
-        with patch("src.db.session.logger") as mock_logger:
+        with patch("src.db.self_heal.vectors.logger") as mock_logger:
             await _ensure_pgvector_embedding_columns(conn)
         messages = [c.args[0] for c in mock_logger.info.call_args_list]
         assert any("Ensured pgvector embedding columns" in m for m in messages)
@@ -197,7 +199,7 @@ class TestTheLogTellsTheTruth:
         conn.exec_driver_sql = AsyncMock(
             side_effect=[probe] + [Exception("must be owner")] * 8
         )
-        with patch("src.db.session.logger") as mock_logger:
+        with patch("src.db.self_heal.vectors.logger") as mock_logger:
             await _ensure_pgvector_embedding_columns(conn)
 
         infos = [c.args[0] for c in mock_logger.info.call_args_list]

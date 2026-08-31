@@ -420,7 +420,7 @@ class TestEnsureDatabricksConfigColumns:
     @pytest.mark.asyncio
     async def test_adds_column_when_absent_sqlite(self):
         """Column missing -> PRAGMA read, then ALTER TABLE ADD COLUMN is issued."""
-        from src.db.session import _ensure_databricks_config_columns
+        from src.db.self_heal.columns import _ensure_databricks_config_columns
 
         conn = MagicMock()
         # First call: PRAGMA returns existing cols (no ai_gateway_enabled).
@@ -445,7 +445,7 @@ class TestEnsureDatabricksConfigColumns:
     @pytest.mark.asyncio
     async def test_no_alter_when_column_present_sqlite(self):
         """Column already present -> only the PRAGMA read, no ALTER."""
-        from src.db.session import _ensure_databricks_config_columns
+        from src.db.self_heal.columns import _ensure_databricks_config_columns
 
         conn = MagicMock()
         conn.exec_driver_sql = AsyncMock(
@@ -468,7 +468,7 @@ class TestEnsureDatabricksConfigColumns:
     @pytest.mark.asyncio
     async def test_no_alter_when_table_absent_sqlite(self):
         """Empty PRAGMA (table not created yet) -> early return, no ALTER."""
-        from src.db.session import _ensure_databricks_config_columns
+        from src.db.self_heal.columns import _ensure_databricks_config_columns
 
         conn = MagicMock()
         conn.exec_driver_sql = AsyncMock(return_value=_make_pragma_result([]))
@@ -484,12 +484,12 @@ class TestEnsureDatabricksConfigColumns:
     @pytest.mark.asyncio
     async def test_postgres_uses_add_column_if_not_exists(self):
         """Non-SQLite URI -> single idempotent ADD COLUMN IF NOT EXISTS, no PRAGMA."""
-        from src.db.session import _ensure_databricks_config_columns
+        from src.db.self_heal.columns import _ensure_databricks_config_columns
 
         conn = MagicMock()
         conn.exec_driver_sql = AsyncMock(return_value=MagicMock())
 
-        with patch("src.db.session.settings") as mock_settings:
+        with patch("src.db.self_heal.dialect.settings") as mock_settings:
             mock_settings.DATABASE_URI = "postgresql+asyncpg://u" ":p@h/db"
             await _ensure_databricks_config_columns(conn)
 
@@ -501,12 +501,12 @@ class TestEnsureDatabricksConfigColumns:
     @pytest.mark.asyncio
     async def test_exception_is_swallowed(self):
         """Driver errors are caught and logged, not propagated."""
-        from src.db.session import _ensure_databricks_config_columns
+        from src.db.self_heal.columns import _ensure_databricks_config_columns
 
         conn = MagicMock()
         conn.exec_driver_sql = AsyncMock(side_effect=RuntimeError("driver boom"))
 
-        with patch("src.db.session.settings") as mock_settings:
+        with patch("src.db.self_heal.dialect.settings") as mock_settings:
             mock_settings.DATABASE_URI = "sqlite+aiosqlite:///test.db"
             # Must not raise.
             await _ensure_databricks_config_columns(conn)
@@ -806,7 +806,7 @@ class TestEnsureChatSessionsTable:
 
     @pytest.mark.asyncio
     async def test_creates_table_via_run_sync(self):
-        from src.db.session import _ensure_chat_sessions_table
+        from src.db.self_heal.tables import _ensure_chat_sessions_table
 
         conn = MagicMock()
         conn.run_sync = AsyncMock()
@@ -824,7 +824,7 @@ class TestEnsureChatSessionsTable:
     @pytest.mark.asyncio
     async def test_failure_is_swallowed(self):
         """A create failure must not break startup — logged as a warning."""
-        from src.db.session import _ensure_chat_sessions_table
+        from src.db.self_heal.tables import _ensure_chat_sessions_table
 
         conn = MagicMock()
         conn.run_sync = AsyncMock(side_effect=Exception("locked"))

@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from src.db import session as sess
+from src.db.self_heal import data as heal
 
 
 async def _seed(conn):
@@ -34,28 +34,25 @@ async def test_disables_only_bi_specialist_and_is_idempotent():
     try:
         async with engine.begin() as conn:
             await _seed(conn)
-            fake_settings = MagicMock()
-            fake_settings.DATABASE_URI = "sqlite+aiosqlite://"
-            with patch.object(sess, "settings", fake_settings):
-                await sess._disable_bi_specialist_crew_memory(conn)
-                for t in ("crews", "agents"):
-                    rows = (
-                        await conn.exec_driver_sql(
-                            f"SELECT id, group_id, memory FROM {t} ORDER BY id"
-                        )
-                    ).fetchall()
-                    mem = {r[0]: r[2] for r in rows}
-                    assert mem["a"] == 0 and mem["b"] == 0  # bi-specialist off
-                    assert mem["c"] == 1  # other group untouched
-
-                # idempotent: second run is a no-op, no error
-                await sess._disable_bi_specialist_crew_memory(conn)
+            await heal._disable_bi_specialist_crew_memory(conn)
+            for t in ("crews", "agents"):
                 rows = (
                     await conn.exec_driver_sql(
-                        "SELECT memory FROM crews WHERE group_id='other-group'"
+                        f"SELECT id, group_id, memory FROM {t} ORDER BY id"
                     )
                 ).fetchall()
-                assert rows[0][0] == 1
+                mem = {r[0]: r[2] for r in rows}
+                assert mem["a"] == 0 and mem["b"] == 0  # bi-specialist off
+                assert mem["c"] == 1  # other group untouched
+
+            # idempotent: second run is a no-op, no error
+            await heal._disable_bi_specialist_crew_memory(conn)
+            rows = (
+                await conn.exec_driver_sql(
+                    "SELECT memory FROM crews WHERE group_id='other-group'"
+                )
+            ).fetchall()
+            assert rows[0][0] == 1
     finally:
         await engine.dispose()
 
@@ -66,9 +63,6 @@ async def test_noop_when_tables_missing():
     engine = create_async_engine("sqlite+aiosqlite://")
     try:
         async with engine.begin() as conn:
-            fake_settings = MagicMock()
-            fake_settings.DATABASE_URI = "sqlite+aiosqlite://"
-            with patch.object(sess, "settings", fake_settings):
-                await sess._disable_bi_specialist_crew_memory(conn)  # must not raise
+            await heal._disable_bi_specialist_crew_memory(conn)  # must not raise
     finally:
         await engine.dispose()

@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from src.db import session as sess
+from src.db.self_heal import columns as heal
 
 
 @pytest.mark.asyncio
@@ -21,27 +21,24 @@ async def test_ensure_crew_columns_adds_reasoning_config_and_is_idempotent():
             # crews table WITHOUT reasoning_config (pre-migration shape)
             await conn.exec_driver_sql("CREATE TABLE crews (id TEXT, name TEXT)")
 
-            fake_settings = MagicMock()
-            fake_settings.DATABASE_URI = "sqlite+aiosqlite://"
-            with patch.object(sess, "settings", fake_settings):
-                await sess._ensure_crew_columns(conn)
-                cols = {
-                    r[1]
-                    for r in (
-                        await conn.exec_driver_sql("PRAGMA table_info(crews)")
-                    ).fetchall()
-                }
-                assert "reasoning_config" in cols
+            await heal._ensure_crew_columns(conn)
+            cols = {
+                r[1]
+                for r in (
+                    await conn.exec_driver_sql("PRAGMA table_info(crews)")
+                ).fetchall()
+            }
+            assert "reasoning_config" in cols
 
-                # idempotent: second run must not raise or duplicate the column
-                await sess._ensure_crew_columns(conn)
-                cols2 = [
-                    r[1]
-                    for r in (
-                        await conn.exec_driver_sql("PRAGMA table_info(crews)")
-                    ).fetchall()
-                ]
-                assert cols2.count("reasoning_config") == 1
+            # idempotent: second run must not raise or duplicate the column
+            await heal._ensure_crew_columns(conn)
+            cols2 = [
+                r[1]
+                for r in (
+                    await conn.exec_driver_sql("PRAGMA table_info(crews)")
+                ).fetchall()
+            ]
+            assert cols2.count("reasoning_config") == 1
     finally:
         await engine.dispose()
 
@@ -53,9 +50,6 @@ async def test_ensure_crew_columns_noop_when_table_missing():
     engine = create_async_engine("sqlite+aiosqlite://")
     try:
         async with engine.begin() as conn:
-            fake_settings = MagicMock()
-            fake_settings.DATABASE_URI = "sqlite+aiosqlite://"
-            with patch.object(sess, "settings", fake_settings):
-                await sess._ensure_crew_columns(conn)  # must not raise
+            await heal._ensure_crew_columns(conn)  # must not raise
     finally:
         await engine.dispose()

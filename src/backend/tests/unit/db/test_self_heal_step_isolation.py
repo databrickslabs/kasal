@@ -28,7 +28,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.db.session import _run_self_heal_step, run_schema_self_heal
+from src.db.self_heal.runner import _run_self_heal_step, run_schema_self_heal
 
 
 def _conn(nested_supported: bool = True) -> MagicMock:
@@ -95,7 +95,7 @@ class TestStepIsolation:
         async def boom(_c):
             raise RuntimeError("must be owner")
 
-        with patch("src.db.session.logger") as mock_logger:
+        with patch("src.db.self_heal.runner.logger") as mock_logger:
             await _run_self_heal_step(conn, boom)
 
         assert mock_logger.warning.called
@@ -131,7 +131,7 @@ class TestTheWholePassSurvivesTheFirstStepFailing:
             "_ensure_modelconfig_columns",
         ]
         with patch.multiple(
-            "src.db.session",
+            "src.db.self_heal.runner",
             **{n: _recorder(n) for n in names},
         ):
             await run_schema_self_heal(conn)
@@ -190,14 +190,14 @@ class TestTheWholePassSurvivesTheFirstStepFailing:
         async def always_boom(c):  # noqa: ARG001
             raise RuntimeError("nope")
 
-        import src.db.session as session_module
+        import src.db.self_heal.runner as runner_module
 
         # Patch every _ensure_/_heal_/_disable_ callable the pass invokes.
         targets = [
             name
-            for name in dir(session_module)
+            for name in dir(runner_module)
             if name.startswith(("_ensure_", "_heal_", "_disable_"))
-            and callable(getattr(session_module, name))
+            and callable(getattr(runner_module, name))
         ]
 
         def _tracked(name):
@@ -208,7 +208,9 @@ class TestTheWholePassSurvivesTheFirstStepFailing:
             step.__name__ = name
             return step
 
-        with patch.multiple("src.db.session", **{n: _tracked(n) for n in targets}):
+        with patch.multiple(
+            "src.db.self_heal.runner", **{n: _tracked(n) for n in targets}
+        ):
             await run_schema_self_heal(conn)  # must not raise
 
         # 24 steps in the pass; assert we got them all, not just the first.

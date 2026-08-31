@@ -12,7 +12,7 @@ missing table doesn't raise.
 import pytest
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from src.db import session as sess
+from src.db.self_heal import data as heal
 
 
 @pytest.mark.asyncio
@@ -29,7 +29,7 @@ async def test_heal_renames_personal_workspace_rows_and_is_idempotent():
                 "('ws_admins',   'Workspace Admins')"  # user-authored name: untouched
             )
 
-            await sess._heal_personal_group_names(conn)
+            await heal._heal_personal_group_names(conn)
             rows = {
                 r[0]: r[1]
                 for r in (
@@ -42,7 +42,7 @@ async def test_heal_renames_personal_workspace_rows_and_is_idempotent():
             assert rows["ws_admins"] == "Workspace Admins"
 
             # idempotent: second run changes nothing
-            await sess._heal_personal_group_names(conn)
+            await heal._heal_personal_group_names(conn)
             rows2 = {
                 r[0]: r[1]
                 for r in (
@@ -60,6 +60,6 @@ async def test_heal_noop_when_table_missing():
     engine = create_async_engine("sqlite+aiosqlite://")
     try:
         async with engine.begin() as conn:
-            await sess._heal_personal_group_names(conn)  # must not raise
+            await heal._heal_personal_group_names(conn)  # must not raise
     finally:
         await engine.dispose()

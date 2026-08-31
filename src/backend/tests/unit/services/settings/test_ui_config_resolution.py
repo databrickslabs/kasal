@@ -40,7 +40,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import src.db.all_models  # noqa: F401  (register every model)
 from src.db.base import Base
-from src.db.session import _ensure_ui_config_columns
+from src.db.self_heal.columns import _ensure_ui_config_columns
 from src.schemas.ui_config import UIConfigUpdate
 from src.services.settings.ui import UIConfigService
 

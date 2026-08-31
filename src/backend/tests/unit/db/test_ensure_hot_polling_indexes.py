@@ -9,7 +9,7 @@ quiet when the tables don't exist yet (fresh DB → create_all handles them).
 import pytest
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from src.db import session as sess
+from src.db.self_heal import tables as heal
 
 EXPECTED = {
     "executionhistory": {
@@ -43,12 +43,12 @@ async def test_creates_polling_indexes_and_is_idempotent():
                 "(id INTEGER PRIMARY KEY, run_id INTEGER, created_at TIMESTAMP)"
             )
 
-            await sess._ensure_hot_polling_indexes(conn)
+            await heal._ensure_hot_polling_indexes(conn)
             for table, expected in EXPECTED.items():
                 assert expected <= await _index_names(conn, table)
 
             # Idempotent: a second run must not raise or duplicate anything.
-            await sess._ensure_hot_polling_indexes(conn)
+            await heal._ensure_hot_polling_indexes(conn)
             for table, expected in EXPECTED.items():
                 assert expected <= await _index_names(conn, table)
     finally:
@@ -62,6 +62,6 @@ async def test_quiet_when_tables_missing():
     engine = create_async_engine("sqlite+aiosqlite://")
     try:
         async with engine.begin() as conn:
-            await sess._ensure_hot_polling_indexes(conn)  # must not raise
+            await heal._ensure_hot_polling_indexes(conn)  # must not raise
     finally:
         await engine.dispose()

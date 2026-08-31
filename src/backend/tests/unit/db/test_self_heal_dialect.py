@@ -31,11 +31,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.db.session import (
-    _conn_is_sqlite,
-    _ensure_agent_columns,
-    _ensure_modelconfig_columns,
-)
+from src.db.self_heal.columns import _ensure_agent_columns, _ensure_modelconfig_columns
+from src.db.self_heal.dialect import _conn_is_sqlite
 
 
 def _conn(dialect: str) -> MagicMock:
@@ -79,7 +76,7 @@ class TestConnIsSqlite:
 
     def test_ignores_the_configured_uri(self):
         """THE bug: a Postgres/Lakebase connection while DATABASE_URI says sqlite."""
-        with patch("src.db.session.settings") as mock_settings:
+        with patch("src.db.self_heal.dialect.settings") as mock_settings:
             mock_settings.DATABASE_URI = "sqlite+aiosqlite:///app.db"
             assert _conn_is_sqlite(_conn("postgresql")) is False
 
@@ -89,7 +86,7 @@ class TestConnIsSqlite:
         type(broken).engine = property(
             lambda self: (_ for _ in ()).throw(RuntimeError("no engine"))
         )
-        with patch("src.db.session.settings") as mock_settings:
+        with patch("src.db.self_heal.dialect.settings") as mock_settings:
             mock_settings.DATABASE_URI = "sqlite+aiosqlite:///app.db"
             assert _conn_is_sqlite(broken) is True
 
@@ -100,7 +97,7 @@ class TestPostgresBranchIsTakenForALakebaseConnection:
 
     async def test_modelconfig_uses_add_column_if_not_exists(self):
         conn = _pg_conn_missing_columns(["id", "key"])
-        with patch("src.db.session.settings") as mock_settings:
+        with patch("src.db.self_heal.dialect.settings") as mock_settings:
             mock_settings.DATABASE_URI = "sqlite+aiosqlite:///app.db"
             await _ensure_modelconfig_columns(conn)
 
@@ -114,7 +111,7 @@ class TestPostgresBranchIsTakenForALakebaseConnection:
 
     async def test_agents_uses_add_column_if_not_exists(self):
         conn = _pg_conn_missing_columns(["id", "name"])
-        with patch("src.db.session.settings") as mock_settings:
+        with patch("src.db.self_heal.dialect.settings") as mock_settings:
             mock_settings.DATABASE_URI = "sqlite+aiosqlite:///app.db"
             await _ensure_agent_columns(conn)
 
@@ -157,7 +154,7 @@ class TestSqliteBranchStillWorks:
         )
 
         # DATABASE_URI deliberately says POSTGRES here: the connection wins.
-        with patch("src.db.session.settings") as mock_settings:
+        with patch("src.db.self_heal.dialect.settings") as mock_settings:
             mock_settings.DATABASE_URI = "postgresql+asyncpg://x/y"
             await _ensure_modelconfig_columns(conn)
 
@@ -190,9 +187,12 @@ class TestNoHelperReadsTheUriDirectly:
         """
         import inspect
 
-        import src.db.session as session_module
+        from src.db.self_heal import columns, data, dialect, runner, tables, vectors
 
-        source = inspect.getsource(session_module)
+        source = "".join(
+            inspect.getsource(m)
+            for m in (columns, data, dialect, runner, tables, vectors)
+        )
         offending = 'is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")'
         assert offending not in source, (
             "A self-heal helper is deciding its dialect from settings.DATABASE_URI. "
