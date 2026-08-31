@@ -231,15 +231,17 @@ class TestScheduleCreateFromExecution:
         ]
         assert "execution_id" in missing_fields
 
-    def test_execution_id_type_validation(self):
-        """Test execution_id field type validation."""
-        data = {
-            "name": "type-test-schedule",
-            "cron_expression": "0 22 * * *",
-            "execution_id": "123",  # String that can be converted to int
-        }
-        schedule = ScheduleCreateFromExecution(**data)
-        assert schedule.execution_id == 123
+    def test_execution_id_keeps_its_type(self):
+        """execution_id is an int row id OR a string job id (chat anchors runs
+        by UUID); neither is coerced into the other."""
+        base = {"name": "type-test-schedule", "cron_expression": "0 22 * * *"}
+        assert ScheduleCreateFromExecution(**base, execution_id=123).execution_id == 123
+        as_text = ScheduleCreateFromExecution(**base, execution_id="123")
+        assert as_text.execution_id == "123"
+        job = ScheduleCreateFromExecution(
+            **base, execution_id="5389f0aa-9e43-4ad6-aab0-55ba944bad5b"
+        )
+        assert job.execution_id == "5389f0aa-9e43-4ad6-aab0-55ba944bad5b"
         assert isinstance(schedule.execution_id, int)
 
 

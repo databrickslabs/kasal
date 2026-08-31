@@ -60,6 +60,9 @@ _AGENT_FIELDS = (
     "date_format",
     "thinking_budget_tokens",
     "reasoning_effort",
+    # Per-agent max output tokens override (Agent form); the kernel reads it
+    # from the agent entry as spec["max_tokens"] (kernel/agent_builder).
+    "max_tokens",
     "skills",
 )
 

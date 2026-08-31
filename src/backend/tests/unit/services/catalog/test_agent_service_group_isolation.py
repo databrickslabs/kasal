@@ -54,10 +54,12 @@ class AgentUpdateModel(BaseModel):
     role: str | None = None
     goal: str | None = None
 
-    def model_dump(self, exclude_none=False):
+    def model_dump(self, exclude_none=False, exclude_unset=False):
         d = super().model_dump()
+        if exclude_unset:
+            d = {k: v for k, v in d.items() if k in self.model_fields_set}
         if exclude_none:
-            return {k: v for k, v in d.items() if v is not None}
+            d = {k: v for k, v in d.items() if v is not None}
         return d
 
 
