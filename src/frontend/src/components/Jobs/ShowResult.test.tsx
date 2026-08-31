@@ -210,3 +210,26 @@ describe('ShowResult fullscreen toggle', () => {
     expect(screen.getByLabelText('Fullscreen')).toBeInTheDocument();
   });
 });
+
+describe('ShowResult renders HTML surfaces the way the chat does', () => {
+  it('pages a ```html slide deck instead of flattening it into one sandboxed page', () => {
+    const deck =
+      'Here is the deck.\n\n```html\n<section class="slide"><h1>One</h1></section>\n' +
+      '<section class="slide"><h1>Two</h1></section>\n```';
+    render(<ShowResult open={true} onClose={vi.fn()} result={{ output: deck }} run={baseRun} />);
+    // The chat's HtmlDeckBlock: slide navigation, not a raw <pre>/code block.
+    expect(screen.getByText('Slide 1 / 2')).toBeInTheDocument();
+  });
+
+  it('shows the raw fence again when the user switches to the code view', () => {
+    const deck =
+      '```html\n<section class="slide"><h1>One</h1></section>\n<section class="slide"><h1>Two</h1></section>\n```';
+    render(<ShowResult open={true} onClose={vi.fn()} result={{ output: deck }} run={baseRun} />);
+    expect(screen.getByText('Slide 1 / 2')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('code view'));
+    expect(screen.queryByText('Slide 1 / 2')).toBeNull();
+    fireEvent.click(screen.getByLabelText('html view'));
+    expect(screen.getByText('Slide 1 / 2')).toBeInTheDocument();
+  });
+});
+

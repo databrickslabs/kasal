@@ -35,6 +35,8 @@ import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
 import { sanitizeUrl } from '../Chat/components/MessageRenderer';
 import PreviewPanel from '../ChatMode/components/Preview/PreviewPanel';
+import { ChatStyleResult } from './ChatStyleResult';
+import { hasChatDiagram } from './chatDiagram';
 // PreviewPanel + the shared A2UI renderer are styled by the chat-mode CSS, scoped
 // under the `.kasal-chat-root` class (Tailwind `important: '.kasal-chat-root'`).
 // Import the stylesheet so it's present wherever this dialog loads, and render the
@@ -813,7 +815,11 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
               }
               return null;
             })() ||
-            (typeof value === 'string' && isHTML(value) && viewMode === 'html' ? (
+            // A ```html/```svg fence or a slide deck renders as in the chat (paged,
+            // scaled), not as a flat page or a code block — unless the user chose raw.
+            (typeof value === 'string' && viewMode !== 'code' && hasChatDiagram(value) ? (
+              <ChatStyleResult text={value} dark={isDarkMode} />
+            ) : typeof value === 'string' && isHTML(value) && viewMode === 'html' ? (
               <SandboxedHTMLRenderer html={value} isFullscreen={isFullscreen} />
             ) : typeof value === 'string' && isMarkdown(value) && !isHTML(value) ? (
               <Box sx={{
@@ -961,7 +967,9 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
           }
         }}
       >
-        {typeof content === 'string' && isHTML(content) && viewMode === 'html' ? (
+        {typeof content === 'string' && viewMode !== 'code' && hasChatDiagram(content) ? (
+          <ChatStyleResult text={content} dark={isDarkMode} />
+        ) : typeof content === 'string' && isHTML(content) && viewMode === 'html' ? (
           <SandboxedHTMLRenderer html={content} isFullscreen={isFullscreen} />
         ) : typeof content === 'string' && isMarkdown(content) && !isHTML(content) ? (
           <ReactMarkdown
@@ -1050,7 +1058,9 @@ const ShowResult = memo<ShowResultProps>(({ open, onClose, result, run }) => {
           }
         }}
       >
-        {typeof value === 'string' && isHTML(value) && viewMode === 'html' ? (
+        {typeof value === 'string' && viewMode !== 'code' && hasChatDiagram(value) ? (
+          <ChatStyleResult text={value} dark={isDarkMode} />
+        ) : typeof value === 'string' && isHTML(value) && viewMode === 'html' ? (
           <SandboxedHTMLRenderer html={value} isFullscreen={isFullscreen} />
         ) : typeof value === 'string' && isMarkdown(value) && !isHTML(value) ? (
           <Box sx={{
