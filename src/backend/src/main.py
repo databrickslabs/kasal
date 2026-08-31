@@ -350,8 +350,10 @@ async def lifespan(app: FastAPI):
                             f"Background seeder error trace: {error_trace}"
                         )
 
-                # Create background task
-                asyncio.create_task(run_seeders_background())
+                # Create the background task and KEEP A REFERENCE: the loop holds
+                # tasks weakly, and an unreferenced one can be garbage-collected
+                # before it finishes (issue #9).
+                app.state.seeder_task = asyncio.create_task(run_seeders_background())
                 system_logger.info(
                     "Seeders started in background, application startup continues..."
                 )

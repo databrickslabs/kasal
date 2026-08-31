@@ -184,37 +184,25 @@ async def run_all_seeders() -> None:
                 logger.error(f"Traceback: {traceback.format_exc()}")
                 # Continue to next seeder even if current one fails
 
-    # Run slow seeders in the background (non-blocking)
-    background_tasks = []
+    # Then the slow ones, AWAITED. run_all_seeders itself already runs as a
+    # background task (main.py), so nothing here blocks startup — and the old
+    # fire-and-forget create_task, whose reference was dropped when this
+    # function returned, is the one shape asyncio documents as unsafe: the loop
+    # only holds a weak reference to a task, so it can be garbage-collected
+    # mid-execution. On Databricks Apps that is exactly what the logs showed
+    # for the skills seeder: a start line, then never a completion or an error
+    # (issue #9). Awaiting also lets the sequence resync below see these rows.
     for seeder_name, seeder_func in SEEDERS.items():
         if seeder_name in slow_seeders:
-            logger.info(
-                f"Starting {seeder_name} seeder in background (non-blocking)..."
-            )
-
-            async def run_seeder_background(name, func):
-                """Run a seeder in the background with error handling."""
-                try:
-                    debug_log(f"Background execution of {name} seeder starting")
-                    await func()
-                    logger.info(f"✅ Background {name} seeder completed successfully.")
-                except Exception as e:
-                    logger.error(f"❌ Error in background {name} seeder: {str(e)}")
-                    logger.error(f"Traceback: {traceback.format_exc()}")
-
-            # Create task but don't await it (non-blocking)
-            task = asyncio.create_task(run_seeder_background(seeder_name, seeder_func))
-            background_tasks.append(task)
-            logger.info(f"✓ {seeder_name} seeder started in background, continuing...")
-
-    logger.info("✅ All fast seeders completed, slow seeders running in background.")
-
-    # Optionally, you can store the tasks if you need to track them later
-    # But we don't await them here to keep it non-blocking
-    if background_tasks:
-        logger.info(
-            f"Running {len(background_tasks)} seeder(s) in background (non-blocking)"
-        )
+            logger.info(f"Running {seeder_name} seeder (after the fast seeders)...")
+            try:
+                debug_log(f"About to execute {seeder_name} seeder function")
+                await seeder_func()
+                logger.info(f"✅ {seeder_name} seeder completed successfully.")
+            except Exception as e:
+                logger.error(f"❌ Error in {seeder_name} seeder: {str(e)}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
+    logger.info("✅ All seeders completed.")
 
     # Resync PostgreSQL sequences after seeding.
     # Seeds (and backup restores) insert rows with explicit IDs which leaves
@@ -289,17 +277,25 @@ async def run_seeders_with_factory(factory, exclude: Optional[Set[str]] = None) 
 
     # Collect seeder modules that reference async_session_factory.
     # Use sys.modules to avoid NameError if a module failed to import.
+    # The explicit names are unioned with the modules of whatever is actually
+    # registered in SEEDERS: a hand-maintained list once omitted
+    # src.seeds.skills, so on the Lakebase path every seeder wrote to Lakebase
+    # except skills, which kept writing to the local database (issue #9).
     seeder_modules = []
-    seed_module_names = [
-        "src.seeds.tools",
-        "src.seeds.schemas",
-        "src.seeds.prompt_templates",
-        "src.seeds.model_configs",
-        "src.seeds.groups",
-        "src.seeds.api_keys",
-        "src.seeds.example_crews",
-        "src.seeds.bi_specialist_crews",
-    ]
+    seed_module_names = sorted(
+        {
+            "src.seeds.tools",
+            "src.seeds.skills",
+            "src.seeds.schemas",
+            "src.seeds.prompt_templates",
+            "src.seeds.model_configs",
+            "src.seeds.groups",
+            "src.seeds.api_keys",
+            "src.seeds.example_crews",
+            "src.seeds.bi_specialist_crews",
+        }
+        | {getattr(func, "__module__", "") for func in SEEDERS.values()}
+    )
     for mod_name in seed_module_names:
         mod = sys.modules.get(mod_name)
         if mod and hasattr(mod, "async_session_factory"):

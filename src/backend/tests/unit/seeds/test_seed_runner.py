@@ -208,21 +208,51 @@ class TestRunAllSeeders:
             mock_fn.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_slow_seeders_launched_as_background_tasks(self):
-        """The 'documentation' seeder should be launched via asyncio.create_task."""
-        doc_mock = AsyncMock()
-        seeders = OrderedDict([("documentation", doc_mock)])
+    async def test_slow_seeders_are_awaited_after_the_fast_ones(self):
+        """A slow seeder runs AFTER the fast ones and is awaited — never handed
+        to a fire-and-forget create_task whose reference is dropped (the loop
+        holds tasks weakly; the skills seeder vanished that way — issue #9)."""
+        order = []
+
+        async def fast():
+            order.append("tools")
+
+        async def slow():
+            order.append("skills")
+
+        seeders = OrderedDict(
+            [
+                ("skills", AsyncMock(side_effect=slow)),
+                ("tools", AsyncMock(side_effect=fast)),
+            ]
+        )
         with patch.object(seed_runner, "SEEDERS", seeders):
             with patch.object(
                 seed_runner, "resync_postgres_sequences", new_callable=AsyncMock
-            ):
+            ) as mock_resync:
                 with patch("src.seeds.seed_runner.asyncio.create_task") as mock_task:
-                    mock_task.return_value = MagicMock()
                     await seed_runner.run_all_seeders()
-        # documentation is NOT in fast_seeders, so it should NOT be awaited directly
-        doc_mock.assert_not_awaited()
-        # Instead it should have been passed to create_task
-        mock_task.assert_called_once()
+        assert order == ["tools", "skills"]
+        seeders["skills"].assert_awaited_once()
+        mock_task.assert_not_called()
+        # The resync sees the slow seeder's rows too.
+        mock_resync.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_slow_seeder_failure_is_logged_and_does_not_break_the_run(self):
+        seeders = OrderedDict(
+            [
+                ("tools", AsyncMock()),
+                ("skills", AsyncMock(side_effect=Exception("boom"))),
+            ]
+        )
+        with patch.object(seed_runner, "SEEDERS", seeders):
+            with patch.object(
+                seed_runner, "resync_postgres_sequences", new_callable=AsyncMock
+            ) as mock_resync:
+                await seed_runner.run_all_seeders()
+        seeders["skills"].assert_awaited_once()
+        mock_resync.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_fast_seeder_failure_continues(self):
@@ -251,7 +281,7 @@ class TestRunAllSeeders:
 
     @pytest.mark.asyncio
     async def test_only_fast_seeders_directly_awaited(self):
-        """Seeders in the slow list should not be directly awaited."""
+        """Slow seeders are awaited too — after the fast ones, never via create_task."""
         fast_mock = AsyncMock()
         slow_mock = AsyncMock()
         seeders = OrderedDict(
@@ -268,11 +298,11 @@ class TestRunAllSeeders:
                     mock_task.return_value = MagicMock()
                     await seed_runner.run_all_seeders()
         fast_mock.assert_awaited_once()
-        slow_mock.assert_not_awaited()
+        slow_mock.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_background_tasks_list_populated(self):
-        """When slow seeders exist, background_tasks should contain tasks."""
+        """A slow seeder is awaited in place; no background task is created (issue #9)."""
         doc_mock = AsyncMock()
         fake_task = MagicMock()
         seeders = OrderedDict([("documentation", doc_mock)])
@@ -285,7 +315,7 @@ class TestRunAllSeeders:
                     return_value=fake_task,
                 ) as mock_task:
                     await seed_runner.run_all_seeders()
-        mock_task.assert_called_once()
+        mock_task.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_all_fast_seeder_names_handled(self):
@@ -611,6 +641,28 @@ class TestRunSeedersWithFactory:
         mock_c.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_every_registered_seeder_module_is_patched_including_skills(self):
+        """The Lakebase path must redirect EVERY seeder — src.seeds.skills was
+        missing from the hand-maintained list, so skills seeded into the local
+        database while everything else went to Lakebase (issue #9)."""
+        import types
+
+        fake_skills = types.ModuleType("src.seeds.skills")
+        fake_skills.async_session_factory = MagicMock(name="orig_skills")
+        seen = {}
+
+        async def skills_seed():
+            seen["during"] = fake_skills.async_session_factory
+
+        seeders = OrderedDict([("skills", skills_seed)])
+        new_factory = MagicMock(name="lakebase_factory")
+        with patch.object(seed_runner, "SEEDERS", seeders):
+            with patch.dict("sys.modules", {"src.seeds.skills": fake_skills}):
+                await seed_runner.run_seeders_with_factory(new_factory)
+        assert seen["during"] is new_factory
+        assert fake_skills.async_session_factory is not new_factory  # restored
+
+    @pytest.mark.asyncio
     async def test_only_modules_with_async_session_factory_are_patched(self):
         """Modules without async_session_factory should not be touched."""
         custom_factory = MagicMock()
@@ -871,8 +923,8 @@ class TestRunAllSeedersIntegration:
 
         # Fast seeder awaited directly
         fast_mock.assert_awaited_once()
-        # Slow seeder NOT awaited directly (launched as background task)
-        slow_mock.assert_not_awaited()
+        # The slow seeder is awaited as well (after the fast ones).
+        slow_mock.assert_awaited_once()
         # Resync called
         mock_resync.assert_awaited_once()
 
@@ -915,4 +967,4 @@ class TestRunAllSeedersIntegration:
             seeders[name].assert_awaited_once()
 
         # Documentation should NOT be directly awaited
-        seeders["documentation"].assert_not_awaited()
+        seeders["documentation"].assert_awaited_once()
