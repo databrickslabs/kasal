@@ -101,6 +101,13 @@ class DispatcherRequest(BaseModel):
         "'uploads/<group>/<exec>/<file>.pdf'). Scopes DatabricksKnowledgeSearchTool "
         "to ONLY these files so the run grounds on the just-uploaded document.",
     )
+    skills: Optional[List[str]] = Field(
+        default_factory=list,
+        description="Skill names picked in the chat '+' menu to attach to the "
+        "generated crew's agents. Each name resolves (per workspace) to a Kasal "
+        "Agent Skill whose <available_skills> block + load_skill/read_skill_file "
+        "tools are injected into every agent by the shared kernel builder.",
+    )
     chat_mode_type: Optional[Literal["chat", "research", "deep"]] = Field(
         "chat",
         description="ChatMode answer mode: 'chat' = single light agent (Agent.kickoff_async, "

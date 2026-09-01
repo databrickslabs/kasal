@@ -146,6 +146,14 @@ interface ExecutionState {
    */
   selectedAgentBricksEndpoints: string[];
   /**
+   * Skill NAMES picked in the chat "+" menu. At execution time these are
+   * attached to every generated agent (the kernel builder injects each skill's
+   * <available_skills> block + load_skill/read_skill_file tools). Stored by name
+   * (not id) — skills resolve per workspace, overrides preferred over builtins —
+   * and persisted for the same reason as ``selectedMcpServers``.
+   */
+  selectedSkills: string[];
+  /**
    * Epoch ms when the current execution started (or null when idle). Lives in
    * the store — not the skeleton's local state — so the "Running agent…" elapsed
    * timer reflects the true run duration and survives switching away and back.
@@ -197,6 +205,8 @@ interface ExecutionActions {
   setSelectedMcpServers: (names: string[]) => void;
   toggleAgentBricksEndpoint: (name: string) => void;
   setSelectedAgentBricksEndpoints: (names: string[]) => void;
+  toggleSkill: (name: string) => void;
+  setSelectedSkills: (names: string[]) => void;
   setActivityPlacement: (placement: 'preview' | 'chat') => void;
   clearPreview: () => void;
   reopenPreview: () => void;
@@ -777,6 +787,7 @@ export const useExecutionStore = create<ExecutionStore>()(
   preferExisting: false,
   selectedMcpServers: [],
   selectedAgentBricksEndpoints: [],
+  selectedSkills: [],
   runStartedAt: null,
   runningJobBySession: {},
   // 'chat' by default so the run-activity stream shows inline in the chat and the
@@ -909,6 +920,13 @@ export const useExecutionStore = create<ExecutionStore>()(
         : [...s.selectedAgentBricksEndpoints, name],
     })),
   setSelectedAgentBricksEndpoints: (names) => set({ selectedAgentBricksEndpoints: names }),
+  toggleSkill: (name) =>
+    set((s) => ({
+      selectedSkills: s.selectedSkills.includes(name)
+        ? s.selectedSkills.filter((n) => n !== name)
+        : [...s.selectedSkills, name],
+    })),
+  setSelectedSkills: (names) => set({ selectedSkills: names }),
   clearPreview: () => {
     // Close the pane only — keep previewContent/history so the user can reopen
     // instantly (the deliverable still renders inline in the chat).
@@ -1913,6 +1931,7 @@ export const useExecutionStore = create<ExecutionStore>()(
       partialize: (s) => ({
         selectedMcpServers: s.selectedMcpServers,
         selectedAgentBricksEndpoints: s.selectedAgentBricksEndpoints,
+        selectedSkills: s.selectedSkills,
         activityPlacement: s.activityPlacement,
         workspaceMemory: s.workspaceMemory,
         memoryEnabled: s.memoryEnabled,

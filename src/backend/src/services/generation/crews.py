@@ -409,6 +409,11 @@ class CrewGenerationService(
         knowledge_file_paths = list(
             getattr(request, "knowledge_file_paths", None) or []
         )
+        # Skills picked in the chat "+" menu — attached to EVERY agent (skills are
+        # agent-level; the kernel builder reads spec["skills"] and injects the
+        # <available_skills> block + load_skill/read_skill_file tools). Mirrors the
+        # MCP/Agent-Bricks injection below: a chat-turn selection, not an LLM choice.
+        requested_skills = list(getattr(request, "skills", None) or [])
         user_request = request.original_prompt or request.prompt
 
         # Agent Bricks endpoints picked in the chat "+" menu. This backend builder is
@@ -486,6 +491,14 @@ class CrewGenerationService(
                 cfg.setdefault("tool_configs", {})["MCP_SERVERS"] = {
                     "servers": mcp_servers
                 }
+            if requested_skills:
+                # Union with any skills the generator already put on the agent, so a
+                # chat-turn pick adds to (never replaces) a generated agent's skills.
+                existing_skills = agent.get("skills") or []
+                merged = list(dict.fromkeys([*existing_skills, *requested_skills]))
+                cfg["skills"] = merged
+            elif agent.get("skills"):
+                cfg["skills"] = agent["skills"]
             if knowledge_file_paths:
                 cfg.setdefault("tool_configs", {})["DatabricksKnowledgeSearchTool"] = {
                     "file_paths": knowledge_file_paths

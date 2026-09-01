@@ -37,6 +37,8 @@ export async function dispatch(
       request.agentbricks_endpoints = runSettings.agentbricks_endpoints;
     if (runSettings.knowledge_file_paths && runSettings.knowledge_file_paths.length > 0)
       request.knowledge_file_paths = runSettings.knowledge_file_paths;
+    if (runSettings.skills && runSettings.skills.length > 0)
+      request.skills = runSettings.skills;
     if (runSettings.chat_mode_type) request.chat_mode_type = runSettings.chat_mode_type;
     // Sent whenever it is true. NOT folded into chat_mode_type — the source
     // ("run something saved") and the shape ("build a crew with this much

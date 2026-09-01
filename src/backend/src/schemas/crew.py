@@ -448,6 +448,10 @@ class CrewStreamingRequest(BaseModel):
         default_factory=list,
         description="Paths of knowledge files attached in this chat turn; scopes DatabricksKnowledgeSearchTool to ONLY these files so the run grounds on the just-uploaded document",
     )
+    skills: Optional[List[str]] = Field(
+        default_factory=list,
+        description="Skill names picked in the chat '+' menu; attached to every agent of the auto-executed run (the kernel builder injects each skill's <available_skills> block + load_skill/read_skill_file tools)",
+    )
     chat_mode_type: Optional[str] = Field(
         "chat",
         description="ChatMode answer mode (chat|research|deep): drives the reasoning budget and execution_type in build_crew_config_from_generated. 'chat' = single light agent (no extra thinking), 'research' = crew with a medium reasoning budget, 'deep' = crew with a high reasoning budget",

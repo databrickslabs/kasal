@@ -47,6 +47,11 @@ class ChatFastPathMixin:
 
         user_request = request.original_prompt or request.prompt or ""
         attached_tools = list(getattr(request, "tools", None) or [])
+        # Skills picked in the chat "+" menu. Attached to the light agent by
+        # build_crew_config_from_generated (which injects request.skills onto every
+        # agent); carried on the agent_result too so the generation_complete event
+        # the chat UI renders reflects what was attached.
+        attached_skills = list(getattr(request, "skills", None) or [])
 
         # A default lightweight assistant + a single task. The config builder
         # injects the attached MCP servers / Agent Bricks endpoints and grounds the
@@ -61,6 +66,7 @@ class ChatFastPathMixin:
                 "goal": "Answer the user's request helpfully, accurately and concisely.",
                 "backstory": "You are a helpful AI assistant.",
                 "tools": attached_tools,
+                "skills": attached_skills,
             }
         ]
         clean_tasks = [

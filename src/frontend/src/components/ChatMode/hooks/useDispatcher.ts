@@ -393,6 +393,8 @@ export function useDispatcher(options: UseDispatcherOptions) {
           // Files attached in THIS turn — scopes the knowledge search tool to the
           // just-uploaded document (otherwise group-wide search picks a wrong file).
           knowledge_file_paths: knowledgeFilePaths,
+          // Skills picked in the chat "+" — attached to every agent of the run.
+          skills: execState.selectedSkills,
           // Answer mode → backend sets reasoning/reasoning effort/execution_type:
           // chat = single light agent, research = crew + medium effort,
           // deep = crew + high effort.

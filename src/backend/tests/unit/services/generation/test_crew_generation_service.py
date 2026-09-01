@@ -4073,6 +4073,58 @@ class TestBuildCrewConfigFromGenerated:
         assert cfg["tasks_yaml"]["task_t1"]["tool_configs"]["MCP_SERVERS"] == servers
         assert "Databricks Genie: Sales" in cfg["tasks_yaml"]["task_t1"]["description"]
 
+    def test_skills_attached_to_every_agent(self):
+        """Skills picked in the chat "+" menu attach to every agent (skills are
+        agent-level; the kernel builder reads spec["skills"]). Not put on tasks —
+        inject_skills reads the AGENT spec."""
+        req = self._req(skills=["databricks-sql", "writing-agent-tasks"])
+        cfg = CrewGenerationService.build_crew_config_from_generated(
+            req,
+            [
+                {"id": "a1", "role": "r", "tools": []},
+                {"id": "a2", "role": "r2", "tools": []},
+            ],
+            [{"id": "t1", "description": "d", "agent_id": "a1"}],
+        )
+        picked = ["databricks-sql", "writing-agent-tasks"]
+        assert cfg["agents_yaml"]["agent_a1"]["skills"] == picked
+        assert cfg["agents_yaml"]["agent_a2"]["skills"] == picked
+        # Skills are agent-level — never leak onto the task entry.
+        assert "skills" not in cfg["tasks_yaml"]["task_t1"]
+
+    def test_skills_union_with_generated_agent_skills(self):
+        """A chat-turn pick ADDS to (never replaces) skills the generator already
+        put on an agent, deduplicated and order-preserving."""
+        req = self._req(skills=["shared", "picked"])
+        cfg = CrewGenerationService.build_crew_config_from_generated(
+            req,
+            [{"id": "a1", "role": "r", "tools": [], "skills": ["generated", "shared"]}],
+            [{"id": "t1", "description": "d", "agent_id": "a1"}],
+        )
+        assert cfg["agents_yaml"]["agent_a1"]["skills"] == [
+            "generated",
+            "shared",
+            "picked",
+        ]
+
+    def test_generated_agent_skills_kept_when_none_picked(self):
+        """With no chat-turn pick, an agent's own generated skills survive the
+        builder's field-by-field copy (skills is not in OPTIONAL_AGENT_FIELDS)."""
+        cfg = CrewGenerationService.build_crew_config_from_generated(
+            self._req(),
+            [{"id": "a1", "role": "r", "tools": [], "skills": ["generated"]}],
+            [{"id": "t1", "description": "d", "agent_id": "a1"}],
+        )
+        assert cfg["agents_yaml"]["agent_a1"]["skills"] == ["generated"]
+
+    def test_no_skills_leaves_no_skills_key(self):
+        cfg = CrewGenerationService.build_crew_config_from_generated(
+            self._req(),
+            [{"id": "a1", "role": "r", "tools": []}],
+            [{"id": "t1", "description": "d", "agent_id": "a1"}],
+        )
+        assert "skills" not in cfg["agents_yaml"]["agent_a1"]
+
     def test_knowledge_file_paths_injected_into_agents_and_tasks(self):
         """A chat turn with attached files threads knowledge_file_paths into the
         DatabricksKnowledgeSearchTool tool_configs on BOTH the agent and the task

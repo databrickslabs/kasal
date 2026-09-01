@@ -59,6 +59,8 @@ const RUN_SETTINGS = {
   disable_memory: true,
   mcp_servers: [],
   agentbricks_endpoints: [],
+  // No skills picked by default (empty selection in the store).
+  skills: [],
   // Default answer mode is 'chat' (single light agent) — also skips the
   // crew-plan steering prefix (research/deep keep it).
   chat_mode_type: 'chat',

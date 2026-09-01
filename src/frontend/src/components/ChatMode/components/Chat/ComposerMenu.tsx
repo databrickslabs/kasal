@@ -23,6 +23,7 @@ import {
 } from '../../utils/answerModes';
 import { SOURCE_MODES } from '../../utils/sourceModes';
 import McpPicker from './McpPicker';
+import SkillsPicker from './SkillsPicker';
 import { useAnchoredFixedStyle } from '../../hooks/useAnchoredFixedStyle';
 import { useExecutionStore } from '../../store/executionStore';
 
@@ -38,7 +39,7 @@ export const MEMORY_MODES: { id: MemoryModeId; label: string; hint: string }[] =
   { id: 'session', label: 'Session memory', hint: "Recall only this chat's history — no teamspace memory" },
 ];
 
-type SectionId = '' | 'source' | 'mode' | 'memory' | 'model' | 'tools';
+type SectionId = '' | 'source' | 'mode' | 'memory' | 'model' | 'tools' | 'skills';
 
 /** Model lists at or under this length render without a search box. */
 const MODEL_SEARCH_THRESHOLD = 6;
@@ -49,6 +50,7 @@ const SECTION_TITLES: Record<Exclude<SectionId, ''>, string> = {
   mode: 'Answer mode',
   memory: 'Memory',
   tools: 'Tools & MCP',
+  skills: 'Skills',
 };
 
 interface ComposerMenuProps {
@@ -172,7 +174,9 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
   const setPreferExisting = useExecutionStore((s) => s.setPreferExisting);
   const selectedMcp = useExecutionStore((s) => s.selectedMcpServers);
   const selectedBricks = useExecutionStore((s) => s.selectedAgentBricksEndpoints) ?? [];
+  const selectedSkills = useExecutionStore((s) => s.selectedSkills) ?? [];
   const toolCount = (selectedMcp?.length ?? 0) + selectedBricks.length;
+  const skillCount = selectedSkills.length;
 
   useEffect(() => {
     if (!open) return;
@@ -189,7 +193,7 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
   const modelName = models.find((m) => m.key === selectedModel)?.name || selectedModel || 'Default';
   const activeMemory = MEMORY_MODES[memoryEnabled ? 0 : 1];
 
-  const badgeCount = attachmentCount + toolCount;
+  const badgeCount = attachmentCount + toolCount + skillCount;
 
   const modelQuery = modelFilter.trim().toLowerCase();
   const visibleModels = modelQuery
@@ -313,6 +317,9 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
       {id === 'tools' && (
         <McpPicker variant="inline" disabled={disabled} onOpenMcpConfig={onOpenMcpConfig} />
       )}
+
+      {/* Skills — same multi-select pattern; back out with the header. */}
+      {id === 'skills' && <SkillsPicker disabled={disabled} />}
     </>
   );
 
@@ -410,6 +417,12 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
                   label="Tools & MCP"
                   value={toolCount > 0 ? `${toolCount} selected` : 'None selected'}
                   onClick={() => setSection('tools')}
+                />
+
+                <Row
+                  label="Skills"
+                  value={skillCount > 0 ? `${skillCount} selected` : 'None selected'}
+                  onClick={() => setSection('skills')}
                 />
               </>
             )}

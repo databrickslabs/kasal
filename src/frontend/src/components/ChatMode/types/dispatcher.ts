@@ -54,6 +54,8 @@ export interface DispatcherRequest {
   agentbricks_endpoints?: string[];
   /** Paths of files attached this turn — scopes the knowledge search tool to them. */
   knowledge_file_paths?: string[];
+  /** Skill names picked in the "+" menu — attached to every agent of the run. */
+  skills?: string[];
   /** Answer mode: 'chat' = single light agent, 'research' = crew + medium reasoning effort, 'deep' = crew + high reasoning effort. */
   chat_mode_type?: 'chat' | 'research' | 'deep';
   /**
@@ -80,6 +82,7 @@ export interface DispatchRunSettings {
   mcp_servers?: string[];
   agentbricks_endpoints?: string[];
   knowledge_file_paths?: string[];
+  skills?: string[];
   chat_mode_type?: 'chat' | 'research' | 'deep';
   /** @see DispatcherRequest.prefer_existing — the SOURCE axis, not the shape. */
   prefer_existing?: boolean;
