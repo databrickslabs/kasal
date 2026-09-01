@@ -1651,6 +1651,15 @@ class TestCreateCrewComplete:
 # Progressive / Streaming crew generation
 # ===========================================================================
 
+# Pre-warm the lazy import chain create_crew_complete triggers at RUN time
+# (otel_tracing -> mlflow -> execution.service -> kasal_service -> models).
+# Several tests here wrap that call in patch.dict(sys.modules, ...), and
+# patch.dict restores the WHOLE dict on exit — evicting every module first
+# imported inside the window. The next test then re-imports the models and
+# SQLAlchemy raises "Table 'llm_usage_billing' is already defined" (21 tests
+# failed this way, order-dependently). With the chain cached up front, the
+# patched window imports nothing new, so nothing gets evicted.
+import src.services.otel_tracing.mlflow_parent_setup  # noqa: F401,E402
 from src.core.exceptions import BadRequestError, KasalError
 from src.schemas.task_generation import Agent as TaskGenAgent
 
@@ -2052,6 +2061,7 @@ class TestProgressiveGeneration:
         mcp_servers=None,
         agentbricks_endpoints=None,
         knowledge_file_paths=None,
+        skills=None,
         chat_mode_type="research",
     ):
         """Create a mock CrewStreamingRequest.
@@ -2078,6 +2088,9 @@ class TestProgressiveGeneration:
         req.mcp_servers = mcp_servers or []
         req.agentbricks_endpoints = agentbricks_endpoints or []
         req.knowledge_file_paths = knowledge_file_paths or []
+        # Iterated by build_crew_config_from_generated (2c9c0bd0) — a bare
+        # Mock attribute is truthy and not iterable.
+        req.skills = skills or []
         req.chat_mode_type = chat_mode_type
         return req
 
@@ -4108,8 +4121,8 @@ class TestBuildCrewConfigFromGenerated:
         ]
 
     def test_generated_agent_skills_kept_when_none_picked(self):
-        """With no chat-turn pick, an agent's own generated skills survive the
-        builder's field-by-field copy (skills is not in OPTIONAL_AGENT_FIELDS)."""
+        """With no chat-turn pick, an agent's own generated skills survive via
+        the OPTIONAL_AGENT_FIELDS copy loop."""
         cfg = CrewGenerationService.build_crew_config_from_generated(
             self._req(),
             [{"id": "a1", "role": "r", "tools": [], "skills": ["generated"]}],
