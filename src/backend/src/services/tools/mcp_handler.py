@@ -158,8 +158,11 @@ _GENIE_POLL_INTERVAL_SECONDS = 3
 
 
 def _is_managed_genie_adapter(adapter) -> bool:
-    """True for the Databricks-managed Genie MCP server (one space per server)."""
-    return "/mcp/genie/" in str(getattr(adapter, "server_url", "") or "")
+    """True for the Databricks-managed Genie MCP server — either a per-space
+    server (``.../mcp/genie/<space>``) or the workspace-wide Genie One endpoint
+    (``.../mcp/genie``, no space id)."""
+    url = str(getattr(adapter, "server_url", "") or "")
+    return "/mcp/genie/" in url or url.rstrip("/").endswith("/mcp/genie")
 
 
 def _genie_poll_tool_name(query_tool_name: str) -> Optional[str]:

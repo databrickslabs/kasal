@@ -68,8 +68,17 @@ class FakeWrapper:
 
 
 def test_is_managed_genie_adapter():
+    # Per-space managed Genie server.
     assert mcp_handler._is_managed_genie_adapter(
         SimpleNamespace(server_url="https://ws/api/2.0/mcp/genie/abc123")
+    )
+    # Genie One — the workspace-wide endpoint with no space id (bare and with a
+    # trailing slash).
+    assert mcp_handler._is_managed_genie_adapter(
+        SimpleNamespace(server_url="https://ws/api/2.0/mcp/genie")
+    )
+    assert mcp_handler._is_managed_genie_adapter(
+        SimpleNamespace(server_url="https://ws/api/2.0/mcp/genie/")
     )
     assert not mcp_handler._is_managed_genie_adapter(
         SimpleNamespace(server_url="https://ws/api/2.0/mcp/sql")

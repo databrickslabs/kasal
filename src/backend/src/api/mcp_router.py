@@ -294,6 +294,21 @@ async def get_databricks_mcp_options(
                 }
             )
 
+        # Genie One — the workspace-wide managed Genie MCP (no space id): one
+        # endpoint that reaches every Genie space the caller can see, so it is
+        # directly selectable, unlike the per-space servers listed on drill-in
+        # below. Same host as the per-space servers, minus the /{space_id} tail.
+        managed.append(
+            {
+                "id": "genie-one",
+                "kind": "genie",
+                "name": "Genie One",
+                "description": "Ask across all your Genie spaces (workspace-wide)",
+                "server_url": f"{workspace_url}/api/2.0/mcp/genie",
+                "expandable": False,
+            }
+        )
+
         # Two-step types — instances are listed on drill-in.
         managed.append(
             {

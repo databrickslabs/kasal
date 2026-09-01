@@ -133,6 +133,13 @@ async def test_catalog_groups_external_and_managed_types():
         == "https://ws.example.com/api/2.0/mcp/functions/system/ai"
     )
     assert managed["functions:system.ai"]["expandable"] is False
+    # Genie One — the workspace-wide managed Genie MCP (no space id) is a
+    # directly-selectable leaf, distinct from the per-space drill-in below.
+    assert (
+        managed["genie-one"]["server_url"] == "https://ws.example.com/api/2.0/mcp/genie"
+    )
+    assert managed["genie-one"]["kind"] == "genie"
+    assert managed["genie-one"]["expandable"] is False
     # Two-step types carry NO instance list (Genie can have 1000s of spaces).
     assert managed["genie"]["expandable"] is True
     assert "server_url" not in managed["genie"]
@@ -167,7 +174,7 @@ async def test_catalog_omits_functions_leaf_without_configured_catalog_schema():
 
     ids = [o["id"] for o in result["managed"]]
     # No config-derived schema leaf — but the built-in system.ai one stays.
-    assert ids == ["sql", "functions:system.ai", "genie", "ai-search"]
+    assert ids == ["sql", "functions:system.ai", "genie-one", "genie", "ai-search"]
 
 
 @pytest.mark.asyncio
@@ -250,6 +257,7 @@ async def test_catalog_survives_external_and_config_failures():
     assert [o["id"] for o in result["managed"]] == [
         "sql",
         "functions:system.ai",
+        "genie-one",
         "genie",
         "ai-search",
     ]
