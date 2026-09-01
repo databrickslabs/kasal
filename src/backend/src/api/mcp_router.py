@@ -287,6 +287,7 @@ async def get_databricks_mcp_options(
                             "start_tool": "genie_ask",
                             "poll_tool": "genie_poll_response",
                             "id_params": ["conversation_id", "response_id"],
+                            "cancel_tool": "genie_cancel_response",
                         }
                     ]
                 },

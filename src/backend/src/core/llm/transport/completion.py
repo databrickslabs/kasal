@@ -30,6 +30,7 @@ from src.core.llm.model_capabilities import (
 from .base import BaseLLM
 from .budget import (
     check_deadline,
+    check_stopped,
     exhausted_mid_round,
     partial_from_reasoning,
     resolve_execution_budget,
@@ -572,6 +573,9 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         rounds_done: int,
         conversation: list[dict[str, Any]] | None = None,
     ) -> None:
+        # A user Stop ends the run at the same boundary as the wall clock:
+        # before the next round's LLM request.
+        check_stopped(rounds_done, self.model, conversation)
         check_deadline(deadline, rounds_done, self.model, conversation)
 
     def _executor(

@@ -19,6 +19,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 
+from src.core.execution_stop import stop_requested
+
 logger = logging.getLogger(__name__)
 
 #: Total budget for one followed call, and the pause between polls.
@@ -30,6 +32,8 @@ FOLLOW_MAX_CONSECUTIVE_FAILURES = 3
 #: Every Nth poll is logged at INFO so a long wait stays visible without
 #: writing a log line every few seconds.
 _LOG_EVERY = 10
+#: Budget for the best-effort server-side cancel call.
+_CANCEL_TIMEOUT_SECONDS = 10
 
 
 @dataclass(frozen=True)
@@ -55,6 +59,10 @@ class FollowSpec:
     #: Whether a result with no envelope carries a substantive payload (the
     #: finished answer) versus an empty not-ready acknowledgement.
     has_content: Callable[[Any], bool]
+    #: Optional sibling tool that cancels the remote job (same id parameters
+    #: as the poll tool). Fired best-effort when the loop abandons the job —
+    #: user stop or timeout — so the server stops computing too.
+    cancel_tool: Optional[str] = None
 
 
 def _describe_failure(polled: Any) -> Optional[str]:
@@ -66,6 +74,24 @@ def _describe_failure(polled: Any) -> Optional[str]:
         if isinstance(text, str) and text.strip():
             return text.strip()[:300]
     return "tool returned an error result"
+
+
+async def _cancel_remote(spec: FollowSpec, adapter: Any, poll_params: dict) -> None:
+    """Best-effort server-side cancel via ``spec.cancel_tool``. Never raises —
+    the job is being abandoned either way; cancelling is a courtesy to the
+    remote service, not a step the agent's answer depends on."""
+    if not spec.cancel_tool:
+        return
+    try:
+        await asyncio.wait_for(
+            adapter.execute_tool(spec.cancel_tool, poll_params),
+            timeout=_CANCEL_TIMEOUT_SECONDS,
+        )
+        logger.info(f"[{spec.name}] cancelled remote job via {spec.cancel_tool}")
+    except Exception as e:  # noqa: BLE001 — cancel is best-effort
+        logger.warning(
+            f"[{spec.name}] remote cancel via {spec.cancel_tool} failed: {e}"
+        )
 
 
 def _not_available(spec: FollowSpec, reason: str) -> str:
@@ -109,11 +135,22 @@ async def follow_tool_call(wrapper, params, spec_of) -> Any:
     polls = 0
     failures = 0
     while True:
+        # A user Stop ends the wait immediately (the transport round loop
+        # will end the whole run at the next round boundary; this check just
+        # stops the polling — and the remote job — right away).
+        if stop_requested():
+            logger.info(
+                f"[{spec.name}] execution stopped by user after {polls} polls — "
+                "abandoning follow-up"
+            )
+            await _cancel_remote(spec, adapter, poll_params)
+            return _not_available(spec, "the execution was stopped by the user")
         if time.monotonic() >= deadline:
             logger.warning(
                 f"[{spec.name}] follow-up timed out after {FOLLOW_TIMEOUT_SECONDS}s "
                 f"({polls} polls, last status={status!r}) via {spec.poll_tool}"
             )
+            await _cancel_remote(spec, adapter, poll_params)
             return _not_available(
                 spec,
                 f"still {status or 'in progress'} after {FOLLOW_TIMEOUT_SECONDS} seconds",

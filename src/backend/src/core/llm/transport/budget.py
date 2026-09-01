@@ -10,7 +10,9 @@ the existing test surface are unchanged.
 import time
 from typing import Any
 
-from .exceptions import ExecutionBudgetExceededError
+from src.core.execution_stop import stop_requested
+
+from .exceptions import ExecutionBudgetExceededError, ExecutionStoppedError
 from .response_parsing import REDACTED_REASONING
 
 #: Tool-calling rounds allowed when no agent supplies a cap.
@@ -87,6 +89,25 @@ def check_deadline(
     if deadline_passed(deadline):
         raise ExecutionBudgetExceededError(
             f"max_execution_time exceeded after {rounds_done} tool round(s) "
+            f"for model {model}.",
+            partial=last_assistant_text(conversation),
+        )
+
+
+def check_stopped(
+    rounds_done: int,
+    model: str,
+    conversation: list[dict[str, Any]] | None = None,
+) -> None:
+    """Raise when THIS context's execution was stopped by the user.
+
+    Same boundary as ``check_deadline``: both are reasons the loop must end
+    before the next round starts. A context with no bound stop event — every
+    subprocess, and non-execution work — always passes.
+    """
+    if stop_requested():
+        raise ExecutionStoppedError(
+            f"Execution stopped by user after {rounds_done} tool round(s) "
             f"for model {model}.",
             partial=last_assistant_text(conversation),
         )

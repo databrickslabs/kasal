@@ -9,6 +9,7 @@ knowledge OUT of code: an MCP server's ``additional_config`` may declare
             "start_tool": "genie_ask",            # substring of the tool name
             "poll_tool": "genie_poll_response",   # replaces it to name the poll tool
             "id_params": ["conversation_id", "response_id"],
+            "cancel_tool": "genie_cancel_response",    # optional server-side cancel
             "terminal_statuses": ["completed", ...],   # optional, has defaults
             "done_fields": ["final_answer", "error"],  # optional, has defaults
         }
@@ -37,6 +38,7 @@ DEFAULT_TERMINAL_STATUSES = frozenset(
         "ERROR",
         "CANCELLED",
         "CANCELED",
+        "INCOMPLETE",
         "QUERY_RESULT_EXPIRED",
     }
 )
@@ -137,6 +139,12 @@ def follow_spec_from_config(wrapper: Any, result: Any) -> Optional[FollowSpec]:
         poll_tool = tool_name.replace(start, poll, 1)
         if not _advertises(adapter, poll_tool):
             continue
+        # Optional server-side cancel, derived and verified the same way as
+        # the poll tool; silently absent when the server does not offer one.
+        cancel = str(pair.get("cancel_tool") or "")
+        cancel_tool = tool_name.replace(start, cancel, 1) if cancel else None
+        if cancel_tool and not _advertises(adapter, cancel_tool):
+            cancel_tool = None
         terminal = {
             str(s).upper() for s in (pair.get("terminal_statuses") or [])
         } or DEFAULT_TERMINAL_STATUSES
@@ -156,5 +164,6 @@ def follow_spec_from_config(wrapper: Any, result: Any) -> Optional[FollowSpec]:
                 envelope, list(_ids)
             ),
             has_content=result_has_content,
+            cancel_tool=cancel_tool,
         )
     return None

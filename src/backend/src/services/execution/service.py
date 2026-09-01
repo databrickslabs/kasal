@@ -471,7 +471,6 @@ class ExecutionService:
         from src.repositories.execution_history_repository import (
             ExecutionHistoryRepository,
         )
-
         from src.services.execution.harness_choice import resolve_run_harness
 
         run = ExecutionHistory(
@@ -2654,10 +2653,19 @@ class ExecutionService:
             # If not process-based (neither flow nor crew), try the thread-based crew_executor
             if not flow_terminated and not process_terminated:
                 try:
+                    from src.core.execution_stop import (
+                        request_stop as request_cooperative_stop,
+                    )
                     from src.services.execution.thread_executor import crew_executor
 
+                    # Chat light agents register a cooperative stop event but
+                    # are unknown to the thread executor — set the event either
+                    # way so the transport round loop ends the run mid-flight.
+                    cooperative = request_cooperative_stop(execution_id)
                     # Request cooperative stop through the executor
-                    stop_requested = crew_executor.request_stop(execution_id)
+                    stop_requested = (
+                        crew_executor.request_stop(execution_id) or cooperative
+                    )
                     if stop_requested:
                         crew_logger.info(
                             f"Stop requested for execution {execution_id} via CrewExecutor"

@@ -30,6 +30,7 @@ GENIE_ONE_FOLLOW = [
         "start_tool": "genie_ask",
         "poll_tool": "genie_poll_response",
         "id_params": ["conversation_id", "response_id"],
+        "cancel_tool": "genie_cancel_response",
     }
 ]
 
@@ -308,3 +309,124 @@ def test_error_results_count_as_failures_not_answers(monkeypatch):
     result = _follow(wrapper)
     assert isinstance(result, str)
     assert "not available" in result.lower()
+
+
+# --- user stop + server-side cancel -----------------------------------------
+
+
+def _follow_with_stop_set(wrapper, params=None):
+    """Run the follow loop in a context whose execution was stopped."""
+    import threading
+
+    from src.core.execution_stop import bind_stop_event, reset_stop_event
+
+    event = threading.Event()
+    event.set()
+    token = bind_stop_event(event)
+    try:
+        return asyncio.run(
+            follow_tool_call(wrapper, params or {"query": "q"}, follow_spec_from_config)
+        )
+    finally:
+        reset_stop_event(token)
+
+
+def _genie_one(poll_results, initial, tool_names):
+    adapter = FakeAdapter(
+        follow=GENIE_ONE_FOLLOW, poll_results=poll_results, tool_names=tool_names
+    )
+    return adapter, FakeWrapper("genie_ask", adapter, initial)
+
+
+def test_user_stop_ends_the_wait_with_a_directive(monkeypatch):
+    """A stopped run must not keep polling the server for up to the full
+    timeout budget — the loop abandons the job immediately."""
+    monkeypatch.setattr(follow_runner, "FOLLOW_INTERVAL_SECONDS", 0)
+    adapter, wrapper = _per_space([], _envelope("ASKING_AI"))
+    result = _follow_with_stop_set(wrapper)
+    assert isinstance(result, str)
+    assert "stopped by the user" in result.lower()
+    assert "not available" in result.lower()
+    assert adapter.poll_calls == []  # no poll, and no cancel tool configured
+
+
+def test_user_stop_fires_the_configured_cancel_tool(monkeypatch):
+    monkeypatch.setattr(follow_runner, "FOLLOW_INTERVAL_SECONDS", 0)
+    adapter, wrapper = _genie_one(
+        [SimpleNamespace(structuredContent={"ok": True})],
+        _one_envelope("in_progress"),
+        ["genie_ask", "genie_poll_response", "genie_cancel_response"],
+    )
+    result = _follow_with_stop_set(wrapper)
+    assert isinstance(result, str)
+    assert "stopped by the user" in result.lower()
+    assert adapter.poll_calls == [
+        (
+            "genie_cancel_response",
+            {"conversation_id": "conv-1", "response_id": "resp-1"},
+        )
+    ]
+
+
+def test_timeout_fires_the_configured_cancel_tool(monkeypatch):
+    monkeypatch.setattr(follow_runner, "FOLLOW_INTERVAL_SECONDS", 0)
+    monkeypatch.setattr(follow_runner, "FOLLOW_TIMEOUT_SECONDS", 0)
+    adapter, wrapper = _genie_one(
+        [SimpleNamespace(structuredContent={"ok": True})],
+        _one_envelope("in_progress"),
+        ["genie_ask", "genie_poll_response", "genie_cancel_response"],
+    )
+    result = _follow(wrapper)
+    assert isinstance(result, str)
+    assert "not available" in result.lower()
+    assert adapter.poll_calls == [
+        (
+            "genie_cancel_response",
+            {"conversation_id": "conv-1", "response_id": "resp-1"},
+        )
+    ]
+
+
+def test_cancel_tool_failure_is_swallowed(monkeypatch):
+    """Cancel is a courtesy to the server — its failure must not replace the
+    directive the agent needs."""
+    monkeypatch.setattr(follow_runner, "FOLLOW_INTERVAL_SECONDS", 0)
+    adapter, wrapper = _genie_one(
+        [RuntimeError("cancel endpoint down")],
+        _one_envelope("in_progress"),
+        ["genie_ask", "genie_poll_response", "genie_cancel_response"],
+    )
+    result = _follow_with_stop_set(wrapper)
+    assert isinstance(result, str)
+    assert "stopped by the user" in result.lower()
+
+
+def test_cancel_tool_is_derived_and_verified():
+    adapter, wrapper = _genie_one(
+        [],
+        _one_envelope("in_progress"),
+        ["genie_ask", "genie_poll_response", "genie_cancel_response"],
+    )
+    spec = follow_spec_from_config(wrapper, wrapper._initial)
+    assert spec.cancel_tool == "genie_cancel_response"
+
+
+def test_unadvertised_cancel_tool_is_dropped():
+    """A declared cancel tool the server does not offer degrades silently —
+    the follow behaviour itself is unaffected."""
+    adapter, wrapper = _genie_one(
+        [], _one_envelope("in_progress"), ["genie_ask", "genie_poll_response"]
+    )
+    spec = follow_spec_from_config(wrapper, wrapper._initial)
+    assert spec is not None
+    assert spec.cancel_tool is None
+
+
+def test_incomplete_is_terminal(monkeypatch):
+    """Databricks Genie reports abandoned work as INCOMPLETE — a terminal
+    state, not one to poll until the timeout."""
+    monkeypatch.setattr(follow_runner, "FOLLOW_INTERVAL_SECONDS", 0)
+    adapter, wrapper = _per_space([_envelope("INCOMPLETE")], _envelope("ASKING_AI"))
+    result = _follow(wrapper)
+    assert result.structuredContent["status"] == "INCOMPLETE"
+    assert len(adapter.poll_calls) == 1

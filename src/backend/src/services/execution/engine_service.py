@@ -574,6 +574,11 @@ class KasalEngineService(BaseEngineService):
                     )
 
             # For thread-based execution (fallback or if process termination fails)
+            # Ask the run to stop cooperatively first — a worker thread ignores
+            # task.cancel(); the transport round loop honours this event.
+            from src.core.execution_stop import request_stop as request_cooperative_stop
+
+            request_cooperative_stop(execution_id)
             task = job_info["task"]
 
             # Cancel the task

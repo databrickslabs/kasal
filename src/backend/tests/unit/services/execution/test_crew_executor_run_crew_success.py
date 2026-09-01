@@ -410,3 +410,59 @@ class TestRunCrewWithExecutor:
             fresh_ex._executor.shutdown(wait=False)
         except Exception:
             pass
+
+
+# ---------------------------------------------------------------------------
+# cooperative stop: the round loop's ExecutionStoppedError + context binding
+# ---------------------------------------------------------------------------
+
+
+class TestCooperativeStop:
+    @pytest.mark.asyncio
+    async def test_execution_stopped_error_becomes_cancellation(self, executor):
+        """When the transport round loop ends a run on the user's Stop
+        (ExecutionStoppedError), run_crew surfaces the SAME CancelledError the
+        post-kickoff stop check raises — downstream handling stays uniform."""
+        from src.core.llm.transport.exceptions import ExecutionStoppedError
+
+        mock_crew = MagicMock()
+        mock_crew.kickoff.side_effect = ExecutionStoppedError(
+            "Execution stopped by user after 2 tool round(s) for model m."
+        )
+
+        with pytest.raises(asyncio.CancelledError):
+            await executor.run_crew(execution_id="stop-exec", crew=mock_crew)
+
+    @pytest.mark.asyncio
+    async def test_stop_event_is_visible_inside_the_kickoff_thread(self, executor):
+        """The stop event must be BOUND in the crew thread's context — that is
+        what lets the transport loop (and the MCP follow loop) see a Stop
+        mid-run instead of only after kickoff returns."""
+        from src.core.execution_stop import request_stop, stop_requested
+
+        seen = {}
+
+        def kickoff():
+            seen["before"] = stop_requested()
+            # The stop endpoint reaches the run through the registry alone.
+            request_stop("bind-exec")
+            seen["after"] = stop_requested()
+            return "done"
+
+        mock_crew = MagicMock()
+        mock_crew.kickoff.side_effect = kickoff
+
+        # kickoff observed the stop AFTER request_stop — so run_crew's own
+        # post-kickoff check raises the cancellation.
+        with pytest.raises(asyncio.CancelledError):
+            await executor.run_crew(execution_id="bind-exec", crew=mock_crew)
+        assert seen == {"before": False, "after": True}
+
+    @pytest.mark.asyncio
+    async def test_registry_entry_is_discarded_after_the_run(self, executor):
+        from src.core.execution_stop import request_stop
+
+        mock_crew = MagicMock()
+        mock_crew.kickoff.return_value = "done"
+        await executor.run_crew(execution_id="discard-exec", crew=mock_crew)
+        assert request_stop("discard-exec") is False

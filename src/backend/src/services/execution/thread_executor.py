@@ -13,6 +13,14 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime
 from typing import Any, Callable, Dict, Optional
 
+from src.core.execution_stop import (
+    bind_stop_event,
+    discard_stop_event,
+    reset_stop_event,
+    stop_event_for,
+)
+from src.core.llm.transport.exceptions import ExecutionStoppedError
+
 logger = logging.getLogger(__name__)
 
 
@@ -108,8 +116,10 @@ class CrewExecutor:
             asyncio.TimeoutError: If execution exceeds timeout
             asyncio.CancelledError: If execution is cancelled
         """
-        # Create stop event for cooperative cancellation
-        stop_event = threading.Event()
+        # Create stop event for cooperative cancellation. Registry-backed
+        # (core.execution_stop) so the stop endpoint reaches it even without
+        # a reference to this executor.
+        stop_event = stop_event_for(execution_id)
         self._stop_events[execution_id] = stop_event
 
         # Track execution
@@ -131,13 +141,16 @@ class CrewExecutor:
                 original_name = current_thread.name
                 current_thread.name = f"Crew_{execution_id[:8]}"
 
+                # Bind the stop event into THIS thread's context: the
+                # transport round loop consults it before every LLM round
+                # (core.execution_stop), which is what makes Stop reach a
+                # run mid-flight instead of only after kickoff returns.
+                stop_token = bind_stop_event(stop_event)
                 try:
                     logger.info(
                         f"Starting crew execution {execution_id} in thread {current_thread.name}"
                     )
 
-                    # TODO: Inject stop event checking into crew execution
-                    # For now, just run the crew normally
                     if inputs:
                         result = crew.kickoff(inputs=inputs)
                     else:
@@ -149,7 +162,13 @@ class CrewExecutor:
 
                     return result
 
+                except ExecutionStoppedError as stopped:
+                    # The round loop ended the run on the user's Stop — same
+                    # signal as the post-kickoff check above, so downstream
+                    # cancellation handling stays uniform.
+                    raise asyncio.CancelledError(str(stopped)) from stopped
                 finally:
+                    reset_stop_event(stop_token)
                     # Restore original thread name
                     current_thread.name = original_name
 
@@ -221,6 +240,7 @@ class CrewExecutor:
             self._metrics["active_executions"] -= 1
             if execution_id in self._stop_events:
                 del self._stop_events[execution_id]
+            discard_stop_event(execution_id)
             # Mark execution as done and clean up old executions
             if execution_id in self._active_executions:
                 self._active_executions[execution_id]["end_time"] = datetime.now()

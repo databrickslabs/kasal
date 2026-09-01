@@ -57,6 +57,22 @@ class ExecutionBudgetExceededError(RuntimeError):
         self.partial = partial
 
 
+class ExecutionStoppedError(RuntimeError):
+    """The user stopped this execution; the round loop must end NOW.
+
+    Raised at the same boundary as the wall-clock check (the top of each tool
+    round): a worker thread cannot be killed, so a stop is COOPERATIVE — the
+    stop endpoint sets the run's event (``src.core.execution_stop``) and this
+    is where it takes effect. Deliberately NOT caught by the tool loop: unlike
+    ``ToolExecutionBlockedError`` it must end the run, not feed the model an
+    explanation to keep going on.
+    """
+
+    def __init__(self, message: str, partial: str = ""):
+        super().__init__(message)
+        self.partial = partial
+
+
 class ToolExecutionBlockedError(Exception):
     """A pre-execution tool hook blocked this tool call.
 

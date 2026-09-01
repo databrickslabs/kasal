@@ -1650,7 +1650,23 @@ class LightAgentService:
         """
 
         async def _do() -> Any:
-            return await agent.kickoff_async(kickoff_prompt)
+            # Cooperative stop: POST /executions/{id}/stop sets this event and
+            # the transport round loop checks it before every LLM round, so
+            # Stop reaches an in-process chat run mid-flight. contextvars flow
+            # through kickoff_async's asyncio.to_thread.
+            from src.core.execution_stop import (
+                bind_stop_event,
+                discard_stop_event,
+                reset_stop_event,
+                stop_event_for,
+            )
+
+            stop_token = bind_stop_event(stop_event_for(execution_id))
+            try:
+                return await agent.kickoff_async(kickoff_prompt)
+            finally:
+                reset_stop_event(stop_token)
+                discard_stop_event(execution_id)
 
         try:
             import logging as _logging

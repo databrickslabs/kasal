@@ -138,6 +138,7 @@ async def test_catalog_groups_external_and_managed_types():
             "start_tool": "genie_ask",
             "poll_tool": "genie_poll_response",
             "id_params": ["conversation_id", "response_id"],
+            "cancel_tool": "genie_cancel_response",
         }
     ]
     # Two-step types carry NO instance list on drill-in step one.
