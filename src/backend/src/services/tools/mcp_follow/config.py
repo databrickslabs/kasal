@@ -12,6 +12,8 @@ knowledge OUT of code: an MCP server's ``additional_config`` may declare
             "cancel_tool": "genie_cancel_response",    # optional server-side cancel
             "terminal_statuses": ["completed", ...],   # optional, has defaults
             "done_fields": ["final_answer", "error"],  # optional, has defaults
+            "timeout_seconds": 900,                    # optional, default 600
+            "interval_seconds": 5,                     # optional, default 3
         }
     ]
 
@@ -107,6 +109,16 @@ def _poll_params(envelope: dict, id_params: List[str]) -> Dict[str, Any]:
     return params
 
 
+def _positive_number(value: Any) -> Optional[float]:
+    """A strictly positive number, or None for anything else — a malformed
+    override falls back to the defaults instead of breaking the loop."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
 def _advertises(adapter: Any, tool_name: str) -> bool:
     return any(
         (t.get("name") if isinstance(t, dict) else getattr(t, "name", None))
@@ -148,6 +160,8 @@ def follow_spec_from_config(wrapper: Any, result: Any) -> Optional[FollowSpec]:
         terminal = {
             str(s).upper() for s in (pair.get("terminal_statuses") or [])
         } or DEFAULT_TERMINAL_STATUSES
+        timeout_seconds = _positive_number(pair.get("timeout_seconds"))
+        interval_seconds = _positive_number(pair.get("interval_seconds"))
         done_fields = [str(f) for f in (pair.get("done_fields") or DEFAULT_DONE_FIELDS)]
 
         def is_final(envelope: dict, _terminal=terminal, _done=done_fields) -> bool:
@@ -165,5 +179,7 @@ def follow_spec_from_config(wrapper: Any, result: Any) -> Optional[FollowSpec]:
             ),
             has_content=result_has_content,
             cancel_tool=cancel_tool,
+            timeout_seconds=timeout_seconds,
+            interval_seconds=interval_seconds,
         )
     return None

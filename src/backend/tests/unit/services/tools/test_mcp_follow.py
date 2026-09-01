@@ -430,3 +430,124 @@ def test_incomplete_is_terminal(monkeypatch):
     result = _follow(wrapper)
     assert result.structuredContent["status"] == "INCOMPLETE"
     assert len(adapter.poll_calls) == 1
+
+
+# --- session reuse + per-pair timing --------------------------------------
+
+
+class FakePollSession:
+    """A fake adapter.poll_session(): serves the SAME poll_results queue."""
+
+    def __init__(self, adapter):
+        self.adapter = adapter
+        self.calls = []
+        self.closed = False
+
+    async def __aenter__(self):
+        self.adapter.sessions_opened += 1
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        self.closed = True
+
+    async def call(self, name, params):
+        self.calls.append((name, params))
+        item = self.adapter._poll_results.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+class SessionFakeAdapter(FakeAdapter):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.sessions_opened = 0
+        self.session = FakePollSession(self)
+
+    def poll_session(self):
+        return self.session
+
+
+def _per_space_session(poll_results, initial):
+    adapter = SessionFakeAdapter(
+        follow=PER_SPACE_FOLLOW,
+        poll_results=poll_results,
+        tool_names=["query_space_s1", "poll_response_s1"],
+    )
+    return adapter, FakeWrapper("query_space_s1", adapter, initial)
+
+
+def test_poll_session_is_opened_once_and_reused(monkeypatch):
+    """Polls flow over ONE MCP session — not a reconnect per poll, which is
+    what made a 3s-interval loop manage ~10 polls in the whole budget."""
+    monkeypatch.setattr(follow_runner, "FOLLOW_INTERVAL_SECONDS", 0)
+    adapter, wrapper = _per_space_session(
+        [_envelope("EXECUTING_QUERY"), _not_ready(), _envelope("COMPLETED")],
+        _envelope("ASKING_AI"),
+    )
+    result = _follow(wrapper)
+    assert result.structuredContent["status"] == "COMPLETED"
+    assert adapter.sessions_opened == 1
+    assert len(adapter.session.calls) == 3
+    assert adapter.poll_calls == []  # execute_tool never used for polls
+    assert adapter.session.closed
+
+
+def test_dead_poll_session_degrades_to_per_call(monkeypatch):
+    """A session failure costs one counted poll failure, then the loop
+    continues over per-call connections — never gives up because of it."""
+    monkeypatch.setattr(follow_runner, "FOLLOW_INTERVAL_SECONDS", 0)
+    adapter, wrapper = _per_space_session(
+        [RuntimeError("session dropped"), _envelope("COMPLETED")],
+        _envelope("ASKING_AI"),
+    )
+    result = _follow(wrapper)
+    assert result.structuredContent["status"] == "COMPLETED"
+    assert len(adapter.session.calls) == 1  # the failed one
+    assert len(adapter.poll_calls) == 1  # the per-call fallback
+    assert adapter.session.closed
+
+
+def test_adapter_without_poll_session_uses_per_call(monkeypatch):
+    """An adapter that offers no poll_session (any third-party one) keeps the
+    original per-call behaviour — the capability is optional."""
+    monkeypatch.setattr(follow_runner, "FOLLOW_INTERVAL_SECONDS", 0)
+    adapter, wrapper = _per_space([_envelope("COMPLETED")], _envelope("ASKING_AI"))
+    result = _follow(wrapper)
+    assert result.structuredContent["status"] == "COMPLETED"
+    assert len(adapter.poll_calls) == 1
+
+
+def test_timing_overrides_are_parsed_into_the_spec():
+    follow = [{**PER_SPACE_FOLLOW[0], "timeout_seconds": 900, "interval_seconds": 5}]
+    adapter, wrapper = _per_space([], _envelope("ASKING_AI"), follow=follow)
+    spec = follow_spec_from_config(wrapper, wrapper._initial)
+    assert spec.timeout_seconds == 900
+    assert spec.interval_seconds == 5
+
+
+def test_malformed_timing_overrides_fall_back_to_defaults():
+    follow = [
+        {**PER_SPACE_FOLLOW[0], "timeout_seconds": "soon", "interval_seconds": -2}
+    ]
+    adapter, wrapper = _per_space([], _envelope("ASKING_AI"), follow=follow)
+    spec = follow_spec_from_config(wrapper, wrapper._initial)
+    assert spec.timeout_seconds is None
+    assert spec.interval_seconds is None
+
+
+def test_spec_timeout_override_governs_the_loop(monkeypatch):
+    """A per-pair timeout_seconds replaces the module default: with a
+    microsecond budget the loop must return the timeout directive at once
+    (the 600s default would never trip inside a test). The first deadline
+    check can land on the same monotonic tick, so at most one poll fits."""
+    monkeypatch.setattr(follow_runner, "FOLLOW_INTERVAL_SECONDS", 0)
+    follow = [{**PER_SPACE_FOLLOW[0], "timeout_seconds": 1e-6}]
+    adapter, wrapper = _per_space(
+        [_envelope("EXECUTING_QUERY")], _envelope("ASKING_AI"), follow=follow
+    )
+    result = _follow(wrapper)
+    assert isinstance(result, str)
+    assert "not available" in result.lower()
+    assert "after 0 seconds" in result
+    assert len(adapter.poll_calls) <= 1

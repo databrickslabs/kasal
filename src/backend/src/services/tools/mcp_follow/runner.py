@@ -14,6 +14,7 @@ never an event loop.
 """
 
 import asyncio
+import contextlib
 import logging
 import time
 from dataclasses import dataclass
@@ -23,11 +24,14 @@ from src.core.execution_stop import stop_requested
 
 logger = logging.getLogger(__name__)
 
-#: Total budget for one followed call, and the pause between polls.
-FOLLOW_TIMEOUT_SECONDS = 300
+#: Default total budget for one followed call, and the pause between polls.
+#: A follow declaration may override both per pair (``timeout_seconds`` /
+#: ``interval_seconds``) — the budget is generic data, like the rest of the
+#: follow config.
+FOLLOW_TIMEOUT_SECONDS = 600
 FOLLOW_INTERVAL_SECONDS = 3
 #: Consecutive poll failures (exceptions OR error results) tolerated before
-#: giving up. Transient 429/5xx blips should not end a 5-minute wait early.
+#: giving up. Transient 429/5xx blips should not end a long wait early.
 FOLLOW_MAX_CONSECUTIVE_FAILURES = 3
 #: Every Nth poll is logged at INFO so a long wait stays visible without
 #: writing a log line every few seconds.
@@ -63,6 +67,10 @@ class FollowSpec:
     #: as the poll tool). Fired best-effort when the loop abandons the job —
     #: user stop or timeout — so the server stops computing too.
     cancel_tool: Optional[str] = None
+    #: Per-pair overrides for the loop's total budget and poll pause;
+    #: None means the module defaults.
+    timeout_seconds: Optional[float] = None
+    interval_seconds: Optional[float] = None
 
 
 def _describe_failure(polled: Any) -> Optional[str]:
@@ -105,6 +113,27 @@ def _not_available(spec: FollowSpec, reason: str) -> str:
     )
 
 
+async def _open_poll_session(stack, adapter: Any, spec: FollowSpec) -> Optional[Any]:
+    """One MCP session for the WHOLE poll loop, when the adapter offers one.
+
+    Per-poll reconnects (auth resolution + TLS/SSE handshake + MCP initialize,
+    every time) cost 15-25s against a managed endpoint — which is how a "3s
+    interval" loop got ~10 polls into a 300s budget. MCP sessions are built to
+    stay open across calls; reusing one makes the interval real. Best-effort:
+    on any failure the loop falls back to per-call ``execute_tool``."""
+    factory = getattr(adapter, "poll_session", None)
+    if factory is None:
+        return None
+    try:
+        return await stack.enter_async_context(factory())
+    except Exception as e:  # noqa: BLE001 — fallback path stays available
+        logger.info(
+            f"[{spec.name}] could not open a poll session "
+            f"(falling back to per-call connections): {e}"
+        )
+        return None
+
+
 async def follow_tool_call(wrapper, params, spec_of) -> Any:
     """Execute the wrapped MCP tool; follow it to completion when recognised.
 
@@ -130,8 +159,27 @@ async def follow_tool_call(wrapper, params, spec_of) -> Any:
     if len(poll_params) < 2:
         return result  # not enough ids to poll with — surface what we got
 
+    async with contextlib.AsyncExitStack() as stack:
+        return await _follow_loop(stack, adapter, spec, poll_params, envelope)
+
+
+async def _follow_loop(stack, adapter, spec: FollowSpec, poll_params, envelope) -> Any:
+    budget = (
+        spec.timeout_seconds
+        if spec.timeout_seconds is not None
+        else FOLLOW_TIMEOUT_SECONDS
+    )
+    interval = (
+        spec.interval_seconds
+        if spec.interval_seconds is not None
+        else FOLLOW_INTERVAL_SECONDS
+    )
+    session = await _open_poll_session(stack, adapter, spec)
+
+    result = None
     status = str(envelope.get("status") or "")
-    deadline = time.monotonic() + FOLLOW_TIMEOUT_SECONDS
+    started = time.monotonic()
+    deadline = started + budget
     polls = 0
     failures = 0
     while True:
@@ -146,20 +194,25 @@ async def follow_tool_call(wrapper, params, spec_of) -> Any:
             await _cancel_remote(spec, adapter, poll_params)
             return _not_available(spec, "the execution was stopped by the user")
         if time.monotonic() >= deadline:
+            elapsed = time.monotonic() - started
+            per_poll = elapsed / polls if polls else 0.0
             logger.warning(
-                f"[{spec.name}] follow-up timed out after {FOLLOW_TIMEOUT_SECONDS}s "
-                f"({polls} polls, last status={status!r}) via {spec.poll_tool}"
+                f"[{spec.name}] follow-up timed out after {elapsed:.0f}s of a "
+                f"{budget:.0f}s budget ({polls} polls, ~{per_poll:.1f}s/poll, "
+                f"last status={status!r}) via {spec.poll_tool}"
             )
             await _cancel_remote(spec, adapter, poll_params)
             return _not_available(
                 spec,
-                f"still {status or 'in progress'} after {FOLLOW_TIMEOUT_SECONDS} seconds",
+                f"still {status or 'in progress'} after {budget:.0f} seconds",
             )
-        await asyncio.sleep(FOLLOW_INTERVAL_SECONDS)
+        await asyncio.sleep(interval)
         polls += 1
-        log = logger.info if polls % _LOG_EVERY == 0 else logger.debug
+        elapsed = time.monotonic() - started
+        log = logger.info if polls == 1 or polls % _LOG_EVERY == 0 else logger.debug
         log(
-            f"[{spec.name}] follow-up poll #{polls} (last status={status!r}) via {spec.poll_tool}"
+            f"[{spec.name}] follow-up poll #{polls} at {elapsed:.0f}s/{budget:.0f}s "
+            f"(last status={status!r}) via {spec.poll_tool}"
         )
 
         # The poll itself is bounded by what is LEFT of the budget, so one
@@ -168,12 +221,25 @@ async def follow_tool_call(wrapper, params, spec_of) -> Any:
         failure: Optional[str] = None
         polled = None
         try:
-            polled = await asyncio.wait_for(
-                adapter.execute_tool(spec.poll_tool, poll_params), timeout=remaining
-            )
+            if session is not None:
+                polled = await asyncio.wait_for(
+                    session.call(spec.poll_tool, poll_params), timeout=remaining
+                )
+            else:
+                polled = await asyncio.wait_for(
+                    adapter.execute_tool(spec.poll_tool, poll_params), timeout=remaining
+                )
             failure = _describe_failure(polled)
         except Exception as e:  # noqa: BLE001 — counted and bounded below
             failure = str(e) or e.__class__.__name__
+            if session is not None:
+                # The shared session died — degrade to per-call connections
+                # for the rest of this loop (the exit stack closes it later).
+                logger.info(
+                    f"[{spec.name}] poll session failed; continuing with "
+                    f"per-call connections: {failure}"
+                )
+                session = None
 
         if failure is not None:
             # Never hand back an in-progress envelope on failure — that is the

@@ -679,6 +679,28 @@ class MCPAdapter:
                     )
                     return result
 
+    def poll_session(self) -> "_PollSession":
+        """One connection for MANY tool calls — the polling companion to the
+        stateless ``execute_tool``.
+
+        ``execute_tool`` deliberately reconnects per call, which is right for
+        one-shot tool calls but ruinous for a poll loop: every poll then pays
+        auth-header resolution + a fresh TLS/SSE handshake + MCP initialize —
+        15-25s against a managed Databricks endpoint — so a "3s interval" loop
+        managed ~10 polls in a 300s budget. A poll session opens the transport
+        once and issues every call over it.
+
+        Usage::
+
+            async with adapter.poll_session() as session:
+                result = await session.call(tool_name, params)
+
+        Rate limiting and parameter conversion still apply per call. The
+        session does NOT retry: a poll loop already owns retry/failure policy,
+        and the caller falls back to ``execute_tool`` when the session dies.
+        """
+        return _PollSession(self)
+
     async def _wait_for_rate_limit(self) -> None:
         """Enforce sliding-window rate limiting (max calls per 60-second window)."""
         if self.rate_limit <= 0:
@@ -785,6 +807,101 @@ class MCPAdapter:
     async def close(self):
         """Alias for stop() for compatibility."""
         await self.stop()
+
+
+class _PollSession:
+    """A single MCP connection reused for many tool calls (see
+    :meth:`MCPAdapter.poll_session`). Not for concurrent use — one poll loop,
+    one session."""
+
+    def __init__(self, adapter: "MCPAdapter"):
+        self._adapter = adapter
+        self._stack: Optional[Any] = None
+        self._session: Optional[Any] = None
+
+    async def __aenter__(self) -> "_PollSession":
+        from contextlib import AsyncExitStack
+
+        from mcp import ClientSession
+
+        adapter = self._adapter
+        headers = await adapter._get_authentication_headers()
+        if not headers:
+            raise ValueError("No authentication headers available")
+        clean_headers = {
+            "Authorization": headers["Authorization"],
+            "User-Agent": get_user_agent(KasalProduct.MCP),
+        }
+
+        stack = AsyncExitStack()
+        try:
+            # Same hard deadline shape as _execute_with_transport: the SDK's
+            # connect timeout does not cover initialize.
+            async def _open():
+                if adapter._transport == "sse":
+                    from mcp.client.sse import sse_client
+
+                    read_stream, write_stream = await stack.enter_async_context(
+                        sse_client(
+                            adapter.server_url,
+                            headers=clean_headers,
+                            timeout=adapter.timeout_seconds,
+                        )
+                    )
+                else:
+                    from mcp.client.streamable_http import (
+                        streamablehttp_client as connect,
+                    )
+
+                    read_stream, write_stream, _ = await stack.enter_async_context(
+                        connect(
+                            adapter.server_url,
+                            headers=clean_headers,
+                            timeout=adapter.timeout_seconds,
+                        )
+                    )
+                session = await stack.enter_async_context(
+                    ClientSession(read_stream, write_stream)
+                )
+                await session.initialize()
+                return session
+
+            # asyncio.timeout, not wait_for: wait_for would run _open in a
+            # separate task, and the anyio cancel scopes the mcp transports
+            # enter are task-bound — they must be exited from the task that
+            # entered them.
+            async with asyncio.timeout(adapter.timeout_seconds):
+                self._session = await _open()
+        except BaseException:
+            try:
+                await stack.aclose()
+            except Exception:  # noqa: BLE001 — already failing; close quietly
+                pass
+            raise
+        self._stack = stack
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        stack, self._stack, self._session = self._stack, None, None
+        if stack is not None:
+            try:
+                await stack.aclose()
+            except Exception as e:  # noqa: BLE001 — a dead transport may
+                # protest on close; the session is being dropped either way.
+                logger.debug(f"poll session close raised (ignored): {e}")
+
+    async def call(self, tool_name: str, parameters: Dict[str, Any]) -> Any:
+        """One tool call over the open session. Raises on any failure —
+        no retries here (the poll loop owns that policy)."""
+        if self._session is None:
+            raise RuntimeError("poll session is not open")
+        adapter = self._adapter
+        await adapter._wait_for_rate_limit()
+        converted = adapter._convert_parameters(tool_name, parameters)
+        async with asyncio.timeout(adapter.timeout_seconds):
+            result = await self._session.call_tool(tool_name, converted)
+        adapter._call_timestamps.append(time.monotonic())
+        return result
 
 
 class MCPTool:
