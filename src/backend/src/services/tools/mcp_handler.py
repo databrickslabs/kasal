@@ -166,9 +166,19 @@ def _is_managed_genie_adapter(adapter) -> bool:
 
 
 def _genie_poll_tool_name(query_tool_name: str) -> Optional[str]:
-    """Derive the 'poll_response_<space>' tool name from 'query_space_<space>'."""
+    """Derive the poll tool from the query tool for the managed Genie MCPs:
+
+      per-space server:  ``query_space_<space>`` → ``poll_response_<space>``
+      Genie One:         ``genie_ask``           → ``genie_poll_response``
+
+    Genie One (``/api/2.0/mcp/genie``, no space id) names its tools differently.
+    Without the second mapping the auto-poll was skipped for it entirely, so the
+    agent drove the poll loop and bailed before the query finished.
+    """
     if "query_space" in query_tool_name:
         return query_tool_name.replace("query_space", "poll_response", 1)
+    if "genie_ask" in query_tool_name:
+        return query_tool_name.replace("genie_ask", "genie_poll_response", 1)
     return None
 
 
@@ -191,6 +201,62 @@ def _genie_status_envelope(result) -> Optional[dict]:
             if isinstance(data, dict) and "status" in data:
                 return data
     return None
+
+
+def _genie_result_has_content(result) -> bool:
+    """True when an MCP result carries a SUBSTANTIVE payload — i.e. a finished
+    Genie answer — versus an empty / not-ready acknowledgement (the managed
+    endpoint answers an in-flight poll with an empty body / HTTP 202).
+
+    Used to tell the two 'no status envelope' cases apart: a poll that returns
+    the answer (done → surface it) vs one that is simply not ready yet (keep
+    polling). Being conservative here — treating empty as 'not ready' — is what
+    stops the loop from handing the agent an unfinished result.
+    """
+    structured = getattr(result, "structuredContent", None)
+    if isinstance(structured, dict) and structured:
+        return True
+    for block in getattr(result, "content", None) or []:
+        text = getattr(block, "text", None)
+        if isinstance(text, str) and text.strip():
+            return True
+        # A non-text block (embedded resource, image, …) is also real content.
+        if text is None and getattr(block, "type", None) not in (None, "text"):
+            return True
+    return False
+
+
+def _genie_is_final(envelope: dict) -> bool:
+    """Whether a Genie status envelope represents a FINISHED query.
+
+    Per-space Genie signals completion with a terminal status
+    (COMPLETED/FAILED/…). Genie One uses a lowercase status ("in_progress" →
+    "completed") AND populates ``final_answer`` — so a non-null ``final_answer``
+    also counts as done, whatever the status string says.
+    """
+    status = str(envelope.get("status") or "").upper()
+    if status in _GENIE_TERMINAL_STATUSES:
+        return True
+    return envelope.get("final_answer") not in (None, "")
+
+
+def _genie_poll_params(envelope: dict) -> dict:
+    """The identifiers a poll needs, across BOTH managed-Genie shapes:
+    ``conversation_id`` plus ``message_id`` (per-space) or ``response_id``
+    (Genie One). Only ids actually present are included; the adapter's
+    ``_convert_parameters`` trims them to the poll tool's real schema.
+    """
+    conv = envelope.get("conversationId") or envelope.get("conversation_id")
+    msg = envelope.get("messageId") or envelope.get("message_id")
+    resp = envelope.get("responseId") or envelope.get("response_id")
+    params: dict = {}
+    if conv:
+        params["conversation_id"] = conv
+    if msg:
+        params["message_id"] = msg
+    if resp:
+        params["response_id"] = resp
+    return params
 
 
 async def _genie_autopoll(wrapper, params):
@@ -220,22 +286,24 @@ async def _genie_autopoll(wrapper, params):
     if envelope is None:
         return result  # not a status envelope — already-final answer or unknown shape
 
+    if _genie_is_final(envelope):
+        return result
+
+    # Capture the poll ids ONCE from the opening envelope. Managed Genie keeps
+    # them stable for the life of the message, and an in-progress poll does not
+    # always echo them back — so we must not re-derive them each round (that was
+    # part of why the loop bailed after one poll). Covers both shapes:
+    # per-space (conversation_id + message_id) and Genie One (conversation_id +
+    # response_id); the adapter trims to the poll tool's real schema.
+    poll_params = _genie_poll_params(envelope)
+    second_id = "message_id" in poll_params or "response_id" in poll_params
+    if "conversation_id" not in poll_params or not second_id:
+        return result  # can't poll without a conversation id and a message/response id
+
+    status = str(envelope.get("status") or "").upper()
     deadline = time.monotonic() + _GENIE_POLL_TIMEOUT_SECONDS
     polls = 0
     while True:
-        status = str(envelope.get("status") or "").upper()
-        if not status or status in _GENIE_TERMINAL_STATUSES:
-            return result
-
-        # Pull the ids straight from the envelope so the agent never has to —
-        # this is also what eliminates the conversation_id/message_id mix-up.
-        conversation_id = envelope.get("conversationId") or envelope.get(
-            "conversation_id"
-        )
-        message_id = envelope.get("messageId") or envelope.get("message_id")
-        if not conversation_id or not message_id:
-            return result  # can't poll without both ids
-
         if time.monotonic() >= deadline:
             logger.warning(
                 f"Genie auto-poll timed out after {_GENIE_POLL_TIMEOUT_SECONDS}s "
@@ -249,22 +317,36 @@ async def _genie_autopoll(wrapper, params):
 
         await asyncio.sleep(_GENIE_POLL_INTERVAL_SECONDS)
         polls += 1
-        logger.info(f"Genie auto-poll #{polls} (status={status}) via {poll_tool}")
+        logger.info(f"Genie auto-poll #{polls} (last status={status}) via {poll_tool}")
         try:
-            result = await adapter.execute_tool(
-                poll_tool,
-                {"conversation_id": conversation_id, "message_id": message_id},
-            )
+            polled = await adapter.execute_tool(poll_tool, poll_params)
         except Exception as e:
             logger.warning(
                 f"Genie auto-poll request failed, returning last snapshot: {e}"
             )
             return result  # hand back the last good snapshot rather than a hard error
 
-        next_envelope = _genie_status_envelope(result)
-        if next_envelope is None:
-            return result  # poll returned an error/unknown shape — surface it as-is
-        envelope = next_envelope
+        next_envelope = _genie_status_envelope(polled)
+        if next_envelope is not None:
+            # A status envelope: advance and keep any ids the poll refreshed.
+            result = polled
+            status = str(next_envelope.get("status") or "").upper()
+            poll_params = {**poll_params, **_genie_poll_params(next_envelope)}
+            if _genie_is_final(next_envelope):
+                return result  # done — surface the finished answer
+            if not status:
+                return result  # no status and not final — can't make progress
+            continue
+
+        # No status envelope on this poll. Two cases, and telling them apart is
+        # the whole fix:
+        #   - it carries the finished answer payload -> done, surface it;
+        #   - it is an empty / not-ready acknowledgement (HTTP 202) -> the query
+        #     is still running, so KEEP POLLING instead of returning early
+        #     (returning here was the premature-exit bug).
+        if _genie_result_has_content(polled):
+            return polled
+        # else: not ready — loop again (bounded by the deadline above).
 
 
 # Dictionary to track all active MCP adapters

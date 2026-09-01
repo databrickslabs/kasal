@@ -34,6 +34,25 @@ def _text_result(text):
     return SimpleNamespace(content=[SimpleNamespace(type="text", text=text)])
 
 
+def _not_ready():
+    """An empty / not-ready poll acknowledgement (HTTP 202): no status envelope
+    and no answer payload. The loop must treat this as 'keep polling', not done."""
+    return SimpleNamespace(structuredContent=None, content=[])
+
+
+def _genie_one_envelope(status, final_answer=None, conv="conv-1", resp="resp-1"):
+    """A Genie One envelope: lowercase status, conversation_id + response_id (no
+    messageId), answer in final_answer. Its native shape (from the live tool)."""
+    return SimpleNamespace(
+        structuredContent={
+            "response_id": resp,
+            "conversation_id": conv,
+            "status": status,
+            "final_answer": final_answer,
+        }
+    )
+
+
 class FakeAdapter:
     def __init__(self, server_url, poll_results, tool_names):
         self.server_url = server_url
@@ -87,7 +106,13 @@ def test_is_managed_genie_adapter():
 
 
 def test_genie_poll_tool_name_derivation():
+    # Per-space server.
     assert mcp_handler._genie_poll_tool_name("query_space_abc") == "poll_response_abc"
+    # Genie One (different tool naming).
+    assert (
+        mcp_handler._genie_poll_tool_name("databricks genie: genie one_genie_ask")
+        == "databricks genie: genie one_genie_poll_response"
+    )
     assert mcp_handler._genie_poll_tool_name("some_other_tool") is None
 
 
@@ -129,6 +154,45 @@ def test_autopoll_blocks_until_completed(monkeypatch):
     assert len(adapter.poll_calls) == 2  # polled past ASKING_AI and PENDING_WAREHOUSE
 
 
+def test_autopoll_keeps_going_when_a_poll_is_not_ready(monkeypatch):
+    """Regression: a not-ready poll (HTTP 202 — no status envelope, no content)
+    must NOT end the loop. Previously an unparseable poll returned immediately,
+    handing the agent an unfinished result before Genie completed."""
+    monkeypatch.setattr(mcp_handler, "_GENIE_POLL_INTERVAL_SECONDS", 0)
+    space = "abc123"
+    adapter = FakeAdapter(
+        server_url=f"https://ws/api/2.0/mcp/genie/{space}",
+        # not-ready, not-ready, then the finished envelope.
+        poll_results=[_not_ready(), _not_ready(), _envelope("COMPLETED")],
+        tool_names=[f"query_space_{space}", f"poll_response_{space}"],
+    )
+    wrapper = FakeWrapper(f"query_space_{space}", adapter, _envelope("ASKING_AI"))
+
+    result = asyncio.run(mcp_handler._genie_autopoll(wrapper, {"query": "q"}))
+
+    assert mcp_handler._genie_status_envelope(result)["status"] == "COMPLETED"
+    assert len(adapter.poll_calls) == 3  # kept polling through both not-ready acks
+
+
+def test_autopoll_returns_a_final_answer_that_has_no_status_envelope(monkeypatch):
+    """When a poll carries the finished answer payload (content, but no status
+    envelope), that IS completion — surface it rather than polling forever."""
+    monkeypatch.setattr(mcp_handler, "_GENIE_POLL_INTERVAL_SECONDS", 0)
+    space = "abc123"
+    answer = _text_result("42 credit cases across 7 industries")
+    adapter = FakeAdapter(
+        server_url=f"https://ws/api/2.0/mcp/genie/{space}",
+        poll_results=[answer],
+        tool_names=[f"query_space_{space}", f"poll_response_{space}"],
+    )
+    wrapper = FakeWrapper(f"query_space_{space}", adapter, _envelope("EXECUTING_QUERY"))
+
+    result = asyncio.run(mcp_handler._genie_autopoll(wrapper, {"query": "q"}))
+
+    assert result is answer
+    assert len(adapter.poll_calls) == 1
+
+
 def test_autopoll_uses_message_id_not_conversation_id(monkeypatch):
     """Regression for the conversation_id-as-message_id mix-up: the poll must
     carry the envelope's messageId as message_id, not the conversationId."""
@@ -148,6 +212,60 @@ def test_autopoll_uses_message_id_not_conversation_id(monkeypatch):
     name, params = adapter.poll_calls[0]
     assert name == f"poll_response_{space}"
     assert params == {"conversation_id": "CONV", "message_id": "MSG"}
+
+
+def test_autopoll_engages_for_genie_one_tool_naming(monkeypatch):
+    """Genie One names its tools genie_ask / genie_poll_response (not
+    query_space / poll_response). The auto-poll must still engage and block until
+    the query completes — otherwise the agent drives the loop and bails early."""
+    monkeypatch.setattr(mcp_handler, "_GENIE_POLL_INTERVAL_SECONDS", 0)
+    prefix = "databricks genie: genie one_"
+    adapter = FakeAdapter(
+        server_url="https://ws/api/2.0/mcp/genie",  # Genie One: no space id
+        poll_results=[_not_ready(), _envelope("COMPLETED")],
+        tool_names=[f"{prefix}genie_ask", f"{prefix}genie_poll_response"],
+    )
+    wrapper = FakeWrapper(f"{prefix}genie_ask", adapter, _envelope("ASKING_AI"))
+
+    result = asyncio.run(mcp_handler._genie_autopoll(wrapper, {"query": "q"}))
+
+    assert mcp_handler._genie_status_envelope(result)["status"] == "COMPLETED"
+    assert [c[0] for c in adapter.poll_calls] == [
+        f"{prefix}genie_poll_response",
+        f"{prefix}genie_poll_response",
+    ]
+
+
+def test_autopoll_genie_one_envelope_polls_with_response_id_until_final_answer(
+    monkeypatch,
+):
+    """Genie One's native envelope: status='in_progress' → 'completed', keyed by
+    conversation_id + response_id (no messageId), answer in final_answer. The
+    loop must poll with response_id and stop only once final_answer is populated."""
+    monkeypatch.setattr(mcp_handler, "_GENIE_POLL_INTERVAL_SECONDS", 0)
+    prefix = "databricks genie: genie one_"
+    adapter = FakeAdapter(
+        server_url="https://ws/api/2.0/mcp/genie",
+        poll_results=[
+            _genie_one_envelope("in_progress"),
+            _genie_one_envelope("completed", final_answer="You have 5 emails today."),
+        ],
+        tool_names=[f"{prefix}genie_ask", f"{prefix}genie_poll_response"],
+    )
+    wrapper = FakeWrapper(
+        f"{prefix}genie_ask", adapter, _genie_one_envelope("in_progress")
+    )
+
+    result = asyncio.run(mcp_handler._genie_autopoll(wrapper, {"query": "q"}))
+
+    # Polled past the in_progress snapshot and stopped on the final answer.
+    assert len(adapter.poll_calls) == 2
+    assert mcp_handler._genie_status_envelope(result)["final_answer"] == (
+        "You have 5 emails today."
+    )
+    # Polls carry conversation_id + response_id (never a bogus message_id).
+    _, params = adapter.poll_calls[0]
+    assert params == {"conversation_id": "conv-1", "response_id": "resp-1"}
 
 
 def test_autopoll_no_poll_when_already_completed():
