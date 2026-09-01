@@ -733,25 +733,20 @@ def title_from_request(query: str) -> str:
 #: when the answer turns out to carry no data — so a frame there would be shown
 #: and then taken away, which is worse than never showing one.
 SHELLABLE_KINDS = {
-    # Own a canvas. The request alone settles the shape, and the prose gate can
-    # never drop them, so their frame is a promise that is always kept.
+    # ONLY the kinds that own a canvas. The request alone settles the shape, the
+    # prose gate can never drop them, so their frame is a promise that is always
+    # kept.
     "quiz": "quiz",
     "flashcards": "flashcards",
     "mindmap": "mindmap",
     "map": "map",
-    # Components that fill a dashboard/document canvas. Asking for a kanban board
-    # or a gallery is just as explicit, so these get a frame too — but their
-    # surface CAN be dropped as prose-only, so the frame is provisional. The
-    # client keeps streaming the answer's text underneath these (see
-    # ``RETRACTABLE_SHELL_KINDS``), which is what makes a retraction cost nothing.
-    "kanban": "dashboard",
-    "album": "dashboard",
-    "graph": "dashboard",
-    "sequence": "dashboard",
-    "dashboard": "dashboard",
-    "forecast": "document",
-    "report": "document",
-    "genie": "document",
+    # NOTE: dashboard/document kinds (kanban, album, graph, sequence, dashboard,
+    # forecast, report, genie) are deliberately NOT shelled. Their surface CAN be
+    # dropped back to prose, so a shell for them gets shown and then retracted —
+    # and because ``infer_deliverable`` matches keywords as substrings, a message
+    # that merely MENTIONS a tool ("use genie to get this data") would flash a
+    # phantom document frame. A frame that isn't certain is worse than no frame,
+    # so these wait for the composed surface (matching ``shell_kind``'s contract).
 }
 
 #: Shells that may still be taken back. Identical to the gated kinds — named

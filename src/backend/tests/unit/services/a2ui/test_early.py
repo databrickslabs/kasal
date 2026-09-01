@@ -51,24 +51,27 @@ def test_every_canvas_owning_kind_gets_a_shell(query, kind):
 
 
 @pytest.mark.parametrize(
-    "query,kind",
+    "query",
     [
-        ("make me a kanban board for the sprint", "dashboard"),
-        ("show me an album of alpine photos", "dashboard"),
-        ("build a network graph of services", "dashboard"),
-        ("show me a dashboard of sales", "dashboard"),
-        ("give me a forecast of revenue", "document"),
-        ("write a report on Q3", "document"),
+        "make me a kanban board for the sprint",
+        "show me an album of alpine photos",
+        "build a network graph of services",
+        "show me a dashboard of sales",
+        "give me a forecast of revenue",
+        "write a report on Q3",
+        # The real-world false positive: "genie" is a tool the user names, not a
+        # request to build a Genie document. It must NOT flash a phantom shell.
+        "can you check my emails from today use genie to get this data",
     ],
 )
-def test_component_deliverables_get_a_provisional_shell(query, kind):
-    """Asking for a board or a gallery is just as explicit as asking for a deck.
-
-    These render on dashboard/document, which the prose gate CAN drop, so their
-    frame is provisional — the client keeps streaming the answer's text
-    underneath one of these, which is what makes a retraction cost nothing.
-    """
-    assert early.shell_kind(query) == kind
+def test_dashboard_document_kinds_get_no_shell(query):
+    """dashboard/document kinds render on a surface the prose gate CAN drop, so a
+    shell for them would be shown and then retracted. They are deliberately not
+    shelled — they wait for the composed surface. (Also protects against the
+    substring keyword match flashing a frame when a request merely mentions a
+    tool like 'genie'.)"""
+    assert early.shell_kind(query) is None
+    assert early.wants_instant_shell(query) is False
 
 
 @pytest.mark.parametrize(
@@ -105,7 +108,9 @@ async def test_the_shell_is_skipped_when_a2ui_is_off(monkeypatch):
     monkeypatch.setattr(early, "_resolve", _off)
     sent: List[Dict[str, Any]] = []
     assert (
-        await early.emit_instant_shell("create a presentation on X", on_delta=_sink(sent))
+        await early.emit_instant_shell(
+            "create a presentation on X", on_delta=_sink(sent)
+        )
         is False
     )
     assert sent == []
@@ -123,5 +128,3 @@ async def test_a_throwing_sink_cannot_fail_the_run(enabled):
 
 
 # ── the outline head start ──────────────────────────────────────────────────
-
-

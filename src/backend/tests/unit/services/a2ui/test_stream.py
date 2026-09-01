@@ -323,22 +323,22 @@ def test_a_non_deck_shell_is_one_placeholder_on_its_own_canvas(kind):
     assert node["pending"] is True
 
 
-def test_shellable_kinds_split_into_certain_and_retractable():
-    """Both halves exist on purpose, and the split is not free-form.
+def test_every_shellable_kind_owns_a_canvas():
+    """The instant shell is offered ONLY for kinds that own a canvas and can
+    never be dropped by the prose gate — so a frame is a promise always kept.
 
-    A kind that owns its own canvas can never be dropped, so its frame is a
-    promise always kept and the client may silence the prose beneath it. A kind
-    living on dashboard/document CAN be dropped as prose-only, so its frame is
-    provisional and the text keeps flowing underneath. `RETRACTABLE_SHELL_KINDS`
-    must be exactly the second half — the client keys its behaviour off it.
+    dashboard/document kinds are deliberately NOT shelled: their surface can be
+    dropped to prose, so a frame for one would be shown and then retracted (and
+    because deliverable keywords match as substrings, a request that merely
+    MENTIONS a tool like "genie" would flash a phantom frame). So no shellable
+    kind is a retractable/gated one.
     """
     kinds = set(SHELLABLE_KINDS.values())
-    certain = kinds - GATED_SURFACE_KINDS
-    retractable = kinds & GATED_SURFACE_KINDS
-
-    assert certain == {"quiz", "flashcards", "mindmap", "map"}
-    assert retractable == RETRACTABLE_SHELL_KINDS
-    assert retractable == {"dashboard", "document"}
+    assert kinds == {"quiz", "flashcards", "mindmap", "map"}
+    assert kinds & GATED_SURFACE_KINDS == set()
+    # RETRACTABLE_SHELL_KINDS (the gated set the client keys its prose behaviour
+    # off) is unchanged and unrelated to what now gets an instant shell.
+    assert RETRACTABLE_SHELL_KINDS == GATED_SURFACE_KINDS
 
 
 def test_the_quiz_shell_carries_the_derived_title():
