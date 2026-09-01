@@ -74,22 +74,11 @@ const Toggle: React.FC<{
   </button>
 );
 
-/** A small stacked control: tiny caption above the toggle (used for the two-toggle
- *  system-admin layout so both fit on one row). */
-const LabeledToggle: React.FC<{
-  caption: string;
-  checked: boolean;
-  disabled?: boolean;
-  ariaLabel: string;
-  onChange: () => void;
-}> = ({ caption, checked, disabled, ariaLabel, onChange }) => (
-  <div className="flex flex-col items-center gap-1 flex-shrink-0">
-    <span className="text-[9px] font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>
-      {caption}
-    </span>
-    <Toggle checked={checked} disabled={disabled} label={ariaLabel} onChange={onChange} />
-  </div>
-);
+// Fixed-width toggle columns: the header labels (rendered once) and each row's
+// toggle share these widths so the switches line up in clean vertical columns.
+const colHeadCls =
+  'w-16 flex-shrink-0 text-center text-[9px] font-semibold uppercase tracking-wide';
+const colCellCls = 'w-16 flex-shrink-0 flex justify-center';
 
 const ChatMcpDialog: React.FC<ChatMcpDialogProps> = ({ open, onClose }) => {
   const isSystemAdmin = usePermissionStore((s) => s.isSystemAdmin);
@@ -243,7 +232,10 @@ const ChatMcpDialog: React.FC<ChatMcpDialogProps> = ({ open, onClose }) => {
           backgroundColor: 'var(--bg-primary)',
           border: '1px solid var(--border-color)',
           boxShadow: 'var(--shadow-popover)',
-          maxHeight: '85vh',
+          // Fixed height (not max) so the dialog never resizes with its content
+          // or the search filter — the body paginates within it (a page of
+          // connections fits without scrolling; the pager stays pinned).
+          height: 'min(720px, 88vh)',
         }}
       >
         {/* Header */}
@@ -273,9 +265,9 @@ const ChatMcpDialog: React.FC<ChatMcpDialogProps> = ({ open, onClose }) => {
           </button>
         </div>
 
-        <div className="px-5 pt-4 overflow-y-auto">
-          {/* Two-step hint (system admins only) */}
-          {isSystemAdmin && (
+        <div className="px-5 pt-4 flex-1 min-h-0 overflow-y-auto">
+          {/* Two-step hint (system admins only) — manage view only. */}
+          {!adding && isSystemAdmin && (
             <div
               className="text-xs leading-relaxed rounded-lg mb-3"
               style={{ padding: '10px 12px', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border-color)' }}
@@ -286,7 +278,8 @@ const ChatMcpDialog: React.FC<ChatMcpDialogProps> = ({ open, onClose }) => {
             </div>
           )}
 
-          {/* Server list */}
+          {/* Server list — hidden while adding, so the Add view is its own page. */}
+          {!adding && (
           <div className="pb-2">
             {loading ? (
               <div className="py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>Loading…</div>
@@ -295,92 +288,137 @@ const ChatMcpDialog: React.FC<ChatMcpDialogProps> = ({ open, onClose }) => {
                 {isSystemAdmin ? 'No servers registered yet.' : 'No servers available for this teamspace yet.'}
               </div>
             ) : (
-              rows.map((row) => {
-                const rowBusy = busy === `g:${row.name}` || busy === `w:${row.name}` || busy === `d:${row.name}`;
-                // Workspace toggle only makes sense once a server is globally
-                // available (system-admin view); otherwise there's no effective row.
-                const wsDisabled = rowBusy || (isSystemAdmin && !row.effective);
-                return (
-                  <div
-                    key={row.name}
-                    className="flex items-center gap-2 rounded-xl mb-2"
-                    style={{ padding: '10px 10px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{row.name}</span>
-                        {row.server_type && (
+              <>
+                {/* Column headers — the toggle labels shown ONCE, aligned over
+                    their columns, instead of repeated on every row. */}
+                <div className="flex items-center gap-2 mb-1.5" style={{ padding: '0 12px', color: 'var(--text-muted)' }}>
+                  <div className="flex-1" />
+                  {isSystemAdmin ? (
+                    <>
+                      <div className={colHeadCls}>Global</div>
+                      <div className={colHeadCls}>Teamspace</div>
+                      <div className="w-7 flex-shrink-0" />
+                    </>
+                  ) : (
+                    <div className={colHeadCls}>Enabled</div>
+                  )}
+                </div>
+
+                {rows.map((row) => {
+                  const rowBusy = busy === `g:${row.name}` || busy === `w:${row.name}` || busy === `d:${row.name}`;
+                  // Workspace toggle only makes sense once a server is globally
+                  // available (system-admin view); otherwise there's no effective row.
+                  const wsDisabled = rowBusy || (isSystemAdmin && !row.effective);
+                  return (
+                    <div
+                      key={row.name}
+                      className="flex items-center gap-2 rounded-xl mb-1.5 transition-colors"
+                      style={{ padding: '8px 12px', backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}
+                    >
+                      <div className="flex-1 min-w-0 flex items-center gap-2">
+                        {/* Name gets the full row width (URL lives in the tooltip,
+                            not a noisy per-row line) and wraps to 2 lines so the
+                            distinguishing suffix — e.g. "(system.ai)" — is never
+                            truncated away. */}
+                        <span
+                          className="text-sm font-medium break-words min-w-0"
+                          style={{ color: 'var(--text-primary)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                          title={row.server_url ? `${row.name}\n${row.server_url}` : row.name}
+                        >
+                          {row.name}
+                        </span>
+                        {/* Type badge only when it's NOT the default — otherwise
+                            it's the same word on every row. */}
+                        {row.server_type && row.server_type.toLowerCase() !== 'streamable' && (
                           <span
-                            className="text-[10px] uppercase tracking-wide flex-shrink-0 rounded"
-                            style={{ padding: '1px 6px', color: 'var(--text-muted)', border: '1px solid var(--border-color)' }}
+                            className="text-[9px] uppercase tracking-wide flex-shrink-0 rounded"
+                            style={{ padding: '1px 5px', color: 'var(--text-muted)', backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}
                           >
                             {row.server_type}
                           </span>
                         )}
                       </div>
-                      {row.server_url && (
-                        <div className="text-[11px] truncate mt-0.5" style={{ color: 'var(--text-muted)' }} title={row.server_url}>
-                          {row.server_url}
+
+                      {isSystemAdmin ? (
+                        <>
+                          <div className={colCellCls}>
+                            {row.base && (
+                              <Toggle
+                                checked={row.base.enabled}
+                                disabled={rowBusy}
+                                label={`Global availability: ${row.name}`}
+                                onChange={() => toggleGlobal(row)}
+                              />
+                            )}
+                          </div>
+                          <div className={colCellCls}>
+                            <Toggle
+                              checked={Boolean(row.effective?.enabled)}
+                              disabled={wsDisabled}
+                              label={`Enabled for this teamspace: ${row.name}`}
+                              onChange={() => toggleWorkspace(row)}
+                            />
+                          </div>
+                          <div className="w-7 flex-shrink-0 flex justify-center">
+                            {row.base && (
+                              <button
+                                type="button"
+                                onClick={() => remove(row)}
+                                disabled={rowBusy}
+                                aria-label={`Delete ${row.name}`}
+                                title={`Delete ${row.name}`}
+                                className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-[var(--bg-rail-hover)] disabled:opacity-50"
+                                style={{ color: 'var(--text-muted)' }}
+                              >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166M18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562A48.11 48.11 0 015.25 5.75m0 0V4.874c0-1.18.91-2.164 2.09-2.201a51.964 51.964 0 013.32 0c1.18.037 2.09 1.022 2.09 2.201v.916" />
+                                </svg>
+                              </button>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <div className={colCellCls}>
+                          <Toggle
+                            checked={Boolean(row.effective?.enabled)}
+                            disabled={rowBusy}
+                            label={`Enabled for this teamspace: ${row.name}`}
+                            onChange={() => toggleWorkspace(row)}
+                          />
                         </div>
                       )}
                     </div>
-
-                    {isSystemAdmin ? (
-                      <>
-                        {row.base && (
-                          <LabeledToggle
-                            caption="Global"
-                            checked={row.base.enabled}
-                            disabled={rowBusy}
-                            ariaLabel={`Global availability: ${row.name}`}
-                            onChange={() => toggleGlobal(row)}
-                          />
-                        )}
-                        <LabeledToggle
-                          caption="Teamspace"
-                          checked={Boolean(row.effective?.enabled)}
-                          disabled={wsDisabled}
-                          ariaLabel={`Enabled for this teamspace: ${row.name}`}
-                          onChange={() => toggleWorkspace(row)}
-                        />
-                        {row.base && (
-                          <button
-                            type="button"
-                            onClick={() => remove(row)}
-                            disabled={rowBusy}
-                            aria-label={`Delete ${row.name}`}
-                            className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors hover:bg-[var(--bg-rail-hover)] disabled:opacity-50"
-                            style={{ color: 'var(--text-muted)' }}
-                          >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166M18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562A48.11 48.11 0 015.25 5.75m0 0V4.874c0-1.18.91-2.164 2.09-2.201a51.964 51.964 0 013.32 0c1.18.037 2.09 1.022 2.09 2.201v.916" />
-                            </svg>
-                          </button>
-                        )}
-                      </>
-                    ) : (
-                      <Toggle
-                        checked={Boolean(row.effective?.enabled)}
-                        disabled={rowBusy}
-                        label={`Enabled for this teamspace: ${row.name}`}
-                        onChange={() => toggleWorkspace(row)}
-                      />
-                    )}
-                  </div>
-                );
-              })
+                  );
+                })}
+              </>
             )}
 
             {error && <div className="text-xs mt-1" style={{ color: 'var(--accent)' }}>{error}</div>}
           </div>
+          )}
 
-          {/* Add server (register) — system admins only. Two sources: the
-              Databricks catalog (Genie/SQL/UC functions/AI Search/external) or a
-              manual URL. */}
+          {/* Add server — system admins only. A SEPARATE view (the list above is
+              hidden while adding): back to the list, then pick a source. Two
+              sources: the Databricks catalog (Genie/SQL/UC functions/AI Search/
+              external) or a manual URL. */}
           {isSystemAdmin && (
             adding ? (
-              <div className="rounded-xl mb-3" style={{ padding: 12, backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
-                {/* Source tabs + close */}
+              <div className="pb-2">
+                {/* Back to the server list */}
+                <button
+                  type="button"
+                  onClick={() => { setAdding(false); setError(null); }}
+                  className="flex items-center gap-1 text-xs font-medium rounded-lg mb-3 transition-colors hover:bg-[var(--bg-rail-hover)]"
+                  style={{ padding: '5px 8px 5px 4px', color: 'var(--text-secondary)' }}
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                  </svg>
+                  Servers
+                </button>
+                <div className="text-sm font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>Add a server</div>
+
+                {/* Source tabs */}
                 <div className="flex items-center gap-1 mb-3">
                   {(['databricks', 'manual'] as const).map((k) => (
                     <button
@@ -394,27 +432,23 @@ const ChatMcpDialog: React.FC<ChatMcpDialogProps> = ({ open, onClose }) => {
                         backgroundColor: addTab === k ? 'var(--bg-active-chip)' : 'transparent',
                       }}
                     >
-                      {k === 'databricks' ? 'Databricks catalog' : 'Manual'}
+                      {k === 'databricks' ? 'Browse' : 'Manual'}
                     </button>
                   ))}
-                  <div className="flex-1" />
-                  <button
-                    type="button"
-                    onClick={() => { setAdding(false); setError(null); }}
-                    aria-label="Done adding"
-                    className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-[var(--bg-rail-hover)]"
-                    style={{ color: 'var(--text-muted)' }}
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
                 </div>
 
                 {addTab === 'databricks' ? (
-                  <div className="max-h-[40vh] overflow-y-auto">
-                    <ChatMcpCatalog scope="global" onRegistered={load} />
-                  </div>
+                  <ChatMcpCatalog
+                    scope="global"
+                    onRegistered={load}
+                    registeredUrls={
+                      new Set(
+                        rows
+                          .map((r) => (r.server_url || '').replace(/\/+$/, ''))
+                          .filter(Boolean),
+                      )
+                    }
+                  />
                 ) : (
                   <div className="flex flex-col gap-2">
                     <input style={inputStyle} placeholder="Name (e.g. my-mcp)" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
@@ -433,6 +467,7 @@ const ChatMcpDialog: React.FC<ChatMcpDialogProps> = ({ open, onClose }) => {
                     </div>
                   </div>
                 )}
+                {error && <div className="text-xs mt-2" style={{ color: 'var(--accent)' }}>{error}</div>}
               </div>
             ) : (
               <button type="button" onClick={() => { setAddTab('databricks'); setAdding(true); }} className="w-full flex items-center justify-center gap-1.5 text-xs font-medium rounded-xl mb-3 transition-colors hover:bg-[var(--bg-rail-hover)]" style={{ padding: '10px', color: 'var(--text-secondary)', border: '1px dashed var(--border-color)' }}>

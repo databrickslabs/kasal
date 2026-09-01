@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import ChatMcpCatalog from './ChatMcpCatalog';
 
 const api = {
@@ -47,9 +47,10 @@ describe('ChatMcpCatalog', () => {
   it('registers a picked option at the given scope and reloads the parent', async () => {
     const onRegistered = vi.fn();
     render(<ChatMcpCatalog scope="global" onRegistered={onRegistered} />);
-    await screen.findByText('my-uc-mcp');
-    // First "Add" is the external option.
-    fireEvent.click(screen.getAllByRole('button', { name: 'Add' })[0]);
+    const name = await screen.findByText('my-uc-mcp');
+    // Managed picks sort first now, so target the external option's own row.
+    const row = name.closest('div.rounded-lg') as HTMLElement;
+    fireEvent.click(within(row).getByRole('button', { name: 'Add' }));
     await waitFor(() =>
       expect(api.ensureDatabricksServer).toHaveBeenCalledWith(
         expect.objectContaining({ name: 'my-uc-mcp' }),

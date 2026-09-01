@@ -139,8 +139,8 @@ describe('ChatMcpDialog', () => {
     fireEvent.change(screen.getByPlaceholderText(/Server URL/i), { target: { value: 'https://z/mcp' } });
     fireEvent.change(screen.getByDisplayValue('Streamable'), { target: { value: 'sse' } });
     fireEvent.change(screen.getByPlaceholderText(/API key/i), { target: { value: 'secret' } });
-    // Close the add panel via the X.
-    fireEvent.click(screen.getByLabelText('Done adding'));
+    // Leave the Add view via the back button — returns to the server list.
+    fireEvent.click(screen.getByText('Servers'));
     expect(screen.queryByPlaceholderText(/Server URL/i)).toBeNull();
   });
 

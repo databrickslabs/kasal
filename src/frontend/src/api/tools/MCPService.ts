@@ -325,6 +325,65 @@ export class MCPService {
   }
 
   /**
+   * Second step of the Unity Catalog Functions picker: catalog.schema pairs as
+   * selectable schema-scoped MCP servers. `catalog` chooses which catalog's
+   * schemas to browse (defaults server-side to the configured catalog);
+   * `catalogs` in the response drives the catalog switcher.
+   */
+  async listFunctionSchemas(
+    catalog?: string,
+    search?: string,
+  ): Promise<{
+    options: DatabricksMcpOption[];
+    catalogs: string[];
+    selected_catalog: string | null;
+  }> {
+    try {
+      const response = await apiClient.get<{
+        options?: DatabricksMcpOption[];
+        catalogs?: string[];
+        selected_catalog?: string | null;
+      }>('/mcp/databricks/function-schemas', {
+        params: {
+          ...(catalog ? { catalog } : {}),
+          ...(search ? { search } : {}),
+        },
+      });
+      return {
+        options: response.data.options ?? [],
+        catalogs: response.data.catalogs ?? [],
+        selected_catalog: response.data.selected_catalog ?? null,
+      };
+    } catch (error) {
+      const axiosError = error as AxiosError<ErrorResponse>;
+      throw new Error(axiosError.response?.data?.detail || 'Error fetching UC Function schemas');
+    }
+  }
+
+  /**
+   * The individual UC functions in a catalog.schema — a preview of what the
+   * schema-scoped Functions MCP server exposes (visibility only; enabling the
+   * server exposes every function in the schema).
+   */
+  async listSchemaFunctions(
+    catalog: string,
+    schema: string,
+    search?: string,
+  ): Promise<Array<{ name: string; comment: string | null }>> {
+    try {
+      const response = await apiClient.get<{
+        functions?: Array<{ name: string; comment: string | null }>;
+      }>('/mcp/databricks/functions', {
+        params: { catalog, schema, ...(search ? { search } : {}) },
+      });
+      return response.data.functions ?? [];
+    } catch (error) {
+      const axiosError = error as AxiosError<ErrorResponse>;
+      throw new Error(axiosError.response?.data?.detail || 'Error fetching functions');
+    }
+  }
+
+  /**
    * Get the base/global MCP servers (group_id IS NULL) — the system-admin
    * catalog. A base server is "available to all workspaces" when enabled.
    */

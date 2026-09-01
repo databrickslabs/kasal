@@ -574,6 +574,40 @@ class DatabricksService:
         data = response.json()
         return [s["name"] for s in data.get("schemas", [])]
 
+    async def list_functions(
+        self, catalog: str, schema: str, host: str | None = None
+    ) -> list:
+        """List Unity Catalog functions in a catalog.schema.
+
+        Returns ``[{"name", "comment"}]``. Used to preview which functions a
+        schema-scoped Functions MCP server (``/mcp/functions/{catalog}/{schema}``)
+        will expose — the managed server is schema-scoped, so this is for
+        visibility, not per-function selection.
+        """
+        headers, workspace_url = await self._resolve_workspace_url_and_headers(host)
+        url = f"{workspace_url}/api/2.1/unity-catalog/functions"
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(
+                url,
+                headers=headers,
+                params={"catalog_name": catalog, "schema_name": schema},
+            )
+
+        if response.status_code != 200:
+            raise KasalError(
+                detail=(
+                    f"Failed to list functions: {response.status_code} {response.text}"
+                )
+            )
+
+        data = response.json()
+        return [
+            {"name": f.get("name", ""), "comment": f.get("comment")}
+            for f in data.get("functions", [])
+            if f.get("name")
+        ]
+
     async def check_databricks_connection(self) -> Dict[str, Any]:
         """
         Check connection to Databricks.

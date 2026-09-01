@@ -79,13 +79,28 @@ const DatabricksMcpCatalog: React.FC<DatabricksMcpCatalogProps> = ({
   const [pendingEnabled, setPendingEnabled] = useState<Record<string, boolean>>({});
   const [filter, setFilter] = useState('');
 
-  const [expandedType, setExpandedType] = useState<'genie' | 'ai-search' | null>(null);
+  const [expandedType, setExpandedType] = useState<
+    'genie' | 'ai-search' | 'functions' | null
+  >(null);
   const [genieSearch, setGenieSearch] = useState('');
   const [genieOptions, setGenieOptions] = useState<DatabricksMcpOption[]>([]);
   const [genieLoaded, setGenieLoaded] = useState(false);
   const [genieNextToken, setGenieNextToken] = useState<string | null>(null);
   const [aiSearchOptions, setAiSearchOptions] = useState<DatabricksMcpOption[]>([]);
   const [aiSearchLoaded, setAiSearchLoaded] = useState(false);
+  // Unity Catalog Functions: schema-scoped servers, browsed per catalog.
+  const [functionsSearch, setFunctionsSearch] = useState('');
+  const [functionsOptions, setFunctionsOptions] = useState<DatabricksMcpOption[]>([]);
+  const [functionsLoaded, setFunctionsLoaded] = useState(false);
+  const [functionsCatalogs, setFunctionsCatalogs] = useState<string[]>([]);
+  // undefined = let the server default to the configured catalog.
+  const [functionsCatalog, setFunctionsCatalog] = useState<string | undefined>(undefined);
+  // Second level: a chosen schema whose individual functions we preview.
+  const [functionsSchema, setFunctionsSchema] = useState<DatabricksMcpOption | null>(null);
+  const [functionNameSearch, setFunctionNameSearch] = useState('');
+  const [schemaFunctions, setSchemaFunctions] = useState<
+    Array<{ name: string; comment: string | null }> | null
+  >(null);
 
   // Load the catalog once on mount (the workspace's set of Databricks MCPs does
   // not change as we enable/disable Kasal registrations).
@@ -157,6 +172,67 @@ const DatabricksMcpCatalog: React.FC<DatabricksMcpCatalogProps> = ({
     };
   }, [expandedType, aiSearchLoaded]);
 
+  // Function schemas (searchable; reloads on catalog switch; debounced on search).
+  useEffect(() => {
+    if (expandedType !== 'functions') return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      MCPService.getInstance()
+        .listFunctionSchemas(functionsCatalog, functionsSearch || undefined)
+        .then(({ options, catalogs, selected_catalog }) => {
+          if (cancelled) return;
+          setFunctionsOptions(options);
+          setFunctionsCatalogs(catalogs);
+          // Adopt the server's default catalog so the switcher shows it selected.
+          if (functionsCatalog === undefined && selected_catalog) {
+            setFunctionsCatalog(selected_catalog);
+          }
+          setFunctionsLoaded(true);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setFunctionsOptions([]);
+          setFunctionsLoaded(true);
+          setActionError('Could not load Unity Catalog Function schemas');
+        });
+    }, functionsLoaded ? 250 : 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedType, functionsSearch, functionsCatalog]);
+
+  // The individual functions of a chosen schema (visibility only; enabling the
+  // schema server still exposes all of them).
+  useEffect(() => {
+    if (!functionsSchema) return;
+    const m = (functionsSchema.server_url || '').match(
+      /\/api\/2\.0\/mcp\/functions\/([^/]+)\/([^/?]+)/,
+    );
+    if (!m) {
+      setSchemaFunctions([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      MCPService.getInstance()
+        .listSchemaFunctions(m[1], m[2], functionNameSearch || undefined)
+        .then((fns) => {
+          if (!cancelled) setSchemaFunctions(fns);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setSchemaFunctions([]);
+          setActionError('Could not load functions');
+        });
+    }, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [functionsSchema, functionNameSearch]);
+
   const loadMoreGenie = async (token: string) => {
     try {
       const { options, next_page_token } = await MCPService.getInstance().listGenieSpaces(
@@ -213,7 +289,7 @@ const DatabricksMcpCatalog: React.FC<DatabricksMcpCatalogProps> = ({
   const query = filter.trim().toLowerCase();
   const nameMatches = (name: string) => !query || name.toLowerCase().includes(query);
 
-  const optionRow = (option: DatabricksMcpOption, indent = false) => {
+  const optionRow = (option: DatabricksMcpOption, indent = false, onView?: () => void) => {
     const match = matchFor(option);
     // Optimistic override wins until the silent parent refresh catches up.
     const enabled = option.id in pendingEnabled ? pendingEnabled[option.id] : (!!match && match.enabled);
@@ -248,6 +324,17 @@ const DatabricksMcpCatalog: React.FC<DatabricksMcpCatalogProps> = ({
             </Typography>
           )}
         </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
+        {onView && (
+          <Button
+            size="small"
+            onClick={onView}
+            endIcon={<ChevronRightIcon />}
+            sx={{ textTransform: 'none', minWidth: 0 }}
+          >
+            {t('configuration.mcp.viewFunctions', { defaultValue: 'Functions' })}
+          </Button>
+        )}
         <FormControlLabel
           sx={{ flexShrink: 0, mr: 0 }}
           control={
@@ -271,11 +358,12 @@ const DatabricksMcpCatalog: React.FC<DatabricksMcpCatalogProps> = ({
             )
           }
         />
+        </Box>
       </Box>
     );
   };
 
-  const drillRow = (kind: 'genie' | 'ai-search', label: string) => (
+  const drillRow = (kind: 'genie' | 'ai-search' | 'functions', label: string) => (
     <Button
       fullWidth
       onClick={() => setExpandedType((prev) => (prev === kind ? null : kind))}
@@ -353,7 +441,7 @@ const DatabricksMcpCatalog: React.FC<DatabricksMcpCatalogProps> = ({
             {visibleManaged.map((mt) =>
               mt.expandable ? (
                 <Box key={mt.id}>
-                  {drillRow(mt.kind as 'genie' | 'ai-search', mt.name)}
+                  {drillRow(mt.kind as 'genie' | 'ai-search' | 'functions', mt.name)}
                   <Collapse in={expandedType === mt.kind} unmountOnExit>
                     {mt.kind === 'genie' ? (
                       <Box sx={{ pl: 4, pb: 1 }}>
@@ -391,6 +479,119 @@ const DatabricksMcpCatalog: React.FC<DatabricksMcpCatalogProps> = ({
                           </>
                         )}
                       </Box>
+                    ) : mt.kind === 'functions' ? (
+                      functionsSchema ? (
+                        <Box sx={{ pl: 4, pb: 1 }}>
+                          <Button
+                            size="small"
+                            startIcon={<ChevronRightIcon sx={{ transform: 'rotate(180deg)' }} />}
+                            onClick={() => {
+                              setFunctionsSchema(null);
+                              setFunctionNameSearch('');
+                              setSchemaFunctions(null);
+                            }}
+                            sx={{ textTransform: 'none', mb: 0.5 }}
+                          >
+                            {t('configuration.mcp.backToSchemas', { defaultValue: 'Schemas' })}
+                          </Button>
+                          {/* Enabling still registers the whole schema server. */}
+                          {optionRow(functionsSchema, true)}
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', pl: 4, mb: 0.5 }}>
+                            {t('configuration.mcp.functionsPreviewHint', {
+                              defaultValue:
+                                'Enabling the server above adds all of these functions — they aren’t selected individually.',
+                            })}
+                          </Typography>
+                          <TextField
+                            size="small"
+                            fullWidth
+                            value={functionNameSearch}
+                            onChange={(e) => setFunctionNameSearch(e.target.value)}
+                            placeholder={t('configuration.mcp.searchFunctionNames', {
+                              defaultValue: 'Search functions…',
+                            })}
+                            inputProps={{ 'aria-label': 'Search functions' }}
+                            sx={{ my: 1 }}
+                          />
+                          {schemaFunctions === null ? (
+                            <Typography variant="caption" color="text.secondary">
+                              {t('common.loading', { defaultValue: 'Loading…' })}
+                            </Typography>
+                          ) : schemaFunctions.length === 0 ? (
+                            <Typography variant="caption" color="text.secondary">
+                              {t('configuration.mcp.noFunctions', { defaultValue: 'No functions found' })}
+                            </Typography>
+                          ) : (
+                            schemaFunctions.map((fn) => (
+                              <Box key={fn.name} sx={{ pl: 4, py: 0.5 }}>
+                                <Typography variant="body2" noWrap title={fn.name}>
+                                  {fn.name}
+                                </Typography>
+                                {fn.comment && (
+                                  <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
+                                    {fn.comment}
+                                  </Typography>
+                                )}
+                              </Box>
+                            ))
+                          )}
+                        </Box>
+                      ) : (
+                        <Box sx={{ pl: 4, pb: 1 }}>
+                          {functionsCatalogs.length > 0 && (
+                            <TextField
+                              select
+                              size="small"
+                              fullWidth
+                              label={t('configuration.mcp.catalog', { defaultValue: 'Catalog' })}
+                              value={functionsCatalog ?? ''}
+                              onChange={(e) => {
+                                setFunctionsLoaded(false);
+                                setFunctionsCatalog(e.target.value || undefined);
+                              }}
+                              SelectProps={{ native: true }}
+                              inputProps={{ 'aria-label': 'Select catalog' }}
+                              sx={{ mb: 1 }}
+                            >
+                              {functionsCatalogs.map((c) => (
+                                <option key={c} value={c}>
+                                  {c}
+                                </option>
+                              ))}
+                            </TextField>
+                          )}
+                          <TextField
+                            size="small"
+                            fullWidth
+                            value={functionsSearch}
+                            onChange={(e) => setFunctionsSearch(e.target.value)}
+                            placeholder={t('configuration.mcp.searchFunctions', {
+                              defaultValue: 'Search catalog.schema…',
+                            })}
+                            inputProps={{ 'aria-label': 'Search function schemas' }}
+                            sx={{ mb: 1 }}
+                          />
+                          {!functionsLoaded ? (
+                            <Typography variant="caption" color="text.secondary">
+                              {t('common.loading', { defaultValue: 'Loading…' })}
+                            </Typography>
+                          ) : functionsOptions.length === 0 ? (
+                            <Typography variant="caption" color="text.secondary">
+                              {t('configuration.mcp.noFunctionSchemas', {
+                                defaultValue: 'No schemas found',
+                              })}
+                            </Typography>
+                          ) : (
+                            functionsOptions.map((option) =>
+                              optionRow(option, true, () => {
+                                setFunctionsSchema(option);
+                                setFunctionNameSearch('');
+                                setSchemaFunctions(null);
+                              }),
+                            )
+                          )}
+                        </Box>
+                      )
                     ) : (
                       <Box sx={{ pl: 4, pb: 1 }}>
                         {!aiSearchLoaded ? (

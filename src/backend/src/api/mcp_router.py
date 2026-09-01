@@ -249,50 +249,21 @@ async def get_databricks_mcp_options(
             }
         )
 
-        # Unity Catalog Functions — schema-level server built from the
-        # catalog/schema in the workspace's Databricks configuration.
-        try:
-            from src.repositories.databricks_config_repository import (
-                DatabricksConfigRepository,
-            )
-
-            group_id = (
-                getattr(group_context, "primary_group_id", None)
-                if group_context
-                else None
-            )
-            config = await DatabricksConfigRepository(session).get_active_config(
-                group_id=group_id
-            )
-            catalog = getattr(config, "catalog", None) if config else None
-            schema = getattr(config, "schema", None) if config else None
-            if catalog and schema:
-                managed.append(
-                    {
-                        "id": f"functions:{catalog}.{schema}",
-                        "kind": "functions",
-                        "name": f"Unity Catalog Functions ({catalog}.{schema})",
-                        "description": "Run the UC functions in the configured schema",
-                        "server_url": f"{workspace_url}/api/2.0/mcp/functions/{catalog}/{schema}",
-                        "expandable": False,
-                    }
-                )
-        except Exception as e:
-            logger.warning(f"Could not derive UC Functions MCP from config: {e}")
-
-        # Built-in system.ai functions (python_exec, etc.) are always offered;
-        # skipped only when the configured schema already IS system.ai.
-        if all(o["id"] != "functions:system.ai" for o in managed):
-            managed.append(
-                {
-                    "id": "functions:system.ai",
-                    "kind": "functions",
-                    "name": "Unity Catalog Functions (system.ai)",
-                    "description": "Built-in functions such as python_exec",
-                    "server_url": f"{workspace_url}/api/2.0/mcp/functions/system/ai",
-                    "expandable": False,
-                }
-            )
+        # Unity Catalog Functions — a two-step type like Genie/AI Search: the
+        # managed server is schema-scoped (.../mcp/functions/{catalog}/{schema},
+        # one server per schema, exposing all its functions), so drilling in
+        # lists selectable catalog.schema pairs. system.ai and the workspace's
+        # configured schema are pinned first on drill-in (see
+        # list_function_mcp_schemas).
+        managed.append(
+            {
+                "id": "functions",
+                "kind": "functions",
+                "name": "Unity Catalog Functions",
+                "description": "Pick a catalog.schema",
+                "expandable": True,
+            }
+        )
 
         # Genie One — the workspace-wide managed Genie MCP (no space id): one
         # endpoint that reaches every Genie space the caller can see, so it is
@@ -388,6 +359,191 @@ async def list_genie_mcp_spaces(
         ],
         "next_page_token": spaces.next_page_token,
     }
+
+
+def _functions_mcp_option(
+    workspace_url: str, catalog: str, schema: str
+) -> Dict[str, Any]:
+    """One selectable UC Functions managed-MCP server for a catalog.schema.
+
+    The managed server is schema-scoped — it exposes every function in the
+    schema; there is no per-function URL. The id mirrors the value the first
+    step used for these leaves so an already-registered server still matches.
+    """
+    return {
+        "id": f"functions:{catalog}.{schema}",
+        "kind": "functions",
+        "name": f"Unity Catalog Functions ({catalog}.{schema})",
+        "description": None,
+        "server_url": f"{workspace_url}/api/2.0/mcp/functions/{catalog}/{schema}",
+    }
+
+
+@router.get("/databricks/function-schemas")
+async def list_function_mcp_schemas(
+    request: Request,
+    session: SessionDep,
+    catalog: Optional[str] = None,
+    search: Optional[str] = None,
+    group_context: GroupContextDep = None,
+) -> Dict[str, Any]:
+    """
+    Second step of the Unity Catalog Functions managed-MCP picker: the
+    workspace's ``catalog.schema`` pairs as selectable MCP servers
+    (``/api/2.0/mcp/functions/{catalog}/{schema}``). Each server exposes every
+    UC function in that schema — the managed MCP is schema-scoped, so there is
+    no per-function URL.
+
+    ``system.ai`` and the workspace's configured ``catalog.schema`` are pinned
+    first as quick picks. ``catalog`` chooses which catalog's schemas to browse
+    (defaults to the configured catalog); the returned ``catalogs`` list lets
+    the caller switch. ``search`` filters the ``catalog.schema`` label.
+
+    Admin-only: registering a managed MCP server is a workspace-admin action.
+    """
+    if not (
+        check_role_in_context(group_context, ["admin"])
+        or _is_global_admin(group_context)
+    ):
+        raise ForbiddenError("Only admins can browse Databricks MCP servers")
+
+    from src.repositories.databricks_config_repository import (
+        DatabricksConfigRepository,
+    )
+    from src.services.databricks.workspace.service import DatabricksService
+    from src.utils.databricks_auth import (
+        extract_user_token_from_request,
+        get_auth_context,
+    )
+    from src.utils.user_context import UserContext
+
+    if group_context:
+        UserContext.set_group_context(group_context)
+    user_token = extract_user_token_from_request(request)
+
+    auth = await get_auth_context(user_token=user_token)
+    workspace_url = (auth.workspace_url or "").rstrip("/") if auth else ""
+    if not workspace_url:
+        return {"options": [], "catalogs": [], "selected_catalog": None}
+
+    group_id = (
+        getattr(group_context, "primary_group_id", None) if group_context else None
+    )
+    config = await DatabricksConfigRepository(session).get_active_config(
+        group_id=group_id
+    )
+    cfg_catalog = getattr(config, "catalog", None) if config else None
+    cfg_schema = getattr(config, "schema", None) if config else None
+
+    service = DatabricksService(session, group_id=group_id, user_token=user_token)
+
+    # Catalogs for the switcher — best-effort so the picker still works when the
+    # caller cannot list the metastore.
+    try:
+        catalogs = await service.list_catalogs()
+    except Exception as e:
+        logger.warning(f"Could not list catalogs for Functions MCP picker: {e}")
+        catalogs = []
+
+    # Browse the requested catalog, else the configured one. Best-effort.
+    browse_catalog = catalog or cfg_catalog
+    schema_pairs: List[tuple] = []
+    if browse_catalog:
+        try:
+            schemas = await service.list_schemas(browse_catalog)
+            schema_pairs = [(browse_catalog, s) for s in schemas]
+        except Exception as e:
+            logger.warning(
+                f"Could not list schemas for '{browse_catalog}' Functions MCP: {e}"
+            )
+
+    # Pin quick picks first: system.ai, then the configured schema.
+    pinned: List[tuple] = [("system", "ai")]
+    if cfg_catalog and cfg_schema:
+        pinned.append((cfg_catalog, cfg_schema))
+
+    seen: set = set()
+    ordered: List[tuple] = []
+    for pair in pinned + schema_pairs:
+        if pair in seen:
+            continue
+        seen.add(pair)
+        ordered.append(pair)
+
+    query = (search or "").strip().lower()
+    options = [
+        _functions_mcp_option(workspace_url, c, s)
+        for (c, s) in ordered
+        if not query or query in f"{c}.{s}".lower()
+    ]
+    return {
+        "options": options,
+        "catalogs": catalogs,
+        "selected_catalog": browse_catalog,
+    }
+
+
+@router.get("/databricks/functions")
+async def list_schema_functions(
+    request: Request,
+    session: SessionDep,
+    catalog: str,
+    schema: str,
+    search: Optional[str] = None,
+    group_context: GroupContextDep = None,
+) -> Dict[str, Any]:
+    """
+    The individual Unity Catalog functions in a ``catalog.schema`` — a preview
+    of what the schema-scoped Functions MCP server
+    (``/api/2.0/mcp/functions/{catalog}/{schema}``) exposes.
+
+    This is for VISIBILITY only: the managed MCP server is schema-scoped, so
+    enabling it exposes every function in the schema. Returns
+    ``[{"name", "comment"}]`` filtered by ``search``. Admin-only.
+    """
+    if not (
+        check_role_in_context(group_context, ["admin"])
+        or _is_global_admin(group_context)
+    ):
+        raise ForbiddenError("Only admins can browse Databricks MCP servers")
+
+    from src.services.databricks.workspace.service import DatabricksService
+    from src.utils.databricks_auth import (
+        extract_user_token_from_request,
+        get_auth_context,
+    )
+    from src.utils.user_context import UserContext
+
+    if group_context:
+        UserContext.set_group_context(group_context)
+    user_token = extract_user_token_from_request(request)
+
+    auth = await get_auth_context(user_token=user_token)
+    workspace_url = (auth.workspace_url or "").rstrip("/") if auth else ""
+    if not workspace_url:
+        return {"functions": []}
+
+    group_id = (
+        getattr(group_context, "primary_group_id", None) if group_context else None
+    )
+    service = DatabricksService(session, group_id=group_id, user_token=user_token)
+    try:
+        functions = await service.list_functions(catalog, schema)
+    except Exception as e:
+        logger.warning(
+            f"Could not list functions for '{catalog}.{schema}' MCP preview: {e}"
+        )
+        return {"functions": []}
+
+    query = (search or "").strip().lower()
+    if query:
+        functions = [
+            f
+            for f in functions
+            if query in str(f.get("name", "")).lower()
+            or query in str(f.get("comment") or "").lower()
+        ]
+    return {"functions": functions}
 
 
 @router.get("/databricks/ai-search-indexes")

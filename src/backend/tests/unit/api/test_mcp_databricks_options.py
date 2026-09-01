@@ -11,7 +11,9 @@ from src.api.mcp_router import (
     _list_external_mcp_options,
     get_databricks_mcp_options,
     list_ai_search_mcp_indexes,
+    list_function_mcp_schemas,
     list_genie_mcp_spaces,
+    list_schema_functions,
 )
 from src.core.exceptions import ForbiddenError
 
@@ -120,19 +122,6 @@ async def test_catalog_groups_external_and_managed_types():
     # Leaves are directly selectable.
     assert managed["sql"]["server_url"] == "https://ws.example.com/api/2.0/mcp/sql"
     assert managed["sql"]["expandable"] is False
-    assert (
-        managed["functions:main.gold"]["server_url"]
-        == "https://ws.example.com/api/2.0/mcp/functions/main/gold"
-    )
-    assert (
-        managed["functions:main.gold"]["name"] == "Unity Catalog Functions (main.gold)"
-    )
-    # The built-in system.ai functions (python_exec, …) are always offered.
-    assert (
-        managed["functions:system.ai"]["server_url"]
-        == "https://ws.example.com/api/2.0/mcp/functions/system/ai"
-    )
-    assert managed["functions:system.ai"]["expandable"] is False
     # Genie One — the workspace-wide managed Genie MCP (no space id) is a
     # directly-selectable leaf, distinct from the per-space drill-in below.
     assert (
@@ -140,17 +129,22 @@ async def test_catalog_groups_external_and_managed_types():
     )
     assert managed["genie-one"]["kind"] == "genie"
     assert managed["genie-one"]["expandable"] is False
-    # Two-step types carry NO instance list (Genie can have 1000s of spaces).
+    # Two-step types carry NO instance list on drill-in step one.
+    # Functions is schema-scoped (a server per catalog.schema), so it drills in
+    # like Genie/AI Search rather than shipping a leaf.
+    assert managed["functions"]["expandable"] is True
+    assert "server_url" not in managed["functions"]
+    # Genie can have 1000s of spaces — also two-step.
     assert managed["genie"]["expandable"] is True
     assert "server_url" not in managed["genie"]
     assert managed["ai-search"]["expandable"] is True
 
 
 @pytest.mark.asyncio
-async def test_catalog_omits_functions_leaf_without_configured_catalog_schema():
-    config_repo = MagicMock()
-    config_repo.get_active_config = AsyncMock(return_value=None)
-
+async def test_catalog_managed_ids_are_config_independent():
+    """Step one no longer reads the Databricks config: Functions is an
+    expandable two-step type (schemas listed on drill-in), so the managed list
+    is the same regardless of the configured catalog.schema."""
     with (
         patch(
             "src.utils.databricks_auth.get_auth_context",
@@ -163,49 +157,13 @@ async def test_catalog_omits_functions_leaf_without_configured_catalog_schema():
         patch(
             "src.api.mcp_router._list_external_mcp_options", AsyncMock(return_value=[])
         ),
-        patch(
-            "src.repositories.databricks_config_repository.DatabricksConfigRepository",
-            MagicMock(return_value=config_repo),
-        ),
     ):
         result = await get_databricks_mcp_options(
             _request(), session=AsyncMock(), group_context=_admin_ctx()
         )
 
     ids = [o["id"] for o in result["managed"]]
-    # No config-derived schema leaf — but the built-in system.ai one stays.
-    assert ids == ["sql", "functions:system.ai", "genie-one", "genie", "ai-search"]
-
-
-@pytest.mark.asyncio
-async def test_catalog_does_not_duplicate_functions_leaf_when_config_is_system_ai():
-    config = SimpleNamespace(catalog="system", schema="ai")
-    config_repo = MagicMock()
-    config_repo.get_active_config = AsyncMock(return_value=config)
-
-    with (
-        patch(
-            "src.utils.databricks_auth.get_auth_context",
-            AsyncMock(return_value=_auth()),
-        ),
-        patch(
-            "src.utils.databricks_auth.extract_user_token_from_request",
-            return_value="tok",
-        ),
-        patch(
-            "src.api.mcp_router._list_external_mcp_options", AsyncMock(return_value=[])
-        ),
-        patch(
-            "src.repositories.databricks_config_repository.DatabricksConfigRepository",
-            MagicMock(return_value=config_repo),
-        ),
-    ):
-        result = await get_databricks_mcp_options(
-            _request(), session=AsyncMock(), group_context=_admin_ctx()
-        )
-
-    ids = [o["id"] for o in result["managed"]]
-    assert ids.count("functions:system.ai") == 1
+    assert ids == ["sql", "functions", "genie-one", "genie", "ai-search"]
 
 
 @pytest.mark.asyncio
@@ -256,7 +214,7 @@ async def test_catalog_survives_external_and_config_failures():
     assert result["external"] == []
     assert [o["id"] for o in result["managed"]] == [
         "sql",
-        "functions:system.ai",
+        "functions",
         "genie-one",
         "genie",
         "ai-search",
@@ -334,6 +292,212 @@ async def test_genie_spaces_step_empty_without_workspace():
     ):
         result = await list_genie_mcp_spaces(_request(), group_context=_admin_ctx())
     assert result == {"options": [], "next_page_token": None}
+
+
+# ---------------------------------------------------------------------------
+# /mcp/databricks/function-schemas — step two (schema-scoped functions servers)
+# ---------------------------------------------------------------------------
+
+
+def _databricks_service(catalogs, schemas_by_catalog):
+    svc = MagicMock()
+    svc.list_catalogs = AsyncMock(return_value=catalogs)
+    svc.list_schemas = AsyncMock(
+        side_effect=lambda catalog, host=None: schemas_by_catalog.get(catalog, [])
+    )
+    return svc
+
+
+@pytest.mark.asyncio
+async def test_function_schemas_step_pins_system_ai_and_config_then_lists_catalog():
+    config = SimpleNamespace(catalog="main", schema="gold")
+    config_repo = MagicMock()
+    config_repo.get_active_config = AsyncMock(return_value=config)
+    svc = _databricks_service(
+        catalogs=["main", "other"],
+        schemas_by_catalog={"main": ["gold", "bronze"]},
+    )
+
+    with (
+        patch(
+            "src.utils.databricks_auth.get_auth_context",
+            AsyncMock(return_value=_auth()),
+        ),
+        patch(
+            "src.utils.databricks_auth.extract_user_token_from_request",
+            return_value="tok",
+        ),
+        patch(
+            "src.repositories.databricks_config_repository.DatabricksConfigRepository",
+            MagicMock(return_value=config_repo),
+        ),
+        patch(
+            "src.services.databricks.workspace.service.DatabricksService",
+            MagicMock(return_value=svc),
+        ),
+    ):
+        result = await list_function_mcp_schemas(
+            _request(), session=AsyncMock(), group_context=_admin_ctx()
+        )
+
+    assert result["catalogs"] == ["main", "other"]
+    assert result["selected_catalog"] == "main"  # defaulted to the configured catalog
+    # system.ai and the configured main.gold are pinned first; main.gold is not
+    # duplicated when it also appears in the browsed catalog's schemas.
+    assert [o["id"] for o in result["options"]] == [
+        "functions:system.ai",
+        "functions:main.gold",
+        "functions:main.bronze",
+    ]
+    system_ai = result["options"][0]
+    assert (
+        system_ai["server_url"]
+        == "https://ws.example.com/api/2.0/mcp/functions/system/ai"
+    )
+    assert system_ai["kind"] == "functions"
+    assert (
+        result["options"][2]["server_url"]
+        == "https://ws.example.com/api/2.0/mcp/functions/main/bronze"
+    )
+
+
+@pytest.mark.asyncio
+async def test_function_schemas_step_browses_requested_catalog_and_filters_search():
+    config_repo = MagicMock()
+    config_repo.get_active_config = AsyncMock(return_value=None)
+    svc = _databricks_service(
+        catalogs=["main", "sales"],
+        schemas_by_catalog={"sales": ["gold", "silver"]},
+    )
+
+    with (
+        patch(
+            "src.utils.databricks_auth.get_auth_context",
+            AsyncMock(return_value=_auth()),
+        ),
+        patch(
+            "src.utils.databricks_auth.extract_user_token_from_request",
+            return_value="tok",
+        ),
+        patch(
+            "src.repositories.databricks_config_repository.DatabricksConfigRepository",
+            MagicMock(return_value=config_repo),
+        ),
+        patch(
+            "src.services.databricks.workspace.service.DatabricksService",
+            MagicMock(return_value=svc),
+        ),
+    ):
+        result = await list_function_mcp_schemas(
+            _request(),
+            session=AsyncMock(),
+            catalog="sales",
+            search="silver",
+            group_context=_admin_ctx(),
+        )
+
+    svc.list_schemas.assert_awaited_with("sales")
+    assert result["selected_catalog"] == "sales"
+    # No config schema to pin; system.ai is filtered out by the search, leaving
+    # only the matching sales.silver.
+    assert [o["id"] for o in result["options"]] == ["functions:sales.silver"]
+
+
+@pytest.mark.asyncio
+async def test_function_schemas_step_empty_without_workspace():
+    with (
+        patch(
+            "src.utils.databricks_auth.get_auth_context", AsyncMock(return_value=None)
+        ),
+        patch(
+            "src.utils.databricks_auth.extract_user_token_from_request",
+            return_value=None,
+        ),
+    ):
+        result = await list_function_mcp_schemas(
+            _request(), session=AsyncMock(), group_context=_admin_ctx()
+        )
+    assert result == {"options": [], "catalogs": [], "selected_catalog": None}
+
+
+@pytest.mark.asyncio
+async def test_function_schemas_step_forbidden_for_non_admin():
+    with pytest.raises(ForbiddenError):
+        await list_function_mcp_schemas(
+            _request(), session=AsyncMock(), group_context=_non_admin_ctx()
+        )
+
+
+@pytest.mark.asyncio
+async def test_schema_functions_lists_and_filters_by_search():
+    svc = MagicMock()
+    svc.list_functions = AsyncMock(
+        return_value=[
+            {"name": "ai_query", "comment": "Call a model"},
+            {"name": "ai_forecast", "comment": None},
+            {"name": "python_exec", "comment": "Run python"},
+        ]
+    )
+
+    with (
+        patch(
+            "src.utils.databricks_auth.get_auth_context",
+            AsyncMock(return_value=_auth()),
+        ),
+        patch(
+            "src.utils.databricks_auth.extract_user_token_from_request",
+            return_value="tok",
+        ),
+        patch(
+            "src.services.databricks.workspace.service.DatabricksService",
+            MagicMock(return_value=svc),
+        ),
+    ):
+        result = await list_schema_functions(
+            _request(),
+            session=AsyncMock(),
+            catalog="system",
+            schema="ai",
+            search="ai_",
+            group_context=_admin_ctx(),
+        )
+
+    svc.list_functions.assert_awaited_with("system", "ai")
+    # search matches on the function name (ai_query, ai_forecast) — python_exec drops out.
+    assert [f["name"] for f in result["functions"]] == ["ai_query", "ai_forecast"]
+
+
+@pytest.mark.asyncio
+async def test_schema_functions_empty_without_workspace():
+    with (
+        patch(
+            "src.utils.databricks_auth.get_auth_context", AsyncMock(return_value=None)
+        ),
+        patch(
+            "src.utils.databricks_auth.extract_user_token_from_request",
+            return_value=None,
+        ),
+    ):
+        result = await list_schema_functions(
+            _request(),
+            session=AsyncMock(),
+            catalog="system",
+            schema="ai",
+            group_context=_admin_ctx(),
+        )
+    assert result == {"functions": []}
+
+
+@pytest.mark.asyncio
+async def test_schema_functions_forbidden_for_non_admin():
+    with pytest.raises(ForbiddenError):
+        await list_schema_functions(
+            _request(),
+            session=AsyncMock(),
+            catalog="system",
+            schema="ai",
+            group_context=_non_admin_ctx(),
+        )
 
 
 # ---------------------------------------------------------------------------
