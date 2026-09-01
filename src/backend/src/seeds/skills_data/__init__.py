@@ -31,21 +31,40 @@ from typing import Any, Dict, List
 from src.seeds.skills_data import (
     agentic_ai_news,
     analysis_findings,
+    dashboard_content,
     databricks_sql,
+    document_grounding,
+    option_comparison,
     presentation_content,
     query_validation,
+    report_writing,
     task_authoring,
     team_updates,
+    web_research,
+    work_breakdown,
+    workplace_messages,
 )
 
 BUILTIN_SKILLS: List[Dict[str, Any]] = [
+    # Building crews and plans
     task_authoring.SKILL,
+    work_breakdown.SKILL,
+    # Data: querying and trusting results
     databricks_sql.SKILL,
     query_validation.SKILL,
-    analysis_findings.SKILL,
-    team_updates.SKILL,
+    # Research and grounding
+    web_research.SKILL,
+    document_grounding.SKILL,
     agentic_ai_news.SKILL,
+    # Deliverables: analyses, documents, decks, dashboards, decisions
+    analysis_findings.SKILL,
+    report_writing.SKILL,
     presentation_content.SKILL,
+    dashboard_content.SKILL,
+    option_comparison.SKILL,
+    # Communication
+    team_updates.SKILL,
+    workplace_messages.SKILL,
 ]
 
 __all__ = ["BUILTIN_SKILLS"]

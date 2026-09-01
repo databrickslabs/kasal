@@ -106,17 +106,14 @@ Most agentic-AI news is one of four things. Classify before writing.
 SKILL = {
     "name": "tracking-agentic-ai-news",
     "description": (
-        "Research and summarise recent developments in agentic AI — model and "
-        "agent releases, tool-use and reasoning benchmarks, agent protocols "
-        "such as MCP and A2A, and framework changes — separating measured "
-        "capability from announcement. Use when asked what is new in AI or "
-        "agentic AI, for a weekly or monthly AI news digest, a competitive or "
-        "landscape scan, whether a specific model or agent capability is real, "
-        "or to monitor a vendor's releases. Always answers with source links. "
-        "Trigger when the user mentions AI news, latest models, agent "
-        "frameworks, LLM benchmarks, what changed this week in AI, keeping up "
-        "with agentic AI, or asks for the links, sources or papers behind an "
-        "answer."
+        "Always load this skill before answering ANY request about AI or "
+        "agentic-AI news, releases, benchmarks or landscape — it defines the "
+        "source tiers, the claim classification, and the mandatory citation "
+        "format the answer must follow; do not research or summarise AI news "
+        "without it. Use for a news digest, a landscape or competitor scan, "
+        "or checking whether a capability claim is real. Trigger when the "
+        "user mentions AI news, what is new in agents or models, releases, "
+        "benchmarks, MCP or A2A developments, or a technology watch."
     ),
     "body": """# Tracking agentic AI
 
