@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Check, ClipboardCopy, Code2, Eye, Maximize2 } from 'lucide-react';
 import { buildMdSandboxCell, notebookSafe } from '../../utils/mdSandboxDiagram';
 import ScaledFrame from './ScaledFrame';
+import { useThrottledPreview } from '../../utils/scaledFrame';
 import FullscreenModal from './FullscreenModal';
 
 /**
@@ -11,9 +12,6 @@ import FullscreenModal from './FullscreenModal';
  * `code` prop grows per token; we throttle the (expensive) iframe re-mount while
  * keeping the code view current.
  */
-
-// Re-mount the live preview at most this often while a diagram streams in.
-const THROTTLE_MS = 400;
 
 interface HtmlDiagramBlockProps {
   /** The raw HTML/SVG body of the diagram block (without the ``` fences). */
@@ -30,30 +28,8 @@ const HtmlDiagramBlock: React.FC<HtmlDiagramBlockProps> = ({ code, streaming = f
   const safeCode = useMemo(() => notebookSafe(code), [code]);
 
   // Throttle the source we actually mount so a streaming diagram doesn't
-  // re-mount the iframe on every token. When not streaming, mount immediately.
-  const [preview, setPreview] = useState(safeCode);
-  const lastMountRef = useRef(0);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    const flush = () => {
-      lastMountRef.current = Date.now();
-      setPreview(safeCode);
-    };
-    if (!streaming) {
-      flush();
-      return;
-    }
-    const since = Date.now() - lastMountRef.current;
-    if (since >= THROTTLE_MS) {
-      flush();
-      return;
-    }
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(flush, THROTTLE_MS - since);
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, [safeCode, streaming]);
+  // re-mount the iframe on every token (shared with the slide deck).
+  const preview = useThrottledPreview(safeCode, streaming);
 
   const copyCell = useCallback(async () => {
     const cell = buildMdSandboxCell(code);
@@ -104,7 +80,7 @@ const HtmlDiagramBlock: React.FC<HtmlDiagramBlockProps> = ({ code, streaming = f
           <code>{`%md-sandbox\n${safeCode}`}</code>
         </pre>
       ) : (
-        <ScaledFrame html={preview} title="Rendered diagram" />
+        <ScaledFrame html={preview} streaming={streaming} title="Rendered diagram" />
       )}
       {full && (
         <FullscreenModal onClose={() => setFull(false)}>

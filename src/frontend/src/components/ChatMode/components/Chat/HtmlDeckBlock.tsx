@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Download, Loader2, Maximize2 } from 'lucide-react';
 import { SLIDE_H, SLIDE_W, splitSlides } from '../../utils/htmlDeck';
+import { useThrottledPreview } from '../../utils/scaledFrame';
 import { downloadDeckPdf, downloadDeckPptx } from '../../utils/deckExport';
 import ScaledFrame from './ScaledFrame';
 import FullscreenModal from './FullscreenModal';
@@ -39,7 +40,11 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
   streaming = false,
   truncated = false,
 }) => {
-  const slides = useMemo(() => splitSlides(code), [code]);
+  // While the deck streams in, rebuild the (expensive) iframe at most every
+  // 400ms instead of per token — same throttle the diagram card uses. The
+  // stream's end flushes immediately.
+  const liveCode = useThrottledPreview(code, streaming);
+  const slides = useMemo(() => splitSlides(liveCode), [liveCode]);
   const count = slides.length;
   const [idx, setIdx] = useState(0);
   const [full, setFull] = useState(false);
@@ -208,7 +213,13 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
           over the (static) slide takes the click and focuses the deck — that
           is what makes "click the presentation, then use the arrows" work. */}
       <div className="relative">
-        <ScaledFrame html={stage} baseWidth={SLIDE_W} fill={false} title="Slide deck" />
+        <ScaledFrame
+          html={stage}
+          baseWidth={SLIDE_W}
+          fill={false}
+          streaming={streaming}
+          title="Slide deck"
+        />
         <div className="absolute inset-0" aria-hidden="true" />
       </div>
       {full && (

@@ -15,7 +15,7 @@
  * (never upscaling past 1×), and set #ksz to the EXACT scaled size so the
  * reported height always matches what's visible.
  */
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 export const BODY_PAD = 12;
 // Default canvas width diagrams are laid out at (the authored target ~1200px).
@@ -198,18 +198,67 @@ export function iframeDoc(html: string, id: string, opts: FrameOpts = {}): strin
   );
 }
 
-/** Unique frame id + auto-updated height driven by the frame's height messages. */
-export function useScaledFrameHeight(initial = 120): { frameId: string; height: number } {
+/**
+ * Unique frame id + auto-updated height driven by the frame's height messages.
+ *
+ * While ``streaming``, the height is MONOTONIC (grow-only): a partial document
+ * measures a different content width on every chunk, so the reported height
+ * oscillates — and an auto-height iframe that grows and shrinks per chunk
+ * shakes the whole chat column (the scroll pinning chases it). Growing only is
+ * stable; the first post-stream fit sets the exact final height.
+ */
+export function useScaledFrameHeight(
+  initial = 120,
+  streaming = false,
+): { frameId: string; height: number } {
   const frameId = useId();
   const [height, setHeight] = useState(initial);
+  const streamingRef = useRef(streaming);
+  streamingRef.current = streaming;
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       const d = e.data as { t?: string; id?: string; h?: number } | null;
       if (!d || d.t !== HEIGHT_MSG || d.id !== frameId) return;
-      if (typeof d.h === 'number' && d.h > 0) setHeight(d.h + 8);
+      if (typeof d.h === 'number' && d.h > 0) {
+        const next = d.h + 8;
+        setHeight((prev) => (streamingRef.current ? Math.max(prev, next) : next));
+      }
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
   }, [frameId]);
   return { frameId, height };
+}
+
+/**
+ * Throttle a streaming value so the (expensive) iframe document is rebuilt at
+ * most every ``ms`` while content streams in — re-parsing the whole srcDoc per
+ * token is the other half of the screen-shake. Immediate when not streaming,
+ * and the stream's END flushes immediately so the final content never waits.
+ */
+export function useThrottledPreview<T>(value: T, streaming: boolean, ms = 400): T {
+  const [preview, setPreview] = useState(value);
+  const lastRef = useRef(0);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const flush = () => {
+      lastRef.current = Date.now();
+      setPreview(value);
+    };
+    if (!streaming) {
+      flush();
+      return;
+    }
+    const since = Date.now() - lastRef.current;
+    if (since >= ms) {
+      flush();
+      return;
+    }
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(flush, ms - since);
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [value, streaming, ms]);
+  return streaming ? preview : value;
 }

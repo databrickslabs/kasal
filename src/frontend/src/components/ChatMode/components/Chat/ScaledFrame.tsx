@@ -16,6 +16,10 @@ interface ScaledFrameProps {
   upscale?: boolean;
   /** Fit both width and height, centered — fills the parent's height (fullscreen). */
   contain?: boolean;
+  /** True while the html is still streaming in: the frame's auto-height then
+   *  only GROWS (partial layouts measure erratically; shrinking per chunk is
+   *  what shook the chat column). */
+  streaming?: boolean;
   title?: string;
 }
 
@@ -25,9 +29,10 @@ const ScaledFrame: React.FC<ScaledFrameProps> = ({
   fill,
   upscale,
   contain,
+  streaming = false,
   title = 'Preview',
 }) => {
-  const { frameId, height } = useScaledFrameHeight();
+  const { frameId, height } = useScaledFrameHeight(120, streaming);
   const srcDoc = useMemo(
     () => iframeDoc(html, frameId, { baseWidth, fill, upscale, contain }),
     [html, frameId, baseWidth, fill, upscale, contain],
