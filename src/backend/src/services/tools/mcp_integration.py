@@ -474,6 +474,10 @@ class MCPIntegration:
                 "timeout_seconds": server.get("timeout_seconds", 30),
                 "max_retries": server.get("max_retries", 3),
                 "rate_limit": server.get("rate_limit", 60),
+                # Start-tool + poll-tool follow declarations (see
+                # services/tools/mcp_follow): server-supplied data, so the MCP
+                # layer needs no per-vendor code.
+                "follow": (server.get("additional_config") or {}).get("follow"),
                 "auth_type": server.get("auth_type", "api_key"),
                 "user_token": user_token,
                 "group_id": group_id,

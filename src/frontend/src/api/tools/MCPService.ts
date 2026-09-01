@@ -23,6 +23,10 @@ export interface DatabricksMcpOption {
   name: string;
   description?: string | null;
   server_url: string;
+  /** Preset server settings shipped with the option — e.g. the managed Genie
+   *  entries carry their start+poll `follow` declaration here, so the MCP
+   *  layer needs no per-vendor code. */
+  additional_config?: Record<string, unknown> | null;
 }
 
 /** A managed MCP TYPE: leaves carry a server_url; expandable types drill into a
@@ -466,6 +470,18 @@ export class MCPService {
         (!!s.server_url && s.server_url === option.server_url),
     );
     if (match) {
+      // Heal older registrations that predate the option's preset settings
+      // (e.g. a Genie server registered before the follow declaration
+      // existed) so auto-follow works without deleting and re-adding.
+      if (option.additional_config && !match.additional_config) {
+        try {
+          await this.updateMcpServer(match.id, {
+            additional_config: option.additional_config,
+          } as Partial<MCPServerConfig>);
+        } catch {
+          /* cosmetic — the server still works without the preset settings */
+        }
+      }
       if (!match.enabled) {
         if (scope === 'global') await this.setGlobalAvailability(match.id, true);
         else await this.setWorkspaceEnabled(match.id, true);
@@ -496,6 +512,9 @@ export class MCPService {
       timeout_seconds: 30,
       max_retries: 3,
       rate_limit: 60,
+      ...(option.additional_config
+        ? { additional_config: option.additional_config }
+        : {}),
     };
     if (scope === 'global') await this.createGlobalServer(payload);
     else await this.createMcpServer(payload);

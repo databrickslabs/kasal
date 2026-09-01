@@ -277,6 +277,19 @@ async def get_databricks_mcp_options(
                 "description": "Ask across all your Genie spaces (workspace-wide)",
                 "server_url": f"{workspace_url}/api/2.0/mcp/genie",
                 "expandable": False,
+                # The server's start+poll convention, shipped as preset DATA —
+                # the MCP layer follows any server that declares this shape
+                # (services/tools/mcp_follow) and names none in code.
+                "additional_config": {
+                    "follow": [
+                        {
+                            "name": "Genie",
+                            "start_tool": "genie_ask",
+                            "poll_tool": "genie_poll_response",
+                            "id_params": ["conversation_id", "response_id"],
+                        }
+                    ]
+                },
             }
         )
 
@@ -354,6 +367,18 @@ async def list_genie_mcp_spaces(
                 "name": space.name,
                 "description": space.description,
                 "server_url": f"{workspace_url}/api/2.0/mcp/genie/{space.id}",
+                # Same follow convention as Genie One, with this shape's tool
+                # names and ids — preset data, not engine code.
+                "additional_config": {
+                    "follow": [
+                        {
+                            "name": "Genie",
+                            "start_tool": "query_space",
+                            "poll_tool": "poll_response",
+                            "id_params": ["conversation_id", "message_id"],
+                        }
+                    ]
+                },
             }
             for space in spaces.spaces
         ],
