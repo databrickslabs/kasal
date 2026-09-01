@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from src.core.exceptions import MCPConnectionError
 from src.core.logger import LoggerManager
+from src.services.mcp.mcp_client.databricks_presets import follow_preset_for
 from src.services.tools.mcp_handler import (
     create_kasal_tool_from_mcp,
     format_mcp_exception,
@@ -31,6 +32,20 @@ if os.environ.get("FLOW_SUBPROCESS_MODE", "false").lower() == "true":
     logger = logger_manager.flow
 else:
     logger = logger_manager.crew
+
+
+def _follow_config_for(server: Dict[str, Any]) -> Optional[Any]:
+    """The follow declarations for one server: its own config wins; for the
+    managed Databricks endpoints the catalog preset fills in as the default.
+
+    In-memory only — no stored data is required or written, so servers
+    registered before the presets existed work with no migration. The same
+    kind of wiring knowledge as the Databricks-URL auth detection in
+    ``_create_tools_for_server``; the engine underneath (mcp_follow /
+    mcp_handler / mcp_adapter) stays fully server-agnostic.
+    """
+    declared = (server.get("additional_config") or {}).get("follow")
+    return declared or follow_preset_for(server.get("server_url"))
 
 
 class MCPIntegration:
@@ -477,7 +492,7 @@ class MCPIntegration:
                 # Start-tool + poll-tool follow declarations (see
                 # services/tools/mcp_follow): server-supplied data, so the MCP
                 # layer needs no per-vendor code.
-                "follow": (server.get("additional_config") or {}).get("follow"),
+                "follow": _follow_config_for(server),
                 "auth_type": server.get("auth_type", "api_key"),
                 "user_token": user_token,
                 "group_id": group_id,

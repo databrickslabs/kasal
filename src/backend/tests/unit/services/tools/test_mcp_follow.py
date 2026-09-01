@@ -22,7 +22,13 @@ PER_SPACE_FOLLOW = [
         "start_tool": "query_space",
         "poll_tool": "poll_response",
         "id_params": ["conversation_id", "message_id"],
-    }
+    },
+    {
+        "name": "Genie",
+        "start_tool": "poll_response",
+        "poll_tool": "poll_response",
+        "id_params": ["conversation_id", "message_id"],
+    },
 ]
 GENIE_ONE_FOLLOW = [
     {
@@ -31,7 +37,14 @@ GENIE_ONE_FOLLOW = [
         "poll_tool": "genie_poll_response",
         "id_params": ["conversation_id", "response_id"],
         "cancel_tool": "genie_cancel_response",
-    }
+    },
+    {
+        "name": "Genie",
+        "start_tool": "genie_poll_response",
+        "poll_tool": "genie_poll_response",
+        "id_params": ["conversation_id", "response_id"],
+        "cancel_tool": "genie_cancel_response",
+    },
 ]
 
 
@@ -551,3 +564,25 @@ def test_spec_timeout_override_governs_the_loop(monkeypatch):
     assert "not available" in result.lower()
     assert "after 0 seconds" in result
     assert len(adapter.poll_calls) <= 1
+
+
+# --- poll self-follow (the second preset entry) -----------------------------
+
+
+def test_direct_poll_call_is_followed_to_final(monkeypatch):
+    """A poll tool the MODEL calls directly must also block until the work is
+    finished — the poll→poll self-follow entry covers the case where the agent
+    starts polling on its own instead of relying on the followed start tool."""
+    monkeypatch.setattr(follow_runner, "FOLLOW_INTERVAL_SECONDS", 0)
+    adapter = FakeAdapter(
+        follow=PER_SPACE_FOLLOW,
+        poll_results=[_envelope("EXECUTING_QUERY"), _envelope("COMPLETED")],
+        tool_names=["query_space_s1", "poll_response_s1"],
+    )
+    wrapper = FakeWrapper("poll_response_s1", adapter, _envelope("ASKING_AI"))
+    result = _follow(wrapper)
+    assert result.structuredContent["status"] == "COMPLETED"
+    assert [name for name, _ in adapter.poll_calls] == [
+        "poll_response_s1",
+        "poll_response_s1",
+    ]

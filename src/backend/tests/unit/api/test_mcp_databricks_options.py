@@ -130,17 +130,10 @@ async def test_catalog_groups_external_and_managed_types():
     assert managed["genie-one"]["kind"] == "genie"
     assert managed["genie-one"]["expandable"] is False
     # The server's start+poll convention ships as preset DATA (the engine
-    # names no server): the follow pair the mcp_follow runner consumes.
-    follow = managed["genie-one"]["additional_config"]["follow"]
-    assert follow == [
-        {
-            "name": "Genie",
-            "start_tool": "genie_ask",
-            "poll_tool": "genie_poll_response",
-            "id_params": ["conversation_id", "response_id"],
-            "cancel_tool": "genie_cancel_response",
-        }
-    ]
+    # The catalog ships NO tool-convention config: the follow presets are
+    # applied at tool-creation time from the managed URL
+    # (mcp_integration._follow_config_for), so the option carries none.
+    assert "additional_config" not in managed["genie-one"]
     # Two-step types carry NO instance list on drill-in step one.
     # Functions is schema-scoped (a server per catalog.schema), so it drills in
     # like Genie/AI Search rather than shipping a leaf.
@@ -283,16 +276,6 @@ async def test_genie_spaces_step_returns_mcp_urls_and_page_token():
             "name": "Sales Space",
             "description": "sales data",
             "server_url": "https://ws.example.com/api/2.0/mcp/genie/s1",
-            "additional_config": {
-                "follow": [
-                    {
-                        "name": "Genie",
-                        "start_tool": "query_space",
-                        "poll_tool": "poll_response",
-                        "id_params": ["conversation_id", "message_id"],
-                    }
-                ]
-            },
         }
     ]
     # The search query and page token ride into the Genie request.
