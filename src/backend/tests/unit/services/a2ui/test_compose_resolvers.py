@@ -154,6 +154,22 @@ def test_compose_retries_past_a_weak_quiz_to_a_real_one():
 
 
 # --- infer_deliverable -----------------------------------------------------
+def test_keywords_match_words_not_substrings():
+    """Substring matching opened instant shells for requests that never asked
+    for one: "comapare" (a typo), "roadmap" and "heatmap" all CONTAIN the bare
+    keyword "map" — and map is a canvas-owning kind, so the frame shipped."""
+    assert infer_deliverable("comapare snowflake with databricks") is None
+    assert infer_deliverable("build a roadmap for the migration") is None
+    assert infer_deliverable("show me a heatmap of sales") is None
+    assert infer_deliverable("the reporting pipeline is broken") is None
+    # The real phrases still match, plurals included.
+    assert infer_deliverable("put the offices on a map") == "map"
+    assert infer_deliverable("a mind map of the topic") == "mindmap"
+    assert infer_deliverable("show the KPIs for Q3") == "dashboard"
+    assert infer_deliverable("make quizzes about history") == "quiz"
+    assert infer_deliverable("two forecasts side by side") == "forecast"
+
+
 def test_infer_deliverable_first_keyword_wins():
     # "presentation" is no longer a deliverable — decks left A2UI for the chat
     # HTML path, so a deck request resolves to no deliverable here.
@@ -274,7 +290,9 @@ def test_resolve_directives_from_string_or_dict():
 
 def test_guidance_for_picks_inferred_then_default_then_empty():
     directives = {"dashboard": "keep KPI tiles to one row", "default": "be concise"}
-    assert guidance_for(directives, "build a KPI dashboard") == "keep KPI tiles to one row"
+    assert (
+        guidance_for(directives, "build a KPI dashboard") == "keep KPI tiles to one row"
+    )
     assert (
         guidance_for(directives, "hello there") == "be concise"
     )  # falls back to default

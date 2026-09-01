@@ -121,6 +121,7 @@ DELIVERABLE_KEYWORDS = [
     ("flashcard", "flashcards"),
     ("flash card", "flashcards"),
     ("anki", "flashcards"),
+    ("quizzes", "quiz"),
     ("quiz", "quiz"),
     ("assessment", "quiz"),
     # Mindmap keywords MUST precede the bare "map" keyword below, else "mind map"
@@ -164,12 +165,18 @@ DELIVERABLE_KEYWORDS = [
 
 
 def infer_deliverable(query: str) -> Optional[str]:
-    """Best-effort deliverable key from the user's request (first keyword wins)."""
+    """Best-effort deliverable key from the user's request (first keyword wins).
+
+    Keywords match on WORD BOUNDARIES with a plural 's' tolerated — never as
+    raw substrings: "comapare" (a typo), "roadmap" and "heatmap" all contain
+    the bare keyword "map", and each opened a geographic-map instant shell for
+    a request that never asked for one (the issue-11 class of false frame).
+    """
     if not query:
         return None
     lowered = query.lower()
     for keyword, deliverable in DELIVERABLE_KEYWORDS:
-        if keyword in lowered:
+        if re.search(r"\b" + re.escape(keyword) + r"s?\b", lowered):
             return deliverable
     return None
 
