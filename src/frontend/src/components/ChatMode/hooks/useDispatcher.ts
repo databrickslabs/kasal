@@ -17,6 +17,7 @@ import {
 } from '../types/dispatcher';
 import { ChatMessage } from '../types/chat';
 import { generateId } from '../utils/markdown';
+import { reconcileSelectedSkills } from '../utils/skillSelection';
 import { GenerationCompleteData } from '../types/dispatcher';
 
 export type PlanData = NonNullable<CatalogLoadResult['plan']>;
@@ -379,6 +380,12 @@ export function useDispatcher(options: UseDispatcherOptions) {
         // run survives a session switch before the plan finishes. Read at
         // dispatch time so the values reflect the user's current choices.
         const execState = useExecutionStore.getState();
+        // Reconcile the persisted skill selection against what the workspace
+        // still offers — a skill deleted, disabled, or promoted to always-on
+        // since it was picked would otherwise ride along silently (the backend
+        // drops unknown names with only a server-side warning). No request is
+        // made when nothing is selected.
+        const selectedSkills = await reconcileSelectedSkills();
         const result = await dispatch(dispatchMessage, model, tools, {
           // ChatMode runs the generated crew on the backend (the crew canvas
           // doesn't — it runs via Play, so it omits this and defaults false).
@@ -394,7 +401,7 @@ export function useDispatcher(options: UseDispatcherOptions) {
           // just-uploaded document (otherwise group-wide search picks a wrong file).
           knowledge_file_paths: knowledgeFilePaths,
           // Skills picked in the chat "+" — attached to every agent of the run.
-          skills: execState.selectedSkills,
+          skills: selectedSkills,
           // Answer mode → backend sets reasoning/reasoning effort/execution_type:
           // chat = single light agent, research = crew + medium effort,
           // deep = crew + high effort.

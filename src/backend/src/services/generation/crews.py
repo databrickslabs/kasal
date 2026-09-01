@@ -462,6 +462,9 @@ class CrewGenerationService(
             "max_retry_limit",
             "use_system_prompt",
             "respect_context_window",
+            # Agent-level skills survive the copy like any other generated field;
+            # a chat-turn pick then UNIONS into them below.
+            "skills",
         )
 
         agents_yaml: Dict[str, Dict[str, Any]] = {}
@@ -492,13 +495,11 @@ class CrewGenerationService(
                     "servers": mcp_servers
                 }
             if requested_skills:
-                # Union with any skills the generator already put on the agent, so a
-                # chat-turn pick adds to (never replaces) a generated agent's skills.
-                existing_skills = agent.get("skills") or []
-                merged = list(dict.fromkeys([*existing_skills, *requested_skills]))
-                cfg["skills"] = merged
-            elif agent.get("skills"):
-                cfg["skills"] = agent["skills"]
+                # Union with any skills the generator already put on the agent
+                # (copied by the field loop above), so a chat-turn pick adds to —
+                # never replaces — a generated agent's skills.
+                merged = [*(cfg.get("skills") or []), *requested_skills]
+                cfg["skills"] = list(dict.fromkeys(merged))
             if knowledge_file_paths:
                 cfg.setdefault("tool_configs", {})["DatabricksKnowledgeSearchTool"] = {
                     "file_paths": knowledge_file_paths

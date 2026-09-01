@@ -11,13 +11,16 @@ vi.mock('../../../../api/tools/SkillService', () => ({
 }));
 
 const SKILLS = [
-  { id: 1, name: 'databricks-sql', description: 'Write governed SQL', enabled: true },
-  { id: 2, name: 'writing-agent-tasks', description: 'Author crisp tasks', enabled: true },
-  { id: 3, name: 'disabled-one', description: 'Off', enabled: false },
+  { id: 1, name: 'databricks-sql', description: 'Write governed SQL', enabled: true, global_enabled: false },
+  { id: 2, name: 'writing-agent-tasks', description: 'Author crisp tasks', enabled: true, global_enabled: false },
+  { id: 3, name: 'disabled-one', description: 'Off', enabled: false, global_enabled: false },
+  { id: 4, name: 'always-on-skill', description: 'For everyone', enabled: true, global_enabled: true },
 ];
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
+  const { invalidateSkillsCache } = await import('../../utils/skillSelection');
+  invalidateSkillsCache();
   useExecutionStore.setState({ selectedSkills: [] });
   list.mockResolvedValue(SKILLS);
 });
@@ -44,12 +47,24 @@ describe('SkillsPicker', () => {
   });
 
   it('reconciles a stale persisted selection against what is available', async () => {
-    // "gone" no longer exists in the workspace; it must be pruned on load.
-    useExecutionStore.setState({ selectedSkills: ['databricks-sql', 'gone'] });
+    // "gone" no longer exists, and "always-on-skill" is attached to every agent
+    // regardless — both must be pruned on load.
+    useExecutionStore.setState({
+      selectedSkills: ['databricks-sql', 'gone', 'always-on-skill'],
+    });
     render(<SkillsPicker />);
     await waitFor(() =>
       expect(useExecutionStore.getState().selectedSkills).toEqual(['databricks-sql']),
     );
+  });
+
+  it('pins globally-enabled skills as Always on, not toggleable', async () => {
+    render(<SkillsPicker />);
+    await waitFor(() => expect(screen.getByText('always-on-skill')).toBeInTheDocument());
+    expect(screen.getByText('Always on')).toBeInTheDocument();
+    // Clicking the pinned row selects nothing — the backend attaches it anyway.
+    fireEvent.click(screen.getByText('always-on-skill'));
+    expect(useExecutionStore.getState().selectedSkills).toEqual([]);
   });
 
   it('filters by the search box', async () => {
