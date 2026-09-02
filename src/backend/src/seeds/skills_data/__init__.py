@@ -38,7 +38,6 @@ from src.seeds.skills_data import (
     presentation_content,
     query_validation,
     report_writing,
-    skill_creation,
     task_authoring,
     team_updates,
     web_research,
@@ -47,9 +46,8 @@ from src.seeds.skills_data import (
 )
 
 BUILTIN_SKILLS: List[Dict[str, Any]] = [
-    # Building crews, plans and skills
+    # Building crews and plans
     task_authoring.SKILL,
-    skill_creation.SKILL,
     work_breakdown.SKILL,
     # Data: querying and trusting results
     databricks_sql.SKILL,

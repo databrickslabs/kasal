@@ -110,9 +110,9 @@ describe('ChatInput — trifecta notice integration', () => {
 describe('ChatInput — slash command autocomplete', () => {
   it('shows the command list when typing "/" and filters', () => {
     render(<ChatInput {...baseProps} />);
-    fireEvent.change(ta(), { target: { value: '/help' } });
+    fireEvent.change(ta(), { target: { value: '/clear' } });
     expect(screen.getByText('Commands')).toBeInTheDocument();
-    expect(screen.getAllByText('/help').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('/clear').length).toBeGreaterThan(0);
   });
 
   it('hides the list when no command matches', () => {
@@ -136,32 +136,32 @@ describe('ChatInput — slash command autocomplete', () => {
   it('Tab selects a command that needs a param (kept in the box, not sent)', () => {
     const onSend = vi.fn();
     render(<ChatInput {...baseProps} onSend={onSend} />);
-    fireEvent.change(ta(), { target: { value: '/run crew' } }); // "/run crew " has trailing space
+    fireEvent.change(ta(), { target: { value: '/refine' } }); // "/refine " has trailing space
     fireEvent.keyDown(ta(), { key: 'Tab' });
-    expect(ta().value).toBe('/run crew ');
+    expect(ta().value).toBe('/refine ');
     expect(onSend).not.toHaveBeenCalled();
   });
 
   it('clicking a command in the list selects it', () => {
     const onSend = vi.fn();
     render(<ChatInput {...baseProps} onSend={onSend} />);
-    fireEvent.change(ta(), { target: { value: '/help' } });
-    fireEvent.click(screen.getAllByText('/help')[0]);
-    // /help has no trailing space -> sent immediately
-    expect(onSend).toHaveBeenCalledWith('/help');
+    fireEvent.change(ta(), { target: { value: '/clear' } });
+    fireEvent.click(screen.getAllByText('/clear')[0]);
+    // /clear has no trailing space -> sent immediately
+    expect(onSend).toHaveBeenCalledWith('/clear');
   });
 
   it('mouseEnter on a command updates the selected index', () => {
     render(<ChatInput {...baseProps} />);
-    fireEvent.change(ta(), { target: { value: '/run' } });
-    const cmd = screen.getByText('/run flow');
+    fireEvent.change(ta(), { target: { value: '/' } });
+    const cmd = screen.getByText('/refine');
     fireEvent.mouseEnter(cmd.closest('button')!);
     expect(cmd).toBeInTheDocument();
   });
 
   it('Escape closes the command list', () => {
     render(<ChatInput {...baseProps} />);
-    fireEvent.change(ta(), { target: { value: '/help' } });
+    fireEvent.change(ta(), { target: { value: '/clear' } });
     expect(screen.getByText('Commands')).toBeInTheDocument();
     fireEvent.keyDown(ta(), { key: 'Escape' });
     expect(screen.queryByText('Commands')).not.toBeInTheDocument();
@@ -169,7 +169,7 @@ describe('ChatInput — slash command autocomplete', () => {
 
   it('ignores other keys while the command list is open', () => {
     render(<ChatInput {...baseProps} />);
-    fireEvent.change(ta(), { target: { value: '/help' } });
+    fireEvent.change(ta(), { target: { value: '/clear' } });
     // a non-navigation key falls through without closing/selecting
     fireEvent.keyDown(ta(), { key: 'a' });
     expect(screen.getByText('Commands')).toBeInTheDocument();
@@ -177,9 +177,10 @@ describe('ChatInput — slash command autocomplete', () => {
 
   it('ArrowDown wraps from the last item back to the first', () => {
     render(<ChatInput {...baseProps} />);
-    fireEvent.change(ta(), { target: { value: '/run' } }); // 2 matches: run crew, run flow
-    fireEvent.keyDown(ta(), { key: 'ArrowDown' }); // 0 -> 1 (last)
-    fireEvent.keyDown(ta(), { key: 'ArrowDown' }); // 1 -> wrap to 0 (the ":0" arm)
+    fireEvent.change(ta(), { target: { value: '/' } }); // 3 matches: skill, refine, clear
+    fireEvent.keyDown(ta(), { key: 'ArrowDown' }); // 0 -> 1
+    fireEvent.keyDown(ta(), { key: 'ArrowDown' }); // 1 -> 2 (last)
+    fireEvent.keyDown(ta(), { key: 'ArrowDown' }); // 2 -> wrap to 0 (the ":0" arm)
     // list is still open after wrapping
     expect(screen.getByText('Commands')).toBeInTheDocument();
   });
@@ -341,9 +342,9 @@ describe('ChatInput — no output-format picker', () => {
     useExecutionStore.setState({ selectedMcpServers: ['My MCP'] });
     const onSend = vi.fn();
     render(<ChatInput {...baseProps} onSend={onSend} />);
-    fireEvent.change(ta(), { target: { value: '/help' } });
+    fireEvent.change(ta(), { target: { value: '/clear' } });
     fireEvent.keyDown(ta(), { key: 'Enter' });
-    expect(onSend).toHaveBeenCalledWith('/help'); // no meta
+    expect(onSend).toHaveBeenCalledWith('/clear'); // no meta
   });
 });
 

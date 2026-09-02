@@ -18,6 +18,8 @@ from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.core.permissions import check_role_in_context
 from src.schemas.skill import (
     SkillCreate,
+    SkillDraftRequest,
+    SkillDraftResponse,
     SkillListResponse,
     SkillResponse,
     SkillUpdate,
@@ -25,6 +27,7 @@ from src.schemas.skill import (
     UcSyncTarget,
 )
 from src.services.skills import packaging, parser
+from src.services.skills.generation import SkillGenerationService
 from src.services.skills.service import SkillService
 from src.services.skills.uc_sync import SkillUcSyncService
 
@@ -119,6 +122,23 @@ async def validate_skill(body: SkillCreate, group_context: GroupContextDep):
     """
     _require_author(group_context)
     return SkillService.validate(body)
+
+
+@router.post("/draft", response_model=SkillDraftResponse)
+async def draft_skill(body: SkillDraftRequest, group_context: GroupContextDep):
+    """Draft a skill from a request or a captured conversation.
+
+    One focused generation call (the ``generate_skill`` template), validated by
+    the reference validator before it returns. Nothing is saved: the chat
+    renders the draft as a card and a person clicks Save.
+    """
+    _require_author(group_context)
+    return await SkillGenerationService.draft(
+        body.request,
+        group_context,
+        transcript=[t.model_dump() for t in (body.transcript or [])] or None,
+        model=body.model,
+    )
 
 
 @router.post("", response_model=SkillResponse, status_code=status.HTTP_201_CREATED)

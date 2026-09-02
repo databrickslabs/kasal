@@ -45,15 +45,13 @@ function formatBytes(bytes: number): string {
   return `${val >= 10 || i === 0 ? Math.round(val) : val.toFixed(1)} ${units[i]}`;
 }
 
-const SLASH_COMMANDS = [
-  { command: '/help', description: 'Show available commands' },
-  { command: '/jobs', description: 'List recent executions' },
-  { command: '/run crew ', description: 'Run a crew by name' },
-  { command: '/run flow ', description: 'Run a flow by name' },
-  { command: '/stop ', description: 'Stop an execution by job ID' },
-  { command: '/delete crew ', description: 'Delete a crew by name' },
-  { command: '/delete flow ', description: 'Delete a flow by name' },
-  { command: '/dismiss', description: 'Dismiss execution panel' },
+// The palette shown while typing "/". `command` is what gets inserted (a
+// trailing space means "then type an argument"); `arg` names that argument.
+// Deliberately short: everything else the chat can do has a button or a
+// plain-language path now, and a long palette buried the three that matter.
+const SLASH_COMMANDS: { command: string; arg?: string; description: string }[] = [
+  { command: '/skill ', arg: 'topic', description: 'Draft a skill — bare /skill captures this conversation' },
+  { command: '/refine ', arg: 'instruction', description: 'Refine the current result' },
   { command: '/clear', description: 'Clear chat history' },
 ];
 
@@ -566,28 +564,37 @@ const ChatInput: React.FC<ChatInputProps> = ({
               Commands
             </span>
           </div>
+          {/* Two aligned columns, read left to right: the command (plus the
+              argument it expects) and what it does. Neutral text — --accent
+              is the theme's alert red, not a highlight. */}
           {filteredCommands.map((cmd, i) => (
             <button
               key={cmd.command}
               onClick={() => handleSelectCommand(cmd.command)}
-              className="w-full text-left px-3 py-2.5 text-sm flex items-center justify-between transition-colors"
+              className="w-full text-left !px-3 !py-1.5 text-sm flex items-baseline gap-4 transition-colors"
               style={{
                 backgroundColor:
                   i === selectedIndex ? 'var(--bg-active-chip)' : 'transparent',
               }}
               onMouseEnter={() => setSelectedIndex(i)}
             >
-              <span
-                className="font-mono text-[13px] font-medium"
-                style={{ color: 'var(--accent)' }}
-              >
-                {cmd.command}
+              <span className="font-mono text-[13px] shrink-0 w-44 truncate">
+                <span style={{ color: 'var(--text-primary)' }}>{cmd.command.trimEnd()}</span>
+                {cmd.arg && (
+                  <span style={{ color: 'var(--text-muted)' }}> ‹{cmd.arg}›</span>
+                )}
               </span>
-              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              <span className="text-xs truncate" style={{ color: 'var(--text-secondary)' }}>
                 {cmd.description}
               </span>
             </button>
           ))}
+          <div
+            className="px-3 py-1.5 text-[11px] border-t"
+            style={{ color: 'var(--text-muted)', borderColor: 'var(--border-color)' }}
+          >
+            ↑↓ to choose · Tab or Enter to insert · Esc to close
+          </div>
         </div>
       )}
 
@@ -780,6 +787,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
               attachmentCount={attachments.length}
               onAttachFiles={() => fileInputRef.current?.click()}
               onOpenMcpConfig={onOpenMcpConfig}
+              onCreateSkill={() => onSend('/skill')}
             />
 
             {/* Send — submit only. Stop lives in the run-activity container above.

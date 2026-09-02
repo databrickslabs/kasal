@@ -57,6 +57,21 @@ export interface UcSyncResult {
   error?: string;
 }
 
+export interface TranscriptTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+/** A proposed SKILL.md from POST /skills/draft, already run through the validator. */
+export interface SkillDraft {
+  name: string;
+  description: string;
+  body: string;
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
 export interface SkillFileInput {
   path: string;
   content: string;
@@ -100,6 +115,24 @@ export const SkillService = {
    * the editor asked for, not a failed request — so read the body rather than
    * relying on a rejected promise.
    */
+  /**
+   * Draft a skill from a request and/or the conversation (capture mode). One
+   * generation call on the backend; the draft comes back validated. Nothing is
+   * saved — the chat renders it as a card and a person clicks Save.
+   */
+  async draft(
+    request: string,
+    transcript?: TranscriptTurn[],
+    model?: string,
+  ): Promise<SkillDraft> {
+    const { data } = await apiClient.post<SkillDraft>(`${BASE}/draft`, {
+      request,
+      transcript: transcript && transcript.length > 0 ? transcript : null,
+      model: model || null,
+    });
+    return data;
+  },
+
   async validate(input: SkillInput): Promise<SkillValidationResult> {
     const { data } = await apiClient.post<SkillValidationResult>(
       `${BASE}/validate`,

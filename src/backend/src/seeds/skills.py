@@ -20,8 +20,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.session import async_session_factory
-from src.models.skill import Skill
-from src.models.skill import SkillFile
+from src.models.skill import Skill, SkillFile
 from src.seeds.skills_data import BUILTIN_SKILLS
 
 logger = logging.getLogger(__name__)
@@ -126,6 +125,31 @@ async def seed() -> None:
             updated += outcome == "updated"
             unchanged += outcome == "unchanged"
 
+        # A builtin that no longer ships must not linger as a phantom row: it
+        # would keep appearing in every picker with content nobody maintains.
+        # Only rows the seeder itself created (builtin source, no group).
+        shipped = [e["name"] for e in BUILTIN_SKILLS]
+        stale_ids = (
+            (
+                await session.execute(
+                    select(Skill.id).where(
+                        Skill.group_id.is_(None),
+                        Skill.source == "builtin",
+                        Skill.name.notin_(shipped),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if stale_ids:
+            await session.execute(
+                delete(SkillFile).where(SkillFile.skill_id.in_(stale_ids))
+            )
+            await session.execute(delete(Skill).where(Skill.id.in_(stale_ids)))
+            logger.info(
+                "Removed %d builtin skill(s) that no longer ship", len(stale_ids)
+            )
         await session.commit()
 
     logger.info(

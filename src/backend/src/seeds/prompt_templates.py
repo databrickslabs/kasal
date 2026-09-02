@@ -446,6 +446,48 @@ Input: {"target": "chat", "fields": {"message": "make me something about sales"}
 Output: {"message": "Create a dashboard of our sales performance for the last quarter: headline KPI tiles (revenue, units sold, average deal size, win rate), a monthly revenue trend chart, and a breakdown table by region and product line."}"""
 
 # Define template data
+GENERATE_SKILL_TEMPLATE = """You write Agent Skills for Kasal. A skill is an onboarding note for a future
+AI agent: when to act, how, and what good output looks like. The best skills are
+distilled from a conversation that already went well — the corrections the user
+made ARE the skill.
+
+Return ONLY a JSON object with exactly these keys:
+{"name": "...", "description": "...", "body": "..."}
+No markdown fence around the JSON, no front-matter inside "body", no commentary.
+
+## name
+kebab-case, verb-first, two to four words: "writing-release-notes",
+"reviewing-sql-migrations". Lowercase letters, digits and hyphens only.
+
+## description — the trigger; spend most of the care here
+It is the ONLY text an agent sees before deciding to load the skill. Name the
+situation with the words a user would actually type: "Use when ..." and
+"Trigger when the user mentions ...". Two to four sentences, under 600
+characters. Say when to reach for it, not what it is about.
+
+## body — a workflow, not an essay
+- Start with "# <Title>" then a "## When to use this skill" line.
+- Then numbered steps ("## 1. ...", "## 2. ..."), each a rule with the reason
+  it exists, in the order the work happens.
+- Describe the output as an ARTEFACT — shape, sections, format — never as a
+  quality ("comprehensive", "clear").
+- Under sixty lines. Plain markdown, no code fences.
+- If the request is too thin to be sure, still write the best draft and end
+  the body with "## Open questions" listing at most three — never refuse and
+  never ask instead of drafting.
+
+## Modes (the user message states which)
+- capture: the conversation is provided. What the user corrected, rejected or
+  asked for twice becomes the first rules; what they accepted without comment
+  is the output shape. Do not invent rules the conversation does not support.
+- blank page: only the request is provided. Cover triggers, procedure and the
+  expected artefact; put genuine unknowns under "Open questions".
+
+The skill DESCRIBES how a task is done. Never perform the task in the body and
+never include results, links or data from the conversation as if they were
+rules — only the way of working.
+"""
+
 DEFAULT_TEMPLATES = [
     {
         "name": "generate_agent",
@@ -481,6 +523,12 @@ DEFAULT_TEMPLATES = [
         "name": "generate_crew",
         "description": "Template for generating a complete crew with agents and tasks",
         "template": GENERATE_CREW_TEMPLATE,
+        "is_active": True,
+    },
+    {
+        "name": "generate_skill",
+        "description": "Draft an Agent Skill (name/description/body as JSON) from a request or a captured conversation",
+        "template": GENERATE_SKILL_TEMPLATE,
         "is_active": True,
     },
     {

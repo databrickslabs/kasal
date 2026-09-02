@@ -117,3 +117,30 @@ class UcSyncTarget(BaseModel):
     schema_name: str = Field(
         ..., alias="schema", description="Target schema within the catalog"
     )
+
+
+class TranscriptTurn(BaseModel):
+    role: str
+    content: str
+
+
+class SkillDraftRequest(BaseModel):
+    """Draft a skill from a request, optionally mining a conversation."""
+
+    request: str = Field("", description="What the skill should cover")
+    transcript: Optional[List[TranscriptTurn]] = Field(
+        None,
+        description="Conversation to capture (user/assistant turns, oldest first)",
+    )
+    model: Optional[str] = Field(None, description="Model key from the chat picker")
+
+
+class SkillDraftResponse(BaseModel):
+    """A proposed SKILL.md, already checked by the reference validator."""
+
+    name: str
+    description: str
+    body: str
+    valid: bool
+    errors: List[str] = []
+    warnings: List[str] = []

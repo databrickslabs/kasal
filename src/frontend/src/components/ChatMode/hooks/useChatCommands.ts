@@ -6,6 +6,8 @@
  * claim falls through to the dispatcher as a normal turn.
  */
 import React, { useCallback } from 'react';
+import { SkillService } from '../../../api/tools/SkillService';
+import { buildTranscript, draftMessage, parseSkillCommand } from '../utils/skillCommand';
 import { stopExecution, listExecutions } from '../api/executions';
 import { saveGeneratedCrew, CrewNameConflictError } from '../api/crews';
 import { GenerationCompleteData } from '../types/dispatcher';
@@ -94,6 +96,42 @@ export function useChatCommands({ dispatcher, executionStream, handleRefine, las
         return true;
       }
 
+      // Create a skill by chatting: "/skill <what it should cover>", a bare
+      // "/skill" to capture this conversation, or plain language ("create a
+      // skill for…", "save what we learned as a skill"). A dedicated generation
+      // call — not a meta-skill the agent has to load — validated before it
+      // returns; the draft renders as a card whose Save is the human gate.
+      const skillCmd = parseSkillCommand(message);
+      if (skillCmd) {
+        addMessage('user', message);
+        execStore.setIsLoading(true);
+        try {
+          const transcript =
+            skillCmd.mode === 'capture'
+              ? buildTranscript(useSessionStore.getState().messages)
+              : undefined;
+          const draft = await SkillService.draft(
+            skillCmd.request,
+            transcript,
+            selectedModel || undefined,
+          );
+          addMessage('assistant', draftMessage(draft));
+        } catch (error) {
+          const detail = (error as { response?: { data?: { detail?: unknown } } })?.response
+            ?.data?.detail;
+          const errMsg =
+            typeof detail === 'string'
+              ? detail
+              : error instanceof Error
+                ? error.message
+                : 'Failed to draft the skill';
+          addMessage('assistant', `Could not draft the skill: ${errMsg}`);
+        } finally {
+          execStore.setIsLoading(false);
+        }
+        return true;
+      }
+
       if (lower === '/dismiss' || lower === '/close') {
         execStore.resetForSession();
         return true;
@@ -157,7 +195,7 @@ export function useChatCommands({ dispatcher, executionStream, handleRefine, las
 
       return false;
     },
-    [addMessage, clearMessages, executionStream, handleRefine],
+    [addMessage, clearMessages, executionStream, handleRefine, selectedModel],
   );
 
   const handleSend = useCallback(

@@ -69,6 +69,8 @@ interface ComposerMenuProps {
   attachmentCount: number;
   onAttachFiles: () => void;
   onOpenMcpConfig?: () => void;
+  /** Capture this conversation into a skill draft (sends the /skill command). */
+  onCreateSkill?: () => void;
 }
 
 /** One uniform menu row: label left, value right, a nav chevron (points right —
@@ -157,6 +159,7 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
   attachmentCount,
   onAttachFiles,
   onOpenMcpConfig,
+  onCreateSkill,
 }) => {
   const [open, setOpen] = useState(false);
   const [section, setSectionRaw] = useState<SectionId>('');
@@ -424,6 +427,19 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
                   value={skillCount > 0 ? `${skillCount} selected` : 'None selected'}
                   onClick={() => setSection('skills')}
                 />
+
+                {onCreateSkill && (
+                  // An action, not a section: distil this conversation into a
+                  // skill draft (validated on the backend, saved by a click).
+                  <Row
+                    label="Create a skill from this chat"
+                    chevron={false}
+                    onClick={() => {
+                      onCreateSkill();
+                      onPicked();
+                    }}
+                  />
+                )}
               </>
             )}
           </div>
