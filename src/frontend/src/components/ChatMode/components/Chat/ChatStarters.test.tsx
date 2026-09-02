@@ -17,7 +17,7 @@ describe('ChatStarters', () => {
       'Show a map',
       'Create a mindmap',
       'Create flashcards',
-      'Create a forecast',
+      'Create a chart',
     ]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }

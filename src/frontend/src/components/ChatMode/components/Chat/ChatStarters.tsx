@@ -2,13 +2,13 @@ import React from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
   Brain,
+  ChartBar,
   CircleHelp,
-  LayoutDashboard,
   Layers,
+  LayoutDashboard,
   Map,
   Presentation,
   Sparkles,
-  TrendingUp,
   Workflow,
 } from 'lucide-react';
 
@@ -35,7 +35,7 @@ export const STARTERS: Starter[] = [
   { label: 'Show a map', prefill: 'Show the map of ', icon: Map },
   { label: 'Create a mindmap', prefill: 'Create a mindmap of ', icon: Brain },
   { label: 'Create flashcards', prefill: 'Create flashcards about ', icon: Layers },
-  { label: 'Create a forecast', prefill: 'Create a forecast of ', icon: TrendingUp },
+  { label: 'Create a chart', prefill: 'Create a chart of ', icon: ChartBar },
 ];
 
 const ChatStarters: React.FC<{ onPick: (text: string) => void }> = ({ onPick }) => (
