@@ -16,6 +16,8 @@ import {
   parseSkillCommand,
 } from '../utils/skillCommand';
 import { stopExecution, listExecutions } from '../api/executions';
+import { latestDeck, parseSlideEdit } from '../utils/slideRefine';
+import { splitSlides } from '../utils/htmlDeck';
 import { saveGeneratedCrew, CrewNameConflictError } from '../api/crews';
 import { GenerationCompleteData } from '../types/dispatcher';
 import { useSessionStore } from '../store/sessionStore';
@@ -155,6 +157,16 @@ export function useChatCommands({ dispatcher, executionStream, handleRefine, las
         } finally {
           execStore.completeGeneration(owner);
         }
+        return true;
+      }
+
+      // A slide edit in plain language — "make the chart bigger on slide 3",
+      // "delete slide 5", "add a slide after 2 about pricing" — refines the
+      // latest deck in this conversation rather than starting a new turn.
+      // Only when there IS a deck: without one, "slide" is just a word.
+      const deck = latestDeck(useSessionStore.getState().messages);
+      if (deck && parseSlideEdit(message, splitSlides(deck.code).length)) {
+        handleRefine(message);
         return true;
       }
 

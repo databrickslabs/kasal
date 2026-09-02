@@ -1,6 +1,22 @@
 import { describe, it, expect } from 'vitest';
 import type { DiagramSegment } from './mdSandboxDiagram';
-import { isDeck, mergeDeckSegments, splitSlides } from './htmlDeck';
+import {
+  replaceDeckInContent,
+  stageFor,
+  clearRefined,
+  duplicateSlide,
+  ensureDeckFence,
+  insertSlide,
+  isDeck,
+  markRefined,
+  mergeDeckSegments,
+  moveSlide,
+  refinedSlideIndex,
+  removeSlide,
+  replaceSlide,
+  sectionFromReply,
+  splitSlides,
+} from './htmlDeck';
 
 describe('isDeck', () => {
   it('detects a slide section', () => {
@@ -102,3 +118,83 @@ describe('mergeDeckSegments', () => {
   });
 });
 
+
+describe('slide edits', () => {
+  const A = '<section class="slide"><h1>A</h1></section>';
+  const B = '<section class="slide"><h1>B</h1></section>';
+  const C = '<section class="slide"><h1>C</h1></section>';
+  const DECK = `<style>.x{}</style>\n${A}\n${B}\n${C}`;
+  const titles = (html: string) => splitSlides(html).map((s) => s.match(/<h1>(.*?)<\/h1>/)?.[1]);
+
+  it('replaceSlide swaps one slide and leaves everything else byte-identical', () => {
+    const out = replaceSlide(DECK, 1, '<section class="slide"><h1>B2</h1></section>');
+    expect(titles(out)).toEqual(['A', 'B2', 'C']);
+    expect(out.startsWith('<style>.x{}</style>\n')).toBe(true);
+    expect(replaceSlide(DECK, 7, '<section class="slide"></section>')).toBe(DECK);
+  });
+
+  it('insertSlide places a slide at an index, or appends past the end', () => {
+    const N = '<section class="slide"><h1>N</h1></section>';
+    expect(titles(insertSlide(DECK, 0, N))).toEqual(['N', 'A', 'B', 'C']);
+    expect(titles(insertSlide(DECK, 2, N))).toEqual(['A', 'B', 'N', 'C']);
+    expect(titles(insertSlide(DECK, 99, N))).toEqual(['A', 'B', 'C', 'N']);
+    expect(insertSlide('', 0, N)).toBe(N);
+  });
+
+  it('removeSlide drops a slide but never the last one', () => {
+    expect(titles(removeSlide(DECK, 1))).toEqual(['A', 'C']);
+    expect(removeSlide(A, 0)).toBe(A);
+  });
+
+  it('moveSlide lands the slide at its target in both directions', () => {
+    expect(titles(moveSlide(DECK, 0, 2))).toEqual(['B', 'C', 'A']);
+    expect(titles(moveSlide(DECK, 2, 0))).toEqual(['C', 'A', 'B']);
+    expect(moveSlide(DECK, 1, 1)).toBe(DECK);
+  });
+
+  it('duplicateSlide copies a slide right after itself', () => {
+    expect(titles(duplicateSlide(DECK, 0))).toEqual(['A', 'A', 'B', 'C']);
+  });
+
+  it('the refined marker is set on one opening tag, found, and cleared', () => {
+    const marked = markRefined(B);
+    expect(marked.startsWith('<section data-refined="1" class="slide">')).toBe(true);
+    expect(markRefined(marked)).toBe(marked); // idempotent
+    const deck = replaceSlide(DECK, 1, marked);
+    expect(refinedSlideIndex(deck)).toBe(1);
+    expect(isDeck(deck) && splitSlides(deck).length).toBe(3);
+    expect(refinedSlideIndex(clearRefined(deck))).toBe(-1);
+    expect(refinedSlideIndex(DECK)).toBe(-1);
+  });
+
+  it('sectionFromReply takes the one finished slide, fenced or bare', () => {
+    expect(sectionFromReply('Here you go:\n```html\n' + B + '\n```\nDone.')).toBe(B);
+    expect(sectionFromReply(B)).toBe(B);
+    expect(sectionFromReply('```html\n<section class="slide"><h1>cut')).toBeNull();
+    expect(sectionFromReply('no slide here')).toBeNull();
+  });
+
+  it('ensureDeckFence fences a bare deck and leaves everything else alone', () => {
+    expect(ensureDeckFence(DECK)).toBe('```html\n' + DECK + '\n```');
+    const fenced = '```html\n' + DECK + '\n```';
+    expect(ensureDeckFence(fenced)).toBe(fenced);
+    expect(ensureDeckFence('<p>just html</p>')).toBe('<p>just html</p>');
+  });
+});
+
+describe('replaceDeckInContent', () => {
+  it('swaps the deck inside a message and keeps the prose around it', () => {
+    const before = 'Here is the deck:\n\n```html\n<section class="slide"><h1>A</h1></section>\n```\n\nEnjoy.';
+    const out = replaceDeckInContent(before, '<section class="slide"><h1>B</h1></section>');
+    expect(out).toBe('Here is the deck:\n\n```html\n<section class="slide"><h1>B</h1></section>\n```\n\nEnjoy.');
+  });
+
+  it('collapses a deck the model split across fences into one, and leaves other content alone', () => {
+    const split = '```html\n<section class="slide"><h1>A</h1></section>\n```\n---\n```html\n<section class="slide"><h1>B</h1></section>\n```';
+    expect(replaceDeckInContent(split, '<section class="slide"><h1>C</h1></section>')).toBe(
+      '```html\n<section class="slide"><h1>C</h1></section>\n```',
+    );
+    expect(replaceDeckInContent('no deck here', '<section class="slide"></section>')).toBe('no deck here');
+    expect(stageFor('<section class="slide">x</section>')).toContain('class="kwrap"');
+  });
+});

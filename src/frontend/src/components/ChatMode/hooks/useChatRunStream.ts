@@ -26,6 +26,7 @@ import { useExecutionStream } from './useExecutionStream';
 import { stopAllGenerationStreams } from '../utils/generationStreamManager';
 import { generateId } from '../utils/markdown';
 import { parsePreviewContent } from '../components/Preview/PreviewPanel';
+import { applyResultTransform, dropResultTransform } from '../utils/resultTransforms';
 import type { A2uiMessage } from '../../../shared/a2ui/stream';
 import type { Surface } from '../../../shared/a2ui';
 import { buildTraceEntry } from '../utils/traceActivity';
@@ -355,16 +356,22 @@ export function useChatRunStream({ pendingActionsRef }: UseChatRunStreamArgs) {
     }
     finishOnce(jobId, () => {
       const store = useExecutionStore.getState();
+      // A run that answered with a PIECE of what the reader should see (a slide
+      // refine returns one <section>) becomes the whole here — the run that
+      // started it registered how (utils/resultTransforms). Applied once, before
+      // the store reads the text.
+      const text = applyResultTransform(jobId, resultText);
       // Only thread the surface arg when a rich one was composed — a plain chat
       // turn calls with the original (text, jobId) shape.
-      if (surface) store.completeExecution(resultText, jobId, surface);
-      else store.completeExecution(resultText, jobId);
+      if (surface) store.completeExecution(text, jobId, surface);
+      else store.completeExecution(text, jobId);
       // Result is in — now surface the bookmark/feedback row beneath it.
       postPendingActionsRow(jobId);
     });
   }, [finishOnce, postPendingActionsRow]);
 
   const failExecutionOnce = useCallback((jobId: string | undefined, error: string) => {
+    dropResultTransform(jobId);
     finishOnce(jobId, () => useExecutionStore.getState().failExecution(error, jobId));
   }, [finishOnce]);
 

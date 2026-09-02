@@ -25,6 +25,10 @@ import {
 } from '../../../utils/variableDetector';
 import { deriveFlowInputs } from '../../../utils/flowInputs';
 import { getSessionPreview } from '../db/sessionApi';
+import { registerResultTransform } from '../utils/resultTransforms';
+import { latestDeck, parseSlideEdit, planSlideEdit, refinerAgent } from '../utils/slideRefine';
+import { ensureDeckFence, fenceDeck, isDeck, splitSlides } from '../utils/htmlDeck';
+import { DeckService } from '../../../api/chat/DeckService';
 
 /**
  * What the user still has to be asked for.
@@ -221,7 +225,12 @@ export function useChatExecutionActions({
       data: GenerationCompleteData,
       spaceId?: string,
       inputs?: Record<string, string>,
-      opts?: { preservePreview?: boolean; originSession?: string | null },
+      opts?: {
+        preservePreview?: boolean;
+        originSession?: string | null;
+        /** Turns the run's final text into what the chat should show (see utils/resultTransforms). */
+        resultTransform?: (text: string) => string;
+      },
     ) => {
       // The run belongs to the session that started it. On auto-run after
       // generation, that's the generation's origin (passed via opts) — NOT the
@@ -301,6 +310,7 @@ export function useChatExecutionActions({
         const execution = await createExecution(crewConfig);
         const jobId = execution.job_id || execution.execution_id;
         if (jobId) {
+          if (opts?.resultTransform) registerResultTransform(jobId, opts.resultTransform);
           handleStartExecutionStream(jobId, originSessionId || undefined, opts);
         } else {
           addMessage('assistant', 'Execution started but no job ID was returned.');
@@ -336,13 +346,100 @@ export function useChatExecutionActions({
   // --- Refine the current artifact instead of generating a brand-new crew ---
   // Builds a single "editor" agent + task whose input is the previous artifact
   // plus the user's instruction, then runs it through the normal execution path
-  // so the revised artifact streams straight back into the preview pane.
+  // so the revised artifact streams straight back.
+  //
+  // A SLIDE edit ("make the chart bigger on slide 3", "delete slide 5") is the
+  // exception: it targets the latest deck in this conversation and touches only
+  // that slide — the model writes ONE <section> and the rest of the deck is
+  // spliced around it (utils/slideRefine). Structural edits need no model.
   const handleRefine = useCallback(
     async (instruction: string) => {
       const trimmed = instruction.trim();
       if (!trimmed) return;
+      const clip = (t: string) => (t.length > 80 ? `${t.slice(0, 77)}…` : t);
+      const traceStep = (label: string) =>
+        useSessionStore.getState().addMessage('assistant', '', {
+          resultType: 'trace',
+          resultData: { label, sublabel: clip(trimmed), source: 'refine', kind: 'event', timestamp: Date.now() },
+        });
 
-      // Resolve the artifact currently shown (or last persisted) for this session.
+      const deck = latestDeck(useSessionStore.getState().messages);
+      const edit = deck ? parseSlideEdit(trimmed, splitSlides(deck.code).length) : null;
+      if (deck && edit) {
+        const plan = planSlideEdit(edit, deck.code);
+        addMessage('user', `Refine: ${trimmed}`);
+        if (plan.kind === 'instant') {
+          // No model involved: the deck is re-posted with the slide moved,
+          // removed or copied, open on the slide that changed.
+          addMessage('assistant', fenceDeck(plan.deck));
+          return;
+        }
+        // One generation call sized to one slide — not a crew run. It shows
+        // as a generation: the "Thinking" container with the edit as its live
+        // step, which carries the run's id once the call returns so the trace
+        // (the LLM call) opens from the activity. Routed to the session that
+        // asked, so switching sessions mid-edit posts nothing elsewhere.
+        const sessionStore = useSessionStore.getState();
+        const owner = sessionStore.currentSessionId || undefined;
+        const post = (content: string, extra?: Parameters<typeof addMessage>[2]) =>
+          owner
+            ? sessionStore.addMessageToTargetSession(owner, 'assistant', content, extra)
+            : sessionStore.addMessage('assistant', content, extra);
+        const model = selectedModel || undefined;
+        const startedAt = Date.now();
+        useExecutionStore.getState().startGeneration(owner);
+        const stepId = post('', {
+          resultType: 'trace',
+          resultData: {
+            kind: 'tool_call',
+            label: plan.summary,
+            sublabel: model ? `${clip(trimmed)} · ${model}` : clip(trimmed),
+            source: 'refine',
+            timestamp: Date.now(),
+          },
+        });
+        const setStep = (resultData: unknown, executionId?: string) => {
+          const updates = { resultType: 'trace', resultData, ...(executionId ? { executionId } : {}) };
+          if (owner) sessionStore.updateMessageInTargetSession(owner, stepId, updates);
+          else sessionStore.updateMessage(stepId, updates);
+        };
+        try {
+          const res = await DeckService.refineSlide({ ...plan.request, model: model || null });
+          if (!res.section) throw new Error(res.error || 'The model did not return a slide.');
+          const calls = res.attempts && res.attempts > 1 ? `${res.attempts} LLM calls` : '1 LLM call';
+          setStep(
+            {
+              kind: 'tool_result',
+              label: plan.done,
+              sublabel: [res.model, calls].filter(Boolean).join(' · '),
+              durationMs: Math.max(0, Date.now() - startedAt),
+              source: 'refine',
+              timestamp: Date.now(),
+            },
+            res.job_id || undefined,
+          );
+          post(fenceDeck(plan.apply(res.section)));
+        } catch (error) {
+          const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+          const errMsg =
+            typeof detail === 'string' ? detail : error instanceof Error ? error.message : 'The edit failed';
+          setStep({
+            kind: 'event',
+            label: `⚠ ${clip(`Could not ${plan.summary.toLowerCase()}: ${errMsg}`)}`,
+            detail: errMsg,
+            durationMs: Math.max(0, Date.now() - startedAt),
+            source: 'refine',
+            timestamp: Date.now(),
+          });
+          post(`Could not ${plan.summary.toLowerCase()}: ${errMsg}`);
+        } finally {
+          useExecutionStore.getState().completeGeneration(owner);
+        }
+        return;
+      }
+
+      // Whole-artifact refine: the pane's artifact (or its persisted copy),
+      // else the latest deck in the chat.
       let artifact = useExecutionStore.getState().previewContent?.data || '';
       if (!artifact) {
         const sid = useSessionStore.getState().currentSessionId;
@@ -351,6 +448,7 @@ export function useChatExecutionActions({
           artifact = stored?.data || '';
         }
       }
+      if (!artifact && deck) artifact = deck.code;
       if (!artifact) {
         addMessage(
           'assistant',
@@ -360,40 +458,9 @@ export function useChatExecutionActions({
       }
 
       addMessage('user', `Refine: ${trimmed}`);
-      // Give the refine run its own activity section — same treatment as a
-      // regular prompt: this trace anchors the collapsible run container
-      // right under the Refine message, ABOVE the refined result, and it
-      // persists there after the run finishes.
-      useSessionStore.getState().addMessage('assistant', '', {
-        resultType: 'trace',
-        resultData: {
-          label: 'Refining artifact',
-          sublabel: trimmed.length > 80 ? `${trimmed.slice(0, 77)}…` : trimmed,
-          source: 'refine',
-          kind: 'event',
-          timestamp: Date.now(),
-        },
-      });
+      traceStep('Refining artifact');
 
-      const editorAgents = [
-        {
-          id: 'refiner',
-          role: 'Content Editor',
-          goal: 'Revise the provided artifact according to the user instruction, preserving correctness and returning the complete updated artifact.',
-          backstory:
-            'You are an expert editor and front-end developer who refines documents and HTML, keeping the output valid, self-contained and ready to render.',
-          tools: [],
-          // Pin the editor to the user-selected model. Without an explicit llm
-          // the backend defaults this hand-built agent to gpt-4o, which fails in
-          // Databricks environments with no OpenAI key.
-          ...(selectedModel ? { llm: selectedModel } : {}),
-          // A refine is a single-shot edit, not a research crew. Disabling memory
-          // (the only agent → disables crew memory entirely) skips the memory
-          // memory search/save flow; no delegation keeps it to one LLM pass.
-          memory: false,
-          allow_delegation: false,
-        },
-      ];
+      const editorAgents = [refinerAgent(selectedModel || undefined)];
       const editorTasks = [
         {
           id: 'refine_task',
@@ -424,7 +491,12 @@ export function useChatExecutionActions({
         { agents: editorAgents, tasks: editorTasks },
         undefined,
         { instruction: trimmed, artifact },
-        { preservePreview: true },
+        {
+          preservePreview: true,
+          // "No code fences" is right for a document and wrong for a deck, which
+          // the chat only pages when it arrives fenced — put the fence back.
+          ...(isDeck(artifact) ? { resultTransform: ensureDeckFence } : {}),
+        },
       );
     },
     [addMessage, doExecuteGenerated, selectedModel],
