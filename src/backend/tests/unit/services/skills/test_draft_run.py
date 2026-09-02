@@ -3,6 +3,7 @@ terminal status — all best-effort, none able to fail the draft."""
 
 import asyncio
 
+from src.services.execution import generation_run
 from src.services.execution.service import ExecutionService
 from src.services.skills import draft_run
 
@@ -80,7 +81,7 @@ def test_record_call_writes_a_request_row_and_a_response_row(monkeypatch):
     async def write_rows(job_id, rows, **kwargs):
         written.append((job_id, rows, kwargs))
 
-    monkeypatch.setattr(draft_run, "write_rows", write_rows)
+    monkeypatch.setattr(generation_run, "write_rows", write_rows)
     asyncio.run(
         draft_run.record_call(
             "job-1",
@@ -123,7 +124,7 @@ def test_close_run_marks_completed_with_the_draft_or_failed_with_the_reason(
         return True
 
     monkeypatch.setattr(
-        draft_run.ExecutionStatusService, "update_status", update_status
+        generation_run.ExecutionStatusService, "update_status", update_status
     )
     asyncio.run(
         draft_run.close_run(
