@@ -204,7 +204,8 @@ const ChatWorkspace: React.FC = () => {
   // The bookmark/feedback actions row for the latest generated crew, parked
   // until that crew's run finishes — feedback only makes sense once the
   // result is visible. Cleared on post; a refine run never sets it.
-  const pendingActionsRef = useRef<{ data: GenerationCompleteData; ownerSession: string | null; mode?: string; usedWorkspaceMemory?: boolean; capability?: string } | null>(null);
+  const pendingActionsRef = useRef<{ data: GenerationCompleteData; ownerSession: string | null;
+    jobId?: string | null; mode?: string; usedWorkspaceMemory?: boolean; capability?: string } | null>(null);
 
   // The run event stream (SSE wiring, trace -> messages, completion and
   // reconnect handling) lives in its own hook — the JSX never touched any of
@@ -316,6 +317,9 @@ const ChatWorkspace: React.FC = () => {
           pendingActionsRef.current = {
             data,
             ownerSession: ownerSession ?? null,
+            // The auto-executed run's id rides on generation_complete; a
+            // generate-only turn has none yet and binds when its stream starts.
+            jobId: ((raw as { execution_id?: string }).execution_id as string) || null,
             mode: useExecutionStore.getState().chatModeType,
             // memoryEnabled === true means the run used Workspace memory (false =
             // session-only). Snapshot it now so a later toggle can't change it.

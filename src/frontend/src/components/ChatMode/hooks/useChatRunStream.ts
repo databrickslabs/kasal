@@ -16,6 +16,7 @@
  * component documents), and READ here.
  */
 import React, { useCallback, useEffect, useRef } from 'react';
+import { pendingActionsBelongTo } from '../utils/pendingActions';
 import { ExecutionStatus } from '../types/execution';
 import { getExecutionStatus } from '../api/executions';
 import { useSessionStore } from '../store/sessionStore';
@@ -37,6 +38,9 @@ interface UseChatRunStreamArgs {
   pendingActionsRef: React.MutableRefObject<{
     data: GenerationCompleteData;
     ownerSession: string | null;
+    /** The run this row is for. Set from generation_complete's execution_id
+     *  when present, else bound when that session's run stream starts. */
+    jobId?: string | null;
     mode?: string;
     usedWorkspaceMemory?: boolean;
     capability?: string;
@@ -301,6 +305,11 @@ export function useChatRunStream({ pendingActionsRef }: UseChatRunStreamArgs) {
   const postPendingActionsRow = useCallback((jobId?: string) => {
     const pending = pendingActionsRef.current;
     if (!pending) return;
+    // Only for its own run: a completion for ANOTHER job (the previous run of
+    // a re-sent question finishing late, a stale poller event) must leave the
+    // row parked, or it lands under a bubble that is still streaming.
+    const owner = jobId ? useExecutionStore.getState().jobOwnerOf(jobId) : null;
+    if (!pendingActionsBelongTo(pending, jobId, owner)) return;
     pendingActionsRef.current = null;
     const sessionStore = useSessionStore.getState();
     // Anchor the row to this run's execution id so the actions bar can offer a
@@ -401,7 +410,9 @@ export function useChatRunStream({ pendingActionsRef }: UseChatRunStreamArgs) {
       useExecutionStore.getState().updateExecutionStatus(status as ExecutionStatus);
     },
     onComplete: (data) => {
-      completeExecutionOnce(sseJobIdRef.current, extractResultText(data), extractA2uiSurface(data));
+      // The event names its own job when it can; the stream ref is the fallback.
+      const jobId = (data?.job_id as string) || (data?.execution_id as string) || sseJobIdRef.current;
+      completeExecutionOnce(jobId, extractResultText(data), extractA2uiSurface(data));
     },
     onError: (error) => {
       failExecutionOnce(sseJobIdRef.current, error);
@@ -524,6 +535,12 @@ export function useChatRunStream({ pendingActionsRef }: UseChatRunStreamArgs) {
       // Remember which session owns this job, so its traces/output are routed
       // back to it by job_id even if the user switches sessions mid-run.
       if (origin) jobOwnerRef.current.set(jobId, origin);
+      // A parked actions row that does not know its run yet (generate-only
+      // turns carry no execution_id) belongs to the run its session starts now.
+      const pending = pendingActionsRef.current;
+      if (pending && !pending.jobId && (!pending.ownerSession || !origin || pending.ownerSession === origin)) {
+        pending.jobId = jobId;
+      }
       useExecutionStore.getState().startExecution(jobId, origin || undefined, opts);
       // Only seize the single live SSE stream when the run's OWNER is on screen.
       // A backgrounded run (a generation that finished for another session while
