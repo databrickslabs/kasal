@@ -6,6 +6,8 @@ import { hasDiagram, splitDiagramSegments } from '../../utils/mdSandboxDiagram';
 import { isDeck, mergeDeckSegments } from '../../utils/htmlDeck';
 import HtmlDiagramBlock from './HtmlDiagramBlock';
 import HtmlDeckBlock from './HtmlDeckBlock';
+import { hasSkillBlock, splitSkillSegments } from '../../utils/skillBlock';
+import SkillCard from './SkillCard';
 
 interface MessageContentProps {
   content: string;
@@ -34,10 +36,9 @@ function renderText(content: string, key?: React.Key) {
   );
 }
 
-// Memoized on the content string: the markdown detection (10 regexes) + full
-// ReactMarkdown parse used to re-run for every message on every render tick.
-const MessageContent: React.FC<MessageContentProps> = React.memo(
-  ({ content, streaming = false }) => {
+// Text/diagram rendering for one run of content (everything except skill
+// cards, which are split out first).
+function renderRich(content: string, streaming: boolean) {
   // A ```html / ```svg block is rendered as a live diagram (sandboxed iframe)
   // instead of a code block, and can be copied as a Databricks %md-sandbox cell.
   // An unclosed fence (streaming) renders a live "building" preview.
@@ -68,8 +69,36 @@ const MessageContent: React.FC<MessageContentProps> = React.memo(
       </>
     );
   }
+  return renderText(content);
+}
 
-    return renderText(content);
+// Memoized on the content string: the markdown detection (10 regexes) + full
+// ReactMarkdown parse used to re-run for every message on every render tick.
+const MessageContent: React.FC<MessageContentProps> = React.memo(
+  ({ content, streaming = false }) => {
+    // A ```skill block (a SKILL.md draft) renders as a card with a Save
+    // button. Split on those FIRST; each text run between them still gets the
+    // diagram / deck treatment.
+    const skillSegments = splitSkillSegments(content);
+    if (hasSkillBlock(skillSegments)) {
+      return (
+        <>
+          {skillSegments.map((seg, i) =>
+            seg.type === 'skill' ? (
+              <SkillCard
+                key={`skill-${i}`}
+                code={seg.code}
+                streaming={!seg.closed && streaming}
+                truncated={!seg.closed && !streaming}
+              />
+            ) : seg.text.trim() ? (
+              <React.Fragment key={`text-${i}`}>{renderRich(seg.text, streaming)}</React.Fragment>
+            ) : null,
+          )}
+        </>
+      );
+    }
+    return renderRich(content, streaming);
   },
 );
 MessageContent.displayName = 'MessageContent';

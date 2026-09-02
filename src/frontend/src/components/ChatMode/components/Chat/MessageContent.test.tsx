@@ -108,4 +108,13 @@ describe('unclosed fence lifecycle', () => {
     expect(screen.queryByText('Building deck…')).not.toBeInTheDocument();
     expect(screen.getByText(/incomplete/)).toBeInTheDocument();
   });
+
+  it('renders a ```skill block as a skill card, with the surrounding text', () => {
+    const md = '---\nname: writing-release-notes\ndescription: Use when drafting release notes.\n---\n\n# Body\n';
+    render(<MessageContent content={`Here is the draft:\n\n\`\`\`skill\n${md}\`\`\`\n\nI left out nothing.`} />);
+    expect(screen.getByRole('group', { name: /Skill draft writing-release-notes/ })).toBeInTheDocument();
+    expect(screen.getByText('Use when drafting release notes.')).toBeInTheDocument();
+    expect(screen.getByText(/Here is the draft/)).toBeInTheDocument();
+    expect(screen.getByText(/I left out nothing/)).toBeInTheDocument();
+  });
 });
