@@ -29,12 +29,17 @@ class FakeResponse:
 class FakeClient:
     """Records every call; routes by method + URL suffix to canned responses."""
 
-    def __init__(self, *, create=None, finalize=None, put=None, get=None):
+    def __init__(
+        self, *, create=None, finalize=None, put=None, get=None, get_routes=None
+    ):
         self.calls = []
         self._create = create or FakeResponse(200, {})
         self._finalize = finalize or FakeResponse(200, {"name": "skills/c.s.x"})
         self._put = put or FakeResponse(204)
         self._get = get or FakeResponse(200, {"skills": []})
+        #: url-suffix -> FakeResponse (first match wins; declare specific
+        #: suffixes first). A LIST value serves its items in order (paging).
+        self._get_routes = get_routes or {}
 
     async def __aenter__(self):
         return self
@@ -52,6 +57,11 @@ class FakeClient:
 
     async def get(self, url, headers=None, params=None):
         self.calls.append(("GET", url, {"params": params}))
+        for suffix, resp in self._get_routes.items():
+            if url.endswith(suffix):
+                if isinstance(resp, list):
+                    return resp.pop(0) if len(resp) > 1 else resp[0]
+                return resp
         return self._get
 
 
@@ -231,3 +241,83 @@ def test_import_all_summarizes_ok_and_error(monkeypatch):
         {"name": "good", "status": "ok"},
         {"name": "bad", "status": "error", "error": "download failed"},
     ]
+
+
+# --- pull recursion, pagination, single-auth batches ------------------------
+
+NESTED_SKILL_MD = (
+    "---\nname: basic-math\ndescription: Arithmetic helper\n---\n\n"
+    "# Basic math\n\nAdd numbers.\n"
+)
+
+
+def test_pull_recurses_into_bundle_subdirectories(monkeypatch):
+    """Push writes nested paths (references/...); pull must walk them back out.
+    The flat listing skipped is_directory entries, so a push->pull round-trip
+    silently dropped every nested file — including the references/ files
+    Kasal's own builtin skills carry."""
+    client = FakeClient(
+        get_routes={
+            "references/notes.md": FakeResponse(200, text="nested!"),
+            "/SKILL.md": FakeResponse(200, text=NESTED_SKILL_MD),
+            "/basic-math/references": FakeResponse(
+                200, {"contents": [{"name": "notes.md", "is_directory": False}]}
+            ),
+            "/basic-math": FakeResponse(
+                200,
+                {
+                    "contents": [
+                        {"name": "SKILL.md", "is_directory": False},
+                        {"name": "references", "is_directory": True},
+                    ]
+                },
+            ),
+        }
+    )
+    svc = _service(None, client, monkeypatch)
+    captured = {}
+
+    async def _create(payload, gc, source=None, files=None):
+        captured["files"] = files
+        return SimpleNamespace(id=1, name=payload.name)
+
+    svc._skills.create_skill = _create  # type: ignore[attr-defined]
+
+    asyncio.run(svc.import_skill("kasal", "default", "basic-math"))
+
+    assert captured["files"] == [{"path": "references/notes.md", "content": "nested!"}]
+
+
+def test_list_follows_pagination(monkeypatch):
+    """A schema larger than one page must not silently truncate the listing."""
+    pages = [
+        FakeResponse(
+            200, {"skills": [{"name": "skills/c.s.a"}], "next_page_token": "t2"}
+        ),
+        FakeResponse(200, {"skills": [{"name": "skills/c.s.b"}]}),
+    ]
+    client = FakeClient(get_routes={"unity-catalog/skills": pages})
+    svc = _service(None, client, monkeypatch)
+
+    out = asyncio.run(svc.list_uc_skills("c", "s"))
+
+    assert [x["name"] for x in out] == ["skills/c.s.a", "skills/c.s.b"]
+    second = client.calls[1]
+    assert second[2]["params"]["page_token"] == "t2"
+
+
+def test_import_all_resolves_auth_once(monkeypatch):
+    """The batch pull shares one auth resolution and one client, as documented."""
+    client = FakeClient()  # default GET: {"skills": []}
+    svc = _service(None, client, monkeypatch)
+    count = {"n": 0}
+    orig = svc._auth
+
+    async def counting():
+        count["n"] += 1
+        return await orig()
+
+    svc._auth = counting  # type: ignore[assignment]
+
+    assert asyncio.run(svc.import_all_skills("kasal", "default")) == []
+    assert count["n"] == 1

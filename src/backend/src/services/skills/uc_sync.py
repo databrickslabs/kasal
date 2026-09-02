@@ -40,6 +40,9 @@ _FILES_API = "/api/2.0/fs/files/Skills"
 _DIRS_API = "/api/2.0/fs/directories/Skills"
 
 _TIMEOUT = 60.0
+#: Cap on files pulled per skill bundle — a runaway or adversarial tree must
+#: not turn one import into thousands of Files API reads.
+_MAX_BUNDLE_FILES = 100
 
 
 class SkillUcSyncService:
@@ -196,14 +199,35 @@ class SkillUcSyncService:
     async def list_uc_skills(self, catalog: str, schema: str) -> List[Dict[str, Any]]:
         headers, host = await self._auth()
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            return await self._list(client, headers, host, catalog, schema)
+
+    async def _list(
+        self,
+        client: httpx.AsyncClient,
+        headers: Dict[str, str],
+        host: str,
+        catalog: str,
+        schema: str,
+    ) -> List[Dict[str, Any]]:
+        """Every skill in the schema — follows ``next_page_token`` to the end,
+        so a schema larger than one page cannot silently truncate pull-all."""
+        skills: List[Dict[str, Any]] = []
+        params: Dict[str, str] = {"parent": f"schemas/{catalog}.{schema}"}
+        while True:
             resp = await client.get(
-                f"{host}{_SKILLS_API}",
-                headers=headers,
-                params={"parent": f"schemas/{catalog}.{schema}"},
+                f"{host}{_SKILLS_API}", headers=headers, params=params
             )
-        if resp.status_code != 200:
-            self._raise("list UC skills", resp)
-        return resp.json().get("skills", []) or []
+            if resp.status_code != 200:
+                self._raise("list UC skills", resp)
+            payload = resp.json()
+            skills.extend(payload.get("skills", []) or [])
+            token = payload.get("next_page_token")
+            if not token:
+                return skills
+            params = {
+                "parent": f"schemas/{catalog}.{schema}",
+                "page_token": token,
+            }
 
     # ── import (pull): UC -> Kasal ───────────────────────────────────────────
 
@@ -223,10 +247,10 @@ class SkillUcSyncService:
         Per-skill ``{name, status, error?}`` summary; one failure does not abort
         the batch. Reuses one HTTP client + auth across the pull.
         """
-        skills = await self.list_uc_skills(catalog, schema)
         headers, host = await self._auth()
         results: List[Dict[str, Any]] = []
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            skills = await self._list(client, headers, host, catalog, schema)
             for entry in skills:
                 sid = (
                     entry.get("bundle_name")
@@ -268,19 +292,35 @@ class SkillUcSyncService:
             self._raise("download SKILL.md", md)
         parsed = parser.parse(md.text, name_hint=skill_id)
 
+        # Walk the bundle RECURSIVELY: skills keep content in subfolders
+        # (references/ — Kasal's own builtins do), and the directories API
+        # lists one level at a time. The flat walk silently dropped every
+        # nested file, so a push→pull round-trip lost them.
         files: List[Dict[str, Any]] = []
-        listing = await client.get(
-            f"{host}{_DIRS_API}/{catalog}/{schema}/{skill_id}", headers=headers
-        )
-        for entry in (
-            listing.json().get("contents", []) if listing.status_code == 200 else []
-        ):
-            rel = str(entry.get("name") or "")
-            if entry.get("is_directory") or rel == "SKILL.md" or not rel:
-                continue
-            got = await client.get(f"{root}/{rel}", headers=headers)
-            if got.status_code == 200:
-                files.append({"path": rel, "content": got.text})
+        pending: List[str] = [""]
+        while pending and len(files) < _MAX_BUNDLE_FILES:
+            sub = pending.pop()
+            listing = await client.get(
+                f"{host}{_DIRS_API}/{catalog}/{schema}/{skill_id}{sub}",
+                headers=headers,
+            )
+            if listing.status_code != 200:
+                continue  # a skill with no bundle directory at all is normal
+            for entry in listing.json().get("contents", []) or []:
+                rel = str(entry.get("name") or "")
+                if not rel:
+                    continue
+                rel_path = f"{sub}/{rel}".lstrip("/")
+                if entry.get("is_directory"):
+                    pending.append(f"/{rel_path}")
+                    continue
+                if rel_path == "SKILL.md":
+                    continue
+                got = await client.get(f"{root}/{rel_path}", headers=headers)
+                if got.status_code == 200:
+                    files.append({"path": rel_path, "content": got.text})
+                if len(files) >= _MAX_BUNDLE_FILES:
+                    break
 
         # Upsert by name: a re-pull must update this workspace's own copy rather
         # than error on the duplicate (create_skill raises when the name exists).
