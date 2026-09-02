@@ -1429,7 +1429,25 @@ class LightAgentService:
                 )
                 _log("UI compose timed out — returning plain answer")
             except Exception as a2ui_err:  # noqa: BLE001
-                logger.debug(f"[light_agent] a2ui compose skipped: {a2ui_err}")
+                # Never break the run — but never hide the reason either. A
+                # mindmap request that silently came back as prose cost a day
+                # of guessing because this was a DEBUG line.
+                logger.warning(
+                    f"[light_agent] a2ui compose failed for {execution_id}; "
+                    f"completing with plain answer: {a2ui_err}",
+                    exc_info=True,
+                )
+                _log(f"UI compose failed — returning plain answer: {a2ui_err}")
+                try:
+                    _schedule_trace(
+                        _base_trace(
+                            "a2ui_surface",
+                            {"outcome": "compose_error", "reason": str(a2ui_err)[:300]},
+                            "a2ui",
+                        )
+                    )
+                except Exception:  # noqa: BLE001 — tracing must not block the run
+                    pass
 
             # Flush trace writes before terminal status — guarantees the
             # fire-and-forget persists (response_run + every tool trace) actually

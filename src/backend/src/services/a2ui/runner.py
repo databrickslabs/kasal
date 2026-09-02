@@ -506,6 +506,21 @@ async def compose_surface(
             execution_id=execution_id,
             group_context=group_context,
         )
+        # Every non-delivery is one line in the run's Logs tab. Several of these
+        # outcomes are deliberately NOT traced (plain-prose turns would drown
+        # the trace), which left "why did my mindmap come back as text?" with
+        # no answer anywhere a user could look.
+        if outcome != "composed" and execution_id:
+            try:
+                from src.services.execution.logs.queue import enqueue_log
+
+                enqueue_log(
+                    execution_id=execution_id,
+                    content=f"UI surface not delivered ({outcome}): {reason}",
+                    group_context=group_context,
+                )
+            except Exception:  # noqa: BLE001 — logging must not block the run
+                pass
 
     if not (text or "").strip():
         await _retract_shell()
@@ -755,7 +770,17 @@ async def compose_surface(
     # superseded revision (a design-lint retry rewrites the whole deck) or simply
     # less than the whole.
     if bridge is not None:
-        bridge.commit(surface)
+        try:
+            bridge.commit(surface)
+        except Exception as commit_err:  # noqa: BLE001
+            # The surface IS composed; the stream just failed to deliver the
+            # final copy. Keep the surface — the result envelope carries it —
+            # rather than dropping the whole thing to prose.
+            logger.warning(
+                f"[a2ui] final stream commit failed ({commit_err}); "
+                "surface kept for the result envelope",
+                exc_info=True,
+            )
     _skip("composed", "", surface=surface)
     return surface
 
