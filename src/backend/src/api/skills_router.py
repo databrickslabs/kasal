@@ -125,12 +125,16 @@ async def validate_skill(body: SkillCreate, group_context: GroupContextDep):
 
 
 @router.post("/draft", response_model=SkillDraftResponse)
-async def draft_skill(body: SkillDraftRequest, group_context: GroupContextDep):
+async def draft_skill(
+    body: SkillDraftRequest, session: SessionDep, group_context: GroupContextDep
+):
     """Draft a skill from a request or a captured conversation.
 
     One focused generation call (the ``generate_skill`` template), validated by
     the reference validator before it returns. Nothing is saved: the chat
-    renders the draft as a card and a person clicks Save.
+    renders the draft as a card and a person clicks Save. The call IS recorded
+    as a run (``job_id`` in the response) so its LLM calls show in the run
+    activity like any other.
     """
     _require_author(group_context)
     return await SkillGenerationService.draft(
@@ -138,6 +142,7 @@ async def draft_skill(body: SkillDraftRequest, group_context: GroupContextDep):
         group_context,
         transcript=[t.model_dump() for t in (body.transcript or [])] or None,
         model=body.model,
+        session=session,
     )
 
 

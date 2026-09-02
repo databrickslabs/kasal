@@ -18,7 +18,10 @@ def _install(monkeypatch, replies, template_text="SYSTEM TEMPLATE"):
 
     async def completion(**kwargs):
         calls.append(kwargs)
-        return replies.pop(0)
+        reply = replies.pop(0)
+        # The service asks for the served model (a tuple return), like the
+        # real LLMManager.completion does under ``with_served_model``.
+        return (reply, "served-model") if kwargs.get("with_served_model") else reply
 
     async def template(name, gc):
         return template_text
@@ -108,3 +111,87 @@ def test_template_failure_falls_back_to_the_seed(monkeypatch):
     )
     asyncio.run(generation.SkillGenerationService.draft("x", _Group()))
     assert "Return ONLY a JSON object" in calls[0]["messages"][0]["content"]
+
+
+def test_reports_the_served_model_and_the_attempt_count(monkeypatch):
+    _install(monkeypatch, [GOOD])
+    out = asyncio.run(
+        generation.SkillGenerationService.draft("a skill", _Group(), model="picker-key")
+    )
+    assert out["model"] == "served-model" and out["attempts"] == 1
+
+    _install(monkeypatch, [json.dumps({"name": "Bad Name!"}), GOOD])
+    out = asyncio.run(generation.SkillGenerationService.draft("a skill", _Group()))
+    assert out["valid"] is True and out["attempts"] == 2
+
+
+def test_served_name_drops_the_none_substitution_suffix():
+    assert generation._served_name("gpt-x (for 'None')", None) == "gpt-x"
+    assert generation._served_name("gpt-x (for 'k')", "k") == "gpt-x (for 'k')"
+    assert generation._served_name(None, "k") == "k"
+    assert generation._served_name("", None) is None
+
+
+def test_with_a_session_the_draft_is_a_run_with_one_call_recorded_per_attempt(
+    monkeypatch,
+):
+    _install(monkeypatch, [json.dumps({"name": "Bad Name!"}), GOOD])
+    events = []
+
+    async def open_run(session, **kwargs):
+        events.append(("open", session, kwargs["transcript_turns"]))
+        return "job-9"
+
+    async def record_call(job_id, **kwargs):
+        events.append(("call", job_id, kwargs["attempt"], kwargs["model"]))
+        assert kwargs["prompt"].startswith("[system]\nSYSTEM TEMPLATE")
+        assert kwargs["duration_ms"] >= 0
+
+    async def close_run(job_id, **kwargs):
+        events.append(("close", job_id, kwargs.get("result", {}).get("valid")))
+
+    monkeypatch.setattr(generation.draft_run, "open_run", open_run)
+    monkeypatch.setattr(generation.draft_run, "record_call", record_call)
+    monkeypatch.setattr(generation.draft_run, "close_run", close_run)
+    out = asyncio.run(
+        generation.SkillGenerationService.draft("a skill", _Group(), session="S")
+    )
+    assert out["job_id"] == "job-9" and out["attempts"] == 2
+    assert events == [
+        ("open", "S", 0),
+        ("call", "job-9", 1, "served-model"),
+        ("call", "job-9", 2, "served-model"),
+        ("close", "job-9", True),
+    ]
+
+
+def test_an_llm_failure_fails_the_run_and_still_raises(monkeypatch):
+    async def completion(**kwargs):
+        raise RuntimeError("endpoint down")
+
+    async def template(name, gc):
+        return "T"
+
+    monkeypatch.setattr(generation.LLMManager, "completion", completion)
+    monkeypatch.setattr(
+        generation.TemplateService, "get_effective_template_content", template
+    )
+    closed = []
+
+    async def open_run(session, **kwargs):
+        return "job-x"
+
+    async def close_run(job_id, **kwargs):
+        closed.append((job_id, kwargs.get("error")))
+
+    monkeypatch.setattr(generation.draft_run, "open_run", open_run)
+    monkeypatch.setattr(generation.draft_run, "close_run", close_run)
+    try:
+        asyncio.run(
+            generation.SkillGenerationService.draft("a skill", _Group(), session="S")
+        )
+    except RuntimeError as exc:
+        assert "endpoint down" in str(exc)
+    else:
+        raise AssertionError("expected the LLM failure to propagate")
+    assert closed == [("job-x", "endpoint down")]

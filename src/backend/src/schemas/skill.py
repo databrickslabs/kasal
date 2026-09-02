@@ -144,3 +144,11 @@ class SkillDraftResponse(BaseModel):
     valid: bool
     errors: List[str] = []
     warnings: List[str] = []
+    model: Optional[str] = Field(None, description="The model that served the draft")
+    attempts: int = Field(
+        1, description="LLM calls made (2 when the first draft was retried)"
+    )
+    job_id: Optional[str] = Field(
+        None,
+        description="The run recording this draft's LLM calls; its trace is the run activity",
+    )

@@ -70,6 +70,12 @@ export interface SkillDraft {
   valid: boolean;
   errors: string[];
   warnings: string[];
+  /** The model that served the draft (resolved — a picker key may be substituted). */
+  model?: string | null;
+  /** LLM calls made: 2 when the first draft failed validation and was retried. */
+  attempts?: number;
+  /** The run that recorded those calls — its trace is the run activity. */
+  job_id?: string | null;
 }
 
 export interface SkillFileInput {

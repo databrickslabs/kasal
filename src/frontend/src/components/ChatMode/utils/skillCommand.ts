@@ -1,5 +1,6 @@
 import type { ChatMessage } from '../types/chat';
-import type { TranscriptTurn } from '../../../api/tools/SkillService';
+import type { SkillDraft, TranscriptTurn } from '../../../api/tools/SkillService';
+import type { TraceEntry } from './traceActivity';
 
 /**
  * The chat-side half of "create a skill by chatting".
@@ -69,4 +70,53 @@ export function draftMessage(draft: {
     ? `Here's a draft of **${draft.name}** — review it, then save it to your teamspace:`
     : `Here's a draft of **${draft.name || 'the skill'}** — it did not pass validation yet (${(draft.errors || []).join('; ')}). You can still edit and save it from Configuration → Skills, or ask me to fix it:`;
   return `${intro}\n\n\`\`\`skill\n${toSkillMarkdown(draft)}\`\`\``;
+}
+
+/**
+ * The drafting call as run activity.
+ *
+ * A draft is one silent backend call that can take half a minute; without a
+ * step in the timeline the screen looks idle. These build the three states of
+ * that step — pending (spinner + the live line in the activity header), done
+ * (which model answered, how many calls it took, how long) and failed.
+ */
+const clip = (s: string, n = 80): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+export function draftingStep(cmd: SkillCommand, transcriptTurns: number, model?: string): TraceEntry {
+  const what =
+    cmd.mode === 'capture'
+      ? `from this conversation · ${transcriptTurns} turn${transcriptTurns === 1 ? '' : 's'}`
+      : clip(cmd.request);
+  return {
+    kind: 'tool_call',
+    label: 'Drafting skill',
+    sublabel: model ? `${what} · ${model}` : what,
+    source: 'generation',
+    timestamp: Date.now(),
+  };
+}
+
+export function draftedStep(draft: SkillDraft, startedAt: number): TraceEntry {
+  const calls = draft.attempts && draft.attempts > 1 ? `${draft.attempts} LLM calls` : '1 LLM call';
+  const parts = [draft.name || 'unnamed', draft.model || null, calls].filter(Boolean) as string[];
+  return {
+    kind: 'tool_result',
+    label: draft.valid ? 'Skill drafted' : 'Draft needs fixes',
+    sublabel: parts.join(' · '),
+    detail: draft.valid ? undefined : (draft.errors || []).join('\n') || undefined,
+    durationMs: Math.max(0, Date.now() - startedAt),
+    source: 'generation',
+    timestamp: Date.now(),
+  };
+}
+
+export function draftFailedStep(reason: string, startedAt: number): TraceEntry {
+  return {
+    kind: 'event',
+    label: `⚠ ${clip(`Could not draft the skill: ${reason}`)}`,
+    detail: reason,
+    durationMs: Math.max(0, Date.now() - startedAt),
+    source: 'generation',
+    timestamp: Date.now(),
+  };
 }

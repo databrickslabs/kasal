@@ -16,11 +16,12 @@ Two modes, one call:
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.services.catalog.templates import TemplateService
 from src.services.llm.manager import LLMManager
-from src.services.skills import parser
+from src.services.skills import draft_run, parser
 from src.utils.prompt_utils import robust_json_parser
 from src.utils.telemetry import KasalProduct, get_user_agent_header
 from src.utils.user_context import GroupContext
@@ -43,35 +44,71 @@ class SkillGenerationService:
         *,
         transcript: Optional[List[Dict[str, str]]] = None,
         model: Optional[str] = None,
+        session: Any = None,
     ) -> Dict[str, Any]:
+        """The validated draft, plus how it was made: the served ``model``,
+        the ``attempts`` it took and the ``job_id`` of the run recording its
+        LLM calls (see :mod:`draft_run`) — None when no ``session`` was given
+        to open one with, or the record could not be written."""
         system = await _system_prompt(group_context)
         user = _user_message(request, transcript)
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ]
-        draft = await _ask(messages, model)
-        verdict = _validate(draft)
-        if not verdict["valid"]:
-            # One retry with the validator's own words: the errors are exact
-            # (name shape, missing description) and the model fixes them
-            # reliably when told; a second failure is returned as-is so the
-            # card can show the same messages on Save.
-            logger.info(
-                "[skills] draft failed validation, retrying once: %s", verdict["errors"]
+        job_id = await draft_run.open_run(
+            session,
+            request=request,
+            transcript_turns=len(transcript or []),
+            model=model,
+            group_context=group_context,
+        )
+        try:
+            draft, served, call = await _ask(messages, model)
+            await draft_run.record_call(
+                job_id, attempt=1, model=served, group_context=group_context, **call
             )
-            messages.append({"role": "assistant", "content": json.dumps(draft)})
-            messages.append(
-                {
-                    "role": "user",
-                    "content": "That draft failed validation:\n- "
-                    + "\n- ".join(verdict["errors"])
-                    + "\nReturn the corrected JSON object only.",
-                }
-            )
-            draft = await _ask(messages, model)
             verdict = _validate(draft)
-        return {**draft, **verdict}
+            attempts = 1
+            if not verdict["valid"]:
+                # One retry with the validator's own words: the errors are
+                # exact (name shape, missing description) and the model fixes
+                # them reliably when told; a second failure is returned as-is
+                # so the card can show the same messages on Save.
+                logger.info(
+                    "[skills] draft failed validation, retrying once: %s",
+                    verdict["errors"],
+                )
+                messages.append({"role": "assistant", "content": json.dumps(draft)})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": "That draft failed validation:\n- "
+                        + "\n- ".join(verdict["errors"])
+                        + "\nReturn the corrected JSON object only.",
+                    }
+                )
+                draft, served, call = await _ask(messages, model)
+                await draft_run.record_call(
+                    job_id, attempt=2, model=served, group_context=group_context, **call
+                )
+                verdict = _validate(draft)
+                attempts = 2
+        except Exception as exc:
+            await draft_run.close_run(job_id, error=str(exc) or exc.__class__.__name__)
+            raise
+        # The model that actually answered and how many calls it took: the
+        # chat shows this drafting as run activity, and a step that names the
+        # model is what makes the work visible (the call is otherwise silent).
+        result = {
+            **draft,
+            **verdict,
+            "model": served,
+            "attempts": attempts,
+            "job_id": job_id,
+        }
+        await draft_run.close_run(job_id, result=result)
+        return result
 
 
 async def _system_prompt(group_context: Optional[GroupContext]) -> str:
@@ -112,25 +149,60 @@ def _user_message(request: str, transcript: Optional[List[Dict[str, str]]]) -> s
     )
 
 
-async def _ask(messages: List[Dict[str, str]], model: Optional[str]) -> Dict[str, Any]:
-    content = await LLMManager.completion(
+async def _ask(
+    messages: List[Dict[str, str]], model: Optional[str]
+) -> Tuple[Dict[str, Any], Optional[str], Dict[str, Any]]:
+    """One call: the parsed ``{name, description, body}``, the model that
+    served it (the resolved one — a picker key may be substituted), and the
+    call itself (``prompt`` / ``response`` / ``duration_ms``) for the trace."""
+    began = time.monotonic()
+    content, served = await LLMManager.completion(
         messages=messages,
         model=model,
         temperature=0.4,
         max_tokens=4000,
         extra_headers=get_user_agent_header(KasalProduct.SKILL),
+        with_served_model=True,
     )
+    call = {
+        "prompt": _render_messages(messages),
+        "response": content or "",
+        "duration_ms": (time.monotonic() - began) * 1000,
+    }
     try:
         data = robust_json_parser(content or "")
     except Exception:  # noqa: BLE001 — unparseable reply -> empty, invalid draft
         data = {}
     if not isinstance(data, dict):
         data = {}
-    return {
-        "name": str(data.get("name") or "").strip(),
-        "description": str(data.get("description") or "").strip(),
-        "body": str(data.get("body") or "").strip(),
-    }
+    return (
+        {
+            "name": str(data.get("name") or "").strip(),
+            "description": str(data.get("description") or "").strip(),
+            "body": str(data.get("body") or "").strip(),
+        },
+        _served_name(served, model),
+        call,
+    )
+
+
+def _render_messages(messages: List[Dict[str, str]]) -> str:
+    """The request as one text, role by role — what the trace shows as the
+    call's input (the retry carries the failed draft and the errors too)."""
+    return "\n\n".join(
+        f"[{m.get('role', '?')}]\n{m.get('content', '')}" for m in messages
+    )
+
+
+def _served_name(served: Any, requested: Optional[str]) -> Optional[str]:
+    """The served model as a plain name. ``completion`` reports a substitution
+    as ``"<served> (for '<requested>')"``; with no requested model that
+    reads ``(for 'None')``, which is noise, so only the served half stays."""
+    if not isinstance(served, str) or not served.strip():
+        return requested or None
+    if requested:
+        return served
+    return served.split(" (for ", 1)[0]
 
 
 def _validate(draft: Dict[str, Any]) -> Dict[str, Any]:

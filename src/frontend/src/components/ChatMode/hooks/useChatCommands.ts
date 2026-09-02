@@ -7,7 +7,14 @@
  */
 import React, { useCallback } from 'react';
 import { SkillService } from '../../../api/tools/SkillService';
-import { buildTranscript, draftMessage, parseSkillCommand } from '../utils/skillCommand';
+import {
+  buildTranscript,
+  draftFailedStep,
+  draftMessage,
+  draftedStep,
+  draftingStep,
+  parseSkillCommand,
+} from '../utils/skillCommand';
 import { stopExecution, listExecutions } from '../api/executions';
 import { saveGeneratedCrew, CrewNameConflictError } from '../api/crews';
 import { GenerationCompleteData } from '../types/dispatcher';
@@ -104,18 +111,36 @@ export function useChatCommands({ dispatcher, executionStream, handleRefine, las
       const skillCmd = parseSkillCommand(message);
       if (skillCmd) {
         addMessage('user', message);
-        execStore.setIsLoading(true);
+        // The draft is a generation, and shows as one: the "Thinking" activity
+        // container under the prompt, with the drafting call as its live step.
+        // Everything routes to the session that asked, so switching sessions
+        // mid-draft neither hides the work nor posts it into the wrong chat.
+        const sessionStore = useSessionStore.getState();
+        const owner = sessionStore.currentSessionId || undefined;
+        const post = (content: string, extra?: Parameters<typeof addMessage>[2]) =>
+          owner
+            ? sessionStore.addMessageToTargetSession(owner, 'assistant', content, extra)
+            : sessionStore.addMessage('assistant', content, extra);
+        const transcript =
+          skillCmd.mode === 'capture' ? buildTranscript(sessionStore.messages) : undefined;
+        const model = selectedModel || undefined;
+        const startedAt = Date.now();
+        execStore.startGeneration(owner);
+        const stepId = post('', {
+          resultType: 'trace',
+          resultData: draftingStep(skillCmd, transcript?.length ?? 0, model),
+        });
+        // The draft is recorded as a run; carrying its id on the step is what
+        // lets the activity open the run's trace (the LLM calls) and the pane.
+        const setStep = (resultData: unknown, executionId?: string) => {
+          const updates = { resultType: 'trace', resultData, ...(executionId ? { executionId } : {}) };
+          if (owner) sessionStore.updateMessageInTargetSession(owner, stepId, updates);
+          else sessionStore.updateMessage(stepId, updates);
+        };
         try {
-          const transcript =
-            skillCmd.mode === 'capture'
-              ? buildTranscript(useSessionStore.getState().messages)
-              : undefined;
-          const draft = await SkillService.draft(
-            skillCmd.request,
-            transcript,
-            selectedModel || undefined,
-          );
-          addMessage('assistant', draftMessage(draft));
+          const draft = await SkillService.draft(skillCmd.request, transcript, model);
+          setStep(draftedStep(draft, startedAt), draft.job_id || undefined);
+          post(draftMessage(draft));
         } catch (error) {
           const detail = (error as { response?: { data?: { detail?: unknown } } })?.response
             ?.data?.detail;
@@ -125,9 +150,10 @@ export function useChatCommands({ dispatcher, executionStream, handleRefine, las
               : error instanceof Error
                 ? error.message
                 : 'Failed to draft the skill';
-          addMessage('assistant', `Could not draft the skill: ${errMsg}`);
+          setStep(draftFailedStep(errMsg, startedAt));
+          post(`Could not draft the skill: ${errMsg}`);
         } finally {
-          execStore.setIsLoading(false);
+          execStore.completeGeneration(owner);
         }
         return true;
       }
