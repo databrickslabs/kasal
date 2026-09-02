@@ -546,3 +546,26 @@
    session context menu rendered but hit-tested to the chat scroll area, so
    Rename/Delete clicks went nowhere. With the vignette at z-index:-1 inside
    the isolated root, children stack naturally and fixed menus win again. */
+
+/* ── Deck studio ────────────────────────────────────────────────────────────
+   The studio is portaled OUTSIDE #kasal-chat-root — it must sit above the app
+   bar, whose z-index lives in the root stacking context — so the id-scoped
+   control resets above never reach it. It carries its own, namespaced by
+   class so nothing else in the app is touched. */
+.kasal-deck-studio button {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  border: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.kasal-deck-studio button:disabled {
+  cursor: default;
+}
+.kasal-deck-studio textarea {
+  font: inherit;
+  margin: 0;
+}

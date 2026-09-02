@@ -435,6 +435,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
             <MessageContent
               content={message.fullContent ?? message.content}
               streaming={Boolean(message.isStreaming)}
+              messageId={message.id}
             />
           </div>
         )}

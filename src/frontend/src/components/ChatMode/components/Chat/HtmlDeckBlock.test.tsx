@@ -46,3 +46,25 @@ describe('HtmlDeckBlock keyboard navigation', () => {
     expect(screen.getByText('Slide 3 / 3')).toBeInTheDocument();
   });
 });
+
+describe('HtmlDeckBlock slide refine', () => {
+  it('opens on the slide a refine marked as changed', () => {
+    const refined =
+      '<section class="slide"><h1>One</h1></section>' +
+      '<section data-refined="1" class="slide"><h1>Two</h1></section>' +
+      '<section class="slide"><h1>Three</h1></section>';
+    render(<HtmlDeckBlock code={refined} />);
+    expect(screen.getByText('Slide 2 / 3')).toBeInTheDocument();
+  });
+
+  it('"Edit deck" opens the studio on the slide on screen', () => {
+    render(<HtmlDeckBlock code={DECK} messageId="m1" />);
+    fireEvent.keyDown(screen.getByRole('group'), { key: 'ArrowRight' });
+    fireEvent.click(screen.getByTitle('Edit deck'));
+    const studio = screen.getByRole('dialog', { name: 'Deck studio' });
+    expect(studio).toBeInTheDocument();
+    expect(screen.getByText('Slide 2')).toBeInTheDocument(); // the instruction bar's target
+    fireEvent.click(screen.getByTitle('Done (Esc)'));
+    expect(screen.queryByRole('dialog', { name: 'Deck studio' })).toBeNull();
+  });
+});

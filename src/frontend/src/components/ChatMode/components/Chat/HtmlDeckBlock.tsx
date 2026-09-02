@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Download, Loader2, Maximize2 } from 'lucide-react';
-import { SLIDE_H, SLIDE_W, splitSlides } from '../../utils/htmlDeck';
+import { ChevronLeft, ChevronRight, Download, Loader2, Maximize2, SquarePen } from 'lucide-react';
+import { SLIDE_W, refinedSlideIndex, splitSlides, stageFor } from '../../utils/htmlDeck';
+import DeckStudio from '../Deck/DeckStudio';
 import { useThrottledPreview } from '../../utils/scaledFrame';
 import { downloadDeckPdf, downloadDeckPptx } from '../../utils/deckExport';
 import ScaledFrame from './ScaledFrame';
@@ -22,23 +23,15 @@ interface HtmlDeckBlockProps {
   /** True when the message ENDED without closing the fence (output cut off):
    *  the deck finalizes (paging/download work) but is labelled incomplete. */
   truncated?: boolean;
-}
-
-// Wrap a slide section on the fixed stage; force the section to the stage size
-// even if the model omitted explicit dimensions.
-function stageFor(section: string): string {
-  return (
-    `<style>.kwrap>section.slide{width:${SLIDE_W}px;height:${SLIDE_H}px;` +
-    'box-sizing:border-box;overflow:hidden;}</style>' +
-    `<div class="kwrap" style="width:${SLIDE_W}px;height:${SLIDE_H}px;overflow:hidden;background:#fff">` +
-    `${section}</div>`
-  );
+  /** The chat message the deck lives in — the studio writes its edits back there. */
+  messageId?: string;
 }
 
 const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
   code,
   streaming = false,
   truncated = false,
+  messageId,
 }) => {
   // While the deck streams in, rebuild the (expensive) iframe at most every
   // 400ms instead of per token — same throttle the diagram card uses. The
@@ -46,8 +39,11 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
   const liveCode = useThrottledPreview(code, streaming);
   const slides = useMemo(() => splitSlides(liveCode), [liveCode]);
   const count = slides.length;
-  const [idx, setIdx] = useState(0);
+  // A deck a slide edit just changed opens on THAT slide (it carries the
+  // refined marker), so the reader lands on the change rather than the cover.
+  const [idx, setIdx] = useState(() => Math.max(0, refinedSlideIndex(code)));
   const [full, setFull] = useState(false);
+  const [studio, setStudio] = useState(false);
   const [menu, setMenu] = useState(false);
   const [busy, setBusy] = useState<'' | 'pdf' | 'pptx'>('');
   const menuRef = useRef<HTMLDivElement>(null);
@@ -56,6 +52,13 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
     if (streaming && count > 0) setIdx(count - 1);
     else setIdx((i) => Math.min(i, Math.max(0, count - 1)));
   }, [streaming, count]);
+  // The refined deck folds into the message the run streamed on, so the same
+  // block instance sees the new code: jump to the changed slide then too.
+  useEffect(() => {
+    if (streaming) return;
+    const refined = refinedSlideIndex(code);
+    if (refined >= 0) setIdx(refined);
+  }, [code, streaming]);
 
   const prev = () => setIdx((i) => Math.max(0, i - 1));
   const next = () => setIdx((i) => Math.min(count - 1, i + 1));
@@ -139,7 +142,7 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
       aria-label={`Slide deck, ${count} slides — use arrow keys to navigate`}
       onClick={(e) => (e.currentTarget as HTMLDivElement).focus({ preventScroll: true })}
       onKeyDown={(e) => {
-        if (full) return; // the fullscreen listener owns the keys
+        if (full || studio) return; // the overlay's own listener owns the keys
         const go = pageKey(e.key);
         if (go) {
           e.preventDefault();
@@ -154,6 +157,17 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
         <span className="font-medium">{label}</span>
         <div className="flex items-center gap-1">
           {nav}
+          <button
+            type="button"
+            className={navBtn}
+            title="Edit deck"
+            disabled={streaming}
+            // The deck studio: thumbnails, one slide large, an instruction bar
+            // that edits ONE slide at a time and writes back into this message.
+            onClick={() => setStudio(true)}
+          >
+            <SquarePen size={14} />
+          </button>
           <button type="button" className={navBtn} title="Present" onClick={() => setFull(true)}>
             <Maximize2 size={14} />
           </button>
@@ -208,6 +222,9 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
         />
         <div className="absolute inset-0" aria-hidden="true" />
       </div>
+      {studio && (
+        <DeckStudio code={code} messageId={messageId} initialIndex={shown} onClose={() => setStudio(false)} />
+      )}
       {full && (
         // Presentation mode: the slide fills the screen on black, arrow keys
         // page, Esc (or leaving native fullscreen) returns to the chat.
