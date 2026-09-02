@@ -28,11 +28,11 @@ describe('HtmlDeckBlock keyboard navigation', () => {
     expect(screen.getByText('Slide 1 / 3')).toBeInTheDocument();
   });
 
-  it('pages window-wide while fullscreen is open', () => {
+  it('pages window-wide while presenting', () => {
     render(<HtmlDeckBlock code={DECK} />);
-    fireEvent.click(screen.getByTitle('View fullscreen'));
+    fireEvent.click(screen.getByTitle('Present'));
     fireEvent.keyDown(window, { key: 'ArrowRight' });
-    // Both the inline header and the fullscreen header show the new position.
+    // Both the inline header and the presentation counter show the new position.
     expect(screen.getAllByText('Slide 2 / 3').length).toBeGreaterThan(0);
   });
 

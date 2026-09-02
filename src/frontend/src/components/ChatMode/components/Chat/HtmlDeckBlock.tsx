@@ -4,7 +4,7 @@ import { SLIDE_H, SLIDE_W, splitSlides } from '../../utils/htmlDeck';
 import { useThrottledPreview } from '../../utils/scaledFrame';
 import { downloadDeckPdf, downloadDeckPptx } from '../../utils/deckExport';
 import ScaledFrame from './ScaledFrame';
-import FullscreenModal from './FullscreenModal';
+import DeckPresentation from './DeckPresentation';
 
 /**
  * Renders an agent-authored HTML slide deck: a ```html block whose slides are
@@ -60,8 +60,8 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
   const prev = () => setIdx((i) => Math.max(0, i - 1));
   const next = () => setIdx((i) => Math.min(count - 1, i + 1));
 
-  // Keyboard paging. Fullscreen listens window-wide (the modal owns the
-  // screen); inline, the deck pages while it has focus — it is focusable
+  // Keyboard paging. Presentation mode listens window-wide (DeckPresentation
+  // owns the screen); inline, the deck pages while it has focus — it is focusable
   // (tabIndex) and grabs focus on click, so "click the presentation, then
   // arrow through it" works. Left/Right, PageUp/PageDown, Home/End.
   const pageKey = (key: string): (() => void) | null => {
@@ -71,20 +71,6 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
     if (key === 'End') return () => setIdx(Math.max(0, count - 1));
     return null;
   };
-
-  useEffect(() => {
-    if (!full) return;
-    const onKey = (e: KeyboardEvent) => {
-      const go = pageKey(e.key);
-      if (go) {
-        e.preventDefault();
-        go();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [full, count]);
 
   // Close the download menu on outside click.
   useEffect(() => {
@@ -168,7 +154,7 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
         <span className="font-medium">{label}</span>
         <div className="flex items-center gap-1">
           {nav}
-          <button type="button" className={navBtn} title="View fullscreen" onClick={() => setFull(true)}>
+          <button type="button" className={navBtn} title="Present" onClick={() => setFull(true)}>
             <Maximize2 size={14} />
           </button>
           <div ref={menuRef} className="relative">
@@ -223,9 +209,18 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
         <div className="absolute inset-0" aria-hidden="true" />
       </div>
       {full && (
-        <FullscreenModal title={label} onClose={() => setFull(false)} toolbar={nav}>
-          <ScaledFrame html={stage} baseWidth={SLIDE_W} fill={false} contain title="Slide deck (fullscreen)" />
-        </FullscreenModal>
+        // Presentation mode: the slide fills the screen on black, arrow keys
+        // page, Esc (or leaving native fullscreen) returns to the chat.
+        <DeckPresentation
+          stage={stage}
+          index={shown}
+          count={count}
+          onPrev={prev}
+          onNext={next}
+          onFirst={() => setIdx(0)}
+          onLast={() => setIdx(Math.max(0, count - 1))}
+          onClose={() => setFull(false)}
+        />
       )}
     </div>
   );

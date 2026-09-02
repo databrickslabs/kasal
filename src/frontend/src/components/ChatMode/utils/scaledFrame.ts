@@ -53,6 +53,12 @@ export interface FrameOpts {
    * a definite height by its container (the iframe fills it).
    */
   contain?: boolean;
+  /** Canvas colour behind the content (default white). A presentation
+   *  letterboxes on black, like every slide viewer. */
+  background?: string;
+  /** Padding around the content in px (default BODY_PAD). 0 for a
+   *  presentation, where the slide should touch the screen edges. */
+  pad?: number;
 }
 
 // Cap on how much we enlarge content to fill the column (avoids blowing up a
@@ -72,9 +78,10 @@ function heightScript(
   fill: boolean,
   upscale: boolean,
   contain: boolean,
+  pad: number = BODY_PAD,
 ): string {
   return (
-    '<' + 'script>(function(){var ID=' + JSON.stringify(id) + ';var PAD=' + BODY_PAD + ';' +
+    '<' + 'script>(function(){var ID=' + JSON.stringify(id) + ';var PAD=' + pad + ';' +
     'var BASE=' + baseWidth + ';var FILL=' + (fill ? 'true' : 'false') +
     ';var UP=' + (upscale ? 'true' : 'false') + ';var CONTAIN=' + (contain ? 'true' : 'false') +
     ';var CAP=' + MAX_UPSCALE + ';' +
@@ -175,16 +182,18 @@ export function iframeDoc(html: string, id: string, opts: FrameOpts = {}): strin
   const fill = opts.fill ?? true;
   const upscale = opts.upscale ?? false;
   const contain = opts.contain ?? false;
+  const background = opts.background ?? '#fff';
+  const pad = opts.pad ?? BODY_PAD;
   // In contain mode the body fills the frame and centers the content (no scroll);
   // otherwise it flows from the top and the frame auto-heights to the content.
   const bodyStyle = contain
-    ? 'html,body{height:100%;}body{padding:' + BODY_PAD +
+    ? 'html,body{height:100%;}body{padding:' + pad +
       'px;display:flex;align-items:center;justify-content:center;overflow:hidden;}'
-    : 'body{padding:' + BODY_PAD + 'px;}';
+    : 'body{padding:' + pad + 'px;}';
   return (
     '<!doctype html><html><head><meta charset="utf-8">' +
     '<meta http-equiv="Content-Security-Policy" content="' + CSP + '">' +
-    '<style>html,body{margin:0;background:#fff;' +
+    '<style>html,body{margin:0;background:' + background + ';' +
     'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}' +
     bodyStyle + '#ksz{overflow:hidden;}#kft{transform-origin:top left;}</style>' +
     // The fit script lives in <head>, BEFORE the content: malformed/partial
@@ -192,7 +201,7 @@ export function iframeDoc(html: string, id: string, opts: FrameOpts = {}): strin
     // the script trailed the content its source rendered as visible text.
     // It only registers load/resize listeners + retry timers, so running
     // pre-content is safe (fit() no-ops until the elements exist).
-    heightScript(id, baseWidth, fill, upscale, contain) +
+    heightScript(id, baseWidth, fill, upscale, contain, pad) +
     '</head><body><div id="ksz"><div id="kft">' + sanitizePartialHtml(html) +
     '</div></div></body></html>'
   );

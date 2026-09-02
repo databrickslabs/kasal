@@ -20,6 +20,10 @@ interface ScaledFrameProps {
    *  only GROWS (partial layouts measure erratically; shrinking per chunk is
    *  what shook the chat column). */
   streaming?: boolean;
+  /** Canvas colour behind the content (default white). */
+  background?: string;
+  /** Padding around the content in px (default BODY_PAD). */
+  pad?: number;
   title?: string;
 }
 
@@ -30,12 +34,14 @@ const ScaledFrame: React.FC<ScaledFrameProps> = ({
   upscale,
   contain,
   streaming = false,
+  background = '#ffffff',
+  pad,
   title = 'Preview',
 }) => {
   const { frameId, height } = useScaledFrameHeight(120, streaming);
   const srcDoc = useMemo(
-    () => iframeDoc(html, frameId, { baseWidth, fill, upscale, contain }),
-    [html, frameId, baseWidth, fill, upscale, contain],
+    () => iframeDoc(html, frameId, { baseWidth, fill, upscale, contain, background, pad }),
+    [html, frameId, baseWidth, fill, upscale, contain, background, pad],
   );
   return (
     <iframe
@@ -46,7 +52,7 @@ const ScaledFrame: React.FC<ScaledFrameProps> = ({
         display: 'block',
         width: '100%',
         border: 0,
-        background: '#ffffff',
+        background,
         // Contain mode fills its container's height; otherwise auto-heights.
         height: contain ? '100%' : height,
       }}
