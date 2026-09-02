@@ -725,25 +725,26 @@ def html_owned_intent(query: str) -> bool:
 
 
 def wants_rich_surface(text: str, query: str) -> bool:
-    """True when a rich surface is worth a composer LLM call: the user asked for
-    one this turn, or the answer carries a table worth turning into a real
-    Table/Chart. Plain prose renders fine as markdown, so we skip the call.
+    """True when a rich surface is worth a composer LLM call: the user (or the
+    agent's purpose) asked for one this turn. Intent-driven ONLY.
+
+    A markdown table in the answer used to trigger composition on its own. It
+    produced a ``document`` surface that re-laid-out tables the reader had just
+    watched stream in — pure duplication under the chat's "never take away what
+    the reader saw" rule, for an answer nobody asked to be a surface. Markdown
+    tables render fine in chat; a surface has to be requested.
 
     ``query`` carries the user's request AND (for crew/agent runs) the agent goal
     / crew purpose, so a rich deliverable in the crew goal triggers even when the
     chat prompt itself has no rich-intent keyword."""
     intent = (query or "").lower()
-    rich_intent = any(k in intent for k in RICH_INTENT)
     body = text or ""
-    has_table = (
-        "\n|" in body or "|---" in body or "| -" in body or "<table" in body.lower()
-    )
     # Yield to an agent-authored diagram: a self-contained ```html/```svg block is
     # rendered directly in chat as a %md-sandbox diagram, so composing an A2UI
     # surface over it would double-render (or replace) the agent's own drawing.
     if re.search(r"```(?:html|svg)\s*\n", body, re.IGNORECASE):
         return False
-    return rich_intent or has_table
+    return any(k in intent for k in RICH_INTENT)
 
 
 def compose_a2ui(

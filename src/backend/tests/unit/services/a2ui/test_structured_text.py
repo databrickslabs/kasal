@@ -85,16 +85,25 @@ class TestItProducesATable:
         )
         assert "Evidence" not in out
 
-    def test_the_rendered_form_triggers_the_composer(self):
-        """The raw JSON did not even read as rich-intent, so some deep runs
-        skipped the composer entirely rather than being dropped by the gate."""
+    def test_the_rendered_form_reaches_the_composer_when_asked(self):
+        """Composition is intent-driven: a rendered envelope composes when the
+        request asks for a rich surface, and a plain table request stays
+        markdown (tables render fine in chat; the surface only duplicated)."""
         from src.services.a2ui.compose import wants_rich_surface
 
-        raw = _envelope()
-        rendered = render_research_envelope(raw)
-        intent = "give me a table with the innovation and the citation link"
-        assert wants_rich_surface(rendered, intent) is True
-        assert wants_rich_surface(raw, intent) is False
+        rendered = render_research_envelope(_envelope())
+        assert (
+            wants_rich_surface(
+                rendered, "visualize the innovations and their citations"
+            )
+            is True
+        )
+        assert (
+            wants_rich_surface(
+                rendered, "give me a table with the innovation and the citation link"
+            )
+            is False
+        )
 
 
 class TestItLeavesEverythingElseAlone:

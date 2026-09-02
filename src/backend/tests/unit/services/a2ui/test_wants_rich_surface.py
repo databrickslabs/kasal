@@ -20,8 +20,26 @@ def test_rich_intent_keyword_triggers_composition():
     assert wants_rich_surface("some prose", "make me a diagram") is True
 
 
-def test_table_in_body_triggers_composition():
-    assert wants_rich_surface("col a | col b\n|---|---|\n1 | 2", "list it") is True
+def test_table_alone_does_not_trigger_composition():
+    """A markdown table renders fine in chat. Composing a document surface from
+    it re-laid-out what the reader had just watched stream in (the streamed
+    text stays under the "never take away what the reader saw" rule), so an
+    unrequested surface was pure duplication."""
+    assert wants_rich_surface("col a | col b\n|---|---|\n1 | 2", "list it") is False
+    assert (
+        wants_rich_surface(
+            "| GPU | Price |\n|---|---|\n| RTX 3090 | 900 |",
+            "assemble a budget PC build with purchase links",
+        )
+        is False
+    )
+
+
+def test_table_with_rich_intent_still_composes():
+    assert (
+        wants_rich_surface("col a | col b\n|---|---|\n1 | 2", "chart these results")
+        is True
+    )
 
 
 def test_plain_prose_does_not_trigger():
