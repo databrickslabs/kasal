@@ -19,6 +19,7 @@ from src.api.database_management_router import router as database_management_rou
 from src.api.databricks_knowledge_router import router as databricks_knowledge_router
 from src.api.databricks_router import router as databricks_router
 from src.api.databricks_secrets_router import router as databricks_secrets_router
+from src.api.decks_router import router as decks_router
 from src.api.dispatcher_router import router as dispatcher_router
 from src.api.documentation_embeddings_router import (
     router as documentation_embeddings_router,
@@ -83,6 +84,7 @@ api_router.include_router(mcp_server_router)
 api_router.include_router(a2a_router)
 api_router.include_router(a2a_agents_router)
 api_router.include_router(skills_router)
+api_router.include_router(decks_router)
 api_router.include_router(crews_export_router)
 api_router.include_router(databricks_router)
 api_router.include_router(ui_config_router)

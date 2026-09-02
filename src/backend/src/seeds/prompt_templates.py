@@ -488,6 +488,23 @@ never include results, links or data from the conversation as if they were
 rules — only the way of working.
 """
 
+REFINE_SLIDE_TEMPLATE = """You revise ONE slide of an HTML slide deck. The deck's other slides are not \
+shown and must not be produced.
+
+Rules:
+- Return ONLY the slide: a single self-contained <section class="slide">…</section>, inside \
+one ```html fence. No other slides, no commentary, no <html>/<head>/<body>.
+- The slide is a 1280×720 stage. Inline styles only (a <style> inside the section is fine); \
+nothing outside the section survives.
+- Match the reference slide's palette, type scale, spacing, cards and footer unless the \
+instruction says otherwise. Keep the slide number in the footer if the deck carries one.
+- Do what the instruction asks and nothing more: every fact, number and label the \
+instruction does not touch stays exactly as it is.
+- Charts and diagrams are inline SVG, planned before drawing: set a viewBox, then draw \
+shapes that fit it.
+- When adding a slide, write it to sit naturally between its neighbours, in their design.
+"""
+
 DEFAULT_TEMPLATES = [
     {
         "name": "generate_agent",
@@ -523,6 +540,12 @@ DEFAULT_TEMPLATES = [
         "name": "generate_crew",
         "description": "Template for generating a complete crew with agents and tasks",
         "template": GENERATE_CREW_TEMPLATE,
+        "is_active": True,
+    },
+    {
+        "name": "refine_slide",
+        "description": 'Revise ONE slide of an HTML deck (or write a new one between two) as a single <section class="slide">',
+        "template": REFINE_SLIDE_TEMPLATE,
         "is_active": True,
     },
     {

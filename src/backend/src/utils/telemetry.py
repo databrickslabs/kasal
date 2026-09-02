@@ -52,6 +52,7 @@ class KasalProduct:
     CREW_GENERATION = "crew_gen"
     TEMPLATE_GENERATION = "template_gen"
     PROMPT_IMPROVEMENT = "prompt_improve"
+    DECK_EDIT = "deck_edit"
 
     # Other services
     INTENT_DETECTION = "intent"
