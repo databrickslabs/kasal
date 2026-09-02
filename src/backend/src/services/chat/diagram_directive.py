@@ -18,9 +18,53 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+from src.services.a2ui.compose import html_owned_intent, infer_deliverable
+
 # Markers so each piece is appended at most once, even if a spec is reused.
 _MARKER = "%md-sandbox diagram specialist"
 _DECK_MARKER = "SLIDE DECK DESIGN SYSTEM"
+_STRUCTURED_MARKER = "The app builds the"
+
+#: What "structured markdown" means per app-rendered deliverable. The A2UI
+#: composer reads the answer and builds the interactive surface from it.
+_STRUCTURED_HINTS: Dict[str, str] = {
+    "mindmap": (
+        "a nested bullet hierarchy: ONE root bullet, then indented sub-bullets "
+        "three to five levels deep, one short label per bullet with an optional "
+        "one-sentence description after an em dash"
+    ),
+    "quiz": "a numbered list of questions, each with four options and the correct answer",
+    "flashcards": "a list of front / back pairs",
+    "map": "a list of places, each with its name and latitude/longitude",
+    "dashboard": "labeled metric values and markdown tables for the numbers",
+    "kanban": "one heading per column with the cards as bullets beneath it",
+    "forecast": "the historical values as a markdown table, one row per period",
+    "graph": "the nodes as a list and the relationships as 'A -> B' lines",
+    "sequence": "the participants as a list and the messages as numbered 'A -> B: text' steps",
+    "album": "the items as a list, each with a title and a caption",
+}
+_STRUCTURED_DEFAULT = "the underlying content as lists and markdown tables"
+
+
+def structured_directive(kind: str) -> str:
+    """The directive for a turn whose deliverable the APP renders (not the model)."""
+    hint = _STRUCTURED_HINTS.get(kind, _STRUCTURED_DEFAULT)
+    return (
+        f"\n\n{_STRUCTURED_MARKER} {kind} itself from your answer. Do NOT draw it: "
+        "no ```html or ```svg block, no inline SVG, no ASCII art, no box-drawing "
+        "characters — a drawing cannot be parsed and replaces the interactive "
+        f"{kind} with a static picture. Reply in clean, structured markdown that "
+        f"carries the content — {hint} — and the app turns it into the {kind}."
+    )
+
+
+def app_rendered_kind(prompt: str) -> Optional[str]:
+    """The A2UI deliverable this request asks for, when the APP (not the model)
+    renders it — None for diagrams/decks (HTML-owned) and plain prose turns."""
+    if html_owned_intent(prompt or ""):
+        return None
+    return infer_deliverable(prompt or "")
+
 
 DIAGRAM_DIRECTIVE = (
     "\n\nWhen (and only when) the user asks for a DIAGRAM — boxes-and-arrows "
@@ -215,6 +259,18 @@ def apply_diagram_directive(
     Mutates and returns the same dict for convenience.
     """
     backstory = str(agent_spec.get("backstory") or "")
+    # A request for something the APP renders (mind map, quiz, map, dashboard,
+    # …) must not be primed as a "diagram specialist": the exclusion list inside
+    # DIAGRAM_DIRECTIVE was ignored by weaker models, which drew a mind map as
+    # an HTML diagram — and the composer then yields to an agent-authored
+    # diagram, so no A2UI surface was ever built. Deterministic instead: those
+    # turns get the structured-markdown directive and never see the diagram one.
+    kind = app_rendered_kind(prompt)
+    if kind:
+        if _STRUCTURED_MARKER not in backstory:
+            backstory = backstory + structured_directive(kind)
+        agent_spec["backstory"] = backstory
+        return agent_spec
     if _MARKER not in backstory:
         backstory = backstory + DIAGRAM_DIRECTIVE
     if _is_deck_request(prompt) and _DECK_MARKER not in backstory:

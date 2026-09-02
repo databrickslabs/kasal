@@ -26,6 +26,8 @@ import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+logger = logging.getLogger(__name__)
+
 # Caller-injected LLM: takes a list of {"role","content"} messages, returns text.
 LLMCall = Callable[[List[Dict[str, str]]], str]
 
@@ -307,8 +309,59 @@ def resolve_catalog(
     return default_catalog  # "basic" and anything unknown → full bundled catalog
 
 
-def extract_json(raw: str) -> Optional[Dict[str, Any]]:
-    """Tolerant parse: strip ``` fences, scan for the first balanced {...} block."""
+def _repair_brackets(s: str) -> str:
+    """Close what the model left open, in the right order.
+
+    A composer reply for a deeply nested surface (a mind map's children of
+    children) sometimes closes an OBJECT while an ARRAY is still open — ``}``
+    where ``]`` belonged — and a truncated reply stops mid-structure. Both
+    make ``json.loads`` fail one character from the end of an otherwise
+    complete surface. This walks the text string-aware, inserts the closer a
+    mismatched bracket implies, drops stray closers, and closes whatever is
+    still open at the end.
+    """
+    out: List[str] = []
+    stack: List[str] = []
+    in_str = False
+    escaped = False
+    for ch in s:
+        if in_str:
+            out.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+            out.append(ch)
+        elif ch in "{[":
+            stack.append(ch)
+            out.append(ch)
+        elif ch in "}]":
+            if not stack:
+                continue  # stray closer
+            want = "}" if stack[-1] == "{" else "]"
+            while stack and ch != want:
+                out.append(want)
+                stack.pop()
+                want = "}" if stack and stack[-1] == "{" else "]"
+            if stack:
+                out.append(ch)
+                stack.pop()
+        else:
+            out.append(ch)
+    if in_str:
+        out.append('"')
+    while stack:
+        out.append("}" if stack.pop() == "{" else "]")
+    return "".join(out)
+
+
+def _candidate_json(raw: str) -> Optional[str]:
+    """The first {...} block of a reply (fences stripped), balanced or not."""
     if not raw:
         return None
     s = raw.strip()
@@ -321,17 +374,59 @@ def extract_json(raw: str) -> Optional[Dict[str, Any]]:
     if start == -1:
         return None
     depth = 0
+    in_str = False
+    escaped = False
     for i in range(start, len(s)):
         ch = s[i]
-        if ch == "{":
+        if in_str:  # braces inside a string value are text, not structure
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
             depth += 1
         elif ch == "}":
             depth -= 1
             if depth == 0:
-                try:
-                    return json.loads(s[start : i + 1])
-                except Exception:  # noqa: BLE001
-                    return None
+                return s[start : i + 1]
+    return s[start:]  # unbalanced: the reply was cut off
+
+
+def json_error_of(raw: str) -> str:
+    """Why a reply is not JSON, in the parser's words with context — for the
+    correction prompt. A model fixes "Expecting ',' at char 1482 near …" far
+    more reliably than "that was not valid"."""
+    cand = _candidate_json(raw)
+    if not cand:
+        return "no JSON object found"
+    try:
+        json.loads(cand)
+        return "the JSON parsed but did not describe a valid surface"
+    except json.JSONDecodeError as e:
+        near = cand[max(0, e.pos - 40) : e.pos + 20].replace("\n", " ")
+        return f"{e.msg} at char {e.pos} near: …{near}…"
+    except Exception as e:  # noqa: BLE001
+        return str(e)[:160]
+
+
+def extract_json(raw: str) -> Optional[Dict[str, Any]]:
+    """Tolerant parse: strip ``` fences, take the first balanced {...} block,
+    and repair mismatched or missing closing brackets before giving up."""
+    cand = _candidate_json(raw)
+    if not cand:
+        return None
+    for text in (cand, _repair_brackets(cand)):
+        try:
+            parsed = json.loads(text)
+        except Exception:  # noqa: BLE001
+            continue
+        if isinstance(parsed, dict):
+            return parsed
     return None
 
 
@@ -840,9 +935,14 @@ def compose_a2ui(
                 else:
                     return _done(payload)
             else:
+                problem = (
+                    json_error_of(raw_str)
+                    if not payload
+                    else "a component is not in the catalog or root does not resolve"
+                )
                 correction = (
-                    "That was not a valid A2UI surface. Reply with ONLY the corrected "
-                    "JSON object, using only allowed components."
+                    f"That was not a valid A2UI surface ({problem}). Reply with ONLY "
+                    "the corrected JSON object, using only allowed components."
                 )
             messages += [
                 {"role": "assistant", "content": raw_str},

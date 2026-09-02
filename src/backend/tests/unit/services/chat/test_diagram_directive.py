@@ -139,3 +139,50 @@ class TestDirectiveScope:
         # is unparseable input for the composer and killed the Mindmap surface.
         assert "STRUCTURED markdown" in DIAGRAM_DIRECTIVE
         assert "NEVER draw ASCII art" in DIAGRAM_DIRECTIVE
+
+
+class TestAppRenderedKindsAreNotPrimedAsDiagrams:
+    """A mind map / quiz / map / dashboard request is rendered by the APP from
+    structured markdown. The diagram directive's exclusion list was ignored by
+    weaker models (a mind map was drawn as an HTML diagram, and the composer
+    then yielded to it), so those turns must never see the diagram prime."""
+
+    def test_mindmap_gets_the_structured_directive_only(self):
+        from src.services.chat.diagram_directive import apply_diagram_directive
+
+        spec = apply_diagram_directive(
+            {"backstory": "b"}, "create a mindmap on LLM internals"
+        )
+        assert "%md-sandbox diagram specialist" not in spec["backstory"]
+        assert "The app builds the mindmap itself" in spec["backstory"]
+        assert "nested bullet hierarchy" in spec["backstory"]
+        assert "Do NOT draw it" in spec["backstory"]
+
+    def test_other_app_rendered_kinds(self):
+        from src.services.chat.diagram_directive import apply_diagram_directive
+
+        for prompt, kind in (
+            ("quiz me on the solar system", "quiz"),
+            ("show our offices on a map", "map"),
+            ("build a KPI dashboard for sales", "dashboard"),
+        ):
+            spec = apply_diagram_directive({"backstory": ""}, prompt)
+            assert f"The app builds the {kind} itself" in spec["backstory"], prompt
+            assert "%md-sandbox diagram specialist" not in spec["backstory"], prompt
+
+    def test_diagrams_and_decks_keep_the_html_path(self):
+        from src.services.chat.diagram_directive import apply_diagram_directive
+
+        arch = apply_diagram_directive(
+            {"backstory": ""}, "draw a diagram of the architecture"
+        )
+        assert "%md-sandbox diagram specialist" in arch["backstory"]
+        deck = apply_diagram_directive({"backstory": ""}, "make me a deck about Q3")
+        assert "SLIDE DECK DESIGN SYSTEM" in deck["backstory"]
+
+    def test_structured_directive_is_idempotent(self):
+        from src.services.chat.diagram_directive import apply_diagram_directive
+
+        spec = apply_diagram_directive({"backstory": ""}, "create a mind map of MCP")
+        again = apply_diagram_directive(spec, "create a mind map of MCP")
+        assert again["backstory"].count("The app builds the") == 1
