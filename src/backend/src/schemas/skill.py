@@ -10,7 +10,7 @@ shape; conformance is decided in one place.
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 #: Where a skill came from. Drives trust: an uploaded skill is untrusted text
 #: headed for a system prompt.
@@ -100,3 +100,20 @@ class SkillValidationResult(BaseModel):
     valid: bool
     errors: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+
+
+class UcSyncTarget(BaseModel):
+    """Where to publish a skill in Unity Catalog.
+
+    The wire key is ``schema``, but the Python field is ``schema_name`` — a
+    Pydantic field literally named ``schema`` shadows ``BaseModel.schema`` and
+    warns on every import. The alias keeps the API contract (``catalog`` +
+    ``schema``) while sidestepping that.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    catalog: str = Field(..., description="Target Unity Catalog catalog")
+    schema_name: str = Field(
+        ..., alias="schema", description="Target schema within the catalog"
+    )

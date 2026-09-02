@@ -22,9 +22,11 @@ from src.schemas.skill import (
     SkillResponse,
     SkillUpdate,
     SkillValidationResult,
+    UcSyncTarget,
 )
 from src.services.skills import packaging, parser
 from src.services.skills.service import SkillService
+from src.services.skills.uc_sync import SkillUcSyncService
 
 router = APIRouter(
     prefix="/skills",
@@ -282,6 +284,82 @@ async def read_skill_file(
                 "content": stored.content or "",
             }
     raise NotFoundError(f"'{skill.name}' has no file '{wanted}'.")
+
+
+@router.get("/uc")
+async def list_uc_skills(
+    session: SessionDep,
+    group_context: GroupContextDep,
+    catalog: str = Query(..., description="Unity Catalog catalog to list skills in"),
+    schema: str = Query(..., description="Schema within the catalog"),
+):
+    """List the skills published in a Unity Catalog schema.
+
+    Reads UC on behalf of the logged-in user (OBO), so it shows exactly the
+    skills they can see there — the read side of the Kasal↔UC sync.
+    """
+    _require_author(group_context)
+    sync = SkillUcSyncService(
+        session, group_context, getattr(group_context, "access_token", None)
+    )
+    return {"skills": await sync.list_uc_skills(catalog, schema)}
+
+
+@router.post("/{skill_id}/sync-to-uc")
+async def sync_skill_to_uc(
+    skill_id: int,
+    body: UcSyncTarget,
+    session: SessionDep,
+    group_context: GroupContextDep,
+):
+    """Publish this workspace's skill into ``catalog.schema`` as a UC skill.
+
+    Create securable → upload SKILL.md + bundle files → finalize, on behalf of
+    the logged-in user (OBO) so it only writes where their UC grants allow.
+    Idempotent — re-syncing an existing skill updates its content in place.
+    """
+    _require_author(group_context)
+    sync = SkillUcSyncService(
+        session, group_context, getattr(group_context, "access_token", None)
+    )
+    return await sync.push_skill(skill_id, body.catalog, body.schema_name)
+
+
+@router.post("/sync-all-to-uc")
+async def sync_all_skills_to_uc(
+    body: UcSyncTarget,
+    session: SessionDep,
+    group_context: GroupContextDep,
+):
+    """Publish every skill visible to this workspace into ``catalog.schema``.
+
+    Returns a per-skill ``{name, status, error?}`` summary — one skill failing
+    (e.g. a UC permission error) does not abort the rest.
+    """
+    _require_author(group_context)
+    sync = SkillUcSyncService(
+        session, group_context, getattr(group_context, "access_token", None)
+    )
+    return {"results": await sync.push_all_skills(body.catalog, body.schema_name)}
+
+
+@router.post("/sync-all-from-uc")
+async def sync_all_skills_from_uc(
+    body: UcSyncTarget,
+    session: SessionDep,
+    group_context: GroupContextDep,
+):
+    """Pull every skill published in ``catalog.schema`` into this workspace.
+
+    Imported skills are ``source='uploaded'`` and upserted BY NAME — a re-pull
+    updates the workspace's own copy in place. Returns a per-skill
+    ``{name, status, error?}`` summary.
+    """
+    _require_author(group_context)
+    sync = SkillUcSyncService(
+        session, group_context, getattr(group_context, "access_token", None)
+    )
+    return {"results": await sync.import_all_skills(body.catalog, body.schema_name)}
 
 
 @router.get("/{skill_id}/export")

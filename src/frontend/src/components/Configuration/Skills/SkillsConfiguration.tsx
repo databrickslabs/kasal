@@ -15,14 +15,23 @@ import {
   Typography,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import DeleteIcon from '@mui/icons-material/Delete';
 import DownloadIcon from '@mui/icons-material/Download';
 import EditIcon from '@mui/icons-material/Edit';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
-import { Skill, SkillInput, SkillService } from '../../../api/tools/SkillService';
+import {
+  Skill,
+  SkillInput,
+  SkillService,
+  UcSyncResult,
+} from '../../../api/tools/SkillService';
+import { DatabricksService } from '../../../api/databricks/DatabricksService';
 import SkillEditor from './SkillEditor';
 import SkillFileViewer from './SkillFileViewer';
+import SkillPublishDialog from './SkillPublishDialog';
 
 /**
  * Agent Skills — authoring, upload, enablement.
@@ -46,6 +55,16 @@ const SkillsConfiguration: React.FC = () => {
   const [viewing, setViewing] = useState<{ skill: Skill; path: string } | null>(
     null,
   );
+  // The active UC sync action: publish one skill, publish all, or pull all.
+  const [sync, setSync] = useState<
+    { mode: 'one'; skill: Skill } | { mode: 'push-all' } | { mode: 'pull-all' } | null
+  >(null);
+  // UC publish is offered ONLY when the Databricks section has a catalog + schema
+  // configured — that's the destination, so without it there is nowhere to
+  // publish and the action would only produce a confusing error.
+  const [ucTarget, setUcTarget] = useState<{ catalog: string; schema: string } | null>(
+    null,
+  );
   const fileInput = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -63,6 +82,28 @@ const SkillsConfiguration: React.FC = () => {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Whether UC publish is available: the Databricks integration is on and a
+  // catalog + schema are set. Best-effort — a failure just hides the action.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const cfg = await DatabricksService.getInstance().getDatabricksConfig();
+        if (cancelled) return;
+        setUcTarget(
+          cfg && cfg.enabled && cfg.catalog && cfg.schema
+            ? { catalog: cfg.catalog, schema: cfg.schema }
+            : null,
+        );
+      } catch {
+        if (!cancelled) setUcTarget(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleSave = async (input: SkillInput) => {
     const saved = editing
@@ -107,6 +148,30 @@ const SkillsConfiguration: React.FC = () => {
     }
   };
 
+  const summarize = (results: UcSyncResult[]): string => {
+    const ok = results.filter((r) => r.status === 'ok').length;
+    const failed = results.length - ok;
+    if (!failed) return `${ok} skill${ok === 1 ? '' : 's'} synced with Unity Catalog.`;
+    const firstErr = results.find((r) => r.status === 'error')?.error ?? '';
+    return `${ok}/${results.length} synced — ${failed} failed. ${firstErr}`.trim();
+  };
+
+  // Runs whichever sync the dialog was opened for; throws propagate to the
+  // dialog, which shows the backend error verbatim and stays open.
+  const runSync = async (catalog: string, schema: string) => {
+    if (!sync) return;
+    if (sync.mode === 'one') {
+      await SkillService.syncToUc(sync.skill.id, catalog, schema);
+      setToast(`${sync.skill.name} published to Unity Catalog.`);
+    } else if (sync.mode === 'push-all') {
+      setToast(summarize(await SkillService.syncAllToUc(catalog, schema)));
+    } else {
+      const results = await SkillService.syncAllFromUc(catalog, schema);
+      setToast(summarize(results));
+      await load(); // pulled skills changed the local list
+    }
+  };
+
   const handleUpload = async (file: File) => {
     try {
       const saved = await SkillService.upload(file);
@@ -142,6 +207,34 @@ const SkillsConfiguration: React.FC = () => {
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
+          {ucTarget && (
+            <>
+              <Tooltip
+                title={`Pull all skills from Unity Catalog (${ucTarget.catalog}.${ucTarget.schema})`}
+              >
+                <Button
+                  size="small"
+                  startIcon={<CloudDownloadIcon />}
+                  onClick={() => setSync({ mode: 'pull-all' })}
+                  sx={{ whiteSpace: 'nowrap' }}
+                >
+                  Pull from UC
+                </Button>
+              </Tooltip>
+              <Tooltip
+                title={`Publish all skills to Unity Catalog (${ucTarget.catalog}.${ucTarget.schema})`}
+              >
+                <Button
+                  size="small"
+                  startIcon={<CloudUploadIcon />}
+                  onClick={() => setSync({ mode: 'push-all' })}
+                  sx={{ whiteSpace: 'nowrap' }}
+                >
+                  Publish all
+                </Button>
+              </Tooltip>
+            </>
+          )}
           <Button
             size="small"
             startIcon={<UploadFileIcon />}
@@ -270,6 +363,18 @@ const SkillsConfiguration: React.FC = () => {
                         </Typography>
                       }
                     />
+                    {ucTarget && (
+                      <Tooltip
+                        title={`Publish to Unity Catalog (${ucTarget.catalog}.${ucTarget.schema})`}
+                      >
+                        <IconButton
+                          size="small"
+                          onClick={() => setSync({ mode: 'one', skill })}
+                        >
+                          <CloudUploadIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    )}
                     <Tooltip title="Download as a skill folder">
                       <IconButton
                         size="small"
@@ -332,6 +437,24 @@ const SkillsConfiguration: React.FC = () => {
         skillName={viewing?.skill.name ?? ''}
         path={viewing?.path ?? ''}
         onClose={() => setViewing(null)}
+      />
+
+      <SkillPublishDialog
+        open={Boolean(sync)}
+        title={
+          sync?.mode === 'one'
+            ? `Publish “${sync.skill.name}” to Unity Catalog`
+            : sync?.mode === 'push-all'
+              ? 'Publish all skills to Unity Catalog'
+              : 'Pull skills from Unity Catalog'
+        }
+        fqnName={sync?.mode === 'one' ? sync.skill.name : undefined}
+        confirmLabel={sync?.mode === 'pull-all' ? 'Pull' : 'Publish'}
+        busyLabel={sync?.mode === 'pull-all' ? 'Pulling…' : 'Publishing…'}
+        defaultCatalog={ucTarget?.catalog ?? ''}
+        defaultSchema={ucTarget?.schema ?? ''}
+        onClose={() => setSync(null)}
+        onConfirm={runSync}
       />
 
       <Snackbar

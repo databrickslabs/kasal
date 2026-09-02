@@ -68,6 +68,9 @@ class KasalProduct:
     # Converters / PowerBI migration
     POWERBI = "powerbi"
 
+    # Agent Skills ↔ Unity Catalog Skills sync
+    SKILL = "skill"
+
 
 def get_user_agent(product: str = None) -> str:
     """

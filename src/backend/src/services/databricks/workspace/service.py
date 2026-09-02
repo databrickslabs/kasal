@@ -487,6 +487,19 @@ class DatabricksService:
 
         return service
 
+    async def get_workspace_auth(
+        self, host: str | None = None
+    ) -> Tuple[Dict[str, str], str]:
+        """Public entrypoint other domains use to borrow this service's auth.
+
+        Returns ``(auth_headers, workspace_url)`` from the same OBO→PAT→SPN chain
+        and host resolution the listing calls use. The skills↔UC sync
+        (``services/skills/uc_sync``) needs both to call the UC Skills + Files
+        APIs, and reaching them through the databricks service — rather than
+        re-deriving auth in the skills domain — is the ownership rule.
+        """
+        return await self._resolve_workspace_url_and_headers(host)
+
     async def _resolve_workspace_url_and_headers(self, host: str | None = None):
         """Helper: returns (auth_headers, workspace_url) applying optional host override."""
         from src.utils.databricks_auth import get_auth_context

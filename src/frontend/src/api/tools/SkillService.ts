@@ -36,6 +36,27 @@ export interface Skill {
   updated_at?: string | null;
 }
 
+/**
+ * A skill as it exists in Unity Catalog (governance metadata only — the body +
+ * files live in the UC Files API, not on the securable). `name` is the full
+ * `skills/{catalog}.{schema}.{id}` resource name; `finalize_time` is set once the
+ * SKILL.md upload has been finalized.
+ */
+export interface UcSkill {
+  name: string;
+  bundle_name?: string;
+  description?: string;
+  comment?: string;
+  finalize_time?: string | null;
+}
+
+/** One row of a batch UC sync summary (publish-all / pull-all). */
+export interface UcSyncResult {
+  name: string;
+  status: 'ok' | 'error';
+  error?: string;
+}
+
 export interface SkillFileInput {
   path: string;
   content: string;
@@ -165,6 +186,53 @@ export const SkillService = {
     link.download = `${name}.zip`;
     link.click();
     URL.revokeObjectURL(url);
+  },
+
+  /**
+   * Publish a skill into Unity Catalog as a governed UC skill.
+   *
+   * Runs the create→upload SKILL.md→finalize lifecycle on the backend, on
+   * behalf of the logged-in user (OBO) so it only writes where their UC grants
+   * allow. Idempotent — re-publishing updates the UC skill's content in place.
+   * `catalog`/`schema` are chosen per publish (the caller remembers the last).
+   */
+  async syncToUc(id: number, catalog: string, schema: string): Promise<UcSkill> {
+    const { data } = await apiClient.post<UcSkill>(`${BASE}/${id}/sync-to-uc`, {
+      catalog,
+      schema,
+    });
+    return data;
+  },
+
+  /** The skills published in a Unity Catalog schema (what the user can see there). */
+  async listUc(catalog: string, schema: string): Promise<UcSkill[]> {
+    const { data } = await apiClient.get<{ skills: UcSkill[] }>(`${BASE}/uc`, {
+      params: { catalog, schema },
+    });
+    return data.skills ?? [];
+  },
+
+  /** Publish every workspace skill to `catalog.schema`; per-skill result summary. */
+  async syncAllToUc(catalog: string, schema: string): Promise<UcSyncResult[]> {
+    const { data } = await apiClient.post<{ results: UcSyncResult[] }>(
+      `${BASE}/sync-all-to-uc`,
+      { catalog, schema },
+    );
+    return data.results ?? [];
+  },
+
+  /**
+   * Pull every skill published in `catalog.schema` into this workspace.
+   *
+   * Imported skills upsert BY NAME — a re-pull updates the workspace's own copy
+   * in place rather than duplicating it. Per-skill result summary.
+   */
+  async syncAllFromUc(catalog: string, schema: string): Promise<UcSyncResult[]> {
+    const { data } = await apiClient.post<{ results: UcSyncResult[] }>(
+      `${BASE}/sync-all-from-uc`,
+      { catalog, schema },
+    );
+    return data.results ?? [];
   },
 };
 
