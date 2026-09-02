@@ -1,4 +1,5 @@
 import React from 'react';
+import ChatStarters from './ChatStarters';
 import { useExecutionStore } from '../../store/executionStore';
 import { usePermissionStore } from '../../../../store/permissions';
 import { useAppStore } from '../../store/appStore';
@@ -48,7 +49,10 @@ const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({ onPrefill }) => {
   const canUseBuilders = allowAgentBuilder || allowFlowBuilder;
 
   return (
-    <div className="w-full mt-4" data-testid="chat-empty-state">
+    <div className="w-full mt-4 space-y-5" data-testid="chat-empty-state">
+      {/* Nine starters — what Kasal builds from one sentence. Each drops an
+          opening phrase into the composer; the user finishes it. */}
+      <ChatStarters onPick={onPrefill} />
       {/* Builder bridge — Agent/Flow Builder are otherwise hidden behind the
           top-bar grid icon; surface them with a hint about WHEN to reach for each
           (crews vs sequenced multi-crew orchestration). Two tidy lines: the

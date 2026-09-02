@@ -787,7 +787,6 @@ const ChatInput: React.FC<ChatInputProps> = ({
               attachmentCount={attachments.length}
               onAttachFiles={() => fileInputRef.current?.click()}
               onOpenMcpConfig={onOpenMcpConfig}
-              onCreateSkill={() => onSend('/skill')}
             />
 
             {/* Send — submit only. Stop lives in the run-activity container above.
