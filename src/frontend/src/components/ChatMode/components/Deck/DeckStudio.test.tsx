@@ -33,7 +33,28 @@ describe('DeckStudio', () => {
     expect(screen.getByRole('listitem', { name: 'Slide 1' })).toHaveAttribute('aria-current', 'true');
     fireEvent.click(screen.getByLabelText('Select slide 3'));
     expect(screen.getByRole('listitem', { name: 'Slide 3' })).toHaveAttribute('aria-current', 'true');
-    fireEvent.keyDown(window, { key: 'ArrowLeft' });
+    // Keys are handled on the studio container (a window listener would be
+    // defeated by the modal's own stopPropagation), so they must originate from
+    // inside it — as a real keypress with focus in the studio does.
+    fireEvent.keyDown(screen.getByRole('dialog', { name: 'Deck studio' }), { key: 'ArrowLeft' });
+    expect(screen.getByRole('listitem', { name: 'Slide 2' })).toHaveAttribute('aria-current', 'true');
+  });
+
+  it('selects a slide on pointer-down, so a draggable row eating the click still selects', () => {
+    render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
+    fireEvent.pointerDown(screen.getByLabelText('Select slide 3'));
+    expect(screen.getByRole('listitem', { name: 'Slide 3' })).toHaveAttribute('aria-current', 'true');
+  });
+
+  it('arrows page slides from the empty instruction bar, but edit the text once typed', () => {
+    render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
+    const bar = screen.getByLabelText('Slide instruction');
+    // The bar autofocuses; while it is empty the arrows still page slides.
+    fireEvent.keyDown(bar, { key: 'ArrowRight' });
+    expect(screen.getByRole('listitem', { name: 'Slide 2' })).toHaveAttribute('aria-current', 'true');
+    // Once there is text to edit, the field keeps the arrows (no navigation).
+    fireEvent.change(bar, { target: { value: 'make the title bold' } });
+    fireEvent.keyDown(bar, { key: 'ArrowRight' });
     expect(screen.getByRole('listitem', { name: 'Slide 2' })).toHaveAttribute('aria-current', 'true');
   });
 
@@ -115,7 +136,7 @@ describe('DeckStudio', () => {
     const onClose = vi.fn();
     render(<DeckStudio code={DECK} onClose={onClose} />);
     act(() => {
-      fireEvent.keyDown(window, { key: 'Escape' });
+      fireEvent.keyDown(screen.getByRole('dialog', { name: 'Deck studio' }), { key: 'Escape' });
     });
     expect(onClose).toHaveBeenCalled();
   });

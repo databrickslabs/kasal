@@ -132,32 +132,40 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
     }
   };
 
-  // Keys, window-wide, except while typing in the instruction bar.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (present) return; // the presentation owns the keys
-      const target = e.target as HTMLElement | null;
-      const typing = target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT');
+  // Keys are handled on the studio's own container (onKeyDown below), NOT a
+  // window listener: the container calls stopPropagation to stay modal, which
+  // would also stop a window listener from ever seeing the event. Escape closes;
+  // arrows page slides — except while the instruction bar (which autofocuses)
+  // HAS text to edit, when the field keeps them. While the presentation overlay
+  // is open it owns the keys through its own window listener, so we don't touch
+  // them.
+  const onDeckKey = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (present) return; // the presentation overlay owns the keys
+      const el = e.target as HTMLInputElement | HTMLTextAreaElement | null;
+      const editing =
+        !!el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') && el.value.length > 0;
       if (e.key === 'Escape') {
         e.preventDefault();
         onClose();
-        return;
+      } else if (!editing) {
+        const k = e.key;
+        let next: number | null = null;
+        if (k === 'ArrowLeft' || k === 'ArrowUp' || k === 'PageUp') next = Math.max(0, shown - 1);
+        else if (k === 'ArrowRight' || k === 'ArrowDown' || k === 'PageDown') next = Math.min(count - 1, shown + 1);
+        else if (k === 'Home') next = 0;
+        else if (k === 'End') next = count - 1;
+        if (next !== null) {
+          e.preventDefault();
+          setSelected(next);
+        }
       }
-      if (typing) return;
-      const k = e.key;
-      let next: number | null = null;
-      if (k === 'ArrowLeft' || k === 'ArrowUp' || k === 'PageUp') next = Math.max(0, shown - 1);
-      else if (k === 'ArrowRight' || k === 'ArrowDown' || k === 'PageDown') next = Math.min(count - 1, shown + 1);
-      else if (k === 'Home') next = 0;
-      else if (k === 'End') next = count - 1;
-      if (next !== null) {
-        e.preventDefault();
-        setSelected(next);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [shown, count, onClose, present]);
+      // Modal: keep keys from reaching the chat behind (a portal still bubbles
+      // React events up the component tree).
+      e.stopPropagation();
+    },
+    [present, shown, count, onClose],
+  );
 
   useEffect(() => {
     if (!menu) return;
@@ -201,9 +209,12 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
         // A portal still bubbles React events up the COMPONENT tree: a click in
         // the instruction bar reached the deck card's onClick, which focuses the
         // card — and the textarea lost focus the moment it got it. The studio is
-        // modal; nothing behind it should hear its clicks or keys.
+        // modal; nothing behind it should hear its clicks. Keys are handled here
+        // too (onDeckKey), which is why they can't just be stopped: a blanket
+        // key-stop is what kept arrow navigation — and the presentation's own
+        // key handler — from ever running.
         onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.stopPropagation()}
+        onKeyDown={onDeckKey}
         style={{ background: '#111', color: '#e5e5e5' }}
       >
         <div className="flex items-center gap-2 px-4 py-2" style={{ borderBottom: '1px solid #222' }}>

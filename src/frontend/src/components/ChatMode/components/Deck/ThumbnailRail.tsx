@@ -115,11 +115,17 @@ const ThumbnailRail: React.FC<ThumbnailRailProps> = ({
                   background="#1a1a1a"
                   title={`Slide ${i + 1} thumbnail`}
                 />
-                {/* The iframe swallows clicks; a transparent catcher over it selects. */}
+                {/* The iframe swallows clicks; a transparent catcher over it selects.
+                    Selection is on pointer-DOWN, not click: the row is draggable,
+                    so a press that moves even slightly starts a native drag and
+                    the click never fires — the rail scrolled but the slide never
+                    got selected. pointerdown fires on press regardless. onClick
+                    stays for keyboard/assistive activation of the button. */}
                 <button
                   type="button"
                   className="absolute inset-0 h-full w-full"
                   aria-label={`Select slide ${i + 1}`}
+                  onPointerDown={() => onSelect(i)}
                   onClick={() => onSelect(i)}
                 />
                 {isWorking && (
