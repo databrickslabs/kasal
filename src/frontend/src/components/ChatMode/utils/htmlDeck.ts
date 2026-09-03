@@ -216,6 +216,23 @@ export function replaceDeckInContent(content: string, code: string): string {
     .join('');
 }
 
+/**
+ * A blank slide in a neighbour's design: the neighbour's opening tag (its
+ * background, padding, fonts ride on the inline style) and its own <style>
+ * blocks, with the content replaced by a quiet placeholder. What "+" inserts
+ * the moment it is clicked — the model fills it in afterwards, if asked.
+ */
+export function blankSlideLike(neighbour?: string): string {
+  const src = neighbour || '';
+  const open = src.match(/^\s*<section\b[^>]*>/i)?.[0].replace(REFINED_RE, '') || '<section class="slide">';
+  const styles = (src.match(/<style\b[^>]*>[\s\S]*?<\/style>/gi) || []).join('\n');
+  return (
+    `${open}${styles}` +
+    '<div style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;' +
+    'font-size:28px;opacity:0.35;letter-spacing:0.02em">New slide</div></section>'
+  );
+}
+
 /** A deck as the chat renders it: one ```html fence around the whole thing. */
 export function fenceDeck(html: string): string {
   return '```html\n' + (html || '').trim() + '\n```';

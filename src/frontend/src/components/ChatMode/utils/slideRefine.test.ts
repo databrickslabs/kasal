@@ -91,6 +91,19 @@ describe('planSlideEdit', () => {
     expect(plan.focus).toBe(2);
   });
 
+  it("a blank is inserted at once in a neighbour's design; fill writes it from its neighbours", () => {
+    const blank = planSlideEdit({ kind: 'blank', index: 2 }, DECK);
+    if (blank.kind !== 'instant') throw new Error('expected instant');
+    expect(titles(blank.deck)).toEqual(['Cover', 'Two', undefined, 'Three', 'Four']);
+    expect(splitSlides(blank.deck)[2]).toContain('New slide');
+    expect(blank.focus).toBe(2);
+
+    const fill = planSlideEdit({ kind: 'fill', index: 2, instruction: 'pricing' }, blank.deck);
+    if (fill.kind !== 'call') throw new Error('expected call');
+    expect(fill.request).toMatchObject({ mode: 'add', instruction: 'pricing', before: slide('Two'), after: slide('Three'), position: '3 of 5' });
+    expect(titles(fill.apply(slide('Pricing')))).toEqual(['Cover', 'Two', 'Pricing', 'Three', 'Four']);
+  });
+
   it('refining the cover uses the next slide as the design reference', () => {
     const plan = planSlideEdit({ kind: 'refine', index: 0, instruction: 'x' }, DECK);
     if (plan.kind !== 'call') throw new Error('expected call');

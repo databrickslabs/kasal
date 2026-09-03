@@ -1,33 +1,23 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Loader2, Sparkles, X } from 'lucide-react';
+import { FILL_CHIPS, REFINE_CHIPS } from './chips';
 
 /**
  * The studio's instruction bar: what should change on the selected slide (or
- * what a new slide should cover), a few one-click chips, Apply. Enter applies,
+ * what a just-inserted blank slide should cover), a few one-click chips, Apply. Enter applies,
  * Shift+Enter breaks a line.
  */
-
-export const REFINE_CHIPS = [
-  'Shorten the text',
-  'Make it more visual',
-  'Bigger title',
-  'Turn the text into bullets',
-  'Add speaker notes',
-  'Change the layout',
-];
-
-export const ADD_CHIPS = ['An agenda', 'A summary of the previous slide', 'Next steps', 'A section divider'];
 
 interface SlideInstructionBarProps {
   /** Which slide the bar is about (1-based, for the label). */
   slideNumber: number;
-  /** `add` writes a new slide at a position instead of revising one. */
-  mode: 'refine' | 'add';
+  /** `fill` writes a just-inserted blank slide from scratch instead of revising one. */
+  mode: 'refine' | 'fill';
   working: boolean;
   error: string | null;
   onApply: (instruction: string) => void;
-  /** Leave add mode without adding. */
-  onCancelAdd: () => void;
+  /** Leave fill mode — the blank slide stays as it is. */
+  onCancelFill: () => void;
 }
 
 const SlideInstructionBar: React.FC<SlideInstructionBarProps> = ({
@@ -36,7 +26,7 @@ const SlideInstructionBar: React.FC<SlideInstructionBarProps> = ({
   working,
   error,
   onApply,
-  onCancelAdd,
+  onCancelFill,
 }) => {
   const [value, setValue] = useState('');
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -52,17 +42,17 @@ const SlideInstructionBar: React.FC<SlideInstructionBarProps> = ({
     onApply(t);
     setValue('');
   };
-  const chips = mode === 'add' ? ADD_CHIPS : REFINE_CHIPS;
+  const chips = mode === 'fill' ? FILL_CHIPS : REFINE_CHIPS;
 
   return (
     <div className="flex flex-col gap-2 px-6 py-3" style={{ background: '#161616', color: '#e5e5e5' }}>
       <div className="flex items-center gap-2 text-xs" style={{ color: '#9a9a9a' }}>
         <span className="font-medium" style={{ color: '#e5e5e5' }}>
-          {mode === 'add' ? `New slide at position ${slideNumber}` : `Slide ${slideNumber}`}
+          {mode === 'fill' ? `New slide ${slideNumber} — what should it cover?` : `Slide ${slideNumber}`}
         </span>
-        {mode === 'add' && (
-          <button type="button" className="inline-flex items-center gap-1 hover:opacity-80" onClick={onCancelAdd}>
-            <X size={12} /> cancel
+        {mode === 'fill' && (
+          <button type="button" className="inline-flex items-center gap-1 hover:opacity-80" onClick={onCancelFill}>
+            <X size={12} /> leave it blank
           </button>
         )}
         {error && (
@@ -84,8 +74,8 @@ const SlideInstructionBar: React.FC<SlideInstructionBarProps> = ({
           }}
           rows={1}
           disabled={working}
-          placeholder={mode === 'add' ? 'What should the new slide cover?' : 'What should change on this slide?'}
-          aria-label={mode === 'add' ? 'New slide instruction' : 'Slide instruction'}
+          placeholder={mode === 'fill' ? 'Describe the new slide' : 'What should change on this slide?'}
+          aria-label={mode === 'fill' ? 'New slide instruction' : 'Slide instruction'}
           className="flex-1 resize-none rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/60"
           style={{ background: '#242424', color: '#f2f2f2', border: '1px solid #333' }}
         />

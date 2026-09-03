@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { DiagramSegment } from './mdSandboxDiagram';
 import {
+  blankSlideLike,
   replaceDeckInContent,
   stageFor,
   clearRefined,
@@ -196,5 +197,18 @@ describe('replaceDeckInContent', () => {
     );
     expect(replaceDeckInContent('no deck here', '<section class="slide"></section>')).toBe('no deck here');
     expect(stageFor('<section class="slide">x</section>')).toContain('class="kwrap"');
+  });
+});
+
+describe('blankSlideLike', () => {
+  it("keeps the neighbour's opening tag and styles, drops its content", () => {
+    const neighbour =
+      '<section data-refined="1" class="slide dark" style="background:#111;padding:40px"><style>.x{color:red}</style><h1>Old</h1><p>text</p></section>';
+    const blank = blankSlideLike(neighbour);
+    expect(blank.startsWith('<section class="slide dark" style="background:#111;padding:40px"><style>.x{color:red}</style>')).toBe(true);
+    expect(blank).not.toContain('Old');
+    expect(blank).toContain('New slide');
+    expect(blank.endsWith('</section>')).toBe(true);
+    expect(blankSlideLike(undefined).startsWith('<section class="slide">')).toBe(true);
   });
 });

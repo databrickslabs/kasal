@@ -67,4 +67,17 @@ describe('HtmlDeckBlock slide refine', () => {
     fireEvent.click(screen.getByTitle('Done (Esc)'));
     expect(screen.queryByRole('dialog', { name: 'Deck studio' })).toBeNull();
   });
+
+  it('typing in the studio keeps focus — the deck card must not grab it back', () => {
+    render(<HtmlDeckBlock code={DECK} messageId="m1" />);
+    fireEvent.click(screen.getByTitle('Edit deck'));
+    const box = screen.getByLabelText('Slide instruction') as HTMLTextAreaElement;
+    box.focus();
+    // The card's onClick focuses the card on any click inside it; a click in the
+    // (portaled) studio bubbles there through React unless the studio stops it.
+    fireEvent.click(box);
+    expect(document.activeElement).toBe(box);
+    fireEvent.change(box, { target: { value: 'bigger title' } });
+    expect(box.value).toBe('bigger title');
+  });
 });

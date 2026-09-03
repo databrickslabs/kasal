@@ -6,7 +6,8 @@ import { SLIDE_W, stageFor } from '../../utils/htmlDeck';
 /**
  * The studio's left rail: every slide small and numbered, the selected one
  * outlined. Click selects, drag reorders, hover shows duplicate / delete, a
- * "+" between slides adds one there. All of it instant — no model involved.
+ * "+" between slides (and "Add slide" at the bottom) inserts a blank one
+ * there at once. All of it instant — no model involved.
  */
 
 interface ThumbnailRailProps {
@@ -148,6 +149,15 @@ const ThumbnailRail: React.FC<ThumbnailRailProps> = ({
           </React.Fragment>
         );
       })}
+      {/* The "+" between slides only shows on hover; this one is always there. */}
+      <button
+        type="button"
+        className="mt-2 inline-flex items-center justify-center gap-1.5 rounded-md border !px-2 !py-1.5 text-xs hover:bg-white/10"
+        style={{ borderColor: '#333', color: '#cfcfcf' }}
+        onClick={() => onAddAt(slides.length)}
+      >
+        <Plus size={13} /> Add slide
+      </button>
     </div>
   );
 };

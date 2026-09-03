@@ -19,6 +19,7 @@ import type { ChatMessage } from '../types/chat';
 import type { SlideRefineRequest } from '../../../api/chat/DeckService';
 import { splitDiagramSegments } from './mdSandboxDiagram';
 import {
+  blankSlideLike,
   clearRefined,
   duplicateSlide,
   insertSlide,
@@ -34,6 +35,10 @@ import {
 export type SlideEdit =
   | { kind: 'refine'; index: number; instruction: string }
   | { kind: 'add'; index: number; instruction: string }
+  /** Insert a blank slide (in a neighbour's design) so that it becomes slide `index`. */
+  | { kind: 'blank'; index: number }
+  /** Write the slide at `index` from scratch, given its neighbours — how a blank one gets filled. */
+  | { kind: 'fill'; index: number; instruction: string }
   | { kind: 'remove'; index: number }
   | { kind: 'move'; from: number; to: number }
   | { kind: 'duplicate'; index: number };
@@ -228,6 +233,30 @@ export function planSlideEdit(edit: SlideEdit, deck: string): SlideEditPlan {
     const next = replaceSlide(moved, edit.to, markRefined(slides[edit.from]));
     const label = `Moved ${human(edit.from)} to position ${edit.to + 1}`;
     return { kind: 'instant', deck: next, focus: edit.to, summary: label, done: label };
+  }
+
+  if (edit.kind === 'blank') {
+    const at = Math.max(0, Math.min(edit.index, n));
+    const next = insertSlide(base, at, markRefined(blankSlideLike(slides[at - 1] ?? slides[at])));
+    const label = `Added ${human(at)}`;
+    return { kind: 'instant', deck: next, focus: at, summary: label, done: label };
+  }
+  if (edit.kind === 'fill') {
+    const i = Math.max(0, Math.min(edit.index, n - 1));
+    return {
+      kind: 'call',
+      request: {
+        mode: 'add',
+        instruction: edit.instruction,
+        before: slides[i - 1] || undefined,
+        after: slides[i + 1] || undefined,
+        position: `${i + 1} of ${n}`,
+      },
+      apply: (section) => replaceSlide(base, i, markRefined(section)),
+      focus: i,
+      summary: `Writing ${human(i)}`,
+      done: `Wrote ${human(i)}`,
+    };
   }
 
   if (edit.kind === 'refine') {

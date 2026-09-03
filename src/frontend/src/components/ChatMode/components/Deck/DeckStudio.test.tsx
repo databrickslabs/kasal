@@ -56,6 +56,24 @@ describe('DeckStudio', () => {
     expect(deckInMessage()).toEqual(['Cover', 'Two', 'Three']);
   });
 
+  it('the studio follows the message: an edit written back from elsewhere shows up', () => {
+    render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
+    expect(screen.getAllByRole('listitem')).toHaveLength(3);
+    // Simulate the deck card re-rendering the studio with new content.
+    const { rerender } = render(<DeckStudio code={[slide('A'), slide('B')].join('\n')} messageId="m1" onClose={() => {}} />);
+    rerender(<DeckStudio code={[slide('A'), slide('B'), slide('C'), slide('D')].join('\n')} messageId="m1" onClose={() => {}} />);
+    expect(screen.getAllByRole('dialog').length).toBeGreaterThan(0);
+  });
+
+  it('a slide handed back unchanged is said so, not silently kept', async () => {
+    refineSlide.mockResolvedValue({ section: slide('Two'), model: 'm', attempts: 1 });
+    render(<DeckStudio code={DECK} messageId="m1" initialIndex={1} onClose={() => {}} />);
+    fireEvent.change(screen.getByLabelText('Slide instruction'), { target: { value: 'x' } });
+    fireEvent.click(screen.getByText('Apply'));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('unchanged'));
+    expect(screen.queryByText(/1 edit/)).toBeNull();
+  });
+
   it('a reply without a slide is shown as an error and changes nothing', async () => {
     refineSlide.mockResolvedValue({ section: null, error: 'The model did not return a slide.' });
     render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
@@ -72,19 +90,25 @@ describe('DeckStudio', () => {
     expect(deckInMessage()).toEqual(['Cover', 'Two']);
     fireEvent.click(screen.getByLabelText('Duplicate slide 1'));
     expect(deckInMessage()).toEqual(['Cover', 'Cover', 'Two']);
+    // "+" inserts a blank slide RIGHT AWAY, then the bar offers to write it.
     fireEvent.click(screen.getByLabelText('Add a slide at position 2'));
-    expect(screen.getByText('New slide at position 2')).toBeInTheDocument();
+    expect(deckInMessage()).toEqual(['Cover', undefined, 'Cover', 'Two']);
+    expect(screen.getByText('New slide 2 — what should it cover?')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('New slide instruction'), { target: { value: 'agenda' } });
     fireEvent.click(screen.getByText('Apply'));
     await waitFor(() => expect(deckInMessage()).toEqual(['Cover', 'New', 'Cover', 'Two']));
     expect(refineSlide.mock.calls[0][0]).toMatchObject({ mode: 'add', before: slide('Cover'), after: slide('Cover'), position: '2 of 4' });
+    // The always-visible button appends one at the end; "leave it blank" keeps it.
+    fireEvent.click(screen.getByText('Add slide'));
+    expect(deckInMessage()).toEqual(['Cover', 'New', 'Cover', 'Two', undefined]);
+    fireEvent.click(screen.getByText('leave it blank'));
     // Drag slide 4 onto slide 1.
     const from = screen.getByRole('listitem', { name: 'Slide 4' });
     const to = screen.getByRole('listitem', { name: 'Slide 1' });
     fireEvent.dragStart(from);
     fireEvent.dragOver(to);
     fireEvent.drop(to);
-    expect(deckInMessage()).toEqual(['Two', 'Cover', 'New', 'Cover']);
+    expect(deckInMessage()).toEqual(['Two', 'Cover', 'New', 'Cover', undefined]);
   });
 
   it('Escape closes', () => {
