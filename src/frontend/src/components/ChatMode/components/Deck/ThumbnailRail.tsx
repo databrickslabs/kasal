@@ -54,7 +54,14 @@ const ThumbnailRail: React.FC<ThumbnailRailProps> = ({
   return (
     <div
       className="flex h-full w-56 flex-col overflow-y-auto px-3 py-3"
-      style={{ background: '#0d0d0d', borderRight: '1px solid #222' }}
+      // scrollbar-gutter: stable reserves the scrollbar's width whether or not it
+      // shows. Without it, a width-consuming scrollbar (macOS with a mouse, or
+      // "Always show scrollbars") sets up a feedback loop: each thumbnail iframe
+      // scales to the rail's inner width, so toggling the scrollbar refits every
+      // thumbnail, which changes the total height, which re-toggles the
+      // scrollbar — the rail shakes forever. A reserved gutter keeps the inner
+      // width constant, so a fit happens once and settles.
+      style={{ background: '#0d0d0d', borderRight: '1px solid #222', scrollbarGutter: 'stable' }}
       role="list"
       aria-label="Slides"
     >
