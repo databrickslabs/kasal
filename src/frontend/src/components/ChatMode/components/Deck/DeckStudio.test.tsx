@@ -132,6 +132,22 @@ describe('DeckStudio', () => {
     expect(deckInMessage()).toEqual(['Two', 'Cover', 'New', 'Cover', undefined]);
   });
 
+  it('arrow keys page the deck from inside the studio, and while presenting', () => {
+    render(<DeckStudio code={DECK} messageId="m1" onClose={() => {}} />);
+    // Focus sits on a control inside the studio (not the textarea): the key
+    // must still reach the window listener.
+    const present = screen.getByTitle('Present');
+    present.focus();
+    fireEvent.keyDown(present, { key: 'ArrowRight', bubbles: true });
+    expect(screen.getByText('Slide 2')).toBeInTheDocument();
+    fireEvent.click(present);
+    // Presenting: the presentation view owns the keys, on the same window.
+    fireEvent.keyDown(document.activeElement || document.body, { key: 'ArrowRight', bubbles: true });
+    expect(screen.getByText('Slide 3')).toBeInTheDocument();
+    fireEvent.keyDown(document.activeElement || document.body, { key: 'ArrowLeft', bubbles: true });
+    expect(screen.getByText('Slide 2')).toBeInTheDocument();
+  });
+
   it('Escape closes', () => {
     const onClose = vi.fn();
     render(<DeckStudio code={DECK} onClose={onClose} />);
