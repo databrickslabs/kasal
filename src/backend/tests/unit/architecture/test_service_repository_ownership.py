@@ -56,6 +56,7 @@ _SERVICES = pathlib.Path(__file__).resolve().parents[3] / "src" / "services"
 _OWNED = {
     "a2a": {"a2a_agent", "a2a_push_config"},
     "a2ui": {"ui_config"},
+    "assets": {"chat_asset"},
     "agent_builder": {"agent", "task", "crew"},
     "catalog": {"agent", "task", "crew", "template", "crew_feedback", "schema"},
     "chat": {"chat_history", "chat_session"},

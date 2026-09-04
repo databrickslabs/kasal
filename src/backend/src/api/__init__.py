@@ -9,6 +9,7 @@ from src.api.agentbricks_router import router as agentbricks_router
 from src.api.agents_router import router as agents_router
 from src.api.analytics_export_router import router as analytics_export_router
 from src.api.api_keys_router import router as api_keys_router
+from src.api.chat_assets_router import router as chat_assets_router
 from src.api.chat_history_router import router as chat_history_router
 from src.api.connections_router import router as connections_router
 from src.api.converter_router import router as converter_router
@@ -85,6 +86,7 @@ api_router.include_router(a2a_router)
 api_router.include_router(a2a_agents_router)
 api_router.include_router(skills_router)
 api_router.include_router(decks_router)
+api_router.include_router(chat_assets_router)
 api_router.include_router(crews_export_router)
 api_router.include_router(databricks_router)
 api_router.include_router(ui_config_router)

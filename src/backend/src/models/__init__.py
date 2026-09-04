@@ -2,6 +2,7 @@ from src.models.a2a_agent import A2AAgent
 from src.models.a2a_push_config import A2APushConfig
 from src.models.agent import Agent
 from src.models.api_key import ApiKey
+from src.models.chat_asset import ChatAsset
 from src.models.chat_history import ChatHistory
 from src.models.chat_session import ChatSession
 from src.models.conversion import (

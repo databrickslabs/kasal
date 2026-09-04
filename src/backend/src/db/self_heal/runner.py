@@ -26,6 +26,7 @@ from src.db.self_heal.dialect import _conn_is_sqlite
 from src.db.self_heal.tables import (
     _ensure_a2a_agents_table,
     _ensure_a2a_push_configs_table,
+    _ensure_chat_assets_table,
     _ensure_chat_sessions_table,
     _ensure_crew_feedback_table,
     _ensure_crew_publications_table,
@@ -97,6 +98,7 @@ async def run_schema_self_heal(conn) -> None:
     steps = (
         _ensure_documentation_embeddings_columns,
         _ensure_databricks_config_columns,
+        _ensure_chat_assets_table,
         _ensure_chat_sessions_table,
         _ensure_chat_sessions_columns,
         _ensure_workflow_recipes_table,

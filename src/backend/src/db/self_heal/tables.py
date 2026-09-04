@@ -35,6 +35,11 @@ async def _ensure_chat_sessions_table(conn) -> None:
     await ensure_table(conn, "src.models.chat_session", "ChatSession")
 
 
+async def _ensure_chat_assets_table(conn) -> None:
+    """Images attached in the chat, kept whole so they can be shown."""
+    await ensure_table(conn, "src.models.chat_asset", "ChatAsset")
+
+
 async def _ensure_workflow_recipes_table(conn) -> None:
     """Executed crews kept for reuse."""
     await ensure_table(conn, "src.models.workflow_recipe", "WorkflowRecipe")
