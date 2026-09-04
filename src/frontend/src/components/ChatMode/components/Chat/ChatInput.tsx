@@ -473,6 +473,10 @@ const ChatInput: React.FC<ChatInputProps> = ({
     } else {
       onSend(trimmed);
     }
+    // A document stays for follow-ups (the knowledge search keeps its scope);
+    // an image belongs to the message it was attached to. Left in place it
+    // rode along with every later question — a relic nobody re-attached.
+    if (images && images.length) setAttachments((prev) => prev.filter((a) => a.kind !== 'image'));
     setValue('');
     setShowCommands(false);
     // Keep attachments after sending so follow-up prompts in the same session

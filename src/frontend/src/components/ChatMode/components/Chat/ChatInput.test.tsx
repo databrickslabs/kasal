@@ -848,6 +848,12 @@ describe('ChatInput image attachments', () => {
     expect(meta.tools).toBeUndefined();
     expect(meta.attachments).toBeUndefined();
     expect(meta.dispatchSuffix).toContain('Images attached: shot.png');
+    // Consumed by the send: the image belongs to that message, not to every
+    // question after it (a document chip, by contrast, stays for follow-ups).
+    expect(screen.queryByText('shot.png')).toBeNull();
+    fireEvent.change(ta(), { target: { value: 'and now a chart' } });
+    fireEvent.keyDown(ta(), { key: 'Enter' });
+    expect(onSend.mock.calls[1][1]).toBeUndefined();
     upload.mockRestore();
   });
 
