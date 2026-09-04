@@ -1406,6 +1406,9 @@ Please analyze this message and provide your intent classification."""
                         # Files attached in this chat turn — scopes the knowledge
                         # search tool so the run grounds on the just-uploaded doc.
                         knowledge_file_paths=request.knowledge_file_paths or [],
+                        # Images attached in this turn — the agents learn how to
+                        # place them in the HTML they write.
+                        image_assets=request.image_assets or [],
                         # Skills picked in the chat "+" menu — attached to every
                         # agent of the run by the shared kernel builder.
                         skills=request.skills or [],

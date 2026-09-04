@@ -64,21 +64,57 @@ def attached_file_names(agent_spec: Dict[str, Any]) -> List[str]:
     return names
 
 
+def attached_images(agent_spec: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The images attached in this turn, as stamped on the agent by the
+    generation step (``image_assets``: id, name, width, height)."""
+    out: List[Dict[str, Any]] = []
+    for item in (agent_spec or {}).get("image_assets") or []:
+        if isinstance(item, dict) and item.get("id"):
+            out.append(item)
+    return out
+
+
+def _image_lines(images: List[Dict[str, Any]]) -> str:
+    """One line per image: what it is called, how big it is, and the exact
+    reference the HTML must use. The bytes never enter the prompt — the
+    frontend swaps the reference for them when it renders (utils/assetRefs)."""
+    lines = []
+    for img in images[:MAX_LISTED]:
+        name = str(img.get("name") or "image")
+        w, h = img.get("width"), img.get("height")
+        size = f" ({w}×{h}px)" if w and h else ""
+        lines.append(f'- "{name}"{size} → <img src="asset:{img["id"]}" alt="{name}">')
+    if len(images) > MAX_LISTED:
+        lines.append(f"- (and {len(images) - MAX_LISTED} more)")
+    return "\n".join(lines)
+
+
 def build_attachment_hint(agent_spec: Dict[str, Any]) -> str:
-    """One line naming what is attached, or "" when nothing is.
+    """What is attached — files, images, both — or "" when nothing is.
 
     Empty is the common case (most chat turns have no attachments) and must cost
     the prompt nothing.
     """
-    names = attached_file_names(agent_spec or {})
-    if not names:
-        return ""
-
-    listed = names[:MAX_LISTED]
-    suffix = (
-        "" if len(names) <= MAX_LISTED else f" (and {len(names) - MAX_LISTED} more)"
-    )
-    return (
-        f"Files attached to this conversation: {', '.join(listed)}{suffix}. "
-        f"Their contents are not included here — {KNOWLEDGE_TOOL_NAME} reads them."
-    )
+    spec = agent_spec or {}
+    names = attached_file_names(spec)
+    images = attached_images(spec)
+    parts: List[str] = []
+    if names:
+        listed = names[:MAX_LISTED]
+        suffix = (
+            "" if len(names) <= MAX_LISTED else f" (and {len(names) - MAX_LISTED} more)"
+        )
+        parts.append(
+            f"Files attached to this conversation: {', '.join(listed)}{suffix}. "
+            f"Their contents are not included here — {KNOWLEDGE_TOOL_NAME} reads them."
+        )
+    if images:
+        parts.append(
+            "Images attached to this conversation — place one whenever the request "
+            "calls for a picture (a slide, an HTML page, a diagram, a document):\n"
+            + _image_lines(images)
+            + "\nRefer to an image ONLY by that exact asset: URL, never a data URL and "
+            "never an invented path; size it with CSS (width/height/object-fit) — the "
+            "app resolves the URL when it renders."
+        )
+    return "\n\n".join(parts)

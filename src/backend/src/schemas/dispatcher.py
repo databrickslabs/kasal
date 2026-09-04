@@ -10,6 +10,8 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.schemas.chat_asset import ImageAssetRef
+
 
 class IntentType(str, Enum):
     """Enumeration of possible intent types."""
@@ -100,6 +102,14 @@ class DispatcherRequest(BaseModel):
         description="Paths of knowledge files attached in this chat turn (e.g. "
         "'uploads/<group>/<exec>/<file>.pdf'). Scopes DatabricksKnowledgeSearchTool "
         "to ONLY these files so the run grounds on the just-uploaded document.",
+    )
+    image_assets: Optional[List[ImageAssetRef]] = Field(
+        default_factory=list,
+        description=(
+            "Images attached in this chat turn (id, name, pixel size). The run tells "
+            'the model how to place one in HTML it writes — <img src="asset:<id>"> — '
+            "and the frontend resolves that reference when rendering."
+        ),
     )
     skills: Optional[List[str]] = Field(
         default_factory=list,

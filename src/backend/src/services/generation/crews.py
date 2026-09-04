@@ -409,6 +409,13 @@ class CrewGenerationService(
         knowledge_file_paths = list(
             getattr(request, "knowledge_file_paths", None) or []
         )
+        # Images attached in this chat turn — stamped on every agent as plain
+        # dicts so the prompt hint can name them (see chat/attachment_hint).
+        raw_images = getattr(request, "image_assets", None)
+        image_assets = [
+            a.model_dump() if hasattr(a, "model_dump") else dict(a)
+            for a in (raw_images if isinstance(raw_images, (list, tuple)) else [])
+        ]
         # Skills picked in the chat "+" menu — attached to EVERY agent (skills are
         # agent-level; the kernel builder reads spec["skills"] and injects the
         # <available_skills> block + load_skill/read_skill_file tools). Mirrors the
@@ -504,6 +511,8 @@ class CrewGenerationService(
                 cfg.setdefault("tool_configs", {})["DatabricksKnowledgeSearchTool"] = {
                     "file_paths": knowledge_file_paths
                 }
+            if image_assets:
+                cfg["image_assets"] = list(image_assets)
             if has_agentbricks:
                 cfg.setdefault("tool_configs", {})["AgentBricksTool"] = {
                     "endpointName": agentbricks_endpoints
@@ -571,6 +580,8 @@ class CrewGenerationService(
                 entry.setdefault("tool_configs", {})[
                     "DatabricksKnowledgeSearchTool"
                 ] = {"file_paths": knowledge_file_paths}
+            if image_assets:
+                entry["image_assets"] = list(image_assets)
             if has_agentbricks:
                 entry.setdefault("tool_configs", {})["AgentBricksTool"] = {
                     "endpointName": agentbricks_endpoints

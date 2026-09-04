@@ -4,6 +4,8 @@ from uuid import UUID as PyUUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.schemas.chat_asset import ImageAssetRef
+
 # Node data models
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
@@ -447,6 +449,14 @@ class CrewStreamingRequest(BaseModel):
     knowledge_file_paths: Optional[List[str]] = Field(
         default_factory=list,
         description="Paths of knowledge files attached in this chat turn; scopes DatabricksKnowledgeSearchTool to ONLY these files so the run grounds on the just-uploaded document",
+    )
+    image_assets: Optional[List[ImageAssetRef]] = Field(
+        default_factory=list,
+        description=(
+            "Images attached in this chat turn (id, name, pixel size). The run tells "
+            'the model how to place one in HTML it writes — <img src="asset:<id>"> — '
+            "and the frontend resolves that reference when rendering."
+        ),
     )
     skills: Optional[List[str]] = Field(
         default_factory=list,

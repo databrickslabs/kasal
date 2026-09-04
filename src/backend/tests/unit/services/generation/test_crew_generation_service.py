@@ -2061,6 +2061,7 @@ class TestProgressiveGeneration:
         mcp_servers=None,
         agentbricks_endpoints=None,
         knowledge_file_paths=None,
+        image_assets=None,
         skills=None,
         chat_mode_type="research",
     ):
@@ -2088,6 +2089,7 @@ class TestProgressiveGeneration:
         req.mcp_servers = mcp_servers or []
         req.agentbricks_endpoints = agentbricks_endpoints or []
         req.knowledge_file_paths = knowledge_file_paths or []
+        req.image_assets = image_assets or []
         # Iterated by build_crew_config_from_generated (2c9c0bd0) — a bare
         # Mock attribute is truthy and not iterable.
         req.skills = skills or []

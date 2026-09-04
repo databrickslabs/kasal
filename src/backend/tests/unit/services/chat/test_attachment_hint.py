@@ -109,3 +109,38 @@ class TestBuildAttachmentHint:
 
         assert hint.startswith("Files attached to this conversation:")
         assert "full-report.md, recipe-report.md" in hint
+
+
+def test_images_are_named_with_their_size_and_exact_reference():
+    from src.services.chat.attachment_hint import attached_images, build_attachment_hint
+
+    spec = {
+        "image_assets": [
+            {"id": "a1", "name": "logo.png", "width": 400, "height": 200},
+            {"id": "a2", "name": "chart.webp"},
+            {"name": "no id — dropped"},
+        ]
+    }
+    assert [i["id"] for i in attached_images(spec)] == ["a1", "a2"]
+    hint = build_attachment_hint(spec)
+    assert "Images attached to this conversation" in hint
+    assert '"logo.png" (400×200px) → <img src="asset:a1" alt="logo.png">' in hint
+    assert '"chart.webp" → <img src="asset:a2" alt="chart.webp">' in hint
+    assert "never a data URL" in hint
+    assert "Files attached" not in hint
+
+
+def test_files_and_images_both_present_give_two_paragraphs():
+    from src.services.chat.attachment_hint import build_attachment_hint
+
+    spec = {
+        "tool_configs": {
+            "DatabricksKnowledgeSearchTool": {"file_paths": ["uploads/g/e/report.pdf"]}
+        },
+        "image_assets": [{"id": "a1", "name": "logo.png"}],
+    }
+    hint = build_attachment_hint(spec)
+    files, images = hint.split("\n\n", 1)
+    assert files.startswith("Files attached to this conversation: report.pdf")
+    assert images.startswith("Images attached")
+    assert build_attachment_hint({}) == ""

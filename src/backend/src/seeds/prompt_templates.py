@@ -503,6 +503,8 @@ instruction does not touch stays exactly as it is.
 - Charts and diagrams are inline SVG, planned before drawing: set a viewBox, then draw \
 shapes that fit it.
 - When adding a slide, write it to sit naturally between its neighbours, in their design.
+- Keep image references exactly as they are (<img src="asset:…">): the app resolves them; \
+never replace one with a data URL or a path.
 """
 
 DEFAULT_TEMPLATES = [
