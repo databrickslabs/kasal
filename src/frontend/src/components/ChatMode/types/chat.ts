@@ -1,5 +1,13 @@
 import { IntentType } from './dispatcher';
 
+/** An image attached in the chat: enough for the model to place it in a layout. */
+export interface ImageRef {
+  id: string;
+  name: string;
+  width?: number;
+  height?: number;
+}
+
 export interface ChatMessage {
   id: string;
   sessionId?: string;
@@ -22,6 +30,8 @@ export interface ChatMessage {
   fullContent?: string;
   /** Names of knowledge files attached to a user message (shown as chips). */
   attachments?: string[];
+  /** Images attached to a user message — shown as thumbnails; the run gets their ids. */
+  images?: ImageRef[];
   /**
    * The execution (job) id of the run this message anchors. The deliverable
    * shown in the preview pane is derived on demand from that execution's stored

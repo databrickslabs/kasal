@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { PanelRight } from 'lucide-react';
-import { ChatMessage as ChatMessageType } from '../../types/chat';
+import { ChatMessage as ChatMessageType, ImageRef } from '../../types/chat';
 import { ModelConfigResponse, GenerationCompleteData } from '../../types/dispatcher';
 import { PlanData, FlowData } from '../../hooks/useDispatcher';
 import ChatMessageComponent, { TraceEntryData } from './ChatMessage';
@@ -275,7 +275,13 @@ interface ChatContainerProps {
   hydrating?: boolean;
   onSend: (
     message: string,
-    meta?: { tools?: string[]; dispatchSuffix?: string; attachments?: string[] },
+    meta?: {
+      tools?: string[];
+      dispatchSuffix?: string;
+      attachments?: string[];
+      knowledgeFilePaths?: string[];
+      images?: ImageRef[];
+    },
   ) => void;
   onCommand?: (command: string) => void;
   onExecuteCrew?: (plan: PlanData) => void;

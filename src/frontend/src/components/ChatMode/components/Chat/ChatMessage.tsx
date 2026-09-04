@@ -15,6 +15,7 @@ import { useAppStore } from '../../store/appStore';
 import { isGenieToolRef, CrewNameConflictError } from '../../api/crews';
 import { TraceDetail, findInlineTraceRenderer } from './traces';
 import MessageContent from './MessageContent';
+import AssetThumb from './AssetThumb';
 import AgentCard from '../Cards/AgentCard';
 import TaskCard from '../Cards/TaskCard';
 import ApprovalCard, { ApprovalData } from '../Cards/ApprovalCard';
@@ -367,6 +368,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
 
   if (isUser) {
     const attachments = message.attachments || [];
+    const images = message.images || [];
     return (
       <div className="flex justify-end mb-5 px-4">
         <div className="max-w-[75%] flex flex-col items-end gap-1.5">
@@ -377,6 +379,13 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
               {message.content}
             </div>
           </div>
+          {images.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 justify-end" data-testid="message-images">
+              {images.map((img) => (
+                <AssetThumb key={img.id} id={img.id} name={img.name} size={72} />
+              ))}
+            </div>
+          )}
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-1.5 justify-end">
               {attachments.map((name, i) => (

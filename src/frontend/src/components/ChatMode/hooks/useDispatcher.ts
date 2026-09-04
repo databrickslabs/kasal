@@ -1,3 +1,4 @@
+import type { ImageRef } from '../types/chat';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { dispatch } from '../api/dispatcher';
 import { useExecutionStore } from '../store/executionStore';
@@ -287,6 +288,7 @@ export function useDispatcher(options: UseDispatcherOptions) {
       attachments?: string[],
       displayAs?: string,
       knowledgeFilePaths?: string[],
+      images?: ImageRef[],
     ) => {
       const options = optionsRef.current;
       if (isDispatchingRef.current) return;
@@ -321,7 +323,12 @@ export function useDispatcher(options: UseDispatcherOptions) {
         // Show a friendly label (e.g. "Open crew: X" from the library rail)
         // while still dispatching the real command/message below.
         displayAs || message,
-        attachments && attachments.length > 0 ? { attachments } : undefined,
+        attachments?.length || images?.length
+          ? {
+              ...(attachments?.length ? { attachments } : {}),
+              ...(images?.length ? { images } : {}),
+            }
+          : undefined,
       );
 
       const assistantId = generateId();
@@ -400,6 +407,8 @@ export function useDispatcher(options: UseDispatcherOptions) {
           // Files attached in THIS turn — scopes the knowledge search tool to the
           // just-uploaded document (otherwise group-wide search picks a wrong file).
           knowledge_file_paths: knowledgeFilePaths,
+          // Images attached in THIS turn — the agents are told how to place them.
+          image_assets: images,
           // Skills picked in the chat "+" — attached to every agent of the run.
           skills: selectedSkills,
           // Answer mode → backend sets reasoning/reasoning effort/execution_type:

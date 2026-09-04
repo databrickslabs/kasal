@@ -9,6 +9,7 @@ import { DeckService } from '../../../../api/chat/DeckService';
 import { useAppStore } from '../../store/appStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { planSlideEdit, type SlideEdit } from '../../utils/slideRefine';
+import { useResolvedAssetHtml } from '../../hooks/useResolvedAssetHtml';
 import { SLIDE_W, replaceDeckInContent, splitSlides, stageFor } from '../../utils/htmlDeck';
 import { downloadDeckPdf, downloadDeckPptx } from '../../utils/deckExport';
 
@@ -51,6 +52,11 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
   }, [code]);
   const slides = useMemo(() => splitSlides(deck), [deck]);
   const count = slides.length;
+  // What the rail, the stage and the exports SHOW: the deck with its
+  // `asset:<id>` image references resolved to bytes. Edits and write-backs
+  // use `slides`/`deck` — the references stay in what is stored and sent.
+  const resolvedDeck = useResolvedAssetHtml(deck);
+  const viewSlides = useMemo(() => splitSlides(resolvedDeck), [resolvedDeck]);
   const [selected, setSelected] = useState(() => Math.max(0, Math.min(initialIndex, count - 1)));
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [working, setWorking] = useState<{ index: number } | null>(null);
@@ -64,7 +70,7 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
   const selectedModel = useAppStore((s) => s.selectedModel);
 
   const shown = Math.min(selected, Math.max(0, count - 1));
-  const stage = useMemo(() => stageFor(slides[shown] ?? ''), [slides, shown]);
+  const stage = useMemo(() => stageFor(viewSlides[shown] ?? ''), [viewSlides, shown]);
 
   // Write the deck back into its message, so the chat's card is current and a
   // closed studio loses nothing.
@@ -180,8 +186,8 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
     setMenu(false);
     setBusy(kind);
     try {
-      if (kind === 'pdf') await downloadDeckPdf(slides);
-      else await downloadDeckPptx(slides);
+      if (kind === 'pdf') await downloadDeckPdf(viewSlides);
+      else await downloadDeckPptx(viewSlides);
     } catch (err) {
       console.error('[deck] export failed', err);
     } finally {
@@ -261,7 +267,7 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
         </div>
         <div className="flex min-h-0 flex-1">
           <ThumbnailRail
-            slides={slides}
+            slides={viewSlides}
             selected={shown}
             working={working?.index ?? null}
             onSelect={(i) => {

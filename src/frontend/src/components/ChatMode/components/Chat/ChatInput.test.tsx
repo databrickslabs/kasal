@@ -816,3 +816,52 @@ describe('ChatInput — rotating landing placeholder (advertises deliverables)',
     window.matchMedia = original;
   });
 });
+
+describe('ChatInput image attachments', () => {
+  const fileInput = () => screen.getByTestId('chat-file-input') as HTMLInputElement;
+  // jsdom cannot decode images; the measurement is its own unit (imageFiles.test).
+  beforeEach(async () => {
+    const imageFiles = await import('../../utils/imageFiles');
+    vi.spyOn(imageFiles, 'measureImage').mockResolvedValue({ width: 640, height: 480 });
+  });
+
+  it('stores an image as an asset, shows its chip, and sends its reference — not the knowledge tool', async () => {
+    const { AssetService } = await import('../../../../api/chat/AssetService');
+    const upload = vi.spyOn(AssetService, 'upload').mockResolvedValue({
+      id: 'img-1', name: 'shot.png', mime: 'image/png', size: 3, width: 640, height: 480, ref: 'asset:img-1',
+    });
+    vi.spyOn(AssetService, 'dataUrl').mockResolvedValue('data:image/png;base64,QQ==');
+    const onSend = vi.fn();
+    render(<ChatInput {...baseProps} onSend={onSend} />);
+
+    fireEvent.change(fileInput(), { target: { files: [new File(['png'], 'shot.png', { type: 'image/png' })] } });
+    expect(screen.getByText('shot.png')).toBeInTheDocument();
+    await screen.findByText('3 B');
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(mockUpload).not.toHaveBeenCalled(); // not the knowledge path
+    expect(screen.getByRole('img', { name: 'Image shot.png' })).toBeInTheDocument();
+
+    fireEvent.change(ta(), { target: { value: 'put it on the cover slide' } });
+    fireEvent.keyDown(ta(), { key: 'Enter' });
+    const [, meta] = onSend.mock.calls[0];
+    expect(meta.images).toEqual([{ id: 'img-1', name: 'shot.png', width: 640, height: 480 }]);
+    expect(meta.tools).toBeUndefined();
+    expect(meta.attachments).toBeUndefined();
+    expect(meta.dispatchSuffix).toContain('Images attached: shot.png');
+    upload.mockRestore();
+  });
+
+  it('a pasted image is attached like a picked one', async () => {
+    const { AssetService } = await import('../../../../api/chat/AssetService');
+    const upload = vi.spyOn(AssetService, 'upload').mockResolvedValue({
+      id: 'img-2', name: 'image.png', mime: 'image/png', size: 2, width: 0, height: 0, ref: 'asset:img-2',
+    });
+    render(<ChatInput {...baseProps} onSend={vi.fn()} />);
+    const file = new File(['xy'], 'image.png', { type: 'image/png' });
+    fireEvent.paste(ta(), { clipboardData: { files: [file], getData: () => '' } });
+    expect(screen.getByText('image.png')).toBeInTheDocument();
+    await screen.findByText('2 B');
+    expect(upload).toHaveBeenCalledWith(file, expect.objectContaining({ width: 640, height: 480 }));
+    upload.mockRestore();
+  });
+});

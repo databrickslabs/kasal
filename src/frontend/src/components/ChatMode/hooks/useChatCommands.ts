@@ -7,6 +7,7 @@
  */
 import React, { useCallback } from 'react';
 import { SkillService } from '../../../api/tools/SkillService';
+import type { ImageRef } from '../types/chat';
 import {
   buildTranscript,
   draftFailedStep,
@@ -239,7 +240,14 @@ export function useChatCommands({ dispatcher, executionStream, handleRefine, las
   const handleSend = useCallback(
     async (
       message: string,
-      meta?: { tools?: string[]; dispatchSuffix?: string; attachments?: string[]; displayAs?: string; knowledgeFilePaths?: string[] },
+      meta?: {
+        tools?: string[];
+        dispatchSuffix?: string;
+        attachments?: string[];
+        displayAs?: string;
+        knowledgeFilePaths?: string[];
+        images?: ImageRef[];
+      },
     ) => {
       // A genuine user message supersedes any pending loaded-crew run (the rail's
       // own "/load …" send is exempt — it's what arms the pending run).
@@ -264,6 +272,7 @@ export function useChatCommands({ dispatcher, executionStream, handleRefine, las
           meta?.attachments,
           meta?.displayAs,
           meta?.knowledgeFilePaths,
+          meta?.images,
         );
       } finally {
         useExecutionStore.getState().setIsLoading(false);

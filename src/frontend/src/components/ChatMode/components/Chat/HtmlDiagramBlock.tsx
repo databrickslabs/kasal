@@ -3,6 +3,7 @@ import { Check, ClipboardCopy, Code2, Eye, Maximize2 } from 'lucide-react';
 import { buildMdSandboxCell, notebookSafe } from '../../utils/mdSandboxDiagram';
 import ScaledFrame from './ScaledFrame';
 import { useThrottledPreview } from '../../utils/scaledFrame';
+import { useResolvedAssetHtml } from '../../hooks/useResolvedAssetHtml';
 import FullscreenModal from './FullscreenModal';
 
 /**
@@ -29,7 +30,9 @@ const HtmlDiagramBlock: React.FC<HtmlDiagramBlockProps> = ({ code, streaming = f
 
   // Throttle the source we actually mount so a streaming diagram doesn't
   // re-mount the iframe on every token (shared with the slide deck).
-  const preview = useThrottledPreview(safeCode, streaming);
+  const throttled = useThrottledPreview(safeCode, streaming);
+  // `asset:<id>` references (attached images) become data URLs for the frame.
+  const preview = useResolvedAssetHtml(throttled);
 
   const copyCell = useCallback(async () => {
     const cell = buildMdSandboxCell(code);

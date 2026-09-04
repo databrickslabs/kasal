@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Download, Loader2, Maximize2, SquarePen } from 'lucide-react';
 import { SLIDE_W, refinedSlideIndex, splitSlides, stageFor } from '../../utils/htmlDeck';
 import DeckStudio from '../Deck/DeckStudio';
+import { useResolvedAssetHtml } from '../../hooks/useResolvedAssetHtml';
 import { useThrottledPreview } from '../../utils/scaledFrame';
 import { downloadDeckPdf, downloadDeckPptx } from '../../utils/deckExport';
 import ScaledFrame from './ScaledFrame';
@@ -37,7 +38,11 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
   // 400ms instead of per token — same throttle the diagram card uses. The
   // stream's end flushes immediately.
   const liveCode = useThrottledPreview(code, streaming);
-  const slides = useMemo(() => splitSlides(liveCode), [liveCode]);
+  // Attached images are referenced as `asset:<id>` in the deck's HTML; the
+  // frames get the bytes (data URLs), the studio and the stored message keep
+  // the references.
+  const resolvedCode = useResolvedAssetHtml(liveCode);
+  const slides = useMemo(() => splitSlides(resolvedCode), [resolvedCode]);
   const count = slides.length;
   // A deck a slide edit just changed opens on THAT slide (it carries the
   // refined marker), so the reader lands on the change rather than the cover.

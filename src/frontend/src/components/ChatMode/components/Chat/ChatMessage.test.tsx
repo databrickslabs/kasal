@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import ChatMessage, { TraceGroupMessage } from './ChatMessage';
 import { CrewNameConflictError } from '../../api/crews';
 import { useExecutionStore } from '../../store/executionStore';
@@ -787,5 +787,30 @@ describe('TraceGroupMessage (collapsed run of same-tool traces)', () => {
     const pending = [{ label: 'X', sublabel: 'q', kind: 'tool_call' }] as never; // no durationMs
     render(<TraceGroupMessage label="X" traces={pending} />);
     expect(screen.getByTestId('trace-group-spinner')).toBeInTheDocument();
+  });
+});
+
+describe('ChatMessage attached images', () => {
+  it('shows a thumbnail for each image on the user message', async () => {
+    const { AssetService } = await import('../../../../api/chat/AssetService');
+    const spy = vi.spyOn(AssetService, 'dataUrl').mockResolvedValue('data:image/png;base64,QQ==');
+    render(
+      <ChatMessage
+        message={{
+          id: 'u1',
+          role: 'user',
+          content: 'use these',
+          timestamp: new Date(),
+          images: [
+            { id: 'img-1', name: 'logo.png', width: 10, height: 10 },
+            { id: 'img-2', name: 'chart.png' },
+          ],
+        } as never}
+      />,
+    );
+    const strip = screen.getByTestId('message-images');
+    expect(within(strip).getByRole('img', { name: 'Image logo.png' })).toBeInTheDocument();
+    expect(within(strip).getByRole('img', { name: 'Image chart.png' })).toBeInTheDocument();
+    spy.mockRestore();
   });
 });

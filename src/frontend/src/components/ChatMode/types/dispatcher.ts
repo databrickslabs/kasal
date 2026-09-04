@@ -1,3 +1,4 @@
+import type { ImageRef } from './chat';
 import { PublicationInputSchema } from '../../../types/workflow/publication';
 
 export type IntentType =
@@ -54,6 +55,8 @@ export interface DispatcherRequest {
   agentbricks_endpoints?: string[];
   /** Paths of files attached this turn — scopes the knowledge search tool to them. */
   knowledge_file_paths?: string[];
+  /** Images attached this turn — the run tells the model how to place them in HTML. */
+  image_assets?: ImageRef[];
   /** Skill names picked in the "+" menu — attached to every agent of the run. */
   skills?: string[];
   /** Answer mode: 'chat' = single light agent, 'research' = crew + medium reasoning effort, 'deep' = crew + high reasoning effort. */
@@ -82,6 +85,7 @@ export interface DispatchRunSettings {
   mcp_servers?: string[];
   agentbricks_endpoints?: string[];
   knowledge_file_paths?: string[];
+  image_assets?: ImageRef[];
   skills?: string[];
   chat_mode_type?: 'chat' | 'research' | 'deep';
   /** @see DispatcherRequest.prefer_existing — the SOURCE axis, not the shape. */

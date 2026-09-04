@@ -1,4 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { AssetService } from '../../../../api/chat/AssetService';
+import AssetThumb from './AssetThumb';
+import { isImageFile, measureImage } from '../../utils/imageFiles';
+import type { ImageRef } from '../../types/chat';
 import { ModelConfigResponse } from '../../types/dispatcher';
 import { modelLacksReasoning } from '../../utils/answerModes';
 import HeldConversationPill from './HeldConversationPill';
@@ -18,7 +22,13 @@ interface Attachment {
   name: string;
   size: number;
   status: 'uploading' | 'ready' | 'error';
+  /** A document goes to the knowledge index; an image is stored whole (assets). */
+  kind?: 'file' | 'image';
   path?: string;
+  /** Image only: the stored asset's id and measured size. */
+  assetId?: string;
+  width?: number;
+  height?: number;
   error?: string;
 }
 
@@ -33,6 +43,8 @@ export interface SendMeta {
   dispatchSuffix?: string;
   /** Attached knowledge-file names, shown as chips on the user's message. */
   attachments?: string[];
+  /** Attached images (ids + sizes) — the run tells the agents how to place them. */
+  images?: ImageRef[];
   /** Attached knowledge-file PATHS — scopes the knowledge search to these files. */
   knowledgeFilePaths?: string[];
 }
@@ -261,6 +273,13 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
   const uploadAttachment = async (id: string, file: File) => {
     try {
+      if (isImageFile(file)) {
+        // An image is SHOWN, not searched: stored whole, referenced by id.
+        const { width, height } = await measureImage(file);
+        const asset = await AssetService.upload(file, { sessionId: sessionId || uploadScopeId.current, width, height });
+        setAttachment(id, { status: 'ready', assetId: asset.id, width: asset.width || width, height: asset.height || height });
+        return;
+      }
       const result = await uploadKnowledgeFile(file, sessionId || uploadScopeId.current);
       setAttachment(id, { status: 'ready', path: result.path });
     } catch (err) {
@@ -276,7 +295,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
       const id = `${file.name}-${file.size}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       setAttachments((prev) => [
         ...prev,
-        { id, name: file.name, size: file.size, status: 'uploading' },
+        { id, name: file.name, size: file.size, status: 'uploading', kind: isImageFile(file) ? 'image' : 'file' },
       ]);
       void uploadAttachment(id, file);
     });
@@ -288,7 +307,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
     // the person who clicked it. Fire-and-forget: the chip goes either way, and
     // a failed cleanup is still caught by the retention sweep.
     const attachment = attachments.find((a) => a.id === id);
-    if (attachment?.status === 'ready') {
+    if (attachment?.status === 'ready' && attachment.kind === 'image') {
+      if (attachment.assetId) void AssetService.delete(attachment.assetId).catch(() => {});
+    } else if (attachment?.status === 'ready') {
       void forgetKnowledgeFile(sessionId || uploadScopeId.current, attachment.name);
     }
     setAttachments((prev) => prev.filter((a) => a.id !== id));
@@ -323,7 +344,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
     if (dragDepth.current === 0) setIsDragging(false);
   };
 
-  const readyAttachments = attachments.filter((a) => a.status === 'ready');
+  const readyAll = attachments.filter((a) => a.status === 'ready');
+
+  const readyAttachments = readyAll.filter((a) => a.kind !== 'image');
+
+  const readyImages = readyAll.filter((a) => a.kind === 'image' && a.assetId);
   // Block sending while any file is still uploading (don't drop in-flight files).
   const isUploading = attachments.some((a) => a.status === 'uploading');
 
@@ -397,6 +422,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
     const tools: string[] = [];
     let attachments: string[] | undefined;
     let knowledgeFilePaths: string[] | undefined;
+    let images: ImageRef[] | undefined;
 
     // Attach uploaded knowledge: include the knowledge-search tool + a steering note.
     if (!isSlash && readyAttachments.length > 0) {
@@ -408,6 +434,19 @@ const ChatInput: React.FC<ChatInputProps> = ({
         .filter((p): p is string => Boolean(p));
       tools.push(KNOWLEDGE_TOOL);
       dispatchSuffix += `\n\n[Knowledge files attached: ${attachments.join(', ')}. Use the ${KNOWLEDGE_TOOL} to search the uploaded documents before answering.]`;
+    }
+
+    // Attached images: their ids ride along so the run can tell the agents how
+    // to place them (<img src="asset:<id>">); the generator is told they exist
+    // so a deck or page is planned WITH them.
+    if (!isSlash && readyImages.length > 0) {
+      images = readyImages.map((a) => ({
+        id: a.assetId as string,
+        name: a.name,
+        ...(a.width ? { width: a.width } : {}),
+        ...(a.height ? { height: a.height } : {}),
+      }));
+      dispatchSuffix += `\n\n[Images attached: ${readyImages.map((a) => a.name).join(', ')}. Use them where the request calls for a picture.]`;
     }
 
     // MCP servers picked via the "+" menu: steer the crew GENERATION around
@@ -427,6 +466,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
       ...(dispatchSuffix ? { dispatchSuffix } : {}),
       ...(attachments ? { attachments } : {}),
       ...(knowledgeFilePaths && knowledgeFilePaths.length ? { knowledgeFilePaths } : {}),
+      ...(images && images.length ? { images } : {}),
     };
     if (Object.keys(meta).length) {
       onSend(trimmed, meta);
@@ -672,6 +712,14 @@ const ChatInput: React.FC<ChatInputProps> = ({
           <textarea
             ref={inputRef}
             value={value}
+            // A pasted screenshot is the main way an image arrives.
+            onPaste={(e) => {
+              const files = Array.from(e.clipboardData?.files || []).filter(isImageFile);
+              if (files.length > 0) {
+                e.preventDefault();
+                addFiles(files);
+              }
+            }}
             onChange={(e) => {
               setValue(e.target.value);
               setHistoryIndex(-1);
@@ -708,7 +756,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 }}
                 title={a.status === 'error' ? a.error : a.name}
               >
-                {a.status === 'uploading' ? (
+                {a.kind === 'image' && a.status === 'ready' && a.assetId ? (
+                  <AssetThumb id={a.assetId} name={a.name} size={22} />
+                ) : a.status === 'uploading' ? (
                   <svg className="w-3.5 h-3.5 animate-spin flex-shrink-0" style={{ color: 'var(--text-muted)' }} fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />

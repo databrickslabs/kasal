@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import HtmlDeckBlock from './HtmlDeckBlock';
 
 const DECK =
@@ -79,5 +79,23 @@ describe('HtmlDeckBlock slide refine', () => {
     expect(document.activeElement).toBe(box);
     fireEvent.change(box, { target: { value: 'bigger title' } });
     expect(box.value).toBe('bigger title');
+  });
+});
+
+describe('HtmlDeckBlock attached images', () => {
+  it('renders frames with asset references resolved, and hands the studio the raw deck', async () => {
+    const { AssetService } = await import('../../../../api/chat/AssetService');
+    const spy = vi.spyOn(AssetService, 'dataUrl').mockResolvedValue('data:image/png;base64,QQ==');
+    const deck = '<section class="slide"><img src="asset:abc123def"></section>';
+    render(<HtmlDeckBlock code={deck} messageId="m1" />);
+    await waitFor(() => {
+      const frame = document.querySelector('iframe[title="Slide deck"]') as HTMLIFrameElement;
+      expect(frame.srcdoc).toContain('data:image/png;base64,QQ==');
+    });
+    fireEvent.click(screen.getByTitle('Edit deck'));
+    // The studio shows resolved thumbnails but edits the raw deck (references kept).
+    const thumb = document.querySelector('iframe[title="Slide 1 thumbnail"]') as HTMLIFrameElement;
+    await waitFor(() => expect(thumb.srcdoc).toContain('data:image/png;base64,QQ=='));
+    spy.mockRestore();
   });
 });

@@ -772,8 +772,8 @@ describe('ChatWorkspace component', () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId('cc-send'));
     });
-    // dispatcher signature: (message, model, tools?, dispatchSuffix?, attachments?)
-    expect(h.dispatcherSend).toHaveBeenCalledWith('hello world', 'm1', undefined, undefined, undefined, undefined, undefined);
+    // dispatcher signature: (message, model, tools?, dispatchSuffix?, attachments?, displayAs?, knowledgeFilePaths?, images?)
+    expect(h.dispatcherSend).toHaveBeenCalledWith('hello world', 'm1', undefined, undefined, undefined, undefined, undefined, undefined);
   });
 
   it('invokes execution-stream callbacks (trace/taskOutput/status/complete/error)', () => {
@@ -1829,7 +1829,7 @@ describe('ChatWorkspace component', () => {
     h.app.selectedModel = '';
     render(<ChatWorkspace />);
     await send('hello there');
-    expect(h.dispatcherSend).toHaveBeenCalledWith('hello there', undefined, undefined, undefined, undefined, undefined, undefined);
+    expect(h.dispatcherSend).toHaveBeenCalledWith('hello there', undefined, undefined, undefined, undefined, undefined, undefined, undefined);
   });
 
   it('handleStopExecution reports a generic error on a non-Error rejection', async () => {
@@ -2372,7 +2372,7 @@ describe('ChatWorkspace component', () => {
     expect(h.session.createNewSession).toHaveBeenCalled();
     expect(h.exec.restoreSessionState).toHaveBeenCalledWith('s-new');
     expect(h.dispatcherSend).toHaveBeenCalledWith(
-      '/load crew My Saved Crew', 'm1', undefined, undefined, undefined, 'Open crew: My Saved Crew', undefined,
+      '/load crew My Saved Crew', 'm1', undefined, undefined, undefined, 'Open crew: My Saved Crew', undefined, undefined,
     );
     h.app.savedCrews = [];
     h.app.catalogOpen = false;
@@ -2387,7 +2387,7 @@ describe('ChatWorkspace component', () => {
     await act(async () => { fireEvent.click(screen.getByText('My Saved Flow')); });
     expect(h.exec.saveSessionState).not.toHaveBeenCalled();
     expect(h.dispatcherSend).toHaveBeenCalledWith(
-      '/load flow My Saved Flow', 'm1', undefined, undefined, undefined, 'Open flow: My Saved Flow', undefined,
+      '/load flow My Saved Flow', 'm1', undefined, undefined, undefined, 'Open flow: My Saved Flow', undefined, undefined,
     );
     h.app.savedFlows = [];
     h.app.catalogOpen = false;
