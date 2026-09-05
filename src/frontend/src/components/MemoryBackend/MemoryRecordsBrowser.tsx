@@ -55,6 +55,7 @@ import AccountTreeIcon from '@mui/icons-material/AccountTree';
 
 import { apiClient } from '../../config/api/ApiConfig';
 import { ConceptForceGraph } from './ConceptForceGraph';
+import { MemoryRecordMarkdown } from './MemoryRecordMarkdown';
 import { runService } from '../../api/execution/ExecutionHistoryService';
 import { Run } from '../../types/execution/run';
 import {
@@ -195,19 +196,9 @@ const RecordCard: React.FC<RecordCardProps> = ({
     >
       <Stack direction="row" spacing={2} alignItems="flex-start">
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography
-            variant="body2"
-            sx={{
-              display: '-webkit-box',
-              WebkitLineClamp: expanded ? 'unset' : 2,
-              WebkitBoxOrient: 'vertical',
-              overflow: 'hidden',
-              lineHeight: 1.45,
-              mb: 1,
-            }}
-          >
-            {record.content}
-          </Typography>
+          <Box sx={{ mb: 1 }}>
+            <MemoryRecordMarkdown content={record.content} expanded={expanded} />
+          </Box>
 
           <Stack
             direction="row"

@@ -82,6 +82,18 @@ describe('MemoryPane', () => {
     expect(screen.queryByTestId('force-graph')).toBeNull();
   });
 
+  it('renders a record as markdown, not as the raw text with hashes and pipes', () => {
+    withRecords([
+      rec('md', ['crewai'], '# CrewAI summary\n\n| Attribute | Detail |\n|---|---|\n| **Type** | Python |'),
+    ]);
+    render(<MemoryPane runId="run-1" />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Records' }));
+    expect(screen.getByRole('heading', { name: 'CrewAI summary' })).toBeInTheDocument();
+    expect(screen.getByRole('table')).toBeInTheDocument();
+    expect(screen.getByText('Python')).toBeInTheDocument();
+    expect(screen.queryByText(/\|---\|/)).not.toBeInTheDocument();
+  });
+
   it('pinning a graph concept lists only the records mentioning it', () => {
     render(<MemoryPane runId="job-1" />);
     fireEvent.click(screen.getByText('pin-mcp-tools'));

@@ -8,6 +8,7 @@
  */
 import React, { useMemo, useState } from 'react';
 import { ConceptForceGraph } from '../../../MemoryBackend/ConceptForceGraph';
+import { MemoryRecordMarkdown } from '../../../MemoryBackend/MemoryRecordMarkdown';
 import {
   formatRelative,
   importanceColor,
@@ -78,12 +79,7 @@ const RecordRow: React.FC<{ record: MemoryRecord }> = ({ record }) => {
       className="w-full text-left rounded-xl !px-3 !py-2.5 transition-colors hover:bg-[var(--bg-rail-hover)]"
       style={{ border: '1px solid var(--border-color)' }}
     >
-      <div
-        className={`text-[13px] leading-relaxed ${expanded ? '' : 'line-clamp-2'}`}
-        style={{ color: 'var(--text-primary)' }}
-      >
-        {record.content}
-      </div>
+      <MemoryRecordMarkdown content={record.content} expanded={expanded} />
       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
         <span
           className="w-1.5 h-1.5 rounded-full flex-shrink-0"
