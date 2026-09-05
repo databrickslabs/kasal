@@ -117,6 +117,9 @@ const PublishDialog: React.FC<PublishDialogProps> = ({
   // needs, published or not.
   const [outcomes, setOutcomes] = useState<Record<string, string>>({});
   const [protocols, setProtocols] = useState<PublicationProtocol[]>(DEFAULT_PROTOCOLS);
+  // Only a crew needs the switch: a flow holds a conversation when its state
+  // declares it, which the flow's own editor owns.
+  const [conversational, setConversational] = useState(false);
   const [inputFields, setInputFields] = useState<PublicationInputField[]>([]);
 
   // The placeholders actually written into this crew's or flow's text. Derived
@@ -165,6 +168,7 @@ const PublishDialog: React.FC<PublishDialogProps> = ({
       setExternalName(publication?.external_name ?? toExternalName(entityName));
       setDescription(publication?.description ?? '');
       setProtocols(publication?.protocols ?? DEFAULT_PROTOCOLS);
+      setConversational(Boolean(publication?.conversational));
       // A publication saved before this editor existed has no schema at all, so
       // fall through to deriving one rather than showing an empty list — the
       // whole back catalogue is in that state.
@@ -202,6 +206,7 @@ const PublishDialog: React.FC<PublishDialogProps> = ({
         description,
         protocols,
         input_schema: buildInputSchema(inputFields),
+        ...(entityType === 'crew' ? { conversational } : {}),
       });
       // Saved to the FLOW, not the publication: the selection that uses these
       // runs for any conversational flow, whether or not it is published.
@@ -350,6 +355,33 @@ const PublishDialog: React.FC<PublishDialogProps> = ({
                 </Typography>
               )}
             </Box>
+            {entityType === 'crew' && (
+              <Box>
+                <Typography variant="subtitle2" gutterBottom>
+                  Conversation
+                </Typography>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={conversational}
+                      onChange={(e) => setConversational(e.target.checked)}
+                      inputProps={{ 'aria-label': 'Holds a conversation' }}
+                    />
+                  }
+                  label="Holds a conversation: follow-ups continue this crew"
+                />
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  display="block"
+                  sx={{ ml: 4, mt: -0.5 }}
+                >
+                  Each follow-up runs the crew again with the recent conversation in
+                  front of it, and MCP or A2A callers are told to keep the same
+                  session. Leave it off for one-shot work.
+                </Typography>
+              </Box>
+            )}
 
             <PublishInputSchema
               fields={inputFields}

@@ -1,6 +1,14 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, Column, DateTime, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 
 from src.db.base import Base
 
@@ -58,6 +66,12 @@ class Publication(Base):
     #: JSON Schema for declared inputs. Without one, a per-capability tool is
     #: barely more useful than the generic start_crew.
     input_schema = Column(JSON, nullable=True)
+
+    #: Whether this capability HOLDS A CONVERSATION: follow-up turns go back to
+    #: it with the recent transcript instead of being re-matched from scratch.
+    #: Set by the publisher. A flow whose state declares `conversational` holds
+    #: one whether or not this is set; for a crew this flag is the only way.
+    conversational = Column(Boolean, nullable=True, default=False)
 
     #: Tenant isolation. NOT nullable: an unscoped publication is reachable from
     #: outside with no group to filter by, which is the leak this layer exists to

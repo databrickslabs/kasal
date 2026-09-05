@@ -240,7 +240,30 @@ async def route_and_dispatch(
         message,
         referenced.content if referenced else None,
         continued,
+        conversation=conversation_for(publication, capability, turns),
     )
+
+
+def conversation_for(
+    publication: Any, capability: Optional[PublishedCapability], turns: List[Any]
+) -> Optional[str]:
+    """The recent transcript a conversational CREW's run is given, else None.
+
+    A conversational flow carries its own state across turns, so it needs
+    nothing here. A crew has no state: each turn is a fresh run, so the only
+    way it can continue a conversation is to be shown the conversation. The
+    same capped window the router just read — what the person can see on
+    screen — rendered as the router renders it.
+    """
+    if (
+        not turns
+        or capability is None
+        or not getattr(capability, "conversational", False)
+    ):
+        return None
+    if (getattr(publication, "entity_type", "crew") or "crew") == "flow":
+        return None
+    return render_turns(turns) or None
 
 
 def _entity_key(entity_id: str) -> Any:
@@ -268,8 +291,13 @@ async def build_dispatch_result(
     message: str = "",
     referenced_answer: Optional[str] = None,
     continued: bool = False,
+    conversation: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Load the published entity and render it as an execute_* result."""
+    """Load the published entity and render it as an execute_* result.
+
+    ``conversation`` is the recent transcript for a conversational CREW (see
+    ``conversation_for``); it rides in the run's bound inputs.
+    """
     if (publication.entity_type or "crew") == "flow":
         return await _build_flow_result(
             decision,
@@ -289,6 +317,7 @@ async def build_dispatch_result(
         message,
         referenced_answer,
         continued,
+        conversation,
     )
 
 
@@ -300,6 +329,7 @@ async def _build_crew_result(
     message: str = "",
     referenced_answer: Optional[str] = None,
     continued: bool = False,
+    conversation: Optional[str] = None,
 ) -> Dict[str, Any]:
     crew = await catalog_service.get(_entity_key(publication.entity_id))
     if crew is None:
@@ -328,6 +358,15 @@ async def _build_crew_result(
         "message": f"Running **{crew.name}**",
         **_routing_payload(
             decision, publication, capability, message, referenced_answer, continued
+        ),
+        # The transcript travels in the BOUND INPUTS, the channel every routed
+        # run already carries into its config: no new field for the consumer to
+        # thread through. The config builder treats `conversation` as run
+        # machinery (a labelled block on the first task), never as a variable.
+        **(
+            {"extracted_inputs": {**decision.inputs, "conversation": conversation}}
+            if conversation
+            else {}
         ),
     }
 

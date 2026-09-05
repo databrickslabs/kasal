@@ -1002,3 +1002,37 @@ describe('a flow can be given inputs', () => {
     expect(buildFlowConfig(flow, 'm').inputs).toEqual({});
   });
 });
+
+describe('a crew that holds a conversation is shown the conversation', () => {
+  const plan = {
+    name: 'Risk Review',
+    nodes: [
+      { id: 'a1', type: 'agentNode', data: { role: 'Analyst', goal: 'g', backstory: 'b' } },
+      {
+        id: 't1',
+        type: 'taskNode',
+        data: { name: 'Review', description: 'Review the region.', expected_output: 'A review' },
+      },
+    ],
+    edges: [],
+  };
+
+  it('puts the transcript on the first task as context, never as an input line', () => {
+    const transcript = 'User: risk review for DACH\n[answer 1, from risk_review] Assistant: Here it is.';
+    const config = buildCrewConfig(plan, 'm', { conversation: transcript, region: 'Germany' });
+    const first = Object.values(config.tasks_yaml)[0] as { description: string };
+    expect(first.description).toContain('Review the region.');
+    expect(first.description).toContain('This run continues a conversation');
+    expect(first.description).toContain(transcript);
+    // The declared value is still listed as an input; the transcript is not.
+    expect(first.description).toContain('region: Germany');
+    expect(first.description).not.toMatch(/^conversation:/m);
+    expect(config.inputs.conversation).toBe(transcript);
+  });
+
+  it('changes nothing for a run with no transcript', () => {
+    const config = buildCrewConfig(plan, 'm', { region: 'Germany' });
+    const first = Object.values(config.tasks_yaml)[0] as { description: string };
+    expect(first.description).not.toContain('continues a conversation');
+  });
+});

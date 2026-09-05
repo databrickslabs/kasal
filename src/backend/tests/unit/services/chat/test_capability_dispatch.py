@@ -579,3 +579,91 @@ class TestConversationChangesTheDecision:
                 session_id="s1",
             )
         assert result["referenced_answer"] is None
+
+
+class TestConversationalCrew:
+    """A crew that holds a conversation is SHOWN the conversation: the recent
+    transcript rides in its bound inputs. A flow keeps its own state and gets
+    nothing; a one-shot crew gets nothing."""
+
+    def _turns(self):
+        from src.services.chat.conversation_context import Turn
+
+        return [
+            Turn(
+                index=0,
+                role="user",
+                preview="risk review for DACH",
+                content="risk review for DACH",
+            ),
+            Turn(
+                index=1,
+                role="assistant",
+                preview="Here is the DACH review…",
+                content="Here is the DACH review…",
+                capability="quarterly_risk_review",
+            ),
+        ]
+
+    def test_conversation_for_is_the_rendered_window_for_a_conversational_crew(self):
+        from src.services.chat.capability_dispatch import conversation_for
+
+        cap = PublishedCapability(
+            entity_type="crew",
+            entity_id=CREW_ID,
+            name="quarterly_risk_review",
+            description="d",
+            conversational=True,
+        )
+        text = conversation_for(_publication(), cap, self._turns())
+        assert text and "[answer 1, from quarterly_risk_review] Assistant:" in text
+        assert "User: risk review for DACH" in text
+
+    def test_a_one_shot_crew_and_a_flow_get_no_transcript(self):
+        from src.services.chat.capability_dispatch import conversation_for
+
+        one_shot = _capability()
+        assert conversation_for(_publication(), one_shot, self._turns()) is None
+        flow_cap = PublishedCapability(
+            entity_type="flow",
+            entity_id=FLOW_ID,
+            name="f",
+            description="d",
+            conversational=True,
+        )
+        assert (
+            conversation_for(_publication("flow", FLOW_ID), flow_cap, self._turns())
+            is None
+        )
+        conv_cap = PublishedCapability(
+            entity_type="crew",
+            entity_id=CREW_ID,
+            name="c",
+            description="d",
+            conversational=True,
+        )
+        assert conversation_for(_publication(), conv_cap, []) is None
+
+    @pytest.mark.asyncio
+    async def test_the_transcript_rides_in_the_bound_inputs_beside_extracted_values(
+        self,
+    ):
+        catalog = SimpleNamespace(get=AsyncMock(return_value=_crew()))
+        result = await build_dispatch_result(
+            _decision(),
+            _publication(),
+            _capability(),
+            catalog,
+            None,
+            _group(),
+            conversation="User: hi\n[answer 1] Assistant: hello",
+        )
+        assert result["extracted_inputs"] == {
+            "region": "DACH",
+            "conversation": "User: hi\n[answer 1] Assistant: hello",
+        }
+        # …and nothing changes for a run with no transcript.
+        plain = await build_dispatch_result(
+            _decision(), _publication(), _capability(), catalog, None, _group()
+        )
+        assert plain["extracted_inputs"] == {"region": "DACH"}

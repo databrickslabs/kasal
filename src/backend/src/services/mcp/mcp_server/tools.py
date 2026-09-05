@@ -383,9 +383,17 @@ def _capability_hint(capability: Any) -> str:
     A flow is not a crew with more steps: it can pause at an approval gate, and
     a conversational one carries a thread across calls, so a follow-up belongs
     in the same capability instead of a fresh run. Saying "crew" for all of them
-    told a client the opposite of both.
+    told a client the opposite of both. A crew can hold a conversation too when
+    its publisher says so — it is shown the recent transcript each turn.
     """
     if getattr(capability, "entity_type", "crew") != "flow":
+        if getattr(capability, "conversational", False):
+            return (
+                "Starts a crew that holds a CONVERSATION and returns a run id "
+                "immediately — poll get_run_status. Send follow-ups to this same "
+                "tool with the same session_id: the crew is shown the recent "
+                "conversation and continues it rather than starting over."
+            )
         return (
             "Starts a crew and returns a run id immediately — crews take "
             "minutes, so poll get_run_status."

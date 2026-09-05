@@ -420,3 +420,52 @@ class TestSeveralTeamspaces:
         )[0]
 
         assert capability.teamspace == "bi-specialist"
+
+
+class TestConversationalCrewFlag:
+    """A crew holds a conversation only when its publisher says so — and the
+    flag is read back live, so re-publishing without it turns it off."""
+
+    @pytest.mark.asyncio
+    async def test_the_flag_is_persisted_and_surfaces_on_the_capability(self, session):
+        service = PublicationService(session)
+        crew_id = uuid.uuid4()
+        await _add_crew(session, crew_id, "Talkative")
+        await service.publish(
+            entity_id=str(crew_id),
+            data=CrewPublicationCreate(
+                external_name="talkative",
+                description="Keeps the thread.",
+                protocols=["chat"],
+                conversational=True,
+            ),
+            group_context=_Ctx([GROUP]),
+            entity_type="crew",
+        )
+        await session.commit()
+        (cap,) = await service.list_capabilities_for_group([GROUP], "chat")
+        assert cap.name == "talkative" and cap.conversational is True
+
+        # Re-publishing without the flag switches it off.
+        await service.publish(
+            entity_id=str(crew_id),
+            data=CrewPublicationCreate(
+                external_name="talkative",
+                description="Keeps the thread.",
+                protocols=["chat"],
+            ),
+            group_context=_Ctx([GROUP]),
+            entity_type="crew",
+        )
+        await session.commit()
+        (cap,) = await service.list_capabilities_for_group([GROUP], "chat")
+        assert cap.conversational is False
+
+    @pytest.mark.asyncio
+    async def test_a_crew_published_the_old_way_is_one_shot(self, session):
+        service = PublicationService(session)
+        crew_id = uuid.uuid4()
+        await _add_crew(session, crew_id, "Quiet")
+        await _publish(service, crew_id, "quiet")
+        (cap,) = await service.list_capabilities_for_group([GROUP], "chat")
+        assert cap.conversational is False

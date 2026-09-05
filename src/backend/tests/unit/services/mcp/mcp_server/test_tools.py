@@ -122,6 +122,17 @@ class TestPerCapabilityTools:
         assert "session_id" in description
 
     @pytest.mark.asyncio
+    async def test_a_conversational_crew_says_follow_ups_continue_it_too(self):
+        cap = self._cap(name="acme_report", conversational=True)
+        with self._capabilities(cap):
+            tools = await mcp_server.list_tools(_caller())
+        description = next(t for t in tools if t["name"] == "acme_report")[
+            "description"
+        ]
+        assert "session_id" in description and "crew" in description
+        assert "Starts a crew and returns" not in description
+
+    @pytest.mark.asyncio
     async def test_a_crew_is_still_described_as_a_crew(self):
         cap = self._cap(name="acme_report")
         with self._capabilities(cap):

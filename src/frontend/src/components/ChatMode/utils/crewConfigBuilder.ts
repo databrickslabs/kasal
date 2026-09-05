@@ -247,6 +247,7 @@ export function buildCrewConfig(plan: {
   }
 
   attachReferencedAnswer(tasks_yaml, inputs);
+  attachConversation(tasks_yaml, inputs);
   attachUnreferencedInputs(tasks_yaml, inputs);
 
   return {
@@ -291,6 +292,32 @@ function attachReferencedAnswer(
 }
 
 /**
+ * A crew that holds a conversation is SHOWN the conversation.
+ *
+ * A flow carries its own state from turn to turn; a crew has none — every turn
+ * is a fresh run. So the router hands a conversational crew the recent
+ * transcript (the same window it just read itself) in `inputs.conversation`,
+ * and this puts it in front of the first task as context: what was asked and
+ * answered before, so "now do the same for Germany" means something. Context,
+ * not the request — the request is the task's own USER REQUEST block.
+ */
+function attachConversation(
+  tasks_yaml: Record<string, Record<string, unknown>>,
+  inputs?: Record<string, string>,
+): void {
+  const conversation = String(inputs?.conversation ?? '').trim();
+  if (!conversation) return;
+  const taskKeys = Object.keys(tasks_yaml);
+  if (taskKeys.length === 0) return;
+  const first = tasks_yaml[taskKeys[0]];
+  first.description =
+    `${String(first.description ?? '').trim()}\n\n` +
+    `This run continues a conversation. The recent turns, oldest first — the ` +
+    `current request refers to them, so read it in their light and do not ` +
+    `redo work they already contain:\n\n${conversation}`;
+}
+
+/**
  * Input keys that are run machinery, not values the crew author declared.
  *
  * They ride in `inputs` because that is the channel the backend reads, but they
@@ -305,6 +332,9 @@ const MACHINERY_INPUTS = new Set([
   // Handed to the crew by attachReferencedAnswer, as a labelled block rather
   // than a one-line "input" — it is a document, often thousands of characters.
   'referenced_answer',
+  // Likewise attachConversation: the recent transcript for a crew that holds a
+  // conversation.
+  'conversation',
 ]);
 
 /**

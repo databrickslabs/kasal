@@ -488,7 +488,15 @@ export function useDispatcher(options: UseDispatcherOptions) {
 
           if (intent === 'execute_crew') {
             const execResult = result.generation_result as ExecuteCrewResult;
-            useExecutionStore.getState().setHeldConversation(null);
+            // A crew published as holding a conversation keeps the chat like a
+            // conversational flow does: follow-ups go back to it.
+            useExecutionStore
+              .getState()
+              .setHeldConversation(
+                execResult.conversational && execResult.capability
+                  ? execResult.capability
+                  : null,
+              );
             if (execResult.plan && options.onExecuteCrew) {
               const plan = execResult.plan;
               // Only a ROUTED run has these: what the router bound from the

@@ -15,6 +15,7 @@ from src.db.self_heal.columns import (
     _ensure_execution_history_columns,
     _ensure_group_users_columns,
     _ensure_modelconfig_columns,
+    _ensure_publications_columns,
     _ensure_ui_config_columns,
 )
 from src.db.self_heal.data import (
@@ -101,6 +102,7 @@ async def run_schema_self_heal(conn) -> None:
         _ensure_chat_assets_table,
         _ensure_chat_sessions_table,
         _ensure_chat_sessions_columns,
+        _ensure_publications_columns,
         _ensure_workflow_recipes_table,
         _ensure_workflow_recipe_trials_table,
         _ensure_crew_publications_table,

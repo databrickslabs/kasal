@@ -64,6 +64,16 @@ class CrewPublicationBase(BaseModel):
             "carries no optionality, so nothing downstream can infer it."
         ),
     )
+    conversational: bool = Field(
+        default=False,
+        description=(
+            "Whether this capability holds a conversation: a follow-up turn in "
+            "the chat goes back to it with the recent transcript instead of "
+            "being re-matched from scratch, and MCP/A2A callers are told to "
+            "continue the thread. A flow whose state declares `conversational` "
+            "holds one regardless; for a crew this is the only way to opt in."
+        ),
+    )
 
     @field_validator("external_name")
     @classmethod
@@ -97,6 +107,7 @@ class CrewPublicationUpdate(BaseModel):
     description: Optional[str] = Field(default=None, min_length=1, max_length=1024)
     protocols: Optional[List[PublicationProtocol]] = None
     input_schema: Optional[Dict[str, Any]] = None
+    conversational: Optional[bool] = None
 
     @field_validator("external_name")
     @classmethod
@@ -144,10 +155,11 @@ class PublishedCapability(BaseModel):
     teamspace: Optional[str] = None
     input_schema: Optional[Dict[str, Any]] = None
     #: Whether this capability holds a CONVERSATION rather than answering once.
-    #: Only a flow can, and only one that declares `state.conversational`. The
-    #: chat router needs it to know that a follow-up belongs to the capability
-    #: that answered the previous turn instead of being re-matched from scratch;
-    #: the other adapters ignore it.
+    #: A flow that declares `state.conversational`, or any publication whose
+    #: publisher switched it on (the only route for a crew). The chat router
+    #: needs it to know that a follow-up belongs to the capability that answered
+    #: the previous turn instead of being re-matched from scratch; the MCP hint
+    #: tells external callers to continue the thread.
     conversational: bool = False
 
     @property

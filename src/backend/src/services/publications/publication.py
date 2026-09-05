@@ -171,7 +171,10 @@ class PublicationService:
                     teamspace=row.group_id,
                     description=row.description,
                     input_schema=row.input_schema,
-                    conversational=key in conversational,
+                    # A flow that declares it in its state, or any publication
+                    # whose publisher switched it on — the only way for a crew.
+                    conversational=key in conversational
+                    or bool(getattr(row, "conversational", False)),
                 )
             )
         return capabilities
@@ -448,6 +451,7 @@ class PublicationService:
             existing.description = data.description
             existing.protocols = list(data.protocols)
             existing.input_schema = data.input_schema
+            existing.conversational = bool(getattr(data, "conversational", False))
             await self.repository.save()
             await self._announce(group_context)
             return existing
@@ -463,6 +467,7 @@ class PublicationService:
             description=data.description,
             protocols=list(data.protocols),
             input_schema=data.input_schema,
+            conversational=bool(getattr(data, "conversational", False)),
             group_id=group_id,
             created_by_email=group_context.group_email,
         )
@@ -519,6 +524,8 @@ class PublicationService:
             row.protocols = list(data.protocols)
         if data.input_schema is not None:
             row.input_schema = data.input_schema
+        if getattr(data, "conversational", None) is not None:
+            row.conversational = bool(data.conversational)
 
         await self.repository.save()
         await self._announce(group_context)

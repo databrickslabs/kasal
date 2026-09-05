@@ -34,6 +34,12 @@ export interface PublicationRequest {
   description: string;
   protocols: PublicationProtocol[];
   /**
+   * Holds a conversation: a follow-up in the chat goes back to this capability
+   * with the recent transcript instead of being re-matched from scratch. A flow
+   * whose state declares it holds one regardless; for a crew this is the switch.
+   */
+  conversational?: boolean;
+  /**
    * JSON Schema for declared inputs, including which are `required`.
    *
    * Authored here and nowhere else: the `{placeholder}` syntax carries no

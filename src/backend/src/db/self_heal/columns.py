@@ -78,6 +78,16 @@ async def _ensure_documentation_embeddings_columns(conn) -> None:
     await _ensure_pgvector_embedding_columns(conn)
 
 
+async def _ensure_publications_columns(conn) -> None:
+    """publications: the publisher's "holds a conversation" flag. Without it a
+    published crew can never be continued across turns."""
+    await ensure_columns(
+        conn,
+        "publications",
+        [("conversational", "BOOLEAN", "BOOLEAN")],
+    )
+
+
 async def _ensure_chat_sessions_columns(conn) -> None:
     """chat_sessions: the refresh-reconnect marker, the per-session preview that
     moved off browser IndexedDB onto the server, and the rolling context
