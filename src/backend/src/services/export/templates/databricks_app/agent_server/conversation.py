@@ -14,7 +14,7 @@ event bus re-entering / looping inside the server.)
 from typing import Any, Callable, Dict, List, Optional
 
 import mlflow
-from agent_server import cancel, mlflow_bridge, progress, state_store
+from agent_server import cancel, mlflow_bridge, ownership, progress, state_store
 from agent_server.kasal_runtime.services.execution.runtime import Agent
 
 # Injected once by agent.configure_conversation() — keeps this layer crew-agnostic.
@@ -227,6 +227,12 @@ def respond(
     groups together in the Traces UI.
     """
     _tag_trace_session(conversation_id, user_id)
+    # The first turn claims the conversation for this user; a later turn from
+    # anyone else is refused before any work — or any history — is touched.
+    try:
+        ownership.ensure_owner(conversation_id, user_id)
+    except ownership.ConversationOwnedByAnother:
+        return "This conversation belongs to another user."
     # Bind this thread to the conversation so the event-bus listener
     # (crew_progress) can report live, ephemeral "doing X" status for this turn.
     progress.set_current(conversation_id)

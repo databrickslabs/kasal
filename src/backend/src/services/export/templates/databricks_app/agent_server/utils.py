@@ -32,12 +32,12 @@ def get_user_id(request: ResponsesAgentRequest) -> Optional[str]:
     ``asyncio.to_thread``. Falls back to a client-supplied ``user_id`` custom input.
     """
     try:
-        headers = get_request_headers() or {}
-        identity = (
-            headers.get("x-forwarded-preferred-username")
-            or headers.get("x-forwarded-email")
-            or headers.get("x-forwarded-user")
-        )
+        # The same derivation the read routes use (agent_server.ownership), so
+        # the user a conversation is claimed for on a turn is the user who may
+        # read it back.
+        from agent_server.ownership import identity_from_headers
+
+        identity = identity_from_headers(get_request_headers() or {})
         if identity:
             return identity
     except Exception:  # noqa: BLE001 — off the request thread / no context

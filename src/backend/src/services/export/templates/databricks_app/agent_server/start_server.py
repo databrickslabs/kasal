@@ -41,24 +41,28 @@ def _whoami(request: Request):
     return {"email": email, "username": username, "name": name}
 
 
+# Every per-conversation route answers only to the user who started the
+# conversation — see agent_server.ownership. An id is not an authorization.
 @app.get("/progress/{conversation_id}")
-def _progress(conversation_id: str):
+def _progress(conversation_id: str, request: Request):
     """Subtle, ephemeral "what is the agent doing right now" for the UI to poll
     while a turn runs. Returns {status, seq} or {status: null} when idle. Nothing
     is persisted — see agent_server.progress."""
-    from agent_server import progress
+    from agent_server import ownership, progress
 
+    ownership.require_owner(conversation_id, request.headers)
     return progress.get(conversation_id) or {"status": None}
 
 
 @app.get("/conversations/{conversation_id}")
-def _conversation_history(conversation_id: str):
+def _conversation_history(conversation_id: str, request: Request):
     """The persisted multi-turn history for a conversation, plus whether a turn
     looks in-flight right now. Backed by the durable state store (Lakebase /
     SQLite — see agent_server.state_store), so the UI can restore a chat after
     a page reload or an app restart instead of showing a dead conversation."""
-    from agent_server import conversation, progress
+    from agent_server import conversation, ownership, progress
 
+    ownership.require_owner(conversation_id, request.headers)
     return {
         "conversation_id": conversation_id,
         "messages": conversation.get_history(conversation_id),
@@ -67,22 +71,24 @@ def _conversation_history(conversation_id: str):
 
 
 @app.get("/a2ui/{conversation_id}")
-def _a2ui(conversation_id: str):
+def _a2ui(conversation_id: str, request: Request):
     """Poll for this turn's A2UI surface. It is composed out-of-band so the answer
     request returns fast (Databricks Apps time out long-held connections). Returns
     {status: pending|ready|none|idle, surface}. See agent_server.a2ui_store."""
-    from agent_server import a2ui_store
+    from agent_server import a2ui_store, ownership
 
+    ownership.require_owner(conversation_id, request.headers)
     return a2ui_store.get(conversation_id)
 
 
 @app.post("/cancel/{conversation_id}")
-def _cancel(conversation_id: str):
+def _cancel(conversation_id: str, request: Request):
     """Stop the running turn for this conversation. Cooperative — the crew aborts
     at the next step boundary (before the next LLM call), so token spend stops
     even though the in-flight request finishes. See agent_server.cancel."""
-    from agent_server import cancel
+    from agent_server import cancel, ownership
 
+    ownership.require_owner(conversation_id, request.headers)
     cancel.request(conversation_id)
     return {"cancelled": True}
 
