@@ -19,7 +19,7 @@ from typing import Any, Dict, List
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.session import async_session_factory
+from src.db.session import get_isolated_db_session
 from src.models.skill import Skill, SkillFile
 from src.seeds.skills_data import BUILTIN_SKILLS
 
@@ -99,7 +99,12 @@ async def seed() -> None:
 
     created = updated = unchanged = 0
 
-    async with async_session_factory() as session:
+    # An isolated connection: this unit of work DELETEs a builtin's files and
+    # re-INSERTs them, with validation and several awaits in between. On the
+    # shared SQLite connection another request's rollback in that window undid
+    # the delete, and the commit then failed the (skill_id, path) uniqueness —
+    # every reload, whenever the UI reconnected while startup was seeding.
+    async with get_isolated_db_session() as session:
         for entry in BUILTIN_SKILLS:
             try:
                 parser.validate_row(
