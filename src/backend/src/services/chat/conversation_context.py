@@ -111,8 +111,13 @@ async def recent_turns(
     try:
         from src.repositories.chat_history_repository import ChatHistoryRepository
 
+        # Activity cards are skipped in the QUERY, not just below: a research
+        # run leaves dozens of `[ui-card]` rows behind, and a window sized in
+        # rows was all cards before it reached the previous exchange — so the
+        # router (and the repeat guard) saw a conversation with its last real
+        # turn missing.
         rows = await ChatHistoryRepository(session).get_recent_by_session_and_group(
-            session_id, group_ids, limit=limit * 3
+            session_id, group_ids, limit=limit * 3, exclude_content_prefix="[ui-card]"
         )
     except Exception as exc:  # noqa: BLE001 — context is an enhancement, not a gate
         logger.debug("[capability_router] conversation context unavailable: %s", exc)

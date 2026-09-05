@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from sqlalchemy import and_, delete, desc, func, select
+from sqlalchemy import and_, delete, desc, func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
@@ -64,6 +64,7 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
         session_id: str,
         group_ids: List[str],
         limit: int = 120,
+        exclude_content_prefix: Optional[str] = None,
     ) -> List[ChatHistory]:
         """Get the MOST RECENT ``limit`` messages for a session, oldest→newest.
 
@@ -77,6 +78,11 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
             session_id: Chat session identifier.
             group_ids: Allowed group IDs (tenant isolation).
             limit: Max messages to return (the most recent ones).
+
+            exclude_content_prefix: Leave out rows whose content starts with
+                this — the chat persists its activity cards as ``[ui-card]``
+                assistant rows, dozens per run, and a window sized in rows was
+                filled by them before it reached the previous real exchange.
 
         Returns:
             Up to ``limit`` ChatHistory rows, ordered oldest→newest.
@@ -96,6 +102,10 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
                 .order_by(self.model.timestamp.desc())
                 .limit(limit)
             )
+            if exclude_content_prefix:
+                query = query.where(
+                    not_(self.model.content.like(f"{exclude_content_prefix}%"))
+                )
             result = await self.session.execute(query)
             rows = list(result.scalars().all())
             rows.reverse()  # newest-first query → chronological for the caller

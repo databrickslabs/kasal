@@ -233,3 +233,19 @@ class TestChatFurnitureIsNotAnAnswer:
             turns = await recent_turns(None, "s1", ["g1"])
 
         assert len(turns) == 1
+
+
+class TestActivityCardsDoNotCrowdTheWindow:
+    @pytest.mark.asyncio
+    async def test_the_query_is_asked_to_skip_ui_card_rows(self):
+        """A research run leaves dozens of `[ui-card]` rows; if they counted
+        against the window the previous real exchange was gone before the router
+        (or the repeat guard) ever saw it."""
+        rows = [_row("user", "gather features"), _row("assistant", "the table")]
+        with _history(rows) as repo_cls:
+            turns = await recent_turns(
+                None, "s1", ["g1"], exclude_message="gather features"
+            )
+        kwargs = repo_cls.return_value.get_recent_by_session_and_group.await_args.kwargs
+        assert kwargs["exclude_content_prefix"] == "[ui-card]"
+        assert [t.role for t in turns] == ["user", "assistant"]

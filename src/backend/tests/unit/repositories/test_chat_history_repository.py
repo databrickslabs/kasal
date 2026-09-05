@@ -803,3 +803,32 @@ class TestGetByIdAndGroup:
     ):
         assert await chat_history_repository.get_by_id_and_group("m1", []) is None
         mock_session.execute.assert_not_awaited()
+
+
+class TestRecentWindowSkipsActivityCards:
+    @pytest.mark.asyncio
+    async def test_exclude_content_prefix_becomes_a_not_like_filter(
+        self, chat_history_repository, mock_session
+    ):
+        """The chat persists its activity cards as `[ui-card]` assistant rows,
+        dozens per run; a window sized in rows was all cards before it reached
+        the previous exchange. The exclusion happens in the QUERY."""
+        mock_result = MagicMock()
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = []
+        mock_result.scalars.return_value = mock_scalars
+        mock_session.execute.return_value = mock_result
+        await chat_history_repository.get_recent_by_session_and_group(
+            session_id="s",
+            group_ids=["g"],
+            limit=24,
+            exclude_content_prefix="[ui-card]",
+        )
+        statement = str(mock_session.execute.call_args.args[0])
+        assert "NOT" in statement and "LIKE" in statement
+        # …and without the argument the query is what it always was.
+        mock_session.execute.reset_mock()
+        await chat_history_repository.get_recent_by_session_and_group(
+            session_id="s", group_ids=["g"], limit=24
+        )
+        assert "LIKE" not in str(mock_session.execute.call_args.args[0])
