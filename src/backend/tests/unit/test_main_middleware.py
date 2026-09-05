@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
 from tests.unit.route_utils import route_paths
 
 # ---------------------------------------------------------------------------
@@ -356,3 +357,26 @@ class TestMiddlewareOrder:
         assert names.index("LocalDevAuthMiddleware") < names.index(
             "UserContextMiddleware"
         ), f"LocalDevAuthMiddleware must run before UserContextMiddleware; order={names}"
+
+
+class TestLocalDevAuthGate:
+    """Audit F07. The development identity fallback is off inside Databricks
+    Apps, cannot be switched on there, and is an explicit opt-out elsewhere."""
+
+    def test_off_inside_databricks_apps_even_when_asked_for(self, monkeypatch):
+        from src.main import _local_dev_auth_enabled
+
+        monkeypatch.setenv("DATABRICKS_APP_NAME", "kasal")
+        monkeypatch.delenv("LOCAL_DEV_AUTH", raising=False)
+        assert _local_dev_auth_enabled() is False
+        monkeypatch.setenv("LOCAL_DEV_AUTH", "true")
+        assert _local_dev_auth_enabled() is False
+
+    def test_on_for_a_plain_local_run_and_off_on_request(self, monkeypatch):
+        from src.main import _local_dev_auth_enabled
+
+        monkeypatch.delenv("DATABRICKS_APP_NAME", raising=False)
+        monkeypatch.delenv("LOCAL_DEV_AUTH", raising=False)
+        assert _local_dev_auth_enabled() is True
+        monkeypatch.setenv("LOCAL_DEV_AUTH", "false")
+        assert _local_dev_auth_enabled() is False
