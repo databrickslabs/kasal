@@ -259,3 +259,78 @@ class TestCleanupZombieJobs:
             result = await ExecutionCleanupService.cleanup_zombie_jobs()
 
         assert result == 0
+
+
+class TestLightAgentRunsAreRecoveredToo:
+    """A chat run ends with a ``response_run`` span, not ``crew_completed``.
+    One answered, never reached COMPLETED, and sat RUNNING with no error."""
+
+    @pytest.mark.asyncio
+    async def test_a_stale_response_run_span_recovers_the_run(self):
+        from src.services.execution.cleanup import LIGHT_AGENT_GRACE_SECONDS
+
+        factory_mock, _ = _build_session_ctx()
+        update_status_mock = AsyncMock(return_value=True)
+        has = AsyncMock(
+            side_effect=[
+                (False, None),
+                (True, {"tool_name": "Response", "content": "the answer"}),
+            ]
+        )
+        with (
+            patch("src.services.execution.cleanup.get_smart_db_session", factory_mock),
+            patch(
+                "src.services.execution.cleanup.ExecutionHistoryRepository"
+            ) as MockHistoryRepo,
+            patch(
+                "src.services.execution.cleanup.ExecutionTraceRepository"
+            ) as MockTraceRepo,
+            patch(
+                "src.services.execution.cleanup.ExecutionStatusService.update_status",
+                update_status_mock,
+            ),
+        ):
+            MockHistoryRepo.return_value.get_job_ids_by_statuses = AsyncMock(
+                return_value=["agent-1"]
+            )
+            MockTraceRepo.return_value.has_completed_trace = has
+            n = await ExecutionCleanupService.cleanup_zombie_jobs()
+
+        assert n == 1
+        second = has.await_args_list[1]
+        assert second.args[:2] == ("agent-1", "response_run")
+        assert second.kwargs["min_age_seconds"] == LIGHT_AGENT_GRACE_SECONDS
+        update_status_mock.assert_awaited_once_with(
+            job_id="agent-1",
+            status=ExecutionStatus.COMPLETED.value,
+            message="Light agent execution completed",
+            result="the answer",
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_run_with_neither_span_is_left_alone(self):
+        factory_mock, _ = _build_session_ctx()
+        update_status_mock = AsyncMock(return_value=True)
+        with (
+            patch("src.services.execution.cleanup.get_smart_db_session", factory_mock),
+            patch(
+                "src.services.execution.cleanup.ExecutionHistoryRepository"
+            ) as MockHistoryRepo,
+            patch(
+                "src.services.execution.cleanup.ExecutionTraceRepository"
+            ) as MockTraceRepo,
+            patch(
+                "src.services.execution.cleanup.ExecutionStatusService.update_status",
+                update_status_mock,
+            ),
+        ):
+            MockHistoryRepo.return_value.get_job_ids_by_statuses = AsyncMock(
+                return_value=["agent-1"]
+            )
+            MockTraceRepo.return_value.has_completed_trace = AsyncMock(
+                side_effect=[(False, None), (False, None)]
+            )
+            n = await ExecutionCleanupService.cleanup_zombie_jobs()
+
+        assert n == 0
+        update_status_mock.assert_not_awaited()

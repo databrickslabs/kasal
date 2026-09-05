@@ -31,6 +31,11 @@ from src.services.execution.status import ExecutionStatusService
 
 logger = logging.getLogger(__name__)
 
+#: A light-agent run writes its ``response_run`` span, then composes a UI
+#: surface (bounded at 240s) and writes its status. A span older than this with
+#: the run still RUNNING means the status write never landed.
+LIGHT_AGENT_GRACE_SECONDS = 360
+
 
 class ExecutionCleanupService:
     """Simple cleanup service for orphaned jobs."""
@@ -98,8 +103,10 @@ class ExecutionCleanupService:
         Called every 2 minutes. For each RUNNING job, check whether a
         crew_completed trace exists — if it does the crew finished but its
         status update silently failed, so mark it COMPLETED and populate the
-        result. Jobs with no completion trace are still genuinely running and
-        are left untouched.
+        result. A light-agent (chat) run ends with a ``response_run`` span
+        instead; one older than the compose budget with the run still RUNNING
+        is the same failure. Jobs with no completion trace are still genuinely
+        running and are left untouched.
 
         Returns number of jobs recovered.
         """
@@ -113,11 +120,19 @@ class ExecutionCleanupService:
 
             for job_id in running_job_ids:
                 # Check whether the crew actually completed
+                message = "CrewAI execution completed successfully"
                 async for db in get_smart_db_session():
                     trace_repo = ExecutionTraceRepository(db)
                     found, output = await trace_repo.has_completed_trace(
                         job_id, "crew_completed"
                     )
+                    if not found:
+                        found, output = await trace_repo.has_completed_trace(
+                            job_id,
+                            "response_run",
+                            min_age_seconds=LIGHT_AGENT_GRACE_SECONDS,
+                        )
+                        message = "Light agent execution completed"
 
                 if not found:
                     continue  # No completion trace → still running, leave it
@@ -137,7 +152,7 @@ class ExecutionCleanupService:
                 await ExecutionStatusService.update_status(
                     job_id=job_id,
                     status=ExecutionStatus.COMPLETED.value,
-                    message="CrewAI execution completed successfully",
+                    message=message,
                     result=final_result,
                 )
                 logger.info(f"[ZombieCleanup] Recovered stale job {job_id} → COMPLETED")

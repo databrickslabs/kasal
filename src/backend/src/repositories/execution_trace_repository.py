@@ -23,6 +23,14 @@ from src.models.execution_trace import ExecutionTrace
 logger = LoggerManager.get_instance().system
 
 
+def _span_age_seconds(created_at: Any) -> float:
+    """Age of a span; a span with no timestamp counts as old enough."""
+    if created_at is None:
+        return float("inf")
+    now = datetime.now(created_at.tzinfo) if created_at.tzinfo else datetime.utcnow()
+    return (now - created_at).total_seconds()
+
+
 class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
     """Repository class for handling ExecutionTrace database operations."""
 
@@ -858,9 +866,17 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         return list(result.scalars().all())
 
     async def has_completed_trace(
-        self, job_id: str, event_type: str = "crew_completed"
+        self,
+        job_id: str,
+        event_type: str = "crew_completed",
+        min_age_seconds: Optional[float] = None,
     ) -> Tuple[bool, Optional[Any]]:
         """Whether a completion span exists for a job, and its output if so.
+
+        ``min_age_seconds`` treats a younger span as absent. The light agent
+        writes its ``response_run`` span BEFORE composing the UI surface and
+        writing its status, so the zombie sweep must not read a fresh one as
+        "answered but never completed".
 
         Zombie-job recovery needs to distinguish "no crew_completed span yet"
         (still genuinely running — leave it alone) from "span exists but its
@@ -873,7 +889,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             (False, None) if the job has no such span at all.
         """
         result = await self.session.execute(
-            select(ExecutionTrace.output)
+            select(ExecutionTrace.output, ExecutionTrace.created_at)
             .where(
                 ExecutionTrace.job_id == job_id,
                 ExecutionTrace.event_type == event_type,
@@ -883,5 +899,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         )
         row = result.first()
         if row is None:
+            return False, None
+        if min_age_seconds is not None and _span_age_seconds(row[1]) < min_age_seconds:
             return False, None
         return True, row[0]
