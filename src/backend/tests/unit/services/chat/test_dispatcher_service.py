@@ -4780,3 +4780,91 @@ class TestResolveEffectiveTools:
         enabled = {"GenieTool", "DatabricksKnowledgeSearchTool"}
         out = DispatcherService._resolve_effective_tools([], enabled)
         assert out == ["GenieTool"]
+
+
+_INTENT_GENERATE_CREW = {
+    "intent": "generate_crew",
+    "confidence": 0.9,
+    "extracted_info": {},
+    "suggested_prompt": "test prompt",
+    "suggested_tools": [],
+}
+
+
+class TestRepeatedTurnAnswersFromTheConversation:
+    """A chat answer run whose message repeats, word for word, the request the
+    previous answer already covered is answered by the light agent from the
+    transcript — not generated and run again. A canvas (no auto-execute)
+    asking twice for a crew still gets a crew."""
+
+    @staticmethod
+    def _turns(asked):
+        from src.services.chat.conversation_context import Turn
+
+        return [
+            Turn(index=0, role="user", preview=asked, content=asked),
+            Turn(index=1, role="assistant", preview="the answer", content="the answer"),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_verbatim_repeat_in_chat_mode_becomes_a_light_agent_turn(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(return_value=_INTENT_GENERATE_CREW)
+        svc._log_llm_interaction = AsyncMock()
+        svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
+        request = DispatcherRequest(
+            message="provide me the features of crewAI in a table",
+            model="test-model",
+            session_id="s1",
+            auto_execute=True,
+            chat_mode_type="research",
+        )
+        with (
+            patch(
+                "src.services.chat.conversation_context.recent_turns",
+                AsyncMock(
+                    return_value=self._turns(
+                        "Provide me the features of CrewAI in a table."
+                    )
+                ),
+            ),
+            patch("asyncio.create_task", return_value=MagicMock()),
+        ):
+            await svc.dispatch(request)
+        # The run that follows is the light agent's, with no semantic recall.
+        assert request.chat_mode_type == "chat" and request.disable_memory is True
+
+    @pytest.mark.asyncio
+    async def test_a_new_request_and_a_canvas_repeat_are_left_alone(self):
+        svc = _build_service()
+        svc._maybe_enable_mlflow_tracing = AsyncMock(return_value=False)
+        svc.detect_intent = AsyncMock(return_value=_INTENT_GENERATE_CREW)
+        svc._log_llm_interaction = AsyncMock()
+        svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
+        turns = self._turns("provide me the features of crewAI in a table")
+        with (
+            patch(
+                "src.services.chat.conversation_context.recent_turns",
+                AsyncMock(return_value=turns),
+            ),
+            patch("asyncio.create_task", return_value=MagicMock()),
+        ):
+            reworded = DispatcherRequest(
+                message="now the same for langgraph",
+                model="m",
+                session_id="s1",
+                auto_execute=True,
+                chat_mode_type="research",
+            )
+            await svc.dispatch(reworded)
+            assert reworded.chat_mode_type == "research"
+            canvas = DispatcherRequest(
+                message="provide me the features of crewAI in a table",
+                model="m",
+                session_id="s1",
+                auto_execute=False,
+                chat_mode_type="research",
+            )
+            await svc.dispatch(canvas)
+            assert canvas.chat_mode_type == "research"

@@ -667,3 +667,111 @@ class TestConversationalCrew:
             _decision(), _publication(), _capability(), catalog, None, _group()
         )
         assert plain["extracted_inputs"] == {"region": "DACH"}
+
+
+class TestRepeatOfTheLastAnswer:
+    """The same request, word for word, that the picked capability answered a
+    moment ago is answered from the conversation, not run again."""
+
+    def _turns(
+        self,
+        asked="provide me the features of crewAI in a table",
+        cap="quarterly_risk_review",
+    ):
+        from src.services.chat.conversation_context import Turn
+
+        return [
+            Turn(index=0, role="user", preview=asked, content=asked),
+            Turn(
+                index=1,
+                role="assistant",
+                preview="| feature | … |",
+                content="| feature | … |",
+                capability=cap,
+            ),
+        ]
+
+    def test_the_pure_check(self):
+        from src.services.chat.capability_router import (
+            is_repeat_of_last_answer as repeat,
+        )
+
+        turns = self._turns()
+        assert repeat(
+            "Provide me the features of CrewAI in a table.",
+            turns,
+            "quarterly_risk_review",
+        )
+        assert repeat(
+            "provide  me the features of crewai in a table?",
+            turns,
+            "quarterly_risk_review",
+        )
+        # A rewording is the router's call, not a verbatim repeat.
+        assert not repeat(
+            "give me crewAI's features as a table", turns, "quarterly_risk_review"
+        )
+        # A different capability answering the same words is a new run.
+        assert not repeat(
+            "provide me the features of crewAI in a table", turns, "other"
+        )
+        # Only the request behind the LAST answer counts.
+        from src.services.chat.conversation_context import Turn
+
+        later = turns + [
+            Turn(index=2, role="user", preview="and Germany?", content="and Germany?"),
+            Turn(
+                index=3,
+                role="assistant",
+                preview="Germany…",
+                content="Germany…",
+                capability="quarterly_risk_review",
+            ),
+        ]
+        assert not repeat(
+            "provide me the features of crewAI in a table",
+            later,
+            "quarterly_risk_review",
+        )
+        assert not repeat("anything", [], "quarterly_risk_review")
+
+    @pytest.mark.asyncio
+    async def test_a_confident_pick_that_repeats_the_last_answer_is_answered_here(self):
+        ctx, service = TestRouteAndDispatch._publications(
+            [_capability()], _publication()
+        )
+        with (
+            ctx,
+            patch(
+                "src.services.chat.capability_dispatch.TemplateService."
+                "get_effective_template_content",
+                AsyncMock(return_value="prompt"),
+            ),
+            patch(
+                "src.services.chat.capability_dispatch.recent_turns",
+                AsyncMock(return_value=self._turns()),
+            ),
+        ):
+            result = await route_and_dispatch(
+                session=None,
+                group_context=_group(),
+                message="Provide me the features of crewAI in a table",
+                ask_models=AsyncMock(
+                    return_value=(
+                        {
+                            "capability": "quarterly_risk_review",
+                            "confidence": 0.95,
+                            "inputs": {},
+                        },
+                        "m",
+                        1,
+                    )
+                ),
+                log_llm=AsyncMock(),
+                catalog_service=None,
+                flow_service=None,
+            )
+        assert result["type"] == "catalog_no_match"
+        assert result["reason"] == "repeat" and result["answer_here"] is True
+        # The point: nothing was resolved, nothing will run.
+        service.resolve_capability_for_group.assert_not_awaited()

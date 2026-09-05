@@ -1085,6 +1085,30 @@ Please analyze this message and provide your intent classification."""
 
         return result
 
+    async def _repeats_last_answer(
+        self, request: Any, group_context: Optional[GroupContext]
+    ) -> bool:
+        """Whether this turn is, word for word, the request the previous answer
+        in this session already answered. Best-effort: any failure reads as
+        "no", and the turn proceeds as it always has."""
+        session_id = getattr(request, "session_id", None)
+        if not session_id:
+            return False
+        try:
+            from src.services.chat.capability_router import is_repeat_of_last_answer
+            from src.services.chat.conversation_context import recent_turns
+
+            turns = await recent_turns(
+                self.session,
+                session_id,
+                list(getattr(group_context, "group_ids", None) or []),
+                exclude_message=request.message,
+            )
+            return is_repeat_of_last_answer(request.message, turns)
+        except Exception as exc:  # noqa: BLE001 — a lookup must never fail the turn
+            logger.debug("[dispatcher] repeat check skipped: %s", exc)
+            return False
+
     async def _route_to_capability(
         self,
         message: str,
@@ -1327,6 +1351,23 @@ Please analyze this message and provide your intent classification."""
             # already on screen" — which is answered, not run. Rewriting the
             # intent here lets the ordinary chat path answer it, instead of this
             # branch growing a second copy of the generation machinery.
+            # The same request, word for word, that the previous answer in
+            # this chat already answered: answer it from the conversation
+            # (reshape, restate) instead of generating and running a crew
+            # again. Chat answer runs only — a canvas asking twice for a crew
+            # wants a crew. The router applies the same rule to its own picks.
+            if (
+                request.auto_execute
+                and dispatcher_response.intent == IntentType.GENERATE_CREW
+                and await self._repeats_last_answer(request, group_context)
+            ):
+                logger.info(
+                    "[dispatcher] turn repeats the request the previous answer "
+                    "covered; answering from the conversation instead of "
+                    "generating a crew again"
+                )
+                request.chat_mode_type = "chat"
+                request.disable_memory = True
             routed_result = None
             if dispatcher_response.intent == IntentType.CATALOG_ROUTE:
                 routed_result = await self._route_to_capability(

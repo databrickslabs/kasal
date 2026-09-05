@@ -30,6 +30,7 @@ from src.services.chat.capability_router import (
     build_route_messages,
     continue_decision,
     held_conversation,
+    is_repeat_of_last_answer,
     parse_route_response,
 )
 from src.services.chat.conversation_context import (
@@ -67,6 +68,12 @@ NO_MATCH_MESSAGES = {
     ),
     "no_match": "Nothing published to chat matches this.",
     "unresolved": "Nothing published to chat matches this.",
+    # Answered in the chat instead (answer_here); this line shows only if that
+    # path is ever not taken.
+    "repeat": (
+        "That is the request the answer above already covers; ask for it in "
+        'another form, or say "run it again" to refresh it.'
+    ),
 }
 
 
@@ -197,6 +204,18 @@ async def route_and_dispatch(
     # ALWAYS through resolve_capability_for_group — the single authorisation
     # choke point, which returns None for "does not exist" and "another
     # tenant's" alike so a name cannot be used as a cross-tenant oracle.
+    # The same request, word for word, that this capability answered a moment
+    # ago: the answer is on screen. Answer the turn from the conversation
+    # (reshape, restate) instead of paying for the run again. "Run it again"
+    # is not the same words, so an explicit refresh still routes.
+    if is_repeat_of_last_answer(message, turns, decision.capability):
+        logger.info(
+            "[capability_router] %s repeats the request %s already answered; "
+            "answering from the conversation instead of re-running",
+            message[:60],
+            decision.capability,
+        )
+        return no_match("repeat", answer_here=True)
     publication = await publications.resolve_capability_for_group(
         group_ids, CHAT_PROTOCOL, decision.capability
     )

@@ -143,6 +143,56 @@ def held_conversation(
     return None
 
 
+def _same_request(a: str, b: str) -> bool:
+    """Whether two messages ask the same thing, allowing for case, spacing and
+    a trailing full stop or question mark — not for rewording."""
+    norm = lambda t: " ".join((t or "").lower().split()).rstrip(" .?!")  # noqa: E731
+    return bool(norm(a)) and norm(a) == norm(b)
+
+
+def is_repeat_of_last_answer(
+    message: str, turns: List[Any], capability: Optional[str] = None
+) -> bool:
+    """Whether ``message`` repeats, word for word, the request that the most
+    recent answer already answered.
+
+    A verbatim repeat is not a request for new work: the material is on
+    screen, and running a crew again spends minutes reproducing it. Only the
+    request that produced the LAST answer counts — an earlier one has been
+    superseded by whatever came after. With ``capability`` given, the answer
+    must also have come from that capability (the router picked the same one
+    again); without it, any answer counts — the build-new path, where every
+    turn generates its own crew. Rewordings are the model's business, not
+    this function's.
+    """
+    last_answer_at = next(
+        (
+            i
+            for i in range(len(turns) - 1, -1, -1)
+            if getattr(turns[i], "role", "") == "assistant"
+        ),
+        None,
+    )
+    if last_answer_at is None:
+        return False
+    if (
+        capability is not None
+        and getattr(turns[last_answer_at], "capability", None) != capability
+    ):
+        return False
+    asked = next(
+        (
+            turns[i]
+            for i in range(last_answer_at - 1, -1, -1)
+            if getattr(turns[i], "role", "") == "user"
+        ),
+        None,
+    )
+    return asked is not None and _same_request(
+        message, getattr(asked, "content", "") or ""
+    )
+
+
 def continue_decision(capability: PublishedCapability, message: str) -> "RouteDecision":
     """Route this turn to the capability already holding the conversation.
 
