@@ -354,6 +354,24 @@ export const isConsolidation = (r: MemoryRecord): boolean =>
 export type RunMemoryMode = 'saved' | 'recalled';
 
 /**
+ * The ids a record answers to: its own, and those of the records maintenance
+ * merged into it (`merged_ids`). A run's traces name records by id; when a
+ * later merge replaces them, the successor still resolves — a run that
+ * recalled two records and saved one looked like it did neither, 40 seconds
+ * after doing both, because all three had been merged into a new record.
+ */
+export function recordIds(r: MemoryRecord): string[] {
+  const merged = r.metadata?.merged_ids;
+  const absorbed = Array.isArray(merged)
+    ? merged.filter((x): x is string => typeof x === 'string')
+    : [];
+  return [r.id, ...absorbed].filter((x): x is string => Boolean(x));
+}
+
+const standsFor = (r: MemoryRecord, ids: Set<string>): boolean =>
+  recordIds(r).some((id) => ids.has(id));
+
+/**
  * A record that names the execution that wrote it — the strongest evidence
  * there is. Chat stamps `execution_id` on its records' metadata; crew/flow
  * task outputs are gaining the same stamp. A write folded into an older
@@ -393,9 +411,9 @@ export function recordsForRun(
 ): MemoryRecord[] {
   if (mode === 'recalled') {
     if (facts.recalledIds.size === 0) return [];
-    return records.filter((r) => r.id && facts.recalledIds.has(r.id));
+    return records.filter((r) => standsFor(r, facts.recalledIds));
   }
-  const byId = (r: MemoryRecord) => Boolean(r.id && facts.savedIds.has(r.id));
+  const byId = (r: MemoryRecord) => standsFor(r, facts.savedIds);
   const byBody = (r: MemoryRecord) =>
     facts.savedIds.size === 0 && contentMatches(r, facts.savedContents);
   return records.filter(

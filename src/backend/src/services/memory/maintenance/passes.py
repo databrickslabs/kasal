@@ -60,7 +60,11 @@ from src.services.memory.engine import (
     KIND_PROCEDURAL,
     KIND_SEMANTIC,
 )
-from src.services.memory.engine.consolidation import merge_categories
+from src.services.memory.engine.consolidation import (
+    contributing_runs,
+    merge_categories,
+    merged_lineage,
+)
 from src.services.memory.maintenance.forgetting import forget_expired_memories
 from src.services.memory.maintenance.supersession import supersede_outdated_facts
 
@@ -250,12 +254,21 @@ def merge_similar_memories(memory: Any, scope: str | None = None) -> dict[str, i
             continue
         try:
             categories = merge_categories(*(r.categories for r in members))
+            # What the merged record stands for: the ids it replaces (a run's
+            # traces name records by id) and every run stamped on a member.
+            metadata: dict[str, Any] = {
+                "merged_from": len(members),
+                "merged_ids": merged_lineage(*members),
+            }
+            runs = contributing_runs(*(r.metadata for r in members))
+            if runs:
+                metadata["execution_ids"] = runs
             memory.remember(
                 merged_text[:4000],
                 categories=categories or None,
                 importance=max(r.importance for r in members),
                 source="consolidation",
-                metadata={"merged_from": len(members)},
+                metadata=metadata,
                 # Inherit the kind rather than re-classifying: passing it
                 # explicitly is what keeps this path free of a second LLM call
                 # per cluster. Merging fragments of a fact must not demote the

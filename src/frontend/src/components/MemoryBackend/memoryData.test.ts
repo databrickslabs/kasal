@@ -9,6 +9,7 @@ import {
   deriveIndex,
   extractRecalledIds,
   isConsolidation,
+  recordIds,
   recordsForRun,
   runTraceFacts,
   timeMs,
@@ -265,5 +266,34 @@ describe('a write folded into an older record at save time', () => {
   it('and by no other run, even one whose maintenance re-saved it', () => {
     expect(recordsForRun([folded], 'saved', facts, 'run-other')).toEqual([]);
     expect(recordsForRun([folded], 'saved', facts)).toEqual([]);
+  });
+});
+
+describe('a run whose records were merged away after it ran', () => {
+  // The run recalled r-old and r-new and its write was folded into r-new.
+  // Forty seconds later maintenance merged both into m-1 and deleted them.
+  const successor = rec({
+    id: 'm-1',
+    source: 'consolidation',
+    metadata: { merged_from: 2, merged_ids: ['r-old', 'r-new'], execution_ids: ['run-x'] },
+    content: 'Lebanon Daily News Report — merged.',
+  });
+  const facts = runTraceFacts([
+    { event_type: 'memory_retrieval', trace_metadata: { record_ids: ['r-old', 'r-new'] } },
+    { event_type: 'memory_write', trace_metadata: { record_id: 'r-new' } },
+  ]);
+
+  it('still shows what it recalled, through the successor', () => {
+    expect(recordsForRun([successor], 'recalled', facts, 'run-x')).toEqual([successor]);
+  });
+
+  it('still shows what it saved, through the runs the successor carries', () => {
+    expect(recordsForRun([successor], 'saved', facts, 'run-x')).toEqual([successor]);
+    expect(recordsForRun([successor], 'saved', facts, 'run-other')).toEqual([]);
+  });
+
+  it('recordIds lists a record and everything it absorbed', () => {
+    expect(recordIds(successor)).toEqual(['m-1', 'r-old', 'r-new']);
+    expect(recordIds(rec({ id: 'plain' }))).toEqual(['plain']);
   });
 });

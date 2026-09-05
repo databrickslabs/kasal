@@ -202,6 +202,37 @@ class TestMergeSimilarMemories:
         ]
         assert merged and merged[0].content == "merged fact"
 
+    def test_the_merged_record_stands_for_what_it_replaced(self, tmp_path):
+        """A run's traces name records by id. Maintenance replaced two of them
+        with one 40 seconds after a run recalled both, and the run looked like
+        it had recalled nothing. The successor carries the ids and the runs."""
+        from src.services.memory.maintenance.passes import (
+            merge_similar_memories,
+        )
+
+        llm = _FakeLLM('[{"merge": [0, 1], "text": "merged fact"}]')
+        backend = LocalStorageBackend(tmp_path / "m.db", embedder=_embedder)
+        memory = Memory(
+            storage=EngineStorageAdapter(backend),
+            root_scope="/g1",
+            llm=llm,
+            consolidation_threshold=0,
+        )
+        for i in range(30):
+            memory.remember(
+                f"unique fact number {i}", metadata={"execution_id": f"run-{i}"}
+            )
+        before = {r.id: r for r in memory.list_records(limit=100)}
+        assert merge_similar_memories(memory)["merged_clusters"] == 1
+        after = {r.id: r for r in memory.list_records(limit=100)}
+        gone = [rid for rid in before if rid not in after]
+        merged = [r for r in after.values() if r.source == "consolidation"][0]
+        assert len(gone) == 2
+        assert set(merged.metadata["merged_ids"]) == set(gone)
+        assert set(merged.metadata["execution_ids"]) == {
+            before[rid].metadata["execution_id"] for rid in gone
+        }
+
     def test_skips_below_min_records(self, tmp_path):
         from src.services.memory.maintenance.passes import (
             merge_similar_memories,

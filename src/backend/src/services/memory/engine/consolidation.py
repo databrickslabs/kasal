@@ -149,7 +149,29 @@ def merge_contents(llm: Any, existing: str, new: str) -> str | None:
         return None
 
 
-def _contributing_runs(*metadatas: dict | None) -> list[str]:
+#: How many absorbed record ids a merged record remembers.
+MERGED_LINEAGE_CAP = 64
+
+
+def merged_lineage(*records: Any) -> list[str]:
+    """The ids a merged record stands for: each member's own id and whatever
+    those members had absorbed before, oldest first, no repeats, capped.
+
+    A run's traces name records by id. When maintenance replaces two records
+    with one, those ids vanish from the store and the run looked like it had
+    recalled and saved nothing — 40 seconds after doing both. The successor
+    answers to the ids it absorbed.
+    """
+    seen: list[str] = []
+    for record in records:
+        meta = getattr(record, "metadata", None) or {}
+        for rid in list(meta.get("merged_ids") or []) + [getattr(record, "id", None)]:
+            if rid and str(rid) not in seen:
+                seen.append(str(rid))
+    return seen[-MERGED_LINEAGE_CAP:]
+
+
+def contributing_runs(*metadatas: dict | None) -> list[str]:
     """Every run stamped on any of ``metadatas``, oldest first, no repeats:
     each one's ``execution_ids`` then its ``execution_id``."""
     seen: list[str] = []
@@ -190,7 +212,7 @@ def consolidate_on_save(
             int(metadata.get("consolidated_writes", 0) or 0) + 1
         )
         metadata["consolidation_similarity"] = round(float(score), 4)
-        contributors = _contributing_runs(existing.metadata, record.metadata)
+        contributors = contributing_runs(existing.metadata, record.metadata)
         if contributors:
             # Provenance survives the fold. A run whose only write was folded
             # into an older record otherwise looked like it saved nothing: the

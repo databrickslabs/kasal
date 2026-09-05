@@ -62,6 +62,13 @@ def _remember_when_settled(
     )
 
 
+def _run_of(generation_result: Optional[dict]) -> Optional[str]:
+    """The execution an assistant row belongs to, from the UI's envelope."""
+    envelope = (generation_result or {}).get("__chatmode")
+    run_id = envelope.get("executionId") if isinstance(envelope, dict) else None
+    return str(run_id) if run_id else None
+
+
 def _settling_question(message_id: str) -> Optional[str]:
     """The question already read for a row that is mid-stream, if any."""
     pending = _settling.get(message_id)
@@ -232,6 +239,7 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         question = _settling_question(message_id)
         if question is None:
             question = await self._last_user_message(session_id, group_context)
+        run_id = _run_of(generation_result)
 
         async def _record() -> None:
             try:
@@ -248,11 +256,16 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
                 )
                 if memory is None:
                     return
+                metadata: Dict[str, Any] = {"session_id": session_id}
+                if run_id:
+                    # The run this answer belongs to, so the Run memory pane
+                    # can attribute the record to it.
+                    metadata["execution_id"] = run_id
                 remember_async(
                     memory,
                     format_turn_for_memory(question, content),
                     source="chat",
-                    metadata={"session_id": session_id},
+                    metadata=metadata,
                 )
             except Exception as exc:  # noqa: BLE001 — never fail a saved message
                 logger.debug("Could not record the exchange in memory: %s", exc)

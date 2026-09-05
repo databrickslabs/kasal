@@ -96,7 +96,11 @@ class TestAStreamedAnswerSettlesBeforeItIsRemembered:
         text = memory_writes.call_args.args[1]
         assert text.startswith("User: gather lebanese news")
         assert "Latest: three strikes." in text
-        assert memory_writes.call_args.kwargs["metadata"] == {"session_id": "s1"}
+        # Stamped with the run it belongs to, so the Run memory pane can show it.
+        assert memory_writes.call_args.kwargs["metadata"] == {
+            "session_id": "s1",
+            "execution_id": "run-1",
+        }
         # The question was read once, on the create; the per-chunk rewrites reuse it.
         assert svc._last_user_message.await_count == 1
 
