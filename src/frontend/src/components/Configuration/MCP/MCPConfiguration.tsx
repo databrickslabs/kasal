@@ -51,6 +51,8 @@ export interface MCPServerConfig {
   global_enabled: boolean;  // NEW: Enable across all agents/tasks
   server_url: string;
   api_key: string;
+  /** A key is stored server-side; the key itself is never returned. */
+  has_api_key?: boolean;
   server_type: string;  // "sse" or "streamable"
   auth_type?: string;  // "api_key", "databricks_obo", or "databricks_spn"
   timeout_seconds: number;
@@ -311,8 +313,15 @@ const ServerEditDialog: React.FC<ServerEditDialogProps> = ({
                 onChange={handleTextChange('api_key')}
                 fullWidth
                 type="password"
-                required
-                helperText={t('configuration.mcp.apiKeyHelp', { defaultValue: 'Authentication key for the MCP server' })}
+                required={!editedServer.has_api_key}
+                placeholder={editedServer.has_api_key ? '••••••••' : undefined}
+                helperText={
+                  editedServer.has_api_key && !editedServer.api_key
+                    ? t('configuration.mcp.apiKeyStored', {
+                        defaultValue: 'A key is stored. Leave blank to keep it, or enter a new one.',
+                      })
+                    : t('configuration.mcp.apiKeyHelp', { defaultValue: 'Authentication key for the MCP server' })
+                }
                 sx={{
                   '& .MuiOutlinedInput-root': {
                     borderRadius: 1.5,
@@ -582,7 +591,8 @@ const MCPConfiguration: React.FC<MCPConfigurationProps> = ({ mode = 'workspace' 
 
   const handleEditServer = async (server: MCPServerConfig) => {
     try {
-      // Fetch full server details with decrypted API key
+      // Fetch full server details. The key itself is never returned — only
+      // whether one is stored; leaving the field blank keeps it.
       const mcpService = MCPService.getInstance();
       const fullServer = await mcpService.getMcpServer(server.id);
 

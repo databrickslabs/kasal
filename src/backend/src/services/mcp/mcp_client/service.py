@@ -5,9 +5,11 @@ from typing import Any, Dict, List, Optional
 from src.core.exceptions import (
     BadRequestError,
     ConflictError,
+    ForbiddenError,
     KasalError,
     NotFoundError,
 )
+from src.core.permissions import is_system_admin
 from src.repositories.mcp_repository import MCPServerRepository, MCPSettingsRepository
 from src.schemas.mcp import (
     MCPServerCreate,
@@ -232,12 +234,14 @@ class MCPService:
             )
         return decrypted
 
-    def _response_with_key(self, server) -> MCPServerResponse:
-        """Build a response, decrypting the API key (best-effort)."""
+    @staticmethod
+    def _masked_response(server) -> MCPServerResponse:
+        """A response that says a key is stored without saying what it is.
+        Keys are write-only at the API; the run that connects decrypts its own
+        (``get_servers_by_names*``)."""
         resp = MCPServerResponse.model_validate(server)
-        decrypted = self._decrypt_server_api_key(server)
-        if decrypted is not None:
-            resp.api_key = decrypted
+        resp.api_key = ""
+        resp.has_api_key = bool(getattr(server, "encrypted_api_key", None))
         return resp
 
     def _group_override_payload(
@@ -286,7 +290,7 @@ class MCPService:
             updated = await self.server_repository.update(
                 server_id, {"enabled": enabled}
             )
-            return self._response_with_key(updated)
+            return self._masked_response(updated)
         # Another group's row → not visible to this caller.
         if target_group is not None:
             raise NotFoundError(detail=f"MCP server with ID {server_id} not found")
@@ -297,9 +301,9 @@ class MCPService:
         payload = self._group_override_payload(target, group_id, enabled)
         if existing:
             updated = await self.server_repository.update(existing.id, payload)
-            return self._response_with_key(updated)
+            return self._masked_response(updated)
         created = await self.server_repository.create(payload)
-        return self._response_with_key(created)
+        return self._masked_response(created)
 
     async def enable_server_for_group(
         self, server_id: int, group_id: str
@@ -335,19 +339,23 @@ class MCPService:
         return await self.create_server(server_data, group_id=None)
 
     async def set_global_availability(
-        self, server_id: int, enabled: bool
+        self, server_id: int, enabled: bool, group_context: Any
     ) -> MCPServerResponse:
         """
         System admin: set whether a base/global server is available to all
         workspaces (its ``enabled`` flag). Validates the target IS a base row.
         """
+        if not is_system_admin(group_context):
+            raise ForbiddenError(
+                detail="Only system admins can change global MCP availability"
+            )
         server = await self.server_repository.get(server_id)
         if not server:
             raise NotFoundError(detail=f"MCP server with ID {server_id} not found")
         if getattr(server, "group_id", None) is not None:
             raise BadRequestError(detail="Not a global MCP server")
         updated = await self.server_repository.update(server_id, {"enabled": enabled})
-        return self._response_with_key(updated)
+        return self._masked_response(updated)
 
     async def get_effective_servers(
         self, explicit_servers: List[str]
@@ -371,31 +379,52 @@ class MCPService:
         # Get all servers by names
         return await self.get_servers_by_names(all_server_names)
 
-    async def get_server_by_id(self, server_id: int) -> MCPServerResponse:
-        """
-        Get a MCP server by ID.
+    # ── Ownership ──────────────────────────────────────────────────────────
+    # Rows are workspace-owned (``group_id`` set) or base/global (``None``,
+    # available to every workspace). Every API read and change goes through
+    # these two: a route dependency checks the caller's ROLE, and only here is
+    # the TARGET checked — which row, whose it is, what the caller may do to
+    # it. A numeric id is not an authorization (audit F02/F03).
 
-        Args:
-            server_id: ID of the server to retrieve
+    @staticmethod
+    def _caller_group(group_context: Any) -> Optional[str]:
+        return (
+            getattr(group_context, "primary_group_id", None) if group_context else None
+        )
 
-        Returns:
-            MCPServerResponse if found
-
-        Raises:
-            HTTPException: If server not found
-        """
+    async def _visible_row(self, server_id: int, group_context: Any):
+        """The row when the caller may SEE it: a base row, or the caller's own
+        workspace's row. Another workspace's row reads as not found — that it
+        exists is the other workspace's business."""
         server = await self.server_repository.get(server_id)
-        if not server:
-            logger.warning(f"MCP server with ID {server_id} not found")
+        owner = getattr(server, "group_id", None) if server else None
+        if server is None or (
+            owner is not None and owner != self._caller_group(group_context)
+        ):
+            logger.warning(f"MCP server with ID {server_id} not found for caller")
             raise NotFoundError(detail=f"MCP server with ID {server_id} not found")
+        return server
 
-        server_response = MCPServerResponse.model_validate(server)
+    async def _mutable_row(self, server_id: int, group_context: Any):
+        """The row when the caller may CHANGE it. A base row changes for a
+        system admin only — it is every workspace's server. A workspace row
+        changes for its own workspace (the route has already required the
+        admin role there)."""
+        server = await self._visible_row(server_id, group_context)
+        if getattr(server, "group_id", None) is None and not is_system_admin(
+            group_context
+        ):
+            raise ForbiddenError(
+                detail="Only system admins can change global MCP servers"
+            )
+        return server
 
-        decrypted = self._decrypt_server_api_key(server)
-        if decrypted is not None:
-            server_response.api_key = decrypted
-
-        return server_response
+    async def get_server_by_id(
+        self, server_id: int, group_context: Any
+    ) -> MCPServerResponse:
+        """One server the caller may see, key masked (see ``_masked_response``)."""
+        server = await self._visible_row(server_id, group_context)
+        return self._masked_response(server)
 
     async def create_server(
         self, server_data: MCPServerCreate, group_id: Optional[str] = None
@@ -459,26 +488,23 @@ class MCPService:
             raise KasalError(detail=f"Failed to create MCP server: {str(e)}")
 
     async def update_server(
-        self, server_id: int, server_data: MCPServerUpdate
+        self, server_id: int, server_data: MCPServerUpdate, group_context: Any
     ) -> MCPServerResponse:
         """
-        Update an existing MCP server.
+        Update an MCP server the caller owns (see ``_mutable_row``).
 
         Args:
             server_id: ID of server to update
             server_data: Server data for update
+            group_context: The caller — decides which rows are theirs to change
 
         Returns:
-            MCPServerResponse of the updated server
+            MCPServerResponse of the updated server, key masked
 
         Raises:
-            HTTPException: If server not found or update fails
+            HTTPException: If server not found, not the caller's, or update fails
         """
-        # Check if server exists
-        server = await self.server_repository.get(server_id)
-        if not server:
-            logger.warning(f"MCP server with ID {server_id} not found for update")
-            raise NotFoundError(detail=f"MCP server with ID {server_id} not found")
+        await self._mutable_row(server_id, group_context)
 
         try:
             # Prepare update data
@@ -495,37 +521,26 @@ class MCPService:
 
             # Update server
             updated_server = await self.server_repository.update(server_id, update_data)
-
-            # Prepare response
-            server_response = MCPServerResponse.model_validate(updated_server)
-
-            decrypted = self._decrypt_server_api_key(updated_server)
-            if decrypted is not None:
-                server_response.api_key = decrypted
-
-            return server_response
+            return self._masked_response(updated_server)
         except Exception as e:
             logger.error(f"Failed to update MCP server: {str(e)}")
             raise KasalError(detail=f"Failed to update MCP server: {str(e)}")
 
-    async def delete_server(self, server_id: int) -> bool:
+    async def delete_server(self, server_id: int, group_context: Any) -> bool:
         """
-        Delete a MCP server by ID.
+        Delete an MCP server the caller owns (see ``_mutable_row``).
 
         Args:
             server_id: ID of server to delete
+            group_context: The caller — decides which rows are theirs to delete
 
         Returns:
             True if deleted successfully
 
         Raises:
-            HTTPException: If server not found or deletion fails
+            HTTPException: If server not found, not the caller's, or deletion fails
         """
-        # Check if server exists
-        server = await self.server_repository.get(server_id)
-        if not server:
-            logger.warning(f"MCP server with ID {server_id} not found for deletion")
-            raise NotFoundError(detail=f"MCP server with ID {server_id} not found")
+        server = await self._mutable_row(server_id, group_context)
 
         # A GLOBAL (base) server has no group_id. Deleting it must cascade to every
         # workspace that opted in — otherwise their override rows are orphaned and
@@ -550,7 +565,9 @@ class MCPService:
             logger.error(f"Failed to delete MCP server: {str(e)}")
             raise KasalError(detail=f"Failed to delete MCP server: {str(e)}")
 
-    async def toggle_server_enabled(self, server_id: int) -> MCPToggleResponse:
+    async def toggle_server_enabled(
+        self, server_id: int, group_context: Any
+    ) -> MCPToggleResponse:
         """
         Toggle the enabled status of a MCP server.
 
@@ -563,6 +580,7 @@ class MCPService:
         Raises:
             HTTPException: If server not found or toggle fails
         """
+        await self._mutable_row(server_id, group_context)
         try:
             # Toggle server enabled status using repository
             server = await self.server_repository.toggle_enabled(server_id)
@@ -580,7 +598,9 @@ class MCPService:
             logger.error(f"Failed to toggle MCP server: {str(e)}")
             raise KasalError(detail=f"Failed to toggle MCP server: {str(e)}")
 
-    async def toggle_server_global_enabled(self, server_id: int) -> MCPToggleResponse:
+    async def toggle_server_global_enabled(
+        self, server_id: int, group_context: Any
+    ) -> MCPToggleResponse:
         """
         Toggle the global enabled status of a MCP server.
 
@@ -593,6 +613,7 @@ class MCPService:
         Raises:
             HTTPException: If server not found or toggle fails
         """
+        await self._mutable_row(server_id, group_context)
         try:
             # Toggle server global enabled status using repository
             server = await self.server_repository.toggle_global_enabled(server_id)

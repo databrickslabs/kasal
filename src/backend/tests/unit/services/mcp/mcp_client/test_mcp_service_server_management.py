@@ -22,6 +22,15 @@ from src.schemas.mcp import (
 )
 from src.services.mcp.mcp_client.service import MCPService
 
+# The caller. Rows are workspace-owned or base; a base row changes for a
+# system admin only, so most mutation tests here — on base rows — act as one.
+SYSADMIN = SimpleNamespace(
+    primary_group_id="g1", current_user=SimpleNamespace(is_system_admin=True)
+)
+WORKSPACE = SimpleNamespace(
+    primary_group_id="g1", current_user=SimpleNamespace(is_system_admin=False)
+)
+
 
 def mk_server(
     id=1,
@@ -83,7 +92,7 @@ async def test_get_server_by_id_not_found():
     svc.server_repository.get = AsyncMock(return_value=None)
 
     with pytest.raises(NotFoundError):
-        await svc.get_server_by_id(999)
+        await svc.get_server_by_id(999, WORKSPACE)
 
 
 @pytest.mark.asyncio
@@ -93,7 +102,7 @@ async def test_get_server_by_id_found_no_api_key(monkeypatch):
     server = mk_server(id=1, name="test", encrypted_api_key=None)
     svc.server_repository.get = AsyncMock(return_value=server)
 
-    result = await svc.get_server_by_id(1)
+    result = await svc.get_server_by_id(1, WORKSPACE)
     assert result.name == "test"
     assert result.api_key == ""
 
@@ -109,8 +118,10 @@ async def test_get_server_by_id_found_with_api_key(monkeypatch):
 
     monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", lambda v: "decrypted")
 
-    result = await svc.get_server_by_id(1)
-    assert result.api_key == "decrypted"
+    result = await svc.get_server_by_id(1, WORKSPACE)
+    # Keys are write-only at the API: the response says one is stored, not what it is.
+    assert result.api_key == ""
+    assert result.has_api_key is True
 
 
 @pytest.mark.asyncio
@@ -128,7 +139,7 @@ async def test_get_server_by_id_decrypt_error(monkeypatch):
         lambda v: (_ for _ in ()).throw(Exception("decrypt fail")),
     )
 
-    result = await svc.get_server_by_id(1)
+    result = await svc.get_server_by_id(1, WORKSPACE)
     assert result.api_key == ""
 
 
@@ -239,7 +250,7 @@ async def test_update_server_not_found():
 
     update_data = MCPServerUpdate(name="updated")
     with pytest.raises(NotFoundError):
-        await svc.update_server(999, update_data)
+        await svc.update_server(999, update_data, SYSADMIN)
 
 
 @pytest.mark.asyncio
@@ -252,7 +263,7 @@ async def test_update_server_success_no_api_key(monkeypatch):
     svc.server_repository.update = AsyncMock(return_value=updated)
 
     update_data = MCPServerUpdate(name="updated", api_key="")
-    result = await svc.update_server(1, update_data)
+    result = await svc.update_server(1, update_data, SYSADMIN)
     assert result.name == "updated"
 
 
@@ -273,8 +284,9 @@ async def test_update_server_with_new_api_key(monkeypatch):
     )
 
     update_data = MCPServerUpdate(name="old", api_key="new_plain_key")
-    result = await svc.update_server(1, update_data)
-    assert result.api_key == "decrypted_new"
+    result = await svc.update_server(1, update_data, SYSADMIN)
+    assert result.api_key == ""  # stored, never echoed back
+    assert result.has_api_key is True
 
 
 @pytest.mark.asyncio
@@ -296,7 +308,7 @@ async def test_update_server_decrypt_error(monkeypatch):
     )
 
     update_data = MCPServerUpdate(name="old", api_key="trigger_encrypt")
-    result = await svc.update_server(1, update_data)
+    result = await svc.update_server(1, update_data, SYSADMIN)
     assert result.api_key == ""
 
 
@@ -310,7 +322,7 @@ async def test_update_server_exception():
 
     update_data = MCPServerUpdate(name="updated")
     with pytest.raises(KasalError):
-        await svc.update_server(1, update_data)
+        await svc.update_server(1, update_data, SYSADMIN)
 
 
 # ---------------------------------------------------------------------------
@@ -325,7 +337,7 @@ async def test_delete_server_not_found():
     svc.server_repository.get = AsyncMock(return_value=None)
 
     with pytest.raises(NotFoundError):
-        await svc.delete_server(999)
+        await svc.delete_server(999, SYSADMIN)
 
 
 @pytest.mark.asyncio
@@ -336,7 +348,7 @@ async def test_delete_server_success():
     svc.server_repository.get = AsyncMock(return_value=existing)
     svc.server_repository.delete = AsyncMock()
 
-    result = await svc.delete_server(1)
+    result = await svc.delete_server(1, SYSADMIN)
     assert result is True
 
 
@@ -349,7 +361,7 @@ async def test_delete_server_exception():
     svc.server_repository.delete = AsyncMock(side_effect=RuntimeError("DB error"))
 
     with pytest.raises(KasalError):
-        await svc.delete_server(1)
+        await svc.delete_server(1, SYSADMIN)
 
 
 # ---------------------------------------------------------------------------
@@ -361,20 +373,19 @@ async def test_delete_server_exception():
 async def test_toggle_server_enabled_not_found():
     svc = MCPService(session=SimpleNamespace())
     svc.server_repository = AsyncMock()
-    svc.server_repository.toggle_enabled = AsyncMock(return_value=None)
-
+    svc.server_repository.get = AsyncMock(return_value=None)
     with pytest.raises(NotFoundError):
-        await svc.toggle_server_enabled(999)
+        await svc.toggle_server_enabled(999, SYSADMIN)
 
 
 @pytest.mark.asyncio
 async def test_toggle_server_enabled_success():
     svc = MCPService(session=SimpleNamespace())
     svc.server_repository = AsyncMock()
-    server = mk_server(id=1, enabled=True)
+    server = mk_server(id=1, group_id="g1", enabled=True)
+    svc.server_repository.get = AsyncMock(return_value=server)
     svc.server_repository.toggle_enabled = AsyncMock(return_value=server)
-
-    result = await svc.toggle_server_enabled(1)
+    result = await svc.toggle_server_enabled(1, WORKSPACE)
     assert result.enabled is True
     assert "enabled" in result.message
 
@@ -383,10 +394,10 @@ async def test_toggle_server_enabled_success():
 async def test_toggle_server_disabled():
     svc = MCPService(session=SimpleNamespace())
     svc.server_repository = AsyncMock()
-    server = mk_server(id=1, enabled=False)
+    server = mk_server(id=1, group_id="g1", enabled=False)
+    svc.server_repository.get = AsyncMock(return_value=server)
     svc.server_repository.toggle_enabled = AsyncMock(return_value=server)
-
-    result = await svc.toggle_server_enabled(1)
+    result = await svc.toggle_server_enabled(1, WORKSPACE)
     assert result.enabled is False
     assert "disabled" in result.message
 
@@ -395,12 +406,12 @@ async def test_toggle_server_disabled():
 async def test_toggle_server_enabled_exception():
     svc = MCPService(session=SimpleNamespace())
     svc.server_repository = AsyncMock()
+    svc.server_repository.get = AsyncMock(return_value=mk_server(id=1, group_id="g1"))
     svc.server_repository.toggle_enabled = AsyncMock(
         side_effect=RuntimeError("DB error")
     )
-
     with pytest.raises(KasalError):
-        await svc.toggle_server_enabled(1)
+        await svc.toggle_server_enabled(1, WORKSPACE)
 
 
 # ---------------------------------------------------------------------------
@@ -412,10 +423,9 @@ async def test_toggle_server_enabled_exception():
 async def test_toggle_global_not_found():
     svc = MCPService(session=SimpleNamespace())
     svc.server_repository = AsyncMock()
-    svc.server_repository.toggle_global_enabled = AsyncMock(return_value=None)
-
+    svc.server_repository.get = AsyncMock(return_value=None)
     with pytest.raises(NotFoundError):
-        await svc.toggle_server_global_enabled(999)
+        await svc.toggle_server_global_enabled(999, SYSADMIN)
 
 
 @pytest.mark.asyncio
@@ -423,9 +433,9 @@ async def test_toggle_global_enabled():
     svc = MCPService(session=SimpleNamespace())
     svc.server_repository = AsyncMock()
     server = mk_server(id=1, global_enabled=True)
+    svc.server_repository.get = AsyncMock(return_value=server)
     svc.server_repository.toggle_global_enabled = AsyncMock(return_value=server)
-
-    result = await svc.toggle_server_global_enabled(1)
+    result = await svc.toggle_server_global_enabled(1, SYSADMIN)
     assert result.enabled is True
     assert "globally enabled" in result.message
 
@@ -435,9 +445,9 @@ async def test_toggle_global_disabled():
     svc = MCPService(session=SimpleNamespace())
     svc.server_repository = AsyncMock()
     server = mk_server(id=1, global_enabled=False)
+    svc.server_repository.get = AsyncMock(return_value=server)
     svc.server_repository.toggle_global_enabled = AsyncMock(return_value=server)
-
-    result = await svc.toggle_server_global_enabled(1)
+    result = await svc.toggle_server_global_enabled(1, SYSADMIN)
     assert result.enabled is False
     assert "globally disabled" in result.message
 
@@ -446,16 +456,14 @@ async def test_toggle_global_disabled():
 async def test_toggle_global_exception():
     svc = MCPService(session=SimpleNamespace())
     svc.server_repository = AsyncMock()
+    svc.server_repository.get = AsyncMock(return_value=mk_server(id=1))
     svc.server_repository.toggle_global_enabled = AsyncMock(
         side_effect=RuntimeError("DB error")
     )
-
     with pytest.raises(KasalError):
-        await svc.toggle_server_global_enabled(1)
+        await svc.toggle_server_global_enabled(1, SYSADMIN)
 
 
-# ---------------------------------------------------------------------------
-# get_effective_servers
 # ---------------------------------------------------------------------------
 
 

@@ -7,6 +7,15 @@ import pytest
 from src.schemas.mcp import MCPTestConnectionRequest
 from src.services.mcp.mcp_client.service import MCPService
 
+# Callers for the ownership checks: a base row changes for a system admin
+# only; a workspace row for its own workspace.
+SYSADMIN = SimpleNamespace(
+    primary_group_id="ws1", current_user=SimpleNamespace(is_system_admin=True)
+)
+WS1 = SimpleNamespace(
+    primary_group_id="ws1", current_user=SimpleNamespace(is_system_admin=False)
+)
+
 
 def mk_server(
     id=1,
@@ -151,7 +160,8 @@ async def test_enable_server_for_group_paths(monkeypatch):
         module.EncryptionUtils, "decrypt_value", lambda v: "decg", raising=True
     )
     out = await svc.enable_server_for_group(5, "g1")
-    assert out.api_key == "decg" and out.enabled is True
+    # Keys are write-only at the API — stored, never echoed back.
+    assert out.api_key == "" and out.has_api_key and out.enabled is True
 
     # existing group override by name -> update existing, disable base
     base = mk_server(id=6, name="x", group_id=None, encrypted_api_key="enc")
@@ -163,7 +173,7 @@ async def test_enable_server_for_group_paths(monkeypatch):
         module.EncryptionUtils, "decrypt_value", lambda v: "dec2", raising=True
     )
     out2 = await svc.enable_server_for_group(6, "g1")
-    assert out2.id == 7 and out2.api_key == "dec2"
+    assert out2.id == 7 and out2.api_key == ""
 
     # no existing -> create and disable base
     svc.server_repository.get = AsyncMock(return_value=base)
@@ -175,7 +185,7 @@ async def test_enable_server_for_group_paths(monkeypatch):
         module.EncryptionUtils, "decrypt_value", lambda v: "dec3", raising=True
     )
     out3 = await svc.enable_server_for_group(6, "g1")
-    assert out3.id == 8 and out3.api_key == "dec3"
+    assert out3.id == 8 and out3.api_key == ""
 
 
 @pytest.mark.asyncio
@@ -731,7 +741,7 @@ async def test_delete_server_cascades_overrides_for_global_base():
     svc.server_repository.delete = AsyncMock()
     svc.server_repository.delete_overrides_by_name = AsyncMock(return_value=2)
 
-    ok = await svc.delete_server(5)
+    ok = await svc.delete_server(5, SYSADMIN)
 
     assert ok is True
     svc.server_repository.delete.assert_awaited_once_with(5)
@@ -748,7 +758,7 @@ async def test_delete_server_workspace_row_does_not_cascade():
     svc.server_repository.delete = AsyncMock()
     svc.server_repository.delete_overrides_by_name = AsyncMock()
 
-    ok = await svc.delete_server(7)
+    ok = await svc.delete_server(7, WS1)
 
     assert ok is True
     svc.server_repository.delete.assert_awaited_once_with(7)
@@ -894,6 +904,6 @@ async def test_get_server_by_id_skips_decrypt_for_obo(monkeypatch):
     )
     svc.server_repository.get = AsyncMock(return_value=obo)
 
-    resp = await svc.get_server_by_id(9)
+    resp = await svc.get_server_by_id(9, WS1)
 
     assert resp is not None and resp.api_key == ""

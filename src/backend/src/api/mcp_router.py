@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Request, status
 
 from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.exceptions import BadRequestError, ForbiddenError
-from src.core.permissions import check_role_in_context
+from src.core.permissions import check_role_in_context, is_system_admin
 from src.schemas.mcp import (
     MCPServerCreate,
     MCPServerListResponse,
@@ -58,26 +58,14 @@ MCPServiceDep = Annotated[MCPService, Depends(get_mcp_service)]
 
 def _is_global_admin(group_context) -> bool:
     """
-    Whether the caller may manage GLOBAL (base) MCP servers.
+    Whether the caller may manage GLOBAL (base) MCP servers: system admins only.
 
-    Mirrors models_router's global gate: an effective admin role OR a system
-    admin. Global MCP servers are available to all workspaces, so changing them
-    is a system-administration action.
+    A base row is every workspace's server, so changing one is a
+    system-administration action. This gate used to accept an effective
+    workspace-admin role as well, which let a workspace admin change and
+    delete servers shared by every other workspace (audit F03).
     """
-    try:
-        from src.core.permissions import get_effective_role
-
-        role = get_effective_role(group_context) if group_context else None
-        if role and role.lower() == "admin":
-            return True
-    except Exception:
-        pass
-    return bool(
-        group_context is not None
-        and getattr(
-            getattr(group_context, "current_user", None), "is_system_admin", False
-        )
-    )
+    return is_system_admin(group_context) if group_context is not None else False
 
 
 def _require_enabled_flag(payload: Dict[str, Any]) -> bool:
@@ -713,7 +701,7 @@ async def get_mcp_server(
     Get an MCP server by ID.
     """
     logger.info(f"Getting MCP server with ID {server_id}")
-    server = await service.get_server_by_id(server_id)
+    server = await service.get_server_by_id(server_id, group_context)
     logger.info(f"Found MCP server with ID {server_id}")
     return server
 
@@ -771,7 +759,7 @@ async def update_mcp_server(
         raise ForbiddenError("Only admins can update MCP servers")
 
     logger.info(f"Updating MCP server with ID {server_id}")
-    server = await service.update_server(server_id, server_data)
+    server = await service.update_server(server_id, server_data, group_context)
     logger.info(f"Updated MCP server with ID {server_id}")
     return server
 
@@ -792,7 +780,7 @@ async def delete_mcp_server(
         raise ForbiddenError("Only admins can delete MCP servers")
 
     logger.info(f"Deleting MCP server with ID {server_id}")
-    await service.delete_server(server_id)
+    await service.delete_server(server_id, group_context)
     logger.info(f"Deleted MCP server with ID {server_id}")
 
 
@@ -809,7 +797,7 @@ async def toggle_mcp_server_enabled(
         raise ForbiddenError("Only admins can toggle MCP server status")
 
     logger.info(f"Toggling enabled status for MCP server with ID {server_id}")
-    response = await service.toggle_server_enabled(server_id)
+    response = await service.toggle_server_enabled(server_id, group_context)
     status_text = "enabled" if response.enabled else "disabled"
     logger.info(f"MCP server with ID {server_id} {status_text}")
     return response
@@ -830,7 +818,7 @@ async def toggle_mcp_server_global_enabled(
         raise ForbiddenError("Only admins can toggle global MCP server status")
 
     logger.info(f"Toggling global enabled status for MCP server with ID {server_id}")
-    response = await service.toggle_server_global_enabled(server_id)
+    response = await service.toggle_server_global_enabled(server_id, group_context)
     status_text = "globally enabled" if response.enabled else "globally disabled"
     logger.info(f"MCP server with ID {server_id} {status_text}")
     return response
@@ -871,7 +859,7 @@ async def set_mcp_server_global_availability(
         raise ForbiddenError("Only system admins can change global MCP availability")
     enabled = _require_enabled_flag(payload)
     logger.info(f"Setting global availability for MCP server {server_id} to {enabled}")
-    return await service.set_global_availability(server_id, enabled)
+    return await service.set_global_availability(server_id, enabled, group_context)
 
 
 @router.patch(

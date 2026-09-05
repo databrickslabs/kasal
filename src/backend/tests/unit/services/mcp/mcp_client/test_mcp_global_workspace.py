@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.core.exceptions import BadRequestError, NotFoundError
+from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.schemas.mcp import MCPServerCreate
 from src.services.mcp.mcp_client.service import MCPService
 
@@ -36,6 +36,14 @@ def mk_server(id=1, name="s1", group_id=None, enabled=True, encrypted_api_key=No
         created_at=now,
         updated_at=now,
     )
+
+
+SYSADMIN = SimpleNamespace(
+    primary_group_id="ws1", current_user=SimpleNamespace(is_system_admin=True)
+)
+WORKSPACE_ADMIN = SimpleNamespace(
+    primary_group_id="ws1", current_user=SimpleNamespace(is_system_admin=False)
+)
 
 
 def _svc():
@@ -98,7 +106,7 @@ async def test_set_global_availability_updates_base_enabled():
         return_value=mk_server(id=5, name="g", group_id=None, enabled=False)
     )
 
-    out = await svc.set_global_availability(5, False)
+    out = await svc.set_global_availability(5, False, SYSADMIN)
 
     svc.server_repository.update.assert_awaited_once_with(5, {"enabled": False})
     assert out.id == 5
@@ -111,7 +119,19 @@ async def test_set_global_availability_rejects_group_row():
         return_value=mk_server(id=5, name="g", group_id="ws1")
     )
     with pytest.raises(BadRequestError):
-        await svc.set_global_availability(5, True)
+        await svc.set_global_availability(5, True, SYSADMIN)
+
+
+@pytest.mark.asyncio
+async def test_set_global_availability_is_a_system_admin_action():
+    """A workspace admin's effective role does not reach base rows (audit F03)."""
+    svc = _svc()
+    svc.server_repository.get = AsyncMock(
+        return_value=mk_server(id=5, name="g", group_id=None)
+    )
+    with pytest.raises(ForbiddenError):
+        await svc.set_global_availability(5, False, WORKSPACE_ADMIN)
+    svc.server_repository.update.assert_not_awaited()
 
 
 # --- set_server_enabled_for_group -------------------------------------------

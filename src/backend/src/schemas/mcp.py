@@ -113,8 +113,12 @@ class MCPServerResponse(MCPServerBase):
     """Schema for MCP server responses"""
 
     id: int = Field(..., description="Unique identifier for the MCP server")
-    api_key: str = Field(
-        "", description="Decrypted API key (only present in specific scenarios)"
+    # Keys are WRITE-ONLY at the API: stored encrypted, decrypted only for the
+    # run that connects. The detail endpoint used to return the plaintext, to
+    # any authenticated caller, for any row by numeric id (audit F02).
+    api_key: str = Field("", description="Always empty in API responses")
+    has_api_key: bool = Field(
+        False, description="Whether a key is stored; leave api_key blank to keep it"
     )
     group_id: Optional[str] = Field(
         default=None,
