@@ -1,7 +1,9 @@
 import asyncio
 import logging
+import os
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, List, Optional, Type
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Type
 from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +19,53 @@ logger = logging.getLogger(__name__)
 
 #: Content the UI posts for an ACTIVITY card rather than an answer.
 _ACTIVITY_CONTENT = {"[ui-card]"}
+
+#: A streamed answer reaches the store one chunk at a time: the row is created
+#: with the first chunk and rewritten with every one after it. Remembering on
+#: the create stored "Assistant: # Lebanon Daily News Report — September" and
+#: nothing more. An exchange is remembered once its row has stopped changing
+#: for this long; a newer write restarts the clock, and the last content wins.
+EXCHANGE_SETTLE_SECONDS = float(os.getenv("CHAT_MEMORY_SETTLE_SECONDS", "20"))
+
+
+@dataclass
+class _SettlingExchange:
+    """An answer whose row is still being written; remembered when it settles."""
+
+    task: "asyncio.Task[None]"
+    question: str
+
+
+#: Per message id. Process-local and best-effort: a restart mid-stream loses
+#: the pending write, which is the same guarantee the fire-and-forget had.
+_settling: Dict[str, _SettlingExchange] = {}
+
+
+def _remember_when_settled(
+    message_id: str, question: str, record: Callable[[], Awaitable[None]]
+) -> None:
+    """(Re)start the clock for ``message_id``; run ``record`` when it expires."""
+    prior = _settling.pop(message_id, None)
+    if prior is not None:
+        prior.task.cancel()
+
+    async def _settle() -> None:
+        try:
+            await asyncio.sleep(EXCHANGE_SETTLE_SECONDS)
+        except asyncio.CancelledError:
+            return  # superseded by a newer write of the same row
+        _settling.pop(message_id, None)
+        await record()
+
+    _settling[message_id] = _SettlingExchange(
+        task=asyncio.ensure_future(_settle()), question=question
+    )
+
+
+def _settling_question(message_id: str) -> Optional[str]:
+    """The question already read for a row that is mid-stream, if any."""
+    pending = _settling.get(message_id)
+    return pending.question if pending is not None else None
 
 
 def _is_activity_card(content: str, generation_result: Optional[dict]) -> bool:
@@ -124,7 +173,12 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         # never delay the answer reaching the screen, and a memory backend that
         # is down must never fail a message that is already persisted.
         await self._remember_exchange(
-            session_id, message_type, content, generation_result, group_context
+            session_id,
+            message_type,
+            content,
+            generation_result,
+            group_context,
+            message_id=message_id,
         )
 
         # Return a pure Pydantic DTO built from the explicit data (no ORM access -> no MissingGreenlet)
@@ -137,6 +191,8 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         content: str,
         generation_result: Optional[dict],
         group_context: Optional[GroupContext],
+        *,
+        message_id: str,
     ) -> None:
         """Record a completed exchange in memory, off the request path.
 
@@ -152,6 +208,12 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         the crew path, the flow path and any future one for free — an answer that
         is not saved to the session did not happen as far as the user is
         concerned, so this is the honest definition of "the turn completed".
+
+        "Completed" is judged by the row settling, not by the create: a streamed
+        answer is created with its first chunk and rewritten per chunk (see
+        ``EXCHANGE_SETTLE_SECONDS``). Every write of an assistant row — create or
+        update — comes through here and restarts the clock; the content of the
+        last write is what gets remembered.
         """
         if message_type != "assistant" or not (content or "").strip():
             return
@@ -166,7 +228,10 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         # session, so every record was stored as "User: \nAssistant: …" — an
         # answer with no subject, which is the one thing this write exists to
         # avoid. The memory BUILD stays detached: it opens its own session.
-        question = await self._last_user_message(session_id, group_context)
+        # Read once per row: a streamed answer writes many times.
+        question = _settling_question(message_id)
+        if question is None:
+            question = await self._last_user_message(session_id, group_context)
 
         async def _record() -> None:
             try:
@@ -197,7 +262,7 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
             # (CrewMemoryService.fetch_memory_backend_config uses
             # routed_scoped_session), so it does not outlive this request's
             # session or hold it open while an embedder is configured.
-            asyncio.ensure_future(_record())
+            _remember_when_settled(message_id, question, _record)
         except RuntimeError:  # no running loop (sync call sites, tests)
             pass
 
@@ -536,4 +601,14 @@ class ChatHistoryService(BaseService[ChatHistory, ChatHistoryCreate]):
         if generation_result is not None:
             record.generation_result = generation_result
         await self.repository.save()
+        if content is not None:
+            # A rewritten answer restarts its settle clock — see _remember_exchange.
+            await self._remember_exchange(
+                record.session_id,
+                record.message_type,
+                record.content,
+                record.generation_result,
+                group_context,
+                message_id=message_id,
+            )
         return ChatHistoryResponse.model_validate(record)

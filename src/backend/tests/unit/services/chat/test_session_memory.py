@@ -25,7 +25,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.services.chat import history as history_module
 from src.services.chat.history import ChatHistoryService, _is_activity_card
+
+
+@pytest.fixture(autouse=True)
+def _settle_immediately(monkeypatch):
+    monkeypatch.setattr(history_module, "EXCHANGE_SETTLE_SECONDS", 0)
+    history_module._settling.clear()
+    yield
+    history_module._settling.clear()
 
 
 class _Ctx:
@@ -61,7 +70,13 @@ async def _save(service, **kwargs):
     )
     defaults.update(kwargs)
     result = await service.save_message(**defaults)
-    await asyncio.sleep(0)  # let the ensure_future task run
+    # The funnel remembers once the row has SETTLED (a streamed answer is
+    # rewritten per chunk); with the clock at zero, awaiting the pending
+    # write is what "let the detached task run" now means.
+    await asyncio.gather(
+        *(pending.task for pending in list(history_module._settling.values())),
+        return_exceptions=True,
+    )
     await asyncio.sleep(0)
     return result
 
