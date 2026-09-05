@@ -9,7 +9,7 @@ Two cooperating pieces:
    turns) persisted on ``chat_sessions.context_summary`` with a fold-marker
    timestamp. Never blocks or fails a run.
 
-2. ``_conversation_preamble`` (in light_agent_service) consumes it: injects
+2. ``build_conversation_preamble`` (``conversation_preamble.py``) consumes it: injects
    the summary block + only the turns NEWER than the fold marker verbatim,
    under a hard character budget that can now drop even old user turns —
    their facts live on in the summary, so the preamble finally has a true

@@ -279,8 +279,13 @@ async def test_preamble_keeps_user_facts_when_bloated_by_assistant_output():
     assert "User: make slide 11" in out
     # ...the current turn is excluded...
     assert "what is my name" not in out
-    # ...and the output stays within the character budget (assistant bloat trimmed).
-    assert len(out) <= 6000 + 400  # budget + header allowance
+    # ...and the output stays within the character budget (assistant bloat
+    # trimmed) — except for the MOST RECENT answer, which is kept whole and sits
+    # outside the budget (it is what a follow-up refers to).
+    last_answer = f"{big} deck 11"
+    assert last_answer in out
+    assert "X" * 300 + " deck 10" not in out  # older answers are still stubs
+    assert len(out) - len(last_answer) <= 6000 + 400  # budget + header allowance
 
 
 @pytest.mark.asyncio

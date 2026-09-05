@@ -1392,7 +1392,7 @@ Please analyze this message and provide your intent classification."""
                     request.chat_mode_type = "chat"
                     # And no semantic recall for this turn. The answer is in the
                     # transcript, which the light agent gets either way
-                    # (``_conversation_preamble`` is unconditional). Semantic
+                    # (``build_conversation_preamble`` is unconditional). Semantic
                     # memory would query a shared, topic-polluted pool with a
                     # short generic question — the exact shape that matches badly
                     # — and is the only mechanism that could drag a different
