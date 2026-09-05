@@ -193,7 +193,9 @@ class ExecutionBroadcastService:
                         id=f"{job_id}_status_{current_status}",
                     )
 
-                    sent_count = await sse_manager.broadcast_to_job(job_id, event)
+                    sent_count = await sse_manager.broadcast_to_job(
+                        job_id, event, group_id=getattr(execution, "group_id", None)
+                    )
                     logger.info(
                         f"[ExecutionBroadcastService] Broadcasted status update for job {job_id} "
                         f"({current_status}) to {sent_count} clients"

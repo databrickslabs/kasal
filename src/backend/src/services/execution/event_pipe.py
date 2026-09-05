@@ -402,6 +402,9 @@ async def _relay_loop(
 ) -> None:
     loop = asyncio.get_running_loop()
     invalid_streak = 0
+    if group_id:
+        # Everything relayed from the subprocess belongs to this workspace.
+        sse_manager.register_job_owner(execution_id, group_id)
     while True:
         try:
             frame = await loop.run_in_executor(

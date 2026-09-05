@@ -498,7 +498,9 @@ class ExecutionTraceService:
                         event="trace",
                         id=f"{job_id}_trace_{trace.id}",
                     )
-                    sent_count = await sse_manager.broadcast_to_job(job_id, event)
+                    sent_count = await sse_manager.broadcast_to_job(
+                        job_id, event, group_id=getattr(trace, "group_id", None)
+                    )
                     logger.debug(
                         f"[ExecutionTraceService] Broadcasted SSE trace event for job_id={job_id}, sent to {sent_count} clients"
                     )

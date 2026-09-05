@@ -238,6 +238,9 @@ class LightAgentService:
             # isolated kickoff with no built-in history, so without this the agent
             # cannot recall what was just said (e.g. the user's name). Prepended to
             # the kickoff prompt ONLY — trace + memory keep the clean current ask.
+            from src.core.sse_manager import sse_manager as _sse
+
+            _sse.register_job_owner(execution_id, group_id)  # audit F04
             conversation_preamble = await self._conversation_preamble(
                 config, group_context, group_id, _log
             )

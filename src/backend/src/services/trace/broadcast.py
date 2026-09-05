@@ -251,7 +251,9 @@ class TraceBroadcastService:
                         data=trace_data, event="trace", id=f"{job_id}_trace_{trace.id}"
                     )
 
-                    sent_count = await sse_manager.broadcast_to_job(job_id, event)
+                    sent_count = await sse_manager.broadcast_to_job(
+                        job_id, event, group_id=getattr(trace, "group_id", None)
+                    )
                     logger.debug(
                         f"[TraceBroadcastService] Broadcasted trace {trace.id} "
                         f"for job {job_id} to {sent_count} clients"

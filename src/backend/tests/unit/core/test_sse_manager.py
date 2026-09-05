@@ -267,7 +267,12 @@ class TestSSEConnectionManager:
         """Test broadcast also sends to global stream subscribers."""
         manager = SSEConnectionManager()
         job_queue = manager.create_event_queue("job-123")
-        global_queue = manager.create_event_queue("all_groups_group1-group2")
+        # A stream-all subscription declares the groups it may see, and the
+        # job has an owner among them (audit F04).
+        global_queue = manager.create_event_queue(
+            "all_groups_group1-group2", group_ids=["group1", "group2"]
+        )
+        manager.register_job_owner("job-123", "group1")
         event = SSEEvent(data={"job_id": "job-123", "status": "running"})
 
         sent_count = await manager.broadcast_to_job("job-123", event)
@@ -389,11 +394,12 @@ class TestReplayBuffer:
         manager = SSEConnectionManager()
         manager.create_event_queue("job-A")
         manager.create_event_queue("job-B")
+        manager.create_event_queue("all_groups_grp1", group_ids=["grp1"])
 
         e1 = SSEEvent(data={"job": "A"})
         e2 = SSEEvent(data={"job": "B"})
-        await manager.broadcast_to_job("job-A", e1)
-        await manager.broadcast_to_job("job-B", e2)
+        await manager.broadcast_to_job("job-A", e1, group_id="grp1")
+        await manager.broadcast_to_job("job-B", e2, group_id="grp1")
 
         # Global replay should contain both events
         replayed = manager.get_replay_events("all_groups_grp1", 0)

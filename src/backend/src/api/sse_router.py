@@ -20,6 +20,7 @@ from src.core.sse_manager import (
     get_heartbeat_seconds,
     sse_manager,
 )
+from src.dependencies.admin_auth import SystemAdminUserDep
 from src.repositories.execution_history_repository import ExecutionHistoryRepository
 
 logger = LoggerManager.get_instance().system
@@ -59,6 +60,19 @@ def _parse_last_event_id(request: Request) -> Optional[int]:
         except (ValueError, TypeError):
             pass
     return None
+
+
+def _require_owned(stream_id: str, group_context) -> None:
+    """A generation (or a job id handed to the generation routes) belongs to
+    a workspace; only that workspace's callers may read it. Unknown ids read
+    as not found — the id space is not an authorization (audit F04)."""
+    owner = sse_manager.job_owner(stream_id)
+    if owner is None or owner not in (group_context.group_ids or []):
+        logger.warning(
+            f"[SSE_STREAM] access denied | id={stream_id} | "
+            f"caller_groups={group_context.group_ids}"
+        )
+        raise NotFoundError(f"Generation {stream_id} not found")
 
 
 @router.get("/executions/{job_id}/stream")
@@ -146,6 +160,9 @@ async def stream_all_executions(
             timeout=timeout,
             heartbeat_interval=heartbeat,
             last_event_id=last_event_id,
+            # What this subscription may see: its own workspaces' runs. The
+            # fan-out and the replay buffer both filter on it (audit F04).
+            group_ids=group_ids,
         ),
         media_type="text/event-stream",
         headers=SSE_HEADERS,
@@ -167,6 +184,7 @@ async def stream_generation_updates(
 
     Supports automatic reconnection with event replay.
     """
+    _require_owned(generation_id, group_context)
     last_event_id = _parse_last_event_id(request)
 
     logger.info(
@@ -208,7 +226,10 @@ async def get_generation_result(
         terminal event is buffered, or ``{"status": "pending"}`` while the
         generation is still in flight / not yet known.
     """
-    event = sse_manager.get_terminal_event(generation_id)
+    _require_owned(generation_id, group_context)
+    event = sse_manager.get_terminal_event(
+        generation_id, group_ids=group_context.group_ids or []
+    )
     if event is None:
         return {"status": "pending", "generation_id": generation_id}
 
@@ -224,7 +245,7 @@ async def get_generation_result(
 
 
 @router.get("/stats")
-async def get_sse_stats():
+async def get_sse_stats(admin: SystemAdminUserDep):
     """
     Get SSE connection statistics.
 

@@ -272,7 +272,11 @@ class ExecutionStatusService:
                                 event="execution_update",
                                 id=f"{job_id}_{status}_{record_id}",
                             )
-                            await sse_manager.broadcast_to_job(job_id, event)
+                            await sse_manager.broadcast_to_job(
+                                job_id,
+                                event,
+                                group_id=getattr(execution_record, "group_id", None),
+                            )
                             logger.debug(
                                 f"[ExecutionStatusService] Broadcasted SSE event for job_id: {job_id}"
                             )

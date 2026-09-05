@@ -579,6 +579,7 @@ async def test_stream_generation_updates_returns_streaming_response():
     req = MagicMock()
     req.headers.get = lambda key, default=None: None
     ctx = Ctx()
+    _m.sse_manager.register_job_owner("gen-1", ctx.group_ids[0])  # owned (F04)
 
     mock_gen = AsyncMock(return_value=iter([]))
     with patch("src.api.sse_router.event_stream_generator", return_value=mock_gen):
@@ -595,6 +596,7 @@ async def test_stream_generation_updates_returns_streaming_response():
 async def test_get_generation_result_pending_when_no_terminal_event():
     """While the generation is in flight, the endpoint reports pending."""
     ctx = Ctx()
+    _m.sse_manager.register_job_owner("gen-1", ctx.group_ids[0])  # owned (F04)
     with patch.object(_m.sse_manager, "get_terminal_event", return_value=None):
         out = await get_generation_result(generation_id="gen-1", group_context=ctx)
     assert out["status"] == "pending"
@@ -611,6 +613,7 @@ async def test_get_generation_result_returns_completed_with_execution_id():
     from src.core.sse_manager import SSEEvent
 
     ctx = Ctx()
+    _m.sse_manager.register_job_owner("gen-1", ctx.group_ids[0])  # owned (F04)
     event = SSEEvent(
         data={"status": "completed", "execution_id": "exec-123", "run_name": "Chat"},
         event="generation_complete",
@@ -628,6 +631,7 @@ async def test_get_generation_result_normalizes_failed():
     from src.core.sse_manager import SSEEvent
 
     ctx = Ctx()
+    _m.sse_manager.register_job_owner("gen-1", ctx.group_ids[0])  # owned (F04)
     event = SSEEvent(data={"error": "boom"}, event="generation_failed")
     with patch.object(_m.sse_manager, "get_terminal_event", return_value=event):
         out = await get_generation_result(generation_id="gen-1", group_context=ctx)
@@ -641,6 +645,7 @@ async def test_get_generation_result_preserves_existing_status():
     from src.core.sse_manager import SSEEvent
 
     ctx = Ctx()
+    _m.sse_manager.register_job_owner("gen-1", ctx.group_ids[0])  # owned (F04)
     event = SSEEvent(data={"status": "completed", "execution_id": "e1"}, event=None)
     with patch.object(_m.sse_manager, "get_terminal_event", return_value=event):
         out = await get_generation_result(generation_id="gen-1", group_context=ctx)
@@ -655,7 +660,7 @@ async def test_get_sse_stats_returns_statistics():
     """get_sse_stats calls sse_manager.get_statistics and returns result."""
     mock_stats = {"total_connections": 5, "active_jobs": ["j1", "j2"]}
     with patch.object(_m.sse_manager, "get_statistics", return_value=mock_stats):
-        out = await get_sse_stats()
+        out = await get_sse_stats(admin=object())  # system admin (F04)
     assert out["total_connections"] == 5
 
 

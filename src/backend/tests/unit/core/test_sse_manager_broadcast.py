@@ -160,7 +160,10 @@ class TestSSEConnectionManager:
         """broadcast_to_job also sends to all_groups_ subscribers."""
         manager = SSEConnectionManager()
         job_queue = manager.create_event_queue("job-1")
-        global_queue = manager.create_event_queue("all_groups_user1")
+        global_queue = manager.create_event_queue(
+            "all_groups_user1", group_ids=["user1"]
+        )
+        manager.register_job_owner("job-1", "user1")
 
         event = SSEEvent(data="event")
         count = await manager.broadcast_to_job("job-1", event)
@@ -231,10 +234,10 @@ class TestSSEConnectionManager:
         """get_replay_events uses global buffer for all_groups_ streams."""
         manager = SSEConnectionManager()
         manager.create_event_queue("job-1")
-        manager.create_event_queue("all_groups_test")
+        manager.create_event_queue("all_groups_test", group_ids=["test"])
 
         e1 = SSEEvent(data="event-a")
-        await manager.broadcast_to_job("job-1", e1)
+        await manager.broadcast_to_job("job-1", e1, group_id="test")
 
         id0 = int(e1.id) - 1
         replayed = manager.get_replay_events("all_groups_test", id0)

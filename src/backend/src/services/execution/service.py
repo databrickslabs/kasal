@@ -1472,6 +1472,12 @@ class ExecutionService:
             logger.debug(
                 f"[ExecutionService.create_execution] Generated execution_id: {execution_id}"
             )
+            # The run's live events reach only its own workspace (audit F04).
+            from src.core.sse_manager import sse_manager
+
+            sse_manager.register_job_owner(
+                execution_id, getattr(group_context, "primary_group_id", None)
+            )
 
             # Generate a descriptive run name
             # Determine model safely

@@ -11,7 +11,16 @@ import os
 import threading
 from collections import deque
 from datetime import datetime
-from typing import Any, AsyncGenerator, Dict, List, Optional, Set, Tuple
+from typing import (
+    Any,
+    AsyncGenerator,
+    Dict,
+    FrozenSet,
+    Iterable,
+    List,
+    Optional,
+    Set,
+)
 from uuid import UUID
 
 from src.core.logger import LoggerManager
@@ -130,11 +139,36 @@ class SSEConnectionManager:
         self._event_id_lock = threading.Lock()
         # Per-job buffer: job_id → deque of (event_id, SSEEvent)
         self._replay_buffer: Dict[str, deque] = {}
-        # Global buffer for "stream-all" replay
+        # Global buffer for "stream-all" replay: (event_id, event, owner group)
         self._global_replay: deque = deque(maxlen=500)
         self._replay_max_per_job = 200
+        # Ownership (audit F04). A job's events reach the "stream-all"
+        # subscribers of the workspace that owns the job and nobody else's;
+        # the global replay and a generation's terminal event answer to the
+        # same rule. Owners are registered where runs and generations are
+        # created, and publishers that know the group pass it too. An event
+        # whose owner is unknown reaches its per-job subscribers (that stream
+        # is checked at subscribe time) and NO stream-all subscriber.
+        self._job_owner: Dict[str, str] = {}
+        # stream key → the groups a "stream-all" subscription may see
+        self._stream_groups: Dict[str, FrozenSet[str]] = {}
 
-    def create_event_queue(self, job_id: str) -> asyncio.Queue:
+    def register_job_owner(self, job_id: str, group_id: Optional[str]) -> None:
+        """Record which workspace a job or generation belongs to."""
+        if job_id and group_id:
+            self._job_owner[job_id] = str(group_id)
+
+    def job_owner(self, job_id: str) -> Optional[str]:
+        """The workspace a job belongs to, when known."""
+        return self._job_owner.get(job_id)
+
+    def _stream_may_see(self, stream_key: str, owner: Optional[str]) -> bool:
+        groups = self._stream_groups.get(stream_key)
+        return owner is not None and groups is not None and owner in groups
+
+    def create_event_queue(
+        self, job_id: str, group_ids: Optional[Iterable[str]] = None
+    ) -> asyncio.Queue:
         """
         Create a new event queue for a job subscription.
 
@@ -148,6 +182,10 @@ class SSEConnectionManager:
             self.job_queues[job_id] = set()
 
         queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+        if group_ids is not None:
+            # What this "stream-all" subscription may see. Without it the
+            # stream sees nothing but its own connection events.
+            self._stream_groups[job_id] = frozenset(str(g) for g in group_ids if g)
         self.job_queues[job_id].add(queue)
         self.connection_count += 1
 
@@ -172,6 +210,7 @@ class SSEConnectionManager:
             # Clean up empty job subscriptions
             if not self.job_queues[job_id]:
                 del self.job_queues[job_id]
+                self._stream_groups.pop(job_id, None)
 
         if self.connection_count > 0:
             self.connection_count -= 1
@@ -186,6 +225,7 @@ class SSEConnectionManager:
         job_id: str,
         event: SSEEvent,
         skip_replay: bool = False,
+        group_id: Optional[str] = None,
     ) -> int:
         """
         Broadcast an event to all clients subscribed to a job.
@@ -199,6 +239,9 @@ class SSEConnectionManager:
             Number of clients that received the event
         """
         sent_count = 0
+        if group_id:
+            self.register_job_owner(job_id, group_id)
+        owner = self._job_owner.get(job_id)
 
         # Assign a sequential event ID for replay-on-reconnect
         with self._event_id_lock:
@@ -214,7 +257,7 @@ class SSEConnectionManager:
             if job_id not in self._replay_buffer:
                 self._replay_buffer[job_id] = deque(maxlen=self._replay_max_per_job)
             self._replay_buffer[job_id].append((eid, event))
-            self._global_replay.append((eid, event))
+            self._global_replay.append((eid, event, owner))
 
         # Broadcast to job-specific subscribers
         if job_id in self.job_queues:
@@ -230,11 +273,18 @@ class SSEConnectionManager:
                 except Exception as e:
                     logger.error(f"Error broadcasting to queue: {e}")
 
-        # Also broadcast to all "stream-all" subscribers
-        # This ensures cross-browser synchronization
+        # Also broadcast to the "stream-all" subscribers of the workspace that
+        # owns the job — cross-browser sync within a tenant, never across.
         all_stream_keys = [
-            key for key in self.job_queues.keys() if key.startswith("all_groups_")
+            key
+            for key in self.job_queues.keys()
+            if key.startswith("all_groups_") and self._stream_may_see(key, owner)
         ]
+        if owner is None and any(k.startswith("all_groups_") for k in self.job_queues):
+            logger.debug(
+                f"[SSE_STREAM] job {job_id} has no registered owner; "
+                "not fanned out to stream-all subscribers"
+            )
         for stream_key in all_stream_keys:
             if stream_key in self.job_queues:
                 queues = list(self.job_queues[stream_key])
@@ -293,14 +343,18 @@ class SSEConnectionManager:
         search the global replay buffer; for per-job streams we search the
         job-specific buffer.
         """
-        buf = (
-            self._global_replay
-            if job_id.startswith("all_groups_")
-            else self._replay_buffer.get(job_id, deque())
-        )
+        if job_id.startswith("all_groups_"):
+            return [
+                evt
+                for eid, evt, owner in self._global_replay
+                if eid > last_event_id and self._stream_may_see(job_id, owner)
+            ]
+        buf = self._replay_buffer.get(job_id, deque())
         return [evt for eid, evt in buf if eid > last_event_id]
 
-    def get_terminal_event(self, job_id: str) -> Optional[SSEEvent]:
+    def get_terminal_event(
+        self, job_id: str, group_ids: Optional[Iterable[str]] = None
+    ) -> Optional[SSEEvent]:
         """
         Return the buffered terminal event for *job_id*, if one exists.
 
@@ -316,6 +370,12 @@ class SSEConnectionManager:
         event (or any event whose ``status`` is completed/failed/stopped), or
         ``None`` if the generation is still in flight / unknown.
         """
+        if group_ids is not None:
+            # The caller must be in the workspace the generation belongs to;
+            # an unknown owner reads as still pending, never as someone else's.
+            owner = self._job_owner.get(job_id)
+            if owner is None or owner not in {str(g) for g in group_ids}:
+                return None
         buf = self._replay_buffer.get(job_id)
         if not buf:
             return None
@@ -340,6 +400,7 @@ async def event_stream_generator(
     timeout: int = 3600,
     heartbeat_interval: Optional[int] = None,
     last_event_id: Optional[int] = None,
+    group_ids: Optional[Iterable[str]] = None,
 ) -> AsyncGenerator[str, None]:
     """
     Generator function for SSE event streams.
@@ -362,7 +423,7 @@ async def event_stream_generator(
     """
     if heartbeat_interval is None:
         heartbeat_interval = get_heartbeat_seconds()
-    queue = sse_manager.create_event_queue(job_id)
+    queue = sse_manager.create_event_queue(job_id, group_ids=group_ids)
     logger.info(
         f"[SSE_STREAM] Generator started | job={job_id} | timeout={timeout}s | "
         f"heartbeat={heartbeat_interval}s | last_event_id={last_event_id}"

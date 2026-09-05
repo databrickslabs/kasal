@@ -1407,6 +1407,13 @@ Please analyze this message and provide your intent classification."""
                     import uuid as _uuid
 
                     generation_id = str(_uuid.uuid4())
+                    # The generation's stream and result answer only to this
+                    # workspace (audit F04).
+                    from src.core.sse_manager import sse_manager
+
+                    sse_manager.register_job_owner(
+                        generation_id, getattr(group_context, "primary_group_id", None)
+                    )
                     streaming_request = CrewStreamingRequest(
                         prompt=dispatcher_response.suggested_prompt or request.message,
                         # Ground the run with the user's CLEAN message when the
