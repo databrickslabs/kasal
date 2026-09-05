@@ -94,6 +94,13 @@ describe('MemoryPane', () => {
     expect(screen.queryByText(/\|---\|/)).not.toBeInTheDocument();
   });
 
+  it('labels a record the run\'s write was folded into as merged', () => {
+    withRecords([{ ...rec('m', ['lebanon'], 'Lebanon Daily News — merged.'), source: 'consolidation' }]);
+    render(<MemoryPane runId="run-1" />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Records' }));
+    expect(screen.getByText('merged')).toBeInTheDocument();
+  });
+
   it('pinning a graph concept lists only the records mentioning it', () => {
     render(<MemoryPane runId="job-1" />);
     fireEvent.click(screen.getByText('pin-mcp-tools'));

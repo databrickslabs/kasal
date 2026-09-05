@@ -12,6 +12,7 @@ import { MemoryRecordMarkdown } from '../../../MemoryBackend/MemoryRecordMarkdow
 import {
   formatRelative,
   importanceColor,
+  isConsolidation,
   MemoryRecord,
   recordAgent,
 } from '../../../MemoryBackend/memoryData';
@@ -97,6 +98,15 @@ const RecordRow: React.FC<{ record: MemoryRecord }> = ({ record }) => {
         <span className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
           · {formatRelative(record.created_at)}
         </span>
+        {isConsolidation(record) && (
+          <span
+            className="text-[10px] rounded-full px-1.5 py-0.5"
+            style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}
+            title="This run's write was folded into an existing record"
+          >
+            merged
+          </span>
+        )}
         {(record.categories ?? []).slice(0, 4).map((c) => (
           <span
             key={c}

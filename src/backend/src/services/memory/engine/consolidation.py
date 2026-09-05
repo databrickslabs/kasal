@@ -121,6 +121,23 @@ def merge_contents(llm: Any, existing: str, new: str) -> str | None:
         return None
 
 
+def _contributing_runs(*metadatas: dict | None) -> list[str]:
+    """Every run stamped on any of ``metadatas``, oldest first, no repeats:
+    each one's ``execution_ids`` then its ``execution_id``."""
+    seen: list[str] = []
+    for meta in metadatas:
+        meta = meta or {}
+        ids = list(meta.get("execution_ids") or [])
+        single = meta.get("execution_id")
+        if single:
+            ids.append(single)
+        for rid in ids:
+            rid = str(rid)
+            if rid and rid not in seen:
+                seen.append(rid)
+    return seen
+
+
 def consolidate_on_save(
     memory: Any, record: MemoryRecord, scope: str | None
 ) -> MemoryRecord | None:
@@ -145,6 +162,13 @@ def consolidate_on_save(
             int(metadata.get("consolidated_writes", 0) or 0) + 1
         )
         metadata["consolidation_similarity"] = round(float(score), 4)
+        contributors = _contributing_runs(existing.metadata, record.metadata)
+        if contributors:
+            # Provenance survives the fold. A run whose only write was folded
+            # into an older record otherwise looked like it saved nothing: the
+            # record carried the OLD run's stamp (or none) and the panes go by
+            # the record's own provenance.
+            metadata["execution_ids"] = contributors
         changes: dict[str, Any] = {
             "content": merged,
             "categories": sorted(set(existing.categories) | set(record.categories)),

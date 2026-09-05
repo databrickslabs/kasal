@@ -139,6 +139,39 @@ class TestConsolidateOnSave:
         assert changes["metadata"]["agent_role"] == "Analyst"
         assert "semantic" not in changes["metadata"]
 
+    def test_a_folded_write_keeps_the_runs_that_contributed(self):
+        """A run whose only write was folded into an older record looked like it
+        saved nothing: the record carried the old run's stamp. Provenance
+        survives the fold, oldest first, no repeats."""
+        existing_rec, stamp = _existing(semantic=0.9)
+        existing_rec.metadata["execution_id"] = "run-old"
+        store = _Store([(existing_rec, stamp)])
+        memory = Memory(
+            storage=store,
+            llm=_FakeLLM('{"content": "merged note"}'),
+            analyze_on_save=False,
+        )
+        new = MemoryRecord(
+            content=NEW,
+            scope="/g",
+            metadata={"execution_id": "run-new"},
+            importance=0.8,
+        )
+        consolidate_on_save(memory, new, "/g")
+        assert store.updates[0][1]["metadata"]["execution_ids"] == [
+            "run-old",
+            "run-new",
+        ]
+
+        again = MemoryRecord(
+            content=NEW + " Again.", scope="/g", metadata={"execution_id": "run-new"}
+        )
+        consolidate_on_save(memory, again, "/g")
+        assert store.updates[1][1]["metadata"]["execution_ids"] == [
+            "run-old",
+            "run-new",
+        ]
+
     def test_without_an_llm_the_pass_is_skipped_and_the_note_inserted(self):
         # No model → no safe merge. Folding would silently drop a note that
         # merely resembles an old one (yesterday's report vs today's).

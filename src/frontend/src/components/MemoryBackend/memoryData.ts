@@ -356,10 +356,16 @@ export type RunMemoryMode = 'saved' | 'recalled';
 /**
  * A record that names the execution that wrote it — the strongest evidence
  * there is. Chat stamps `execution_id` on its records' metadata; crew/flow
- * task outputs are gaining the same stamp. Consolidation output never has it.
+ * task outputs are gaining the same stamp. A write folded into an older
+ * record at save time keeps its stamp in that record's `execution_ids`, so
+ * a run whose only write was merged still shows what it saved.
  */
-export const writtenByRun = (r: MemoryRecord, runId: string | undefined): boolean =>
-  Boolean(runId) && r.metadata?.execution_id === runId;
+export const writtenByRun = (r: MemoryRecord, runId: string | undefined): boolean => {
+  if (!runId) return false;
+  if (r.metadata?.execution_id === runId) return true;
+  const ids = r.metadata?.execution_ids;
+  return Array.isArray(ids) && ids.includes(runId);
+};
 
 /**
  * Records scoped to ONE run under a mode — the single place both the chat
@@ -367,8 +373,11 @@ export const writtenByRun = (r: MemoryRecord, runId: string | undefined): boolea
  *
  * recalled: records whose ids the run's memory_retrieval traces carry.
  * saved:    ONLY what the evidence proves the run wrote — a record stamped
- *           with this run's execution_id, a record id its memory_write traces
- *           carry, or (runs traced before the id stamps) the recorded body.
+ *           with this run's execution_id (or carrying it among the runs
+ *           folded into it), a record id its memory_write traces carry, or
+ *           (runs traced before the id stamps) the recorded body. A
+ *           consolidation record counts only by its own stamp: maintenance
+ *           re-saves merged records under whichever run triggered it.
  *           No such evidence means nothing saved, and that shows EMPTY: a run
  *           that has only just started, recalled nothing, or runs without
  *           memory must not inherit other runs' records. (A completed_at time
@@ -390,7 +399,7 @@ export function recordsForRun(
   const byBody = (r: MemoryRecord) =>
     facts.savedIds.size === 0 && contentMatches(r, facts.savedContents);
   return records.filter(
-    (r) => !isConsolidation(r) && (writtenByRun(r, runId) || byId(r) || byBody(r)),
+    (r) => writtenByRun(r, runId) || (!isConsolidation(r) && (byId(r) || byBody(r))),
   );
 }
 

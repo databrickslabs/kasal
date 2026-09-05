@@ -243,3 +243,27 @@ describe('isConsolidation', () => {
     expect(isConsolidation(rec({ source: null }))).toBe(false);
   });
 });
+
+describe('a write folded into an older record at save time', () => {
+  // Save-time consolidation merged the run's only write into the previous
+  // turn's record. The record is consolidation output, but it carries the
+  // runs folded into it — so the run that wrote it still shows what it saved.
+  const folded = rec({
+    id: 'f1',
+    created_at: '2026-06-21 12:00:00',
+    source: 'consolidation',
+    metadata: { merged_from: 2, execution_ids: ['run-old', 'run-new'] },
+    content: 'Lebanon Daily News Report — merged across two turns.',
+  });
+  const facts = runTraceFacts([{ event_type: 'memory_write', trace_metadata: { record_id: 'f1' } }]);
+
+  it('counts as saved by every run folded into it', () => {
+    expect(recordsForRun([folded], 'saved', facts, 'run-new')).toEqual([folded]);
+    expect(recordsForRun([folded], 'saved', facts, 'run-old')).toEqual([folded]);
+  });
+
+  it('and by no other run, even one whose maintenance re-saved it', () => {
+    expect(recordsForRun([folded], 'saved', facts, 'run-other')).toEqual([]);
+    expect(recordsForRun([folded], 'saved', facts)).toEqual([]);
+  });
+});
