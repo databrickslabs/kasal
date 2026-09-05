@@ -45,7 +45,8 @@ class TestMemoryQuery:
         )
         assert len(traces) == 1
         td = traces[0]
-        assert td["event_type"] == "memory_retrieval"
+        # No stage on the event → the store's search pool, not what was recalled.
+        assert td["event_type"] == "memory_search"
         extra = td["output"]["extra_data"]
         assert extra["query"] == "latest news from Switzerland"
         assert extra["results_count"] == 2
@@ -152,3 +153,36 @@ class TestRecallPlanStamps:
         assert (
             traces[0]["trace_metadata"]["distilled_query"] == extra["distilled_query"]
         )
+
+
+class TestWhatWasSelectedIsWhatWasRecalled:
+    """The search pool listed records the relevance cliff then cut, so the Run
+    memory pane showed a Lebanese-news turn "recalling" an AI-news record its
+    prompt never contained. The selected-stage report is the memory_retrieval
+    row; the pool is memory_search."""
+
+    def test_the_selected_stage_is_the_memory_retrieval_row(self):
+        memory = object()
+        h, traces, logs = _harness(memory)
+        h.on_memory_query(
+            memory,
+            SimpleNamespace(
+                query="lebanese news",
+                results=[SimpleNamespace(id="lebanon", content="Israeli strikes…")],
+                stage="selected",
+            ),
+        )
+        assert [td["event_type"] for td in traces] == ["memory_retrieval"]
+        assert traces[0]["output"]["extra_data"]["record_ids"] == ["lebanon"]
+        assert logs == ["Memory recall: 1 record(s) reach the prompt"]
+
+    def test_the_search_stage_keeps_its_own_row(self):
+        memory = object()
+        h, traces, logs = _harness(memory)
+        pool = [SimpleNamespace(id="lebanon"), SimpleNamespace(id="ai-news")]
+        h.on_memory_query(
+            memory, SimpleNamespace(query="lebanese news", results=pool, stage="search")
+        )
+        assert [td["event_type"] for td in traces] == ["memory_search"]
+        assert traces[0]["output"]["extra_data"]["record_ids"] == ["lebanon", "ai-news"]
+        assert logs == ["Memory read: 2 result(s)"]

@@ -62,11 +62,16 @@ class MemoryTraceHandlers:
         td["trace_metadata"].update(extra)
         self._schedule_trace(td)
 
-    # ── Memory Read: the recall query and what it matched ─────────────────
+    # ── Memory Read: the search pool, then what reached the prompt ────────
+    # Two rows per recall. Stage "search" (memory_search) is the store's
+    # candidate pool with the query, timing and distilled query; stage
+    # "selected" (memory_retrieval) is what the run's selection kept for the
+    # prompt — the row the Run memory pane and the timeline go by.
     def on_memory_query(self, source: Any, event: Any) -> None:
         try:
             if not self._matches_memory(source):
                 return
+            stage = getattr(event, "stage", None) or "search"
             results = getattr(event, "results", None)
             count = len(results) if isinstance(results, (list, tuple)) else None
             qms = getattr(event, "query_time_ms", None)
@@ -98,8 +103,14 @@ class MemoryTraceHandlers:
             ]
             if rids:
                 extra["record_ids"] = rids
-            self._log(f"Memory read: {count if count is not None else '?'} result(s)")
-            self._emit("memory_retrieval", content, extra)
+            if stage == "selected":
+                self._log(f"Memory recall: {count or 0} record(s) reach the prompt")
+                self._emit("memory_retrieval", content, extra)
+            else:
+                self._log(
+                    f"Memory read: {count if count is not None else '?'} result(s)"
+                )
+                self._emit("memory_search", content, extra)
         except Exception as h_err:  # noqa: BLE001
             logger.debug(f"[light_agent] memory-query trace skipped: {h_err}")
 

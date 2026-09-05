@@ -134,3 +134,38 @@ class TestRecallPlanStamps:
         attrs = _attrs(span)
         assert "kasal.extra.distilled_query" not in attrs
         assert "kasal.extra.exploration_rounds" not in attrs
+
+
+class TestSelectedRecallHasItsOwnRow:
+    """A stage="selected" query event — what recall kept for the prompt — is
+    the memory_retrieval row; the store's search pool is memory_search."""
+
+    def _handler_for(self, bridge):
+        handlers = {}
+
+        class _Bus:
+            def on(self, cls):
+                def _register(fn):
+                    handlers[cls] = fn
+                    return fn
+
+                return _register
+
+        from src.core.events import MemoryQueryCompletedEvent
+
+        bridge._register_handler(_Bus(), MemoryQueryCompletedEvent)
+        return handlers[MemoryQueryCompletedEvent]
+
+    def test_routing_by_stage(self):
+        bridge, _ = _bridge_with_span()
+        bridge._emit_span = MagicMock()
+        handler = self._handler_for(bridge)
+        handler(object(), SimpleNamespace(stage="search", results=[]))
+        handler(object(), SimpleNamespace(stage="selected", results=[]))
+        handler(object(), SimpleNamespace(results=[]))  # no stage → the pool
+        rows = [(c.args[0], c.args[1]) for c in bridge._emit_span.call_args_list]
+        assert rows == [
+            ("kasal.memory.query_completed", "memory_search"),
+            ("kasal.memory.recall_selected", "memory_retrieval"),
+            ("kasal.memory.query_completed", "memory_search"),
+        ]

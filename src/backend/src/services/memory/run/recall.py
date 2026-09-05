@@ -175,6 +175,34 @@ def _select_records(mem: Any, records: list, limit: int) -> list:
     return chosen[:limit]
 
 
+def _announce_selection(mem: Any, query: str, selected: list, limit: int) -> None:
+    """Report what recall SELECTED — the block the prompt gets.
+
+    ``Memory.recall`` reports the search pool (stage "search"). The trace built
+    from that listed records the relevance cliff then cut, so the Run memory
+    pane showed a Lebanese-news turn "recalling" an AI-news record its prompt
+    never contained. This report (stage "selected") is what the panes go by.
+    Best-effort: a failed report never touches the recall.
+    """
+    try:
+        from src.core.events import MemoryQueryCompletedEvent
+        from src.core.events.bus import event_bus
+
+        event_bus.emit(
+            mem,
+            MemoryQueryCompletedEvent(
+                query=query.strip()[:2000],
+                results=list(selected),
+                limit=limit,
+                query_time_ms=0.0,
+                stage="selected",
+                source_type="unified_memory",
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001 — reporting must never break recall
+        logger.debug("memory selection not reported: %s", exc)
+
+
 def build_memory_preamble(
     memory: Any,
     query: str,
@@ -195,6 +223,7 @@ def build_memory_preamble(
         logger.warning("Memory recall failed (%s) — continuing without memory", exc)
         records = []
     records = _select_records(mem, records, limit)
+    _announce_selection(mem, query, records, limit)
     if not records:
         return ""
 

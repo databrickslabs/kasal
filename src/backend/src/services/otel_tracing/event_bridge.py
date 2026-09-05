@@ -47,6 +47,9 @@ _RUN_LEVEL_EVENTS = frozenset(
 
 # Event type -> (span_name, event_type_string)
 # span_name maps to SPAN_NAME_MAP in db_exporter.py
+#: The span for what recall SELECTED (see _EVENT_SPAN_MAP's query_completed).
+_SELECTED_RECALL_SPAN = ("kasal.memory.recall_selected", "memory_retrieval")
+
 _EVENT_SPAN_MAP = {
     # Crew lifecycle
     "CrewKickoffStartedEvent": ("kasal.crew.kickoff", "crew_started"),
@@ -99,7 +102,10 @@ _EVENT_SPAN_MAP = {
         "kasal.memory.query_started",
         "memory_retrieval_started",
     ),
-    "MemoryQueryCompletedEvent": ("kasal.memory.query_completed", "memory_retrieval"),
+    # The search pool. A stage="selected" event of the same class — what the
+    # run's selection kept for the prompt — is routed to memory_retrieval by
+    # _register_handler; that is the row "what this run recalled" is read from.
+    "MemoryQueryCompletedEvent": ("kasal.memory.query_completed", "memory_search"),
     "MemoryQueryFailedEvent": ("kasal.memory.query_failed", "memory_retrieval_failed"),
     "MemoryRetrievalCompletedEvent": (
         "kasal.memory.retrieval_completed",
@@ -589,6 +595,12 @@ class OTelEventBridge:
 
         @event_bus.on(event_cls)
         def _handler(source: Any, event: Any) -> None:
+            if (
+                event_name == "MemoryQueryCompletedEvent"
+                and getattr(event, "stage", "search") == "selected"
+            ):
+                bridge._emit_span(*_SELECTED_RECALL_SPAN, event)
+                return
             bridge._emit_span(span_name, event_type, event)
 
     def _emit_span(self, span_name: str, event_type: str, event: Any) -> None:

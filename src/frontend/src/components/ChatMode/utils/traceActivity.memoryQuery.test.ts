@@ -36,6 +36,10 @@ describe('buildTraceEntry — memory recall shows its query', () => {
     expect(entry.detail).toBe('ctx');
   });
 
+  it('hides the search-pool row — the recall row says what reached the prompt', () => {
+    expect(buildTraceEntry('', { ...retrieved, event_type: 'memory_search' })).toBeNull();
+  });
+
   it('still hides an empty recall entirely', () => {
     expect(
       buildTraceEntry('', { ...retrieved, output: { content: '[]', extra_data: { query: 'x' } } }),

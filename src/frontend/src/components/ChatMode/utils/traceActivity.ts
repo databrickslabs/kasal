@@ -184,6 +184,11 @@ export function buildTraceEntry(
   // output.content; without this branch they fall to the generic handler below
   // and the context is hidden (or dropped as JSON noise). The matching "Search
   // memory" tool result still shows the empty case on its own.
+  // The store's candidate pool (stage "search") — what the run's selection
+  // then cut down to the memory_retrieval row below. Its content is a list of
+  // record reprs; shown generically it read as noise, and the recall pill that
+  // follows already says what reached the prompt.
+  if (eventType === 'memory_search') return null;
   if (eventType === 'memory_retrieval' || eventType === 'memory_retrieval_completed') {
     const content = typeof output.content === 'string' ? (output.content as string).trim() : '';
     const foundNothing = !content || /no relevant memories|no memories found|^\[\]$/i.test(content);

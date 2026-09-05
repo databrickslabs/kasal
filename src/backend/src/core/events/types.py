@@ -451,6 +451,12 @@ class MemoryQueryCompletedEvent(MemoryBaseEvent):
     # what was actually searched, not only what was asked.
     distilled_query: str | None = None
     exploration_rounds: int = 0
+    # Which stage reported: "search" is the store's candidate pool (what
+    # Memory.recall returned); "selected" is what the run's selection kept for
+    # the prompt after the relevance cliff and de-duplication. Panes and
+    # timelines that say what a run RECALLED go by "selected" — the pool listed
+    # records the prompt never contained.
+    stage: Literal["search", "selected"] = "search"
 
 
 class MemoryQueryFailedEvent(MemoryBaseEvent):

@@ -80,16 +80,21 @@ class TestRecallReachesTrace:
 
         assert inject_task_memory(memory, [task]) == 1
 
+        # The store's search pool …
         completed = _wait_for_span(spans, "kasal.memory.query_completed")
         attrs = dict(completed[0].attributes)
-        assert attrs["kasal.event_type"] == "memory_retrieval"
+        assert attrs["kasal.event_type"] == "memory_search"
         # Attribution: pre-kickoff recall still lands under ITS task.
         assert attrs["kasal.extra.task_id"] == "task-123"
         assert attrs["kasal.task_name"] == "collect news"
         assert attrs["kasal.agent_name"] == "News Specialist"
-        # The ids of what was recalled, structured — the run's "Recalled" view
-        # resolves on these rather than parsing the capped content.
         assert attrs["kasal.extra.results_count"] == 1
+        assert list(attrs["kasal.extra.record_ids"]) == [stored.id]
+        # … and what the selection kept for the prompt: the row the run's
+        # "Recalled" view resolves on, structured rather than parsed.
+        selected = _wait_for_span(spans, "kasal.memory.recall_selected")
+        attrs = dict(selected[0].attributes)
+        assert attrs["kasal.event_type"] == "memory_retrieval"
         assert list(attrs["kasal.extra.record_ids"]) == [stored.id]
 
 

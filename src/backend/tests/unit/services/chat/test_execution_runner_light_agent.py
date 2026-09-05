@@ -1550,7 +1550,12 @@ async def test_memory_query_emits_memory_retrieval_trace():
         ] + [1, 2]
         captured["MemoryQueryCompletedEvent"](
             mock_agent.memory,
-            SimpleNamespace(query="swiss news", results=results, query_time_ms=12748.6),
+            SimpleNamespace(
+                query="swiss news",
+                results=results,
+                query_time_ms=12748.6,
+                stage="selected",  # what reached the prompt — the recalled row
+            ),
         )
 
     result, captured = await _run_with_captured_handlers(
