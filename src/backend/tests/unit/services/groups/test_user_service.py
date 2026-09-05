@@ -414,7 +414,7 @@ async def test_update_user_uniqueness_and_success():
         repo.get = AsyncMock(
             side_effect=[SimpleNamespace(id="u1"), SimpleNamespace(id="u1")]
         )
-        await svc.update_user("u1", UserUpdate(username="okay", email="a@b.com"))
+        await svc.update_user("u1", UserUpdate(username="okay"))
         assert repo.update.called
 
 

@@ -127,11 +127,8 @@ class UserService:
             if existing_user and existing_user.id != user_id:
                 raise ValueError("Username already taken")
 
-        # Check if email is being updated and is unique
-        if "email" in update_data:
-            existing_user = await self.user_repo.get_by_email(update_data["email"])
-            if existing_user and existing_user.id != user_id:
-                raise ValueError("Email already registered")
+        # Email is never in update_data: it is the identity authentication
+        # resolves a row by, and the schema refuses it (see UserUpdate).
 
         # Update user
         await self.user_repo.update(user_id, update_data)

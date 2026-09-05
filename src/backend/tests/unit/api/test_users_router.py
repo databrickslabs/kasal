@@ -86,6 +86,7 @@ def client(mock_current_user, mock_session):
     from src.dependencies.admin_auth import (
         get_admin_user,
         get_authenticated_user,
+        get_system_admin_user,
         require_authenticated_user,
     )
     from tests.unit.api.conftest import register_exception_handlers
@@ -98,6 +99,7 @@ def client(mock_current_user, mock_session):
     app.dependency_overrides[require_authenticated_user] = lambda: mock_current_user
     app.dependency_overrides[get_authenticated_user] = lambda: mock_current_user
     app.dependency_overrides[get_admin_user] = lambda: mock_current_user
+    app.dependency_overrides[get_system_admin_user] = lambda: mock_current_user
     app.dependency_overrides[get_db] = lambda: mock_session
 
     return TestClient(app)
@@ -142,11 +144,11 @@ class TestCurrentUserEndpoints:
 
         from src.models.enums import UserRole, UserStatus
 
-        update_data = {"email": "newemail@example.com"}
+        update_data = {"username": "renamed"}
         updated_user = {
             "id": "current-user-123",
-            "username": "currentuser",
-            "email": "newemail@example.com",
+            "username": "renamed",
+            "email": "current@example.com",
             "role": UserRole.REGULAR.value,
             "status": UserStatus.ACTIVE.value,
             "created_at": datetime.now().isoformat(),
@@ -167,7 +169,7 @@ class TestCurrentUserEndpoints:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["email"] == "newemail@example.com"
+        assert data["username"] == "renamed"
 
     def skip_test_update_users_profile(
         self, client, mock_current_user, mock_user_service
@@ -280,7 +282,8 @@ class TestAdminEndpoints:
         with patch("src.api.users_router.UserService", return_value=mock_user_service):
             with patch("src.api.users_router.SessionDep", return_value=AsyncMock()):
                 with patch(
-                    "src.api.users_router.AdminUserDep", return_value=mock_admin_user
+                    "src.api.users_router.SystemAdminUserDep",
+                    return_value=mock_admin_user,
                 ):
                     response = client.get("/users/")
 
@@ -301,7 +304,8 @@ class TestAdminEndpoints:
         with patch("src.api.users_router.UserService", return_value=mock_user_service):
             with patch("src.api.users_router.SessionDep", return_value=AsyncMock()):
                 with patch(
-                    "src.api.users_router.AdminUserDep", return_value=mock_admin_user
+                    "src.api.users_router.SystemAdminUserDep",
+                    return_value=mock_admin_user,
                 ):
                     response = client.get(
                         "/users/?role=admin&status=active&search=test"
@@ -341,7 +345,8 @@ class TestAdminEndpoints:
         with patch("src.api.users_router.UserService", return_value=mock_user_service):
             with patch("src.api.users_router.SessionDep", return_value=AsyncMock()):
                 with patch(
-                    "src.api.users_router.AdminUserDep", return_value=mock_admin_user
+                    "src.api.users_router.SystemAdminUserDep",
+                    return_value=mock_admin_user,
                 ):
                     response = client.get("/users/user-123")
 
@@ -356,7 +361,8 @@ class TestAdminEndpoints:
         with patch("src.api.users_router.UserService", return_value=mock_user_service):
             with patch("src.api.users_router.SessionDep", return_value=AsyncMock()):
                 with patch(
-                    "src.api.users_router.AdminUserDep", return_value=mock_admin_user
+                    "src.api.users_router.SystemAdminUserDep",
+                    return_value=mock_admin_user,
                 ):
                     response = client.get("/users/nonexistent")
 
@@ -365,31 +371,33 @@ class TestAdminEndpoints:
 
     def test_update_user_success(self, client, mock_admin_user, mock_user_service):
         """Test updating a user."""
-        update_data = {"email": "updated@example.com"}
-        updated_user = MockUser(email="updated@example.com")
+        update_data = {"username": "renamed"}
+        updated_user = MockUser(username="renamed")
 
         mock_user_service.update_user.return_value = updated_user
 
         with patch("src.api.users_router.UserService", return_value=mock_user_service):
             with patch("src.api.users_router.SessionDep", return_value=AsyncMock()):
                 with patch(
-                    "src.api.users_router.AdminUserDep", return_value=mock_admin_user
+                    "src.api.users_router.SystemAdminUserDep",
+                    return_value=mock_admin_user,
                 ):
                     response = client.put("/users/user-123", json=update_data)
 
         assert response.status_code == 200
         data = response.json()
-        assert data["email"] == "updated@example.com"
+        assert data["username"] == "renamed"
 
     def test_update_user_not_found(self, client, mock_admin_user, mock_user_service):
         """Test updating non-existent user."""
-        update_data = {"email": "updated@example.com"}
+        update_data = {"username": "renamed"}
         mock_user_service.update_user.return_value = None
 
         with patch("src.api.users_router.UserService", return_value=mock_user_service):
             with patch("src.api.users_router.SessionDep", return_value=AsyncMock()):
                 with patch(
-                    "src.api.users_router.AdminUserDep", return_value=mock_admin_user
+                    "src.api.users_router.SystemAdminUserDep",
+                    return_value=mock_admin_user,
                 ):
                     response = client.put("/users/nonexistent", json=update_data)
 
@@ -408,7 +416,8 @@ class TestAdminEndpoints:
         with patch("src.api.users_router.UserService", return_value=mock_user_service):
             with patch("src.api.users_router.SessionDep", return_value=AsyncMock()):
                 with patch(
-                    "src.api.users_router.AdminUserDep", return_value=mock_admin_user
+                    "src.api.users_router.SystemAdminUserDep",
+                    return_value=mock_admin_user,
                 ):
                     response = client.put("/users/user-123/role", json=role_data)
 
@@ -426,7 +435,8 @@ class TestAdminEndpoints:
         with patch("src.api.users_router.UserService", return_value=mock_user_service):
             with patch("src.api.users_router.SessionDep", return_value=AsyncMock()):
                 with patch(
-                    "src.api.users_router.AdminUserDep", return_value=mock_admin_user
+                    "src.api.users_router.SystemAdminUserDep",
+                    return_value=mock_admin_user,
                 ):
                     response = client.put("/users/nonexistent/role", json=role_data)
 
@@ -440,7 +450,8 @@ class TestAdminEndpoints:
         with patch("src.api.users_router.UserService", return_value=mock_user_service):
             with patch("src.api.users_router.SessionDep", return_value=AsyncMock()):
                 with patch(
-                    "src.api.users_router.AdminUserDep", return_value=mock_admin_user
+                    "src.api.users_router.SystemAdminUserDep",
+                    return_value=mock_admin_user,
                 ):
                     response = client.delete("/users/user-123")
 
@@ -453,7 +464,8 @@ class TestAdminEndpoints:
         with patch("src.api.users_router.UserService", return_value=mock_user_service):
             with patch("src.api.users_router.SessionDep", return_value=AsyncMock()):
                 with patch(
-                    "src.api.users_router.AdminUserDep", return_value=mock_admin_user
+                    "src.api.users_router.SystemAdminUserDep",
+                    return_value=mock_admin_user,
                 ):
                     response = client.delete("/users/nonexistent")
 
@@ -470,7 +482,8 @@ class TestAdminEndpoints:
         with patch("src.api.users_router.UserService", return_value=mock_user_service):
             with patch("src.api.users_router.SessionDep", return_value=AsyncMock()):
                 with patch(
-                    "src.api.users_router.AdminUserDep", return_value=mock_admin_user
+                    "src.api.users_router.SystemAdminUserDep",
+                    return_value=mock_admin_user,
                 ):
                     response = client.get("/users/?skip=10&limit=5")
 
@@ -482,3 +495,70 @@ class TestAdminEndpoints:
         mock_user_service.get_users.assert_called_once_with(
             skip=10, limit=5, filters={}, search=None
         )
+
+
+class TestGlobalUserRoutesAreSystemAdminOnly:
+    """Audit F01. The global user routes used to accept an admin of ANY
+    workspace, and a user's email is what authentication resolves by — a
+    workspace admin could point a system admin's row at an address they
+    control and sign in as them. The real gate runs here: only the identity
+    lookup is replaced."""
+
+    @pytest.fixture
+    def gated_client(self, mock_session):
+        from fastapi import FastAPI
+
+        from src.api.users_router import router
+        from src.db.session import get_db
+        from tests.unit.api.conftest import register_exception_handlers
+
+        app = FastAPI()
+        app.include_router(router)
+        register_exception_handlers(app)
+        app.dependency_overrides[get_db] = lambda: mock_session
+        return TestClient(app)
+
+    def _as(self, user):
+        return patch(
+            "src.dependencies.admin_auth.require_authenticated_user",
+            new=AsyncMock(return_value=user),
+        )
+
+    @pytest.mark.parametrize(
+        "method,path,body",
+        [
+            ("get", "/users/", None),
+            ("get", "/users/user-9", None),
+            ("put", "/users/user-9", {"username": "renamed"}),
+            ("put", "/users/user-9/permissions", {"is_system_admin": True}),
+            ("delete", "/users/user-9", None),
+        ],
+    )
+    def test_a_workspace_admin_is_refused(self, gated_client, method, path, body):
+        workspace_admin = MockUser(id="ws-admin")  # is_system_admin is False
+        with self._as(workspace_admin), patch("src.api.users_router.UserService"):
+            response = gated_client.request(method.upper(), path, json=body)
+        assert response.status_code == 403
+
+    def test_a_system_admin_is_not(self, gated_client, mock_user_service):
+        sysadmin = MockUser(id="sys-admin")
+        sysadmin.is_system_admin = True
+        mock_user_service.update_user.return_value = MockUser(id="user-9")
+        with (
+            self._as(sysadmin),
+            patch("src.api.users_router.UserService", return_value=mock_user_service),
+        ):
+            response = gated_client.put("/users/user-9", json={"username": "renamed"})
+        assert response.status_code == 200
+
+    def test_no_route_rebinds_an_email(self, client, mock_user_service):
+        # `client` resolves the caller as a system admin for the global route
+        # and as the current user for /me; the schema refuses either way.
+        with patch("src.api.users_router.UserService", return_value=mock_user_service):
+            admin_edit = client.put(
+                "/users/user-9", json={"email": "attacker@example.com"}
+            )
+            self_edit = client.put("/users/me", json={"email": "me@example.com"})
+        assert admin_edit.status_code == 422
+        assert self_edit.status_code == 422
+        mock_user_service.update_user.assert_not_called()

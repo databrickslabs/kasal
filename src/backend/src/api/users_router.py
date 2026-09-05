@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query, status
 
 from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.exceptions import ForbiddenError, NotFoundError
-from src.dependencies.admin_auth import AdminUserDep, AuthenticatedUserDep
+from src.dependencies.admin_auth import AuthenticatedUserDep, SystemAdminUserDep
 from src.models.user import User
 from src.schemas.user import UserInDB, UserPermissionUpdate, UserUpdate
 from src.services.groups.users import UserService
@@ -62,11 +62,17 @@ async def update_users_me(
 # External identity endpoints removed - using simplified auth
 
 
-# Admin endpoints
+# Global user administration — SYSTEM admins only.
+#
+# These routes list, read, change and delete ANY user row. They used to accept
+# an admin of any workspace, and a user's email is what authentication resolves
+# an identity by: a workspace admin could point a system admin's row at an
+# email they control and sign in as that admin (audit F01). Workspace admins
+# manage their members through the groups routes, not here.
 @router.get("", response_model=List[UserInDB])
 async def read_users(
     service: Annotated[UserService, Depends(get_user_service)],
-    admin_user: AdminUserDep,
+    admin_user: SystemAdminUserDep,
     group_context: GroupContextDep,
     skip: int = 0,
     limit: int = 100,
@@ -74,7 +80,7 @@ async def read_users(
     status: Optional[str] = None,
     search: Optional[str] = None,
 ):
-    """Get list of users (admin only)"""
+    """Get list of users (system admin only)"""
     filters = {}
 
     if role:
@@ -92,10 +98,10 @@ async def read_users(
 async def read_user(
     user_id: str,
     service: Annotated[UserService, Depends(get_user_service)],
-    admin_user: AdminUserDep,
+    admin_user: SystemAdminUserDep,
     group_context: GroupContextDep,
 ):
-    """Get user by ID (admin only)"""
+    """Get user by ID (system admin only)"""
     # Use injected service
     user = await service.get_user_complete(user_id)
 
@@ -110,10 +116,11 @@ async def update_user(
     user_id: str,
     user_update: UserUpdate,
     service: Annotated[UserService, Depends(get_user_service)],
-    admin_user: AdminUserDep,
+    admin_user: SystemAdminUserDep,
     group_context: GroupContextDep,
 ):
-    """Update user information (admin only)"""
+    """Update a user's username or status (system admin only). Email is
+    immutable through the API — it is the identity authentication resolves."""
     # Use injected service
     user = await service.update_user(user_id, user_update)
 
@@ -129,7 +136,7 @@ async def update_user_permissions(
     user_id: str,
     permission_update: UserPermissionUpdate,
     service: Annotated[UserService, Depends(get_user_service)],
-    admin_user: AdminUserDep,
+    admin_user: SystemAdminUserDep,
     group_context: GroupContextDep,
 ):
     """Update user permissions (system admin only)"""
@@ -154,10 +161,10 @@ async def update_user_permissions(
 async def delete_user(
     user_id: str,
     service: Annotated[UserService, Depends(get_user_service)],
-    admin_user: AdminUserDep,
+    admin_user: SystemAdminUserDep,
     group_context: GroupContextDep,
 ):
-    """Delete a user (admin only)"""
+    """Delete a user (system admin only)"""
     # Use injected service
     success = await service.delete_user(user_id)
 

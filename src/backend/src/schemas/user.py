@@ -3,7 +3,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 
 # Import enums from models to ensure consistency
 from src.models.enums import UserRole, UserStatus
@@ -42,8 +42,17 @@ class UserBase(BaseModel):
 
 # User update
 class UserUpdate(BaseModel):
+    """What may change about a user through the API: username and status.
+
+    Email is NOT here. Authentication resolves an identity by email, so a
+    changeable email is a changeable identity: rewrite an admin's row to an
+    address you control and sign in as them (audit F01). Unknown fields are
+    refused rather than dropped, so a request that tries reads as an error.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     username: Optional[str] = None
-    email: Optional[EmailStr] = None
     status: Optional[UserStatus] = None
 
     @field_validator("username", mode="before")

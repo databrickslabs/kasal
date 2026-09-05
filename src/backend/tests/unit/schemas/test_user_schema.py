@@ -161,22 +161,26 @@ class TestUserUpdate:
         """Test valid UserUpdate creation."""
         update_data = {
             "username": "updateduser",
-            "email": "updated@example.com",
             "status": UserStatus.ACTIVE,
         }
 
         user_update = UserUpdate(**update_data)
 
         assert user_update.username == "updateduser"
-        assert user_update.email == "updated@example.com"
         assert user_update.status == UserStatus.ACTIVE
+
+    def test_user_update_refuses_email(self):
+        """Email is the identity authentication resolves by; it cannot be
+        rewritten through the API, and the attempt is an error, not a no-op
+        (audit F01)."""
+        with pytest.raises(ValidationError):
+            UserUpdate(username="x", email="rebound@example.com")
 
     def test_user_update_all_optional(self):
         """Test UserUpdate with all optional fields."""
         user_update = UserUpdate()
 
         assert user_update.username is None
-        assert user_update.email is None
         assert user_update.status is None
 
     def test_user_update_partial(self):
@@ -186,7 +190,6 @@ class TestUserUpdate:
         user_update = UserUpdate(**update_data)
 
         assert user_update.username == "partialupdate"
-        assert user_update.email is None
         assert user_update.status is None
 
     def test_user_update_username_validation(self):
@@ -402,7 +405,6 @@ class TestSchemaInteraction:
         # UserUpdate - all fields optional
         update = UserUpdate()
         assert update.username is None
-        assert update.email is None
         assert update.status is None
 
         # UserPermissionUpdate - all fields optional
