@@ -34,6 +34,9 @@ def gc():
     )
 
 
+SYSADMIN = SimpleNamespace(id="sys", is_system_admin=True)
+
+
 def make_schema(sid=1, name="test_schema"):
     """Create a mock schema response object."""
     now = datetime.utcnow()
@@ -191,7 +194,7 @@ class TestCreateSchema:
         )
 
         result = await create_schema(
-            schema_data=schema_data, service=svc, group_context=gc()
+            schema_data=schema_data, service=svc, admin=SYSADMIN, group_context=gc()
         )
 
         assert result.name == "new_schema"
@@ -214,7 +217,7 @@ class TestCreateSchema:
 
         with pytest.raises(HTTPException) as exc_info:
             await create_schema(
-                schema_data=schema_data, service=svc, group_context=gc()
+                schema_data=schema_data, service=svc, admin=SYSADMIN, group_context=gc()
             )
 
         assert exc_info.value.status_code == 400
@@ -241,6 +244,7 @@ class TestUpdateSchema:
             schema_name="updated_schema",
             schema_data=update_data,
             service=svc,
+            admin=SYSADMIN,
             group_context=gc(),
         )
 
@@ -261,6 +265,7 @@ class TestUpdateSchema:
                 schema_name="missing",
                 schema_data=update_data,
                 service=svc,
+                admin=SYSADMIN,
                 group_context=gc(),
             )
 
@@ -281,7 +286,7 @@ class TestDeleteSchema:
         svc.delete_schema = AsyncMock(return_value=None)
 
         result = await delete_schema(
-            schema_name="to_delete", service=svc, group_context=gc()
+            schema_name="to_delete", service=svc, admin=SYSADMIN, group_context=gc()
         )
 
         assert result is None
@@ -295,7 +300,9 @@ class TestDeleteSchema:
         )
 
         with pytest.raises(HTTPException) as exc_info:
-            await delete_schema(schema_name="missing", service=svc, group_context=gc())
+            await delete_schema(
+                schema_name="missing", service=svc, admin=SYSADMIN, group_context=gc()
+            )
 
         assert exc_info.value.status_code == 404
 
@@ -305,7 +312,9 @@ class TestDeleteSchema:
         svc.delete_schema = AsyncMock(side_effect=RuntimeError("db error"))
 
         with pytest.raises(RuntimeError, match="db error"):
-            await delete_schema(schema_name="schema1", service=svc, group_context=gc())
+            await delete_schema(
+                schema_name="schema1", service=svc, admin=SYSADMIN, group_context=gc()
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -341,3 +350,67 @@ class TestRouterConfiguration:
         assert "GET" in methods_by_path["/schemas/{schema_name}"]
         assert "PUT" in methods_by_path["/schemas/{schema_name}"]
         assert "DELETE" in methods_by_path["/schemas/{schema_name}"]
+
+
+class TestCatalogMutationsAreSystemAdminOnly:
+    """Audit F10. The catalog is global; any authenticated caller could
+    create, rewrite and delete entries by name. The real gate runs here with
+    only the identity lookup replaced."""
+
+    @pytest.fixture
+    def client(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from src.core.dependencies import get_group_context, get_smart_db_session
+        from tests.unit.api.conftest import register_exception_handlers
+
+        app = FastAPI()
+        app.include_router(router)
+        register_exception_handlers(app)
+        app.dependency_overrides[get_smart_db_session] = lambda: None
+        app.dependency_overrides[get_group_context] = gc
+        return TestClient(app)
+
+    def _as(self, system_admin):
+        from unittest.mock import patch
+
+        user = SimpleNamespace(id="u", email="u@x.com", is_system_admin=system_admin)
+        return patch(
+            "src.dependencies.admin_auth.require_authenticated_user",
+            new=AsyncMock(return_value=user),
+        )
+
+    @pytest.mark.parametrize(
+        "method,path,body",
+        [
+            (
+                "POST",
+                "/schemas",
+                {
+                    "name": "s",
+                    "description": "d",
+                    "schema_type": "data_model",
+                    "schema_definition": {"type": "object"},
+                },
+            ),
+            ("PUT", "/schemas/s", {"description": "changed"}),
+            ("DELETE", "/schemas/s", None),
+        ],
+    )
+    def test_an_operator_is_refused(self, client, method, path, body):
+        from unittest.mock import patch
+
+        with self._as(False), patch("src.api.schemas_router.SchemaService"):
+            assert client.request(method, path, json=body).status_code == 403
+
+    def test_a_system_admin_is_not(self, client):
+        from unittest.mock import patch
+
+        svc = AsyncMock()
+        svc.delete_schema = AsyncMock(return_value=True)
+        with (
+            self._as(True),
+            patch("src.api.schemas_router.SchemaService", return_value=svc),
+        ):
+            assert client.delete("/schemas/s").status_code == 204

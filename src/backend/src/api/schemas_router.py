@@ -4,6 +4,7 @@ from typing import Annotated, List
 from fastapi import APIRouter, Depends, status
 
 from src.core.dependencies import GroupContextDep, SessionDep
+from src.dependencies.admin_auth import SystemAdminUserDep
 from src.schemas.schema import (
     SchemaCreate,
     SchemaListResponse,
@@ -88,10 +89,15 @@ async def get_schema_by_name(
     return schema
 
 
+# The schema catalog is GLOBAL — rows have no workspace owner and every
+# workspace's runs read them — so changing it is a system-administration
+# action. Any authenticated caller could create, rewrite and delete entries
+# by name (audit F10).
 @router.post("", response_model=SchemaResponse, status_code=status.HTTP_201_CREATED)
 async def create_schema(
     schema_data: SchemaCreate,
     service: SchemaServiceDep,
+    admin: SystemAdminUserDep,
     group_context: GroupContextDep = None,
 ) -> SchemaResponse:
     """
@@ -110,6 +116,7 @@ async def update_schema(
     schema_name: str,
     schema_data: SchemaUpdate,
     service: SchemaServiceDep,
+    admin: SystemAdminUserDep,
     group_context: GroupContextDep = None,
 ) -> SchemaResponse:
     """
@@ -125,7 +132,10 @@ async def update_schema(
 
 @router.delete("/{schema_name}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_schema(
-    schema_name: str, service: SchemaServiceDep, group_context: GroupContextDep = None
+    schema_name: str,
+    service: SchemaServiceDep,
+    admin: SystemAdminUserDep,
+    group_context: GroupContextDep = None,
 ) -> None:
     """
     Delete a schema.
