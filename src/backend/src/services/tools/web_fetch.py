@@ -50,20 +50,18 @@ def _http_json(
     return dict(results)
 
 
-def _safe_fetch(
-    url: str,
-    headers: dict[str, str],
-    timeout: int = 15,
-    max_bytes: int | None = None,
-) -> str:
-    """Fetch a URL, refusing non-HTTP schemes and private/loopback hosts.
+#: Redirect hops followed before giving up. urllib's own default is 10.
+_MAX_REDIRECTS = 5
+#: Request headers dropped when a redirect changes the origin.
+_SENSITIVE_REQUEST_HEADERS = ("Authorization", "Cookie", "Proxy-Authorization")
 
-    ``max_bytes`` bounds how much of the response body is READ. Without it a
-    multi-megabyte page is pulled into memory in full and only trimmed later,
-    which pays the download and decode cost regardless — and on a hostile or
-    misconfigured URL there is no upper bound at all. None keeps the previous
-    unbounded behaviour for callers that have their own limit.
-    """
+
+def _assert_public_target(url: str) -> None:
+    """Refuse non-HTTP schemes and hosts that resolve to private, loopback,
+    link-local or reserved addresses. Applied to the first URL AND to every
+    redirect hop — a public URL that 302s to ``http://127.0.0.1/…`` used to be
+    followed without a second look (audit F09). The check-then-connect DNS
+    race remains: pinning the resolved address needs a custom transport."""
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise ValueError(f"Unsupported URL scheme: {parsed.scheme!r}")
@@ -81,9 +79,53 @@ def _safe_fetch(
             or address.is_reserved
         ):
             raise ValueError(f"Refusing to fetch private/internal address for {host!r}")
+
+
+def _origin(url: str) -> tuple:
+    parts = urllib.parse.urlsplit(url)
+    return (parts.scheme, parts.netloc)
+
+
+class _SafeRedirects(urllib.request.HTTPRedirectHandler):
+    """Every hop is held to the same rule as the first URL, the hop count is
+    capped, and credentials do not travel to a different origin."""
+
+    max_redirections = _MAX_REDIRECTS
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        target = urllib.parse.urljoin(req.full_url, newurl)
+        try:
+            _assert_public_target(target)
+        except ValueError as refused:
+            raise urllib.error.HTTPError(
+                target, code, f"redirect refused: {refused}", headers, fp
+            ) from refused
+        new = super().redirect_request(req, fp, code, msg, headers, target)
+        if new is not None and _origin(target) != _origin(req.full_url):
+            for header in _SENSITIVE_REQUEST_HEADERS:
+                new.remove_header(header)
+        return new
+
+
+def _safe_fetch(
+    url: str,
+    headers: dict[str, str],
+    timeout: int = 15,
+    max_bytes: int | None = None,
+) -> str:
+    """Fetch a URL, refusing non-HTTP schemes and private/loopback hosts.
+
+    ``max_bytes`` bounds how much of the response body is READ. Without it a
+    multi-megabyte page is pulled into memory in full and only trimmed later,
+    which pays the download and decode cost regardless — and on a hostile or
+    misconfigured URL there is no upper bound at all. None keeps the previous
+    unbounded behaviour for callers that have their own limit.
+    """
+    _assert_public_target(url)
     request = urllib.request.Request(url, headers=headers)
+    opener = urllib.request.build_opener(_SafeRedirects())
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with opener.open(request, timeout=timeout) as response:
             charset = response.headers.get_content_charset() or "utf-8"
             # read(n) caps the transfer itself. One extra byte is requested so the
             # caller can tell "exactly at the limit" from "truncated".
