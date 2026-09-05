@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Copy, Loader2, Plus, Trash2 } from 'lucide-react';
 import ScaledFrame from '../Chat/ScaledFrame';
 import { SLIDE_W, stageFor } from '../../utils/htmlDeck';
+import { hasPendingAssets } from '../../utils/assetRefs';
 
 /**
  * The studio's left rail: every slide small and numbered, the selected one
@@ -108,6 +109,8 @@ const ThumbnailRail: React.FC<ThumbnailRailProps> = ({
                 }}
               >
                 <ScaledFrame
+                  // Remount once the slide's images are in (see hasPendingAssets).
+                  key={hasPendingAssets(slide) ? 'pending' : 'ready'}
                   html={stageFor(slide)}
                   baseWidth={SLIDE_W}
                   fill={false}

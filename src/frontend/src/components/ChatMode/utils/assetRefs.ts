@@ -37,3 +37,15 @@ export function substituteAssetRefs(html: string, urls: Record<string, string>):
   if (!html || !html.includes('asset:')) return html || '';
   return html.replace(REF, (whole, id: string) => urls[id] ?? LOADING_PIXEL);
 }
+
+/**
+ * True while `html` still carries the loading pixel for some image. Consumers
+ * key their frame on this: a frame whose `srcdoc` is changed from the pixel
+ * version to the real one while its first navigation is still pending keeps
+ * the OLD document (Chrome drops the second navigation), which left the deck
+ * studio — several frames mounted at once — showing blank slides. A key flip
+ * remounts the frame with the final document instead of re-navigating it.
+ */
+export function hasPendingAssets(html: string): boolean {
+  return (html || '').includes(LOADING_PIXEL);
+}

@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Download, Loader2, Maximize2, SquarePen } fr
 import { SLIDE_W, refinedSlideIndex, splitSlides, stageFor } from '../../utils/htmlDeck';
 import DeckStudio from '../Deck/DeckStudio';
 import { useResolvedAssetHtml } from '../../hooks/useResolvedAssetHtml';
+import { hasPendingAssets } from '../../utils/assetRefs';
 import { useThrottledPreview } from '../../utils/scaledFrame';
 import { downloadDeckPdf, downloadDeckPptx } from '../../utils/deckExport';
 import ScaledFrame from './ScaledFrame';
@@ -219,6 +220,8 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
           is what makes "click the presentation, then use the arrows" work. */}
       <div className="relative">
         <ScaledFrame
+          // Remount once the slide's images are in (see hasPendingAssets).
+          key={hasPendingAssets(stage) ? 'pending' : 'ready'}
           html={stage}
           baseWidth={SLIDE_W}
           fill={false}

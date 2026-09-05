@@ -88,14 +88,22 @@ describe('HtmlDeckBlock attached images', () => {
     const spy = vi.spyOn(AssetService, 'dataUrl').mockResolvedValue('data:image/png;base64,QQ==');
     const deck = '<section class="slide"><img src="asset:abc123def"></section>';
     render(<HtmlDeckBlock code={deck} messageId="m1" />);
+    // The frame is REMOUNTED once the bytes are in — a fresh element, not the
+    // first one re-navigated (Chrome drops a srcdoc change that lands before a
+    // new frame's first navigation finishes; the studio showed blank slides).
+    const pending = document.querySelector('iframe[title="Slide deck"]') as HTMLIFrameElement;
+    expect(pending.srcdoc).not.toContain('data:image/png;base64,QQ==');
     await waitFor(() => {
       const frame = document.querySelector('iframe[title="Slide deck"]') as HTMLIFrameElement;
       expect(frame.srcdoc).toContain('data:image/png;base64,QQ==');
+      expect(frame).not.toBe(pending);
     });
     fireEvent.click(screen.getByTitle('Edit deck'));
     // The studio shows resolved thumbnails but edits the raw deck (references kept).
-    const thumb = document.querySelector('iframe[title="Slide 1 thumbnail"]') as HTMLIFrameElement;
-    await waitFor(() => expect(thumb.srcdoc).toContain('data:image/png;base64,QQ=='));
+    await waitFor(() => {
+      const thumb = document.querySelector('iframe[title="Slide 1 thumbnail"]') as HTMLIFrameElement;
+      expect(thumb.srcdoc).toContain('data:image/png;base64,QQ==');
+    });
     spy.mockRestore();
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LOADING_PIXEL, findAssetIds, substituteAssetRefs } from './assetRefs';
+import { LOADING_PIXEL, findAssetIds, hasPendingAssets, substituteAssetRefs } from './assetRefs';
 
 describe('assetRefs', () => {
   const html =
@@ -19,5 +19,13 @@ describe('assetRefs', () => {
     expect(out).toContain(`src="${LOADING_PIXEL}"`);
     expect(out).not.toContain('asset:');
     expect(substituteAssetRefs('<p>plain</p>', {})).toBe('<p>plain</p>');
+  });
+});
+
+describe('hasPendingAssets', () => {
+  it('is true only while a loading pixel stands in for an image', () => {
+    expect(hasPendingAssets(substituteAssetRefs('<img src="asset:abc123def">', {}))).toBe(true);
+    expect(hasPendingAssets(substituteAssetRefs('<img src="asset:abc123def">', { abc123def: 'data:x' }))).toBe(false);
+    expect(hasPendingAssets('<p>no images</p>')).toBe(false);
   });
 });

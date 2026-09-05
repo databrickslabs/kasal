@@ -10,6 +10,7 @@ import { useAppStore } from '../../store/appStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { planSlideEdit, type SlideEdit } from '../../utils/slideRefine';
 import { useResolvedAssetHtml } from '../../hooks/useResolvedAssetHtml';
+import { hasPendingAssets } from '../../utils/assetRefs';
 import { SLIDE_W, replaceDeckInContent, splitSlides, stageFor } from '../../utils/htmlDeck';
 import { downloadDeckPdf, downloadDeckPptx } from '../../utils/deckExport';
 
@@ -287,7 +288,17 @@ const DeckStudio: React.FC<DeckStudioProps> = ({ code, messageId, initialIndex =
           <div className="flex min-w-0 flex-1 flex-col">
             <div className="min-h-0 flex-1 p-6">
               <div className="h-full w-full">
-                <ScaledFrame html={stage} baseWidth={SLIDE_W} contain upscale pad={0} background="#000" title={`Slide ${shown + 1}`} />
+                <ScaledFrame
+                  // Remount once the slide's images are in (see hasPendingAssets).
+                  key={hasPendingAssets(stage) ? 'pending' : 'ready'}
+                  html={stage}
+                  baseWidth={SLIDE_W}
+                  contain
+                  upscale
+                  pad={0}
+                  background="#000"
+                  title={`Slide ${shown + 1}`}
+                />
               </div>
             </div>
             <SlideInstructionBar

@@ -4,6 +4,7 @@ import { buildMdSandboxCell, notebookSafe } from '../../utils/mdSandboxDiagram';
 import ScaledFrame from './ScaledFrame';
 import { useThrottledPreview } from '../../utils/scaledFrame';
 import { useResolvedAssetHtml } from '../../hooks/useResolvedAssetHtml';
+import { hasPendingAssets } from '../../utils/assetRefs';
 import FullscreenModal from './FullscreenModal';
 
 /**
@@ -83,11 +84,18 @@ const HtmlDiagramBlock: React.FC<HtmlDiagramBlockProps> = ({ code, streaming = f
           <code>{`%md-sandbox\n${safeCode}`}</code>
         </pre>
       ) : (
-        <ScaledFrame html={preview} streaming={streaming} title="Rendered diagram" />
+        <ScaledFrame
+          // Remount once the diagram's images are in (see hasPendingAssets).
+          key={hasPendingAssets(preview) ? 'pending' : 'ready'} html={preview} streaming={streaming} title="Rendered diagram" />
       )}
       {full && (
         <FullscreenModal onClose={() => setFull(false)}>
-          <ScaledFrame html={safeCode} contain title="Rendered diagram (fullscreen)" />
+          <ScaledFrame
+            key={hasPendingAssets(preview) ? 'pending' : 'ready'}
+            html={preview}
+            contain
+            title="Rendered diagram (fullscreen)"
+          />
         </FullscreenModal>
       )}
     </div>
