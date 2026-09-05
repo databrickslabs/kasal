@@ -36,6 +36,34 @@ _MERGE_CHAR_CAP = 4000
 # Scoring artefacts the storage stamps on hits; never written back.
 _ADVISORY_KEYS = ("similarity", "semantic")
 
+#: Tags a merged record keeps. Merges used to take the UNION of every folded
+#: record's tags: ten of the 36 records in one store carried more than ten,
+#: one carried 22 — and a record like that, recalled once, painted the whole
+#: concept graph with subjects the turn never touched.
+MERGED_CATEGORY_CAP = 8
+
+
+def merge_categories(
+    *tag_lists: list[str] | None, cap: int = MERGED_CATEGORY_CAP
+) -> list[str]:
+    """Tags for a record merged from ``tag_lists`` (newest first).
+
+    Tags shared by more than one source lead, then each source's own in
+    order, capped at ``cap``. Order within a rank is first appearance, so the
+    result is deterministic and needs no model.
+    """
+    counts: dict[str, int] = {}
+    order: list[str] = []
+    for tags in tag_lists:
+        for tag in dict.fromkeys(t for t in (tags or []) if t):
+            if tag not in counts:
+                order.append(tag)
+            counts[tag] = counts.get(tag, 0) + 1
+    shared = [t for t in order if counts[t] > 1]
+    own = [t for t in order if counts[t] == 1]
+    return (shared + own)[:cap]
+
+
 _MERGE_SYSTEM_PROMPT = (
     "You maintain an AI agent's long-term memory. Two notes below say nearly "
     "the same thing. Rewrite them as ONE note that keeps every distinct fact, "
@@ -171,7 +199,7 @@ def consolidate_on_save(
             metadata["execution_ids"] = contributors
         changes: dict[str, Any] = {
             "content": merged,
-            "categories": sorted(set(existing.categories) | set(record.categories)),
+            "categories": merge_categories(record.categories, existing.categories),
             "metadata": metadata,
             "importance": max(existing.importance, record.importance),
             "last_accessed": datetime.now(timezone.utc),

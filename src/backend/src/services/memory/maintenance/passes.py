@@ -60,6 +60,7 @@ from src.services.memory.engine import (
     KIND_PROCEDURAL,
     KIND_SEMANTIC,
 )
+from src.services.memory.engine.consolidation import merge_categories
 from src.services.memory.maintenance.forgetting import forget_expired_memories
 from src.services.memory.maintenance.supersession import supersede_outdated_facts
 
@@ -248,7 +249,7 @@ def merge_similar_memories(memory: Any, scope: str | None = None) -> dict[str, i
         if len(members) < 2:
             continue
         try:
-            categories = sorted({c for r in members for c in (r.categories or [])})
+            categories = merge_categories(*(r.categories for r in members))
             memory.remember(
                 merged_text[:4000],
                 categories=categories or None,

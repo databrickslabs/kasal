@@ -4,8 +4,10 @@ the record it duplicates."""
 
 from src.services.memory.engine import Memory
 from src.services.memory.engine.consolidation import (
+    MERGED_CATEGORY_CAP,
     consolidate_on_save,
     find_duplicate,
+    merge_categories,
     similarity_of,
 )
 from src.services.memory.engine.types import MemoryRecord
@@ -229,3 +231,39 @@ class TestRememberIntegration:
         landed = memory.remember("The Federal Council kept the 2026 quotas unchanged.")
         assert landed is not None and landed.id != "existing-1"
         assert len(store.saved) == 1 and store.updates == []
+
+
+class TestMergedTagsStayBounded:
+    """Merges took the UNION of every folded record's tags: one record in a real
+    store carried 22, and recalled once it painted the whole concept graph."""
+
+    def test_shared_tags_lead_then_each_sources_own_in_order(self):
+        newer = ["lebanon-news", "displacement", "middle-east"]
+        older = ["middle-east", "lebanon-politics", "lebanon-news"]
+        assert merge_categories(newer, older) == [
+            "lebanon-news",
+            "middle-east",
+            "displacement",
+            "lebanon-politics",
+        ]
+
+    def test_the_cap_holds_and_blanks_and_none_are_ignored(self):
+        many = [f"tag-{i}" for i in range(12)]
+        assert merge_categories(many, None, [""]) == many[:MERGED_CATEGORY_CAP]
+        assert merge_categories(None, []) == []
+
+    def test_a_fold_keeps_at_most_the_cap(self):
+        existing_rec, stamp = _existing(semantic=0.9)
+        existing_rec.categories = [f"old-{i}" for i in range(10)]
+        store = _Store([(existing_rec, stamp)])
+        memory = Memory(
+            storage=store, llm=_FakeLLM('{"content": "merged"}'), analyze_on_save=False
+        )
+        new = MemoryRecord(
+            content=NEW, scope="/g", categories=["crime", "old-3"], importance=0.8
+        )
+        consolidate_on_save(memory, new, "/g")
+        tags = store.updates[0][1]["categories"]
+        assert len(tags) == MERGED_CATEGORY_CAP
+        assert tags[0] == "old-3"  # shared by both sides leads
+        assert tags[1] == "crime"  # then the newer record's own
