@@ -18,6 +18,8 @@ from typing import Any
 _PATTERNS = [
     r"Respond directly and helpfully to the user's request\.?\s*",
     r"USER REQUEST — this run exists to answer it:\s*",
+    r"ANSWER FROM THE CONVERSATION — the transcript above already holds what this turn needs:\s*",
+    r"Restate or reshape that answer as asked\. Use a tool only for something the transcript does not contain; do not research the question again\.?\s*",
     r"MCP data sources attached — query them for data questions\.?\s*",
     r"Expected output: A helpful, complete answer to the user's request\.?\s*",
     # The attached-tools hint (" : browser Expected output…") — only the chunk

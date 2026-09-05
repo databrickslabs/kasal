@@ -438,6 +438,14 @@ class CrewStreamingRequest(BaseModel):
         False,
         description="'No memory' mode — build agents without memory for the auto-executed run",
     )
+    answer_from_conversation: bool = Field(
+        False,
+        description=(
+            "Set by the dispatcher, not the client: this turn restates or reshapes "
+            "the answer already on screen. The run is grounded on the transcript "
+            "instead of sent to research the question again."
+        ),
+    )
     mcp_servers: Optional[List[str]] = Field(
         default_factory=list,
         description="MCP server names to equip the auto-executed crew with",

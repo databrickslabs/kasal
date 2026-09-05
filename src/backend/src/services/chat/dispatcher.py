@@ -1085,29 +1085,22 @@ Please analyze this message and provide your intent classification."""
 
         return result
 
-    async def _repeats_last_answer(
-        self, request: Any, group_context: Optional[GroupContext]
-    ) -> bool:
-        """Whether this turn is, word for word, the request the previous answer
-        in this session already answered. Best-effort: any failure reads as
-        "no", and the turn proceeds as it always has."""
-        session_id = getattr(request, "session_id", None)
-        if not session_id:
-            return False
-        try:
-            from src.services.chat.capability_router import is_repeat_of_last_answer
-            from src.services.chat.conversation_context import recent_turns
+    @staticmethod
+    def _answer_from_conversation(request: Any) -> None:
+        """Mark this turn as answered from what is already on screen.
 
-            turns = await recent_turns(
-                self.session,
-                session_id,
-                list(getattr(group_context, "group_ids", None) or []),
-                exclude_message=request.message,
-            )
-            return is_repeat_of_last_answer(request.message, turns)
-        except Exception as exc:  # noqa: BLE001 — a lookup must never fail the turn
-            logger.debug("[dispatcher] repeat check skipped: %s", exc)
-            return False
+        A light agent whatever the answer-mode pill says (that pill is greyed
+        out here, and a stored 'deep' would build a reasoning crew to restate a
+        table). Grounded on the transcript, not sent to research the question
+        again — the run's task says so. And memory recall stays inside this
+        session: the shared pool matches a short generic question badly and is
+        the one mechanism that could drag another subject into an answer about
+        what is on screen. Memory itself stays ON, so what is said in these
+        turns is still remembered.
+        """
+        request.chat_mode_type = "chat"
+        request.answer_from_conversation = True
+        request.memory_workspace_scope = False
 
     async def _route_to_capability(
         self,
@@ -1356,18 +1349,19 @@ Please analyze this message and provide your intent classification."""
             # (reshape, restate) instead of generating and running a crew
             # again. Chat answer runs only — a canvas asking twice for a crew
             # wants a crew. The router applies the same rule to its own picks.
+            from src.services.chat.capability_router import repeats_last_answer
+
             if (
                 request.auto_execute
                 and dispatcher_response.intent == IntentType.GENERATE_CREW
-                and await self._repeats_last_answer(request, group_context)
+                and await repeats_last_answer(self.session, request, group_context)
             ):
                 logger.info(
                     "[dispatcher] turn repeats the request the previous answer "
                     "covered; answering from the conversation instead of "
                     "generating a crew again"
                 )
-                request.chat_mode_type = "chat"
-                request.disable_memory = True
+                self._answer_from_conversation(request)
             routed_result = None
             if dispatcher_response.intent == IntentType.CATALOG_ROUTE:
                 routed_result = await self._route_to_capability(
@@ -1384,20 +1378,7 @@ Please analyze this message and provide your intent classification."""
                         "the turn instead of running a capability"
                     )
                     dispatcher_response.intent = IntentType.GENERATE_CREW
-                    # A light agent, whatever the answer-mode pill says. That
-                    # pill is greyed out in this mode and its stored value could
-                    # be 'deep' — building a full reasoning crew to answer
-                    # "what is this Aviation sector" would spend minutes on a
-                    # question the transcript already answers.
-                    request.chat_mode_type = "chat"
-                    # And no semantic recall for this turn. The answer is in the
-                    # transcript, which the light agent gets either way
-                    # (``build_conversation_preamble`` is unconditional). Semantic
-                    # memory would query a shared, topic-polluted pool with a
-                    # short generic question — the exact shape that matches badly
-                    # — and is the only mechanism that could drag a different
-                    # subject into an answer about what is already on screen.
-                    request.disable_memory = True
+                    self._answer_from_conversation(request)
                     routed_result = None
 
             # Dispatch to appropriate service based on intent
@@ -1442,6 +1423,7 @@ Please analyze this message and provide your intent classification."""
                         session_id=request.session_id,
                         memory_workspace_scope=request.memory_workspace_scope,
                         disable_memory=request.disable_memory,
+                        answer_from_conversation=request.answer_from_conversation,
                         mcp_servers=request.mcp_servers or [],
                         agentbricks_endpoints=request.agentbricks_endpoints or [],
                         # Files attached in this chat turn — scopes the knowledge

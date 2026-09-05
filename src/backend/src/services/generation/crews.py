@@ -43,6 +43,13 @@ if TYPE_CHECKING:  # imported for the annotation only, no runtime cost
 
 logger = logging.getLogger(__name__)
 
+#: The brief a restate/reshape turn gets instead of the research grounding.
+#: ``services.memory.text`` strips it from what memory keeps of the task.
+ANSWER_FROM_CONVERSATION_RULE = (
+    "Restate or reshape that answer as asked. Use a tool only for something the "
+    "transcript does not contain; do not research the question again."
+)
+
 
 class CrewGenerationService(
     CompleteGenerationMixin,
@@ -545,11 +552,23 @@ class CrewGenerationService(
             # crew has a concrete question and actually queries its tools.
             base_desc = str(task.get("description") or "")
             grounding: List[str] = []
-            if user_request:
+            # A turn the dispatcher judged a restatement of the answer on screen
+            # gets a different brief: the transcript is the source, tools are for
+            # gaps only. With "this run exists to answer it: gather …" plus
+            # "query the MCP sources", the agent researched a report it could
+            # already see in full.
+            answer_here = bool(getattr(request, "answer_from_conversation", False))
+            if user_request and answer_here:
+                grounding.append(
+                    "ANSWER FROM THE CONVERSATION — the transcript above already "
+                    f"holds what this turn needs:\n{user_request}"
+                )
+                grounding.append(ANSWER_FROM_CONVERSATION_RULE)
+            elif user_request:
                 grounding.append(
                     f"USER REQUEST — this run exists to answer it:\n{user_request}"
                 )
-            if mcp_servers:
+            if mcp_servers and not answer_here:
                 grounding.append(
                     f"MCP data sources attached — query them for data questions: {', '.join(mcp_servers)}"
                 )

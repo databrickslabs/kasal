@@ -89,6 +89,14 @@ class DispatcherRequest(BaseModel):
         False,
         description="When true, run the generated crew with memory fully disabled",
     )
+    answer_from_conversation: bool = Field(
+        False,
+        description=(
+            "Set by the dispatcher, not the client: this turn restates or reshapes "
+            "the answer already on screen. The run is grounded on the transcript "
+            "instead of sent to research the question again."
+        ),
+    )
     mcp_servers: Optional[List[str]] = Field(
         default_factory=list,
         description="MCP servers (e.g. Genie spaces) to attach to the generated crew's run",

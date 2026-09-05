@@ -193,6 +193,30 @@ def is_repeat_of_last_answer(
     )
 
 
+async def repeats_last_answer(session: Any, request: Any, group_context: Any) -> bool:
+    """Whether this turn is, word for word, the request the previous answer in
+    this session already answered — the dispatcher's guard before the build-new
+    path, sharing :func:`is_repeat_of_last_answer` with the router's own pick.
+    Best-effort: any failure reads as "no", and the turn proceeds as it always
+    has."""
+    session_id = getattr(request, "session_id", None)
+    if not session_id:
+        return False
+    try:
+        from src.services.chat.conversation_context import recent_turns
+
+        turns = await recent_turns(
+            session,
+            session_id,
+            list(getattr(group_context, "group_ids", None) or []),
+            exclude_message=request.message,
+        )
+        return is_repeat_of_last_answer(request.message, turns)
+    except Exception as exc:  # noqa: BLE001 — a lookup must never fail the turn
+        logger.debug("[capability_router] repeat check skipped: %s", exc)
+        return False
+
+
 def continue_decision(capability: PublishedCapability, message: str) -> "RouteDecision":
     """Route this turn to the capability already holding the conversation.
 

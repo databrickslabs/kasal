@@ -4832,8 +4832,12 @@ class TestRepeatedTurnAnswersFromTheConversation:
             patch("asyncio.create_task", return_value=MagicMock()),
         ):
             await svc.dispatch(request)
-        # The run that follows is the light agent's, with no semantic recall.
-        assert request.chat_mode_type == "chat" and request.disable_memory is True
+        # The run that follows is the light agent's: grounded on the transcript,
+        # memory kept but scoped to this session.
+        assert request.chat_mode_type == "chat"
+        assert request.answer_from_conversation is True
+        assert request.memory_workspace_scope is False
+        assert request.disable_memory is False
 
     @pytest.mark.asyncio
     async def test_a_new_request_and_a_canvas_repeat_are_left_alone(self):
