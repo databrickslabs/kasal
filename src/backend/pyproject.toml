@@ -78,7 +78,7 @@ dependencies = [
     # own transport instead (a BaseLLM subclass), so the extra is unnecessary
     # AND the conflict never arises — and Databricks auth, retry/fallback, the
     # context-window clamp and every LLM event stay identical across engines.
-    "crewai==1.15.16",
+    "crewai==1.15.20",
     # Observability
     "mlflow>=3.11,<4", # >=3.11 required for Unity Catalog trace storage (OTel tables)
     "dspy>=3.3,<4", # MemAlign judge alignment (mlflow.genai.judges.optimizers) is built on DSPy; mlflow does not pull it in

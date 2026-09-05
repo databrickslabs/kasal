@@ -525,7 +525,7 @@ toml = [
 
 [[package]]
 name = "crewai"
-version = "1.15.16"
+version = "1.15.20"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -560,14 +560,14 @@ dependencies = [
     { name = "tomli" },
     { name = "tomli-w" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a8/80/616fbc703f3e682dd7009c247d70b2e185a139f86e48c0b5a66be8f63adf/crewai-1.15.16.tar.gz", hash = "sha256:38f75f499a5e6a5dc78369a3f5384452b791bc4852a1ff38c342aca4e04e8264", size = 7885470 }
+sdist = { url = "https://files.pythonhosted.org/packages/c7/07/3a6d94fbb3bd465c653208a28d3e59d539d00cb5bef55626188a46ed7457/crewai-1.15.20.tar.gz", hash = "sha256:c4a4d02c27eca7502479ce8cf3fcdd1658fcc9948aa86962ad19e581530032b4", size = 7965515 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b2/55/29fc1a03ae190c0bc2f921dcf9226c0afa22483558a18bb8c6f0cbd1679d/crewai-1.15.16-py3-none-any.whl", hash = "sha256:a93ae2c78b42dacdb932c2e4bbba2efb108ac610c23cf5453d8d59000858665b", size = 1114637 },
+    { url = "https://files.pythonhosted.org/packages/b0/cd/fa00e87bf061e8bb02546cd00f58c4d85694b0fe027afae5eb1f578c610c/crewai-1.15.20-py3-none-any.whl", hash = "sha256:8bf272a687ad3320b681f23a183a6ac445f2fa7fc78b52943b835acc2eb158d6", size = 1141815 },
 ]
 
 [[package]]
 name = "crewai-cli"
-version = "1.15.16"
+version = "1.15.20"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "appdirs" },
@@ -587,14 +587,14 @@ dependencies = [
     { name = "tomli-w" },
     { name = "uv" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/89/e4/eb56bf3c36485b6f6c51489d747d4f92750d3cadc19ecdb03c23dd026a74/crewai_cli-1.15.16.tar.gz", hash = "sha256:6d8f0c03bb05e88114b1a60e93aced09db2cc0a83f6811ec83f2e902fda14426", size = 227940 }
+sdist = { url = "https://files.pythonhosted.org/packages/2e/30/8521f26795a71179b684c5b2d8135e78f8b4fcabe79acae93e0b3d9a42e2/crewai_cli-1.15.20.tar.gz", hash = "sha256:21f1735ee7e6818f658f46d59844d6f04700af5398c632a3e0fd42c8e6180c93", size = 233643 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f7/b2/bbc5da7b20e15a5e67b92aed90a729a8e3175918adc626a763735d893d6a/crewai_cli-1.15.16-py3-none-any.whl", hash = "sha256:b98848f2cffe03fcefe69eeeb64e8dca8ec0fcc7f00437c419ad1972dd4a8c2c", size = 195493 },
+    { url = "https://files.pythonhosted.org/packages/b7/eb/a04ae71e6226c10ae921911a8b8216cef6ae5d1db98c5b36f941058728c3/crewai_cli-1.15.20-py3-none-any.whl", hash = "sha256:2d692143cb4a46ef97f927fc1a2f6035790d2ee2fe4d1bb50fad9f884576ce6a", size = 198183 },
 ]
 
 [[package]]
 name = "crewai-core"
-version = "1.15.16"
+version = "1.15.20"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "appdirs" },
@@ -610,9 +610,9 @@ dependencies = [
     { name = "rich" },
     { name = "tomli" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/52/86/4d8273b80f41d7c7637ae0ada4d8ba78b540acf94735bdd0bf624ccb776d/crewai_core-1.15.16.tar.gz", hash = "sha256:c8d5548e223f32262243e91ee83b6976002616a26fc10951b3d5f1c05f10697f", size = 35445 }
+sdist = { url = "https://files.pythonhosted.org/packages/c8/7f/75b9f75f90f6639edb68e1591bc6fd54ef1381cbdd4f10f41f62ef12b985/crewai_core-1.15.20.tar.gz", hash = "sha256:5a3ad81107172f24b6ee14a24aff87f93e3b56da7220a0e5584992d9b9476939", size = 39207 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0e/88/e954a1928421fd923b92c33cf22951d5e0dd2dc0c3fb129dd48dfeaa6b57/crewai_core-1.15.16-py3-none-any.whl", hash = "sha256:7a74e6ddbecd9df042dd459fd5e19a308b576958469bfa134ceb12dc6814106b", size = 40428 },
+    { url = "https://files.pythonhosted.org/packages/b8/6a/f5e1f1114a6900275e240feffae6580ddccc6f5e4716372b3ec97511e3ab/crewai_core-1.15.20-py3-none-any.whl", hash = "sha256:09a96fbd08e2f849e4a521ecfdab88b62fcb3b94292f4e7039c0bc3b9de67d40", size = 42481 },
 ]
 
 [[package]]
@@ -1733,7 +1733,7 @@ requires-dist = [
     { name = "asyncpg", specifier = ">=0.29.0" },
     { name = "azure-identity", specifier = ">=1.15.0" },
     { name = "bcrypt", specifier = "==4.0.1" },
-    { name = "crewai", specifier = "==1.15.16" },
+    { name = "crewai", specifier = "==1.15.20" },
     { name = "croniter" },
     { name = "cryptography" },
     { name = "databricks" },
