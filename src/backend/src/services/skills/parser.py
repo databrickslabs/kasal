@@ -102,10 +102,43 @@ def parse(skill_md: str, name_hint: Optional[str] = None) -> ParsedSkill:
     check would validate a name against itself.
     """
     with tempfile.TemporaryDirectory() as tmp:
-        root = pathlib.Path(tmp) / (name_hint or _peek_name(skill_md) or "skill")
+        base = pathlib.Path(tmp)
+        root = base / _directory_name(name_hint or _peek_name(skill_md))
+        # Belt and braces: the name check above is the rule; this is the proof.
+        if root.resolve().parent != base.resolve():
+            raise SkillValidationError(["Skill name must stay inside its directory"])
         root.mkdir(parents=True, exist_ok=True)
         (root / "SKILL.md").write_text(skill_md, encoding="utf-8")
         return _parse_dir(root)
+
+
+def _directory_name(candidate: Optional[str]) -> str:
+    """The temp directory's name — ONE path segment, nothing else.
+
+    It comes from the request (the row's name, an archive prefix, a catalog
+    id) and it used to be joined onto the temp root as-is: an absolute name
+    replaced the root, a ``..`` walked out of it, and ``SKILL.md`` was written
+    wherever that landed, before any validation ran (audit F05). Spec
+    conformance of the name stays the reference validator's job; this is only
+    the filesystem boundary.
+    """
+    name = (candidate or "skill").strip()
+    posix, windows = pathlib.PurePosixPath(name), pathlib.PureWindowsPath(name)
+    if (
+        not name
+        or name in (".", "..")
+        or "/" in name
+        or "\\" in name
+        or "\x00" in name
+        or posix.is_absolute()
+        or windows.is_absolute()
+        or windows.drive
+        or posix.name != name
+    ):
+        raise SkillValidationError(
+            [f"Skill name must be a single directory name, got {candidate!r}"]
+        )
+    return name
 
 
 def validate_row(
