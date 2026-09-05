@@ -117,7 +117,7 @@ class TestSafeFetchErrorMessages:
         """_safe_fetch resolves the host and refuses private/reserved addresses
         before fetching. Stub resolution with an arbitrary public address so the
         test exercises the error path, not the SSRF guard. Nothing is contacted —
-        urlopen is stubbed in each test."""
+        the fetch's opener seam is stubbed in each test."""
         from src.services.tools import web_fetch as bundled
 
         monkeypatch.setattr(
@@ -134,7 +134,7 @@ class TestSafeFetchErrorMessages:
                 "https://news.example.com/article", 404, "Not Found", {}, None
             )
 
-        monkeypatch.setattr(bundled.urllib.request, "urlopen", fake_urlopen)
+        monkeypatch.setattr(bundled, "_open", fake_urlopen)
 
         with pytest.raises(RuntimeError) as exc:
             bundled._safe_fetch("https://news.example.com/article", {})
@@ -148,7 +148,7 @@ class TestSafeFetchErrorMessages:
         def fake_urlopen(request, timeout=None):
             raise urllib.error.URLError("connection refused")
 
-        monkeypatch.setattr(bundled.urllib.request, "urlopen", fake_urlopen)
+        monkeypatch.setattr(bundled, "_open", fake_urlopen)
 
         with pytest.raises(RuntimeError) as exc:
             bundled._safe_fetch("https://news.example.com/article", {})

@@ -107,6 +107,11 @@ class _SafeRedirects(urllib.request.HTTPRedirectHandler):
         return new
 
 
+def _open(request: urllib.request.Request, timeout: int):
+    """Open through the redirect-checking opener. The one seam tests stub."""
+    return urllib.request.build_opener(_SafeRedirects()).open(request, timeout=timeout)
+
+
 def _safe_fetch(
     url: str,
     headers: dict[str, str],
@@ -123,9 +128,8 @@ def _safe_fetch(
     """
     _assert_public_target(url)
     request = urllib.request.Request(url, headers=headers)
-    opener = urllib.request.build_opener(_SafeRedirects())
     try:
-        with opener.open(request, timeout=timeout) as response:
+        with _open(request, timeout) as response:
             charset = response.headers.get_content_charset() or "utf-8"
             # read(n) caps the transfer itself. One extra byte is requested so the
             # caller can tell "exactly at the limit" from "truncated".
