@@ -75,3 +75,20 @@ class TestStatsRequireASystemAdmin:
     def test_a_system_admin_is_not(self, client):
         with self._as(True):
             assert client.get("/sse/stats").status_code == 200
+
+
+class TestTheStreamAllLogLine:
+    def test_tokens_and_cookies_never_reach_the_log(self):
+        from src.api.sse_router import _loggable_headers
+
+        out = _loggable_headers(
+            {
+                "Authorization": "Bearer secret",
+                "Cookie": "session=abc",
+                "X-Forwarded-Access-Token": "dapi-secret",
+                "User-Agent": "Mozilla",
+                "Last-Event-ID": "42",
+            }
+        )
+        assert out == {"User-Agent": "Mozilla", "Last-Event-ID": "42"}
+        assert "secret" not in str(out)

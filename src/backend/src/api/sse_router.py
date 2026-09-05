@@ -62,6 +62,27 @@ def _parse_last_event_id(request: Request) -> Optional[int]:
     return None
 
 
+#: Request headers worth a log line. Never the whole set: behind the Databricks
+#: proxy it carries the user's forwarded access token, and elsewhere
+#: Authorization and cookies (audit F08).
+_LOGGABLE_HEADERS = frozenset(
+    {
+        "user-agent",
+        "accept",
+        "cache-control",
+        "last-event-id",
+        "x-forwarded-for",
+        "x-forwarded-host",
+        "x-forwarded-proto",
+    }
+)
+
+
+def _loggable_headers(headers) -> dict:
+    """The allowlisted subset of a request's headers, for diagnostics."""
+    return {k: v for k, v in headers.items() if k.lower() in _LOGGABLE_HEADERS}
+
+
 def _require_owned(stream_id: str, group_context) -> None:
     """A generation (or a job id handed to the generation routes) belongs to
     a workspace; only that workspace's callers may read it. Unknown ids read
@@ -151,7 +172,7 @@ async def stream_all_executions(
         f"[SSE_STREAM] stream-all endpoint hit | groups={group_ids} | "
         f"stream_id={stream_id} | timeout={timeout}s | heartbeat={heartbeat}s | "
         f"last_event_id={last_event_id} | "
-        f"headers={dict(request.headers)}"
+        f"headers={_loggable_headers(request.headers)}"
     )
 
     return StreamingResponse(
