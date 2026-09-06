@@ -320,6 +320,11 @@ async def set_default_memory_config(
     Returns:
         Success status
     """
+    # Same boundary as the single delete and the disabled switch (R2-05).
+    if not is_workspace_admin(group_context):
+        raise ForbiddenError(
+            "Only workspace admins can set the default memory configuration"
+        )
     # Service is injected via dependency
     success = await service.set_default_backend(
         group_context.primary_group_id, backend_id
@@ -347,6 +352,9 @@ async def delete_all_databricks_configs(
     Returns:
         Success status with count of deleted configurations
     """
+    # Same boundary as the single delete and the disabled switch (R2-05).
+    if not is_workspace_admin(group_context):
+        raise ForbiddenError("Only workspace admins can delete memory configurations")
     # Get all memory backends for the group
     backends = await service.get_memory_backends(group_context.primary_group_id)
 
@@ -422,6 +430,9 @@ async def cleanup_disabled_configs(
     Returns:
         Success status with count of deleted configurations
     """
+    # Same boundary as the single delete and the disabled switch (R2-05).
+    if not is_workspace_admin(group_context):
+        raise ForbiddenError("Only workspace admins can clean up memory configurations")
     # Delete all disabled configurations
     deleted_count = await service.delete_disabled_configurations(
         group_context.primary_group_id

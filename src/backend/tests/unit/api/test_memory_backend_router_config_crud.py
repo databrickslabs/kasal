@@ -387,3 +387,26 @@ async def test_save_lakebase_config_success():
         request=MagicMock(), service=svc, group_context=ctx
     )
     assert result is not None
+
+
+# ─── R2-05: every configuration mutation is a workspace-admin action ──────────
+@pytest.mark.asyncio
+async def test_set_default_bulk_delete_and_cleanup_refuse_an_operator():
+    from src.core.exceptions import ForbiddenError
+
+    svc = AsyncMock()
+    operator = AdminCtx(is_admin=False)
+    with pytest.raises(ForbiddenError):
+        await configs_router.set_default_memory_config(
+            backend_id="1", service=svc, group_context=operator
+        )
+    with pytest.raises(ForbiddenError):
+        await configs_router.delete_all_databricks_configs(
+            service=svc, group_context=operator
+        )
+    with pytest.raises(ForbiddenError):
+        await configs_router.cleanup_disabled_configs(
+            service=svc, group_context=operator
+        )
+    svc.set_default_backend.assert_not_awaited()
+    svc.delete_memory_backend.assert_not_awaited()
