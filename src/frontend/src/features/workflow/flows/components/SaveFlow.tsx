@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField } from '@mui/material';
 import { FlowService } from '../../../../api/workflow/FlowService';
 import axios from 'axios';
+import type { CanvasSaveCallbacks } from '../../assistant/utils/saveCanvasToCatalog';
 import { Edge, Node } from 'reactflow';
 import { useTabManagerStore } from '../../../../store/tabManager';
 import { buildFlowConfiguration } from '../../../../utils/flowConfigBuilder';
@@ -22,6 +23,7 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [autoSave, setAutoSave] = useState(false);
+  const pendingSave = useRef<CanvasSaveCallbacks | null>(null);
 
   const { activeTabId, updateTabFlowInfo } = useTabManagerStore();
 
@@ -31,6 +33,7 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
       if (disabled) return;
       const detail = (event as CustomEvent).detail;
       if (detail?.suggestedName) {
+        pendingSave.current = detail;
         setName(detail.suggestedName);
         setAutoSave(true);
       } else {
@@ -122,6 +125,7 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
         });
 
         console.log('SaveFlow: Update successful', updatedFlow);
+        customEvent.detail.onSaved?.({ name: updatedFlow.name });
 
         // Update the tab's flow info and mark as clean
         const { updateTabFlowInfo, markTabClean } = useTabManagerStore.getState();
@@ -138,6 +142,7 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
 
       } catch (error) {
         console.error('SaveFlow: Update failed', error);
+        customEvent.detail.onError?.(error);
         // Could show an error notification here
       } finally {
         setIsSaving(false);
@@ -267,6 +272,8 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
 
       if (!crew_id) {
         setError('Please save the crew first before saving the flow');
+        pendingSave.current?.onError?.(new Error('Please save the crew first before saving the flow'));
+        pendingSave.current = null;
         setIsSaving(false);
         return;
       }
@@ -294,6 +301,8 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
       });
 
       console.log('SaveFlow: Save successful, closing dialog', savedFlow);
+      pendingSave.current?.onSaved?.({ name: savedFlow.name || name });
+      pendingSave.current = null;
 
       // Update the tab's flow info
       if (activeTabId && savedFlow.id) {
@@ -313,6 +322,8 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
       }, 100);
     } catch (error) {
       console.error('SaveFlow: Save failed', error);
+      pendingSave.current?.onError?.(error);
+      pendingSave.current = null;
       if (axios.isAxiosError(error) && error.response?.data) {
         const errorData = error.response.data;
         let errorMessage = 'Failed to save flow';

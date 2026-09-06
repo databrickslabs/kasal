@@ -1,5 +1,6 @@
+import { kasalStageSurface } from '../../../../../theme/kasalSurfaces';
 import { getDefaultModel } from '../../../../../config/defaultModel';
-import React, { useState, useEffect, useRef, ChangeEvent, KeyboardEvent } from 'react';
+import React, { useState, useEffect, useRef, useId, ChangeEvent, KeyboardEvent } from 'react';
 import { 
   Dialog, 
   DialogTitle, 
@@ -19,7 +20,10 @@ import {
   InputAdornment,
   Tabs,
   Tab,
-  Divider
+  Divider,
+  MenuItem,
+  useTheme,
+  useMediaQuery
 } from '@mui/material';
 import { CrewService, CrewFeedbackService, CrewFeedbackEntry } from '../../../../../api/workflow/CrewService';
 import { FlowService } from '../../../../../api/workflow/FlowService';
@@ -109,6 +113,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
   hideFlowsTab = false,
 }): JSX.Element => {
   const [tabValue, setTabValue] = useState(initialTab);
+  const catalogTitleId = useId();
   // Crew whose prompts are being optimized (opens CrewOptimizeDialog).
   const [optimizeCrew, setOptimizeCrew] = useState<CrewResponse | null>(null);
   // Optimization writes prompt versions to an MLflow registry, so the action is
@@ -141,6 +146,14 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const theme = useTheme();
+  const compactCatalog = useMediaQuery(theme.breakpoints.down('sm'));
+  const [catalogSort, setCatalogSort] = useState('recent');
+  const sortCatalog = (a: { name: string; created_at: string }, b: { name: string; created_at: string }) => catalogSort === 'name'
+    ? a.name.localeCompare(b.name)
+    : new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  const catalogCardSx = { height: '100%', cursor: 'pointer', backgroundColor: 'action.hover', backgroundImage: 'none', border: 0, borderRadius: 3, boxShadow: 'none', transition: 'background-color 150ms ease', '&:hover': { bgcolor: 'action.selected' }, '&:focus-visible': { outline: '2px solid', outlineColor: 'text.secondary', outlineOffset: 2 }, '& .MuiCardContent-root': { p: 2.5 }, '& h2': { fontSize: 15, fontWeight: 600, minHeight: 40 }, '& .MuiIconButton-root': { color: 'text.secondary' } };
+
   
   // Clear search query when dialog opens or closes
   useEffect(() => {
@@ -1349,30 +1362,33 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
       <Dialog
         open={open}
         onClose={onClose}
-        maxWidth="md"
+        maxWidth="lg"
         fullWidth
+        fullScreen={compactCatalog}
+        aria-labelledby={catalogTitleId}
         TransitionProps={{
           onEntered: handleDialogEntered,
         }}
         PaperProps={{
+          sx: { ...kasalStageSurface(theme.palette.mode === 'dark'), height: compactCatalog ? '100%' : '86vh', maxHeight: compactCatalog ? '100%' : '900px', borderRadius: compactCatalog ? 0 : 4, border: 0 },
           component: "div", // This allows the dialog to receive focus
           role: "dialog",
           tabIndex: -1, // This allows the dialog to be part of the tab sequence
         }}
       >
-        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Box>
-            {showOnlyTab === 0 ? 'Load Existing Crews' :
-             showOnlyTab === 1 ? 'Load Existing Agents' :
-             showOnlyTab === 2 ? 'Load Existing Tasks' :
-             showOnlyTab === 3 ? 'Load Existing Flows' :
-             'Open Catalog'}
+        <DialogTitle id={`${catalogTitleId}-header`} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', px: 3, pt: 3, pb: 2 }}>
+          <Box id={catalogTitleId}>
+            {showOnlyTab === 0 ? 'Crew catalog' :
+             showOnlyTab === 1 ? 'Agent catalog' :
+             showOnlyTab === 2 ? 'Task catalog' :
+             showOnlyTab === 3 ? 'Flow catalog' :
+             'Catalog'}
           </Box>
-          <IconButton onClick={onClose}>
+          <IconButton aria-label="Close catalog" onClick={onClose}>
             <CloseIcon />
           </IconButton>
         </DialogTitle>
-        <DialogContent onKeyDown={handleDialogKeyDown} data-tour="catalog-dialog">
+        <DialogContent onKeyDown={handleDialogKeyDown} data-tour="catalog-dialog" sx={{ px: 3, pb: 3, '& .MuiButton-outlined': { border: 0, color: 'text.secondary', bgcolor: 'action.hover', borderRadius: 2 }, '& .MuiTabs-indicator': { display: 'none' }, '& .MuiTab-root': { minHeight: 40, borderRadius: 2, mx: 0.25, color: 'text.secondary' }, '& .MuiTab-root.Mui-selected': { color: 'text.primary', bgcolor: 'action.selected' } }}>
           {error && (
             <Alert severity="error" sx={{ mb: 2 }}>
               {error}
@@ -1387,7 +1403,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
           <Box sx={{ width: '100%' }}>
             {showOnlyTab === undefined ? (
               // Show all tabs when opened from catalog
-              <Box sx={{ borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
+              <Box sx={{ borderBottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
                 <Tabs value={tabValue} onChange={handleTabChange} aria-label="catalog tabs">
                   <Tab icon={<PersonIcon />} iconPosition="start" label="Crews" id="crew-tab-0" aria-controls="tabpanel-0" sx={{ textTransform: 'none' }} />
                   <Tab icon={<GroupIcon />} iconPosition="start" label="Agents" id="agent-tab-1" aria-controls="tabpanel-1" sx={{ textTransform: 'none' }} />
@@ -1407,7 +1423,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
               </Box>
             ) : showOnlyTab === 3 ? (
               // Show import/export buttons when showing only Flows tab
-              <Box sx={{ borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 1, py: 1 }}>
+              <Box sx={{ borderBottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 1, py: 1 }}>
                 <Button startIcon={<FileUploadIcon />} variant="outlined" size="small" onClick={handleImportFlowClick}>
                   Import Flow
                 </Button>
@@ -1418,10 +1434,12 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
             ) : null}
 
             {/* Search and action buttons */}
-            <Box sx={{ py: 1, display: 'flex', justifyContent: 'space-between' }}>
+            <Box sx={{ py: 2, display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
               <Box sx={{ flex: 1 }}>
                 <TextField
-                  placeholder="Search..."
+                  placeholder={`Search ${['crews', 'agents', 'tasks', 'flows'][tabValue]}…`}
+                  inputProps={{ 'aria-label': 'Search catalog' }}
+                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3, bgcolor: 'action.hover' }, '& fieldset': { border: 0 } }}
                   size="small"
                   fullWidth
                   value={searchQuery}
@@ -1457,6 +1475,9 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                   }}
                 />
               </Box>
+              {(tabValue === 0 || tabValue === 3) && <TextField select size="small" value={catalogSort} onChange={event => setCatalogSort(event.target.value)} SelectProps={{ inputProps: { 'aria-label': 'Sort catalog' } }} sx={{ minWidth: 135, '& fieldset': { border: 0 }, '& .MuiInputBase-root': { borderRadius: 3, bgcolor: 'action.hover' } }}>
+                <MenuItem value="recent">Newest first</MenuItem><MenuItem value="name">Name A–Z</MenuItem>
+              </TextField>}
               {showOnlyTab === undefined && (
                 <Box sx={{ ml: 2, display: 'flex', gap: 1 }}>
                   {tabValue === 3 ? (
@@ -1487,9 +1508,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
             {(showOnlyTab === undefined || showOnlyTab === 0) && (
               <TabPanel value={tabValue} index={0}>
                 {showOnlyTab === undefined && (
-                  <Alert severity="info" sx={{ mb: 2 }}>
-                    Loading a crew will open it in a new tab
-                  </Alert>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Choose a crew to open it on a new canvas.</Typography>
                 )}
               {loading ? (
                 <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
@@ -1501,7 +1520,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                 </Alert>
               ) : (
                 <Grid container spacing={2}>
-                  {crews
+                  {[...crews].sort(sortCatalog)
                     .filter(crew => {
                       // Filter out flows if CrewAI flow is disabled
                       if (!kasalFlowEnabled && isCrewActuallyFlow(crew)) {
@@ -1517,24 +1536,8 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                     })
                     .map((crew, index) => (
                       <Grid item xs={12} sm={6} md={4} key={crew.id}>
-                        <Card 
-                          sx={{ 
-                            height: '100%',
-                            cursor: 'pointer',
-                            '&:hover': {
-                              boxShadow: 3,
-                              bgcolor: 'action.hover'
-                            },
-                            '&:focus': {
-                              outline: '2px solid',
-                              outlineColor: 'primary.main',
-                              boxShadow: 6,
-                              bgcolor: 'action.hover'
-                            },
-                            opacity: 1,
-                            filter: 'none',
-                            transition: 'all 0.2s'
-                          }}
+                        <Card elevation={0}
+                          sx={catalogCardSx}
                           onClick={() => handleCrewSelect(crew.id)}
                           onKeyDown={(e) => handleKeyDown(e, crew.id, 'crew', index)}
                           tabIndex={0}
@@ -1561,7 +1564,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                               {crew.name}
                             </Typography>
                             <Typography variant="caption" color="text.secondary" display="block">
-                              Created: {new Date(crew.created_at).toLocaleString()}
+                              {new Date(crew.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                             </Typography>
                             {(() => {
                               const fb = feedbackSummary[crew.id];
@@ -1673,7 +1676,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                                 gap: 0.25,
                                 mt: 1.5,
                                 pt: 1,
-                                borderTop: 1,
+                                borderTop: 0,
                                 borderColor: 'divider',
                               }}
                             >
@@ -1903,31 +1906,15 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                 </Alert>
               ) : (
                 <Grid container spacing={2}>
-                  {flows
+                  {[...flows].sort(sortCatalog)
                     .filter(flow => 
                       searchQuery === '' ||
                       flow.name.toLowerCase().includes(searchQuery.toLowerCase())
                     )
                     .map((flow, index) => (
                       <Grid item xs={12} sm={6} md={4} key={flow.id}>
-                        <Card 
-                          sx={{ 
-                            height: '100%',
-                            cursor: 'pointer',
-                            '&:hover': {
-                              boxShadow: 3,
-                              bgcolor: 'action.hover'
-                            },
-                            '&:focus': {
-                              outline: '2px solid',
-                              outlineColor: 'primary.main',
-                              boxShadow: 6,
-                              bgcolor: 'action.hover'
-                            },
-                            opacity: 1,
-                            filter: 'none',
-                            transition: 'all 0.2s'
-                          }}
+                        <Card elevation={0}
+                          sx={catalogCardSx}
                           onClick={() => handleFlowSelect(flow.id.toString())}
                           onKeyDown={(e) => handleKeyDown(e, flow.id, 'flow', index)}
                           tabIndex={0}
@@ -1962,61 +1949,11 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                               </Typography>
                             </Box>
                             
-                            {/* Crew list section */}
-                            <Typography variant="subtitle2" color="text.primary" sx={{ mt: 1 }}>
-                              Crews:
+                            <Typography variant="body2" color="text.secondary" sx={{ mt: 1, minHeight: 42, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                              {(flow.nodes || []).filter(node => node.type === 'crewNode' || node.data?.crewName).map(node => node.data?.crewName || node.data?.label || 'Crew').join(' → ') || 'No crews yet'}
                             </Typography>
-                            <Box
-                              sx={{
-                                mt: 1,
-                                maxHeight: '80px',
-                                overflowY: 'auto',
-                                border: '1px solid',
-                                borderColor: 'divider',
-                                borderRadius: 1,
-                                p: 1,
-                                bgcolor: 'background.default',
-                                '&::-webkit-scrollbar': {
-                                  width: '8px',
-                                },
-                                '&::-webkit-scrollbar-track': {
-                                  backgroundColor: 'background.paper',
-                                },
-                                '&::-webkit-scrollbar-thumb': {
-                                  backgroundColor: 'primary.light',
-                                  borderRadius: '4px',
-                                }
-                              }}
-                            >
-                              {flow.nodes && Array.isArray(flow.nodes) && flow.nodes
-                                .filter(node => node.type === 'crewNode' || node.data?.crewName)
-                                .map((node, index) => {
-                                  const crewName = node.data?.crewName || node.data?.label || `Crew ${index + 1}`;
-                                  return (
-                                    <Typography 
-                                      key={node.id} 
-                                      variant="body2" 
-                                      sx={{ 
-                                        py: 0.5,
-                                        borderBottom: index < flow.nodes.filter(n => n.type === 'crewNode' || n.data?.crewName).length - 1 ? 
-                                          '1px solid' : 'none',
-                                        borderColor: 'divider'
-                                      }}
-                                    >
-                                      • {crewName}
-                                    </Typography>
-                                  );
-                                })}
-                              {(!flow.nodes || !Array.isArray(flow.nodes) || 
-                                !flow.nodes.some(node => node.type === 'crewNode' || node.data?.crewName)) && (
-                                <Typography variant="body2" color="text.secondary">
-                                  No crews found
-                                </Typography>
-                              )}
-                            </Box>
-                            
                             <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
-                              Created: {new Date(flow.created_at).toLocaleString()}
+                              {new Date(flow.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                             </Typography>
                             <Typography variant="caption" color="text.secondary" display="block">
                               Components: {flow.nodes?.length || 0} / 
@@ -2032,7 +1969,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                                 gap: 0.25,
                                 mt: 1.5,
                                 pt: 1,
-                                borderTop: 1,
+                                borderTop: 0,
                                 borderColor: 'divider',
                               }}
                             >

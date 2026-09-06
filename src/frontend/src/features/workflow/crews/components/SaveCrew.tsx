@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField } from '@mui/material';
 import { CrewService } from '../../../../api/workflow/CrewService';
 import axios from 'axios';
+import type { CanvasSaveCallbacks } from '../../assistant/utils/saveCanvasToCatalog';
 import { SaveCrewProps } from '../types/dialogs';
 import { Edge } from 'reactflow';
 import { useTabManagerStore } from '../../../../store/tabManager';
@@ -25,6 +26,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [autoSave, setAutoSave] = useState(false);
+  const pendingSave = useRef<CanvasSaveCallbacks | null>(null);
 
   const { activeTabId, updateTabCrewInfo } = useTabManagerStore();
 
@@ -43,6 +45,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
       if (disabled) return;
       const detail = (event as CustomEvent).detail;
       if (detail?.suggestedName) {
+        pendingSave.current = detail;
         setName(detail.suggestedName);
         setAutoSave(true);
       } else {
@@ -145,6 +148,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         }
 
         console.log('SaveCrew: Update successful', updatedCrew);
+        customEvent.detail.onSaved?.({ name: updatedCrew.name });
         
         // Update the tab's crew info and mark as clean
         const { updateTabCrewInfo, markTabClean } = useTabManagerStore.getState();
@@ -162,6 +166,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         
       } catch (error) {
         console.error('SaveCrew: Update failed', error);
+        customEvent.detail.onError?.(error);
         // Could show an error notification here
       } finally {
         setIsSaving(false);
@@ -528,6 +533,8 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
       });
       
       console.log('SaveCrew: Save successful, closing dialog', savedCrew);
+      pendingSave.current?.onSaved?.({ name: savedCrew.name || name });
+      pendingSave.current = null;
       refreshChatCatalog();
 
       // Update the tab's crew info
@@ -567,6 +574,8 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
       }, 100);
     } catch (error) {
       console.error('SaveCrew: Save failed', error);
+      pendingSave.current?.onError?.(error);
+      pendingSave.current = null;
       if (axios.isAxiosError(error) && error.response?.data) {
         const errorData = error.response.data;
         let errorMessage = 'Failed to save crew';

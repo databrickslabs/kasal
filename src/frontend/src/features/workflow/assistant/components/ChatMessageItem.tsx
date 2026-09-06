@@ -24,6 +24,7 @@ import { MessageContent } from './MessageRenderer';
 import { stripAnsiEscapes, isMarkdown, isHtmlDocument } from '../utils/textProcessing';
 import { GenieSpaceConfigPrompt } from '../GenieSpaceConfigPrompt';
 import BuilderRunActions from './BuilderRunActions';
+import BuilderCatalogAction from './BuilderCatalogAction';
 import { UiSurfaceResult } from './UiSurfaceResult';
 import { toSurface } from '../../../chat/utils/surfaceAdapter';
 import type { ToolConfigNeededData } from '../../../../hooks/global/useCrewGenerationSSE';
@@ -543,6 +544,12 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
               >
                 {renderMessageContent()}
               </Box>
+              {message.type === 'assistant' && !message.isIntermediate && (
+                message.metadata?.catalogKind || ((message.intent === 'generate_crew' || message.intent === 'generate_flow') && Boolean(message.result)) ||
+                message.content.includes('✓ Crew generated successfully') || message.content.includes('Your flow is on the canvas.')
+              ) && <BuilderCatalogAction
+                flow={message.metadata?.catalogKind === 'flow' || message.intent === 'generate_flow' || message.content.includes('Your flow is on the canvas.')}
+                suggestedName={typeof message.metadata?.catalogName === 'string' ? message.metadata.catalogName : undefined} />}
               {message.type === 'result' && message.jobId && !message.isIntermediate && (
                 <BuilderRunActions key={message.jobId} jobId={message.jobId} />
               )}
