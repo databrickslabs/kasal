@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Union
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.exceptions import KasalError
 from src.core.logger import LoggerManager
 from src.db.database_router import get_smart_db_session
 from src.repositories.agent_repository import AgentRepository
@@ -270,57 +271,26 @@ class FlowRunnerService:
             nodes = config.get("nodes", [])
             edges = config.get("edges", [])
 
-            # Check if we need to load flow data from database
-            if not nodes and flow_id is not None:
-                logger.info(
-                    f"No nodes provided in config, loading flow data from database for flow {flow_id}"
-                )
-                try:
-                    # Load flow data from database using repository
-                    flow = await self.flow_repo.get(flow_id)
-                    if not flow:
-                        logger.error(f"Flow with ID {flow_id} not found in database")
-                        raise HTTPException(
-                            status_code=status.HTTP_404_NOT_FOUND,
-                            detail=f"Flow with ID {flow_id} not found",
-                        )
+            # Authorize saved definitions even when an earlier layer supplied nodes.
+            # Canvas flows may carry a new UUID before their first save.
+            if flow_id is not None:
+                flow = await self.flow_repo.get(flow_id)
+                if flow is not None:
+                    from src.services.flow_builder.flow_service import FlowService
 
-                    # Check group access if group_context is provided in config
-                    group_context = config.get("group_context")
-                    if flow.group_id and group_context:
-                        # Extract group_ids from group_context
-                        group_ids = getattr(group_context, "group_ids", [])
-                        if group_ids and flow.group_id not in group_ids:
-                            logger.error(
-                                f"Access denied: Flow {flow_id} belongs to group {flow.group_id}, user has access to {group_ids}"
-                            )
-                            raise HTTPException(
-                                status_code=status.HTTP_403_FORBIDDEN,
-                                detail=f"Access denied to flow {flow_id}",
-                            )
-
-                    # Update the config with loaded data
-                    config["nodes"] = flow.nodes
-                    config["edges"] = flow.edges
-                    config["flow_config"] = flow.flow_config
-
-                    # Update local variables
-                    nodes = flow.nodes
-                    edges = flow.edges
-
-                    logger.info(
-                        f"Loaded flow data from database: {len(nodes)} nodes, {len(edges)} edges"
+                    FlowService.require_execution_access(
+                        flow, config.get("group_context")
                     )
-                except HTTPException:
-                    raise
-                except Exception as e:
-                    logger.error(
-                        f"Error loading flow data from database: {e}", exc_info=True
-                    )
+                elif not nodes:
                     raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail=f"Error loading flow data: {str(e)}",
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Flow not found",
                     )
+
+                if not nodes and flow is not None:
+                    config["nodes"] = nodes = flow.nodes
+                    config["edges"] = edges = flow.edges
+                    config["flow_config"] = flow.flow_config
 
             # Validate nodes if this is a dynamic flow (no flow_id) or we have nodes in config
             if flow_id is None and (not nodes or not isinstance(nodes, list)):
@@ -479,6 +449,8 @@ class FlowRunnerService:
                     "error": error_msg,
                     "message": f"Flow execution failed: {error_msg}",
                 }
+        except KasalError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.detail) from e
         except HTTPException:
             # Re-raise HTTPException as-is to preserve status codes (404, 400, etc.)
             raise
@@ -1056,9 +1028,8 @@ class FlowRunnerService:
                                 config["flow_config"] = frontend_flow_config
 
                                 # CRITICAL: Merge listeners from database if frontend doesn't have them
-                                if (
-                                    "listeners" in db_flow_config
-                                    and db_flow_config.get("listeners")
+                                if "listeners" in db_flow_config and db_flow_config.get(
+                                    "listeners"
                                 ):
                                     if "listeners" not in config[
                                         "flow_config"

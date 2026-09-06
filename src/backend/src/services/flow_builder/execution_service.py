@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.exceptions import ForbiddenError
 from src.core.logger import LoggerManager
 from src.models.execution_history import ExecutionHistory
 
@@ -46,6 +47,13 @@ class FlowExecutionService:
         from src.services.execution.service import ExecutionService
 
         self.execution_service = ExecutionService(session)
+
+    async def get_owned_existing_execution(self, job_id: str, group_id: Optional[str]):
+        """Allow precreated jobs to be reused only by their existing workspace."""
+        execution = await self.execution_service.get_run_by_job_id(job_id)
+        if execution and (not group_id or execution.group_id != group_id):
+            raise ForbiddenError(detail="Access denied to this execution")
+        return execution
 
     async def create_execution(
         self,
@@ -84,6 +92,9 @@ class FlowExecutionService:
                 logger.error(f"Invalid UUID format for flow_id: {flow_id}")
                 raise ValueError(f"Invalid UUID format: {str(e)}")
 
+        # Check the caller's scope before any inference or record mutation.
+        execution = await self.get_owned_existing_execution(job_id, group_id)
+
         # If group_id not provided, inherit from the parent flow
         if group_id is None and flow_id is not None:
             from src.repositories.flow_repository import FlowRepository
@@ -102,9 +113,6 @@ class FlowExecutionService:
             run_name = f"Flow Execution {flow_id_str} - {timestamp}"
             logger.info(f"Generated default run_name: {run_name}")
 
-        # Check if an execution record already exists (created by execution_service.py)
-        execution = await self.execution_service.get_run_by_job_id(job_id)
-
         if execution:
             # Update existing record with flow-specific fields
             logger.info(
@@ -116,8 +124,6 @@ class FlowExecutionService:
                 execution.run_name = run_name
             if config:
                 execution.inputs = config
-            if group_id:
-                execution.group_id = group_id
             await self.session.commit()
             await self.execution_service.reload_run(execution)
             logger.info(

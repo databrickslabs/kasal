@@ -14,6 +14,25 @@ from fastapi import HTTPException
 from src.services.flow_builder.kasal_flow_service import KasalFlowService
 
 
+@pytest.fixture(autouse=True)
+def new_execution_authorization():
+    """These handoff tests use new jobs and unsaved canvas flows.
+
+    Real ownership rejection is covered in test_review5_remediation.py.
+    """
+    with (
+        patch(
+            "src.services.flow_builder.execution_service.FlowExecutionService.get_owned_existing_execution",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "src.services.flow_builder.flow_service.FlowService.get_flow_for_execution",
+            new=AsyncMock(return_value=None),
+        ),
+    ):
+        yield
+
+
 class TestKasalFlowServiceInitialization:
     """Tests for KasalFlowService initialization."""
 

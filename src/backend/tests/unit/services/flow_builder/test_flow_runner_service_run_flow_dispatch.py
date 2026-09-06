@@ -70,8 +70,8 @@ class TestEmitErrorSpan:
         ):
             mock_tracer = MagicMock()
             mock_span = MagicMock()
-            mock_tracer.start_as_current_span.return_value.__enter__ = (
-                lambda s: mock_span
+            mock_tracer.start_as_current_span.return_value.__enter__ = lambda s: (
+                mock_span
             )
             mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(
                 return_value=False
@@ -167,6 +167,7 @@ class TestRunFlow:
             return_value=_make_execution(1)
         )
         svc.flow_execution_service.update_execution_status = AsyncMock()
+        svc.flow_repo.get = AsyncMock(return_value=None)
         return svc
 
     @pytest.mark.asyncio
@@ -770,7 +771,6 @@ class TestRunDynamicFlow:
                 new=_make_smart_session_patch(mock_session),
             ),
         ):
-
             flow_svc_instance = MagicMock()
             flow_svc_instance.update_execution_status = AsyncMock()
             MockFlowSvc.return_value = flow_svc_instance
@@ -836,7 +836,6 @@ class TestRunDynamicFlow:
             ),
             patch.object(svc, "_emit_error_span", new=AsyncMock()),
         ):
-
             flow_svc_instance = MagicMock()
             flow_svc_instance.update_execution_status = AsyncMock()
             MockFlowSvc.return_value = flow_svc_instance
@@ -887,7 +886,6 @@ class TestRunDynamicFlow:
                 new=_make_smart_session_patch(mock_session),
             ),
         ):
-
             pause_exc = FlowPausedForApprovalException(
                 approval_id="appr-1",
                 gate_node_id="gate-x",
@@ -957,7 +955,6 @@ class TestRunDynamicFlow:
             ),
             patch.object(svc, "_emit_error_span", new=AsyncMock()),
         ):
-
             bf_instance = MagicMock()
             bf_instance.kickoff = AsyncMock(side_effect=RuntimeError("crew exploded"))
             bf_instance.config = {}
@@ -1036,7 +1033,6 @@ class TestRunFlowExecutionResultConversion:
                 "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
             ),
         ):
-
             flow_svc_instance = MagicMock()
             flow_svc_instance.update_execution_status = AsyncMock()
             MockFlowSvc.return_value = flow_svc_instance
@@ -1090,7 +1086,6 @@ class TestRunFlowExecutionResultConversion:
             patch.object(svc, "_emit_error_span", new=AsyncMock()),
             patch("src.services.settings.models.ModelConfigService") as MockModelSvc,
         ):
-
             flow_svc_instance = MagicMock()
             flow_svc_instance.update_execution_status = AsyncMock()
             MockFlowSvc.return_value = flow_svc_instance

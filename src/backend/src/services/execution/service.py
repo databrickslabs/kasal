@@ -38,7 +38,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from sqlalchemy.orm import Session
 
-from src.core.exceptions import KasalError
+from src.core.exceptions import BadRequestError, KasalError
 from src.core.logger import LoggerManager
 from src.schemas.execution import (
     CrewConfig,
@@ -1608,42 +1608,17 @@ class ExecutionService:
                             f"[ExecutionService.create_execution] No flow_id provided, but nodes ({len(config.nodes)}) and edges ({edge_count}) present - allowing ad-hoc flow execution"
                         )
                     else:
-                        # No flow_id and no nodes/edges, try to find the most recent flow from database
-                        exec_logger.info(
-                            f"[ExecutionService.create_execution] No flow_id or nodes/edges provided for execution_id: {execution_id}, trying to find most recent flow from database"
+                        raise BadRequestError(
+                            "Either flow_id or nodes must be provided for flow execution"
                         )
-                        try:
-                            # Use async query for the most recent flow from the database
-                            from src.db.session import routed_scoped_session
-                            from src.services.flow_builder.flow_service import (
-                                FlowService,
-                            )
 
-                            async with routed_scoped_session() as db:
-                                # Flows are FlowService's domain.
-                                most_recent_flow = await FlowService(
-                                    db
-                                ).get_most_recent_flow()
+                if flow_id:
+                    from src.services.flow_builder.flow_service import FlowService
 
-                                if most_recent_flow:
-                                    flow_id = most_recent_flow.id
-                                    exec_logger.info(
-                                        f"[ExecutionService.create_execution] Found most recent flow with ID {flow_id} for execution_id: {execution_id}"
-                                    )
-                                else:
-                                    exec_logger.error(
-                                        f"[ExecutionService.create_execution] No flows found in database for execution_id: {execution_id}"
-                                    )
-                                    raise ValueError(
-                                        "No flow found in the database. Please create a flow first, or provide nodes and edges for ad-hoc execution."
-                                    )
-                        except Exception as e:
-                            exec_logger.error(
-                                f"[ExecutionService.create_execution] Error finding most recent flow: {str(e)}"
-                            )
-                            raise ValueError(
-                                f"Error finding most recent flow: {str(e)}"
-                            )
+                    # Resolve authorization before persisting inputs or queuing work.
+                    await FlowService(self.session).get_flow_for_execution(
+                        flow_id, group_context, allow_unsaved=bool(config.nodes)
+                    )
 
             # Create database entry
             inputs = {
@@ -1964,6 +1939,8 @@ class ExecutionService:
                 run_name=run_name,
             ).model_dump()  # Return as dict
 
+        except KasalError:
+            raise
         except Exception as e:
             logger.error(
                 f"[ExecutionService.create_execution] Error during initial creation for execution: {str(e)}",

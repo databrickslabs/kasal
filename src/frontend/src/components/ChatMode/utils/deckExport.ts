@@ -16,17 +16,15 @@
  * sandboxed preview — this render happens in the app origin. Heavy libs are
  * imported dynamically so they only load when a download is triggered.
  */
+import DOMPurify from 'dompurify';
 import { SLIDE_H, SLIDE_W } from './htmlDeck';
 
-// Strip anything executable before injecting agent HTML into the app document.
-function sanitizeForRender(html: string): string {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<\/?(?:iframe|object|embed|link|meta)\b[^>]*>/gi, '')
-    .replace(/\son\w+\s*=\s*"[^"]*"/gi, '')
-    .replace(/\son\w+\s*=\s*'[^']*'/gi, '')
-    .replace(/\son\w+\s*=\s*[^\s>]+/gi, '')
-    .replace(/javascript:/gi, '');
+// Keep slide layout and SVG diagrams while removing active HTML before export.
+export function sanitizeForRender(html: string): string {
+  return DOMPurify.sanitize(html, {
+    USE_PROFILES: { html: true, svg: true, svgFilters: true },
+    FORBID_TAGS: ['iframe', 'object', 'embed', 'link', 'meta', 'base', 'form', 'style'],
+  });
 }
 
 function mountSlide(sectionHtml: string): HTMLDivElement {

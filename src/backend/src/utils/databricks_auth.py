@@ -216,6 +216,7 @@ import logging
 import os
 import time
 from typing import Dict, Optional, Tuple
+from urllib.parse import urlparse
 
 import httpx
 from databricks.sdk import WorkspaceClient
@@ -615,6 +616,8 @@ class DatabricksAuth:
             Tuple[Optional[Dict[str, str]], Optional[str]]: Headers dict and error message if any
         """
         try:
+            if mcp_server_url and urlparse(mcp_server_url).scheme.lower() != "https":
+                return None, "Automatic Databricks authentication requires HTTPS"
             # Load config if needed
             if not await self._load_config():
                 return None, "Failed to load Databricks configuration"
@@ -1631,6 +1634,12 @@ async def get_mcp_auth_headers(
     """
     try:
         access_token = None
+        if urlparse(mcp_server_url).scheme.lower() != "https":
+            if not api_key:
+                return None, "Automatic Databricks authentication requires HTTPS"
+            # Explicit third-party keys may be used for local HTTP servers.
+            # Never try an automatic OBO/CLI credential on that connection.
+            user_token = None
 
         # First try: OBO authentication if user token is provided
         if user_token:

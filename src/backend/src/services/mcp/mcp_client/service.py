@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from src.core.exceptions import (
     BadRequestError,
@@ -684,6 +685,16 @@ class MCPService:
         """
         logger.info(f"Starting SSE connection test to: {test_data.server_url}")
 
+        if (
+            not test_data.api_key
+            and test_data.auth_type in ("databricks_obo", "databricks_spn")
+            and urlparse(test_data.server_url).scheme.lower() != "https"
+        ):
+            return MCPTestConnectionResponse(
+                success=False,
+                message="Automatic Databricks authentication requires HTTPS",
+            )
+
         headers = {}
         if test_data.api_key:
             headers["Authorization"] = f"Bearer {test_data.api_key}"
@@ -782,6 +793,16 @@ class MCPService:
         logger.info(
             f"Starting Streamable HTTP connection test to: {test_data.server_url}"
         )
+
+        if (
+            not test_data.api_key
+            and test_data.auth_type in ("databricks_obo", "databricks_spn")
+            and urlparse(test_data.server_url).scheme.lower() != "https"
+        ):
+            return MCPTestConnectionResponse(
+                success=False,
+                message="Automatic Databricks authentication requires HTTPS",
+            )
 
         headers = {}
         if test_data.api_key:

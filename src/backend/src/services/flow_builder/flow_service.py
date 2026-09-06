@@ -188,6 +188,32 @@ class FlowService:
 
         return flow
 
+    @staticmethod
+    def require_execution_access(flow: Flow, group_context) -> None:
+        """Saved definitions require a resolved owner and caller workspace."""
+        group_ids = getattr(group_context, "group_ids", None) or []
+        if not flow.group_id or flow.group_id not in group_ids:
+            raise ForbiddenError(detail="Access denied to this flow")
+
+    async def get_flow_for_execution(
+        self,
+        flow_id: Union[uuid.UUID, str],
+        group_context,
+        *,
+        allow_unsaved: bool = False,
+    ) -> Optional[Flow]:
+        try:
+            flow_id = uuid.UUID(str(flow_id))
+        except (ValueError, TypeError, AttributeError) as error:
+            raise BadRequestError(detail="Invalid flow ID") from error
+        flow = await FlowRepository(self.session).get(flow_id)
+        if flow is None:
+            if allow_unsaved:
+                return None
+            raise NotFoundError(detail="Flow not found")
+        self.require_execution_access(flow, group_context)
+        return flow
+
     async def get_all_flows_for_group(self, group_context) -> List[Flow]:
         """
         Get all flows for the user's groups.

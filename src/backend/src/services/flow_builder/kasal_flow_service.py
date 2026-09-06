@@ -105,6 +105,23 @@ class KasalFlowService:
                 )
         logger.info("=" * 100)
 
+        # Authorize before naming, engine setup or subprocess side effects.
+        # Repeat the job check at the eventual record update as well.
+        if self.session is not None:
+            from src.services.flow_builder.execution_service import FlowExecutionService
+            from src.services.flow_builder.flow_service import FlowService
+
+            if job_id:
+                await FlowExecutionService(self.session).get_owned_existing_execution(
+                    job_id, getattr(group_context, "primary_group_id", None)
+                )
+            if flow_id:
+                await FlowService(self.session).get_flow_for_execution(
+                    flow_id,
+                    group_context,
+                    allow_unsaved=bool(config and config.get("nodes")),
+                )
+
         # Generate run_name if not provided
         if not run_name and config:
             try:

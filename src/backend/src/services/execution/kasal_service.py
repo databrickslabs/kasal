@@ -832,9 +832,9 @@ class KasalExecutionService:
                     from src.services.flow_builder.flow_service import FlowService
 
                     async with routed_scoped_session() as db:
-                        # Flows are FlowService's domain. find_flow, not get_flow:
-                        # the latter RAISES and this path returns an error payload.
-                        flow = await FlowService(db).find_flow(flow_id)
+                        flow = await FlowService(db).get_flow_for_execution(
+                            flow_id, group_context
+                        )
                         if not flow:
                             crew_logger.error(
                                 f"Flow with ID {flow_id} not found in repository"

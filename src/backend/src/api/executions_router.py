@@ -121,7 +121,9 @@ async def create_execution(
                 # This is a saved flow being re-executed - verify it exists
                 flow_service = FlowService(service.session)
                 try:
-                    flow = await flow_service.get_flow(config.flow_id)
+                    flow = await flow_service.get_flow_for_execution(
+                        config.flow_id, group_context
+                    )
                     exec_logger.info(f"Found flow in database: {flow.name} ({flow.id})")
                 except HTTPException as he:
                     if he.status_code == 404:

@@ -75,7 +75,7 @@ async def test_create_execution_with_valid_flow_id_in_db():
 
     mock_flow = SimpleNamespace(id=flow_id, name="My Flow")
     mock_flow_svc = AsyncMock()
-    mock_flow_svc.get_flow = AsyncMock(return_value=mock_flow)
+    mock_flow_svc.get_flow_for_execution = AsyncMock(return_value=mock_flow)
 
     with patch("src.api.executions_router.FlowService", return_value=mock_flow_svc):
         out = await create_execution(
@@ -104,7 +104,7 @@ async def test_create_execution_flow_id_not_found_raises():
     ctx = Ctx(user_role="admin")
 
     mock_flow_svc = AsyncMock()
-    mock_flow_svc.get_flow = AsyncMock(
+    mock_flow_svc.get_flow_for_execution = AsyncMock(
         side_effect=HTTPException(status_code=404, detail="Not found")
     )
 
@@ -351,9 +351,9 @@ async def test_list_executions_scopes_to_selected_workspace(MockExecSvc):
 
     assert isinstance(out, list)
     _, kwargs = svc.list_executions.call_args
-    assert kwargs["group_ids"] == [
-        "g1"
-    ], "must scope to the selected workspace, not the union"
+    assert kwargs["group_ids"] == ["g1"], (
+        "must scope to the selected workspace, not the union"
+    )
 
 
 @pytest.mark.asyncio

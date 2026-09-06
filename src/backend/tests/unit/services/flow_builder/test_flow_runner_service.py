@@ -13,6 +13,7 @@ Tests cover:
 import inspect
 import uuid
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
@@ -251,6 +252,7 @@ class TestRunFlow:
                                 svc = FlowRunnerService(mock_session)
                                 svc.flow_execution_service = mock_exec_svc.return_value
                                 svc.flow_repo = mock_flow_repo.return_value
+                                svc.flow_repo.get = AsyncMock(return_value=None)
                                 return svc
 
     @pytest.mark.asyncio
@@ -305,7 +307,9 @@ class TestRunFlow:
             mock_run.return_value = {"success": True, "result": {}}
 
             result = await service.run_flow(
-                flow_id=flow_id, job_id="job-123", config={}
+                flow_id=flow_id,
+                job_id="job-123",
+                config={"group_context": SimpleNamespace(group_ids=["group-1"])},
             )
 
         service.flow_repo.get.assert_called_once()
@@ -376,7 +380,7 @@ class TestRunFlow:
         mock_flow.nodes = [{"id": "node-1"}]
         mock_flow.edges = []
         mock_flow.flow_config = {}
-        mock_flow.group_id = None
+        mock_flow.group_id = "group-1"
 
         mock_execution = MagicMock()
         mock_execution.id = 1
@@ -392,7 +396,12 @@ class TestRunFlow:
             mock_run.return_value = {"success": True, "result": {}}
 
             result = await service.run_flow(
-                flow_id=None, job_id="job-123", config={"flow_id": flow_id}
+                flow_id=None,
+                job_id="job-123",
+                config={
+                    "flow_id": flow_id,
+                    "group_context": SimpleNamespace(group_ids=["group-1"]),
+                },
             )
 
         # Should have extracted flow_id from config

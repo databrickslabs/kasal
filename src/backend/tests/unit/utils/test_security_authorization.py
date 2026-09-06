@@ -23,6 +23,9 @@ class TestGroupAuthorizationSecurity:
         mock_user = Mock()
         mock_user.id = "user123"
         mock_user.email = "regulatory@databricks.com"
+        mock_user.personal_group_id = GroupContext.generate_individual_group_id(
+            mock_user.email
+        )
         mock_user.is_system_admin = False
         mock_user.is_personal_workspace_manager = False
 
@@ -55,6 +58,9 @@ class TestGroupAuthorizationSecurity:
         mock_user = Mock()
         mock_user.id = "user123"
         mock_user.email = "regulatory@databricks.com"
+        mock_user.personal_group_id = GroupContext.generate_individual_group_id(
+            mock_user.email
+        )
         mock_user.is_system_admin = False
         mock_user.is_personal_workspace_manager = False
 
@@ -87,6 +93,9 @@ class TestGroupAuthorizationSecurity:
         mock_user = Mock()
         mock_user.id = "user123"
         mock_user.email = "alice@company.com"
+        mock_user.personal_group_id = GroupContext.generate_individual_group_id(
+            mock_user.email
+        )
         mock_user.is_system_admin = False
         mock_user.is_personal_workspace_manager = False
 
@@ -119,6 +128,9 @@ class TestGroupAuthorizationSecurity:
         mock_user = Mock()
         mock_user.id = "user123"
         mock_user.email = "alice@company.com"
+        mock_user.personal_group_id = GroupContext.generate_individual_group_id(
+            mock_user.email
+        )
         mock_user.is_system_admin = False
         mock_user.is_personal_workspace_manager = False
 
@@ -155,6 +167,9 @@ class TestGroupAuthorizationSecurity:
         mock_user = Mock()
         mock_user.id = "user123"
         mock_user.email = "regulatory@databricks.com"
+        mock_user.personal_group_id = GroupContext.generate_individual_group_id(
+            mock_user.email
+        )
         mock_user.is_system_admin = False
         mock_user.is_personal_workspace_manager = False
 
@@ -193,6 +208,9 @@ class TestGroupAuthorizationSecurity:
         mock_user = Mock()
         mock_user.id = "user123"
         mock_user.email = "user@company.com"
+        mock_user.personal_group_id = GroupContext.generate_individual_group_id(
+            mock_user.email
+        )
         mock_user.is_system_admin = False
         mock_user.is_personal_workspace_manager = False
 
@@ -227,6 +245,9 @@ class TestGroupAuthorizationSecurity:
         mock_user = Mock()
         mock_user.id = "user123"
         mock_user.email = "user@company.com"
+        mock_user.personal_group_id = GroupContext.generate_individual_group_id(
+            mock_user.email
+        )
         mock_user.is_system_admin = False
         mock_user.is_personal_workspace_manager = False
 
@@ -274,6 +295,9 @@ class TestSecurityLogging:
         mock_user = Mock()
         mock_user.id = "user123"
         mock_user.email = "attacker@company.com"
+        mock_user.personal_group_id = GroupContext.generate_individual_group_id(
+            mock_user.email
+        )
         mock_user.is_system_admin = False
         mock_user.is_personal_workspace_manager = False
 

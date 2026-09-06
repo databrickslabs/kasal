@@ -891,7 +891,7 @@ async def test_run_flow_execution_with_flow_id_loads_from_repo():
     mock_flow.flow_config = {"type": "default"}
 
     mock_flow_repo_instance = AsyncMock()
-    mock_flow_repo_instance.find_flow = AsyncMock(return_value=mock_flow)
+    mock_flow_repo_instance.get_flow_for_execution = AsyncMock(return_value=mock_flow)
 
     mock_db_session = AsyncMock()
     mock_db_session.__aenter__ = AsyncMock(return_value=mock_db_session)
@@ -912,7 +912,7 @@ async def test_run_flow_execution_with_flow_id_loads_from_repo():
             return mock_db_session
         return mock_exec_session
 
-    # Flows are read through FlowService.find_flow (their owning domain).
+    # Flows are read through FlowService.get_flow_for_execution (their owning domain).
     import src.services.flow_builder.flow_service as flow_svc_mod
 
     orig_flow_repo = flow_svc_mod.FlowService
@@ -940,13 +940,13 @@ async def test_run_flow_execution_with_flow_id_not_found():
     flow_id = str(uuid.uuid4())
 
     mock_flow_repo_instance = AsyncMock()
-    mock_flow_repo_instance.find_flow = AsyncMock(return_value=None)
+    mock_flow_repo_instance.get_flow_for_execution = AsyncMock(return_value=None)
 
     mock_db_session = AsyncMock()
     mock_db_session.__aenter__ = AsyncMock(return_value=mock_db_session)
     mock_db_session.__aexit__ = AsyncMock(return_value=None)
 
-    # Flows are read through FlowService.find_flow (their owning domain).
+    # Flows are read through FlowService.get_flow_for_execution (their owning domain).
     import src.services.flow_builder.flow_service as flow_svc_mod
 
     orig_flow_repo = flow_svc_mod.FlowService

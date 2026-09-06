@@ -12,6 +12,7 @@ import time
 import traceback
 from collections import deque
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from src.core.exceptions import MCPConnectionError
 from src.utils.telemetry import KasalProduct, get_user_agent
@@ -731,6 +732,8 @@ class MCPAdapter:
 
     async def _get_spn_fallback_headers(self) -> Optional[Dict[str, str]]:
         """Get SPN (Service Principal) authentication headers as fallback when OBO fails."""
+        if urlparse(self.server_url).scheme.lower() != "https":
+            return None
         try:
             from src.utils.databricks_auth import get_auth_context
 
@@ -751,6 +754,13 @@ class MCPAdapter:
 
     async def _get_authentication_headers(self) -> Optional[Dict[str, str]]:
         """Get authentication headers using our fallback mechanism."""
+        if urlparse(self.server_url).scheme.lower() != "https" and (
+            self._spn_fallback_headers
+            or self.server_params.get("auth_type")
+            in ("databricks_obo", "databricks_spn")
+            or "/api/2.0/mcp/" in self.server_url
+        ):
+            return None
         try:
             # If SPN fallback headers were obtained during discovery (OBO was rejected),
             # use them directly — the OBO token is known to be rejected by this server.
