@@ -198,24 +198,19 @@ echo "  ✓ Removed src/backend/migrations (app builds schema via create_all)"
 
 # Repo-browsing docs content never served by the in-app viewer (the viewer's
 # docSections lists only top-level src/docs/*.md; subdirs are repo-only).
-for d in Blueprints archive examples powerbi images; do
+for d in Blueprints archive examples powerbi; do
     if [ -d "src/docs/$d" ]; then
         rm -rf "src/docs/$d"
         echo "  ✓ Removed src/docs/$d (repo-only docs)"
     fi
 done
 
-# Docs dedup (verified against src/package.json): its prebuild/postbuild
-# copy src/docs/*.md into frontend/public/docs and frontend_static/docs on
-# every build, so public/docs/*.md are regenerated duplicates — and the
-# examples/powerbi subdirs there are stale copies of the repo-only docs
-# removed above. Keep public/docs/images (NOT regenerated; vite ships it
-# via public/ and the doc pages reference it). The repo-root docs/ dir is
-# outside the app root (src/) and never served.
-rm -f src/frontend/public/docs/*.md
-rm -rf src/frontend/public/docs/examples src/frontend/public/docs/powerbi
+# Vite stages src/docs (including images referenced by top-level pages) under
+# frontend/.generated/public. The canonical images must stay with src/docs;
+# frontend/public no longer contains a second committed documentation tree.
+# The repo-root docs/ directory is outside the app root and never served.
 rm -rf docs
-echo "  ✓ Removed duplicated/stale public/docs markdown + repo-only top-level docs/"
+echo "  ✓ Kept canonical app docs/images; removed repo-only top-level docs/"
 
 # Test configuration files - be careful with conftest.py as it might be needed
 find . -name "jest.config.*" -o -name ".coverage" -o -name "pytest.ini" -type f -delete 2>/dev/null || true

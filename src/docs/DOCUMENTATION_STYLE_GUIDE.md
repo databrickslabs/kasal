@@ -1,6 +1,6 @@
 # Documentation style guide
 
-How to write and structure docs in `src/docs/`. These docs are rendered on GitHub and served in-app (the frontend copies `src/docs/` to `public/docs/`), so every rule below has to hold in both renderers. Follow it for new pages and when you touch an existing one.
+How to write and structure docs in `src/docs/`. These docs are rendered on GitHub and served in-app (Vite stages `src/docs/` in the generated `.generated/public/docs/` directory), so every rule below has to hold in both renderers. Follow it for new pages and when you touch an existing one.
 
 This guide is itself a reference page. For the rationale behind the four-mode model, see [Diátaxis](https://diataxis.fr/) and the [Write the Docs guide](https://www.writethedocs.org/guide/writing/docs-principles/).
 

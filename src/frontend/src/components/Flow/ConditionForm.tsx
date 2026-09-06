@@ -1,3 +1,4 @@
+import type { ConditionFormData } from '../../types/workflow/condition';
 import React, { useState } from 'react';
 import {
   Box,
@@ -14,12 +15,6 @@ import {
   Divider,
   Link,
 } from '@mui/material';
-
-export interface ConditionFormData {
-  conditionType?: 'none' | 'and' | 'or' | 'router';
-  targetNodes?: string[];
-  routerCondition?: string;
-}
 
 interface ConditionFormProps {
   availableNodes?: { id: string; label: string }[];

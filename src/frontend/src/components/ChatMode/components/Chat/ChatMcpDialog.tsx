@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { MCPService } from '../../../../api/tools/MCPService';
-import type { MCPServerConfig } from '../../../Configuration/MCP/MCPConfiguration';
+import type { MCPServerConfig } from '../../../../types/config/mcp';
 import { usePermissionStore } from '../../../../store/permissions';
 import ChatMcpCatalog from './ChatMcpCatalog';
 

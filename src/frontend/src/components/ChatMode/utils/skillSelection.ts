@@ -1,5 +1,4 @@
 import { Skill, SkillService } from '../../../api/tools/SkillService';
-import { useExecutionStore } from '../store/executionStore';
 
 /**
  * Shared skill-selection plumbing for ChatMode.
@@ -31,25 +30,10 @@ export function invalidateSkillsCache(): void {
   cache = null;
 }
 
-/**
- * Drop selected skill names that are no longer pickable — gone, disabled, or
- * globally enabled (those attach to every agent anyway). Returns the kept
- * selection; on a fetch failure the current selection is kept untouched (the
- * backend tolerates stale names). No request is made when nothing is selected.
- */
-export async function reconcileSelectedSkills(): Promise<string[]> {
-  const store = useExecutionStore.getState();
-  const selected = store.selectedSkills;
-  if (selected.length === 0) return selected;
-  try {
-    const enabled = await fetchEnabledSkills();
-    const pickable = new Set(
-      enabled.filter((s) => !s.global_enabled).map((s) => s.name),
-    );
-    const kept = selected.filter((n) => pickable.has(n));
-    if (kept.length !== selected.length) store.setSelectedSkills(kept);
-    return kept;
-  } catch {
-    return selected;
-  }
+/** Keep explicitly selectable names in their original order. */
+export function pickSelectedSkills(selected: readonly string[], skills: readonly Pick<Skill, 'name' | 'enabled' | 'global_enabled'>[]): string[] {
+  const pickable = new Set(
+    skills.filter((skill) => skill.enabled && !skill.global_enabled).map((skill) => skill.name),
+  );
+  return selected.filter((name) => pickable.has(name));
 }

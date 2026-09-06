@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { ExtendedRun } from '../types/execution/run';
 import { runService } from '../api/execution/ExecutionHistoryService';
 import { Trace } from '../types/execution/trace';
-import { appendTraceBatch } from './traceIndex';
+import { appendTraceBatch } from '../features/executions/trace/lib/traceIndex';
 
 // Re-export Trace type to ensure consistency across the app
 export type { Trace };

@@ -622,8 +622,8 @@ def deploy_source_to_databricks(
                 )
                 logger.info("Copied frontend_static folder")
 
-                # Docs also ship standalone; the npm postbuild already copied
-                # docs/*.md into frontend_static/docs for the app to serve.
+                # Docs also ship standalone; Vite staged the recursive docs tree
+                # and npm postbuild published it in frontend_static/docs.
                 docs_src = root_dir / "docs"
                 if docs_src.exists():
                     logger.info("Copying docs folder...")

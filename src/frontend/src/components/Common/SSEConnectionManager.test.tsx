@@ -9,7 +9,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import { SSEConnectionManager } from './SSEConnectionManager';
-import { createTraceBatcher } from '../../utils/traceBatcher';
+import { createTraceBatcher } from '../../features/executions/trace/lib/traceBatcher';
 import type { Trace } from '../../types/execution/trace';
 
 // Must use vi.hoisted for variables referenced in vi.mock

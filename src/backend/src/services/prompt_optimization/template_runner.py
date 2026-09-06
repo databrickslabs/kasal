@@ -39,7 +39,7 @@ from src.services.prompt_optimization.gepa.reflection import (
     _make_reflection_fn,
     _sync_llm_completion,
 )
-from src.utils.prompt_utils import robust_json_parser
+from src.core.llm.robust_json import robust_json_parser
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)

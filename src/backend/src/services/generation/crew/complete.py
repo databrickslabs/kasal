@@ -16,7 +16,7 @@ from src.schemas.crew import (
 )
 from src.services.llm.manager import LLMManager
 from src.services.tools.tool_service import ToolService
-from src.utils.prompt_utils import robust_json_parser
+from src.core.llm.robust_json import robust_json_parser
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)

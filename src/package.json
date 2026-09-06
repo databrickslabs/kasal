@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "prebuild": "node scripts/build-tasks.cjs prebuild",
     "build": "cd frontend && npm install --include=dev && npm run build",
     "postbuild": "node scripts/build-tasks.cjs postbuild"
   }

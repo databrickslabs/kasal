@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { UILayoutState } from '../utils/CanvasLayoutManager';
+import type { UILayoutState } from '../types/ui/layout';
 import { usePermissionStore } from './permissions';
 
 /**

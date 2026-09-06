@@ -11,7 +11,8 @@ import RunTraceTimeline from '../Preview/RunTraceTimeline';
 import { traceEventToRunStep } from '../Preview/traceEventStep';
 import { useRunTimeline } from '../../hooks/useRunTimeline';
 import type { RunStep } from '../Preview/traceEventStep';
-import type { PreviewContent } from '../Preview/PreviewPanel';
+import type { PreviewContent } from '../../types/preview';
+import type { ExecutionContext } from '../../types/execution';
 
 /**
  * Group trace messages for a readable timeline (shown inside the RunProgress
@@ -260,12 +261,6 @@ const RunProgress: React.FC<{
     </div>
   );
 };
-
-export interface ExecutionContext {
-  crewName: string;
-  agents: { name: string; role?: string }[];
-  tasks: { name: string }[];
-}
 
 interface ChatContainerProps {
   messages: ChatMessageType[];

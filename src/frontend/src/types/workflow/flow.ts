@@ -1,5 +1,5 @@
 import { Node, Edge } from 'reactflow';
-import { ConditionFormData } from '../../components/Flow/ConditionForm';
+import type { ConditionFormData } from './condition';
 import { CrewTask } from './crewPlan';
 import { FlowStateConfig } from '../../utils/flowStateSchema';
 

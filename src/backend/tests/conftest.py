@@ -248,14 +248,6 @@ def cleanup_after_test():
             pass
 
 
-# Skip integration tests marker
-def pytest_configure(config):
-    """Configure pytest with custom markers."""
-    config.addinivalue_line("markers", "integration: mark test as integration test")
-    config.addinivalue_line("markers", "slow: mark test as slow running")
-    config.addinivalue_line("markers", "unit: mark test as unit test")
-
-
 # Files pytest must not collect.
 #
 # This matches by BASENAME, not path — an entry here silently skips EVERY file

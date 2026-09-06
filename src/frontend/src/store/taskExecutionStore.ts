@@ -1,16 +1,7 @@
+import type { TaskStatus, TaskState } from '../types/execution/task';
 import { create } from 'zustand';
 import { apiClient } from '../config/api/ApiConfig';
 import { extractTaskId, extractTaskName, mapEventToStatus } from '../utils/taskIdUtils';
-
-type TaskStatus = 'planning' | 'running' | 'completed' | 'failed';
-
-interface TaskState {
-  status: TaskStatus;
-  task_name: string;
-  started_at?: string;
-  completed_at?: string;
-  failed_at?: string;
-}
 
 /**
  * Valid state transitions for task lifecycle.

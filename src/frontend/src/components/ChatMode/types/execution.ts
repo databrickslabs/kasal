@@ -1,3 +1,9 @@
+export interface ExecutionContext {
+  crewName: string;
+  agents: { name: string; role?: string }[];
+  tasks: { name: string }[];
+}
+
 export type ExecutionStatus =
   | 'queued'
   | 'running'

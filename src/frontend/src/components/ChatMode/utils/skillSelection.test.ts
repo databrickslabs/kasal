@@ -1,10 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   fetchEnabledSkills,
+  pickSelectedSkills,
   invalidateSkillsCache,
-  reconcileSelectedSkills,
 } from './skillSelection';
-import { useExecutionStore } from '../store/executionStore';
 
 const list = vi.fn();
 vi.mock('../../../api/tools/SkillService', () => ({
@@ -20,28 +19,7 @@ const SKILLS = [
 beforeEach(() => {
   vi.clearAllMocks();
   invalidateSkillsCache();
-  useExecutionStore.setState({ selectedSkills: [] });
   list.mockResolvedValue(SKILLS);
-});
-
-describe('reconcileSelectedSkills', () => {
-  it('makes no request when nothing is selected', async () => {
-    expect(await reconcileSelectedSkills()).toEqual([]);
-    expect(list).not.toHaveBeenCalled();
-  });
-
-  it('prunes gone, disabled and always-on names from the selection', async () => {
-    useExecutionStore.setState({ selectedSkills: ['picked', 'gone', 'off', 'global'] });
-    expect(await reconcileSelectedSkills()).toEqual(['picked']);
-    expect(useExecutionStore.getState().selectedSkills).toEqual(['picked']);
-  });
-
-  it('keeps the selection untouched when the fetch fails', async () => {
-    list.mockRejectedValue(new Error('down'));
-    useExecutionStore.setState({ selectedSkills: ['picked', 'gone'] });
-    expect(await reconcileSelectedSkills()).toEqual(['picked', 'gone']);
-    expect(useExecutionStore.getState().selectedSkills).toEqual(['picked', 'gone']);
-  });
 });
 
 describe('fetchEnabledSkills', () => {
@@ -52,5 +30,17 @@ describe('fetchEnabledSkills', () => {
     expect(list).toHaveBeenCalledTimes(1);
     await fetchEnabledSkills(true); // force busts the cache
     expect(list).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('pickSelectedSkills', () => {
+  it('removes unavailable choices without reordering selected names', () => {
+    const skills = [...SKILLS, { name: 'second', enabled: true, global_enabled: false }];
+    expect(pickSelectedSkills(['second', 'off', 'picked', 'global', 'gone'], skills))
+      .toEqual(['second', 'picked']);
+  });
+
+  it('returns an empty selection when no skills are available', () => {
+    expect(pickSelectedSkills(['gone'], [])).toEqual([]);
   });
 });

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { rememberTaskOutputMessage, useExecutionStore } from './executionStore';
 import { useSessionStore } from './sessionStore';
 import { saveSessionPreview, getSessionPreview, clearSessionRunningJob } from '../db/sessionApi';
-import { parsePreviewContent } from '../components/Preview/PreviewPanel';
+import { parsePreviewContent } from '../utils/preview';
 import { deriveSessionPreviews } from '../utils/sessionPreview';
 
 // --- Mocks for sibling modules ---
@@ -31,7 +31,7 @@ vi.mock('../db/sessionApi', () => ({
   clearSessionRunningJob: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock('../components/Preview/PreviewPanel', () => ({
+vi.mock('../utils/preview', () => ({
   parsePreviewContent: vi.fn(),
 }));
 

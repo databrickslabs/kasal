@@ -13,7 +13,7 @@ import { toast } from 'react-hot-toast';
 import { useRunStatusStore } from '../../store/runStatus';
 import { useGlobalExecutionSSE } from '../../hooks/global/useSSE';
 import { useTracePolling } from '../../hooks/global/useTracePolling';
-import { createTraceBatcher } from '../../utils/traceBatcher';
+import { createTraceBatcher } from '../../features/executions/trace/lib/traceBatcher';
 
 /**
  * Generate user-friendly error message based on error type

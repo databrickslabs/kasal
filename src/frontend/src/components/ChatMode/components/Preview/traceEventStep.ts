@@ -6,7 +6,7 @@
  * place the two models meet — including the decision about which SHAPE the
  * payload is (a plan, code, or prose), which `StepContent` then renders.
  */
-import { extractPlanItems, type PlanItem } from '../../../Jobs/TracePlanView';
+import { extractPlanItems, type PlanItem } from '../../../../features/executions/trace/lib/plan';
 import type { TraceEvent } from '../../../../types/execution/trace';
 
 /**

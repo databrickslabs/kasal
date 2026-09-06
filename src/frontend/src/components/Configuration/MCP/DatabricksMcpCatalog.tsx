@@ -23,7 +23,7 @@ import {
   DatabricksManagedMcpType,
   databricksMcpServerName,
 } from '../../../api/tools/MCPService';
-import { MCPServerConfig } from './MCPConfiguration';
+import type { MCPServerConfig } from '../../../types/config/mcp';
 
 /**
  * Admin curation surface for the workspace's Databricks MCP servers.

@@ -228,6 +228,11 @@ python_files = "test_*.py"
 python_functions = "test_*"
 python_classes = "Test*"
 asyncio_mode = "auto"
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "slow: Slow running tests",
+]
 
 # ─── Architecture contracts (import-linter) ──────────────────────────────────
 # Run: .venv/bin/lint-imports

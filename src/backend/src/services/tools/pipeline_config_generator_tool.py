@@ -1,14 +1,12 @@
 """Pipeline Config Generator Tool — calls PBI APIs directly, no LLM intermediation.
 
-Wraps generate_config.py logic as a CrewAI tool so it can be used in the Kasal UI
+Wraps the Power BI pipeline configuration library as a CrewAI tool so it can be used in the Kasal UI
 with its own config form (including both SP credential sets).
 """
 
 import json
 import logging
-import os
 import re
-import sys
 from collections import defaultdict
 from typing import Any, Optional, Type
 
@@ -1226,7 +1224,7 @@ class PipelineConfigGeneratorTool(BaseTool):
         additive — only writes a ``filter_sets`` key that's absent. Returns an audit
         log. Never raises (failures become skip notes).
         """
-        from src.services.tools import generate_config as _gc
+        from src.services.powerbi import pipeline_config as _gc
         from src.services.tools.metric_view_utils import uc_query
 
         log: list[dict] = []
@@ -1353,7 +1351,7 @@ class PipelineConfigGeneratorTool(BaseTool):
         matches how the skeleton is built. When this returns ``[]`` the P3 LLM call is
         skipped entirely — the cost/value gate.
         """
-        from src.services.tools import generate_config as _gc
+        from src.services.powerbi import pipeline_config as _gc
 
         facts = (
             _gc._identify_fact_tables(relationships, admin_tables={})
@@ -1397,7 +1395,7 @@ class PipelineConfigGeneratorTool(BaseTool):
         ``TODO: verify`` suffix (a wrong join produces silently-wrong numbers, so a
         human must confirm). Returns an audit log. Never raises.
         """
-        from src.services.tools import generate_config as _gc
+        from src.services.powerbi import pipeline_config as _gc
         from src.services.tools.metric_view_utils import uc_query
 
         log: list[dict] = []
@@ -1728,42 +1726,7 @@ class PipelineConfigGeneratorTool(BaseTool):
 
     @staticmethod
     def _import_generate_config():
-        """Import the generate_config module.
+        """Load the shared Power BI library through its canonical package."""
+        from src.services.powerbi import pipeline_config
 
-        Search order:
-        1. Same directory as this tool file (bundled for deployed apps).
-        2. examples/uc_metric_view_migration/ relative to the repo root
-           (local dev convenience).
-        """
-        this_dir = os.path.dirname(os.path.abspath(__file__))
-
-        # Priority 1: bundled alongside the tool (deployed app path)
-        candidates = [this_dir]
-
-        # Priority 2: examples directory (local dev)
-        project_root = os.path.abspath(
-            os.path.join(this_dir, "..", "..", "..", "..", "..", "..", "..")
-        )
-        candidates.append(
-            os.path.join(project_root, "examples", "uc_metric_view_migration")
-        )
-
-        gen_config_dir = None
-        for candidate in candidates:
-            if os.path.isfile(os.path.join(candidate, "generate_config.py")):
-                gen_config_dir = candidate
-                break
-
-        if gen_config_dir is None:
-            checked = ", ".join(candidates)
-            raise ImportError(
-                f"generate_config.py not found in any of: [{checked}]. "
-                f"Resolved from {this_dir} (project_root={project_root})"
-            )
-
-        if gen_config_dir not in sys.path:
-            sys.path.insert(0, gen_config_dir)
-
-        import generate_config  # noqa: E402
-
-        return generate_config
+        return pipeline_config

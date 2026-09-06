@@ -4,7 +4,7 @@ import { TaskService } from '../../../api/workflow/TaskService';
 import { Agent } from '../../../types/workflow/agent';
 import { Task } from '../../../types/workflow/task';
 import { GeneratedAgent, GeneratedTask, GeneratedCrew, ChatMessage } from '../types';
-import { CanvasLayoutManager } from '../../../utils/CanvasLayoutManager';
+import { CanvasLayoutManager } from '../../../features/workflow/canvas/lib/CanvasLayoutManager';
 import { useWorkflowStore } from '../../../store/workflow';
 import { useUILayoutStore } from '../../../store/uiLayout';
 import { useCrewExecutionStore } from '../../../store/crewExecution';

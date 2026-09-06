@@ -14,7 +14,7 @@
 import { getExecution } from '../api/executions';
 import { toSurface } from './surfaceAdapter';
 import type { ChatMessage } from '../types/chat';
-import type { PreviewContent } from '../components/Preview/PreviewPanel';
+import type { PreviewContent } from '../types/preview';
 
 // Page-session cache: executionId -> stored result (or null when missing).
 // Results can be large, so switching sessions back and forth must not re-fetch.

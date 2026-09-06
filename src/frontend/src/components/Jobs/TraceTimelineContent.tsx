@@ -31,17 +31,16 @@ import SaveIcon from '@mui/icons-material/Save';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import StorageIcon from '@mui/icons-material/Storage';
-import TracePlanView, { extractPlanItems } from './TracePlanView';
+import TracePlanView from './TracePlanView';
+import { extractPlanItems } from '../../features/executions/trace/lib/plan';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import PersonIcon from '@mui/icons-material/Person';
 import BuildIcon from '@mui/icons-material/Build';
 import TargetIcon from '@mui/icons-material/TrackChanges';
 import TuneIcon from '@mui/icons-material/Tune';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
-import {
-  isEventClickable,
-  getEventIcon as getEventIconConfig,
-} from './traceEventProcessors';
+import { isEventClickable } from '../../features/executions/trace/lib/traceEventProcessors';
+import { getEventIcon as getEventIconConfig } from '../../features/executions/trace/components/eventIcons';
 import { PaginatedOutput } from '../Common';
 import { TaskDescriptionDialog } from './TaskDescriptionDialog';
 import { LlmEventDetails } from './LlmEventDetails';

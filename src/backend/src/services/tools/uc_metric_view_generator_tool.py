@@ -779,34 +779,10 @@ class UCMetricViewGeneratorTool(BaseTool):
 
     @staticmethod
     def _import_generate_config():
-        """Import the standalone generate_config module (bundled alongside this tool)."""
-        import sys as _sys
+        """Load the shared Power BI library through its canonical package."""
+        from src.services.powerbi import pipeline_config
 
-        this_dir = os.path.dirname(os.path.abspath(__file__))
-        candidates = [this_dir]
-        project_root = os.path.abspath(
-            os.path.join(this_dir, "..", "..", "..", "..", "..", "..", "..")
-        )
-        candidates.append(
-            os.path.join(project_root, "examples", "uc_metric_view_migration")
-        )
-        gen_config_dir = next(
-            (
-                c
-                for c in candidates
-                if os.path.isfile(os.path.join(c, "generate_config.py"))
-            ),
-            None,
-        )
-        if gen_config_dir is None:
-            raise ImportError(
-                f"generate_config.py not found in any of: [{', '.join(candidates)}]"
-            )
-        if gen_config_dir not in _sys.path:
-            _sys.path.insert(0, gen_config_dir)
-        import generate_config  # noqa: E402
-
-        return generate_config
+        return pipeline_config
 
     @staticmethod
     def _tmdl_tables_to_measures(admin_tables: dict) -> list:

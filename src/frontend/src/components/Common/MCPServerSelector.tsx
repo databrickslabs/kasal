@@ -18,7 +18,7 @@ import {
 } from '@mui/material';
 import StorageIcon from '@mui/icons-material/Storage';
 import { MCPService } from '../../api/tools/MCPService';
-import { MCPServerConfig } from '../Configuration/MCP/MCPConfiguration';
+import type { MCPServerConfig } from '../../types/config/mcp';
 
 interface MCPServerSelectorProps {
   value: string | string[] | null;

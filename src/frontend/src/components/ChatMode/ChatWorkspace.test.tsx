@@ -248,6 +248,8 @@ vi.mock('./components/Preview/PreviewPanel', () => ({
       <button data-testid="preview-restyle" onClick={() => props.onStyleChange?.('{"restyled":true}')}>s</button>
     </div>
   ),
+}));
+vi.mock('./utils/preview', () => ({
   parsePreviewContent: (...a: unknown[]) => h.parsePreview(...a),
 }));
 vi.mock('./components/Chat/ChatContainer', () => ({

@@ -1,7 +1,7 @@
-import { firstBy } from '../../utils/collectionIndexes';
+import { firstBy } from '../../shared/lib/collections';
 import React from 'react';
 import type { ReactFlowInstance, Node, Edge } from 'reactflow';
-import { CanvasLayoutManager } from '../../utils/CanvasLayoutManager';
+import { CanvasLayoutManager } from '../../features/workflow/canvas/lib/CanvasLayoutManager';
 import { useUILayoutStore } from '../../store/uiLayout';
 
 export function useWorkflowLayoutEvents(params: {

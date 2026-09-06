@@ -2,7 +2,8 @@ import { describe, test, expect } from 'vitest';
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
-import TracePlanView, { extractPlanItems } from './TracePlanView';
+import TracePlanView from './TracePlanView';
+import { extractPlanItems } from '../../features/executions/trace/lib/plan';
 
 const theme = createTheme();
 

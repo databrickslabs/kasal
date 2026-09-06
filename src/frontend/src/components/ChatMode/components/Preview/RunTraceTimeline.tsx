@@ -26,12 +26,8 @@ import {
   Sparkles,
   AlertCircle,
 } from 'lucide-react';
-import { isEventClickable } from '../../../Jobs/traceEventProcessors';
-import {
-  formatTraceDuration,
-  formatTraceOffset,
-  parseTraceTime,
-} from '../../../../hooks/global/useTraceData';
+import { isEventClickable } from '../../../../features/executions/trace/lib/traceEventProcessors';
+import { formatTraceDuration, formatTraceOffset, parseTraceTime } from '../../../../features/executions/trace/lib/processTraces';
 import type {
   GroupedTrace,
   ProcessedTraces,

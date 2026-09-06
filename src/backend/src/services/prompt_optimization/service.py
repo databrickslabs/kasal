@@ -124,7 +124,7 @@ from src.services.prompt_optimization.run_state import (  # noqa: E402,F401
     _row_to_public,
     _run_to_columns,
 )
-from src.utils.prompt_utils import robust_json_parser
+from src.core.llm.robust_json import robust_json_parser
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)

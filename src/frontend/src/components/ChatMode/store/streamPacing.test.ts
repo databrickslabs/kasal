@@ -54,7 +54,7 @@ vi.mock('../db/sessionApi', () => ({
   clearSessionRunningJob: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock('../components/Preview/PreviewPanel', () => ({ parsePreviewContent: vi.fn() }));
+vi.mock('../utils/preview', () => ({ parsePreviewContent: vi.fn() }));
 vi.mock('../utils/sessionPreview', () => ({
   deriveSessionPreviews: vi.fn(() => Promise.resolve({ history: [], current: null })),
 }));

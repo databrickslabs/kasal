@@ -30,7 +30,7 @@ import { MemoryBackendConfig } from '../../types/config/memoryBackend';
 import { usePermissionStore } from '../../store/permissions';
 import { ToolService, Tool as ServiceTool } from '../../api/tools/ToolService';
 import { MCPService } from '../../api/tools/MCPService';
-import type { MCPServerConfig } from '../Configuration/MCP/MCPConfiguration';
+import type { MCPServerConfig } from '../../types/config/mcp';
 
 interface WorkspaceInfo {
   name: string;

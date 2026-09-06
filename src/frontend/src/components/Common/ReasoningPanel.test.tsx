@@ -11,11 +11,8 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
-import ReasoningPanel, {
-  REASONING_VISIBLE_MODELS,
-  REDACTED_REASONING,
-  reasoningText,
-} from './ReasoningPanel';
+import ReasoningPanel, { REASONING_VISIBLE_MODELS, reasoningText } from './ReasoningPanel';
+import { REDACTED_REASONING } from '../../shared/lib/reasoning';
 
 const THINKING = '**My Thought Process for Calculating 17 x 23**\nAlright, so I need to…';
 

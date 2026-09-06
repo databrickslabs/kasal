@@ -183,7 +183,7 @@ vi.mock('./KnowledgeFileUpload', () => ({
   KnowledgeFileUpload: () => <div data-testid="knowledge-upload">Upload</div>,
 }));
 
-vi.mock('../../utils/CanvasLayoutManager', () => {
+vi.mock('../../features/workflow/canvas/lib/CanvasLayoutManager', () => {
   return {
     CanvasLayoutManager: class MockCanvasLayoutManager {
       getAgentNodePosition = vi.fn().mockReturnValue({ x: 100, y: 100 });

@@ -6,7 +6,8 @@
  * testing on its own.
  */
 
-import { REASONING_VISIBLE_MODELS, isRedactedReasoning } from '../../Common/ReasoningPanel';
+import { REASONING_VISIBLE_MODELS } from '../../Common/ReasoningPanel';
+import { isRedactedReasoning } from '../../../shared/lib/reasoning';
 
 export interface TraceEntry {
   label: string;

@@ -26,7 +26,7 @@ import { useTranslation } from 'react-i18next';
 import ShowLogs from './ShowLogs';
 import { executionLogService, LogEntry } from '../../api/execution/ExecutionLogs';
 import { useRunResult } from '../../hooks/global/useExecutionResult';
-import { useTraceData } from '../../hooks/global/useTraceData';
+import { useTraceData } from '../../features/executions/trace/hooks/useTraceData';
 import TraceTimelineContent from './TraceTimelineContent';
 
 const ShowTraceTimeline: React.FC<ShowTraceProps> = ({

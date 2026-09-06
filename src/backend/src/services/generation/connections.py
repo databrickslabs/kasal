@@ -16,7 +16,7 @@ from src.schemas.connection import ConnectionRequest, ConnectionResponse
 from src.services.catalog.templates import TemplateService
 from src.services.llm.manager import LLMManager
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
-from src.utils.prompt_utils import robust_json_parser
+from src.core.llm.robust_json import robust_json_parser
 
 # Configure logging
 logger = logging.getLogger(__name__)

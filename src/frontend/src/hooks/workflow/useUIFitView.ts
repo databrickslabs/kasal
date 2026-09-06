@@ -1,6 +1,6 @@
 import React from 'react';
 import type { ReactFlowInstance, Node } from 'reactflow';
-import { CanvasLayoutManager } from '../../utils/CanvasLayoutManager';
+import { CanvasLayoutManager } from '../../features/workflow/canvas/lib/CanvasLayoutManager';
 import { useUILayoutStore } from '../../store/uiLayout';
 
 export function useUIFitView(params: {

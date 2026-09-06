@@ -5,7 +5,7 @@ import { CrewTask } from '../../types/workflow/crewPlan';
 import { v4 as uuidv4 } from 'uuid';
 import { useFlowStateStore, DeclaredFlowState } from '../../store/flowState';
 import { useTabManagerStore } from '../../store/tabManager';
-import { CanvasLayoutManager } from '../../utils/CanvasLayoutManager';
+import { CanvasLayoutManager } from '../../features/workflow/canvas/lib/CanvasLayoutManager';
 import { useUILayoutStore } from '../../store/uiLayout';
 
 // Context menu handlers

@@ -6,28 +6,48 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const docsDir = path.join(root, 'docs');
+const docSuffixes = new Set(['.md', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.json', '.css']);
 
-function copyMarkdown(destDir) {
-  fs.mkdirSync(destDir, { recursive: true });
-  if (!fs.existsSync(docsDir)) return;
-  for (const file of fs.readdirSync(docsDir)) {
-    if (file.endsWith('.md')) {
-      fs.copyFileSync(path.join(docsDir, file), path.join(destDir, file));
-    }
-  }
+function copyDocs(source, destination) {
+  // Only generated destinations belong here. Recreate them so removed source
+  // pages cannot survive in a later build.
+  if (!fs.statSync(source).isDirectory()) throw new Error(`Missing docs directory: ${source}`);
+  fs.rmSync(destination, { recursive: true, force: true });
+  fs.cpSync(source, destination, {
+    recursive: true,
+    filter: (file) => fs.statSync(file).isDirectory() || docSuffixes.has(path.extname(file).toLowerCase()),
+  });
 }
 
-const task = process.argv[2];
+function preparePublic(sourceRoot = root) {
+  const docsDir = path.join(sourceRoot, 'docs');
+  // Validate the canonical source before replacing the previous generated tree.
+  if (!fs.statSync(docsDir).isDirectory()) throw new Error(`Missing docs directory: ${docsDir}`);
+  const publicDir = path.join(sourceRoot, 'frontend', '.generated', 'public');
+  fs.rmSync(publicDir, { recursive: true, force: true });
+  fs.cpSync(path.join(sourceRoot, 'frontend', 'public'), publicDir, { recursive: true });
+  copyDocs(docsDir, path.join(publicDir, 'docs'));
+  return publicDir;
+}
 
-if (task === 'prebuild') {
-  copyMarkdown(path.join(root, 'frontend', 'public', 'docs'));
-} else if (task === 'postbuild') {
-  const staticDir = path.join(root, 'frontend_static');
+function publishFrontend(sourceRoot = root) {
+  const distDir = path.join(sourceRoot, 'frontend', 'dist');
+  if (!fs.existsSync(path.join(distDir, 'index.html'))) {
+    throw new Error(`Frontend build missing: ${distDir}`);
+  }
+  const staticDir = path.join(sourceRoot, 'frontend_static');
   fs.rmSync(staticDir, { recursive: true, force: true });
-  fs.cpSync(path.join(root, 'frontend', 'dist'), staticDir, { recursive: true });
-  copyMarkdown(path.join(staticDir, 'docs'));
-} else {
-  console.error(`Unknown build task: ${task}`);
-  process.exit(1);
+  fs.cpSync(distDir, staticDir, { recursive: true });
+}
+
+module.exports = { copyDocs, preparePublic, publishFrontend };
+
+if (require.main === module) {
+  const task = process.argv[2];
+  if (task === 'prebuild') preparePublic();
+  else if (task === 'postbuild') publishFrontend();
+  else {
+    console.error(`Unknown build task: ${task}`);
+    process.exitCode = 1;
+  }
 }

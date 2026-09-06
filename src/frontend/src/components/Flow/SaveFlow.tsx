@@ -1,4 +1,4 @@
-import { uniqueBy } from '../../utils/collectionIndexes';
+import { uniqueBy } from '../../shared/lib/collections';
 import React, { useState, useRef, useEffect } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField } from '@mui/material';
 import { FlowService } from '../../api/workflow/FlowService';

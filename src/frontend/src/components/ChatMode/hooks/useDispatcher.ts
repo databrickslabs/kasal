@@ -18,7 +18,7 @@ import {
 } from '../types/dispatcher';
 import { ChatMessage } from '../types/chat';
 import { generateId } from '../utils/markdown';
-import { reconcileSelectedSkills } from '../utils/skillSelection';
+import { reconcileSelectedSkills } from '../store/skillSelection';
 import { GenerationCompleteData } from '../types/dispatcher';
 
 export type PlanData = NonNullable<CatalogLoadResult['plan']>;

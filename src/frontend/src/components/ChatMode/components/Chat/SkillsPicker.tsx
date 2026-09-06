@@ -1,9 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Skill } from '../../../../api/tools/SkillService';
-import {
-  fetchEnabledSkills,
-  reconcileSelectedSkills,
-} from '../../utils/skillSelection';
+import { fetchEnabledSkills } from '../../utils/skillSelection';
+import { reconcileSelectedSkills } from '../../store/skillSelection';
 import { useExecutionStore } from '../../store/executionStore';
 
 /**

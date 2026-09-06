@@ -48,7 +48,7 @@ from src.services.generation.crews import CrewGenerationService
 from src.services.generation.tasks import TaskGenerationService
 from src.services.llm.manager import LLMManager
 from src.services.mlflow.service import MLflowService
-from src.utils.prompt_utils import robust_json_parser
+from src.core.llm.robust_json import robust_json_parser
 from src.utils.user_context import GroupContext
 
 # Configure logging

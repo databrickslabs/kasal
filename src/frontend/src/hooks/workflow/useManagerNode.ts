@@ -1,7 +1,7 @@
 import { getDefaultModel } from '../../config/defaultModel';
 import { useEffect, useCallback, useRef } from 'react';
 import { Node, Edge } from 'reactflow';
-import { CanvasLayoutManager } from '../../utils/CanvasLayoutManager';
+import { CanvasLayoutManager } from '../../features/workflow/canvas/lib/CanvasLayoutManager';
 import { useUILayoutStore } from '../../store/uiLayout';
 import { useCrewExecutionStore } from '../../store/crewExecution';
 

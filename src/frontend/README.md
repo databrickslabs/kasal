@@ -1,86 +1,35 @@
-# Getting Started with Create React App
+# Kasal frontend
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+React and TypeScript, built with Vite. Run commands from `src/frontend` after
+installing dependencies with `npm install`.
 
-## Available Scripts
+| Command | Purpose |
+| --- | --- |
+| `npm start` or `npm run dev` | Development server on port 3000 |
+| `npm run build` | TypeScript checks and production output in `dist/` |
+| `npm run preview` | Serve the existing production build locally |
+| `npm test` | Vitest in watch mode |
+| `npm run test:run` | Run tests once |
+| `npm run lint` | ESLint using `eslint.config.js` |
+| `npm run build:analyze` | Build with the bundle visualizer |
 
-In the project directory, you can run:
+The API client reads `VITE_API_URL`. It defaults to
+`http://localhost:8000/api/v1` in development and `/api/v1` in production.
+Use `.env.local` for local overrides. Deployment sets this value explicitly.
 
-### `npm start`
+Application documentation belongs in `../docs/`. Vite stages it recursively,
+including images, JSON examples and CSS, alongside `public/` assets in the
+ignored `.generated/public/` directory. The app serves these pages at `/docs/`.
+Edit the source documentation and restart Vite to refresh the staged copy;
+do not edit generated files.
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+To prepare `src/frontend_static/` for deployment or wheel packaging, run
+`npm run build` from `src/`. This installs frontend dependencies, builds the
+frontend and publishes the complete `dist/` snapshot. `src/build.py` uses the
+same lifecycle.
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
-
-### `npm test`
-
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
-
-### `npm run build`
-
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
-
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
-
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
-
-### `npm run eject`
-
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
-
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
-
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
-
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
-
-## Environment Variables
-
-The application supports the following environment variables for configuration:
-
-- `REACT_APP_API_URL`: The base URL for API requests. This can be set during the build process to customize the API endpoint.
-
-### Building with Custom API URL
-
-When building the application using the build.py script, you can specify a custom API URL using the `--api-url` parameter:
-
-```bash
-python build.py --api-url="https://your-custom-api-url.com/api/v1"
-```
-
-This will set the environment variable during the build process and the application will use this URL for API requests.
+Code remains organized under `src/components`, `src/api`, `src/store` and
+related folders, with feature extraction underway. Execution trace processing
+lives in `src/features/executions/trace`; shared contracts live in `src/types`.
+Tests stay beside their source. See the [code structure guide](../docs/CODE_STRUCTURE_GUIDE.md)
+for backend ownership and import conventions.

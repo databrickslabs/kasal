@@ -42,7 +42,7 @@ import { Node as FlowNode } from 'reactflow';
 import { ChatHistoryService } from '../../api/chat/ChatHistoryService';
 import { ModelService } from '../../api/config/ModelService';
 import TraceService from '../../api/execution/TraceService';
-import { CanvasLayoutManager } from '../../utils/CanvasLayoutManager';
+import { CanvasLayoutManager } from '../../features/workflow/canvas/lib/CanvasLayoutManager';
 import { buildModelLabels } from '../../utils/modelDisplay';
 import { useUILayoutState, useUILayoutStore } from '../../store/uiLayout';
 

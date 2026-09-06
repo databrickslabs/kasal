@@ -25,7 +25,7 @@ import { readActiveExecution, clearActiveExecution } from '../store/activeExecut
 import { useExecutionStream } from './useExecutionStream';
 import { stopAllGenerationStreams } from '../utils/generationStreamManager';
 import { generateId } from '../utils/markdown';
-import { parsePreviewContent } from '../components/Preview/PreviewPanel';
+import { parsePreviewContent } from '../utils/preview';
 import { applyResultTransform, dropResultTransform } from '../utils/resultTransforms';
 import type { A2uiMessage } from '../../../shared/a2ui/stream';
 import type { Surface } from '../../../shared/a2ui';

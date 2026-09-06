@@ -15,7 +15,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { getJobTraces } from '../api/executions';
-import { processTraces } from '../../../hooks/global/useTraceData';
+import { processTraces } from '../../../features/executions/trace/lib/processTraces';
 import type { ProcessedTraces, Trace } from '../../../types/execution/trace';
 
 /** Matches the status poll's cadence: a run writes traces continuously, and a

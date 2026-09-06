@@ -44,7 +44,7 @@ These are extracted directly from PBI APIs (Admin Scanner, Execute Queries, XMLA
 and **inline value lists** (`Table[col] IN {"APET","CAN",...}`), *and* it harvests
 the value lists referenced by the auto-derived `switch_decompositions`. Code:
 `pipeline_config_generator_tool._auto_enrich_from_dax` (§1) and
-`generate_config.derive_filter_sets`. In practice most filter sets now arrive pre-filled.
+`services.powerbi.pipeline_config.derive_filter_sets`. In practice most filter sets now arrive pre-filled.
 
 **The remaining manual case — boolean flag columns**: When DAX filters on a
 pre-computed flag (`CALCULATE(SUM(...), Table[CWC_Filter] = 1)`), the flag is a
@@ -91,7 +91,7 @@ patterns into individual metric view measures (the slicer dropdown becomes N mea
 Proposer decomposes SELECTEDVALUE+SWITCH measures into individual `{name, num,
 num_fs, den, den_fs}` entries automatically — including the geo/plant/company
 selector variant (`ISFILTERED`/`HASONEVALUE`) — emitting **real SQL branches, not
-skeletons**. Code: `generate_config.derive_switch_decompositions` +
+skeletons**. Code: `services.powerbi.pipeline_config.derive_switch_decompositions` +
 `derive_geo_switch_decompositions`, plus `_auto_enrich_from_dax` (§ SWITCH).
 
 **The residual manual case**: A branch whose `[Measure]` reference the proposer
@@ -261,10 +261,10 @@ Earlier revisions of this guide listed `switch_decompositions` as "High effort,
 manual" and `filter_sets` as broadly manual. That is **no longer accurate** — both
 are now auto-derived by the Config Proposer:
 
-- **`switch_decompositions`** → `generate_config.derive_switch_decompositions` +
+- **`switch_decompositions`** → `services.powerbi.pipeline_config.derive_switch_decompositions` +
   `derive_geo_switch_decompositions` (plant/company selectors), emitting real SQL
   branches.
-- **`filter_sets`** → `generate_config.derive_filter_sets` +
+- **`filter_sets`** → `services.powerbi.pipeline_config.derive_filter_sets` +
   `pipeline_config_generator_tool._auto_enrich_from_dax`, harvesting inline
   literals, `IN {…}` lists, and the values used by the switch branches.
 - **DAX translation** is LLM-first with a skill corpus + correctness guards, so

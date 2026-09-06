@@ -1,4 +1,4 @@
-import { firstBy } from '../../utils/collectionIndexes';
+import { firstBy } from '../../shared/lib/collections';
 import { useCallback, useEffect, useMemo } from 'react';
 import {
   Edge,

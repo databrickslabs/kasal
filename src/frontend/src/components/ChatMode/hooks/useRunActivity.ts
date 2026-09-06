@@ -13,7 +13,7 @@
  */
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useExecutionStore } from '../store/executionStore';
-import { PreviewContent } from '../components/Preview/PreviewPanel';
+import type { PreviewContent } from '../types/preview';
 import type { RunStep } from '../components/Preview/traceEventStep';
 import { useSessionStore } from '../store/sessionStore';
 

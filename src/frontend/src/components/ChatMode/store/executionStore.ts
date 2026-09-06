@@ -1,8 +1,9 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { ExecutionStatus } from '../types/execution';
-import { ExecutionContext } from '../components/Chat/ChatContainer';
-import { PreviewContent, parsePreviewContent } from '../components/Preview/PreviewPanel';
+import type { ExecutionContext } from '../types/execution';
+import type { PreviewContent } from '../types/preview';
+import { parsePreviewContent } from '../utils/preview';
 import { useSessionStore } from './sessionStore';
 import {
   saveSessionPreview,

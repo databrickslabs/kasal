@@ -8,7 +8,7 @@
  */
 import React from 'react';
 import { Check, CircleDashed, CircleDot, X } from 'lucide-react';
-import type { PlanItem } from '../../../Jobs/TracePlanView';
+import type { PlanItem } from '../../../../features/executions/trace/lib/plan';
 
 function StatusIcon({ status }: { status: string }): JSX.Element {
   const common = { size: 14, className: 'flex-shrink-0 mt-0.5' } as const;

@@ -1,4 +1,4 @@
-import { Run } from '../../api/execution/ExecutionHistoryService';
+import type { Run } from './run';
 
 export interface ShowTraceProps {
   open: boolean;

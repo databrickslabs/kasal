@@ -6,7 +6,7 @@
  * against never existed. It does now.
  */
 import { extractDocSummary } from './surfaceAdapter';
-import type { PreviewContent } from '../components/Preview/PreviewPanel';
+import type { PreviewContent } from '../types/preview';
 import { stripEmbeddedUiDocument } from './resultExtraction';
 
 export function cleanTaskLabel(taskName: string): string {

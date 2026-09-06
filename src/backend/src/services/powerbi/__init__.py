@@ -3,6 +3,7 @@ Power BI: semantic models, DAX, and measure conversion.
 
 - ``service`` / ``context_config`` / ``semantic_model_cache`` — workspace and
   report metadata, plus the per-workspace context the tools read
+- ``pipeline_config`` — API extraction and reusable pipeline-config derivation
 - ``dax_rag_retriever`` — few-shot Q→DAX example retrieval
 - ``conversions`` / ``kpi_conversion`` — conversion jobs, history and saved
   configs (the BUSINESS side: rows, group scoping, status)

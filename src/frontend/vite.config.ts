@@ -2,12 +2,18 @@ import { defineConfig, type UserConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { visualizer } from 'rollup-plugin-visualizer';
 import path from 'path';
+import { createRequire } from 'node:module';
+
+const { preparePublic } = createRequire(import.meta.url)('../scripts/build-tasks.cjs');
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   const analyze = process.env.ANALYZE === 'true';
 
   const config: UserConfig = {
+    // Development, direct Vite builds and npm builds all use the same docs
+    // source without writing generated copies into the tracked public tree.
+    publicDir: preparePublic(path.resolve(__dirname, '..')),
     plugins: [
       // disableOxcRecommendation: silence the "switch to @vitejs/plugin-react-oxc"
       // notice. That plugin is now DEPRECATED (folded back into plugin-react), and

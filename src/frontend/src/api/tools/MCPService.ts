@@ -1,6 +1,6 @@
 import { AxiosError } from 'axios';
 import { apiClient } from '../../config/api/ApiConfig';
-import { MCPServerConfig } from '../../components/Configuration/MCP/MCPConfiguration';
+import type { MCPServerConfig } from '../../types/config/mcp';
 
 // Error response type
 interface ErrorResponse {

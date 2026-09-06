@@ -11,7 +11,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from src.schemas.dispatcher import IntentType
-from src.utils.prompt_utils import robust_json_parser
+from src.core.llm.robust_json import robust_json_parser
 
 logger = logging.getLogger(__name__)
 

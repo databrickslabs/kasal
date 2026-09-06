@@ -5,7 +5,7 @@
  * handleTraceUpdate(), and the TaskNode selector (~500 lines → ~60 lines).
  */
 
-import type { TaskStatus } from '../store/taskExecutionStore';
+import type { TaskStatus } from '../types/execution/task';
 
 /** Shape of an SSE trace event coming from the backend. */
 export interface TraceEvent {
