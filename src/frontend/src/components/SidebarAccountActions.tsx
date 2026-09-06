@@ -16,7 +16,7 @@ const SidebarAccountActions: React.FC<{ onOpenSettings?: () => void; showLabel?:
   const buttonSx = { borderRadius: 2, color: 'text.secondary', justifyContent: showLabel ? 'flex-start' : 'center', gap: 1.25, fontSize: 13, fontWeight: 500 };
 
   return (
-    <Box sx={{ mt: 'auto', width: '100%', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: showLabel ? 'stretch' : 'center', gap: '4px', pt: '8px', pb: '12px', px: showLabel ? '8px' : 0 }}>
+    <Box data-tour="workspace-account-actions" sx={{ mt: 'auto', width: '100%', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: showLabel ? 'stretch' : 'center', gap: '4px', pt: '8px', pb: '12px', px: showLabel ? '8px' : 0 }}>
       {onOpenSettings && <Tooltip title="Configuration" placement="right">
         <IconButton aria-label="Configuration" data-tour="configuration-button" onClick={onOpenSettings} style={buttonStyle} sx={buttonSx}>
           <SettingsIcon sx={{ fontSize: 20 }} />

@@ -70,7 +70,7 @@ const HarnessSelector: React.FC = () => {
       setOptions(response.harnesses ?? []);
     } catch (err) {
       console.error('Failed to change the default harness:', err);
-      setError('Failed to change the default harness');
+      setError('Failed to change the default framework');
       setHarness(previous);
     } finally {
       setSwitching(false);
@@ -84,13 +84,13 @@ const HarnessSelector: React.FC = () => {
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
         <MemoryIcon sx={{ color: 'primary.main', fontSize: '1.1rem' }} />
         <Typography variant="subtitle1" fontWeight={600}>
-          Default Harness
+          Default Framework
         </Typography>
         {switching && <CircularProgress size={14} />}
       </Box>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
         Used by runs that don&apos;t pick one themselves (scheduled and API-triggered).
-        Runs under way keep the harness they started with.
+        Runs under way keep the framework they started with.
       </Typography>
 
       {error && (

@@ -68,6 +68,7 @@ import CrewPlanningDialog from '../../features/workflow/planning/components/Crew
 import ScheduleDialog from '../../features/workflow/scheduling/components/ScheduleDialog';
 import TriggersDialog from '../../features/triggers/components/TriggersDialog';
 import JobsPanel from '../../features/executions/components/JobsPanel';
+import TutorialButton from '../../features/help/tutorial/TutorialButton';
 import InteractiveTutorial from '../../features/help/tutorial/InteractiveTutorial';
 import APIKeys from '../../features/configuration/components/APIKeys/APIKeys';
 import Logs from '../../features/executions/components/LLMLogs';
@@ -1417,7 +1418,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         {!isChatMode && showRunHistory && (
           <Drawer anchor={assistantPanelSide} variant={isCompact && !responseFocused ? 'temporary' : 'persistent'} open onClose={() => setExecutionHistoryVisible(false)}
             PaperProps={{ 'data-testid': 'workspace-conversation-pane', sx: { background: 'transparent', left: isCompact ? 56 : assistantPanelSide === 'left' ? leftSidebarBaseWidth + 8 : 'auto', right: isCompact ? 56 : assistantPanelSide === 'right' ? rightSidebarWidth + 8 : 'auto', top: 56, bottom: 8, height: 'auto', width: isCompact ? 'calc(100vw - 112px)' : responseMainWidth - 16, ...(isCompact ? { bottom: 'auto', height: 'calc(55vh - 16px)' } : {}), border: 0, borderRadius: '20px', overflow: 'hidden', boxShadow: 'none' } }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, px: 1, pt: 1.5, pb: 1, flexShrink: 0 }}>
+            <Box data-tour="workspace-panel-tabs" sx={{ display: 'flex', alignItems: 'center', gap: 0.25, px: 1, pt: 1.5, pb: 1, flexShrink: 0 }}>
               {areFlowsVisible && <Button color="inherit" size="small" aria-pressed={showingCrews} onClick={() => setFlowPanelTab('crews')} sx={{ fontSize: 12, px: 1, borderRadius: 2, bgcolor: showingCrews ? 'action.selected' : 'transparent' }}>Available Crews</Button>}
               <Button color="inherit" size="small" aria-pressed={!showingResponses && !showingCrews} onClick={() => setExecutionHistoryVisible(true)} sx={{ fontSize: 12, minWidth: 0, px: 1, borderRadius: 2, bgcolor: !showingResponses && !showingCrews ? 'action.selected' : 'transparent' }}>{areFlowsVisible ? 'All Runs' : 'Runs'}</Button>
               <Button color="inherit" size="small" aria-pressed={showingResponses} onClick={() => setAssistantPanelVisible(true)} sx={{ fontSize: 12, minWidth: 0, px: 1, borderRadius: 2, bgcolor: showingResponses ? 'action.selected' : 'transparent' }}>Responses</Button>
@@ -1663,6 +1664,10 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           onProceed={handleTrifectaProceed}
           onCancel={handleTrifectaCancel}
         />
+
+        {isChatMode && <Box sx={{ position: 'absolute', right: 4, bottom: { xs: 84, sm: 12 }, zIndex: 5 }}>
+          <TutorialButton onClick={() => dialogManager.setIsTutorialOpen(true)} />
+        </Box>}
 
         {/* Right Sidebar — hidden in chat mode */}
         {!isChatMode && (

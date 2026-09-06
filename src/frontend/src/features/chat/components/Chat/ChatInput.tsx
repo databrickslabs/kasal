@@ -560,7 +560,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
 
 
   return (
-    <div className="relative px-4 pb-5 pt-2">
+    <div data-tour="chat-composer" className="relative px-4 pb-5 pt-2">
       {/* Slash command autocomplete */}
       {showCommands && (
         <div

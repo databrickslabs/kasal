@@ -5,7 +5,6 @@ import {
   Tooltip,
   Paper,
   GlobalStyles,
-  Badge,
 } from '@mui/material';
 import {
   PersonAdd as PersonAddIcon,
@@ -17,13 +16,12 @@ import {
   Assessment as LogsIcon,
   PlayArrow as PlayArrowIcon,
   FileDownload as FileDownloadIcon,
-  HelpOutline as HelpOutlineIcon,
 } from '@mui/icons-material';
 import { Edge } from 'reactflow';
 import { usePermissionStore } from '../../store/permissions';
 import { useTabManagerStore } from '../../store/tabManager';
 import { useEventTriggersStore } from '../../store/eventTriggers';
-import { useWorkflowStore } from '../../store/workflow';
+import TutorialButton from '../../features/help/tutorial/TutorialButton';
 import ExportCrewDialog from '../../features/workflow/export/components/ExportCrewDialog';
 
 interface SidebarItem {
@@ -84,7 +82,6 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   onPlayFlow,
   edges = [],
 }) => {
-  const hasSeenTutorial = useWorkflowStore(state => state.hasSeenTutorial);
   const [animateAIAssistant, setAnimateAIAssistant] = useState(true);
   const [chatOpenedByClick, setChatOpenedByClick] = useState(false);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
@@ -370,6 +367,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                       Tooltip needs, so the tooltip listens on the span instead. */}
                   <span style={{ display: 'inline-flex' }}>
                   <IconButton
+                    data-tour={item.id}
                     aria-label={item.tooltip}
                     onClick={(e) => {
                       if (item.onClick && !item.disabled) {
@@ -409,14 +407,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
           ))}
           {onOpenTutorial && (
             <Box sx={{ mt: 'auto', pt: 1, pb: { xs: 9, sm: 0.5 }, flexShrink: 0 }}>
-              <Tooltip title="Start Tutorial / Help" placement="left">
-                <IconButton aria-label="Start Tutorial / Help" data-tour="help-button" onClick={onOpenTutorial}
-                  sx={{ width: 40, height: 40, borderRadius: 2, color: 'text.secondary' }}>
-                  <Badge variant="dot" color="primary" invisible={hasSeenTutorial}>
-                    <HelpOutlineIcon sx={{ fontSize: 20 }} />
-                  </Badge>
-                </IconButton>
-              </Tooltip>
+              <TutorialButton onClick={onOpenTutorial} />
             </Box>
           )}
         </Paper>
