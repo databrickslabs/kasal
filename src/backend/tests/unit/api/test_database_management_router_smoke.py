@@ -1,6 +1,6 @@
 import importlib
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -142,6 +142,10 @@ async def test_debug_permissions_and_headers_minimal():
 
 
 @pytest.mark.asyncio
+@patch(
+    "src.services.databricks.lakebase.preflight.preflight_via_service",
+    AsyncMock(return_value={"status": "healthy"}),
+)
 async def test_lakebase_endpoints_success_and_validations():
     svc = AsyncMock()
 

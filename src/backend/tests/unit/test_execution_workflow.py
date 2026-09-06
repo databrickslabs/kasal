@@ -277,6 +277,10 @@ class TestExecutionService:
             assert mock_create_task.called
 
     @pytest.mark.asyncio
+    @patch(
+        "src.services.flow_builder.flow_service.FlowService.get_flow_for_execution",
+        AsyncMock(return_value=MagicMock()),
+    )
     async def test_create_execution_with_flow_id(
         self, execution_service, sample_flow_config, mock_group_context
     ):
@@ -1383,53 +1387,19 @@ class TestExecutionWorkflowIntegration:
         del ExecutionService.executions[execution_id]
 
     @pytest.mark.asyncio
-    async def test_create_execution_flow_with_most_recent_flow(
+    async def test_create_execution_flow_requires_an_explicit_definition(
         self, execution_service, mock_group_context
     ):
-        """Test flow execution creation that finds most recent flow."""
-        config = CrewConfig(
-            agents_yaml={},
-            tasks_yaml={},
-            model="gpt-4o-mini",
-            execution_type="flow",
-            inputs={},  # No flow_id
-            schema_detection_enabled=False,
-        )
+        """Never choose an unrelated user's most recent flow implicitly."""
+        from src.core.exceptions import BadRequestError
 
-        with (
-            patch(
-                "src.services.execution.status.ExecutionStatusService"
-            ) as mock_status_service,
-            patch.object(
-                execution_service, "_check_for_running_jobs"
-            ) as mock_check_jobs,
-            patch("src.db.session.async_session_factory") as mock_session_factory,
-            patch("asyncio.create_task") as mock_create_task,
-        ):
-
-            mock_status_service.create_execution = AsyncMock(return_value=True)
-            mock_check_jobs.return_value = None
-            mock_create_task.return_value = MagicMock()
-
-            # Mock the async session and query to return a flow
-            mock_db = AsyncMock()
-            mock_flow = MagicMock()
-            mock_flow.id = uuid.uuid4()
-            mock_result = MagicMock()
-            mock_result.scalars.return_value.first.return_value = mock_flow
-            mock_db.execute.return_value = mock_result
-            mock_session_factory.return_value.__aenter__.return_value = mock_db
-
-            # Mock the execution name service response
-            mock_name_response = MagicMock()
-            mock_name_response.name = "Flow Most Recent"
-            execution_service.execution_name_service.generate_execution_name = (
-                AsyncMock(return_value=mock_name_response)
-            )
-
-            result = await execution_service.create_execution(
-                config, group_context=mock_group_context
-            )
-
-            assert isinstance(result, dict)
-            assert result["status"] == ExecutionStatus.RUNNING.value
+        config = CrewConfig(execution_type="flow", inputs={})
+        with patch(
+            "src.services.execution.status.ExecutionStatusService.create_execution",
+            new_callable=AsyncMock,
+        ) as create:
+            with pytest.raises(BadRequestError, match="flow_id or nodes"):
+                await execution_service.create_execution(
+                    config, group_context=mock_group_context
+                )
+            create.assert_not_awaited()

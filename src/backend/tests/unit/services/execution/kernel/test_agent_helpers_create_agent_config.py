@@ -74,7 +74,7 @@ def _patch_all_deps():
     return (
         patch_build("src.services.execution.kernel.agent_builder", "agent"),
         patch(
-            "src.services.agent_builder.agent_adapter.resolve_tool_ids_to_names",
+            "src.services.execution.kernel.tool_helpers.resolve_tools_for_agent",
             new_callable=AsyncMock,
             return_value=[],
         ),
@@ -583,9 +583,9 @@ class TestToolResolution:
             ),
             patch("src.services.mcp.mcp_client.service.MCPService"),
             patch(
-                "src.services.agent_builder.agent_adapter.resolve_tool_ids_to_names",
+                "src.services.execution.kernel.tool_helpers.resolve_tools_for_agent",
                 new_callable=AsyncMock,
-                return_value=["ResolvedTool"],
+                return_value=[("ResolvedTool", {})],
             ),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
@@ -637,9 +637,9 @@ class TestToolResolution:
             ),
             patch("src.services.mcp.mcp_client.service.MCPService"),
             patch(
-                "src.services.agent_builder.agent_adapter.resolve_tool_ids_to_names",
+                "src.services.execution.kernel.tool_helpers.resolve_tools_for_agent",
                 new_callable=AsyncMock,
-                return_value=["SomeTool"],
+                return_value=[("SomeTool", {})],
             ),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())

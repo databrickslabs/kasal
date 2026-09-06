@@ -695,7 +695,9 @@ class TestRunFlowExecution:
                 "src.services.flow_builder.flow_service.FlowService"
             ) as mock_flow_repo:
                 mock_flow_repo_inst = MagicMock()
-                mock_flow_repo_inst.find_flow = AsyncMock(return_value=mock_flow)
+                mock_flow_repo_inst.get_flow_for_execution = AsyncMock(
+                    return_value=mock_flow
+                )
                 mock_flow_repo.return_value = mock_flow_repo_inst
 
                 with patch(
@@ -770,7 +772,9 @@ class TestRunFlowExecution:
                 "src.services.flow_builder.flow_service.FlowService"
             ) as mock_flow_repo:
                 mock_flow_repo_inst = MagicMock()
-                mock_flow_repo_inst.find_flow = AsyncMock(return_value=None)
+                mock_flow_repo_inst.get_flow_for_execution = AsyncMock(
+                    return_value=None
+                )
                 mock_flow_repo.return_value = mock_flow_repo_inst
 
                 result = await service.run_flow_execution(

@@ -185,7 +185,7 @@ class TestSetupSyncAuth:
         assert os.environ.get("DATABRICKS_CLIENT_SECRET") == "csecret"
         mock_mlflow.set_tracking_uri.assert_called_with("databricks")
 
-    def test_pat_stripped_during_sdk_call_then_restored(self, monkeypatch):
+    def test_explicit_oauth_does_not_mutate_pat_during_sdk_call(self, monkeypatch):
         _spn_env(monkeypatch)
         monkeypatch.setenv("DATABRICKS_API_KEY", "key1")
         captured = {}
@@ -203,7 +203,10 @@ class TestSetupSyncAuth:
             ):
                 ok = _setup_sync("/Shared/base", "c", "s", None, "X")
         assert ok is True
-        assert captured["api_key_present"] is False  # stripped during the call
+        assert (
+            captured["api_key_present"] is True
+        )  # process-wide credentials stay intact
+        assert sdk.WorkspaceClient.call_args.kwargs["auth_type"] == "oauth-m2m"
         assert os.environ.get("DATABRICKS_API_KEY") == "key1"  # restored after
 
     def test_unexpected_auth_header_returns_false(self, monkeypatch):

@@ -682,6 +682,10 @@ class TestGetWorkspaceInfo:
 # ---------------------------------------------------------------------------
 
 
+@patch(
+    "src.services.databricks.lakebase.preflight.preflight_via_service",
+    AsyncMock(return_value={"status": "healthy"}),
+)
 class TestEnableLakebase:
 
     @pytest.mark.asyncio

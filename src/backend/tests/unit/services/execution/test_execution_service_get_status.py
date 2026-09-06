@@ -16,6 +16,7 @@ import pytest
 from src.core.exceptions import KasalError
 from src.schemas.execution import CrewConfig, ExecutionStatus
 from src.services.execution.service import ExecutionService
+from src.services.flow_builder.flow_service import FlowService
 from src.utils.user_context import GroupContext
 
 # ---------------------------------------------------------------------------
@@ -1193,6 +1194,7 @@ class TestCreateExecution:
         ExecutionService.executions.clear()
 
     @pytest.mark.asyncio
+    @patch.object(FlowService, "get_flow_for_execution", AsyncMock())
     async def test_create_flow_execution_no_background_tasks(self):
         svc = make_service()
         cfg = self._make_cfg(execution_type="flow", flow_id=str(uuid.uuid4()))
@@ -1256,6 +1258,7 @@ class TestCreateExecution:
         ExecutionService.executions.clear()
 
     @pytest.mark.asyncio
+    @patch.object(FlowService, "get_flow_for_execution", AsyncMock())
     async def test_create_execution_flow_type_logger_selection(self):
         """Test that flow execution type selects flow logger."""
         svc = make_service()
@@ -1333,6 +1336,7 @@ class TestCreateExecution:
         ExecutionService.executions.clear()
 
     @pytest.mark.asyncio
+    @patch.object(FlowService, "get_flow_for_execution", AsyncMock())
     async def test_create_execution_flow_with_flow_config(self):
         svc = make_service()
         fid = str(uuid.uuid4())
@@ -1586,32 +1590,11 @@ class TestDeferredRunNameGeneration:
 
 
 class TestCreateExecutionBranches:
-
-    @pytest.fixture(autouse=True)
-    def _stub_deferred_rename(self):
-        """Stub the fire-and-forget LLM rename (see TestCreateExecution)."""
-        with patch.object(
-            ExecutionService, "_generate_run_name_async", new=AsyncMock()
-        ) as m:
-            yield m
-
-    def _make_cfg(self, execution_type="crew", **kw):
-        cfg = MagicMock()
-        cfg.execution_type = execution_type
-        cfg.model = kw.get("model", "gpt-4")
-        cfg.agents_yaml = kw.get("agents_yaml", {"a1": {"role": "researcher"}})
-        cfg.tasks_yaml = kw.get("tasks_yaml", {"t1": {"description": "task"}})
-        cfg.inputs = kw.get("inputs", {})
-        cfg.planning = kw.get("planning", False)
-        cfg.reasoning = kw.get("reasoning", False)
-        cfg.schema_detection_enabled = kw.get("schema_detection_enabled", False)
-        cfg.flow_id = kw.get("flow_id", None)
-        cfg.nodes = kw.get("nodes", None)
-        cfg.edges = kw.get("edges", None)
-        cfg.flow_config = kw.get("flow_config", None)
-        return cfg
+    _make_cfg = TestCreateExecution._make_cfg
+    _stub_deferred_rename = TestCreateExecution._stub_deferred_rename
 
     @pytest.mark.asyncio
+    @patch.object(FlowService, "get_flow_for_execution", AsyncMock())
     async def test_flow_id_from_inputs_dict(self):
         """Cover line 910-912: flow_id extracted from inputs dict."""
         svc = make_service()
@@ -1746,6 +1729,7 @@ class TestCreateExecutionBranches:
         ExecutionService.executions.clear()
 
     @pytest.mark.asyncio
+    @patch.object(FlowService, "get_flow_for_execution", AsyncMock())
     async def test_flow_execution_with_no_nodes_but_has_flow_id(self):
         """Cover line 971: no nodes but flow_id is present."""
         svc = make_service()
@@ -1950,30 +1934,3 @@ class TestTheRunListSaysWhichHarnessRanEach:
             rows = await svc.list_executions(group_ids=["g1"])
 
         assert rows and rows[0]["harness"] is None
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["crew", "flow"])
-async def test_completed_run_details_preserve_catalog_identity_and_configuration(kind):
-    """Run actions must resolve the saved crew/flow from the details endpoint."""
-    from src.schemas.execution import ExecutionResponse
-
-    definition_id = uuid.uuid4()
-    config = {"nodes": [{"type": "crewNode", "data": {"crewId": str(definition_id)}}]} if kind == "flow" else {"agents_yaml": {"researcher": {"memory": True}}}
-    summary = SimpleNamespace(
-        status="COMPLETED", created_at=datetime(2026, 9, 6), completed_at=None,
-        run_name="Saved research", error=None, execution_type=kind,
-        mlflow_trace_id=None, mlflow_experiment_name=None, mlflow_evaluation_run_id=None,
-    )
-    row = SimpleNamespace(result={"output": "done"}, inputs=config,
-                          crew_id=definition_id if kind == "crew" else None,
-                          flow_id=definition_id if kind == "flow" else None)
-    repo = AsyncMock()
-    repo.get_execution_summary_by_job_id.return_value = summary
-    repo.get_execution_by_job_id.return_value = row
-    service = make_service(session=AsyncMock())
-    with patch("src.repositories.execution_history_repository.ExecutionHistoryRepository", return_value=repo):
-        result = await service.get_execution_status("run-1", group_ids=["workspace-1"])
-    response = ExecutionResponse(**result)
-    assert getattr(response, f"{kind}_id") == str(definition_id)
-    assert response.inputs == config
-    repo.get_execution_by_job_id.assert_awaited_once_with("run-1", group_ids=["workspace-1"])

@@ -380,7 +380,7 @@ class TestCreateAgentToolResolution:
                 "src.services.execution.kernel.agent_builder", "agent"
             ) as mock_agent_cls,
             patch(
-                "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+                "src.services.execution.kernel.tool_helpers.resolve_tools_for_agent",
                 new_callable=AsyncMock,
             ) as mock_resolve,
         ):
@@ -392,7 +392,7 @@ class TestCreateAgentToolResolution:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_agent_cls.return_value = MagicMock(llm=MagicMock())
-            mock_resolve.return_value = ["SearchTool"]
+            mock_resolve.return_value = [(name, {}) for name in ["SearchTool"]]
 
             agent = await create_agent(
                 agent_key="tool-agent",
@@ -431,7 +431,7 @@ class TestCreateAgentToolResolution:
                 "src.services.execution.kernel.agent_builder", "agent"
             ) as mock_agent_cls,
             patch(
-                "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+                "src.services.execution.kernel.tool_helpers.resolve_tools_for_agent",
                 new_callable=AsyncMock,
             ) as mock_resolve,
         ):
@@ -443,7 +443,7 @@ class TestCreateAgentToolResolution:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_agent_cls.return_value = MagicMock(llm=MagicMock())
-            mock_resolve.return_value = ["MCPTool"]
+            mock_resolve.return_value = [(name, {}) for name in ["MCPTool"]]
 
             agent = await create_agent(
                 agent_key="mcp-agent",
@@ -478,7 +478,7 @@ class TestCreateAgentToolResolution:
                 "src.services.execution.kernel.agent_builder", "agent"
             ) as mock_agent_cls,
             patch(
-                "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+                "src.services.execution.kernel.tool_helpers.resolve_tools_for_agent",
                 new_callable=AsyncMock,
             ) as mock_resolve,
         ):
@@ -490,7 +490,7 @@ class TestCreateAgentToolResolution:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_agent_cls.return_value = MagicMock(llm=MagicMock())
-            mock_resolve.return_value = ["MCPAdapterTool"]
+            mock_resolve.return_value = [(name, {}) for name in ["MCPAdapterTool"]]
 
             agent = await create_agent(
                 agent_key="mcp-adapter-agent",
@@ -522,7 +522,7 @@ class TestCreateAgentToolResolution:
                 "src.services.execution.kernel.agent_builder", "agent"
             ) as mock_agent_cls,
             patch(
-                "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+                "src.services.execution.kernel.tool_helpers.resolve_tools_for_agent",
                 new_callable=AsyncMock,
             ) as mock_resolve,
         ):
@@ -534,7 +534,7 @@ class TestCreateAgentToolResolution:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_agent_cls.return_value = MagicMock(llm=MagicMock())
-            mock_resolve.return_value = ["MissingTool"]
+            mock_resolve.return_value = [(name, {}) for name in ["MissingTool"]]
 
             agent = await create_agent(
                 agent_key="missing-tool-agent",
@@ -564,7 +564,7 @@ class TestCreateAgentToolResolution:
                 "src.services.execution.kernel.agent_builder", "agent"
             ) as mock_agent_cls,
             patch(
-                "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+                "src.services.execution.kernel.tool_helpers.resolve_tools_for_agent",
                 new_callable=AsyncMock,
             ) as mock_resolve,
         ):
@@ -576,7 +576,7 @@ class TestCreateAgentToolResolution:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_agent_cls.return_value = MagicMock(llm=MagicMock())
-            mock_resolve.return_value = ["SomeToolName"]
+            mock_resolve.return_value = [(name, {}) for name in ["SomeToolName"]]
 
             agent = await create_agent(
                 agent_key="no-factory-agent",
@@ -680,7 +680,7 @@ class TestCreateAgentAdditionalParams:
                 "src.services.execution.kernel.agent_builder", "agent"
             ) as mock_agent_cls,
             patch(
-                "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+                "src.services.execution.kernel.tool_helpers.resolve_tools_for_agent",
                 new_callable=AsyncMock,
             ) as mock_resolve,
         ):
@@ -692,7 +692,7 @@ class TestCreateAgentAdditionalParams:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_agent_cls.return_value = MagicMock(llm=MagicMock())
-            mock_resolve.return_value = ["GenieTool"]
+            mock_resolve.return_value = [(name, {}) for name in ["GenieTool"]]
 
             agent = await create_agent(
                 agent_key="genie-agent",
@@ -755,7 +755,7 @@ class TestCreateAgentAdditionalParams:
                 "src.services.execution.kernel.agent_builder", "agent"
             ) as mock_agent_cls,
             patch(
-                "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+                "src.services.execution.kernel.tool_helpers.resolve_tools_for_agent",
                 new_callable=AsyncMock,
             ) as mock_resolve,
         ):
@@ -883,7 +883,7 @@ class TestCreateAgentLLMConfigExtended:
                 "src.services.execution.kernel.agent_builder", "agent"
             ) as mock_agent_cls,
             patch(
-                "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+                "src.services.execution.kernel.tool_helpers.resolve_tools_for_agent",
                 new_callable=AsyncMock,
             ) as mock_resolve,
         ):
@@ -895,7 +895,7 @@ class TestCreateAgentLLMConfigExtended:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_agent_cls.return_value = MagicMock(llm=MagicMock())
-            mock_resolve.return_value = ["MCPWeirdTool"]
+            mock_resolve.return_value = [(name, {}) for name in ["MCPWeirdTool"]]
 
             agent = await create_agent(
                 agent_key="mcp-weird-agent",

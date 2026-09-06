@@ -63,6 +63,10 @@ def _engine_stub():
 
 
 @pytest.mark.asyncio
+@patch(
+    "src.services.databricks.lakebase.preflight.preflight_via_service",
+    AsyncMock(return_value={"status": "healthy"}),
+)
 class TestEnableWithExpandSchema:
     async def test_expand_runs_the_column_self_heal(self):
         svc = _make_service()
@@ -112,16 +116,20 @@ class TestEnableWithExpandSchema:
         assert result["success"] is True
         engine.dispose.assert_awaited()
 
-    async def test_plain_connect_changes_nothing(self):
-        """Without expand_schema the user asked to connect, not to alter."""
+    async def test_plain_connect_reconciles_columns_without_creating_tables(self):
+        """Existing schemas get newly required columns on every connection."""
         svc = _make_service()
-        heal = AsyncMock()
+        engine, conn = _engine_stub()
+        svc.connection_service.create_lakebase_engine_async = AsyncMock(
+            return_value=engine
+        )
+        heal = AsyncMock(return_value=True)
         with patch("src.db.session.run_schema_self_heal", heal):
             result = await svc.enable_lakebase("inst", "h.example.com")
-
-        assert "schema_reconcile" not in result
-        heal.assert_not_awaited()
+        assert result["schema_reconcile"] == "reconciled"
+        heal.assert_awaited_once_with(conn)
         svc.schema_service.create_tables_async.assert_not_awaited()
+        engine.dispose.assert_awaited_once()
 
     async def test_a_heal_failure_does_not_block_enabling(self):
         """Enabling Lakebase matters more than the reconcile; degrade, don't fail."""
@@ -302,7 +310,10 @@ class TestTheFourSetupOptions:
         import pathlib
 
         src_root = pathlib.Path(__file__).resolve().parents[6]  # .../src
-        path = src_root / "frontend/src/features/configuration/components/DatabaseManagement.tsx"
+        path = (
+            src_root
+            / "frontend/src/features/configuration/components/DatabaseManagement.tsx"
+        )
         assert path.exists(), path
         return path.read_text()
 
