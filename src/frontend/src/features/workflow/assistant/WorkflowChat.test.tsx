@@ -77,6 +77,14 @@ vi.mock('../../../store/crewExecution', () => ({
     setInputVariables: vi.fn(),
     executeCrew: vi.fn(),
     executeFlow: vi.fn(),
+    processType: 'sequential',
+    setProcessType: vi.fn(),
+    managerLLM: '',
+    setManagerLLM: vi.fn(),
+    reasoningEnabled: false,
+    setReasoningEnabled: vi.fn(),
+    reasoningConfig: { reasoning_effort: 'low' },
+    setReasoningConfig: vi.fn(),
   }),
 }));
 
