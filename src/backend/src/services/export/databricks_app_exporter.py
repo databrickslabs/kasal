@@ -35,6 +35,7 @@ from .yaml_generator import YAMLGenerator
 #: the two stay equal.
 _CREWAI_PIN = "1.15.16"
 
+
 def _can_export(name: "HarnessName") -> bool:
     """Whether a bundle can be produced for this harness, per its own binding.
 

@@ -177,5 +177,3 @@ async def test_no_retraction_when_no_shell_was_shipped(wired, monkeypatch):
     monkeypatch.setattr(runner, "_resolve_config", _off)
     _, sent = await _compose(shell_shipped=False)
     assert sent == []
-
-

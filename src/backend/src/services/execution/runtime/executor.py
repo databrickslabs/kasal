@@ -468,6 +468,7 @@ def run_agent(
     # A turn that ran a tool is not idempotent, so it is not replayed.
     executed_a_tool = False
     if functions:
+
         def _watch(name: str, fn: Callable[..., Any]) -> Callable[..., Any]:
             def watched(*args: Any, **kwargs: Any) -> Any:
                 nonlocal executed_a_tool
@@ -519,8 +520,7 @@ def run_agent(
                 raise
             if _identical_prompt_would_fail_again(e):
                 logger.warning(
-                    "agent %r: %s reproduces from the same prompt; not "
-                    "replaying it",
+                    "agent %r: %s reproduces from the same prompt; not " "replaying it",
                     agent.role,
                     type(e).__name__,
                 )

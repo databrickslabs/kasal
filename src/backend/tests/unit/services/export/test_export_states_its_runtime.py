@@ -26,9 +26,9 @@ CREW = {
 async def _export(harness: str):
     with bind(harness):
         result = await DatabricksAppExporter().export(CREW, {})
-    readme = next(
-        f for f in result["files"] if f["path"].endswith("README.md")
-    )["content"]
+    readme = next(f for f in result["files"] if f["path"].endswith("README.md"))[
+        "content"
+    ]
     return result["metadata"], readme
 
 
@@ -60,13 +60,15 @@ class TestTheBundleNamesItsRuntime:
         """The notice is for the case that is actually surprising: you asked for
         a bundle this export cannot make, and got a working one anyway."""
         with bind("kasal"):
-            result = await DatabricksAppExporter().export(CREW, {"runtime": "langgraph"})
+            result = await DatabricksAppExporter().export(
+                CREW, {"runtime": "langgraph"}
+            )
         notice = result["metadata"].get("runtime_notice", "")
         assert result["metadata"]["bundle_runtime"] == "kasal"
         assert "langgraph" in notice
-        readme = next(
-            f for f in result["files"] if f["path"].endswith("README.md")
-        )["content"]
+        readme = next(f for f in result["files"] if f["path"].endswith("README.md"))[
+            "content"
+        ]
         assert "**Note:**" in readme
 
     @pytest.mark.asyncio

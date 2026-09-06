@@ -146,7 +146,9 @@ async def export_crew(
         # The runtime rides along, or following this URL would hand back a
         # bundle for a DIFFERENT runtime than the one just exported — the two
         # differ in their dependencies, so it is not a cosmetic mismatch.
-        download_url = f"/api/crews/{crew_id}/export/download?format={request.export_format}"
+        download_url = (
+            f"/api/crews/{crew_id}/export/download?format={request.export_format}"
+        )
         if result.get("metadata", {}).get("bundle_runtime"):
             download_url += f"&runtime={result['metadata']['bundle_runtime']}"
         result["download_url"] = download_url

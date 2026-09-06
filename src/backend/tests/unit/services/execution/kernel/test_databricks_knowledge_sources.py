@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
-
 # Add the backend src directory to the path
 
 # NOTE: process_knowledge_sources removed - using DatabricksKnowledgeSearchTool instead

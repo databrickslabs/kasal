@@ -37,12 +37,22 @@ class TestTheBundleIsCrewAIs:
         """One import line is the whole seam — the file reads identically for
         either runtime."""
         agent_py = (crewai_app_bundle / "agent_server" / "agent.py").read_text()
-        assert "from agent_server.runtime_binding import Agent, Crew, Process, Task" in agent_py
+        assert (
+            "from agent_server.runtime_binding import Agent, Crew, Process, Task"
+            in agent_py
+        )
 
 
 class TestTheAdaptersAreShipped:
     def test_the_harness_adapters_are_vendored(self, crewai_app_bundle):
-        vendored = crewai_app_bundle / "agent_server" / "kasal_runtime" / "services" / "execution" / "harnesses"
+        vendored = (
+            crewai_app_bundle
+            / "agent_server"
+            / "kasal_runtime"
+            / "services"
+            / "execution"
+            / "harnesses"
+        )
         assert (vendored / "crewai" / "llm.py").is_file()
         assert (vendored / "crewai" / "tools.py").is_file()
         assert (vendored / "crewai" / "build.py").is_file()
@@ -51,7 +61,9 @@ class TestTheAdaptersAreShipped:
         """The adapters log through LoggerManager upstream. Rather than editing
         them — an edited copy is one that drifts — the bundle ships a shim with
         the same call shape over stdlib logging."""
-        shim = crewai_app_bundle / "agent_server" / "kasal_runtime" / "core" / "logger.py"
+        shim = (
+            crewai_app_bundle / "agent_server" / "kasal_runtime" / "core" / "logger.py"
+        )
         assert shim.is_file()
         assert "class LoggerManager" in shim.read_text()
 
@@ -60,11 +72,13 @@ class TestTheAdaptersAreShipped:
         what broke exports before — resolving to a mismatch that failed at the
         first LLM call, in the customer's workspace."""
         pyproject = (crewai_app_bundle / "pyproject.toml").read_text()
-        assert 'crewai==' in pyproject
+        assert "crewai==" in pyproject
 
 
 class TestItActuallyBuilds:
-    def test_an_agent_is_built_from_the_apps_own_kwargs(self, crewai_app_bundle, fake_llm):
+    def test_an_agent_is_built_from_the_apps_own_kwargs(
+        self, crewai_app_bundle, fake_llm
+    ):
         """The kwargs agent.py assembles are Kasal's vocabulary. CrewAI rejects
         some of them, so the binding translates rather than passing them
         through — this is the check that the translation is wired."""
@@ -85,7 +99,9 @@ class TestItActuallyBuilds:
         assert isinstance(agent, crewai.Agent)
         assert agent.role == "Researcher"
 
-    def test_the_transport_is_presented_to_crewai_as_an_llm(self, crewai_app_bundle, fake_llm):
+    def test_the_transport_is_presented_to_crewai_as_an_llm(
+        self, crewai_app_bundle, fake_llm
+    ):
         """Kasal's transport object is not a CrewAI LLM; the binding wraps it.
         Without this the agent would carry an object CrewAI cannot call."""
         from crewai.llms.base_llm import BaseLLM

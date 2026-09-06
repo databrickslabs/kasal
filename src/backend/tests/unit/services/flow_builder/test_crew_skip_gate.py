@@ -294,7 +294,9 @@ class TestAChangedVerdictNamesWhatChanged:
             )
 
         assert changed is True
-        said = " ".join(str(a) for call in logger.warning.call_args_list for a in call.args)
+        said = " ".join(
+            str(a) for call in logger.warning.call_args_list for a in call.args
+        )
         assert "not-the-current-hash" in said
         assert "Gatherer" in said
         assert "browser_search_and_read" in said
@@ -311,7 +313,9 @@ class TestAChangedVerdictNamesWhatChanged:
         identity = compute_crew_identity("Crew", [task])
 
         with patch.object(checkpoint_skip, "logger") as logger:
-            changed = checkpoint_skip._identity_changed("Crew", [task], {"Crew": identity})
+            changed = checkpoint_skip._identity_changed(
+                "Crew", [task], {"Crew": identity}
+            )
 
         assert changed is False
         assert logger.warning.call_args_list == []
