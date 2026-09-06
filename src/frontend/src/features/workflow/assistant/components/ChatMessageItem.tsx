@@ -545,7 +545,7 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
                 {renderMessageContent()}
               </Box>
               {message.type === 'assistant' && !message.isIntermediate && (
-                message.metadata?.catalogKind || ((message.intent === 'generate_crew' || message.intent === 'generate_flow') && Boolean(message.result)) ||
+                message.metadata?.catalogKind ||
                 message.content.includes('✓ Crew generated successfully') || message.content.includes('Your flow is on the canvas.')
               ) && <BuilderCatalogAction
                 flow={message.metadata?.catalogKind === 'flow' || message.intent === 'generate_flow' || message.content.includes('Your flow is on the canvas.')}

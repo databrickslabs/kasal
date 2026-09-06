@@ -25,4 +25,11 @@ describe('Generated plan catalog action', () => {
     render(<ChatMessageItem message={{ id: 'pending', type: 'assistant', content: 'Crew Plan', timestamp: new Date(), isIntermediate: true }} appearance="assistant-panel" />);
     expect(screen.queryByRole('button', { name: 'Save to catalog', exact: true })).not.toBeInTheDocument();
   });
+  it('shows one save action after the full plan, not on the generation acknowledgement', () => {
+    render(<>
+      <ChatMessageItem message={{ id: 'intro', type: 'assistant', content: "I've created a crew with:\nClick Play to run the crew.", intent: 'generate_crew', result: { agents: [], tasks: [] }, timestamp: new Date() }} appearance="assistant-panel" />
+      <ChatMessageItem message={{ id: 'plan', type: 'assistant', content: 'Crew Plan\n✓ Crew generated successfully', timestamp: new Date() }} appearance="assistant-panel" />
+    </>);
+    expect(screen.getAllByRole('button', { name: 'Save to catalog', exact: true })).toHaveLength(1);
+  });
 });

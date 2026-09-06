@@ -1201,6 +1201,12 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               // Legacy synchronous path (fallback)
               detachTabFromSavedCrew();
               handleCrewGenerated(genResult as GeneratedCrew);
+              const crew = genResult as GeneratedCrew;
+              if (crew.agents?.length && crew.tasks?.length) {
+                setMessages(prev => prev.map(message => message.id === assistantMessage.id
+                  ? { ...message, metadata: { ...message.metadata, catalogKind: 'crew', catalogName: crew.tasks?.[0]?.name || crew.agents?.[0]?.name } }
+                  : message));
+              }
             }
             break;
           }
