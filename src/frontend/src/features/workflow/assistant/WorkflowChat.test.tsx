@@ -129,10 +129,7 @@ vi.mock('../../../store/uiLayout', () => ({
     chatPanelCollapsed: false,
     chatPanelWidth: 450,
   }),
-  useUILayoutStore: () => ({
-    chatPanelSide: 'right',
-    setChatPanelSide: vi.fn(),
-  }),
+  useUILayoutStore: Object.assign(() => ({ chatPanelSide: 'right', setChatPanelSide: vi.fn() }), { getState: () => ({ setFlowPanelTab: vi.fn(), setAssistantPanelVisible: vi.fn() }) }),
 }));
 
 vi.mock('./hooks/useChatSession', () => ({
@@ -1322,5 +1319,37 @@ describe('Run activity rendering (removed from chat — lives in ShowTrace)', ()
     expect(screen.queryByText(/Started execution/)).not.toBeInTheDocument();
     expect(screen.queryByText(/completed successfully/)).not.toBeInTheDocument();
     expect(screen.getByText('All done')).toBeInTheDocument();
+  });
+});
+
+vi.mock('../../../api/workflow/FlowService', () => ({ FlowService: { generateFlow: vi.fn() } }));
+
+describe('Flow Builder conversation', () => {
+  it('uses saved-crew flow generation and applies its draft instead of crew generation', async () => {
+    const { FlowService } = await import('../../../api/workflow/FlowService');
+    const draft = { name: 'Draft', message: 'Research then write', nodes: [{ id: 'flow-a', type: 'crewNode', position: { x: 0, y: 0 }, data: { crewId: 'saved-a' } }], edges: [], missing_capabilities: [] };
+    vi.mocked(FlowService.generateFlow).mockResolvedValue(draft);
+    const generated = vi.fn();
+    render(<WorkflowChat builderMode="flow" nodes={draft.nodes} onFlowGenerated={generated} selectedModel="test-model" />);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message Kasal' }), { target: { value: 'Research and write' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+    await waitFor(() => expect(generated).toHaveBeenCalledWith(draft));
+    expect(FlowService.generateFlow).toHaveBeenCalledWith('Research and write', 'test-model', ['saved-a'], expect.any(AbortSignal));
+  });
+
+  it('cancels generation when switching canvases and never applies the late result', async () => {
+    const { FlowService } = await import('../../../api/workflow/FlowService');
+    let finish!: (value: never) => void;
+    vi.mocked(FlowService.generateFlow).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    const generated = vi.fn();
+    const { rerender } = render(<WorkflowChat builderMode="flow" chatSessionId="first" onFlowGenerated={generated} />);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message Kasal' }), { target: { value: 'Build a flow' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+    await waitFor(() => expect(finish).toBeDefined());
+    const signal = vi.mocked(FlowService.generateFlow).mock.lastCall?.[3];
+    rerender(<WorkflowChat builderMode="flow" chatSessionId="second" onFlowGenerated={generated} />);
+    expect(signal?.aborted).toBe(true);
+    finish({ name: 'Late', nodes: [{ id: 'late' }], edges: [], message: 'Late', missing_capabilities: [] } as never);
+    await waitFor(() => expect(generated).not.toHaveBeenCalled());
   });
 });

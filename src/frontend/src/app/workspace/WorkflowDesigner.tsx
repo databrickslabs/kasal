@@ -1,3 +1,5 @@
+import { useFlowStateStore } from '../../store/flowState';
+import { buildFlowConfiguration } from '../../utils/flowConfigBuilder';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ReactFlowProvider as _ReactFlowProvider,
@@ -323,6 +325,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     chatPanelVisible: showChatPanel,
     executionHistoryVisible: showRunHistory,
     assistantPanelVisible,
+    flowPanelTab,
+    setFlowPanelTab,
     assistantPanelSide,
     setAssistantPanelVisible,
     assistantResponseFocused,
@@ -385,7 +389,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   const { isCompact, isMobile } = useResponsiveLayout();
   const effectiveChatVisible = showChatPanel; // Always respect user toggle
   const responseFocused = assistantResponseFocused && showRunHistory;
-  const showingResponses = assistantPanelVisible && !areFlowsVisible;
+  const showingResponses = assistantPanelVisible && (!areFlowsVisible || flowPanelTab === 'responses');
+  const showingCrews = areFlowsVisible && flowPanelTab === 'crews';
   const responseMainWidth = (window.innerWidth - leftSidebarBaseWidth - rightSidebarWidth) * assistantPanelRatio;
   const effectiveLeftMargin = leftSidebarBaseWidth + (responseFocused && !isCompact && assistantPanelSide === 'left' ? responseMainWidth : 0); // Always reserve sidebar space
 
@@ -1341,20 +1346,29 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             />
 
             {/* Keep workspace navigation available in flow mode and with the composer hidden. */}
-            {(areFlowsVisible || !effectiveChatVisible) && (
+            {(!effectiveChatVisible) && (
               <Box sx={{ position: 'absolute', left: 12, right: rightSidebarWidth + 12, bottom: isMobile ? 76 : 12, zIndex: 10, display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
                 <Box sx={{ pointerEvents: 'auto', display: 'flex', alignItems: 'center', gap: 1, p: 0.75, borderRadius: 3, bgcolor: 'background.paper' }}>
                   <ModeSwitcher />
-                  {!areFlowsVisible && <Button color="inherit" size="small" onClick={() => setChatPanelVisible(true)} sx={{ fontSize: 12 }}>Show input</Button>}
+                  <Button color="inherit" size="small" onClick={() => setChatPanelVisible(true)} sx={{ fontSize: 12 }}>Show input</Button>
                 </Box>
               </Box>
             )}
 
-            {effectiveChatVisible && !areFlowsVisible && (
+            {effectiveChatVisible && (
               <Box sx={{ position: 'absolute', top: 0, left: 12, right: rightSidebarWidth + 12, bottom: isMobile ? 76 : 12, zIndex: 10, pointerEvents: 'none' }}>
                 <ChatPanel layout="canvas"
+                  builderMode={areFlowsVisible ? 'flow' : 'crew'}
+                  onFlowGenerated={(draft) => {
+                    const config = buildFlowConfiguration(draft.nodes, draft.edges, draft.name);
+                    setFlowNodes(draft.nodes); setFlowEdges(draft.edges);
+                    useWorkflowStore.getState().setFlowConfig(config);
+                    const tab = getActiveTab();
+                    if (tab) useFlowStateStore.getState().clearDeclared(tab.id);
+                    window.setTimeout(() => flowFlowInstanceRef.current?.fitView({ padding: 0.2, duration: 300 }), 150);
+                  }}
                   onNodesGenerated={(newNodes, newEdges) => { handleNodesGenerated(newNodes, newEdges, setNodes, setEdges); }}
-                  onLoadingStateChange={setIsChatProcessing} isVisible={showChatPanel} nodes={nodes} edges={edges}
+                  onLoadingStateChange={setIsChatProcessing} isVisible={showChatPanel} nodes={areFlowsVisible ? flowNodes : nodes} edges={areFlowsVisible ? flowEdges : edges}
                   onExecuteCrew={() => {
                     // Set current tab as running when executing from chat
                     const activeTab = getActiveTab();
@@ -1404,8 +1418,9 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           <Drawer anchor={assistantPanelSide} variant={isCompact && !responseFocused ? 'temporary' : 'persistent'} open onClose={() => setExecutionHistoryVisible(false)}
             PaperProps={{ 'data-testid': 'workspace-conversation-pane', sx: { background: 'transparent', left: isCompact ? 56 : assistantPanelSide === 'left' ? leftSidebarBaseWidth + 8 : 'auto', right: isCompact ? 56 : assistantPanelSide === 'right' ? rightSidebarWidth + 8 : 'auto', top: 56, bottom: 8, height: 'auto', width: isCompact ? 'calc(100vw - 112px)' : responseMainWidth - 16, ...(isCompact ? { bottom: 'auto', height: 'calc(55vh - 16px)' } : {}), border: 0, borderRadius: '20px', overflow: 'hidden', boxShadow: 'none' } }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, px: 1, pt: 1.5, pb: 1, flexShrink: 0 }}>
-              <Button color="inherit" size="small" aria-pressed={!showingResponses} onClick={() => setExecutionHistoryVisible(true)} sx={{ fontSize: 12, minWidth: 0, px: 1, borderRadius: 2, bgcolor: !showingResponses ? 'action.selected' : 'transparent' }}>Runs</Button>
-              {!areFlowsVisible && <Button color="inherit" size="small" aria-pressed={showingResponses} onClick={() => setAssistantPanelVisible(true)} sx={{ fontSize: 12, minWidth: 0, px: 1, borderRadius: 2, bgcolor: showingResponses ? 'action.selected' : 'transparent' }}>Responses</Button>}
+              {areFlowsVisible && <Button color="inherit" size="small" aria-pressed={showingCrews} onClick={() => setFlowPanelTab('crews')} sx={{ fontSize: 12, px: 1, borderRadius: 2, bgcolor: showingCrews ? 'action.selected' : 'transparent' }}>Available Crews</Button>}
+              <Button color="inherit" size="small" aria-pressed={!showingResponses && !showingCrews} onClick={() => setExecutionHistoryVisible(true)} sx={{ fontSize: 12, minWidth: 0, px: 1, borderRadius: 2, bgcolor: !showingResponses && !showingCrews ? 'action.selected' : 'transparent' }}>{areFlowsVisible ? 'All Runs' : 'Runs'}</Button>
+              <Button color="inherit" size="small" aria-pressed={showingResponses} onClick={() => setAssistantPanelVisible(true)} sx={{ fontSize: 12, minWidth: 0, px: 1, borderRadius: 2, bgcolor: showingResponses ? 'action.selected' : 'transparent' }}>Responses</Button>
               <Box sx={{ display: 'flex', ml: 'auto' }}>
                 {!isCompact && <>
                   <IconButton aria-label={`Move workspace panel to ${assistantPanelSide === 'left' ? 'right' : 'left'}`} title="Swap panel and canvas" size="small" onClick={() => setAssistantPanelSide(assistantPanelSide === 'left' ? 'right' : 'left')}><ArrowLeftRight size={15} /></IconButton>
@@ -1414,9 +1429,10 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
               <IconButton aria-label="Close workspace panel" size="small" onClick={() => setExecutionHistoryVisible(false)}><CloseIcon sx={{ fontSize: 17 }} /></IconButton>
             </Box>
-            <Box sx={{ flex: 1, minHeight: 0, display: showingResponses ? 'none' : 'block' }}><JobsPanel /></Box>
+            <Box sx={{ flex: 1, minHeight: 0, display: showingResponses || showingCrews ? 'none' : 'block' }}><JobsPanel /></Box>
+            {areFlowsVisible && <Box id="builder-available-crews-host" sx={{ flex: 1, minHeight: 0, display: showingCrews ? 'flex' : 'none', flexDirection: 'column' }} />}
             <Box id="builder-assistant-response-host" sx={{ flex: 1, minHeight: 0, display: showingResponses ? 'flex' : 'none', flexDirection: 'column' }} />
-            {!areFlowsVisible && <Box id="builder-assistant-composer-host" sx={{ flexShrink: 0 }} />}
+            <Box id="builder-assistant-composer-host" sx={{ flexShrink: 0 }} />
           </Drawer>
         )}
 

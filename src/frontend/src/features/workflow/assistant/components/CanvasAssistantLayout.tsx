@@ -19,7 +19,7 @@ interface Props {
 }
 
 export function CanvasAssistantLayout({ composer, response, responseKey, hasMessages, busy, dark, onNewChat, showEarlier, onToggleEarlier, onHide }: Props) {
-  const visible = useUILayoutStore(state => state.assistantPanelVisible);
+  const visible = useUILayoutStore(state => state.assistantPanelVisible && (!state.areFlowsVisible || state.flowPanelTab === 'responses'));
   const side = useUILayoutStore(state => state.assistantPanelSide);
   const paneOpen = useUILayoutStore(state => state.executionHistoryVisible);
   const focused = useUILayoutStore(state => state.assistantResponseFocused) && paneOpen;
@@ -42,7 +42,11 @@ export function CanvasAssistantLayout({ composer, response, responseKey, hasMess
     requestAnimationFrame(() => restoreRef.current?.focus());
   };
 
-  useEffect(() => { if (responseKey || busy) showResponse(); }, [responseKey, busy]);
+  const previousResponse = useRef(responseKey);
+  useEffect(() => {
+    if (busy || (responseKey && (responseKey !== previousResponse.current || !useUILayoutStore.getState().areFlowsVisible))) showResponse();
+    previousResponse.current = responseKey;
+  }, [responseKey, busy]);
   useLayoutEffect(() => {
     setHost(document.getElementById('builder-assistant-response-host'));
     setComposerTarget(document.getElementById('builder-assistant-composer-host'));

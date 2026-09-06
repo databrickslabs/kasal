@@ -2,7 +2,7 @@ import { useTabManagerStore } from '../../../../store/tabManager';
 import { useWorkflowStore } from '../../../../store/workflow';
 
 /** Open a conversation's canvas within the current workspace, preserving the current draft canvas. */
-export function openConversationCanvas(sessionId?: string): string {
+export function openConversationCanvas(sessionId?: string, viewMode: 'crew' | 'flow' = 'crew'): string {
   const tabs = useTabManagerStore.getState();
   const current = tabs.getActiveTab();
   if (current) {
@@ -15,7 +15,7 @@ export function openConversationCanvas(sessionId?: string): string {
     tabs.setActiveTab(existing.id);
     return existing.id;
   }
-  const id = tabs.createTab(undefined, 'crew');
+  const id = tabs.createTab(undefined, viewMode);
   if (sessionId) {
     // Historical conversations without a local canvas begin on a fresh tab.
     useTabManagerStore.setState(state => ({ tabs: state.tabs.map(tab => tab.id === id ? { ...tab, chatSessionId: sessionId } : tab) }));

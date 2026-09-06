@@ -67,7 +67,17 @@ export interface ModelConfig {
   supports_reasoning_effort?: boolean;
 }
 
+export interface FlowDraft {
+  name: string;
+  message: string;
+  nodes: Node[];
+  edges: Edge[];
+  missing_capabilities: string[];
+}
+
 export interface WorkflowChatProps {
+  builderMode?: 'crew' | 'flow';
+  onFlowGenerated?: (draft: FlowDraft) => void;
   layout?: 'panel' | 'canvas';
   onNodesGenerated?: (nodes: Node[], edges: Edge[]) => void;
   onLoadingStateChange?: (isLoading: boolean) => void;

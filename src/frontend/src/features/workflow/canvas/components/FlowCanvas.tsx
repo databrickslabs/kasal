@@ -1,3 +1,5 @@
+import { createPortal } from 'react-dom';
+import AvailableCrewsPanel from '../../flows/components/AvailableCrewsPanel';
 import React, { useCallback, useRef, useState, memo, useEffect, useLayoutEffect } from 'react';
 import ReactFlow, {
   Background,
@@ -137,7 +139,10 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
   // Crew palette state
   const [crews, setCrews] = useState<CrewResponse[]>([]);
   const [loadingCrews, setLoadingCrews] = useState(false);
-  const [paletteVisible, setPaletteVisible] = useState(true);
+  const paneOpen = useUILayoutStore(state => state.executionHistoryVisible);
+  const panelTab = useUILayoutStore(state => state.flowPanelTab);
+  const [crewHost, setCrewHost] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => { setCrewHost(document.getElementById('builder-available-crews-host')); }, [paneOpen, panelTab]);
 
   // Edge configuration dialog state
   const [isEdgeDialogOpen, setIsEdgeDialogOpen] = useState(false);
@@ -550,8 +555,7 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
       }
     },
     onOpenFlowDialog: () => {
-      setPaletteVisible(!paletteVisible);
-      showTemporaryNotification(`Crew palette ${!paletteVisible ? 'shown' : 'hidden'}`);
+      useUILayoutStore.getState().setFlowPanelTab('crews');
     },
     disabled: isRendering || hasError,
     instanceId: 'flow-canvas',
@@ -774,95 +778,7 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
         background: 'transparent',
       }}
     >
-      {/* Crew Palette - Left Sidebar */}
-      {paletteVisible && (
-        <Paper
-          elevation={3}
-          sx={{
-            width: '250px',
-            height: showRunHistory ? `calc(100% - ${executionHistoryHeight}px)` : '100%',
-            borderRight: 0,
-            backgroundColor: isDarkMode ? '#232930' : '#ffffff',
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden'
-          }}
-        >
-          {/* Header */}
-          <Box sx={{ p: 2, borderBottom: 0 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-              <Typography variant="h6" sx={{ fontSize: '1rem', fontWeight: 600 }}>
-                Available Crews
-              </Typography>
-              <Tooltip title="Refresh crews">
-                <IconButton size="small" onClick={loadCrews} disabled={loadingCrews}>
-                  <RefreshIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            </Box>
-            <Typography variant="caption" color="text.secondary">
-              Click to add to canvas
-            </Typography>
-          </Box>
-
-          {/* Crew List */}
-          <Box
-            sx={{
-              flex: 1,
-              minHeight: 0,
-              overflowY: 'auto',
-              overflowX: 'hidden'
-            }}
-            onWheel={(e) => {
-              e.stopPropagation();
-            }}
-            onMouseDown={(e) => {
-              e.stopPropagation();
-            }}
-          >
-            {loadingCrews ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-                <CircularProgress size={24} />
-              </Box>
-            ) : crews.length === 0 ? (
-              <Box sx={{ p: 2 }}>
-                <Typography variant="body2" color="text.secondary" align="center">
-                  No crews available
-                </Typography>
-              </Box>
-            ) : (
-              <List dense sx={{ p: 0 }}>
-                {crews.map((crew, index) => (
-                  <React.Fragment key={crew.id}>
-                    <ListItem disablePadding>
-                      <Tooltip title={crew.name} placement="right" enterDelay={500}>
-                        <ListItemButton onClick={() => handleAddCrewToCanvas(crew)}>
-                          <IconButton size="small" sx={{ mr: 1, pointerEvents: 'none', flexShrink: 0 }}>
-                            <AddIcon fontSize="small" />
-                          </IconButton>
-                          <ListItemText
-                            primary={crew.name}
-                            primaryTypographyProps={{
-                              fontSize: '0.875rem',
-                              noWrap: true,
-                              sx: {
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis'
-                              }
-                            }}
-                            sx={{ overflow: 'hidden' }}
-                          />
-                        </ListItemButton>
-                      </Tooltip>
-                    </ListItem>
-                    {index < crews.length - 1 && <Divider />}
-                  </React.Fragment>
-                ))}
-              </List>
-            )}
-          </Box>
-        </Paper>
-      )}
+      {crewHost && createPortal(<AvailableCrewsPanel crews={crews} loading={loadingCrews} onRefresh={loadCrews} onAdd={handleAddCrewToCanvas} />, crewHost)}
 
       {/* Canvas Area */}
       <Box sx={{ flex: 1, position: 'relative' }}>

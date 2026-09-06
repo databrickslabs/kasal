@@ -1,3 +1,4 @@
+import { FlowService } from '../../../api/workflow/FlowService';
 import { getDefaultModel } from '../../../config/defaultModel';
 import React, { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
 import {
@@ -82,6 +83,8 @@ import { HtmlPreviewDialog } from './components/HtmlPreviewDialog';
 
 const WorkflowChat: React.FC<WorkflowChatProps> = ({
   layout = 'panel',
+  builderMode = 'crew',
+  onFlowGenerated,
   onNodesGenerated,
   onLoadingStateChange,
   selectedModel = 'databricks-gpt-5-3-codex',
@@ -95,6 +98,11 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   chatSessionId: providedChatSessionId,
   onOpenLogs,
 }) => {
+  const flowRequest = useRef<AbortController | null>(null);
+  useEffect(() => {
+    setIsLoading(false);
+    return () => { flowRequest.current?.abort(); };
+  }, [providedChatSessionId, builderMode]);
   const [inputValue, setInputValue] = useState('');
   const [isImproving, setIsImproving] = useState(false);
   const improveRequest = useRef(0);
@@ -618,6 +626,39 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
 
+    if (builderMode === 'flow' && !isCollectingVariables && !isExecuteFlowCommand(inputValue) && !/^\/?run(?:\s+(?:the\s+)?flow)?[.!]?$/i.test(inputValue.trim())) {
+      const controller = new AbortController();
+      flowRequest.current = controller;
+      const userMessage: ChatMessage = { id: `flow-user-${Date.now()}`, type: 'user', content: inputValue.trim(), timestamp: new Date() };
+      const progressId = `flow-progress-${Date.now()}`;
+      setMessages(prev => [...prev, userMessage, { id: progressId, type: 'assistant', content: 'Finding saved crews and connecting your flow…', isIntermediate: true, timestamp: new Date() }]);
+      setInputValue(''); setIsLoading(true);
+      useUILayoutStore.getState().setFlowPanelTab('responses');
+      try {
+        await saveMessageToBackend(userMessage);
+        const draft = await FlowService.generateFlow(userMessage.content, selectedModel, nodes.map(node => node.data?.crewId).filter(Boolean), controller.signal);
+        if (controller.signal.aborted) return;
+        if (draft.nodes.length) onFlowGenerated?.(draft);
+        const response: ChatMessage = {
+          id: `flow-response-${Date.now()}`, type: 'assistant', timestamp: new Date(),
+          content: `${draft.nodes.length ? `**${draft.name}**\n\n` : ''}${draft.message}${draft.missing_capabilities?.length ? `\n\nNeeded: ${draft.missing_capabilities.join('; ')}` : ''}${draft.nodes.length ? '\n\nYour flow is on the canvas. Review the connections, then use Play to run it.' : ''}`,
+        };
+        setMessages(prev => [...prev.filter(message => message.id !== progressId), response]);
+        await saveMessageToBackend(response);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          const detail = (error as { response?: { data?: { detail?: unknown } } }).response?.data?.detail;
+          const response: ChatMessage = { id: `flow-error-${Date.now()}`, type: 'assistant', timestamp: new Date(), content: typeof detail === 'string' ? detail : 'Could not build the flow. Please try again.' };
+          setMessages(prev => [...prev.filter(message => message.id !== progressId), response]);
+          await saveMessageToBackend(response);
+        }
+      } finally {
+        setMessages(prev => prev.filter(message => message.id !== progressId));
+        if (flowRequest.current === controller) { flowRequest.current = null; setIsLoading(false); }
+      }
+      return;
+    }
+
     // Push to command history
     setCommandHistory(prev => [...prev, inputValue]);
     setHistoryIndex(-1);
@@ -815,7 +856,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     }
 
     // Check if user wants to execute a flow
-    if (isExecuteFlowCommand(inputValue)) {
+    if (isExecuteFlowCommand(inputValue) || (builderMode === 'flow' && /^\/?run(?:\s+(?:the\s+)?flow)?[.!]?$/i.test(inputValue.trim()))) {
       const userMessage: ChatMessage = {
         id: `msg-${Date.now()}`,
         type: 'user',
@@ -826,6 +867,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       setInputValue('');
       saveMessageToBackend(userMessage);
 
+      markPendingExecution();
+      useUILayoutStore.getState().setAssistantPanelVisible(true);
       window.dispatchEvent(new CustomEvent('executeFlowEvent'));
 
       const pendingMessage: ChatMessage = {
@@ -1544,7 +1587,10 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
 
   const handleNewConversation = () => {
-    if (layout === 'canvas') openConversationCanvas();
+    if (layout === 'canvas') {
+      openConversationCanvas(undefined, builderMode);
+      if (builderMode === 'flow') useUILayoutStore.getState().setFlowPanelTab('crews');
+    }
     else startNewChat();
     setShowSessionList(false);
     setShowEarlierMessages(false);
@@ -1801,7 +1847,7 @@ showSessionList && (
             inputRef={inputRef}
             fullWidth
             variant="standard"
-            placeholder={executingJobId ? "Execution in progress..." : "Describe what you want to create..."}
+            placeholder={executingJobId ? "Execution in progress..." : builderMode === 'flow' ? "Describe a flow using your available crews..." : "Describe what you want to create..."}
             value={inputValue}
             onChange={(e) => handleInputChange(e.target.value)}
             onKeyDown={(e) => {

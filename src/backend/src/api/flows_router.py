@@ -19,6 +19,8 @@ from src.schemas.execution_history import (
     CrewCheckpointInfo,
 )
 from src.schemas.flow import FlowCreate, FlowResponse, FlowUpdate
+from src.schemas.flow_generation import FlowGenerationRequest, FlowGenerationResponse
+from src.services.flow_builder.generation import FlowGenerationService
 from src.services.execution.checkpointing.service import CheckpointService
 from src.services.execution.history import ExecutionHistoryService
 from src.services.flow_builder.flow_service import FlowService
@@ -59,6 +61,21 @@ def clean_null_values(obj: Any) -> Any:
         return [clean_null_values(item) for item in obj]
     else:
         return obj
+
+
+@router.post("/generate", response_model=FlowGenerationResponse)
+async def generate_flow(
+    request: FlowGenerationRequest,
+    session: SessionDep,
+    group_context: GroupContextDep,
+):
+    """Draft a flow from this teamspace's crews without saving or running it."""
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can build flows")
+    try:
+        return await FlowGenerationService(session).generate(request, group_context)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("", response_model=List[FlowResponse])

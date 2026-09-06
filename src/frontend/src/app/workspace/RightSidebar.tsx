@@ -84,7 +84,8 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   edges = [],
 }) => {
   const { assistantPanelVisible, executionHistoryVisible, setAssistantPanelVisible, setExecutionHistoryVisible } = useUILayoutStore();
-  const historySelected = executionHistoryVisible && !assistantPanelVisible;
+  const flowPanelTab = useUILayoutStore(state => state.flowPanelTab);
+  const historySelected = executionHistoryVisible && !assistantPanelVisible && (!areFlowsVisible || flowPanelTab === 'runs');
   const [animateAIAssistant, setAnimateAIAssistant] = useState(true);
   const [chatOpenedByClick, setChatOpenedByClick] = useState(false);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);

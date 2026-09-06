@@ -279,3 +279,18 @@ describe('conversation split preferences', () => {
     expect(restored.useUILayoutStore.getState().assistantPanelRatio).toBe(0.3);
   });
 });
+
+
+describe('Flow Builder pane', () => {
+  it('restores Available Crews by default and switches tabs without hiding the input', async () => {
+    const { useUILayoutStore } = await freshModule({ appMode: 'flow', areFlowsVisible: true });
+    expect(useUILayoutStore.getState()).toMatchObject({ flowPanelTab: 'crews', assistantPanelVisible: false });
+    useUILayoutStore.getState().setFlowPanelTab('responses');
+    expect(useUILayoutStore.getState()).toMatchObject({ flowPanelTab: 'responses', assistantPanelVisible: true, chatPanelVisible: true });
+    useUILayoutStore.getState().setExecutionHistoryVisible(true);
+    expect(useUILayoutStore.getState()).toMatchObject({ flowPanelTab: 'runs', assistantPanelVisible: false, chatPanelVisible: true });
+    useUILayoutStore.getState().setAreFlowsVisible(false);
+    useUILayoutStore.getState().setAreFlowsVisible(true);
+    expect(useUILayoutStore.getState().flowPanelTab).toBe('crews');
+  });
+});

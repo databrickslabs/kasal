@@ -15,6 +15,8 @@ interface UILayoutStore extends UILayoutState {
   appMode: AppMode;
   setAppMode: (mode: AppMode) => void;
 
+  flowPanelTab: 'crews' | 'runs' | 'responses';
+  setFlowPanelTab: (tab: 'crews' | 'runs' | 'responses') => void;
   assistantPanelVisible: boolean;
   assistantPanelSide: 'left' | 'right';
   assistantPanelRatio: number;
@@ -95,7 +97,9 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
   // the mode switcher; an explicit persisted choice always wins.
   appMode: persistedState.appMode || 'chat',
 
-  assistantPanelVisible: true,
+  flowPanelTab: 'crews',
+  setFlowPanelTab: tab => set({ flowPanelTab: tab, assistantPanelVisible: tab === 'responses', executionHistoryVisible: true, chatPanelVisible: true, assistantResponseFocused: true }),
+  assistantPanelVisible: persistedState.appMode !== 'flow',
   assistantPanelSide: persistedState.assistantLayoutVersion === 2 && persistedState.assistantPanelSide === 'right' ? 'right' : 'left',
   assistantPanelRatio: Number.isFinite(persistedState.assistantPanelRatio) ? Math.max(0.3, Math.min(0.75, persistedState.assistantPanelRatio)) : 0.6,
   assistantResponseFocused: true,
@@ -106,7 +110,7 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
     saveToLocalStorage({ assistantPanelRatio, assistantLayoutVersion: 2, assistantPanelSide: get().assistantPanelSide });
   },
   setAssistantResponseFocused: focused => set({ assistantResponseFocused: focused, assistantPanelVisible: true, executionHistoryVisible: true, chatPanelVisible: true }),
-  setAssistantPanelVisible: visible => set(state => ({ assistantPanelVisible: visible, executionHistoryVisible: visible || (state.executionHistoryVisible && !state.assistantPanelVisible), ...(visible ? { chatPanelVisible: true, assistantResponseFocused: true } : {}) })),
+  setAssistantPanelVisible: visible => set(state => ({ assistantPanelVisible: visible, executionHistoryVisible: visible || (state.executionHistoryVisible && !state.assistantPanelVisible), ...(visible ? { chatPanelVisible: true, assistantResponseFocused: true, ...(state.areFlowsVisible ? { flowPanelTab: 'responses' as const } : {}) } : {}) })),
   setAssistantPanelSide: side => { set({ assistantPanelSide: side }); saveToLocalStorage({ assistantPanelSide: side, assistantLayoutVersion: 2 }); },
   assistantDockHeight: 128,
   setAssistantDockHeight: height => {
@@ -130,7 +134,7 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
     // layout effects still key off it. Flow mode shows the flow canvas; crew and
     // chat modes hide it.
     const areFlowsVisible = mode === 'flow';
-    set({ appMode: mode, areFlowsVisible });
+    set({ appMode: mode, areFlowsVisible, ...(areFlowsVisible && get().appMode !== 'flow' ? { flowPanelTab: 'crews', assistantPanelVisible: false, executionHistoryVisible: true, chatPanelVisible: true } : {}) });
     saveToLocalStorage({ appMode: mode, areFlowsVisible });
   },
 
@@ -158,7 +162,7 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
   },
 
   setExecutionHistoryVisible: (visible: boolean) => {
-    set({ executionHistoryVisible: visible, assistantPanelVisible: false });
+    set({ executionHistoryVisible: visible, assistantPanelVisible: false, ...(visible && get().areFlowsVisible ? { flowPanelTab: 'runs' as const } : {}) });
     saveToLocalStorage({ executionHistoryVisible: visible });
   },
 
@@ -184,7 +188,7 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
     } else if (currentMode === 'flow') {
       appMode = 'crew';
     }
-    set({ areFlowsVisible: visible, appMode });
+    set({ areFlowsVisible: visible, appMode, ...(visible && currentMode !== 'flow' ? { flowPanelTab: 'crews' as const, assistantPanelVisible: false, executionHistoryVisible: true, chatPanelVisible: true } : {}) });
     saveToLocalStorage({ areFlowsVisible: visible, appMode });
   },
 

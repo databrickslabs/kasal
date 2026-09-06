@@ -18,6 +18,8 @@ import { useJobManagementStore } from '../../../store/jobManagement';
 const kasalIcon24 = `${import.meta.env.BASE_URL}kasal-icon-24.png`;
 
 interface ChatPanelProps {
+  builderMode?: 'crew' | 'flow';
+  onFlowGenerated?: (draft: import('./types').FlowDraft) => void;
   layout?: 'panel' | 'canvas';
   onNodesGenerated?: (nodes: Node[], edges: Edge[]) => void;
   onLoadingStateChange?: (isLoading: boolean) => void;
@@ -34,6 +36,8 @@ interface ChatPanelProps {
 
 const ChatPanel: React.FC<ChatPanelProps> = ({
   layout = 'panel',
+  builderMode = 'crew',
+  onFlowGenerated,
   onNodesGenerated,
   onLoadingStateChange,
   isVisible = true,
@@ -49,7 +53,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   const { selectedModel, setSelectedModel } = useCrewExecutionStore();
   const { selectedTools } = useJobManagementStore();
 
-  if (layout === 'canvas') return <WorkflowChat layout="canvas" onNodesGenerated={onNodesGenerated} onLoadingStateChange={onLoadingStateChange} selectedModel={selectedModel} selectedTools={selectedTools} isVisible={isVisible} setSelectedModel={setSelectedModel} nodes={nodes} edges={edges} onExecuteCrew={onExecuteCrew} onToggleCollapse={onToggleCollapse} chatSessionId={chatSessionId} onOpenLogs={onOpenLogs} />;
+  if (layout === 'canvas') return <WorkflowChat builderMode={builderMode} onFlowGenerated={onFlowGenerated} layout="canvas" onNodesGenerated={onNodesGenerated} onLoadingStateChange={onLoadingStateChange} selectedModel={selectedModel} selectedTools={selectedTools} isVisible={isVisible} setSelectedModel={setSelectedModel} nodes={nodes} edges={edges} onExecuteCrew={onExecuteCrew} onToggleCollapse={onToggleCollapse} chatSessionId={chatSessionId} onOpenLogs={onOpenLogs} />;
 
   if (isCollapsed) {
     // Collapsed state - show only icon and expand button
