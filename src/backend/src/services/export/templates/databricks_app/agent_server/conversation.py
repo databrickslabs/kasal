@@ -233,6 +233,10 @@ def respond(
         ownership.ensure_owner(conversation_id, user_id)
     except ownership.ConversationOwnedByAnother:
         return "This conversation belongs to another user."
+    except ownership.ConversationUnclaimable:
+        return "This conversation predates ownership tracking; please start a new one."
+    except state_store.StorageUnavailable:
+        return "The conversation store is unavailable; please try again."
     # Bind this thread to the conversation so the event-bus listener
     # (crew_progress) can report live, ephemeral "doing X" status for this turn.
     progress.set_current(conversation_id)

@@ -55,6 +55,11 @@ class _Backend:
     def set(self, cid: str, key: str, value: str, now: float) -> None:
         raise NotImplementedError
 
+    def set_if_absent(self, cid: str, key: str, value: str, now: float) -> bool:
+        """Write only if no row exists; True when this call wrote it. The one
+        atomic primitive ownership claims are built on."""
+        raise NotImplementedError
+
     def delete(self, cid: str, key: str) -> None:
         raise NotImplementedError
 
@@ -73,6 +78,12 @@ class _MemoryBackend(_Backend):
 
     def set(self, cid: str, key: str, value: str, now: float) -> None:
         self._data[(cid, key)] = (value, now)
+
+    def set_if_absent(self, cid: str, key: str, value: str, now: float) -> bool:
+        if (cid, key) in self._data:
+            return False
+        self._data[(cid, key)] = (value, now)
+        return True
 
     def delete(self, cid: str, key: str) -> None:
         self._data.pop((cid, key), None)
@@ -112,6 +123,15 @@ class _SQLiteBackend(_Backend):
             (cid, key, value, now),
         )
         self._conn.commit()
+
+    def set_if_absent(self, cid: str, key: str, value: str, now: float) -> bool:
+        cur = self._conn.execute(
+            f"INSERT OR IGNORE INTO {_TABLE} "
+            "(conversation_id, key, value, updated_at) VALUES (?, ?, ?, ?)",
+            (cid, key, value, now),
+        )
+        self._conn.commit()
+        return cur.rowcount == 1
 
     def delete(self, cid: str, key: str) -> None:
         self._conn.execute(
@@ -254,6 +274,17 @@ class _PostgresBackend(_Backend):
             (cid, key, value, now),
         )
 
+    def set_if_absent(self, cid: str, key: str, value: str, now: float) -> bool:
+        row = self._execute(
+            f"INSERT INTO {self._table} (conversation_id, key, value, updated_at) "
+            "VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (conversation_id, key) DO NOTHING "
+            "RETURNING conversation_id",
+            (cid, key, value, now),
+            fetch=True,
+        )
+        return row is not None
+
     def delete(self, cid: str, key: str) -> None:
         self._execute(
             f"DELETE FROM {self._table} WHERE conversation_id = %s AND key = %s",
@@ -303,10 +334,19 @@ def backend_name() -> str:
     return _get_backend().name
 
 
+class StorageUnavailable(RuntimeError):
+    """The store could not answer. A caller deciding authorization must not
+    read this as "absent"."""
+
+
 def get_text(
-    cid: Optional[str], key: str, max_age: Optional[float] = None
+    cid: Optional[str],
+    key: str,
+    max_age: Optional[float] = None,
+    strict: bool = False,
 ) -> Optional[str]:
-    """The stored value, or None when absent/expired. Never raises."""
+    """The stored value, or None when absent/expired. Never raises — unless
+    ``strict``, for callers that must tell "absent" from "unknown"."""
     if not cid:
         return None
     try:
@@ -320,7 +360,24 @@ def get_text(
         return value
     except Exception as exc:  # noqa: BLE001
         print(f"[state_store] get({key}) failed: {exc}")
+        if strict:
+            raise StorageUnavailable(str(exc)) from exc
         return None
+
+
+def claim_text(cid: Optional[str], key: str, value: str) -> bool:
+    """Write ``value`` only if nothing is stored under ``key`` yet — atomically
+    in the backend, so two callers racing for one conversation cannot both
+    win. True when this call wrote it. Raises ``StorageUnavailable`` rather
+    than guessing."""
+    if not cid:
+        return False
+    try:
+        with _lock:
+            return _get_backend().set_if_absent(str(cid), key, value, time.time())
+    except Exception as exc:  # noqa: BLE001
+        print(f"[state_store] claim({key}) failed: {exc}")
+        raise StorageUnavailable(str(exc)) from exc
 
 
 def set_text(cid: Optional[str], key: str, value: str) -> None:
@@ -351,8 +408,10 @@ def delete(cid: Optional[str], key: str) -> None:
         print(f"[state_store] delete({key}) failed: {exc}")
 
 
-def get_json(cid: Optional[str], key: str, max_age: Optional[float] = None) -> Any:
-    raw = get_text(cid, key, max_age=max_age)
+def get_json(
+    cid: Optional[str], key: str, max_age: Optional[float] = None, strict: bool = False
+) -> Any:
+    raw = get_text(cid, key, max_age=max_age, strict=strict)
     if raw is None:
         return None
     try:

@@ -91,3 +91,77 @@ async def test_the_server_routes_check_ownership(app_bundle):
     for route in ("/progress/", "/conversations/", "/a2ui/", "/cancel/"):
         assert route in src
     assert src.count("ownership.require_owner(conversation_id, request.headers)") == 4
+
+
+@pytest.mark.asyncio
+async def test_history_from_before_ownership_is_nobodys(app_bundle):
+    """R2-02. An unowned id that already holds messages is legacy state; a
+    turn must not claim it and the routes must not serve it."""
+    from agent_server import ownership, state_store
+
+    _fresh_store()
+    state_store.set_json("legacy", "history", [{"role": "user", "content": "old"}])
+    with pytest.raises(ownership.ConversationUnclaimable):
+        ownership.ensure_owner("legacy", "bob")
+    assert ownership.owned_by("legacy", "bob") is False
+    assert ownership.owner_of("legacy") is None
+
+
+@pytest.mark.asyncio
+async def test_two_first_turns_racing_for_one_id_yield_one_owner(app_bundle):
+    import threading
+
+    from agent_server import ownership
+
+    _fresh_store()
+    barrier = threading.Barrier(2)
+    outcomes = {}
+
+    def claim(user):
+        barrier.wait()
+        try:
+            ownership.ensure_owner("raced", user)
+            outcomes[user] = "owner"
+        except ownership.ConversationOwnedByAnother:
+            outcomes[user] = "refused"
+
+    threads = [threading.Thread(target=claim, args=(u,)) for u in ("alice", "bob")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(outcomes.values()) == ["owner", "refused"]
+    assert outcomes[ownership.owner_of("raced")] == "owner"
+
+
+@pytest.mark.asyncio
+async def test_the_claim_is_refreshed_on_every_authorized_turn(app_bundle):
+    """The owner row must not age out from under a live conversation."""
+    import json
+
+    from agent_server import ownership, state_store
+
+    _fresh_store()
+    ownership.ensure_owner("live", "alice")
+    backend = state_store._get_backend()
+    _, first = backend.get("live", "owner")
+    backend.set("live", "owner", json.dumps({"user": "alice"}), first - 100)
+    ownership.ensure_owner("live", "alice")
+    _, refreshed = backend.get("live", "owner")
+    assert refreshed > first - 100
+
+
+@pytest.mark.asyncio
+async def test_a_store_that_cannot_answer_fails_closed(app_bundle, monkeypatch):
+    from agent_server import ownership, state_store
+
+    _fresh_store()
+    ownership.ensure_owner("c9", "alice")
+
+    def boom(*a, **k):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(state_store._get_backend(), "get", boom)
+    assert ownership.owned_by("c9", "alice") is False
+    with pytest.raises(state_store.StorageUnavailable):
+        ownership.ensure_owner("c9", "alice")
