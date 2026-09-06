@@ -169,6 +169,15 @@
   margin: 0;
 }
 
+/* Embedded activity also lives outside the Chat workspace's #id reset. Keep
+   native button chrome from turning its status and trace rows into gray boxes. */
+.kasal-chat-root [data-run-activity] button,
+.kasal-chat-root [data-chat-preview] button {
+  background-color: transparent;
+  border: 0;
+  color: inherit;
+}
+
 /*
  * Buttons need the full preflight reset too: without it, raw <button>s keep
  * the user-agent beveled border + gray background, which is what made the
@@ -528,7 +537,8 @@
    transparent over it, so bar + rail + stage read as a single surface with a
    continuous falloff. Brightest around the chat input (50% x, ~58% y is the
    landing composer), shadowing gently toward every edge and corner. */
-.kasal-chat-root::before {
+/* Theme scopes on embedded results/actions must never paint a viewport layer. */
+#kasal-chat-root::before {
   content: '';
   position: fixed;
   inset: 0;

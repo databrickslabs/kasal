@@ -358,15 +358,18 @@ export class RunService {
       schema_detection_enabled?: boolean;
       [key: string]: unknown;
     } | undefined = undefined;
-    if (executionItem.inputs && typeof executionItem.inputs === 'object') {
+    if (executionItem.inputs && (typeof executionItem.inputs === 'object' || typeof executionItem.inputs === 'string')) {
       // Parse inputs if it's a string, otherwise use directly
-      let parsedInputs = executionItem.inputs;
+      let parsedInputs: Record<string, unknown> = {};
       if (typeof executionItem.inputs === 'string') {
         try {
-          parsedInputs = JSON.parse(executionItem.inputs as string);
+          const parsed = JSON.parse(executionItem.inputs);
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) parsedInputs = parsed;
         } catch (e) {
           parsedInputs = {};
         }
+      } else {
+        parsedInputs = executionItem.inputs as Record<string, unknown>;
       }
       
       inputs = {

@@ -593,6 +593,15 @@ describe('getRunByJobId (PERF-037)', () => {
     expect(mockGet).toHaveBeenCalledWith('/executions/job-123');
   });
 
+  it('preserves flow graphs and memory flags stored in serialized execution inputs', async () => {
+    const service = await getService();
+    const inputs = { execution_type: 'flow', nodes: [{ id: 'crew-1' }], edges: [], flow_config: { state: { conversational: true } }, disable_memory: true };
+    mockGet.mockResolvedValue({ data: { execution_id: 'old-flow', status: 'completed', inputs: JSON.stringify(inputs) } });
+    const run = await service.getRunByJobId('old-flow');
+    expect(run?.inputs).toEqual(expect.objectContaining(inputs));
+    expect(run?.execution_type).toBe('flow');
+  });
+
   it('returns null on direct-endpoint failure without bulk fallback', async () => {
     const service = await getService();
     mockGet.mockImplementation((url: string) =>

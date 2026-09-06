@@ -10,10 +10,21 @@ vi.mock('../../../../api/execution/ScheduleService', () => ({ ScheduleService: {
   createScheduleFromExecution: createSchedule, listSchedules: vi.fn(async () => []),
 } }));
 vi.mock('../../../chat/components/Preview/MemoryPane', () => ({ default: ({ runId }: { runId: string }) => <div>Memory for {runId}</div> }));
+const getTraces = vi.hoisted(() => vi.fn(async () => ({ data: { traces: [] } })));
+vi.mock('../../../../shared/api/client', () => ({ apiClient: { get: getTraces }, default: { get: getTraces } }));
+vi.mock('../../../chat/store/appStore', () => ({ useAppStore: { getState: () => ({ loadCatalog: vi.fn() }) } }));
 import BuilderRunActions, { runUsedMemory } from './BuilderRunActions';
+import { BuilderPreviewContext } from './BuilderPreviewContext';
 const run = { job_id: 'older-run', status: 'completed', run_name: 'News', agents_yaml: '', inputs: { agents_yaml: { a: { memory: true } } } } as Run;
-beforeEach(() => { vi.clearAllMocks(); getRun.mockResolvedValue(run); usePermissionStore.setState({ allowAgentBuilder: true }); });
+beforeEach(() => { vi.clearAllMocks(); getRun.mockResolvedValue(run); getTraces.mockResolvedValue({ data: { traces: [] } }); usePermissionStore.setState({ allowAgentBuilder: true, allowFlowBuilder: true, userRole: 'admin' }); });
 describe('Builder completed-run actions', () => {
+  it('uses the adjacent builder preview for the selected historical run', async () => {
+    const open = vi.fn();
+    render(<BuilderPreviewContext.Provider value={{ openMemory: open, openStep: vi.fn() }}><BuilderRunActions jobId="older-run" /></BuilderPreviewContext.Provider>);
+    fireEvent.click(await screen.findByRole('button', { name: 'View memory graph' }));
+    expect(open).toHaveBeenCalledWith('older-run');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
   it('opens memory and schedules the message execution, not the latest canvas', async () => {
     render(<BuilderRunActions jobId="older-run" />);
     fireEvent.click(await screen.findByRole('button', { name: 'View memory graph' }));
@@ -39,5 +50,18 @@ describe('Builder completed-run actions', () => {
   it('recognizes stored YAML and honors execution-wide memory disable', () => {
     expect(runUsedMemory({ ...run, inputs: undefined, agents_yaml: 'a:\n  memory: true' })).toBe(true);
     expect(runUsedMemory({ ...run, inputs: { ...run.inputs, disable_memory: true } })).toBe(false);
+  });
+  it('shows the memory graph for a flow with memory traces and no agent YAML', async () => {
+    getRun.mockResolvedValue({ ...run, execution_type: 'flow', inputs: { agents_yaml: {} } });
+    getTraces.mockResolvedValue({ data: { traces: [{ id: 1 }] } } as any);
+    render(<BuilderRunActions jobId="flow-run" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'View memory graph' }));
+    expect(screen.getByText('Memory for flow-run')).toBeInTheDocument();
+    expect(getTraces).toHaveBeenCalledWith('/traces/job/flow-run', expect.objectContaining({ params: { limit: 1, event_type_prefix: 'memory_' } }));
+  });
+  it('keeps catalog saving on generated plans, not completed runs', async () => {
+    render(<BuilderRunActions jobId="older-run" />);
+    await screen.findByRole('button', { name: 'Schedule' });
+    expect(screen.queryByRole('button', { name: 'Save to catalog', exact: true })).not.toBeInTheDocument();
   });
 });

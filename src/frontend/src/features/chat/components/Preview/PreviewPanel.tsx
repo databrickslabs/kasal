@@ -162,6 +162,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatColla
 
   return (
     <aside
+      data-chat-preview
       className="flex flex-col h-full"
       style={{
         flex: chatCollapsed ? '1 1 100%' : '1 1 50%',

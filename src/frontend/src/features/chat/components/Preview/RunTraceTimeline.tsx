@@ -109,7 +109,6 @@ const EventRow: React.FC<EventRowProps> = ({ event, onSelect }) => {
           : undefined
       }
       className={`flex items-center gap-2 py-1 pl-3 pr-1 text-xs rounded-md ${clickable ? 'cursor-pointer hover:bg-[var(--bg-rail-hover)]' : ''}`}
-      style={{ borderLeft: '2px solid var(--bg-rail-hover)' }}
     >
       <EventIcon type={event.type} />
       <span

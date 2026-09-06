@@ -1346,6 +1346,10 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               }}
             />
 
+            {/* The shared Chat preview occupies the canvas column, so it follows
+                the conversation when the user swaps left and right. */}
+            <Box id="builder-assistant-preview-host" sx={{ position: 'absolute', inset: 0, zIndex: 20, pointerEvents: 'none' }} />
+
             {/* Keep workspace navigation available in flow mode and with the composer hidden. */}
             {(!effectiveChatVisible) && (
               <Box sx={{ position: 'absolute', left: 12, right: rightSidebarWidth + 12, bottom: isMobile ? 76 : 12, zIndex: 10, display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
@@ -1421,7 +1425,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             <Box data-tour="workspace-panel-tabs" sx={{ display: 'flex', alignItems: 'center', gap: 0.25, px: 1, pt: 1.5, pb: 1, flexShrink: 0 }}>
               {areFlowsVisible && <Button color="inherit" size="small" aria-pressed={showingCrews} onClick={() => setFlowPanelTab('crews')} sx={{ fontSize: 12, px: 1, borderRadius: 2, bgcolor: showingCrews ? 'action.selected' : 'transparent' }}>Available Crews</Button>}
               <Button color="inherit" size="small" aria-pressed={!showingResponses && !showingCrews} onClick={() => setExecutionHistoryVisible(true)} sx={{ fontSize: 12, minWidth: 0, px: 1, borderRadius: 2, bgcolor: !showingResponses && !showingCrews ? 'action.selected' : 'transparent' }}>{areFlowsVisible ? 'All Runs' : 'Runs'}</Button>
-              <Button color="inherit" size="small" aria-pressed={showingResponses} onClick={() => setAssistantPanelVisible(true)} sx={{ fontSize: 12, minWidth: 0, px: 1, borderRadius: 2, bgcolor: showingResponses ? 'action.selected' : 'transparent' }}>Responses</Button>
+              <Button color="inherit" size="small" aria-pressed={showingResponses} onClick={() => setAssistantPanelVisible(true)} sx={{ fontSize: 12, minWidth: 0, px: 1, borderRadius: 2, bgcolor: showingResponses ? 'action.selected' : 'transparent' }}>Conversation</Button>
               <Box sx={{ display: 'flex', ml: 'auto' }}>
                 {!isCompact && <>
                   <IconButton aria-label={`Move workspace panel to ${assistantPanelSide === 'left' ? 'right' : 'left'}`} title="Swap panel and canvas" size="small" onClick={() => setAssistantPanelSide(assistantPanelSide === 'left' ? 'right' : 'left')}><ArrowLeftRight size={15} /></IconButton>

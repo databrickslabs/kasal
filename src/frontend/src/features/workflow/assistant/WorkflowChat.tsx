@@ -69,8 +69,9 @@ import { useChatSession } from './hooks/useChatSession';
 import { useExecutionMonitoring } from './hooks/useExecutionMonitoring';
 
 // Import components
+import BuilderRunActivity from './components/BuilderRunActivity';
+import { builderTranscript } from './utils/builderTranscript';
 import { ChatMessageItem } from './components/ChatMessageItem';
-import { GroupedTraceMessages } from './components/GroupedTraceMessages';
 import { KnowledgeFileUpload, KnowledgeFileUploadHandle } from './KnowledgeFileUpload';
 import ChatInputPlusMenu from './components/ChatInputPlusMenu';
 import ModeSwitcher from '../../../app/workspace/ModeSwitcher';
@@ -110,7 +111,6 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     setIsImproving(false);
     return () => { improveRequest.current += 1; };
   }, [providedChatSessionId]);
-  const [showEarlierMessages, setShowEarlierMessages] = useState(false);
   const drafts = useRef(new Map<string, string>());
   const draftSession = useRef(providedChatSessionId);
   const currentDraft = useRef(inputValue);
@@ -120,7 +120,6 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     if (draftSession.current) drafts.current.set(draftSession.current, currentDraft.current);
     draftSession.current = providedChatSessionId;
     setInputValue(providedChatSessionId ? drafts.current.get(providedChatSessionId) || '' : '');
-    setShowEarlierMessages(false);
   }, [providedChatSessionId, layout]);
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
   const composerDark = useThemeStore(state => state.isDarkMode);
@@ -530,6 +529,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           id: msgId,
           type: 'assistant' as const,
           content: `**Crew Plan** — ${complexityLabel} ${processLabel} · ${plan.agents.length} agent${plan.agents.length === 1 ? '' : 's'} · ${plan.tasks.length} task${plan.tasks.length === 1 ? '' : 's'}`,
+          metadata: { catalogName: plan.tasks[0]?.name || plan.agents[0]?.name },
           timestamp: new Date(),
         },
       ]);
@@ -573,6 +573,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
       // Append success line BEFORE clearing the ref so it still finds the message
       appendProgressLine('\n✓ Crew generated successfully');
+      const completedPlanId = progressMsgIdRef.current;
+      setMessages(prev => prev.map(message => message.id === completedPlanId ? { ...message, metadata: { ...message.metadata, catalogKind: 'crew' } } : message));
       progressMsgIdRef.current = null;
 
       // Signal the Play button to pulse
@@ -641,6 +643,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         if (draft.nodes.length) onFlowGenerated?.(draft);
         const response: ChatMessage = {
           id: `flow-response-${Date.now()}`, type: 'assistant', timestamp: new Date(),
+          metadata: draft.nodes.length ? { catalogKind: 'flow', catalogName: draft.name } : undefined,
           content: `${draft.nodes.length ? `**${draft.name}**\n\n` : ''}${draft.message}${draft.missing_capabilities?.length ? `\n\nNeeded: ${draft.missing_capabilities.join('; ')}` : ''}${draft.nodes.length ? '\n\nYour flow is on the canvas. Review the connections, then use Play to run it.' : ''}`,
         };
         setMessages(prev => [...prev.filter(message => message.id !== progressId), response]);
@@ -1593,13 +1596,11 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     }
     else startNewChat();
     setShowSessionList(false);
-    setShowEarlierMessages(false);
   };
   const handleOpenConversation = (selectedSessionId: string) => {
     if (layout === 'canvas') {
       openConversationCanvas(selectedSessionId);
       setShowSessionList(false);
-      setShowEarlierMessages(true);
     } else { void loadSessionMessages(selectedSessionId); }
   };
 
@@ -1714,12 +1715,12 @@ showSessionList && (
         ref={messagesContainerRef}
         onScroll={handleMessagesScroll}
         sx={{
-          flex: messages.length === 0 ? '0 0 auto' : 1,
-          mt: messages.length === 0 ? 'auto' : 0,
+          flex: (messages.length === 0 && !executingJobId) ? '0 0 auto' : 1,
+          mt: (messages.length === 0 && !executingJobId) ? 'auto' : 0,
           minHeight: 0,
-          overflow: messages.length === 0 ? 'visible' : 'auto',
-          px: messages.length === 0 ? 0 : layout === 'canvas' ? 2 : 2.5,
-          py: messages.length === 0 || layout === 'canvas' ? 0 : 2,
+          overflow: (messages.length === 0 && !executingJobId) ? 'visible' : 'auto',
+          px: (messages.length === 0 && !executingJobId) ? 0 : layout === 'canvas' ? 2 : 2.5,
+          py: (messages.length === 0 && !executingJobId) || layout === 'canvas' ? 0 : 2,
           width: '100%',
           maxWidth: '100%',
           position: 'relative',
@@ -1728,7 +1729,7 @@ showSessionList && (
           display: showSessionList ? 'none' : 'flex',
           flexDirection: 'column',
         }}>
-        {messages.length === 0 ? (
+        {(messages.length === 0 && !executingJobId) ? (
           layout === 'canvas' ? <Box sx={{ p: 2.5 }}><Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Ask Kasal to create or refine your workflow. Responses will appear here.</Typography></Box> : <BuilderAssistantWelcome dark={composerDark} hasNodes={nodes.length > 0} />
         ) : (
           <List sx={{
@@ -1737,81 +1738,9 @@ showSessionList && (
             pt: 0, // Remove top padding
             pb: 0, // Remove bottom padding
           }}>
-            {(() => {
-              // Messages are already deduplicated by Zustand store
-              const lastUserIndex = messages.map(message => message.type).lastIndexOf('user');
-              const deduplicatedMessages = layout === 'canvas' && !showEarlierMessages ? messages.slice(Math.max(0, lastUserIndex)).filter(message => message.type !== 'user') : messages;
-
-              const filteredMessages = deduplicatedMessages.filter(message => {
-                // Run activity does not render in this chat: trace rows
-                // (including historical ones) live in ShowTrace, and the live
-                // view is the streamed answer bubble. Only conversation
-                // messages and results belong here.
-                if (message.type === 'trace') {
-                  return false;
-                }
-                if (message.type === 'execution' && (
-                  message.content.includes('🚀 Started execution:') ||
-                  message.content.includes('✅ Execution completed successfully') ||
-                  message.content.includes('⏳ Preparing to execute')
-                )) {
-                  return false;
-                }
-                return true;
-              });
-
-              const groupedMessages: (ChatMessage | ChatMessage[])[] = [];
-              let currentTraceGroup: ChatMessage[] = [];
-
-              filteredMessages.forEach((message, index) => {
-                if (message.type === 'trace') {
-                  currentTraceGroup.push(message);
-                } else {
-                  // If we have accumulated trace messages, add them as a group
-                  if (currentTraceGroup.length > 0) {
-                    groupedMessages.push([...currentTraceGroup]);
-                    currentTraceGroup = [];
-                  }
-                  // Add the non-trace message
-                  groupedMessages.push(message);
-                }
-              });
-
-              // Don't forget any remaining trace messages
-              if (currentTraceGroup.length > 0) {
-                groupedMessages.push(currentTraceGroup);
-              }
-
-              return (
-                <>
-                  {groupedMessages.map((item, index) => {
-                    if (Array.isArray(item)) {
-                      // It's a group of trace messages. Key on the FIRST id
-                      // only — including the last id would remount (and
-                      // re-collapse) the container on every streamed trace.
-                      const groupKey = `trace-group-${item[0].id}-${index}`;
-                      const groupRunning = Boolean(executingJobId) &&
-                        item.some(m => m.jobId === executingJobId);
-                      return (
-                        <GroupedTraceMessages
-                          key={groupKey}
-                          messages={item}
-                          running={groupRunning}
-                          onOpenLogs={onOpenLogs}
-                        />
-                      );
-                    } else {
-                      // It's a regular message
-                      return (
-                        <React.Fragment key={item.id}>
-                          <ChatMessageItem message={item} onOpenLogs={onOpenLogs} appearance="assistant-panel" dark={composerDark} />
-                        </React.Fragment>
-                      );
-                    }
-                  })}
-                </>
-              );
-            })()}
+            {builderTranscript(messages, executingJobId).map(item => item.kind === 'activity'
+              ? <BuilderRunActivity key={`activity-${item.jobId}`} jobId={item.jobId} running={item.jobId === executingJobId} onOpenLogs={onOpenLogs} />
+              : <ChatMessageItem key={item.message.id} message={item.message} onOpenLogs={onOpenLogs} appearance="assistant-panel" dark={composerDark} />)}
           </List>
         )}
         <div ref={messagesEndRef} />
@@ -2135,10 +2064,10 @@ showSessionList && (
       </Box>
   );
   if (layout === 'canvas') return <>
-    <CanvasAssistantLayout composer={composerContent} response={responseContent}
+    <CanvasAssistantLayout composer={composerContent} response={responseContent} sessionKey={`${builderMode}:${sessionId}`}
       responseKey={messages[messages.length - 1]?.id} hasMessages={messages.length > 0} busy={isLoading || !!executingJobId} dark={composerDark}
       onNewChat={handleNewConversation}
-      showEarlier={showEarlierMessages} onToggleEarlier={() => setShowEarlierMessages(value => !value)} onHide={onToggleCollapse} />
+      onHide={onToggleCollapse} />
     <HtmlPreviewDialog />
   </>;
 

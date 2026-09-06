@@ -1,39 +1,46 @@
-import React, { useEffect, useState } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import { Box, Dialog, IconButton, Typography } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
-import { load } from 'js-yaml';
+import { apiClient } from '../../../../shared/api/client';
+import { parseRunConfig, runConfiguration, runEntities } from '../utils/runConfiguration';
 import { runService } from '../../../../api/execution/ExecutionHistoryService';
 import { useThemeStore } from '../../../../store/theme';
 import type { Run } from '../../../../types/execution/run';
 import CompletedRunActions from '../../../chat/components/Cards/CompletedRunActions';
 import MemoryPane from '../../../chat/components/Preview/MemoryPane';
+import { BuilderPreviewContext } from './BuilderPreviewContext';
 import '../../../chat/chat.css';
 
 /** Read the saved execution configuration, never the current canvas's settings. */
 export function runUsedMemory(run: Run): boolean {
-  const config = run.inputs;
-  if (config?.disable_memory === true || config?.memory === false) return false;
-  if (config?.memory === true) return true;
-  try {
-    const agents = config?.agents_yaml ?? load(run.agents_yaml || '{}');
-    return !!agents && typeof agents === 'object' && Object.values(agents).some(
-      (agent) => agent && typeof agent === 'object' && agent.memory === true,
-    );
-  } catch { return false; }
+  const config = runConfiguration(run);
+  const inputs = parseRunConfig(config.inputs);
+  if (config.disable_memory === true || inputs.disable_memory === true || config.memory === false) return false;
+  if (config.memory === true || inputs.memory === true) return true;
+  const agents = runEntities(config.agents_yaml, run.agents_yaml);
+  return Object.values(agents).some(agent => agent?.memory === true || agent?.memory === 'true');
 }
 
 const BuilderRunActions: React.FC<{ jobId: string }> = ({ jobId }) => {
+  const openPreview = useContext(BuilderPreviewContext);
   const dark = useThemeStore((s) => s.isDarkMode);
   const [run, setRun] = useState<Run | null>(null);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const [hasMemoryTrace, setHasMemoryTrace] = useState(false);
   useEffect(() => {
     let active = true;
     setRun(null);
     setMemoryOpen(false);
+    setHasMemoryTrace(false);
+    const controller = new AbortController();
+    // Flow records often omit agent YAML; actual memory events are authoritative.
+    void apiClient.get(`/traces/job/${jobId}`, { params: { limit: 1, event_type_prefix: 'memory_' }, signal: controller.signal }).then(({ data }) => {
+      if (active) setHasMemoryTrace(Boolean(data?.traces?.length));
+    }).catch(() => { /* Stored configuration remains the fallback. */ });
     void runService.getRunByJobId(jobId).then((result) => {
       if (active) setRun(result);
     }).catch(() => { /* A missing historical execution cannot be scheduled. */ });
-    return () => { active = false; };
+    return () => { active = false; controller.abort(); };
   }, [jobId]);
 
   if (!run || !['completed', 'complete', 'success', 'succeeded'].includes(run.status.toLowerCase())) return null;
@@ -43,8 +50,8 @@ const BuilderRunActions: React.FC<{ jobId: string }> = ({ jobId }) => {
         <CompletedRunActions
           executionId={jobId}
           defaultName={`${run.run_name || 'Crew'} schedule`}
-          usedWorkspaceMemory={runUsedMemory(run)}
-          onOpenMemory={() => setMemoryOpen(true)}
+          usedWorkspaceMemory={hasMemoryTrace || runUsedMemory(run)}
+          onOpenMemory={() => openPreview ? openPreview.openMemory(jobId) : setMemoryOpen(true)}
         />
       </div>
       <Dialog open={memoryOpen} onClose={() => setMemoryOpen(false)} maxWidth="md" fullWidth
