@@ -6,11 +6,11 @@ using LLM models to convert natural language descriptions into
 CrewAI agent configurations.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from fastapi import APIRouter
-from pydantic import BaseModel
 
+from src.schemas.agent import AgentPrompt
 from src.core.dependencies import GroupContextDep, SessionDep
 from src.services.generation.agents import AgentGenerationService
 
@@ -21,14 +21,6 @@ router = APIRouter(
     tags=["Agent Generation"],
     responses={404: {"description": "Not found"}},
 )
-
-
-class AgentPrompt(BaseModel):
-    """Request model for agent generation."""
-
-    prompt: str
-    model: Optional[str] = "databricks-llama-4-maverick"
-    tools: Optional[List[str]] = []
 
 
 @router.post("/generate", response_model=Dict[str, Any])

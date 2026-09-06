@@ -16,14 +16,14 @@ vi.mock('../api/client', () => ({
   getClient: () => ({ get: mockGet, post: mockPost, put: mockPut, delete: mockDelete }),
 }));
 
-vi.mock('./sessionDb', () => ({
+vi.mock('./legacySessionDb', () => ({
   initDb: vi.fn(async () => undefined),
   listSessions: vi.fn(async () => []),
   getSessionMessages: vi.fn(async () => []),
 }));
 
 import * as api from './sessionApi';
-import * as localDb from './sessionDb';
+import * as localDb from './legacySessionDb';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -697,6 +697,13 @@ describe('sessionApi - preview (server-backed, replaces IndexedDB)', () => {
     const p = await api.getSessionPreview('s1');
     expect(mockGet).toHaveBeenCalledWith('/chat-history/sessions/s1/preview');
     expect(p).toEqual({ sessionId: 's1', type: 'ui', data: '{"a":1}', title: 'T' });
+  });
+
+  it('restores a legacy preview with missing type/title and tolerates an absent row', async () => {
+    mockGet.mockResolvedValueOnce({ data: { type: null, data: 'saved content', title: null } });
+    expect(await api.getSessionPreview('s1')).toEqual({ sessionId: 's1', type: 'ui', data: 'saved content' });
+    mockGet.mockResolvedValueOnce({ data: null });
+    expect(await api.getSessionPreview('s1')).toBeUndefined();
   });
 
   it('returns undefined when there is no preview (null data)', async () => {

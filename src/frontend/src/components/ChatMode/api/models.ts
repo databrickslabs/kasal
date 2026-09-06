@@ -1,5 +1,5 @@
-import { getClient } from './client';
-import { ModelConfigResponse } from '../types/dispatcher';
+import { getClient } from '../../../features/chat/api/client';
+import { ModelConfigResponse } from '../../../features/chat/types/dispatcher';
 
 interface ModelListResponse {
   models: ModelConfigResponse[];

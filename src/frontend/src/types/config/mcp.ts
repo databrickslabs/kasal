@@ -19,4 +19,3 @@ export interface MCPServerConfig {
   additional_config?: Record<string, unknown>;  // Additional configuration parameters
   group_id?: string | null; // Workspace override identifier when present
 }
-

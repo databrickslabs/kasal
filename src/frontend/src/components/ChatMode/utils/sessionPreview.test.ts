@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { deriveSessionPreviews } from './sessionPreview';
 import { getExecution } from '../api/executions';
-import type { ChatMessage } from '../types/chat';
+import type { ChatMessage } from '../../../features/chat/types/chat';
 
 vi.mock('../api/executions', () => ({ getExecution: vi.fn() }));
 const mockedGet = vi.mocked(getExecution);

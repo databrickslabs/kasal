@@ -1,4 +1,4 @@
-import { IntentType } from './dispatcher';
+import type { IntentType } from './dispatcher';
 
 /** An image attached in the chat: enough for the model to place it in a layout. */
 export interface ImageRef {

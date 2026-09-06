@@ -83,7 +83,8 @@ export function createMessageUpdateQueue(
     flush(id: string): Promise<void> {
       const entry = entries.get(id);
       if (!entry) return Promise.resolve();
-      const result = entry.pending?.promise ?? entry.running ?? Promise.resolve();
+      // A live entry always has a pending batch or an in-flight write.
+      const result = entry.pending?.promise ?? entry.running!;
       clearTimeout(entry.timer);
       entry.timer = undefined;
       entry.ready = true;

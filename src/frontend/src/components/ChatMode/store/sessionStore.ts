@@ -1,10 +1,10 @@
 import { create } from 'zustand';
-import { ChatMessage, ChatSession } from '../types/chat';
+import { ChatMessage, ChatSession } from '../../../features/chat/types/chat';
 import { generateId } from '../utils/markdown';
 // Sessions persist server-side (SQLite locally / Lakebase when active)
 // through the /chat-history API instead of browser IndexedDB. The adapter
-// keeps sessionDb's exact contract; previews and running-job markers stay
-// device-local in sessionDb.
+// retains the store's contract; previews and running-job markers also persist
+// on the server. IndexedDB is read only for legacy-session migration.
 import {
   initDb,
   assignUngroupedSessions as dbAssignUngroupedSessions,
@@ -16,7 +16,7 @@ import {
   addMessageToSession,
   updateMessageInSession,
   clearSessionMessages,
-} from '../db/sessionApi';
+} from '../../../features/chat/persistence/sessionApi';
 
 const ACTIVE_SESSION_KEY = 'kasal-chat-active-session';
 

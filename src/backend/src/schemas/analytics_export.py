@@ -42,3 +42,9 @@ class DashboardSummary(BaseModel):
     warehouse_id: Optional[str] = None
     parent_path: Optional[str] = None
     lifecycle_state: Optional[str] = None
+
+
+class GenieSpaceExportBody(BaseModel):
+    """Request body for POST download — carries the serialized_space from the tool output."""
+
+    serialized_space: Optional[str] = None

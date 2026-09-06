@@ -4,7 +4,7 @@ import { useDispatcher } from './useDispatcher';
 import { dispatch } from '../api/dispatcher';
 import { generateId } from '../utils/markdown';
 import { useExecutionStore } from '../store/executionStore';
-import type { DispatchResult, GenerationCompleteData } from '../types/dispatcher';
+import type { DispatchResult, GenerationCompleteData } from '../../../features/chat/types/dispatcher';
 
 vi.mock('../api/dispatcher', () => ({
   dispatch: vi.fn(),

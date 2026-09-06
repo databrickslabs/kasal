@@ -1,5 +1,5 @@
 import React from 'react';
-import { FlowListResult } from '../../types/dispatcher';
+import { FlowListResult } from '../../../../features/chat/types/dispatcher';
 
 interface FlowListCardProps {
   data: FlowListResult;

@@ -1,4 +1,4 @@
-import type { ChatMessage } from '../types/chat';
+import type { ChatMessage } from '../../../features/chat/types/chat';
 import type { SkillDraft, TranscriptTurn } from '../../../api/tools/SkillService';
 import type { TraceEntry } from './traceActivity';
 

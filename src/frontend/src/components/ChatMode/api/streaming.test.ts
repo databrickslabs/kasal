@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // getClient so we can drive the result-endpoint polling fallback.
 const getBaseUrl = vi.fn<[], string>(() => 'https://example.com/api/v1');
 const httpGet = vi.fn(async () => ({ data: { status: 'pending' } }));
-vi.mock('./client', () => ({
+vi.mock('../../../features/chat/api/client', () => ({
   __esModule: true,
   getBaseUrl: () => getBaseUrl(),
   getClient: () => ({ get: httpGet }),
@@ -604,7 +604,7 @@ describe('streamExecution when SSE is disabled', () => {
   it('returns a no-op cleanup and never opens an EventSource', async () => {
     vi.resetModules();
     vi.doMock('../../../utils/sseTransport', () => ({ SSE_ENABLED: false }));
-    vi.doMock('./client', () => ({
+    vi.doMock('../../../features/chat/api/client', () => ({
       __esModule: true,
       getBaseUrl: () => 'https://example.com/api/v1',
     }));
@@ -616,7 +616,7 @@ describe('streamExecution when SSE is disabled', () => {
     expect(() => cleanup()).not.toThrow(); // no-op cleanup
 
     vi.doUnmock('../../../utils/sseTransport');
-    vi.doUnmock('./client');
+    vi.doUnmock('../../../features/chat/api/client');
     vi.resetModules();
   });
 });
@@ -630,7 +630,7 @@ describe('streamGeneration when SSE is disabled (deployed)', () => {
     vi.resetModules();
     const get = vi.fn().mockResolvedValue({ data: { status: 'pending' } });
     vi.doMock('../../../utils/sseTransport', () => ({ SSE_ENABLED: false }));
-    vi.doMock('./client', () => ({
+    vi.doMock('../../../features/chat/api/client', () => ({
       __esModule: true,
       getBaseUrl: () => 'https://example.com/api/v1',
       getClient: () => ({ get }),
@@ -648,7 +648,7 @@ describe('streamGeneration when SSE is disabled (deployed)', () => {
 
     cleanup();
     vi.doUnmock('../../../utils/sseTransport');
-    vi.doUnmock('./client');
+    vi.doUnmock('../../../features/chat/api/client');
     vi.resetModules();
   });
 });

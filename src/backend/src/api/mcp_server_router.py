@@ -13,12 +13,12 @@ endpoint cannot reach a tool without it.
 """
 
 import logging
-from typing import Annotated, Any, Dict, Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
 
+from src.schemas.mcp import ToolCallRequest
 from src.core.dependencies import SessionDep
 from src.core.exceptions import KasalError, NotFoundError
 from src.services.external import streaming
@@ -88,19 +88,6 @@ async def get_external_caller(
 
 
 CallerDep = Annotated[ExternalCaller, Depends(get_external_caller)]
-
-
-class ToolCallRequest(BaseModel):
-    name: str = Field(..., description="The tool to invoke.")
-    arguments: Dict[str, Any] = Field(default_factory=dict)
-    stream: bool = Field(
-        default=False,
-        description=(
-            "Stream progress as NDJSON instead of returning one result. The "
-            "response is a chunked application/x-ndjson body, one JSON object "
-            "per line, ending with the terminal frame."
-        ),
-    )
 
 
 @router.get("/tools")

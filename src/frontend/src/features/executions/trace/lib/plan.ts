@@ -203,4 +203,3 @@ function normalise(rows: unknown[]): PlanItem[] | null {
     .filter((item) => item.content);
   return items.length ? items : null;
 }
-

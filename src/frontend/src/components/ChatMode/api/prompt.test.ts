@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
 import { improveChatPrompt } from './prompt';
-import { getClient } from './client';
+import { getClient } from '../../../features/chat/api/client';
 
-vi.mock('./client', () => ({
+vi.mock('../../../features/chat/api/client', () => ({
   getClient: vi.fn(),
 }));
 

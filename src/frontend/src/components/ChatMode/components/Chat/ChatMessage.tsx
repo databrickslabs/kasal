@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Maximize2 } from 'lucide-react';
-import { ChatMessage as ChatMessageType } from '../../types/chat';
+import { ChatMessage as ChatMessageType } from '../../../../features/chat/types/chat';
 import {
   CatalogListResult,
   CatalogLoadResult,
@@ -9,7 +9,7 @@ import {
   GeneratedAgent,
   GeneratedTask,
   GenerationCompleteData,
-} from '../../types/dispatcher';
+} from '../../../../features/chat/types/dispatcher';
 import { PlanData, FlowData } from '../../hooks/useDispatcher';
 import { useAppStore } from '../../store/appStore';
 import { isGenieToolRef, CrewNameConflictError } from '../../api/crews';

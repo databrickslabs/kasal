@@ -1,4 +1,4 @@
-import { getClient } from './client';
+import { getClient } from '../../../features/chat/api/client';
 
 /*
  * Knowledge-file upload for the chat workspace. Reuses Kasal's knowledge upload

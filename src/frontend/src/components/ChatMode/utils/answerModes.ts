@@ -1,4 +1,4 @@
-import { ModelConfigResponse } from '../types/dispatcher';
+import { ModelConfigResponse } from '../../../features/chat/types/dispatcher';
 
 /**
  * What an answer mode actually does, per model.

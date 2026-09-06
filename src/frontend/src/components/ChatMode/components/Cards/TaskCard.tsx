@@ -1,5 +1,5 @@
 import React from 'react';
-import { GeneratedTask } from '../../types/dispatcher';
+import { GeneratedTask } from '../../../../features/chat/types/dispatcher';
 
 interface TaskCardProps {
   task: GeneratedTask;

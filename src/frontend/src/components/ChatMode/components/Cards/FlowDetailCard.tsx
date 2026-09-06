@@ -1,5 +1,5 @@
 import React from 'react';
-import { FlowLoadResult } from '../../types/dispatcher';
+import { FlowLoadResult } from '../../../../features/chat/types/dispatcher';
 import { useExecutionStore } from '../../store/executionStore';
 
 interface FlowDetailCardProps {

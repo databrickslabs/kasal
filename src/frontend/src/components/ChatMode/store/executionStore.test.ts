@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { rememberTaskOutputMessage, useExecutionStore } from './executionStore';
 import { useSessionStore } from './sessionStore';
-import { saveSessionPreview, getSessionPreview, clearSessionRunningJob } from '../db/sessionApi';
+import { saveSessionPreview, getSessionPreview, clearSessionRunningJob } from '../../../features/chat/persistence/sessionApi';
 import { parsePreviewContent } from '../utils/preview';
 import { deriveSessionPreviews } from '../utils/sessionPreview';
 
@@ -22,7 +22,7 @@ vi.mock('./sessionStore', () => {
   };
 });
 
-vi.mock('../db/sessionApi', () => ({
+vi.mock('../../../features/chat/persistence/sessionApi', () => ({
   saveSessionPreview: vi.fn(),
   getSessionPreview: vi.fn(() => Promise.resolve(undefined)),
   getSessionMessages: vi.fn(() => Promise.resolve([])),

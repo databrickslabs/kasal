@@ -9,7 +9,7 @@ const listSavedCrews = vi.fn();
 const listSavedFlows = vi.fn();
 const listChatPublished = vi.fn();
 
-vi.mock('../api/client', () => ({
+vi.mock('../../../features/chat/api/client', () => ({
   updateClient: (...args: unknown[]) => updateClient(...args),
 }));
 vi.mock('../api/models', () => ({

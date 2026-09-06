@@ -1,5 +1,5 @@
 import React from 'react';
-import { GeneratedAgent } from '../../types/dispatcher';
+import { GeneratedAgent } from '../../../../features/chat/types/dispatcher';
 
 interface AgentCardProps {
   agent: GeneratedAgent;

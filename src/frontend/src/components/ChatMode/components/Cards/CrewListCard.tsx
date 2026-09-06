@@ -1,5 +1,5 @@
 import React from 'react';
-import { CatalogListResult } from '../../types/dispatcher';
+import { CatalogListResult } from '../../../../features/chat/types/dispatcher';
 
 interface CrewListCardProps {
   data: CatalogListResult;

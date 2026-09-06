@@ -1,4 +1,4 @@
-import { getClient } from './client';
+import { getClient } from '../../../features/chat/api/client';
 import { Execution, ExecutionConfig } from '../types/execution';
 
 export async function createExecution(

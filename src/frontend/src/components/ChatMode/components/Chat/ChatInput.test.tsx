@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within, act } from '@testing-library/react';
 import ChatInput from './ChatInput';
-import type { ModelConfigResponse } from '../../types/dispatcher';
+import type { ModelConfigResponse } from '../../../../features/chat/types/dispatcher';
 import { uploadKnowledgeFile } from '../../api/knowledge';
 import { useExecutionStore } from '../../store/executionStore';
 import { useAppStore } from '../../store/appStore';

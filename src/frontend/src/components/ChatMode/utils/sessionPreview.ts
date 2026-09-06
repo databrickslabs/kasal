@@ -13,7 +13,7 @@
  */
 import { getExecution } from '../api/executions';
 import { toSurface } from './surfaceAdapter';
-import type { ChatMessage } from '../types/chat';
+import type { ChatMessage } from '../../../features/chat/types/chat';
 import type { PreviewContent } from '../types/preview';
 
 // Page-session cache: executionId -> stored result (or null when missing).

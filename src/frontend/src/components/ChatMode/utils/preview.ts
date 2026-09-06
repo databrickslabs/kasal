@@ -49,4 +49,3 @@ export function parsePreviewContent(raw: string): PreviewContent | null {
   const surface = toSurface(cleaned);
   return surface ? { type: 'ui', data: JSON.stringify(surface) } : null;
 }
-

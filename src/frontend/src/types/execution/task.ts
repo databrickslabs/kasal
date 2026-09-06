@@ -7,4 +7,3 @@ export interface TaskState {
   completed_at?: string;
   failed_at?: string;
 }
-

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import AgentCard from './AgentCard';
-import { GeneratedAgent } from '../../types/dispatcher';
+import { GeneratedAgent } from '../../../../features/chat/types/dispatcher';
 
 describe('AgentCard', () => {
   const baseAgent: GeneratedAgent = {

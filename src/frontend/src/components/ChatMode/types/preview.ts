@@ -21,4 +21,3 @@ export interface PreviewContent {
    *  session switches instead of living only in this in-memory slot. */
   sourceMessageId?: string;
 }
-

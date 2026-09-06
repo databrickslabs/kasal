@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { generatePersonalWorkspaceId, fetchWorkspaces } from './workspaces';
-import { getClient } from './client';
+import { getClient } from '../../../features/chat/api/client';
 
-vi.mock('./client', () => ({
+vi.mock('../../../features/chat/api/client', () => ({
   getClient: vi.fn(),
 }));
 

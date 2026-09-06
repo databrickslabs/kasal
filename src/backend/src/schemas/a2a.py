@@ -171,3 +171,17 @@ class TaskArtifactUpdateEvent(BaseModel):
     kind: str = "artifact-update"
     artifact: Artifact
     contextId: Optional[str] = None
+
+
+class PushConfigRequest(BaseModel):
+    url: str = Field(..., description="Public https endpoint to POST updates to.")
+    token: Optional[str] = Field(
+        None, description="Sent as a bearer token on delivery."
+    )
+    secret: Optional[str] = Field(
+        None,
+        description=(
+            "HMAC secret. When set, deliveries carry X-Kasal-Signature so the "
+            "receiver can verify the call came from Kasal."
+        ),
+    )

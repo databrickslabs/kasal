@@ -1,4 +1,4 @@
-import { getBaseUrl, getClient } from './client';
+import { getBaseUrl, getClient } from '../../../features/chat/api/client';
 import { SSE_ENABLED } from '../../../utils/sseTransport';
 
 export interface StreamEvent {

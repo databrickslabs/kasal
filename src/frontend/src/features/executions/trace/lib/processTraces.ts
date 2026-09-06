@@ -627,4 +627,3 @@ export const parseTraceTime = (value: string | undefined | null): Date => {
   const iso = value.includes('T') ? value : value.replace(' ', 'T');
   return new Date(HAS_TIMEZONE_RE.test(iso) ? iso : `${iso}Z`);
 };
-

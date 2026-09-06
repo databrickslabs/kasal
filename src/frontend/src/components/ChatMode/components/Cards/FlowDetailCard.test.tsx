@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import FlowDetailCard from './FlowDetailCard';
-import { FlowLoadResult } from '../../types/dispatcher';
+import { FlowLoadResult } from '../../../../features/chat/types/dispatcher';
 
 // Mock the execution store. The component selects `s.isExecuting || s.isLoading`.
 const storeState = { isExecuting: false, isLoading: false };

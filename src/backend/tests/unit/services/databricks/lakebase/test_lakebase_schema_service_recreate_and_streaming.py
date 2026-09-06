@@ -322,11 +322,11 @@ class TestCreateTablesAsyncDetailed:
         with (
             patch("src.services.databricks.lakebase.schema.Base") as mock_base,
             patch(
-                "src.services.databricks.lakebase.superuser.enter_superuser_async",
+                "src.db.lakebase_ddl.enter_superuser_async",
                 new=AsyncMock(return_value=False),
             ),
             patch(
-                "src.services.databricks.lakebase.superuser.enable_pgvector_async",
+                "src.db.lakebase_ddl.enable_pgvector_async",
                 new=AsyncMock(return_value=False),
             ),
             patch(

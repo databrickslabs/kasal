@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useExecutionStore } from '../../store/executionStore';
-import { GenerationCompleteData } from '../../types/dispatcher';
+import { GenerationCompleteData } from '../../../../features/chat/types/dispatcher';
 import { postCrewFeedback, CrewNameConflictError, deriveCrewName } from '../../api/crews';
 import { useAppStore } from '../../store/appStore';
 import { usePermissionStore } from '../../../../store/permissions';

@@ -610,4 +610,3 @@ class TestRobustJsonParserReasoningAndTruncation:
         """A stray ']' where a '}' was expected is dropped."""
         result = robust_json_parser('{"a":1,"b":{"c":2]}')
         assert result["a"] == 1 and result["b"]["c"] == 2
-

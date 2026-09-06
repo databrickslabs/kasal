@@ -9,7 +9,7 @@
  * registering the full Databricks catalog also lives in Configuration → MCP
  * (served by MCPService, src/api/MCPService.ts).
  */
-import { getClient } from './client';
+import { getClient } from '../../../features/chat/api/client';
 
 export interface KasalMcpServer {
   id: string | number;

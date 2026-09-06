@@ -66,4 +66,3 @@ describe('parsePreviewContent — A2UI only', () => {
     expect(parsePreviewContent('just a normal sentence with nothing special here at all')).toBeNull();
   });
 });
-

@@ -16,7 +16,7 @@ import { useSessionStore } from '../store/sessionStore';
 import { useExecutionStore } from '../store/executionStore';
 import { useAppStore } from '../store/appStore';
 import { PlanData, FlowData } from '../hooks/useDispatcher';
-import { GenerationCompleteData, RoutedRunFields } from '../types/dispatcher';
+import { GenerationCompleteData, RoutedRunFields } from '../../../features/chat/types/dispatcher';
 import { buildCrewConfig, buildFlowConfig, buildCrewConfigFromGenerated } from '../utils/crewConfigBuilder';
 import {
   DetectedVariable,
@@ -24,7 +24,7 @@ import {
   detectVariablesFromGenerated,
 } from '../../../utils/variableDetector';
 import { deriveFlowInputs } from '../../../utils/flowInputs';
-import { getSessionPreview } from '../db/sessionApi';
+import { getSessionPreview } from '../../../features/chat/persistence/sessionApi';
 import { registerResultTransform } from '../utils/resultTransforms';
 import { latestDeck, parseSlideEdit, planSlideEdit, refinerAgent } from '../utils/slideRefine';
 import { ensureDeckFence, fenceDeck, isDeck, splitSlides } from '../utils/htmlDeck';

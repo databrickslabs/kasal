@@ -6,7 +6,7 @@ import {
   modelDisplayName,
   modelLacksReasoning,
 } from './answerModes';
-import { ModelConfigResponse } from '../types/dispatcher';
+import { ModelConfigResponse } from '../../../features/chat/types/dispatcher';
 
 const model = (
   key: string,

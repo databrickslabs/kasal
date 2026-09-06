@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { saveGeneratedCrew, deriveCrewName, normalizeGeneration, usesGenieTool, stripGenieTools, postCrewFeedback, CrewNameConflictError, listSavedCrews, listSavedFlows, synthesizeCrewFromConversation } from './crews';
-import { getClient } from './client';
+import { getClient } from '../../../features/chat/api/client';
 
-vi.mock('./client', () => ({
+vi.mock('../../../features/chat/api/client', () => ({
   getClient: vi.fn(),
 }));
 

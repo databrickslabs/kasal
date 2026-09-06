@@ -106,3 +106,17 @@ class FlowExecutionDetailResponse(FlowExecutionResponse):
     nodes: List[FlowNodeExecutionResponse] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class FlowExecutionRequest(BaseModel):
+    """Request model for flow execution"""
+
+    flow_id: Union[str, int, UUID]
+    job_id: str
+    run_name: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
+    # Checkpoint resume fields
+    resume_from_flow_uuid: Optional[str] = None  # CrewAI state.id to resume from
+    resume_from_execution_id: Optional[int] = (
+        None  # Execution ID of checkpoint to resume
+    )

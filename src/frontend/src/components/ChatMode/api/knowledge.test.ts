@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const post = vi.fn();
-vi.mock('./client', () => ({ getClient: () => ({ post }) }));
+vi.mock('../../../features/chat/api/client', () => ({ getClient: () => ({ post }) }));
 
 import { uploadKnowledgeFile } from './knowledge';
 

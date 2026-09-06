@@ -9,7 +9,7 @@ import {
   saveSessionPreview,
   getSessionPreview,
   getSessionMessages,
-} from '../db/sessionApi';
+} from '../../../features/chat/persistence/sessionApi';
 import {
   persistActiveExecution,
   clearActiveExecution,

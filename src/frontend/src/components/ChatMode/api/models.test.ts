@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fetchEnabledModels } from './models';
-import { getClient } from './client';
+import { getClient } from '../../../features/chat/api/client';
 
-vi.mock('./client', () => ({
+vi.mock('../../../features/chat/api/client', () => ({
   getClient: vi.fn(),
 }));
 

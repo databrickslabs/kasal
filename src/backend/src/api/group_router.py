@@ -5,11 +5,11 @@ Provides endpoints for manual group creation and user assignment.
 This is the admin interface for the simple multi-group foundation.
 """
 
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
 
+from src.schemas.group import GroupContextResponse
 from src.config.settings import settings
 from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.exceptions import ForbiddenError, NotFoundError
@@ -34,16 +34,6 @@ from src.schemas.group import (
 )
 from src.services.groups.groups import GroupService
 from src.services.groups.users import UserService
-
-
-class GroupContextResponse(BaseModel):
-    """Response showing current group context for testing."""
-
-    group_id: Optional[str] = None
-    group_email: Optional[str] = None
-    user_id: Optional[str] = None
-    access_token_present: bool = False
-    message: str
 
 
 logger = LoggerManager.get_instance().api

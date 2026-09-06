@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { GenerationCompleteData } from '../../types/dispatcher';
+import { GenerationCompleteData } from '../../../../features/chat/types/dispatcher';
 import { buildCrewGraph, deriveCrewName, normalizeGeneration, CrewNameConflictError } from '../../api/crews';
 import { useUILayoutStore } from '../../../../store/uiLayout';
 import { useExecutionStore } from '../../store/executionStore';

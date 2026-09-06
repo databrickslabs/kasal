@@ -32,7 +32,7 @@ import type { Surface } from '../../../shared/a2ui';
 import { buildTraceEntry } from '../utils/traceActivity';
 import { cleanTaskLabel, taskHeaderLabel, summarizeTaskOutput } from '../utils/taskChatRendering';
 import { extractResultText, extractA2uiSurface } from '../utils/resultExtraction';
-import { GenerationCompleteData } from '../types/dispatcher';
+import { GenerationCompleteData } from '../../../features/chat/types/dispatcher';
 
 interface UseChatRunStreamArgs {
   /** Written by the generation stream in ChatWorkspace, drained here. */

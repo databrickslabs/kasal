@@ -8,7 +8,7 @@ import {
   parseSkillCommand,
   toSkillMarkdown,
 } from './skillCommand';
-import type { ChatMessage } from '../types/chat';
+import type { ChatMessage } from '../../../features/chat/types/chat';
 
 describe('parseSkillCommand', () => {
   it('bare /skill captures the conversation', () => {

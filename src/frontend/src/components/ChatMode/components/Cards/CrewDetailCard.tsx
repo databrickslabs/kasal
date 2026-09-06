@@ -1,5 +1,5 @@
 import React from 'react';
-import { CatalogLoadResult } from '../../types/dispatcher';
+import { CatalogLoadResult } from '../../../../features/chat/types/dispatcher';
 import { useExecutionStore } from '../../store/executionStore';
 
 interface CrewDetailCardProps {

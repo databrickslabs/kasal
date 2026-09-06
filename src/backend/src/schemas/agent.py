@@ -310,3 +310,11 @@ class Agent(AgentInDBBase):
     """Pydantic model for returning agents to clients."""
 
     pass
+
+
+class AgentPrompt(BaseModel):
+    """Request model for agent generation."""
+
+    prompt: str
+    model: Optional[str] = "databricks-llama-4-maverick"
+    tools: Optional[List[str]] = []

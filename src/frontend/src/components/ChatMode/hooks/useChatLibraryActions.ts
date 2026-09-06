@@ -9,7 +9,7 @@ import { saveGeneratedCrew, synthesizeCrewFromConversation, CrewNameConflictErro
 import { useSessionStore } from '../store/sessionStore';
 import { useAppStore } from '../store/appStore';
 import { useExecutionStore } from '../store/executionStore';
-import { GenerationCompleteData } from '../types/dispatcher';
+import { GenerationCompleteData } from '../../../features/chat/types/dispatcher';
 
 export function useChatLibraryActions() {
 

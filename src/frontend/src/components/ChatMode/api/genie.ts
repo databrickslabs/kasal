@@ -1,4 +1,4 @@
-import { getClient } from './client';
+import { getClient } from '../../../features/chat/api/client';
 
 export interface GenieSpace {
   id: string;

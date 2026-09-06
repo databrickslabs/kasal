@@ -45,7 +45,7 @@ vi.mock('./sessionStore', () => {
   return { useSessionStore: { getState: vi.fn(() => state) } };
 });
 
-vi.mock('../db/sessionApi', () => ({
+vi.mock('../../../features/chat/persistence/sessionApi', () => ({
   saveSessionPreview: vi.fn(),
   getSessionPreview: vi.fn(() => Promise.resolve(undefined)),
   getSessionMessages: vi.fn(() => Promise.resolve([])),

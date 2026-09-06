@@ -7,7 +7,7 @@
  */
 import React, { useCallback } from 'react';
 import { SkillService } from '../../../api/tools/SkillService';
-import type { ImageRef } from '../types/chat';
+import type { ImageRef } from '../../../features/chat/types/chat';
 import {
   buildTranscript,
   draftFailedStep,
@@ -20,7 +20,7 @@ import { stopExecution, listExecutions } from '../api/executions';
 import { latestDeck, parseSlideEdit } from '../utils/slideRefine';
 import { splitSlides } from '../utils/htmlDeck';
 import { saveGeneratedCrew, CrewNameConflictError } from '../api/crews';
-import { GenerationCompleteData } from '../types/dispatcher';
+import { GenerationCompleteData } from '../../../features/chat/types/dispatcher';
 import { useSessionStore } from '../store/sessionStore';
 import { useExecutionStore } from '../store/executionStore';
 import { useAppStore } from '../store/appStore';

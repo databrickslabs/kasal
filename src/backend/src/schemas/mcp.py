@@ -198,3 +198,16 @@ class MCPSettingsResponse(MCPSettingsBase):
     )
 
     model_config: ClassVar[Dict[str, Any]] = {"from_attributes": True}
+
+
+class ToolCallRequest(BaseModel):
+    name: str = Field(..., description="The tool to invoke.")
+    arguments: Dict[str, Any] = Field(default_factory=dict)
+    stream: bool = Field(
+        default=False,
+        description=(
+            "Stream progress as NDJSON instead of returning one result. The "
+            "response is a chunked application/x-ndjson body, one JSON object "
+            "per line, ending with the terminal frame."
+        ),
+    )

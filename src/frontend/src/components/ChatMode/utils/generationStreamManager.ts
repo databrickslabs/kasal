@@ -1,5 +1,5 @@
 import { streamGeneration, StreamEvent } from '../api/streaming';
-import { GeneratedAgent, GeneratedTask, GenerationCompleteData } from '../types/dispatcher';
+import { GeneratedAgent, GeneratedTask, GenerationCompleteData } from '../../../features/chat/types/dispatcher';
 
 export type { GenerationCompleteData };
 

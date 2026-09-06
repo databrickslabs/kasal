@@ -7,10 +7,10 @@ import {
   stopExecution,
   getJobTraces,
 } from './executions';
-import { getClient } from './client';
+import { getClient } from '../../../features/chat/api/client';
 import type { Execution, ExecutionConfig } from '../types/execution';
 
-vi.mock('./client', () => ({
+vi.mock('../../../features/chat/api/client', () => ({
   getClient: vi.fn(),
 }));
 

@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import CrewDetailCard from './CrewDetailCard';
-import { CatalogLoadResult } from '../../types/dispatcher';
+import { CatalogLoadResult } from '../../../../features/chat/types/dispatcher';
 
 // Mock the execution store so we can control the `busy` selector value.
 let storeState: { isExecuting: boolean; isLoading: boolean };

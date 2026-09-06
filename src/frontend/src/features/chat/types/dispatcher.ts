@@ -1,5 +1,5 @@
 import type { ImageRef } from './chat';
-import { PublicationInputSchema } from '../../../types/workflow/publication';
+import type { PublicationInputSchema } from '../../../types/workflow/publication';
 
 export type IntentType =
   | 'generate_agent'

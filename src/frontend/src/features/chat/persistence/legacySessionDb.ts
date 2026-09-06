@@ -1,5 +1,5 @@
 import { openDB, deleteDB, IDBPDatabase } from 'idb';
-import { ChatMessage, ChatSession } from '../types/chat';
+import type { ChatMessage, ChatSession } from '../types/chat';
 
 const DB_NAME = 'kasal-chat-db';
 // Preserve the legacy schema version while reading sessions for server migration.

@@ -34,6 +34,9 @@ export default tseslint.config(
       'src/components/ChatMode/types/**/*.ts',
       'src/components/ChatMode/store/**/*.ts',
       'src/components/ChatMode/utils/preview.ts',
+      'src/features/chat/types/**/*.ts',
+      'src/features/chat/api/**/*.ts',
+      'src/features/chat/persistence/**/*.ts',
     ],
     rules: {
       'no-restricted-imports': ['error', {
@@ -49,6 +52,8 @@ export default tseslint.config(
       'src/features/executions/trace/lib/**/*.ts',
       'src/features/workflow/canvas/lib/**/*.ts',
       'src/shared/lib/collections.ts',
+      'src/features/chat/api/**/*.ts',
+      'src/features/chat/persistence/**/*.ts',
     ],
     ignores: ['**/*.test.*'],
     rules: {

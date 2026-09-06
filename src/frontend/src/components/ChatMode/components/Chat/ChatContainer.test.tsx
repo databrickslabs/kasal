@@ -9,7 +9,7 @@ const mockTimeline = vi.fn(() => ({ processed: makeProcessedTraces(), loading: f
 vi.mock('../../hooks/useRunTimeline', () => ({
   useRunTimeline: (...args: unknown[]) => mockTimeline(...(args as [])),
 }));
-import type { ChatMessage as ChatMessageType } from '../../types/chat';
+import type { ChatMessage as ChatMessageType } from '../../../../features/chat/types/chat';
 
 // Stub the heavy children so we can isolate ChatContainer logic. The run/
 // generation status + Stop control now live INSIDE ChatInput, so the mock

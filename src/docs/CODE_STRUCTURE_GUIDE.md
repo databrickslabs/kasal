@@ -42,10 +42,14 @@ Paths in this section are relative to `src/backend/src/`.
 | `models/`, `schemas/` | SQLAlchemy entities and Pydantic contracts |
 | `db/session.py`, `db/all_models.py` | Sessions and model registration |
 | `db/self_heal/` | Deployed startup schema compatibility repairs |
+| `db/lakebase_ddl.py` | Lakebase role/extension setup with savepoint isolation |
 | `config/` | Runtime settings and logging configuration |
 | `core/` | Shared infrastructure, LLM transport, events and runtime paths |
 | `utils/` | Cross-domain helpers and documented lazy authentication lookups |
 | `seeds/`, `seeds/skills_data/` | Shipped seed and skill content |
+
+Endpoint request/response models belong to the corresponding `schemas/` domain.
+Routers import them; the public field names and defaults stay with the schema.
 
 Use the existing domain package for a service. Tool adapters under
 `services/tools/` are intentionally flat; substantial reusable logic belongs
@@ -115,7 +119,9 @@ Paths in this section are relative to `src/frontend/src/`.
 | Path | Responsibility |
 | --- | --- |
 | `components/` | Existing views, forms and UI composition |
-| `components/ChatMode/` | Chat workspace, state, persistence, hooks and views |
+| `components/ChatMode/` | Chat workspace, state, hooks and views |
+| `features/chat/persistence/` | Server session storage, queued writes, message mapping and legacy IndexedDB migration |
+| `features/chat/api/`, `features/chat/types/` | Shared chat HTTP client and chat/dispatcher contracts |
 | `features/executions/trace/lib/` | UI-independent trace processing, indexing and batching |
 | `features/executions/trace/hooks/` | Trace fetching and React view state |
 | `features/executions/trace/components/` | Trace event icons |
@@ -136,6 +142,11 @@ The flat ESLint configuration enforces the boundaries already established.
 
 `config/api/ApiConfig.ts` reads `VITE_API_URL`, defaulting to
 `http://localhost:8000/api/v1` in development and `/api/v1` in production.
+Chat view models retain `Date` values and camelCase fields; persistence wire
+contracts keep backend timestamp strings and snake_case fields. `messageCodec.ts`
+owns their conversion. `legacySessionDb.ts` exists only for migration; server
+sessions, previews and running-job markers remain in `sessionApi.ts`.
+
 State storage keys, event names, endpoint URLs and CSS scopes are stable
 contracts even when their source files move.
 

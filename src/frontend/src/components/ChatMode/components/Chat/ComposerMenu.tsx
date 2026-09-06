@@ -16,7 +16,7 @@
  * grown inside it.
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { ModelConfigResponse } from '../../types/dispatcher';
+import { ModelConfigResponse } from '../../../../features/chat/types/dispatcher';
 import {
   isAnswerModeDisabled,
   modelLacksReasoning,

@@ -10,7 +10,7 @@ import { useExecutionStore } from './store/executionStore';
 import { useAppStore } from './store/appStore';
 import { useDispatcher } from './hooks/useDispatcher';
 import { startGenerationStream } from './utils/generationStreamManager';
-import { GenerationCompleteData } from './types/dispatcher';
+import { GenerationCompleteData } from '../../features/chat/types/dispatcher';
 import ChatContainer from './components/Chat/ChatContainer';
 import CatalogLibrary from './components/CatalogLibrary';
 import ScheduleLibrary from './components/ScheduleLibrary';

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import { AppConfig } from '../types/chat';
-import { ModelConfigResponse } from '../types/dispatcher';
-import { updateClient } from '../api/client';
+import { AppConfig } from '../../../features/chat/types/chat';
+import { ModelConfigResponse } from '../../../features/chat/types/dispatcher';
+import { updateClient } from '../../../features/chat/api/client';
 import { fetchEnabledModels } from '../api/models';
 import { fetchEnabledTools, ToolInfo } from '../api/tools';
 import { fetchWorkspaces, Workspace } from '../api/workspaces';

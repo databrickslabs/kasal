@@ -232,7 +232,7 @@ vi.mock('./api/crews', () => ({
     })),
   }),
 }));
-vi.mock('./db/sessionApi', () => ({
+vi.mock('../../features/chat/persistence/sessionApi', () => ({
   saveSessionPreview: (...a: unknown[]) => h.saveSessionPreview(...a),
   getSessionPreview: (...a: unknown[]) => h.getSessionPreview(...a),
   setSessionRunningJob: (...a: unknown[]) => h.setSessionRunningJob(...a),

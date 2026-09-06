@@ -18,4 +18,3 @@ export const isRedactedReasoning = (text: string): boolean => {
   const trimmed = text.trim();
   return trimmed.length > 0 && trimmed.split(REDACTED_REASONING).join('') === '';
 };
-

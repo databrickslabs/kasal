@@ -1,5 +1,5 @@
-import { getClient } from './client';
-import { GenerationCompleteData } from '../types/dispatcher';
+import { getClient } from '../../../features/chat/api/client';
+import { GenerationCompleteData } from '../../../features/chat/types/dispatcher';
 
 /**
  * Save a chat-generated crew "plan" (its agents + tasks) to the catalog.

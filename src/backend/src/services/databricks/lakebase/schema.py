@@ -332,7 +332,7 @@ class LakebaseSchemaService(BaseService):
                 # install pgvector — which lets vector tables be created WITH their
                 # embedding column instead of the vector-free fallback. Both are
                 # best-effort; on a plain Postgres they no-op (see superuser.py).
-                from src.services.databricks.lakebase.superuser import (
+                from src.db.lakebase_ddl import (
                     enable_pgvector_async,
                     enter_superuser_async,
                 )

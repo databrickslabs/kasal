@@ -15,8 +15,8 @@ import logging
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Header, Query, Request
-from pydantic import BaseModel, Field
 
+from src.schemas.a2a import PushConfigRequest
 from src.core.dependencies import SessionDep
 from src.core.exceptions import KasalError, NotFoundError, UnprocessableEntityError
 from src.schemas.a2a import AgentCard, SendMessageRequest, Task
@@ -259,20 +259,6 @@ async def list_tasks(
 # that must keep a stream open for the whole thing is the weakest arrangement
 # on offer. Push is what makes a long-running task practical over A2A.
 # ---------------------------------------------------------------------------
-
-
-class PushConfigRequest(BaseModel):
-    url: str = Field(..., description="Public https endpoint to POST updates to.")
-    token: Optional[str] = Field(
-        None, description="Sent as a bearer token on delivery."
-    )
-    secret: Optional[str] = Field(
-        None,
-        description=(
-            "HMAC secret. When set, deliveries carry X-Kasal-Signature so the "
-            "receiver can verify the call came from Kasal."
-        ),
-    )
 
 
 @router.post("/a2a/v1/tasks/{task_id}/pushNotificationConfigs")

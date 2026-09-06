@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { PanelRight } from 'lucide-react';
-import { ChatMessage as ChatMessageType, ImageRef } from '../../types/chat';
-import { ModelConfigResponse, GenerationCompleteData } from '../../types/dispatcher';
+import { ChatMessage as ChatMessageType, ImageRef } from '../../../../features/chat/types/chat';
+import { ModelConfigResponse, GenerationCompleteData } from '../../../../features/chat/types/dispatcher';
 import { PlanData, FlowData } from '../../hooks/useDispatcher';
 import ChatMessageComponent, { TraceEntryData } from './ChatMessage';
 import { findInlineTraceRenderer } from './traces';

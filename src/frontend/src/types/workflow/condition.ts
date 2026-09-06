@@ -3,4 +3,3 @@ export interface ConditionFormData {
   targetNodes?: string[];
   routerCondition?: string;
 }
-

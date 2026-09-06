@@ -196,3 +196,13 @@ class GroupStatsResponse(BaseModel):
     active_users: int = Field(..., description="Number of active group users")
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class GroupContextResponse(BaseModel):
+    """Response showing current group context for testing."""
+
+    group_id: Optional[str] = None
+    group_email: Optional[str] = None
+    user_id: Optional[str] = None
+    access_token_present: bool = False
+    message: str

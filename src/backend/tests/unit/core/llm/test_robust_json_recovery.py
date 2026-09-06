@@ -356,4 +356,3 @@ class TestRobustJsonParser:
         result = robust_json_parser(text)
         # Step 2 extracts up to last }, step 9 finishes it
         assert result["items"] == [{"id": 1}]
-

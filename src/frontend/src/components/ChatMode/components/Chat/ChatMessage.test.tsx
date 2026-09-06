@@ -3,7 +3,7 @@ import { render, screen, fireEvent, within } from '@testing-library/react';
 import ChatMessage, { } from './ChatMessage';
 import { CrewNameConflictError } from '../../api/crews';
 import { useExecutionStore } from '../../store/executionStore';
-import type { ChatMessage as ChatMessageType } from '../../types/chat';
+import type { ChatMessage as ChatMessageType } from '../../../../features/chat/types/chat';
 
 // --- Mock leaf children so we isolate ChatMessage's routing logic ---
 vi.mock('./MessageContent', () => ({

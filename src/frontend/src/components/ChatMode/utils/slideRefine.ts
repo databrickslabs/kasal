@@ -15,7 +15,7 @@
  * the edit — the request for the one-slide call and the splice that puts its
  * answer back. The studio and the chat hook make the call.
  */
-import type { ChatMessage } from '../types/chat';
+import type { ChatMessage } from '../../../features/chat/types/chat';
 import type { SlideRefineRequest } from '../../../api/chat/DeckService';
 import { splitDiagramSegments } from './mdSandboxDiagram';
 import {

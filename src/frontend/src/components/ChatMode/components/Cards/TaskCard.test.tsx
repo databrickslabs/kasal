@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import TaskCard from './TaskCard';
-import { GeneratedTask } from '../../types/dispatcher';
+import { GeneratedTask } from '../../../../features/chat/types/dispatcher';
 
 describe('TaskCard', () => {
   const baseTask: GeneratedTask = {

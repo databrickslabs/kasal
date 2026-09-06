@@ -15,7 +15,7 @@ import {
   setSessionRunningJob,
   getSessionRunningJob,
   clearSessionRunningJob,
-} from '../db/sessionApi';
+} from '../../../features/chat/persistence/sessionApi';
 
 /** Record the in-flight job for a session (fire-and-forget; safe from sync callers). */
 export function persistActiveExecution(sessionId: string, jobId: string): void {

@@ -1,4 +1,4 @@
-import type { ImageRef } from '../types/chat';
+import type { ImageRef } from '../../../features/chat/types/chat';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { dispatch } from '../api/dispatcher';
 import { useExecutionStore } from '../store/executionStore';
@@ -15,11 +15,11 @@ import {
   CatalogNoMatchResult,
   IntentType,
   RoutedRunFields,
-} from '../types/dispatcher';
-import { ChatMessage } from '../types/chat';
+} from '../../../features/chat/types/dispatcher';
+import { ChatMessage } from '../../../features/chat/types/chat';
 import { generateId } from '../utils/markdown';
 import { reconcileSelectedSkills } from '../store/skillSelection';
-import { GenerationCompleteData } from '../types/dispatcher';
+import { GenerationCompleteData } from '../../../features/chat/types/dispatcher';
 
 export type PlanData = NonNullable<CatalogLoadResult['plan']>;
 export type FlowData = NonNullable<FlowLoadResult['flow']>;

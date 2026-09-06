@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { dispatch, detectIntent } from './dispatcher';
-import { getClient } from './client';
+import { getClient } from '../../../features/chat/api/client';
 import type {
   DispatcherResponse,
   DispatchResult,
-} from '../types/dispatcher';
+} from '../../../features/chat/types/dispatcher';
 
-vi.mock('./client', () => ({
+vi.mock('../../../features/chat/api/client', () => ({
   getClient: vi.fn(),
 }));
 

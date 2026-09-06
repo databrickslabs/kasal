@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.services.databricks.lakebase.superuser import (
+from src.db.lakebase_ddl import (
     SUPERUSER_ROLE,
     enable_pgvector_async,
     enter_superuser_async,

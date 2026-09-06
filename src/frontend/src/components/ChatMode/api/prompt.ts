@@ -1,4 +1,4 @@
-import { getClient } from './client';
+import { getClient } from '../../../features/chat/api/client';
 
 /*
  * Prompt improvement for the chat composer. Reuses Kasal's prompt-improvement

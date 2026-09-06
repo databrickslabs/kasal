@@ -23,6 +23,7 @@ export default defineConfig({
         '**/index.ts',
         // type-only modules compile to no runtime code
         'src/components/ChatMode/types/**',
+        'src/features/chat/types/**',
         // pure CSS/asset module
         'src/components/ChatMode/chat.css',
       ],
@@ -35,7 +36,13 @@ export default defineConfig({
       // than 100. Thresholds are checked when coverage runs (e.g. `vitest run
       // --coverage`); a regression below these floors fails the run.
       thresholds: {
-        'src/components/ChatMode/{api,utils,db,hooks,store,components}/**/*.{ts,tsx}': {
+        'src/components/ChatMode/{api,utils,hooks,store,components}/**/*.{ts,tsx}': {
+          statements: 100,
+          branches: 100,
+          functions: 100,
+          lines: 100,
+        },
+        'src/features/chat/{api,persistence}/**/*.{ts,tsx}': {
           statements: 100,
           branches: 100,
           functions: 100,

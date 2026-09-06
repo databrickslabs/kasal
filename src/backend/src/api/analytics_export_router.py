@@ -26,12 +26,12 @@ engine on top of them without needing to understand the raw Databricks API JSON.
 import io
 import logging
 import zipfile
-from typing import List, Optional
+from typing import List
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
 
+from src.schemas.analytics_export import GenieSpaceExportBody
 from src.core.dependencies import GroupContextDep
 from src.core.exceptions import NotFoundError
 from src.schemas.analytics_export import DashboardSummary
@@ -109,12 +109,6 @@ async def download_genie_space_export(
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{zip_name}"'},
     )
-
-
-class GenieSpaceExportBody(BaseModel):
-    """Request body for POST download — carries the serialized_space from the tool output."""
-
-    serialized_space: Optional[str] = None
 
 
 @router.post(

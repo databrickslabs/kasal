@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { latestDeck, parseSlideEdit, planSlideEdit } from './slideRefine';
 import { refinedSlideIndex, splitSlides } from './htmlDeck';
-import type { ChatMessage } from '../types/chat';
+import type { ChatMessage } from '../../../features/chat/types/chat';
 
 const slide = (t: string) => `<section class="slide"><h1>${t}</h1></section>`;
 const DECK = ['Cover', 'Two', 'Three', 'Four'].map(slide).join('\n');

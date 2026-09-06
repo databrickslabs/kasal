@@ -165,7 +165,7 @@ vi.mock('idb', () => ({
 // Import AFTER mocks are registered. Because initDb caches a module-level
 // singleton promise, we re-import a fresh module copy in beforeEach via
 // vi.resetModules() so each test starts clean.
-let sessionDb: typeof import('./sessionDb');
+let sessionDb: typeof import('./legacySessionDb');
 
 beforeEach(async () => {
   mockStores = new Map();
@@ -177,7 +177,7 @@ beforeEach(async () => {
   });
   deleteDBMock.mockClear();
   vi.resetModules();
-  sessionDb = await import('./sessionDb');
+  sessionDb = await import('./legacySessionDb');
 });
 
 const makeMsg = (overrides: Partial<ChatMessage> = {}): ChatMessage => ({

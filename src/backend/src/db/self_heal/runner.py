@@ -87,7 +87,7 @@ async def run_schema_self_heal(conn) -> None:
     # best-effort: on a plain Postgres with no such role they no-op and the heal
     # proceeds as the connecting role, exactly as before. Skipped on SQLite.
     if not _conn_is_sqlite(conn):
-        from src.services.databricks.lakebase.superuser import (
+        from src.db.lakebase_ddl import (
             enable_pgvector_async,
             enter_superuser_async,
         )

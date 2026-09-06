@@ -51,4 +51,3 @@ describe('reconcileSelectedSkills', () => {
     expect(useExecutionStore.getState().selectedSkills).toEqual(['picked', 'gone']);
   });
 });
-

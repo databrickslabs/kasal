@@ -1,10 +1,10 @@
-import { getClient } from './client';
+import { getClient } from '../../../features/chat/api/client';
 import {
   DispatcherRequest,
   DispatcherResponse,
   DispatchResult,
   DispatchRunSettings,
-} from '../types/dispatcher';
+} from '../../../features/chat/types/dispatcher';
 
 export async function dispatch(
   message: string,
