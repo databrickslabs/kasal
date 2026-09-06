@@ -39,6 +39,10 @@ from src.services.prompt_optimization.gepa.grading import (  # noqa: E402
     _parse_grade_from_text,
     _to_float,
 )
+from src.services.prompt_optimization.gepa.judge_memory import (
+    JudgeMemory,
+    majority_embedder,
+)
 from src.services.prompt_optimization.gepa.judge_model import (  # noqa: E402
     _crew_target_model,
     _resolve_judge_model,
@@ -345,6 +349,15 @@ class CrewRunnerMixin:
                         f"Could not load registered MLflow judges: {scorer_err}"
                     )
             expected_keys = set(field_keys)
+            embedder_config = majority_embedder(
+                [a.get("embedder_config") for a in agents_yaml.values()]
+            )
+            judge_memories = {
+                judge.name: JudgeMemory(
+                    judge, loop, embedder_config, group_context, user_token
+                )
+                for judge in registered_scorers
+            }
 
             def _apply_fields(fields: Dict[str, str]):
                 agents_over = copy.deepcopy(agents_yaml)
@@ -745,14 +758,16 @@ class CrewRunnerMixin:
                 # bursts of one execution per judge), multiplying the budget.
                 # Registered judges are RENDERED AND INVOKED HERE through
                 # LLMManager — never via mlflow's own model client. The judge
-                # entity contributes only its instructions and model key;
+                # entity contributes its instructions, retrieved examples and model key;
                 # provider routing, keys and request quirks stay centralized
                 # in the manager (invoking judges through mlflow's client is
                 # what produced the retired-DeepSeek and Kimi failures).
                 for judge in registered_scorers:
                     judge_name = getattr(judge, "name", "judge")
                     try:
-                        instructions = getattr(judge, "instructions", "") or ""
+                        instructions = judge_memories[judge_name].instructions(
+                            inputs=inputs.get("request", objective), outputs=text
+                        )
                         rendered = (
                             instructions.replace("{{ outputs }}", text)
                             .replace("{{outputs}}", text)
@@ -795,6 +810,12 @@ class CrewRunnerMixin:
                                     f"[{judge_name}] {judge_reply.strip()}"
                                 )
                     except Exception as judge_err:
+                        if getattr(judge, "memory", None):
+                            # Do not silently drop an aligned judge from the
+                            # optimization metric when memory/provider access fails.
+                            raise RuntimeError(
+                                f"Aligned judge '{judge_name}' could not score with its memory"
+                            ) from judge_err
                         logger.warning(
                             f"Registered judge '{judge_name}' failed: {judge_err}"
                         )

@@ -87,9 +87,13 @@ class TestAlignJudge:
             def load(self, full_name):
                 return specs.get(full_name)
 
-            def save(self, full_name, instructions, model, commit_message=None):
-                saved.append((full_name, instructions, model, commit_message))
-                return JudgeSpec(full_name, instructions, model, version=7)
+            def save(
+                self, full_name, instructions, model, commit_message=None, memory=None
+            ):
+                saved.append((full_name, instructions, model, commit_message, memory))
+                return JudgeSpec(
+                    full_name, instructions, model, version=7, memory=memory
+                )
 
         return Registry
 
@@ -150,10 +154,13 @@ class TestAlignJudge:
         make_judge = MagicMock(return_value=base_judge)
         aligned = MagicMock(name="aligned")
         aligned.model_dump.return_value = {
-            "semantic_memory": [
-                {"guideline_text": "Prefer certified views over raw tables."},
-                {"guideline_text": ""},
-            ]
+            "memory_augmented_judge_data": {
+                "semantic_memory": [
+                    {"guideline_text": "Prefer certified views over raw tables."},
+                    {"guideline_text": ""},
+                ],
+                "episodic_trace_ids": ["graded"],
+            }
         }
         optimizer = MagicMock()
         optimizer.align.return_value = aligned
@@ -184,7 +191,8 @@ class TestAlignJudge:
         assert kwargs["embedding_dim"] == 4
         assert kwargs["retrieval_k"] == 5
         # Saved as the next prompt version: base + the fresh guideline block.
-        full_name, instructions, model, commit = saved[-1]
+        full_name, instructions, model, commit, memory = saved[-1]
+        assert memory["episodic_trace_ids"] == ["graded"]
         assert full_name == self.JUDGE and model == "qwen-30b"
         assert instructions == with_guidelines(
             self.BASE, ["Prefer certified views over raw tables."]
@@ -197,6 +205,62 @@ class TestAlignJudge:
         assert result["model"] == "qwen-30b"
         assert result["version"] == 7
         assert result["guidelines"] == ["Prefer certified views over raw tables."]
+
+    @pytest.mark.asyncio
+    async def test_realign_keeps_old_examples_and_rereads_corrected_feedback(self):
+        old = _trace("older-than-window", [_assessment(self.JUDGE, "HUMAN")])
+        new = _trace("new", [_assessment(self.JUDGE, "HUMAN")])
+        removed = _trace("removed", [])
+        specs = {
+            self.JUDGE: JudgeSpec(
+                self.JUDGE,
+                with_guidelines(self.BASE, ["obsolete"]),
+                "qwen-30b",
+                memory={
+                    "schema_version": 1,
+                    "episodic_trace_ids": [old.info.trace_id, "removed"],
+                },
+            )
+        }
+        optimizer_cls = MagicMock()
+        optimizer_cls.return_value.align.return_value.model_dump.return_value = {
+            "memory_augmented_judge_data": {
+                "semantic_memory": [{"guideline_text": "corrected"}],
+                "episodic_trace_ids": ["new", old.info.trace_id],
+            }
+        }
+        saved = []
+        svc = self._service_with_registry()
+        with (
+            self._patched(specs, saved, [new], optimizer_cls, MagicMock(), {}),
+            patch("mlflow.get_trace", side_effect=[old, removed]) as get_trace,
+        ):
+            await svc.align_judge("accuracy", CREW)
+        assert get_trace.call_count == 2
+        assert optimizer_cls.return_value.align.call_args.args[1] == [new, old]
+        assert "obsolete" not in saved[-1][1]
+        assert saved[-1][4]["episodic_trace_ids"] == ["new", old.info.trace_id]
+
+    @pytest.mark.asyncio
+    async def test_removing_all_feedback_clears_previous_memory_on_realign(self):
+        specs = {
+            self.JUDGE: JudgeSpec(
+                self.JUDGE,
+                with_guidelines(self.BASE, ["obsolete"]),
+                "qwen-30b",
+                memory={"schema_version": 1, "episodic_trace_ids": ["removed"]},
+            )
+        }
+        saved, optimizer_cls = [], MagicMock()
+        svc = self._service_with_registry()
+        with self._patched(
+            specs, saved, [_trace("removed", [])], optimizer_cls, MagicMock(), {}
+        ):
+            result = await svc.align_judge("accuracy", CREW)
+        optimizer_cls.assert_not_called()
+        assert result["traces_used"] == 0 and result["guidelines"] == []
+        assert saved[-1][1] == self.BASE
+        assert saved[-1][4]["episodic_trace_ids"] == []
 
     @pytest.mark.asyncio
     async def test_no_graded_answers_is_a_clear_error_not_an_mlflow_one(self):

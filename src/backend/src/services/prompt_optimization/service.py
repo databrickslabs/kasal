@@ -582,6 +582,7 @@ class PromptOptimizationService(
                 "backstory": a.backstory,
                 "tools": a.tools or [],
                 "llm": a.llm,
+                "embedder_config": getattr(a, "embedder_config", None),
             }
             for a in agents
         }

@@ -860,9 +860,15 @@ class _FakeJudgeStore:
             def load(self, full_name):
                 return store.specs.get(full_name)
 
-            def save(self, full_name, instructions, model, commit_message=None):
+            def save(
+                self, full_name, instructions, model, commit_message=None, memory=None
+            ):
                 spec = JudgeSpec(
-                    full_name, instructions, model, version=len(store.registered) + 1
+                    full_name,
+                    instructions,
+                    model,
+                    version=len(store.registered) + 1,
+                    memory=memory,
                 )
                 store.specs[full_name] = spec
                 store.registered.append((full_name, instructions, model))
@@ -971,11 +977,17 @@ class TestJudgeLifecycle:
     async def test_update_model_keeps_instructions(self, fake_mlflow):
         svc = _judge_service()
         await svc.create_judge("acc", "Keep these criteria for {{ outputs }}.")
+        memory = {"schema_version": 1, "episodic_trace_ids": ["t1"]}
+        fake_mlflow.specs["acc"].memory = memory
+        fake_mlflow.specs["acc"].instructions += "\n"
         fake_mlflow.registered.clear()
         await svc.update_judge("acc", model="deepseek-v4-pro", group_context=_group())
         name, instructions, model = fake_mlflow.registered[0]
         assert model == "deepseek-v4-pro"
         assert "Keep these criteria" in instructions
+        assert fake_mlflow.specs["acc"].memory == memory
+        await svc.update_judge("acc", instructions="New criteria for {{ outputs }}.")
+        assert fake_mlflow.specs["acc"].memory is None
 
     @pytest.mark.asyncio
     async def test_update_with_nothing_to_change_rejected(self, fake_mlflow):
@@ -2189,6 +2201,33 @@ class TestCrewOptimizationOrchestration:
         )
 
     # -- cap -----------------------------------------------------------------
+
+    def test_aligned_judge_retrieval_reaches_the_scoring_prompt(self, monkeypatch):
+        from src.services.prompt_optimization.judge_registry import JudgeSpec
+
+        monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "1")
+        spec = JudgeSpec(
+            "crew_x__accuracy",
+            "Rate {{ outputs }}",
+            "custom-judge",
+            memory={"schema_version": 1, "episodic_trace_ids": ["t1"]},
+        )
+        with (
+            patch(
+                "src.services.prompt_optimization.judge_registry.JudgeRegistry"
+            ) as registry,
+            patch(
+                "src.services.prompt_optimization.crew_runner.JudgeMemory.instructions",
+                return_value="Rate {{ outputs }}. Example Judgements: human correction.",
+            ) as retrieve,
+        ):
+            registry.return_value.list.return_value = [spec]
+            run = self._drive([_crew_fixture()[0]])
+        retrieve.assert_called_once()
+        assert retrieve.call_args.kwargs["outputs"] == run.scored[0][0]
+        assert any(
+            "Example Judgements: human correction." in c["text"] for c in run.calls
+        )
 
     def test_execution_cap_is_hard(self, monkeypatch):
         """The user's budget is a promise about REAL crew executions (tools,

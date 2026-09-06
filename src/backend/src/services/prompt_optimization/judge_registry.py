@@ -1,7 +1,7 @@
 """Judges live in the MLflow Prompt Registry.
 
-A judge is three strings — a name, plain-language instructions with
-``{{ outputs }}``, and a Kasal model key — and it is invoked ON DEMAND through
+A judge has a name, plain-language instructions with ``{{ outputs }}``, a
+Kasal model key, and optional MemAlign memory. It is invoked ON DEMAND through
 LLMManager (``crew_runner`` while GEPA scores candidates, ``memalign_bridge``
 while MemAlign distils grades). The Prompt Registry is MLflow's primitive for
 exactly that kind of thing: a versioned, governed definition. On Databricks it
@@ -23,12 +23,15 @@ UC the three-level ``catalog.schema.`` prefix is added.
 
 Each version carries tags ``kasal_model`` (the Kasal key), ``kasal_crew`` (the
 crew id or empty) and ``kasal_kind=judge``. MemAlign's learned guidelines are
-stored inside the template in MLflow's own block format, so a judge's history
-reads naturally in the registry UI.
+stored inside the template in MLflow's own block format. A versioned JSON
+section holds semantic provenance and episodic trace references alongside the
+criteria, atomically. It is stripped before editing or invoking the judge;
+no credentials, vectors or copied trace payloads are stored there.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from dataclasses import dataclass
@@ -50,6 +53,7 @@ KIND = "judge"
 PAGE_SIZE = 200
 #: Header of the guideline block MemAlign folds into a judge's instructions.
 GUIDELINES_HEADER = "Distilled Guidelines"
+MEMORY_HEADER = "\n\n<!-- kasal-memalign-v1 -->\n"
 
 _CREW_NAME = re.compile(r"^crew_([0-9a-f]{1,12})__(.+)$")
 
@@ -102,6 +106,7 @@ class JudgeSpec:
     instructions: str
     model: Optional[str]
     version: Optional[int] = None
+    memory: Optional[Dict[str, Any]] = None
 
     @property
     def name(self) -> str:
@@ -235,12 +240,22 @@ class JudgeRegistry:
     def _spec(full_name: str, version: Any) -> JudgeSpec:
         tags = dict(getattr(version, "tags", None) or {})
         template = getattr(version, "template", "")
+        instructions = template if isinstance(template, str) else str(template)
+        memory = None
+        if MEMORY_HEADER in instructions:
+            instructions, payload = instructions.rsplit(MEMORY_HEADER, 1)
+            memory = json.loads(payload)
+            if not isinstance(memory, dict) or memory.get("schema_version") != 1:
+                raise ValueError(
+                    "Unsupported MemAlign memory format; align the judge again."
+                )
         number = getattr(version, "version", None)
         return JudgeSpec(
             full_name=full_name,
-            instructions=template if isinstance(template, str) else str(template),
+            instructions=instructions,
             model=tags.get(TAG_MODEL) or None,
             version=int(number) if number is not None else None,
+            memory=memory,
         )
 
     # -------------------------------------------------------------- writes
@@ -250,6 +265,7 @@ class JudgeRegistry:
         instructions: str,
         model: Optional[str],
         commit_message: Optional[str] = None,
+        memory: Optional[Dict[str, Any]] = None,
     ) -> JudgeSpec:
         """Register a new version (the first one creates the prompt)."""
         name = self.prompt_name(full_name)
@@ -257,7 +273,11 @@ class JudgeRegistry:
         try:
             version = self._client.register_prompt(
                 name=name,
-                template=instructions,
+                template=(
+                    (instructions + MEMORY_HEADER + json.dumps(memory))
+                    if memory is not None
+                    else instructions
+                ),
                 commit_message=commit_message,
                 tags={TAG_KIND: KIND, TAG_MODEL: model or "", TAG_CREW: crew_id or ""},
             )

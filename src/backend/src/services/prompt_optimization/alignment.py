@@ -15,11 +15,9 @@ registered judges. Without alignment GEPA optimizes the crew toward the judge's
 taste; with it, the judge is first brought to the reviewer's standard, and GEPA
 optimizes toward that.
 
-What Kasal's own scoring sees: crew_runner renders registered judges through
-LLMManager (deliberately — never via mlflow's model client), reading
-``judge.instructions``. A MemoryAugmentedJudge appends its guidelines to
-``instructions``, so the semantic memory reaches GEPA scoring unchanged;
-episodic retrieval stays inside mlflow's own judge invocation.
+Kasal persists both semantic guidelines and episodic trace references in the
+judge's prompt version. crew_runner retrieves relevant examples through
+gepa.judge_memory before rendering instructions and scoring via LLMManager.
 
 Model routing: nothing here is configured by environment. The judge grades
 with the model chosen for it in the Optimize dialog, so alignment distils with
@@ -29,12 +27,15 @@ agents carry (Agent form). Both go through LLMManager — see
 """
 
 import asyncio
-import json
 import logging
 import uuid
-from collections import Counter
 from typing import Any, Dict, List, Optional
 
+from src.services.prompt_optimization.gepa.judge_memory import (
+    load_memory_trace,
+    majority_embedder,
+    serialize_memory,
+)
 from src.services.prompt_optimization.gepa.judge_model import (
     _stored_judge_model_to_key,
 )
@@ -80,15 +81,13 @@ async def crew_embedder_config(
     if crew is None:
         return None
     agent_service = AgentService(session)
-    seen: List[str] = []
+    seen: List[Dict[str, Any]] = []
     for agent_id in crew.agent_ids or []:
         agent = await agent_service.get_with_group_check(agent_id, group_context)
         config = getattr(agent, "embedder_config", None) if agent else None
         if isinstance(config, dict) and config:
-            seen.append(json.dumps(config, sort_keys=True))
-    if not seen:
-        return None
-    return json.loads(Counter(seen).most_common(1)[0][0])
+            seen.append(config)
+    return majority_embedder(seen)
 
 
 def has_human_feedback(trace: Any, judge_name: str) -> bool:
@@ -190,21 +189,41 @@ class JudgeAlignmentMixin:
                     max_results=TRACE_WINDOW,
                     return_type="list",
                 )
+                # Keep examples from earlier alignments even after they leave
+                # the recent trace window. Re-read their current assessments:
+                # corrected or removed feedback must not leave stale guidelines.
+                seen_ids = {t.info.trace_id for t in traces}
+                for trace_id in (spec.memory or {}).get("episodic_trace_ids", []):
+                    if trace_id not in seen_ids:
+                        trace = load_memory_trace(trace_id)
+                        if trace is not None:
+                            traces.append(trace)
+                        seen_ids.add(trace_id)
                 graded = [t for t in traces if has_human_feedback(t, full_name)]
-                if not graded:
+                if not graded and not spec.memory:
                     raise ValueError(
                         "No graded evaluation answers for this judge yet. Grade a "
                         "few answers with this judge selected, then align."
                     )
-                with memalign_via_llm_manager(
-                    loop, model, embedder_config, group_context, user_token
-                ) as models:
-                    optimizer = MemAlignOptimizer(retrieval_k=RETRIEVAL_K, **models)
-                    aligned = optimizer.align(judge, graded)
-                dump = aligned.model_dump()
+                if graded:
+                    with memalign_via_llm_manager(
+                        loop, model, embedder_config, group_context, user_token
+                    ) as models:
+                        optimizer = MemAlignOptimizer(retrieval_k=RETRIEVAL_K, **models)
+                        aligned = optimizer.align(judge, graded)
+                    memory = serialize_memory(aligned)
+                else:
+                    # Re-align after all feedback was removed: clear the
+                    # previous memory instead of retaining obsolete guidelines.
+                    memory = {
+                        "schema_version": 1,
+                        "semantic_memory": [],
+                        "episodic_trace_ids": [],
+                        "retrieval_k": RETRIEVAL_K,
+                    }
                 guidelines = [
                     str(g.get("guideline_text", "")).strip()
-                    for g in (dump.get("semantic_memory") or [])
+                    for g in memory["semantic_memory"]
                     if isinstance(g, dict)
                 ]
                 logger.info(
@@ -223,6 +242,7 @@ class JudgeAlignmentMixin:
                         f"MemAlign: {len(guidelines)} guidelines from "
                         f"{len(graded)} graded answers"
                     ),
+                    memory=memory,
                 )
                 return {
                     "name": full_name[len(prefix) :],

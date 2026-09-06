@@ -375,6 +375,13 @@ class JudgeOperationsMixin:
                     text,
                     final_model,
                     commit_message="edited in Kasal's Optimize dialog",
+                    # Model changes keep learned examples. Criteria edits need
+                    # fresh alignment so old feedback does not judge a new rubric.
+                    memory=(
+                        current.memory
+                        if text.strip() == current.instructions.strip()
+                        else None
+                    ),
                 )
                 return {"name": name, "model": final_model}
 

@@ -156,14 +156,32 @@ In the crew catalog, open **Optimize**:
    judge, grade it, and say why. The grade is stored on the answer's trace as
    human feedback *in the judge's name*.
 3. After grading a few answers, press the wand next to the judge chip
-   (**Align**). Kasal saves the aligned criteria as a new version of the judge's
-   prompt and lists what it learned.
-4. Run **Optimize** — GEPA now scores candidates with the aligned judge.
+   (**Align**). Kasal saves the learned guidelines and references to the graded
+   examples together as a new version of the judge's prompt and lists what it learned.
+4. Run **Optimize** — GEPA scores candidates with the learned guidelines and
+   up to five relevant past examples, retrieved using the crew's embedder.
 
 Grades given under **Overall quality** feed the optimizer's own reflection but
 do not align any judge: only grades given *for a judge* align that judge. Align
 again whenever you have graded more answers — each alignment starts from the
-grades, not from the previous alignment.
+grades, not from the previous guidelines. It scans the most recent 200 crew
+traces and also reloads examples remembered by earlier alignments, so older
+examples do not fall out of memory merely because newer runs exist. Corrected
+or removed feedback is reflected when you align again.
+
+Judges aligned before dual-memory persistence was introduced need **Align**
+once more to save their example references. Existing judges keep working in
+the meantime with their saved instructions. Changing only a judge's model
+preserves memory; editing its criteria clears example memory until you align
+the revised criteria.
+
+Memory is versioned with the judge in the MLflow Prompt Registry. The extra
+memory section is excluded from the criteria editor and model prompt. Examples
+remain in MLflow traces, so trace retention controls their availability. The
+retrieval index is rebuilt once per judge per optimization run; deleted traces
+are skipped, while permission or server errors are reported. Alignment remains
+an explicit action; this does not add automatic background alignment or an
+in-app control for deleting individual feedback records.
 
 ### Which models it uses
 
