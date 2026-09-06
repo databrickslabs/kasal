@@ -23,19 +23,24 @@ import SkillsPicker from './SkillsPicker';
 import { useAnchoredFixedStyle } from '../../hooks/useAnchoredFixedStyle';
 import { useExecutionStore } from '../../store/executionStore';
 
+import EffortPicker from '../../../../shared/components/EffortPicker';
+import { effortLabel } from '../../../../types/workflow/effort';
+import { useChatEffortStore } from '../../../../store/chatEffort';
+
 export type MemoryModeId = 'workspace' | 'session';
 export const MEMORY_MODES: { id: MemoryModeId; label: string; hint: string }[] = [
   { id: 'workspace', label: 'Teamspace memory', hint: 'Recall context across the whole teamspace' },
   { id: 'session', label: 'Session memory', hint: "Recall only this chat's history — no teamspace memory" },
 ];
 
-type SectionId = '' | 'source' | 'memory' | 'model' | 'tools' | 'skills';
+type SectionId = '' | 'source' | 'memory' | 'model' | 'tools' | 'skills' | 'effort';
 
 /** Model lists at or under this length render without a search box. */
 const MODEL_SEARCH_THRESHOLD = 6;
 
 const SECTION_TITLES: Record<Exclude<SectionId, ''>, string> = {
   model: 'Model',
+  effort: 'Effort',
   source: 'Source',
   memory: 'Memory',
   tools: 'Tools & MCP',
@@ -143,6 +148,8 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
   onAttachFiles,
   onOpenMcpConfig,
 }) => {
+  const effort = useChatEffortStore(s => s.settings);
+  const setEffort = useChatEffortStore(s => s.setSettings);
   const [open, setOpen] = useState(false);
   const [section, setSectionRaw] = useState<SectionId>('');
   const [modelFilter, setModelFilter] = useState('');
@@ -153,7 +160,7 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
     setSectionRaw(id);
   };
   const rootRef = useRef<HTMLDivElement>(null);
-  const menuStyle = useAnchoredFixedStyle(open, rootRef, menuPlacement);
+  const menuStyle = useAnchoredFixedStyle(open, rootRef, menuPlacement, 352);
 
   const preferExisting = useExecutionStore((s) => s.preferExisting);
   const setPreferExisting = useExecutionStore((s) => s.setPreferExisting);
@@ -249,6 +256,9 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
         </>
       )}
 
+      {id === 'effort' && <EffortPicker value={effort} onChange={setEffort}
+        models={models.filter(m => m.key === selectedModel)} onPicked={() => pick(() => {})} />}
+
       {id === 'source' &&
         SOURCE_MODES.map((m) => (
           <Option
@@ -328,7 +338,7 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
           className={`kasal-popover ${menuAnimClass} w-[22rem] rounded-xl overflow-hidden z-50`}
           style={{ ...menuStyle, backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)' }}
         >
-          <div className="max-h-[70vh] overflow-y-auto py-1.5 px-1.5 flex flex-col">
+          <div style={{ maxHeight: menuStyle.maxHeight }} className="max-h-[70vh] overflow-y-auto py-1.5 px-1.5 flex flex-col">
             {section !== '' ? (
               sectionPanel(section)
             ) : (
@@ -340,6 +350,8 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
                     onClick={() => setSection('model')}
                   />
                 )}
+
+                <Row label="Effort" value={effortLabel(effort)} onClick={() => setSection('effort')} />
 
                 <Row label="Source" value={activeSource.short} onClick={() => setSection('source')} />
 

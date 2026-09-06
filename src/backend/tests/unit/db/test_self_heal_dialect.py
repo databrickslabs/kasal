@@ -135,6 +135,7 @@ class TestPostgresBranchIsTakenForALakebaseConnection:
                 "thinking_budget_tokens",
                 "reasoning_effort",
                 "max_tokens",
+                "execution_effort",
             ]
         )
         await _ensure_agent_columns(conn)

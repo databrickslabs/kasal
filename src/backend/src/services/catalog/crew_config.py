@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 # behaviour), and temperature (carried inside the model config, not the agent
 # entry the engine reads).
 _AGENT_FIELDS = (
+    "execution_effort",
     "llm",
     "function_calling_llm",
     "max_iter",

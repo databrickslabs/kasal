@@ -106,7 +106,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
           process: executionStore.processType,
           reasoning: executionStore.reasoningEnabled,
           reasoning_llm: executionStore.reasoningEnabled && executionStore.reasoningLLM ? executionStore.reasoningLLM : undefined,
-          reasoning_config: executionStore.reasoningEnabled ? executionStore.reasoningConfig : undefined,
+          reasoning_config: executionStore.reasoningConfig,
           manager_llm: executionStore.processType === 'hierarchical' && executionStore.managerLLM ? executionStore.managerLLM : undefined
         };
 
@@ -232,7 +232,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
           process: executionStore.processType,
           reasoning: executionStore.reasoningEnabled,
           reasoning_llm: executionStore.reasoningEnabled && executionStore.reasoningLLM ? executionStore.reasoningLLM : undefined,
-          reasoning_config: executionStore.reasoningEnabled ? executionStore.reasoningConfig : undefined,
+          reasoning_config: executionStore.reasoningConfig,
           manager_llm: executionStore.processType === 'hierarchical' && executionStore.managerLLM ? executionStore.managerLLM : undefined
         };
 
@@ -517,7 +517,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         process: processType,
         reasoning: reasoningEnabled,
         reasoning_llm: reasoningEnabled && reasoningLLM ? reasoningLLM : undefined,
-        reasoning_config: reasoningEnabled ? reasoningConfig : undefined,
+        reasoning_config: reasoningConfig,
         manager_llm: processType === 'hierarchical' && managerLLM ? managerLLM : undefined
       };
 

@@ -8,6 +8,7 @@ conversation history — are not implemented.
 """
 
 import concurrent.futures
+import contextvars
 import datetime
 import hashlib
 import json
@@ -220,7 +221,9 @@ class Task(BaseModel):
         context: str | None = None,
         tools: Sequence[Any] | None = None,
     ) -> concurrent.futures.Future:
-        return _TASK_EXECUTOR.submit(self.execute_sync, agent, context, tools)
+        return _TASK_EXECUTOR.submit(
+            contextvars.copy_context().run, self.execute_sync, agent, context, tools
+        )
 
     def copy(self, agents: Sequence[Any], task_mapping: dict[str, "Task"]) -> "Task":
         """Clone for a copied crew: fresh id/output, agent and context remapped."""

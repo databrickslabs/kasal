@@ -52,7 +52,9 @@ def resolve_execution_budget(from_agent: Any) -> tuple[int, float | None]:
     earlier of the two makes the run-level promise the binding one.
     """
     rounds = MAX_TOOL_ROUNDS
-    deadline: float | None = None
+    from .request_deadline import current_deadline
+
+    deadline = current_deadline()
     if from_agent is None:
         return rounds, deadline
 
@@ -62,7 +64,10 @@ def resolve_execution_budget(from_agent: Any) -> tuple[int, float | None]:
 
     max_seconds = getattr(from_agent, "max_execution_time", None)
     if isinstance(max_seconds, (int, float)) and max_seconds > 0:
-        deadline = time.monotonic() + float(max_seconds)
+        turn_deadline = time.monotonic() + float(max_seconds)
+        deadline = (
+            min(deadline, turn_deadline) if deadline is not None else turn_deadline
+        )
 
     run_deadline = getattr(from_agent, "run_deadline", None)
     if isinstance(run_deadline, (int, float)):

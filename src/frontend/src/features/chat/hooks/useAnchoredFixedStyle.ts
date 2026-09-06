@@ -25,6 +25,7 @@ export function useAnchoredFixedStyle(
   open: boolean,
   anchorRef: React.RefObject<HTMLElement>,
   placement: 'up' | 'down',
+  preferredWidth = MENU_WIDTH,
 ): React.CSSProperties {
   const [style, setStyle] = useState<React.CSSProperties>({ position: 'fixed' });
   useLayoutEffect(() => {
@@ -32,11 +33,12 @@ export function useAnchoredFixedStyle(
     if (!open || !el) return;
     const update = () => {
       const r = el.getBoundingClientRect();
-      const left = Math.max(8, Math.min(r.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8));
+      const width = Math.min(preferredWidth, window.innerWidth - 16);
+      const left = Math.max(8, Math.min(r.right - width, window.innerWidth - width - 8));
       setStyle(
         placement === 'down'
-          ? { position: 'fixed', left, top: r.bottom + 8, width: MENU_WIDTH }
-          : { position: 'fixed', left, bottom: window.innerHeight - r.top + 8, width: MENU_WIDTH },
+          ? { position: 'fixed', left, top: r.bottom + 8, width, maxHeight: Math.max(100, window.innerHeight - r.bottom - 16) }
+          : { position: 'fixed', left, bottom: window.innerHeight - r.top + 8, width, maxHeight: Math.max(100, r.top - 16) },
       );
     };
     update();
@@ -46,6 +48,6 @@ export function useAnchoredFixedStyle(
       window.removeEventListener('resize', update);
       window.removeEventListener('scroll', update, true);
     };
-  }, [open, placement, anchorRef]);
+  }, [open, placement, anchorRef, preferredWidth]);
   return style;
 }

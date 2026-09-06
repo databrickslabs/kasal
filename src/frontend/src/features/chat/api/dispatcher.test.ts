@@ -91,6 +91,7 @@ describe('dispatcher api', () => {
         undefined,
         {
           auto_execute: true,
+          execution_effort: { tier: 'medium' },
           session_id: 'chat-1',
           memory_workspace_scope: false,
           disable_memory: true,
@@ -105,6 +106,7 @@ describe('dispatcher api', () => {
         model: 'm',
         original_prompt: 'top customers',
         auto_execute: true,
+        execution_effort: { tier: 'medium' },
         session_id: 'chat-1',
         memory_workspace_scope: false,
         disable_memory: true,

@@ -178,8 +178,10 @@ export class JobExecutionService {
         // agent has to survive all of them — reading the agent itself is the
         // only version of this that cannot be broken by adding a new builder.
         const skillsByAgentId = new Map<string, string[]>();
+        const savedAgents = new Map<string, Awaited<ReturnType<typeof AgentService.listAgents>>[number]>();
         try {
           for (const saved of await AgentService.listAgents()) {
+            if (saved.id) savedAgents.set(String(saved.id), saved);
             if (saved.id && Array.isArray(saved.skills)) {
               skillsByAgentId.set(String(saved.id), saved.skills);
             }
@@ -192,6 +194,8 @@ export class JobExecutionService {
         nodes.forEach(node => {
           if (node.type === 'agentNode') {
             const agentData = node.data;
+            const savedAgent = savedAgents.get(String(agentData.agentId ?? ''))
+              ?? savedAgents.get(node.id.replace(/^agent-/, ''));
             console.log('Agent node data:', JSON.stringify(agentData, null, 2));
             console.log(`[DEBUG] Node ${node.id} knowledge_sources:`, agentData.knowledge_sources);
             const agentName = `agent_${node.id}`;
@@ -219,9 +223,10 @@ export class JobExecutionService {
               tool_configs: agentData.tool_configs,  // Include tool_configs for MCP server configuration
               llm: agentData.llm,
               function_calling_llm: agentData.function_calling_llm,
-              max_iter: agentData.max_iter,
+              execution_effort: savedAgent?.execution_effort ?? agentData.execution_effort,
+              max_iter: savedAgent?.max_iter ?? agentData.max_iter,
               max_rpm: agentData.max_rpm,
-              max_execution_time: agentData.max_execution_time,
+              max_execution_time: savedAgent?.max_execution_time ?? agentData.max_execution_time,
               memory: agentData.memory,
               verbose: agentData.verbose,
               allow_delegation: agentData.allow_delegation,

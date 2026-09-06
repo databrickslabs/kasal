@@ -122,7 +122,7 @@ export function buildCrewConfig(plan: {
         // Agent Skills. This list is a WHITELIST — a field missing from it is
         // dropped silently, which for skills means an agent that shows them
         // attached in the form and has none at run time.
-        'skills',
+        'skills', 'execution_effort', 'reasoning_effort', 'thinking_effort', 'thinking_budget_tokens', 'max_tokens', 'temperature',
       ];
       optionalFields.forEach((field) => {
         if (d[field] !== undefined && d[field] !== null) {

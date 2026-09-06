@@ -39,7 +39,7 @@ import SkillSelector from '../../../tools/components/configuration/SkillSelector
 import { Agent, AgentFormProps, KnowledgeSource } from '../../../../types/workflow/agent';
 import { ModelService } from '../../../../api/config/ModelService';
 import { Models } from '../../../../types/config/models';
-import ModelOverrideFields from './ModelOverrideFields';
+import AgentModelSettings from './AgentModelSettings';
 import { PerplexityConfig, SerperConfig } from '../../../../types/workflow/config';
 
 import { GenerateService } from '../../../../api/workflow/GenerateService';
@@ -107,6 +107,9 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
       llm: initialData?.llm || getDefaultModel(),
       temperature: initialData?.temperature || undefined,
       max_tokens: initialData?.max_tokens ?? undefined,
+      execution_effort: initialData?.execution_effort ?? null,
+      thinking_budget_tokens: initialData?.thinking_budget_tokens,
+      thinking_effort: initialData?.reasoning_effort ?? initialData?.thinking_effort,
       tools: initialData?.tools ? initialData.tools.map(id => String(id)) : [],
       skills: initialData?.skills ?? [],
       function_calling_llm: initialData?.function_calling_llm || undefined,
@@ -238,6 +241,9 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
     // the database: JSON drops undefined, so clearing the field would otherwise
     // leave the old override in place. null is what the API clears on.
     agentToSave.max_tokens = formData.max_tokens ?? null;
+    agentToSave.execution_effort = formData.execution_effort ?? null;
+    agentToSave.reasoning_effort = formData.thinking_effort ?? null;
+    agentToSave.thinking_budget_tokens = formData.thinking_budget_tokens ?? null;
     
     // Build tool_configs for tools that need configuration
     let updatedToolConfigs = { ...toolConfigs };
@@ -1090,32 +1096,11 @@ const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSav
                       </Select>
                     </FormControl>
                   </Grid>
-                  {/* Per-agent overrides of the model row (temperature, max
-                      output tokens, thinking). Blank inherits the model's
-                      workspace default; which controls appear follows the
-                      SELECTED model's measured capability. */}
-                  <ModelOverrideFields
+                  <AgentModelSettings
+                    agent={formData} model={selectedModel}
                     acceptsTemperature={selectedModelAcceptsParam('temperature')}
-                    temperature={formData.temperature}
-                    maxTokens={formData.max_tokens}
-                    modelMaxOutputTokens={selectedModel?.max_output_tokens}
-                    thinkingMode={selectedModel?.thinking_mode}
-                    allowedEfforts={selectedModel?.allowed_efforts}
-                    returnsThinkingText={selectedModel?.returns_thinking_text}
-                    thinkingBudgetTokens={formData.thinking_budget_tokens}
-                    thinkingEffort={formData.thinking_effort}
-                    onChange={handleInputChange}
+                    onPatch={patch => setFormData(previous => ({ ...previous, ...patch }))}
                   />
-                  {/* "Function Calling LLM" was removed here. It was a CrewAI-era
-                      field that survived the move to Kasal's own runtime and did
-                      NOTHING: runtime/agent.py declares it
-                      "Deprecated; accepted for compatibility and unused", no
-                      execution path reads it, and its only reader
-                      (core/llm/transport/instructor.py) is not invoked by any of
-                      the three paths. Selecting a model there changed nothing
-                      about the run, which is worse than offering no control at
-                      all. The field is still accepted on the API and stored, so
-                      existing agents are untouched. */}
                 </Grid>
               </AccordionDetails>
             </Accordion>

@@ -134,6 +134,8 @@ async def run_crew_in_process(
                 "planning_llm",
                 "reasoning_llm",
                 "reasoning_config",
+                "execution_effort",
+                "resolved_effort",
                 "process",
                 "max_rpm",
                 "planning",

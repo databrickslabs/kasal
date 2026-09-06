@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 #: one has to reach the database, and exclude_none drops an explicit null along
 #: with the unset fields — see _keep_explicit_clears.
 _CLEARABLE_OVERRIDES = (
+    "execution_effort",
     "max_tokens",
     "temperature",
     "thinking_budget_tokens",

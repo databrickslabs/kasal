@@ -61,6 +61,10 @@ _MODULES: List[Tuple[Path, str]] = [
     # pick it up and it has to be listed here. Pure stdlib + dataclasses/enum,
     # zero ``src.`` imports, so it vendors as-is.
     (
+        BACKEND_SRC / "core" / "llm" / "effort.py",
+        "core/llm/effort.py",
+    ),
+    (
         BACKEND_SRC / "core" / "llm" / "model_capabilities.py",
         "core/llm/model_capabilities.py",
     ),

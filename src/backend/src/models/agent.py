@@ -43,6 +43,7 @@ class Agent(Base):
     #: whichever the new model accepts.
     thinking_budget_tokens = Column(Integer, nullable=True)
     reasoning_effort = Column(String, nullable=True)
+    execution_effort = Column(JSON, nullable=True)
     #: Per-agent max OUTPUT tokens. NULL inherits the model row's
     #: `max_output_tokens`, the same contract as the overrides above. Applied to
     #: the agent's own LLM by kernel/agent_builder._apply_output_cap_override on

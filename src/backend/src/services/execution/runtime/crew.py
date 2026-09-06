@@ -33,6 +33,7 @@ from src.core.events.types import (
     CrewKickoffStartedEvent,
     TaskCheckpointRestoredEvent,
 )
+from src.core.llm.transport.request_deadline import run_with_deadline
 from src.core.llm.transport.rpm import RPMController
 
 from .agent import Agent, BaseAgent
@@ -85,6 +86,7 @@ class Crew(BaseModel):
     #: effective ceiling of 24× the per-call cap and no way to state how long
     #: "deep research" can take. Set from the mode's budget profile.
     run_max_seconds: float | None = None
+    execution_effort: dict[str, Any] | None = None
     planning: bool | None = False
     planning_llm: Any | None = None
     stream: bool = False
@@ -123,6 +125,7 @@ class Crew(BaseModel):
         )
         return hashlib.md5(source.encode(), usedforsecurity=False).hexdigest()
 
+    @run_with_deadline
     def kickoff(
         self,
         inputs: dict[str, Any] | None = None,
@@ -529,9 +532,12 @@ class Crew(BaseModel):
         return [ordered[id(t)] for t in self.tasks if id(t) in ordered]
 
     def _manager(self) -> BaseAgent:
+        from src.core.llm.effort import apply_manager_limits
+
         if self.manager_agent is not None:
             if self.manager_agent.tools:
                 raise ValueError("Manager agent should not have tools")
+            apply_manager_limits(self.manager_agent, self.execution_effort)
             return self.manager_agent
         if self.manager_llm is None:
             raise ValueError(
@@ -544,6 +550,7 @@ class Crew(BaseModel):
             llm=self.manager_llm,
             verbose=self.verbose,
         )
+        apply_manager_limits(manager, self.execution_effort)
         self.manager_agent = manager
         return manager
 

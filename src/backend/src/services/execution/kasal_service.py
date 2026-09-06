@@ -32,6 +32,7 @@ from src.utils.user_context import GroupContext
 
 #: Per-agent LLM overrides stored on the agent row. NULL = inherit the model.
 _AGENT_LLM_OVERRIDE_FIELDS = (
+    "execution_effort",
     "temperature",
     "thinking_budget_tokens",
     "reasoning_effort",
@@ -211,7 +212,12 @@ class KasalExecutionService:
                                     # tool_configs below — the payload wins when it
                                     # carries the key; the row fills in what it left out.
                                     for field in _AGENT_LLM_OVERRIDE_FIELDS:
-                                        if agent_config.get(field) is None:
+                                        if (
+                                            not agent_config.get(
+                                                "agent_settings_snapshot"
+                                            )
+                                            and agent_config.get(field) is None
+                                        ):
                                             value = getattr(db_agent, field, None)
                                             if value is not None:
                                                 agent_config[field] = value

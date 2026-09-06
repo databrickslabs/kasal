@@ -474,6 +474,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
 
       // Prepare additionalInputs with reasoning_llm, process type, and manager_llm
       const additionalInputs: Record<string, unknown> = {
+        execution_effort: reasoningConfig.execution_effort,
         ...inputVariables,
         process: processType
       };
@@ -797,6 +798,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
 
       // Prepare additionalInputs with reasoning_llm, process type, and manager_llm
       const additionalInputs: Record<string, unknown> = {
+        execution_effort: reasoningConfig.execution_effort,
         process: processType
       };
       if (reasoningEnabled && reasoningLLM) {
@@ -1104,7 +1106,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
 
     try {
       // Prepare additionalInputs with reasoning_llm if enabled
-      const additionalInputs: Record<string, unknown> = { generate: true };
+      const additionalInputs: Record<string, unknown> = { generate: true, execution_effort: reasoningConfig.execution_effort };
       if (reasoningEnabled && reasoningLLM) {
         additionalInputs.reasoning_llm = reasoningLLM;
       }

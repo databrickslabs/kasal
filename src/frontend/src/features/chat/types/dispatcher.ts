@@ -1,3 +1,4 @@
+import type { EffortSettings } from '../../../types/workflow/effort';
 import type { ImageRef } from './chat';
 import type { PublicationInputSchema } from '../../../types/workflow/publication';
 
@@ -45,6 +46,7 @@ export interface DispatcherRequest {
   // The crew canvas omits this (defaults false): it renders the plan and the
   // user runs it via Play — sending it true here would double-run the crew.
   auto_execute?: boolean;
+  execution_effort?: EffortSettings;
   // ChatMode run settings — carried to the backend so a generated crew is
   // auto-executed with the chat's own memory scope + attached data sources,
   // without a frontend round-trip. AgentBuilder doesn't send these.
@@ -74,6 +76,7 @@ export interface DispatcherRequest {
 /** ChatMode run settings gathered from the execution store at dispatch time. */
 export interface DispatchRunSettings {
   auto_execute?: boolean;
+  execution_effort?: EffortSettings;
   session_id?: string;
   memory_workspace_scope?: boolean;
   disable_memory?: boolean;
@@ -342,6 +345,8 @@ export interface ModelConfigResponse {
    * `undefined` as "unknown", not as "unsupported".
    */
   supports_reasoning_effort?: boolean;
+  allowed_efforts?: string[];
+  thinking_mode?: 'manual' | 'adaptive' | null;
   created_at: string;
   updated_at: string;
 }

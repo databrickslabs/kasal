@@ -117,6 +117,7 @@ async def _ensure_agent_columns(conn) -> None:
             ("skills", "TEXT", "JSONB"),
             ("thinking_budget_tokens", "INTEGER", "INTEGER"),
             ("reasoning_effort", "TEXT", "VARCHAR"),
+            ("execution_effort", "TEXT", "JSONB"),
             ("max_tokens", "INTEGER", "INTEGER"),
         ],
     )

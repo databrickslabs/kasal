@@ -168,6 +168,11 @@ def adapt_config(config: CrewConfig) -> Dict[str, Any]:
     if workspace_scope is not None:
         engine_config["memory_workspace_scope"] = workspace_scope
 
+    effort = config.inputs.get("resolved_effort")
+    if effort:
+        engine_config["run_max_seconds"] = effort["run_max_seconds"]
+        engine_config["execution_effort"] = config.inputs["execution_effort"]
+
     return engine_config
 
 

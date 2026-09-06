@@ -11,8 +11,9 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from src.core.llm.effort import apply_effort_to_config
 from src.models.execution_status import ExecutionStatus
 
 
@@ -214,6 +215,10 @@ class CrewConfig(BaseModel):
             else:
                 agents[key] = value
         return agents
+
+    @model_validator(mode="after")
+    def _resolve_execution_effort(self):
+        return apply_effort_to_config(self)
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
 

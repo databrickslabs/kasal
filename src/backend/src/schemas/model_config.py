@@ -3,6 +3,8 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.core.llm.effort import EFFORT_PROFILES
+
 
 class ModelConfigBase(BaseModel):
     """Base schema with common model configuration attributes."""
@@ -153,6 +155,11 @@ class ModelListResponse(BaseModel):
 
     models: List[ModelConfigResponse]
     count: int
+    effort_profiles: Dict[str, Dict[str, int]] = Field(
+        default_factory=lambda: {
+            key: dict(value) for key, value in EFFORT_PROFILES.items()
+        }
+    )
     # The server's default model, so clients stop hardcoding one. Every backend
     # default (models/agent.py, schemas/agent.py, schemas/crew.py, the engine
     # paths) derives from the SAME constant, and shipping it here means a UI

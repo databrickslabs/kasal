@@ -1,8 +1,12 @@
+import type { PopoverActions } from '@mui/material';
 import React, { useEffect, useRef, useState } from 'react';
 import { Badge, Box, CircularProgress, Divider, IconButton, Menu, MenuItem, Tooltip, Typography } from '@mui/material';
 import { Add as AddIcon, ArrowBack as BackIcon, AttachFile as AttachFileIcon, Check as CheckIcon, ChevronRight as ChevronRightIcon } from '@mui/icons-material';
-import { useCrewExecutionStore, ReasoningConfig } from '../../../../store/crewExecution';
-import { ReasoningModelCatalogue, reasoningUnsupportedReason, useReasoningSupport } from '../../../../hooks/global/useReasoningSupport';
+import { useCrewExecutionStore } from '../../../../store/crewExecution';
+import { ReasoningModelCatalogue, useReasoningSupport } from '../../../../hooks/global/useReasoningSupport';
+
+import EffortPicker, { EffortModel } from '../../../../shared/components/EffortPicker';
+import { DEFAULT_EFFORT, effortLabel } from '../../../../types/workflow/effort';
 
 export interface ChatInputPlusMenuProps {
   /** Opens the knowledge-file picker (the imperative handle on the uploader). */
@@ -13,7 +17,7 @@ export interface ChatInputPlusMenuProps {
   attachDisabledReason?: string;
   /** Model catalogue — decides whether reasoning can do anything, and lists
    *  the manager models for the hierarchical process. */
-  models: ReasoningModelCatalogue & Record<string, { name?: string } | undefined>;
+  models: ReasoningModelCatalogue & Record<string, EffortModel | undefined>;
   /**
    * The composer's currently selected model. Counted alongside the canvas
    * agents' models when deciding whether reasoning is available, because it is
@@ -38,16 +42,10 @@ const PROCESSES: { value: ProcessType; label: string; hint: string }[] = [
   { value: 'parallel', label: 'Parallel', hint: 'Independent tasks run at once' },
 ];
 
-const EFFORTS: { value: NonNullable<ReasoningConfig['reasoning_effort']>; label: string; hint: string }[] = [
-  { value: 'low', label: 'Low', hint: 'Minimal thinking (fastest)' },
-  { value: 'medium', label: 'Medium', hint: 'Balanced thinking' },
-  { value: 'high', label: 'High', hint: 'Maximum thinking (slowest)' },
-];
-
 type Section = 'settings' | 'models' | 'process' | 'manager' | 'reasoning';
 const TITLES: Record<Section, string> = {
   settings: 'Files and run settings', models: 'Model', process: 'Process type',
-  manager: 'Manager model', reasoning: 'Agent reasoning',
+  manager: 'Manager model', reasoning: 'Effort',
 };
 const ROW_SX = {
   minHeight: 42, px: 1.5, py: 1, gap: 1.5, borderRadius: '10px',
@@ -86,13 +84,15 @@ const ChatInputPlusMenu: React.FC<ChatInputPlusMenuProps> = ({
 }) => {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const [section, setSection] = useState<Section>('settings');
-  const listRef = useRef<HTMLUListElement>(null);
+  const listRef = useRef<HTMLUListElement | null>(null);
+  const popoverActions = useRef<PopoverActions>(null);
+  const menuObserver = useRef<ResizeObserver | null>(null);
   const open = Boolean(anchorEl);
-  const { processType, setProcessType, managerLLM, setManagerLLM, reasoningEnabled,
-    setReasoningEnabled, reasoningConfig, setReasoningConfig } = useCrewExecutionStore();
-  const { agentModelNames, supported: reasoningSupported } = useReasoningSupport(models, selectedModel);
-  const hasNonDefault = processType !== 'sequential' || reasoningEnabled;
-  const effort = reasoningConfig.reasoning_effort ?? 'low';
+  const { processType, setProcessType, managerLLM, setManagerLLM,
+    reasoningConfig, setReasoningConfig } = useCrewExecutionStore();
+  const { agentModelNames } = useReasoningSupport(models, selectedModel);
+  const hasNonDefault = processType !== 'sequential' || Boolean(reasoningConfig.execution_effort);
+  const effort = reasoningConfig.execution_effort;
   const modelName = (key: string) => modelLabels[key] || models[key]?.name || key || 'Default';
   const close = () => { setAnchorEl(null); setSection('settings'); };
   const pick = (apply: () => void) => { apply(); setSection('settings'); };
@@ -102,6 +102,7 @@ const ChatInputPlusMenu: React.FC<ChatInputPlusMenuProps> = ({
     if (open) listRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
   }, [section, open]);
   useEffect(() => { if (disabled) setAnchorEl(null); }, [disabled]);
+
 
   const modelRows = (manager: boolean) => loadingModels
     ? [<MenuItem key="loading" disabled sx={ROW_SX}><CircularProgress size={14} />Loading models…</MenuItem>]
@@ -116,7 +117,7 @@ const ChatInputPlusMenu: React.FC<ChatInputPlusMenuProps> = ({
     ...(onModelChange ? [<SettingsRow key="models" label="Model" value={loadingModels ? 'Loading models…' : modelName(selectedModel || '')} onClick={() => setSection('models')} />] : []),
     <SettingsRow key="process" label="Process type" value={PROCESSES.find(p => p.value === processType)?.label || 'Sequential'} onClick={() => setSection('process')} />,
     ...(processType === 'hierarchical' ? [<SettingsRow key="manager" label="Manager model" value={modelName(managerLLM || '')} onClick={() => setSection('manager')} />] : []),
-    <SettingsRow key="reasoning" label="Agent reasoning" value={reasoningEnabled ? EFFORTS.find(e => e.value === effort)?.label || 'Low' : 'Off'} onClick={() => setSection('reasoning')} />,
+    <SettingsRow key="reasoning" label="Effort" value={effort ? effortLabel(effort) : 'Use agent settings'} onClick={() => setSection('reasoning')} />,
     <Divider key="divider" sx={{ mx: 1.5, my: 0.5, opacity: 0.5 }} />,
     <Tooltip key="files" describeChild title={attachDisabled ? attachDisabledReason || '' : ''} placement="top">
       <MenuItem aria-disabled={attachDisabled} onClick={() => { if (!attachDisabled) { close(); onAddFiles(); } }}
@@ -130,13 +131,12 @@ const ChatInputPlusMenu: React.FC<ChatInputPlusMenuProps> = ({
     : section === 'manager' ? modelRows(true)
     : section === 'process' ? PROCESSES.map(process => <ChoiceRow key={process.value} label={process.label} hint={process.hint}
       selected={processType === process.value} onClick={() => pick(() => setProcessType(process.value))} />)
-    : [
-      <ChoiceRow key="off" label="Off" hint="Use the model’s default thinking behavior" selected={!reasoningEnabled} onClick={() => pick(() => setReasoningEnabled(false))} />,
-      ...EFFORTS.map(option => <ChoiceRow key={option.value} label={option.label} hint={option.hint}
-        selected={reasoningEnabled && effort === option.value} disabled={!reasoningSupported}
-        onClick={() => pick(() => { setReasoningConfig({ reasoning_effort: option.value }); setReasoningEnabled(true); })} />),
-      ...(!reasoningSupported ? [<Typography key="unsupported" role="note" sx={{ px: 1.5, py: 1, fontSize: 12, color: 'text.secondary' }}>{reasoningUnsupportedReason(agentModelNames)}</Typography>] : []),
-    ];
+    : [<ChoiceRow key="inherit" label="Use agent settings" hint="Use each agent’s saved effort and limits" selected={!effort}
+      onClick={() => pick(() => setReasoningConfig({ execution_effort: undefined }))} />,
+      <EffortPicker key="effort" value={effort ?? DEFAULT_EFFORT} inherited={!effort}
+      models={agentModelNames.map(key => models[key] ?? {})}
+      onChange={execution_effort => setReasoningConfig({ execution_effort })}
+      onPicked={() => setSection('settings')} />];
 
   return <>
     <Tooltip title="Files and run settings"><span>
@@ -147,9 +147,24 @@ const ChatInputPlusMenu: React.FC<ChatInputPlusMenuProps> = ({
         <Badge color="primary" variant="dot" invisible={!hasNonDefault}><AddIcon sx={{ fontSize: 18 }} /></Badge>
       </IconButton>
     </span></Tooltip>
-    <Menu anchorEl={anchorEl} open={open} onClose={close}
+    <Menu action={popoverActions} anchorEl={anchorEl} open={open} onClose={close}
       anchorOrigin={{ vertical: 'top', horizontal: 'left' }} transformOrigin={{ vertical: 'bottom', horizontal: 'left' }}
-      MenuListProps={{ ref: listRef, 'aria-label': TITLES[section], onKeyDown: event => {
+      MenuListProps={{ ref: (node: HTMLUListElement | null) => {
+        listRef.current = node;
+        menuObserver.current?.disconnect();
+        if (node && typeof ResizeObserver !== 'undefined') {
+          menuObserver.current = new ResizeObserver(() => popoverActions.current?.updatePosition());
+          menuObserver.current.observe(node);
+        }
+      }, 'aria-label': TITLES[section], onKeyDownCapture: event => {
+        if (section !== 'reasoning' || event.target instanceof HTMLInputElement || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+        const items = Array.from(listRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemradio"]') ?? []);
+        if (!items.length) return;
+        event.preventDefault(); event.stopPropagation();
+        const index = items.indexOf(document.activeElement as HTMLElement);
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+        items[next].focus();
+      }, onKeyDown: event => {
         if (event.key === 'ArrowLeft' && section !== 'settings') { event.preventDefault(); setSection('settings'); }
       } }}
       slotProps={{ paper: { sx: { width: 352, maxWidth: 'calc(100vw - 24px)', maxHeight: 'min(480px, calc(100vh - 32px))',

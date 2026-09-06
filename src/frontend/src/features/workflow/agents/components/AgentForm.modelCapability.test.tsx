@@ -18,6 +18,11 @@ import { render, screen, act, waitFor, fireEvent } from '@testing-library/react'
 import AgentForm from './AgentForm';
 import { AgentService } from '../../../../api/workflow/AgentService';
 
+vi.mock('../../../../shared/api/client', () => ({ apiClient: { get: vi.fn().mockResolvedValue({ data: {
+  effort_profiles: { low: { max_iter: 8, max_execution_time: 120, run_max_seconds: 180, max_output_tokens: 8192 },
+    high: { max_iter: 30, max_execution_time: 900, run_max_seconds: 1200, max_output_tokens: 32768 } },
+} }) } }));
+
 vi.mock('../../../../api/workflow/AgentService', () => ({
   AgentService: {
     createAgent: vi.fn(),
@@ -133,7 +138,7 @@ describe('AgentForm — controls follow the selected model', () => {
     onAgentSaved: vi.fn(),
   };
 
-  const renderWithModel = async (llm: string) => {
+  const renderWithModel = async (llm: string, overrides: Record<string, unknown> = {}) => {
     render(
       <AgentForm
         {...props}
@@ -145,6 +150,7 @@ describe('AgentForm — controls follow the selected model', () => {
           backstory: 'B',
           llm,
           tools: [],
+          ...overrides,
         } as never}
       />,
     );
@@ -156,6 +162,37 @@ describe('AgentForm — controls follow the selected model', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('saves an effort preset and its limits on the agent', async () => {
+    await renderWithModel('databricks-claude-opus-5');
+    fireEvent.click(screen.getByRole('button', { name: 'LLM Configuration' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use model settings' }));
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: /^High/ }));
+    expect(screen.getByLabelText('Max Iterations')).toHaveValue(30);
+    expect(screen.getByLabelText('Max Execution Time (s)')).toHaveValue(900);
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(AgentService.updateAgentFull).toHaveBeenCalled());
+    const payload = (AgentService.updateAgentFull as Mock).mock.calls[0][1];
+    expect(payload.execution_effort).toEqual({ tier: 'high' });
+    expect(payload.reasoning_effort).toBeNull();
+    expect(payload.max_iter).toBe(30);
+    expect(payload.max_execution_time).toBe(900);
+  });
+
+  it('restores saved effort and native overrides when reopening an agent', async () => {
+    await renderWithModel('databricks-claude-opus-5', {
+      execution_effort: { tier: 'high' }, reasoning_effort: 'low',
+      max_iter: 11, max_execution_time: 200,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'LLM Configuration' }));
+    expect(screen.getByRole('button', { name: 'High' })).toBeVisible();
+    expect(screen.getByLabelText('Max Iterations')).toHaveValue(11);
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(AgentService.updateAgentFull).toHaveBeenCalled());
+    const payload = (AgentService.updateAgentFull as Mock).mock.calls[0][1];
+    expect(payload.reasoning_effort).toBe('low');
+    expect(payload.execution_effort).toEqual({ tier: 'high' });
   });
 
   it('hides Temperature Override for a model that refuses temperature', async () => {

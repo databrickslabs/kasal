@@ -171,6 +171,11 @@ class CrewConfigBuilder:
         run_max_seconds = self._resolve_run_wall_clock()
         if run_max_seconds:
             crew_kwargs["run_max_seconds"] = run_max_seconds
+        effort = (self.config.get("inputs") or {}).get(
+            "execution_effort"
+        ) or self.config.get("execution_effort")
+        if effort:
+            crew_kwargs["execution_effort"] = effort
 
         # NOTE: 'planning' / 'planning_llm' are deliberately NOT forwarded. The
         # CrewAI-style prose planner was removed — the engine has no planner, so
@@ -187,9 +192,25 @@ class CrewConfigBuilder:
 
     def _resolve_run_wall_clock(self) -> Optional[int]:
         """Seconds the whole run may take, or None for no run-level cap."""
+        from src.core.llm.effort import resolve_effort
+
+        raw = (self.config.get("inputs") or {}).get(
+            "execution_effort"
+        ) or self.config.get("execution_effort")
+        if raw:
+            return resolve_effort(raw)["run_max_seconds"]
         explicit = self.config.get("run_max_seconds")
         if explicit:
             return int(explicit)
+
+        # A crew shares ONE deadline. More agents or retries do not multiply it.
+        saved = [
+            resolve_effort(agent["execution_effort"])["run_max_seconds"]
+            for agent in self.config.get("agents", [])
+            if agent.get("execution_effort")
+        ]
+        if saved:
+            return max(saved)
 
         from src.services.generation.crew.answer_mode import GATED_MODES
 

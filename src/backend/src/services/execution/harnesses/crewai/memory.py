@@ -38,6 +38,10 @@ from __future__ import annotations
 
 from typing import Any, List, Optional
 
+from src.core.llm.transport.request_deadline import (
+    async_run_with_deadline,
+    run_with_deadline,
+)
 from src.core.logger import LoggerManager
 from src.services.execution.harnesses.crewai.availability import crewai_symbols
 
@@ -120,17 +124,27 @@ def kasal_memory_crew_class() -> type:
         # Crash-resume
         # ---------------------------------------------------------------
 
+        @run_with_deadline
         def kickoff(self, *args: Any, from_checkpoint: Any = None, **kwargs: Any):
             self._stamp_run_deadline()
             self._seed_from_checkpoint(from_checkpoint)
             return crew_base.kickoff(self, *args, **kwargs)
 
+        @async_run_with_deadline
         async def kickoff_async(
             self, *args: Any, from_checkpoint: Any = None, **kwargs: Any
         ):
             self._stamp_run_deadline()
             self._seed_from_checkpoint(from_checkpoint)
             return await crew_base.kickoff_async(self, *args, **kwargs)
+
+        def _create_manager_agent(self) -> None:
+            from src.core.llm.effort import apply_manager_limits
+
+            crew_base._create_manager_agent(self)
+            apply_manager_limits(
+                self.manager_agent, getattr(self, "_kasal_execution_effort", None)
+            )
 
         def _stamp_run_deadline(self) -> None:
             """One deadline for the whole run, on every agent.

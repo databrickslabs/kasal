@@ -79,6 +79,7 @@ class TestUpdateExecutionStatusWithRetry:
                 status="COMPLETED",
                 message="Success message",
                 result={"result": "data"},
+                preserve_terminal=True,
             )
 
     async def test_update_status_success_after_retries(self):
@@ -198,7 +199,11 @@ class TestUpdateExecutionStatusWithRetry:
 
             assert result is True
             mock_status_service.update_status.assert_called_once_with(
-                job_id="test-id", status="FAILED", message="Error message", result=None
+                job_id="test-id",
+                status="FAILED",
+                message="Error message",
+                result=None,
+                preserve_terminal=True,
             )
 
 

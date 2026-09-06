@@ -23,6 +23,7 @@ import logging
 import traceback
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
+from src.core.llm.effort import EffortSettings
 from src.repositories.crew_generator_repository import CrewGeneratorRepository
 from src.repositories.log_repository import LLMLogRepository
 from src.services.catalog.templates import TemplateService
@@ -637,6 +638,17 @@ class CrewGenerationService(
             "inputs": (
                 {"reasoning_config": {"reasoning_effort": _reasoning_effort}}
                 if _reasoning_effort
+                else {}
+            )
+            | (
+                {
+                    "execution_effort": request.execution_effort.model_dump(
+                        exclude_none=True
+                    )
+                }
+                if isinstance(
+                    getattr(request, "execution_effort", None), EffortSettings
+                )
                 else {}
             ),
             "reasoning": _reasoning,

@@ -1110,67 +1110,21 @@ class LightAgentService:
                     f"[light_agent] Kicking off single agent for execution {execution_id}"
                 )
                 try:
-                    # ── Memory recall — Kasal's engine Agent does not consult
-                    # memory itself, so recall here and prepend a capped context
-                    # block. One embedding + one search (no LLM calls);
-                    # best-effort. The CrewAI engine's agent is the exception:
-                    # there the attach step really does set ``agent.memory``
-                    # (a CrewAI Agent has the field; Kasal's pydantic Agent
-                    # rejects it), and its kickoff recalls on its own — running
-                    # the preamble too re-read the same store moments later
-                    # (two "Memory Read" rows in the trace) and injected the
-                    # same context twice.
-                    memory_block = ""
-                    _agent_recalls_itself = (
-                        _agent_memory is not None
-                        and getattr(agent, "memory", None) is _agent_memory
-                    )
-                    if _agent_recalls_itself:
-                        _log(
-                            "Memory recall left to the agent (CrewAI engine consults memory during kickoff)"
-                        )
-                    if _agent_memory is not None and not _agent_recalls_itself:
-                        from src.services.memory.run.recall import build_memory_preamble
+                    from src.services.chat.turn_kickoff import kickoff_chat_turn
 
-                        memory_block = await asyncio.to_thread(
-                            build_memory_preamble, _agent_memory, prompt
-                        )
-                        if memory_block:
-                            _log("Memory recall: context block injected")
-                    # Attaching a file binds the knowledge tool and scopes it to
-                    # that file, but nothing told the agent the file EXISTS — so
-                    # it answered "please share or upload the report" holding the
-                    # tool that would have read it. Last of the preamble parts,
-                    # closest to the user's message.
-                    from src.services.chat.attachment_hint import (
-                        build_attachment_hint,
-                    )
-
-                    attachment_hint = build_attachment_hint(agent_spec)
-                    if attachment_hint:
-                        _log("Attached files noted for the agent")
-                    preamble_parts = [
-                        part
-                        for part in (
-                            memory_block,
-                            conversation_preamble,
-                            attachment_hint,
-                        )
-                        if part
-                    ]
-                    kickoff_prompt = (
-                        "\n\n".join(preamble_parts) + f"\n\nCurrent message:\n{prompt}"
-                        if preamble_parts
-                        else prompt
-                    )
-                    kicked = await self._kickoff_with_mlflow_trace(
+                    kicked = await kickoff_chat_turn(
+                        self,
                         agent,
-                        kickoff_prompt,
                         config,
                         execution_id,
                         trace_context,
                         group_context,
                         group_id,
+                        prompt,
+                        agent_spec,
+                        conversation_preamble,
+                        _agent_memory,
+                        _log,
                     )
                 finally:
                     if _uninstall_approval_hook is not None:
@@ -1206,12 +1160,17 @@ class LightAgentService:
                             f"[light_agent] handler unregister skipped: {off_err}"
                         )
                 answer = getattr(kicked, "raw", None)
+                budget_exhausted = getattr(kicked, "budget_exhausted", False) is True
                 if answer is None:
                     answer = str(kicked) if kicked is not None else ""
 
                 # ── Memory persist — fire-and-forget (never blocks the answer).
                 # The engine Agent does not auto-save; store the compact turn.
-                if _agent_memory is not None and (answer or "").strip():
+                if (
+                    not budget_exhausted
+                    and _agent_memory is not None
+                    and (answer or "").strip()
+                ):
                     from src.services.memory.run.persist import (
                         format_turn_for_memory,
                         remember_async,
@@ -1231,7 +1190,7 @@ class LightAgentService:
                 # workspace that only used chat accumulated duplicate records
                 # forever and they crowded the 6-snippet recall budget. A turn is
                 # far too frequent to maintain on every one, hence the throttle.
-                if _agent_memory is not None:
+                if not budget_exhausted and _agent_memory is not None:
                     try:
                         from src.services.memory.maintenance.passes import (
                             schedule_maintenance_after_writes,
@@ -1259,7 +1218,12 @@ class LightAgentService:
                     )
                     if not _compact_groups and group_id and group_id != "default":
                         _compact_groups = [group_id]
-                    if compaction_enabled() and _session_id and _compact_groups:
+                    if (
+                        not budget_exhausted
+                        and compaction_enabled()
+                        and _session_id
+                        and _compact_groups
+                    ):
                         _model_name = getattr(
                             getattr(agent, "llm", None), "model", None
                         )
@@ -1271,7 +1235,10 @@ class LightAgentService:
                 except Exception as compact_err:  # noqa: BLE001
                     logger.debug(f"[light_agent] compaction skipped: {compact_err}")
 
-            _log(f"Chat agent '{role}' completed ({len(answer or '')} chars)")
+            turn_result = (
+                "reached its execution limit" if budget_exhausted else "completed"
+            )
+            _log(f"Chat agent '{role}' {turn_result} ({len(answer or '')} chars)")
 
             # Compose a renderable A2UI surface from the answer — the SAME shared
             # composer the exported app uses (src.services.a2ui), run post-answer so the
@@ -1283,7 +1250,7 @@ class LightAgentService:
                 # Diagram/slides/presentation are rendered from the agent's own
                 # ```html block — skip A2UI composition entirely for them. (The
                 # generic handler below keeps the plain answer.)
-                if _html_owned:
+                if _html_owned or budget_exhausted:
                     raise _HtmlOwnedSkip()
                 from src.services.a2ui.runner import compose_surface
 
@@ -1382,18 +1349,25 @@ class LightAgentService:
             # wedges completion.
             await _flush_and_close_traces(timeout=10)
 
+            terminal_status = "FAILED" if budget_exhausted else "COMPLETED"
             outcome = await persist_execution_outcome(
                 execution_id,
                 ExecutionOutcome(
-                    "COMPLETED", "Light agent execution completed", result_payload
+                    terminal_status,
+                    (
+                        "Execution limit reached; partial output retained"
+                        if budget_exhausted
+                        else "Light agent execution completed"
+                    ),
+                    result_payload,
                 ),
             )
             _system_log.info(
-                f"[light_agent] Completed light agent execution {execution_id}"
+                f"[light_agent] Light agent execution {execution_id}: {terminal_status}"
             )
             return {
                 "execution_id": execution_id,
-                "status": ExecutionStatus.COMPLETED.value,
+                "status": terminal_status,
                 "status_persisted": outcome.persisted,
             }
 
@@ -1499,13 +1473,8 @@ class LightAgentService:
         )
         if resolved:
             return resolved
-        # Personal-workspace fallback: when no workspace is selected (no group_id
-        # header), the request carries no primary_group_id/group_ids — but the
-        # user's OWN workspace id is deterministically derived from their email,
-        # the SAME id GroupContext.from_email uses and that workspace-scoped MCP
-        # overrides are stored under (e.g. user_nehme_tohme_databricks_com).
-        # Without this the chat "answer mode" path falls back to "default", which
-        # matches no MCP rows, so workspace-enabled servers resolve to 0.
+        # Personal-workspace fallback uses the allocated ID. Re-deriving it
+        # from email could select a different workspace when IDs collide.
         email = getattr(group_context, "group_email", None)
         if email and "@" in email:
             return GroupContext.personal_workspace_id_of(

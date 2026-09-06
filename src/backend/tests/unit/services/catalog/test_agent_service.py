@@ -925,7 +925,7 @@ async def test_update_with_group_check_keeps_an_explicit_null_override():
     group_ctx = MagicMock()
     obj_in = MagicMock()
     obj_in.model_dump.side_effect = lambda **kw: (
-        {"name": "n", "max_tokens": None, "temperature": None}
+        {"name": "n", "max_tokens": None, "temperature": None, "execution_effort": None}
         if kw.get("exclude_unset")
         else {"name": "n"}
     )
@@ -935,7 +935,13 @@ async def test_update_with_group_check_keeps_an_explicit_null_override():
     ):
         await svc.update_with_group_check("a1", obj_in, group_ctx)
     svc.repository.update.assert_awaited_once_with(
-        "a1", {"name": "n", "max_tokens": None, "temperature": None}
+        "a1",
+        {
+            "name": "n",
+            "max_tokens": None,
+            "temperature": None,
+            "execution_effort": None,
+        },
     )
 
 

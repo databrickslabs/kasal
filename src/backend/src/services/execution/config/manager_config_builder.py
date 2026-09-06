@@ -74,6 +74,22 @@ class ManagerConfigBuilder:
         except Exception as e:
             logger.warning(f"Error configuring crew manager LLM: {e}")
 
+        effort = (self.config.get("inputs") or {}).get(
+            "execution_effort"
+        ) or self.config.get("execution_effort")
+        if effort:
+            from src.services.execution.kernel.agent_effort import (
+                apply_execution_effort,
+            )
+
+            manager = crew_kwargs.get("manager_agent")
+            llm = (
+                getattr(manager, "llm", None)
+                if manager is not None
+                else crew_kwargs.get("manager_llm")
+            )
+            apply_execution_effort(llm, {"execution_effort": effort}, "Crew Manager")
+
         return crew_kwargs
 
     async def _configure_hierarchical_manager(

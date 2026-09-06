@@ -263,9 +263,11 @@ def build_crew(**kwargs: Any) -> Any:
     # call, and under CrewAI every call is one tool round. A 30s cap then means
     # "30s per round", which is no cap at all.
     run_max_seconds = kwargs.pop("run_max_seconds", None)
+    effort = kwargs.pop("execution_effort", None)
 
     crew = _build(kasal_memory_crew_class(), kwargs, "crew")
     object.__setattr__(crew, "_kasal_run_max_seconds", run_max_seconds)
+    object.__setattr__(crew, "_kasal_execution_effort", effort)
     # The object survives the flag. Callers read the memory backend back OFF the
     # crew to build the recall provider; if `memory=False` were the only record,
     # they would build nothing and the crew would be silently memory-less.

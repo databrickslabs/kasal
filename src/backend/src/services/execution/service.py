@@ -46,10 +46,10 @@ from src.schemas.execution import (
     ExecutionNameGenerationRequest,
     ExecutionStatus,
 )
+from src.services.execution.flow_name_inputs import extract_flow_name_inputs
 from src.services.execution.kasal_service import KasalExecutionService
 from src.services.execution.naming import ExecutionNameService
 from src.services.execution.serialization import sanitize_for_database
-from src.services.execution.flow_name_inputs import extract_flow_name_inputs
 from src.services.execution.status import ExecutionStatusService
 from src.utils.asyncio_utils import create_and_run_loop, run_in_thread_with_loop
 from src.utils.sensitive_data_utils import mask_sensitive_fields
@@ -1027,7 +1027,9 @@ class ExecutionService:
                                 masked_inputs.get("flow_id") if masked_inputs else None
                             )
                         ),
-                        "crew_id": str(e.crew_id) if getattr(e, "crew_id", None) else None,
+                        "crew_id": (
+                            str(e.crew_id) if getattr(e, "crew_id", None) else None
+                        ),
                     }
 
                     # Also extract agents_yaml and tasks_yaml from masked inputs for direct access
@@ -1301,9 +1303,21 @@ class ExecutionService:
                 # Completed-run actions need the saved definition and exact
                 # configuration. The terminal lookup already loaded this row;
                 # keep running-status polls free of configuration blobs.
-                "crew_id": str(full_row.crew_id) if getattr(full_row, "crew_id", None) else None,
-                "flow_id": str(full_row.flow_id) if getattr(full_row, "flow_id", None) else None,
-                "inputs": self._mask_inputs_sensitive_data(full_row.inputs) if getattr(full_row, "inputs", None) else None,
+                "crew_id": (
+                    str(full_row.crew_id)
+                    if getattr(full_row, "crew_id", None)
+                    else None
+                ),
+                "flow_id": (
+                    str(full_row.flow_id)
+                    if getattr(full_row, "flow_id", None)
+                    else None
+                ),
+                "inputs": (
+                    self._mask_inputs_sensitive_data(full_row.inputs)
+                    if getattr(full_row, "inputs", None)
+                    else None
+                ),
                 "run_name": execution.run_name,
                 "error": execution.error,
                 # Lets the trace poller skip requests that don't apply to this
@@ -1464,27 +1478,12 @@ class ExecutionService:
                     f"[ExecutionService.create_execution] Extracted {len(agents_yaml)} agents and {len(tasks_yaml)} tasks from flow config for name generation"
                 )
 
-            # Log the agents_yaml to see if knowledge_sources are present
-            logger.info(
-                f"[ExecutionService.create_execution] Received agents_yaml with {len(agents_yaml)} agents"
+            # Snapshot agent settings before history persistence and worker launch.
+            from src.services.execution.config.agent_settings_snapshot import (
+                snapshot_agent_settings,
             )
-            for agent_id, agent_config in agents_yaml.items():
-                logger.info(
-                    f"[ExecutionService.create_execution] Agent {agent_id} keys: {list(agent_config.keys())}"
-                )
-                if "knowledge_sources" in agent_config:
-                    knowledge_sources = agent_config.get("knowledge_sources", [])
-                    logger.info(
-                        f"[ExecutionService.create_execution] Agent {agent_id} has {len(knowledge_sources)} knowledge_sources"
-                    )
-                    for idx, source in enumerate(knowledge_sources):
-                        logger.info(
-                            f"[ExecutionService.create_execution] Agent {agent_id} knowledge_source[{idx}]: {source}"
-                        )
-                else:
-                    logger.debug(
-                        f"[ExecutionService.create_execution] Agent {agent_id} has NO knowledge_sources field"
-                    )
+
+            await snapshot_agent_settings(config, self.session, group_context)
 
             # Ensure GroupContext is available in UserContext for authentication
             # This is critical for both OBO (user_token) and PAT (group_id) authentication

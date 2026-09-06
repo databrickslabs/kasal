@@ -139,7 +139,11 @@ def _apply_thinking_overrides(llm: Any, spec: Dict[str, Any], label: str = "") -
         # against one does not silently no-op.
         effort = spec.get("reasoning_effort") or spec.get("thinking_effort")
         if effort:
-            from src.core.llm.model_capabilities import allowed_efforts
+            from src.core.llm.model_capabilities import (
+                ReasoningStyle,
+                allowed_efforts,
+                model_capability,
+            )
 
             # Validated against THIS model's accepted set: the scales differ per
             # model (five distinct ones across the catalogue), so "high" being
@@ -148,6 +152,9 @@ def _apply_thinking_overrides(llm: Any, spec: Dict[str, Any], label: str = "") -
             value = str(effort).strip().lower()
             if value in accepted:
                 llm.thinking_effort = value
+                capability = model_capability(getattr(llm, "model", None))
+                if capability and capability.style == ReasoningStyle.REASONING_EFFORT:
+                    llm.reasoning_effort = value
                 logger.info(f"Agent {label} overrides thinking effort: {value!r}")
             else:
                 logger.info(
@@ -340,9 +347,16 @@ async def build_agent_llm(
             logger.debug(f"Token streaming not enabled for agent {label}: {stream_err}")
 
     # Reasoning = the model's native thinking budget, applied to the agent's own LLM.
+    catalog_output_cap = output_cap(llm)
+    from src.services.execution.kernel.agent_effort import apply_execution_effort
+
+    if not spec.get("execution_effort_override"):
+        apply_execution_effort(llm, spec, label, catalog_output_cap)
     _apply_reasoning_effort(llm, spec, label=label)
     _apply_thinking_overrides(llm, spec, label=label)
     _apply_output_cap_override(llm, spec, label=label)
+    if spec.get("execution_effort_override"):
+        apply_execution_effort(llm, spec, label, catalog_output_cap)
 
     # What this agent will actually run with, logged HERE so all three paths
     # report it identically — chat, crew and flow all reach this function, and
@@ -372,6 +386,9 @@ def build_agent_kwargs(
     Does NOT inject the security preamble — the caller does that next via
     ``inject_security_preamble`` so each path keeps its own log line.
     """
+    from src.core.llm.effort import agent_effort_defaults
+
+    spec = agent_effort_defaults(spec)
     agent_kwargs: Dict[str, Any] = {
         "role": spec["role"],
         "goal": spec["goal"],

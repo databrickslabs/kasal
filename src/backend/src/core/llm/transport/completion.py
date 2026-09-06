@@ -44,6 +44,7 @@ from .exceptions import (
     LLMContextLengthExceededError,
     is_context_length_exceeded,
 )
+from .request_deadline import bounded_params, call_deadline, check_request_deadline
 
 # Aliased: `function_calls` is the local variable name throughout the round
 # loops, and a module-level import of the same name would shadow confusingly.
@@ -311,7 +312,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         response_model: type[BaseModel] | None = None,
     ) -> str:
         # Attribution for every delta this call streams — see BaseLLM._call_scope.
-        with self._attributed(from_task, from_agent):
+        with self._attributed(from_task, from_agent), call_deadline(from_agent):
             conversation = self._normalize_messages(messages)
             self._emit_call_started_event(conversation, tools, from_task, from_agent)
             try:
@@ -751,7 +752,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
             try:
                 if self.stream:
                     return self._stream_chat_completion(params)
-                response = self.client.chat.completions.create(**params)
+                response = self.client.chat.completions.create(**bounded_params(params))
             except Exception as e:
                 rejections += 1
                 if (
@@ -844,14 +845,18 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         delta, accumulates tool-call deltas, returns (text, usage, calls)."""
         params = {**params, "stream": True, "stream_options": {"include_usage": True}}
         try:
-            response_stream = self.client.chat.completions.create(**params)
+            response_stream = self.client.chat.completions.create(
+                **bounded_params(params)
+            )
         except Exception as e:
             # Some OpenAI-compatible servers reject stream_options; retry
             # without it (usage is then unavailable for this call).
             if "stream_options" not in str(e):
                 raise
             params.pop("stream_options", None)
-            response_stream = self.client.chat.completions.create(**params)
+            response_stream = self.client.chat.completions.create(
+                **bounded_params(params)
+            )
 
         chunks: list[str] = []
         calls_by_index: dict[int, dict[str, Any]] = {}
@@ -859,6 +864,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         chunk_index = 0
         finish_reason: str | None = None
         for part in response_stream:
+            check_request_deadline("".join(chunks))
             if getattr(part, "usage", None) is not None:
                 usage = self._extract_chat_token_usage(part)
             choices = getattr(part, "choices", None)
@@ -1111,7 +1117,9 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
         while True:
             try:
                 return self.client.responses.create(
-                    **self._prepare_responses_params(conversation, tools)
+                    **bounded_params(
+                        self._prepare_responses_params(conversation, tools)
+                    )
                 )
             except Exception as e:
                 rejections += 1

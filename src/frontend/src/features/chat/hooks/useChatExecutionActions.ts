@@ -11,6 +11,7 @@
  * from.
  */
 import { useState, useCallback } from 'react';
+import { useChatEffortStore } from '../../../store/chatEffort';
 import { createExecution } from '../api/executions';
 import { useSessionStore } from '../store/sessionStore';
 import { useExecutionStore } from '../store/executionStore';
@@ -299,6 +300,7 @@ export function useChatExecutionActions({
           false,
           'chat',
         );
+        crewConfig.inputs = { ...crewConfig.inputs, execution_effort: useChatEffortStore.getState().settings };
         const execution = await createExecution(crewConfig);
         const jobId = execution.job_id || execution.execution_id;
         if (jobId) {

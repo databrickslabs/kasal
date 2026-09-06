@@ -8,6 +8,10 @@ vi.mock('../../../../hooks/global/useReasoningSupport', () => ({
   reasoningUnsupportedReason: () => 'Reasoning is unavailable for this model.',
 }));
 
+vi.mock('../../../../shared/api/client', () => ({ apiClient: { get: vi.fn().mockResolvedValue({ data: { effort_profiles: {
+  low: { run_max_seconds: 180, max_iter: 8 }, medium: { run_max_seconds: 600, max_iter: 15 }, high: { run_max_seconds: 1200, max_iter: 30 },
+} } }) } }));
+
 const models = { 'model-a': { name: 'Model A', supports_reasoning_effort: true }, 'model-b': { name: 'Model B' } };
 beforeEach(() => useCrewExecutionStore.setState({
   processType: 'sequential', managerLLM: '', reasoningEnabled: false,
@@ -47,16 +51,23 @@ describe('Builder composer settings', () => {
     expect(screen.getByRole('menuitem', { name: 'Manager model' })).toHaveTextContent('Model B');
   });
 
-  it('applies reasoning effort and can turn it off again', () => {
+  it('applies the shared effort profile and shows the selection at the root', async () => {
     setup();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Agent reasoning' }));
-    fireEvent.click(screen.getByRole('menuitemradio', { name: /High/ }));
-    expect(useCrewExecutionStore.getState().reasoningEnabled).toBe(true);
-    expect(useCrewExecutionStore.getState().reasoningConfig.reasoning_effort).toBe('high');
-    expect(screen.getByRole('menuitem', { name: 'Agent reasoning' })).toHaveTextContent('High');
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Agent reasoning' }));
-    fireEvent.click(screen.getByRole('menuitemradio', { name: /^Off/ }));
-    expect(useCrewExecutionStore.getState().reasoningEnabled).toBe(false);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Effort' }));
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: /High/ }));
+    expect(useCrewExecutionStore.getState().reasoningConfig.execution_effort).toEqual({ tier: 'high' });
+    expect(screen.getByRole('menuitem', { name: 'Effort' })).toHaveTextContent('High');
+  });
+
+  it('inherits saved agents by default and can clear a run override', async () => {
+    setup();
+    expect(screen.getByRole('menuitem', { name: 'Effort' })).toHaveTextContent('Use agent settings');
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Effort' }));
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: /High/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Effort' }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /Use agent settings/ }));
+    expect(useCrewExecutionStore.getState().reasoningConfig.execution_effort).toBeUndefined();
+    expect(screen.getByRole('menuitem', { name: 'Effort' })).toHaveTextContent('Use agent settings');
   });
 
   it('supports keyboard navigation into and back out of a panel', () => {

@@ -1,4 +1,6 @@
+import type { EffortSettings } from './effort';
 export interface AgentYaml {
+  execution_effort?: EffortSettings | null;
   role: string;
   goal: string;
   backstory: string;

@@ -247,6 +247,9 @@ class AgentConfig:
             "code_execution_mode",
             "max_context_window_size",
             "max_tokens",
+            "execution_effort",
+            "thinking_budget_tokens",
+            "reasoning_effort",
             # reasoning + reasoning_config = the model's native reasoning budget,
             # applied to this agent's LLM by the shared builder. (The legacy
             # max_reasoning_attempts cap belonged to the removed replan loop.)

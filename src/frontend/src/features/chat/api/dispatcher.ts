@@ -25,7 +25,10 @@ export async function dispatch(
   // ChatMode run settings: the backend auto-executes the generated crew with
   // these (session-scoped memory, attached MCP data sources).
   if (runSettings) {
-    if (runSettings.auto_execute) request.auto_execute = true;
+    if (runSettings.auto_execute) {
+      request.auto_execute = true;
+      request.execution_effort = runSettings.execution_effort;
+    }
     if (runSettings.session_id) request.session_id = runSettings.session_id;
     if (runSettings.memory_workspace_scope !== undefined)
       request.memory_workspace_scope = runSettings.memory_workspace_scope;

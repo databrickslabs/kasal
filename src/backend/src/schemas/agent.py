@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from src.core.llm.effort import EffortSettings, agent_effort_defaults
 
 # Shared properties
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
@@ -11,6 +13,7 @@ class AgentBase(BaseModel):
     """Base Pydantic model for Agents with shared attributes."""
 
     name: str = Field(default="Unnamed Agent")
+    execution_effort: Optional[EffortSettings] = None
     role: str
     goal: str
     backstory: str
@@ -190,7 +193,10 @@ class AgentBase(BaseModel):
 class AgentCreate(AgentBase):
     """Pydantic model for creating an agent."""
 
-    pass
+    @model_validator(mode="before")
+    @classmethod
+    def effort_defaults(cls, value):
+        return agent_effort_defaults(value) if isinstance(value, dict) else value
 
 
 # Properties to receive on agent update
@@ -198,6 +204,13 @@ class AgentUpdate(BaseModel):
     """Pydantic model for updating an agent, all fields optional."""
 
     name: Optional[str] = None
+    execution_effort: Optional[EffortSettings] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def effort_defaults(cls, value):
+        return agent_effort_defaults(value) if isinstance(value, dict) else value
+
     role: Optional[str] = None
     goal: Optional[str] = None
     backstory: Optional[str] = None

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { useDispatcher } from './useDispatcher';
+import { useChatEffortStore } from '../../../store/chatEffort';
 import { dispatch } from '../api/dispatcher';
 import { generateId } from '../utils/markdown';
 import { useExecutionStore } from '../store/executionStore';
@@ -53,6 +54,7 @@ function result(
 // Session memory" change — disable_memory: true, no MCP servers). The 5th arg
 // is the CLEAN user message (before the intent-steering prefix is added).
 const RUN_SETTINGS = {
+  execution_effort: { tier: 'medium' },
   auto_execute: true,
   session_id: 'session-1',
   memory_workspace_scope: true,
@@ -71,6 +73,7 @@ const RUN_SETTINGS = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useChatEffortStore.setState({ settings: { tier: 'medium' } });
   mockedGenerateId.mockReturnValue(ASSISTANT_ID);
   // Reset the shared store's answer mode so each test starts at the 'chat'
   // default (tests that need crew augmentation opt into research explicitly).
@@ -88,6 +91,15 @@ describe('useDispatcher', () => {
     expect(typeof hook.current.sendMessage).toBe('function');
     expect(hook.current.isDispatching).toHaveProperty('current', false);
     expect(typeof hook.current.setLastGenerated).toBe('function');
+  });
+
+  it('snapshots the selected Chat effort on each dispatch', async () => {
+    const settings = { tier: 'high' as const, max_iter: 28, run_max_seconds: 900 };
+    useChatEffortStore.setState({ settings });
+    mockedDispatch.mockResolvedValue(result('conversation', null));
+    const { result: hook } = renderHook(() => useDispatcher(makeOptions()));
+    await act(async () => { await hook.current.sendMessage('Research this'); });
+    expect(mockedDispatch.mock.calls[0][3].execution_effort).toEqual(settings);
   });
 
   it('re-entrancy guard: ignores a second call while dispatching', async () => {

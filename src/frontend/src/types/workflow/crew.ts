@@ -1,10 +1,12 @@
 import type { Node, Edge } from 'reactflow';
+import type { EffortSettings } from './effort';
 import type { TaskNode, AgentNode } from './canvas';
 
 // Reasoning controls. Defined here (a leaf types module) so both the crew wire
 // types and the execution store can share it without an import cycle. The backend
 // maps `reasoning_effort` onto the model's native reasoning/thinking budget.
 export interface ReasoningConfig {
+  execution_effort?: EffortSettings;
   reasoning_effort?: 'low' | 'medium' | 'high';
 }
 

@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.core.llm.effort import EffortSettings
 from src.schemas.chat_asset import ImageAssetRef
 
 
@@ -42,6 +43,8 @@ class IntentType(str, Enum):
 
 class DispatcherRequest(BaseModel):
     """Request schema for dispatcher service."""
+
+    execution_effort: Optional[EffortSettings] = None
 
     message: str = Field(
         ...,

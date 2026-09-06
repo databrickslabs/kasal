@@ -4,6 +4,7 @@ from uuid import UUID as PyUUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.core.llm.effort import EffortSettings
 from src.schemas.chat_asset import ImageAssetRef
 
 # Node data models
@@ -408,6 +409,8 @@ class CrewCreationResponse(BaseModel):
 
 class CrewStreamingRequest(BaseModel):
     """Request schema for progressive/streaming crew generation."""
+
+    execution_effort: Optional[EffortSettings] = None
 
     prompt: str = Field(
         ..., description="Natural language description of the crew setup"

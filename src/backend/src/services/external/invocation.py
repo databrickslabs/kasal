@@ -336,7 +336,11 @@ async def start_run(
     config = CrewConfig(
         agents_yaml=agents_yaml,
         tasks_yaml=tasks_yaml,
-        inputs={**(inputs or {}), "external_origin": caller.origin},
+        inputs={
+            "reasoning_config": getattr(crew, "reasoning_config", None) or {},
+            **(inputs or {}),
+            "external_origin": caller.origin,
+        },
         execution_type="crew",
     )
 

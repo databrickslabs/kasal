@@ -1,3 +1,4 @@
+import { useChatEffortStore } from '../../../store/chatEffort';
 import type { ImageRef } from '../types/chat';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { dispatch } from '../api/dispatcher';
@@ -371,6 +372,7 @@ export function useDispatcher(options: UseDispatcherOptions) {
           // ChatMode runs the generated crew on the backend (the crew canvas
           // doesn't — it runs via Play, so it omits this and defaults false).
           auto_execute: true,
+          execution_effort: useChatEffortStore.getState().settings,
           session_id: originSessionId || undefined,
           memory_workspace_scope: execState.workspaceMemory,
           disable_memory: !execState.memoryEnabled,

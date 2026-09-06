@@ -1,3 +1,4 @@
+import type { EffortSettings } from './effort';
 import { MemoryBackendConfig } from '../config/memoryBackend';
 
 // Define UploadedFileInfo locally since we removed UploadService
@@ -58,6 +59,8 @@ export interface EmbedderConfig {
 }
 
 export interface Agent {
+  execution_effort?: EffortSettings | null;
+  reasoning_effort?: string | null;
   id?: string;
   name: string;
   role: string;

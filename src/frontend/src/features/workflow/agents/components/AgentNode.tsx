@@ -142,6 +142,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
           temperature: typeof data.temperature === 'number' ? data.temperature : undefined,
           // max_tokens is NOT read from node data: older code stamped it there.
           thinking_budget_tokens: typeof data.thinking_budget_tokens === 'number' ? data.thinking_budget_tokens : undefined,
+          execution_effort: data.execution_effort as Agent["execution_effort"],
           thinking_effort: typeof data.thinking_effort === 'string' ? data.thinking_effort : undefined,
           function_calling_llm: data.function_calling_llm,
           max_rpm: data.max_rpm,
@@ -248,7 +249,8 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
               temperature: updatedAgent.temperature,
               max_tokens: updatedAgent.max_tokens,
               thinking_budget_tokens: updatedAgent.thinking_budget_tokens,
-              thinking_effort: updatedAgent.thinking_effort,
+              thinking_effort: updatedAgent.reasoning_effort ?? updatedAgent.thinking_effort,
+              execution_effort: updatedAgent.execution_effort,
             }
           };
         }

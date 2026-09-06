@@ -1,3 +1,4 @@
+import { catalogExecutionSettings } from './catalogExecutionSettings';
 import { kasalStageSurface } from '../../../../../theme/kasalSurfaces';
 import { getDefaultModel } from '../../../../../config/defaultModel';
 import React, { useState, useEffect, useRef, useId, ChangeEvent, KeyboardEvent } from 'react';
@@ -55,8 +56,8 @@ import ListItemButton from '@mui/material/ListItemButton';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
 import { useFlowConfigStore } from '../../../../../store/flowConfig';
-import { useCrewExecutionStore, ReasoningConfig } from '../../../../../store/crewExecution';
-import { useTabManagerStore, TabExecutionConfig } from '../../../../../store/tabManager';
+import { useCrewExecutionStore } from '../../../../../store/crewExecution';
+import { useTabManagerStore } from '../../../../../store/tabManager';
 import PublishButton from './PublishButton';
 import { usePublicationStore } from '../../../../../store/publication';
 import { usePermissions } from '../../../../../hooks/usePermissions';
@@ -515,55 +516,14 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
         const store = useCrewExecutionStore.getState();
         const tabStore = useTabManagerStore.getState();
 
-        // Determine the final process type
-        let finalProcessType: 'sequential' | 'hierarchical' | 'parallel' = 'sequential';
-        if (hasManagerNode) {
-          console.log('[CrewFlowDialog] Manager node found, forcing hierarchical process type');
-          finalProcessType = 'hierarchical';
-        } else if (selectedCrew.process) {
-          console.log('[CrewFlowDialog] Setting process type from crew data:', selectedCrew.process);
-          finalProcessType = selectedCrew.process as 'sequential' | 'hierarchical' | 'parallel';
-        }
-        store.setProcessType(finalProcessType);
-
-        if (selectedCrew.reasoning !== undefined) {
-          store.setReasoningEnabled(selectedCrew.reasoning);
-        }
-        if (selectedCrew.reasoning_llm) {
-          store.setReasoningLLM(selectedCrew.reasoning_llm);
-        }
-        if (selectedCrew.reasoning_config) {
-          store.setReasoningConfig(selectedCrew.reasoning_config as Partial<ReasoningConfig>);
-        }
-
-        // Determine final manager LLM
-        let finalManagerLLM: string | undefined;
-        if (selectedCrew.manager_llm) {
-          finalManagerLLM = selectedCrew.manager_llm;
-          store.setManagerLLM(selectedCrew.manager_llm);
-        } else if (managerNode?.data?.llm) {
-          finalManagerLLM = managerNode.data.llm;
-          store.setManagerLLM(managerNode.data.llm);
-        }
-
-        // Set manager node ID if manager exists
-        if (hasManagerNode && managerNode) {
-          store.setManagerNodeId(managerNode.id);
-        }
-
-        // Save execution config to the active tab for per-tab persistence
-        const activeTabId = tabStore.activeTabId;
-        if (activeTabId) {
-          const tabConfig: TabExecutionConfig = {
-            processType: finalProcessType,
-            reasoningEnabled: selectedCrew.reasoning,
-            reasoningLLM: selectedCrew.reasoning_llm,
-            reasoningConfig: selectedCrew.reasoning_config,
-            managerLLM: finalManagerLLM
-          };
-          console.log('[CrewFlowDialog] Saving execution config to tab:', activeTabId, tabConfig);
-          tabStore.updateTabExecutionConfig(activeTabId, tabConfig);
-        }
+        const settings = catalogExecutionSettings(selectedCrew, managerNode?.data?.llm, hasManagerNode);
+        store.setProcessType(settings.processType!);
+        store.setReasoningEnabled(settings.reasoningEnabled!);
+        store.setReasoningLLM(settings.reasoningLLM!);
+        store.setReasoningConfig(settings.reasoningConfig!);
+        store.setManagerLLM(settings.managerLLM!);
+        if (managerNode) store.setManagerNodeId(managerNode.id);
+        if (tabStore.activeTabId) tabStore.updateTabExecutionConfig(tabStore.activeTabId, settings);
 
         // Clear the loading flag after all config is set
         store.setIsLoadingCrew(false);

@@ -92,7 +92,7 @@ export const useTabExecutionSync = () => {
       setReasoningLLM(config.reasoningLLM);
     }
     if (config.reasoningConfig !== undefined) {
-      setReasoningConfig(config.reasoningConfig);
+      setReasoningConfig({ ...config.reasoningConfig, execution_effort: config.reasoningConfig.execution_effort });
     }
     if (config.managerLLM !== undefined) {
       setManagerLLM(config.managerLLM);
