@@ -116,8 +116,10 @@ def test_end_to_end_a_public_start_that_redirects_inside_is_refused():
     calls = {"n": 0}
 
     def first_pass_then_real(url):
+        # The start URL passes (as a public page would) and is pinned to the
+        # local server; the hop it redirects to is checked for real.
         calls["n"] += 1
-        return None if calls["n"] == 1 else real(url)
+        return "127.0.0.1" if calls["n"] == 1 else real(url)
 
     with (
         _redirecting_server() as base,
@@ -126,3 +128,70 @@ def test_end_to_end_a_public_start_that_redirects_inside_is_refused():
         with pytest.raises(RuntimeError, match="redirect refused"):
             web_fetch._safe_fetch(f"{base}/start", headers={}, max_bytes=1000)
     assert calls["n"] == 2
+
+
+class TestTheConnectionGoesWhereTheCheckLooked:
+    """R2-08. The check resolved the name once and urllib resolved it again to
+    connect: a name that answered public first and private second reached the
+    private address. The transport now connects to the validated address."""
+
+    def test_the_socket_is_opened_to_the_validated_address(self, monkeypatch):
+        answers = iter(
+            [[(2, 1, 6, "", ("93.184.216.34", 0))], [(2, 1, 6, "", ("127.0.0.1", 0))]]
+        )
+        monkeypatch.setattr(
+            web_fetch.socket, "getaddrinfo", lambda *a, **k: next(answers)
+        )
+        connected = {}
+
+        def fake_create_connection(address, timeout=None, source_address=None):
+            connected["address"] = address
+            raise OSError("no network in tests")
+
+        monkeypatch.setattr(
+            web_fetch.socket, "create_connection", fake_create_connection
+        )
+        with pytest.raises(RuntimeError):
+            web_fetch._safe_fetch(
+                "http://rebinding.example.com/x", headers={}, max_bytes=100
+            )
+        # The one validated answer; the name is never resolved a second time.
+        assert connected["address"] == ("93.184.216.34", 80)
+        assert next(answers, None) is not None  # the loopback answer was never consumed
+
+    def test_a_private_first_answer_never_connects(self, monkeypatch):
+        monkeypatch.setattr(
+            web_fetch.socket,
+            "getaddrinfo",
+            lambda *a, **k: [(2, 1, 6, "", ("10.0.0.5", 0))],
+        )
+        touched = []
+        monkeypatch.setattr(
+            web_fetch.socket, "create_connection", lambda *a, **k: touched.append(a)
+        )
+        with pytest.raises(ValueError, match="private/internal"):
+            web_fetch._safe_fetch("http://internal.example.com/x", headers={})
+        assert touched == []
+
+
+def test_a_redirect_to_a_file_url_has_nowhere_to_go():
+    """The opener carries HTTP handlers only: a file: hop is refused as a
+    redirect, and could not be served even if it were not."""
+    req = urllib.request.Request("http://example.com/a")
+    with pytest.raises(urllib.error.HTTPError, match="redirect refused"):
+        _handler().redirect_request(
+            req, None, 302, "Found", email.message.Message(), "file:///etc/passwd"
+        )
+    captured = {}
+
+    def capture(self, request, timeout=None):
+        captured["handlers"] = [type(h).__name__ for h in self.handlers]
+        raise urllib.error.URLError("stop here")
+
+    with patch.object(web_fetch.urllib.request.OpenerDirector, "open", capture):
+        with pytest.raises(urllib.error.URLError):
+            web_fetch._open(req, timeout=1)
+    assert not any(
+        name.startswith(("File", "FTP", "Data")) for name in captured["handlers"]
+    )
+    assert "_PinnedHandler" in captured["handlers"]

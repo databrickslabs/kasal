@@ -7,12 +7,14 @@ by both the search and scrape tools.
 """
 
 import datetime
+import http.client
 import ipaddress
 import json
 import logging
 import os
 import re
 import socket
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -56,20 +58,30 @@ _MAX_REDIRECTS = 5
 _SENSITIVE_REQUEST_HEADERS = ("Authorization", "Cookie", "Proxy-Authorization")
 
 
-def _assert_public_target(url: str) -> None:
-    """Refuse non-HTTP schemes and hosts that resolve to private, loopback,
-    link-local or reserved addresses. Applied to the first URL AND to every
-    redirect hop — a public URL that 302s to ``http://127.0.0.1/…`` used to be
-    followed without a second look (audit F09). The check-then-connect DNS
-    race remains: pinning the resolved address needs a custom transport."""
+def _assert_http_scheme(url: str) -> None:
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise ValueError(f"Unsupported URL scheme: {parsed.scheme!r}")
-    host = parsed.hostname or ""
+
+
+def _assert_public_target(url: str) -> str:
+    """Refuse non-HTTP schemes and hosts that resolve to private, loopback,
+    link-local or reserved addresses, and return the address that passed.
+
+    Applied to the first URL AND to every redirect hop — a public URL that
+    302s to ``http://127.0.0.1/…`` used to be followed without a second look
+    (audit F09). The connection is then made to the returned address, never
+    to a second resolution: a name that answered public here and private a
+    moment later reached the private address (R2-08).
+    """
+    _assert_http_scheme(url)
+    host = urllib.parse.urlparse(url).hostname or ""
     try:
         infos = socket.getaddrinfo(host, None)
     except socket.gaierror as e:
         raise ValueError(f"Cannot resolve host {host!r}: {e}") from e
+    if not infos:
+        raise ValueError(f"Cannot resolve host {host!r}")
     for info in infos:
         address = ipaddress.ip_address(info[4][0])
         if (
@@ -79,6 +91,54 @@ def _assert_public_target(url: str) -> None:
             or address.is_reserved
         ):
             raise ValueError(f"Refusing to fetch private/internal address for {host!r}")
+    return infos[0][4][0]
+
+
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    """Connects to the address that was validated, not to a fresh lookup."""
+
+    def __init__(self, *args, pinned: str, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._pinned = pinned
+
+    def connect(self):
+        self.sock = socket.create_connection(
+            (self._pinned, self.port), self.timeout, self.source_address
+        )
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """As above; TLS still verifies the certificate against the HOST NAME."""
+
+    def __init__(self, *args, pinned: str, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._pinned = pinned
+
+    def connect(self):
+        sock = socket.create_connection(
+            (self._pinned, self.port), self.timeout, self.source_address
+        )
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+class _PinnedHandler(urllib.request.HTTPHandler, urllib.request.HTTPSHandler):
+    """The opener's transport: every request — first URL and every redirect
+    hop, which the redirect handler re-issues through here — is validated and
+    then connected to exactly the address that passed."""
+
+    def __init__(self):
+        urllib.request.HTTPHandler.__init__(self)
+        urllib.request.HTTPSHandler.__init__(self, context=ssl.create_default_context())
+
+    def http_open(self, req):
+        pinned = _assert_public_target(req.full_url)
+        return self.do_open(_PinnedHTTPConnection, req, pinned=pinned)
+
+    def https_open(self, req):
+        pinned = _assert_public_target(req.full_url)
+        return self.do_open(
+            _PinnedHTTPSConnection, req, pinned=pinned, context=self._context
+        )
 
 
 def _origin(url: str) -> tuple:
@@ -108,8 +168,20 @@ class _SafeRedirects(urllib.request.HTTPRedirectHandler):
 
 
 def _open(request: urllib.request.Request, timeout: int):
-    """Open through the redirect-checking opener. The one seam tests stub."""
-    return urllib.request.build_opener(_SafeRedirects()).open(request, timeout=timeout)
+    """Open through the pinned, redirect-checking opener. The one seam tests stub.
+
+    Built by hand rather than with ``build_opener``: the default set includes
+    file:, ftp: and data: handlers, and a redirect to ``file:///etc/passwd``
+    must have nowhere to go."""
+    opener = urllib.request.OpenerDirector()
+    for handler in (
+        _PinnedHandler(),
+        _SafeRedirects(),
+        urllib.request.HTTPDefaultErrorHandler(),
+        urllib.request.HTTPErrorProcessor(),
+    ):
+        opener.add_handler(handler)
+    return opener.open(request, timeout=timeout)
 
 
 def _safe_fetch(
@@ -126,7 +198,7 @@ def _safe_fetch(
     misconfigured URL there is no upper bound at all. None keeps the previous
     unbounded behaviour for callers that have their own limit.
     """
-    _assert_public_target(url)
+    _assert_http_scheme(url)  # the transport checks the address, per hop
     request = urllib.request.Request(url, headers=headers)
     try:
         with _open(request, timeout) as response:
