@@ -23,6 +23,7 @@ import { ChatMessage } from '../types/index';
 import { MessageContent } from './MessageRenderer';
 import { stripAnsiEscapes, isMarkdown, isHtmlDocument } from '../utils/textProcessing';
 import { GenieSpaceConfigPrompt } from '../GenieSpaceConfigPrompt';
+import BuilderRunActions from './BuilderRunActions';
 import { UiSurfaceResult } from './UiSurfaceResult';
 import { toSurface } from '../../../chat/utils/surfaceAdapter';
 import type { ToolConfigNeededData } from '../../../../hooks/global/useCrewGenerationSSE';
@@ -542,6 +543,9 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
               >
                 {renderMessageContent()}
               </Box>
+              {message.type === 'result' && message.jobId && !message.isIntermediate && (
+                <BuilderRunActions key={message.jobId} jobId={message.jobId} />
+              )}
               <Typography variant="caption" color="text.secondary" sx={{ ml: 1, display: panel ? 'none' : undefined }}>
                 {message.timestamp.toLocaleTimeString()}
               </Typography>

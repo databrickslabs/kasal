@@ -28,7 +28,17 @@ it('reserves the main response area and gives the right canvas its full height',
   const manager = new CanvasLayoutManager();
   manager.updateUIState({ screenWidth: 1500, screenHeight: 1000, areFlowsVisible: false, leftSidebarExpanded: false, assistantPanelVisible: true, assistantResponseFocused: true, executionHistoryVisible: true, chatPanelVisible: true, assistantDockHeight: 180 });
   const area = manager.getAvailableCanvasArea('crew');
-  expect(area.x).toBeCloseTo(48 + (1500 - 96) * 0.62 + 20);
-  expect(area.width).toBeCloseTo((1500 - 96) * 0.38 - 40);
+  expect(area.x).toBeCloseTo(48 + (1500 - 96) * 0.6 + 20);
+  expect(area.width).toBeCloseTo((1500 - 96) * 0.4 - 40);
   expect(area.height).toBe(1000 - 48 - 40);
+});
+
+it('moves the canvas to the left when the conversation pane moves right', () => {
+  const manager = new CanvasLayoutManager();
+  manager.updateUIState({ screenWidth: 1500, screenHeight: 1000, areFlowsVisible: false, leftSidebarExpanded: false, assistantPanelVisible: true, assistantResponseFocused: true, assistantPanelSide: 'right', assistantPanelRatio: 0.7, executionHistoryVisible: true, chatPanelVisible: true });
+  const area = manager.getAvailableCanvasArea('crew');
+  expect(area.x).toBe(48 + 20);
+  expect(area.width).toBeCloseTo((1500 - 96) * 0.3 - 40);
+  manager.updateUIState({ assistantPanelVisible: false });
+  expect(manager.getAvailableCanvasArea('crew')).toEqual(area);
 });

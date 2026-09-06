@@ -1,4 +1,3 @@
-import { kasalStageSurface } from '../../../../theme/kasalSurfaces';
 import React, { useCallback, useRef, useState, memo, useEffect, useLayoutEffect } from 'react';
 import ReactFlow, {
   Background,
@@ -772,7 +771,7 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
         display: 'flex',
         flexDirection: 'row',
         position: 'relative',
-        ...kasalStageSurface(isDarkMode),
+        background: 'transparent',
       }}
     >
       {/* Crew Palette - Left Sidebar */}

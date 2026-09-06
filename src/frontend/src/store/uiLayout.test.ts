@@ -47,7 +47,7 @@ describe('uiLayout store — initial state', () => {
     expect(s.chatPanelCollapsed).toBe(false);
     expect(s.chatPanelWidth).toBe(450);
     expect(s.chatPanelSide).toBe('right');
-    expect(s.executionHistoryVisible).toBe(false);
+    expect(s.executionHistoryVisible).toBe(true);
     expect(s.executionHistoryHeight).toBe(60);
     expect(s.panelPosition).toBe(50);
     expect(s.layoutOrientation).toBe('horizontal');
@@ -257,5 +257,25 @@ describe('uiLayout store — getUILayoutState / useUILayoutState', () => {
     const { renderHook } = await import('@testing-library/react');
     const { result } = renderHook(() => mod.useUILayoutState());
     expect(result.current.tabBarHeight).toBe(48);
+  });
+});
+
+describe('conversation split preferences', () => {
+  it('starts with conversation on the left, ignoring the old narrow-sidebar preference', async () => {
+    const { useUILayoutStore } = await freshModule({ assistantPanelSide: 'right', executionHistoryVisible: false });
+    expect(useUILayoutStore.getState()).toMatchObject({ assistantPanelSide: 'left', assistantResponseFocused: true, assistantPanelVisible: true, executionHistoryVisible: true, assistantPanelRatio: 0.6 });
+  });
+  it('preserves side and width across reloads and keeps the width when showing runs', async () => {
+    const { useUILayoutStore } = await freshModule();
+    useUILayoutStore.getState().setAssistantPanelSide('right');
+    useUILayoutStore.getState().setAssistantPanelRatio(0.7);
+    useUILayoutStore.getState().setExecutionHistoryVisible(true);
+    expect(useUILayoutStore.getState()).toMatchObject({ assistantResponseFocused: true, assistantPanelRatio: 0.7, assistantPanelSide: 'right', assistantPanelVisible: false });
+    const restored = await freshModule(readPersisted());
+    expect(restored.useUILayoutStore.getState()).toMatchObject({ assistantPanelRatio: 0.7, assistantPanelSide: 'right' });
+    restored.useUILayoutStore.getState().setAssistantPanelRatio(10);
+    expect(restored.useUILayoutStore.getState().assistantPanelRatio).toBe(0.75);
+    restored.useUILayoutStore.getState().setAssistantPanelRatio(-10);
+    expect(restored.useUILayoutStore.getState().assistantPanelRatio).toBe(0.3);
   });
 });

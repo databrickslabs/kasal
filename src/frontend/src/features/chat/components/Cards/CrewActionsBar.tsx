@@ -1,10 +1,7 @@
 import React, { useState } from 'react';
-import { useExecutionStore } from '../../store/executionStore';
 import { GenerationCompleteData } from '../../types/dispatcher';
 import { postCrewFeedback, CrewNameConflictError, deriveCrewName } from '../../api/crews';
-import { useAppStore } from '../../store/appStore';
-import { usePermissionStore } from '../../../../store/permissions';
-import ScheduleRunDialog from '../Chat/ScheduleRunDialog';
+import CompletedRunActions from './CompletedRunActions';
 import { useSessionStore } from '../../store/sessionStore';
 import OpenOnCanvasButtons from './OpenOnCanvasButtons';
 
@@ -60,13 +57,6 @@ const CrewActionsBar: React.FC<CrewActionsBarProps> = ({ data, messageId, onSave
   const [proposing, setProposing] = useState(false);
   const [answerSaved, setAnswerSaved] = useState(false);
   const [showDownForm, setShowDownForm] = useState(false);
-  // Scheduling is builder-gated like OpenOnCanvasButtons: a chat-only user
-  // cannot see a scheduled run's results, so the offer would be a dead end.
-  const allowAgentBuilder = usePermissionStore((s) => s.allowAgentBuilder);
-  const allowFlowBuilder = usePermissionStore((s) => s.allowFlowBuilder);
-  const canSchedule = allowAgentBuilder || allowFlowBuilder;
-  const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [scheduledName, setScheduledName] = useState<string | undefined>(undefined);
   const [downComment, setDownComment] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -90,12 +80,6 @@ const CrewActionsBar: React.FC<CrewActionsBarProps> = ({ data, messageId, onSave
       setProposing(false);
     }
   };
-
-  // The memory graph only exists for runs that actually used WORKSPACE memory.
-  // This is a per-run snapshot (taken when the run was dispatched) — NOT the live
-  // toggle — so a session-only run never shows the graph even after the user
-  // later switches the composer to workspace memory.
-  const canShowGraph = Boolean(usedWorkspaceMemory) && Boolean(executionId);
 
   const persist = (patch: PersistedActions) => {
     try {
@@ -198,29 +182,12 @@ const CrewActionsBar: React.FC<CrewActionsBarProps> = ({ data, messageId, onSave
             : savedId ? `Saved${savedName ? ` — ${savedName}` : ''}` : 'Save to catalog'}
         </button>
 
-        {/* Schedule — re-run THIS run on a cadence. The run's stored config is
-            the template (POST /schedules/from-execution), so it works the same
-            for a generated crew and an answer-mode turn. */}
-        {executionId && canSchedule && (
-          <button
-            type="button"
-            onClick={() => setScheduleOpen(true)}
-            disabled={busy || proposing}
-            title={scheduledName ? `Scheduled — ${scheduledName}` : 'Run this on a schedule'}
-            className={ICON_BTN}
-            style={{
-              color: scheduledName ? 'var(--accent)' : 'var(--text-secondary)',
-              backgroundColor: 'transparent',
-              border: 'none',
-            }}
-          >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <circle cx="12" cy="12" r="8.5" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 7.5V12l3 2" />
-            </svg>
-            {scheduledName ? 'Scheduled' : 'Schedule'}
-          </button>
-        )}
+        <CompletedRunActions
+          executionId={executionId}
+          defaultName={`${deriveCrewName(data)} schedule`}
+          usedWorkspaceMemory={usedWorkspaceMemory}
+          disabled={busy || proposing}
+        />
 
         {/* Open the generated crew on a builder canvas. Only for actual crews —
             the answer-mode single assistant has no crew graph to load. */}
@@ -278,35 +245,6 @@ const CrewActionsBar: React.FC<CrewActionsBarProps> = ({ data, messageId, onSave
           </>
         )}
 
-        {/* Memory graph — concept graph of what this run wrote to memory */}
-        {canShowGraph && (
-          <button
-            type="button"
-            onClick={() =>
-              useExecutionStore.getState().openPreviewPane({
-                type: 'memory',
-                data: executionId as string,
-                title: 'Run memory',
-              })
-            }
-            aria-label="View memory graph"
-            className={ICON_BTN}
-            style={{
-              color: 'var(--text-secondary)',
-              backgroundColor: 'transparent',
-              border: 'none',
-            }}
-          >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <circle cx="6" cy="6" r="2.5" />
-              <circle cx="18" cy="7" r="2.5" />
-              <circle cx="12" cy="17" r="2.5" />
-              <path strokeLinecap="round" d="M7.8 7.4l2.6 7.4M16.6 8.7l-3 6.4M8.3 6.4l7.2.4" />
-            </svg>
-            Memory graph
-          </button>
-        )}
-
         {voted === 'down' && (
           <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
             Feedback recorded — thank you
@@ -348,19 +286,7 @@ const CrewActionsBar: React.FC<CrewActionsBarProps> = ({ data, messageId, onSave
         </div>
       )}
 
-      {scheduleOpen && executionId && canSchedule && (
-        <ScheduleRunDialog
-          executionId={executionId}
-          defaultName={`${deriveCrewName(data)} schedule`}
-          onClose={() => setScheduleOpen(false)}
-          onCreated={(name) => {
-            setScheduledName(name);
-            setScheduleOpen(false);
-            // Surface it in the rail's Schedules section right away.
-            void useAppStore.getState().loadSchedules();
-          }}
-        />
-      )}
+
     </div>
   );
 };

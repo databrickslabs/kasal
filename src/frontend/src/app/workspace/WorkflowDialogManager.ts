@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { readSettingsNavigation } from '../../features/configuration/lib/settingsNavigation';
 import { useAPIKeysStore } from '../../store/apiKeys';
 
 export interface DialogManagerResult {
@@ -40,7 +41,7 @@ export const useDialogManager = (
   const [isAPIKeysDialogOpen, setIsAPIKeysDialogOpen] = useState(false);
   const [isToolsDialogOpen, setIsToolsDialogOpen] = useState(false);
   const [isLogsDialogOpen, setIsLogsDialogOpen] = useState(false);
-  const [isConfigurationDialogOpen, setIsConfigurationDialogOpen] = useState(false);
+  const [isConfigurationDialogOpen, setIsConfigurationDialogOpen] = useState(() => readSettingsNavigation() !== null);
   const [isFlowDialogOpen, setIsFlowDialogOpen] = useState(false);
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
 

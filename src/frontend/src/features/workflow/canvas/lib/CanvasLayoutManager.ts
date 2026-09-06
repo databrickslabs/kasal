@@ -140,11 +140,12 @@ export class CanvasLayoutManager {
       availableWidth -= this.uiState.rightSidebarWidth;
     }
 
-    const responseFocused = this.uiState.assistantResponseFocused && this.uiState.assistantPanelVisible && this.uiState.executionHistoryVisible && !this.uiState.areFlowsVisible;
+    const responseFocused = this.uiState.assistantResponseFocused && this.uiState.executionHistoryVisible;
     if (responseFocused) {
       if (this.uiState.screenWidth >= 900) {
-        availableX += availableWidth * 0.62;
-        availableWidth *= 0.38;
+        const ratio = this.uiState.assistantPanelRatio ?? 0.6;
+        if (this.uiState.assistantPanelSide !== 'right') availableX += availableWidth * ratio;
+        availableWidth *= 1 - ratio;
       } else {
         availableY += this.uiState.screenHeight * 0.55;
         availableHeight -= this.uiState.screenHeight * 0.55;

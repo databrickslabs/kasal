@@ -346,35 +346,9 @@ export function useDispatcher(options: UseDispatcherOptions) {
         isStreaming: true,
       });
 
-      // Augment the prompt to steer intent detection toward generate_crew
-      // when the message looks like a generation request but doesn't already
-      // contain crew/plan keywords.  The original message is shown to the user;
-      // only the dispatch payload is modified.
       let dispatchMessage = message;
-      const lowerMsg = message.toLowerCase();
-      const isSlashCommand = lowerMsg.startsWith('/');
-      const alreadyHasCrewHint = /\b(crew|plan|create crew|create plan|generate crew)\b/i.test(message);
-      // Chat (light agent) mode answers the literal question with a single agent —
-      // don't steer it into "create a crew plan with agents and tasks". Research /
-      // Deep modes still build a crew, so they keep the prefix.
-      // "Use existing" never gets the prefix either, for a stronger reason: the
-      // router matches the sentence against published DESCRIPTIONS, and
-      // "create a crew plan with agents and tasks: …" describes nothing anyone
-      // published. It would poison every match.
-      const { chatModeType, preferExisting, skipContinuation } =
-        useExecutionStore.getState();
-      // Consumed here, not on the next render: leaving a conversation suppresses
-      // continuation for the NEXT turn only. Leaving it set would silently
-      // disable stickiness for the rest of the session.
+      const { skipContinuation } = useExecutionStore.getState();
       if (skipContinuation) useExecutionStore.getState().setSkipContinuation(false);
-      if (
-        chatModeType !== 'chat' &&
-        !preferExisting &&
-        !isSlashCommand &&
-        !alreadyHasCrewHint
-      ) {
-        dispatchMessage = `create a crew plan with agents and tasks: ${message}`;
-      }
       // Hidden steering text (e.g. attached-knowledge note): sent to the crew
       // but never shown in the chat (addMessage above used the clean message).
       if (dispatchSuffix) {
@@ -411,12 +385,8 @@ export function useDispatcher(options: UseDispatcherOptions) {
           image_assets: images,
           // Skills picked in the chat "+" — attached to every agent of the run.
           skills: selectedSkills,
-          // Answer mode → backend sets reasoning/reasoning effort/execution_type:
-          // chat = single light agent, research = crew + medium effort,
-          // deep = crew + high effort.
-          chat_mode_type: execState.chatModeType,
-          // Source axis: run something already published instead of building.
-          // Sent beside chat_mode_type, never folded into it.
+          // Direct chat uses the light assistant; crew design lives in Agent Builder.
+          chat_mode_type: 'chat',
           prefer_existing: execState.preferExisting,
           // Present only when the user has just left a held conversation. The
           // backend default is true, so carrying it on every request would put

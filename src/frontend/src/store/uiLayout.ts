@@ -17,6 +17,8 @@ interface UILayoutStore extends UILayoutState {
 
   assistantPanelVisible: boolean;
   assistantPanelSide: 'left' | 'right';
+  assistantPanelRatio: number;
+  setAssistantPanelRatio: (ratio: number) => void;
   assistantResponseFocused: boolean;
   setAssistantResponseFocused: (focused: boolean) => void;
   setAssistantPanelVisible: (visible: boolean) => void;
@@ -54,7 +56,7 @@ const loadPersistedState = () => {
 };
 
 // Helper function to save state to localStorage
-const saveToLocalStorage = (state: Partial<UILayoutState> & { appMode?: AppMode }) => {
+const saveToLocalStorage = (state: Partial<UILayoutState> & { appMode?: AppMode; assistantLayoutVersion?: number }) => {
   try {
     const stored = localStorage.getItem('ui-layout-storage') || '{}';
     const current = JSON.parse(stored);
@@ -84,7 +86,7 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
   chatPanelWidth: persistedState.chatPanelWidth || 450,
   chatPanelCollapsedWidth: 60,
   chatPanelSide: persistedState.chatPanelSide || 'right',
-  executionHistoryVisible: persistedState.executionHistoryVisible !== undefined ? persistedState.executionHistoryVisible : false,
+  executionHistoryVisible: true,
   executionHistoryHeight: persistedState.executionHistoryHeight || 60,
   panelPosition: persistedState.panelPosition || 50,
   areFlowsVisible: persistedState.areFlowsVisible !== undefined ? persistedState.areFlowsVisible : false,
@@ -93,12 +95,19 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
   // the mode switcher; an explicit persisted choice always wins.
   appMode: persistedState.appMode || 'chat',
 
-  assistantPanelVisible: false,
-  assistantPanelSide: 'right',
-  assistantResponseFocused: false,
+  assistantPanelVisible: true,
+  assistantPanelSide: persistedState.assistantLayoutVersion === 2 && persistedState.assistantPanelSide === 'right' ? 'right' : 'left',
+  assistantPanelRatio: Number.isFinite(persistedState.assistantPanelRatio) ? Math.max(0.3, Math.min(0.75, persistedState.assistantPanelRatio)) : 0.6,
+  assistantResponseFocused: true,
+  setAssistantPanelRatio: ratio => {
+    if (!Number.isFinite(ratio)) return;
+    const assistantPanelRatio = Math.max(0.3, Math.min(0.75, ratio));
+    set({ assistantPanelRatio });
+    saveToLocalStorage({ assistantPanelRatio, assistantLayoutVersion: 2, assistantPanelSide: get().assistantPanelSide });
+  },
   setAssistantResponseFocused: focused => set({ assistantResponseFocused: focused, assistantPanelVisible: true, executionHistoryVisible: true, chatPanelVisible: true }),
-  setAssistantPanelVisible: visible => set(state => ({ assistantPanelVisible: visible, executionHistoryVisible: visible || (state.executionHistoryVisible && !state.assistantPanelVisible), ...(visible ? { chatPanelVisible: true } : { assistantResponseFocused: false }) })),
-  setAssistantPanelSide: side => { set({ assistantPanelSide: side }); saveToLocalStorage({ assistantPanelSide: side }); },
+  setAssistantPanelVisible: visible => set(state => ({ assistantPanelVisible: visible, executionHistoryVisible: visible || (state.executionHistoryVisible && !state.assistantPanelVisible), ...(visible ? { chatPanelVisible: true, assistantResponseFocused: true } : {}) })),
+  setAssistantPanelSide: side => { set({ assistantPanelSide: side }); saveToLocalStorage({ assistantPanelSide: side, assistantLayoutVersion: 2 }); },
   assistantDockHeight: 128,
   setAssistantDockHeight: height => {
     set({ assistantDockHeight: height });
@@ -149,7 +158,7 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
   },
 
   setExecutionHistoryVisible: (visible: boolean) => {
-    set({ executionHistoryVisible: visible, assistantPanelVisible: false, assistantResponseFocused: false });
+    set({ executionHistoryVisible: visible, assistantPanelVisible: false });
     saveToLocalStorage({ executionHistoryVisible: visible });
   },
 
@@ -205,6 +214,7 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
       assistantPanelVisible: state.assistantPanelVisible,
       assistantResponseFocused: state.assistantResponseFocused,
       assistantPanelSide: state.assistantPanelSide,
+      assistantPanelRatio: state.assistantPanelRatio,
       assistantDockHeight: state.assistantDockHeight,
       chatPanelVisible: state.chatPanelVisible,
       chatPanelCollapsed: state.chatPanelCollapsed,

@@ -688,27 +688,14 @@ describe('ChatInput — the "+" menu opens upward by default', () => {
   });
 });
 
-describe('ChatInput — answer mode (inside the "+" menu)', () => {
-  beforeEach(() => {
-    useExecutionStore.getState().setChatModeType('chat');
-  });
-
-  it('shows the active mode and expands to all three', () => {
+describe('ChatInput — composer menu', () => {
+  it('has no retired answer modes', () => {
     render(<ChatInput {...baseProps} />);
     openMenu();
-    const row = screen.getByLabelText('Answer mode');
-    expect(row).toHaveTextContent('Chat');
-    fireEvent.click(row);
-    expect(screen.getByText('Research')).toBeInTheDocument();
-    expect(screen.getByText('Deep Research')).toBeInTheDocument();
-  });
-
-  it('selecting a mode updates the store', () => {
-    render(<ChatInput {...baseProps} />);
-    openMenu();
-    fireEvent.click(screen.getByLabelText('Answer mode'));
-    fireEvent.click(screen.getByText('Research'));
-    expect(useExecutionStore.getState().chatModeType).toBe('research');
+    expect(screen.queryByLabelText('Answer mode')).not.toBeInTheDocument();
+    expect(screen.queryByText('Research')).not.toBeInTheDocument();
+    expect(screen.queryByText('Deep Research')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Memory')).toBeInTheDocument();
   });
 
   it('positions the menu with position:fixed so it escapes overflow-hidden containers', () => {

@@ -355,7 +355,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
             py: 1,
             borderLeft: 0,
             borderColor: 'divider',
-            backgroundColor: 'background.paper',
+            background: 'transparent',
             zIndex: 5,
             borderRadius: 0
           }}

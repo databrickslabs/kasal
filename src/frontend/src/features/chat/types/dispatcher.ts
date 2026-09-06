@@ -59,17 +59,12 @@ export interface DispatcherRequest {
   image_assets?: ImageRef[];
   /** Skill names picked in the "+" menu — attached to every agent of the run. */
   skills?: string[];
-  /** Answer mode: 'chat' = single light agent, 'research' = crew + medium reasoning effort, 'deep' = crew + high reasoning effort. */
-  chat_mode_type?: 'chat' | 'research' | 'deep';
+  /** Direct Chat execution uses a single light assistant. */
+  chat_mode_type?: 'chat';
   /**
    * True when the user picked "Use existing": run something already published
    * rather than building something new.
    *
-   * Its own field, NOT a fourth `chat_mode_type`. They are different axes —
-   * `chat_mode_type` says what SHAPE to build, this says whether to build at
-   * all. The catalogue only stores crews, so reuse could never honour 'chat',
-   * and a fourth answer mode would be a value that silently invalidates its own
-   * neighbours.
    */
   prefer_existing?: boolean;
   /** False for one turn after the user leaves a held conversation. */
@@ -87,7 +82,7 @@ export interface DispatchRunSettings {
   knowledge_file_paths?: string[];
   image_assets?: ImageRef[];
   skills?: string[];
-  chat_mode_type?: 'chat' | 'research' | 'deep';
+  chat_mode_type?: 'chat';
   /** @see DispatcherRequest.prefer_existing — the SOURCE axis, not the shape. */
   prefer_existing?: boolean;
   /** False for one turn after the user leaves a held conversation. */

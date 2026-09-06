@@ -1,860 +1,178 @@
-import React, { useState, useEffect } from 'react';
-import {
-  Typography,
-  Box,
-  Alert,
-  Snackbar,
-  Select,
-  MenuItem,
-  FormControl,
-  InputLabel,
-  SelectChangeEvent,
-  List,
-  ListItemIcon,
-  ListItemText,
-  Paper,
-  ListItemButton,
-  IconButton,
-} from '@mui/material';
-import SettingsIcon from '@mui/icons-material/Settings';
-import TranslateIcon from '@mui/icons-material/Translate';
-import ModelIcon from '@mui/icons-material/ModelTraining';
-import KeyIcon from '@mui/icons-material/Key';
-import BuildIcon from '@mui/icons-material/Build';
-import CodeIcon from '@mui/icons-material/Code';
-import TextFormatIcon from '@mui/icons-material/TextFormat';
-import CloudIcon from '@mui/icons-material/Cloud';
-import HubIcon from '@mui/icons-material/Hub';
-import SchoolIcon from '@mui/icons-material/School';
-import EngineeringIcon from '@mui/icons-material/Engineering';
-import CloseIcon from '@mui/icons-material/Close';
-// Same brain the run table's Memory column uses — the hardware chip icon read
-// as RAM, not as what an agent remembers.
-import MemoryIcon from '@mui/icons-material/Psychology';
-import TimelineIcon from '@mui/icons-material/Timeline';
-import StorageIcon from '@mui/icons-material/Storage';
-import WorkspacesIcon from '@mui/icons-material/Workspaces';
-import ViewQuiltIcon from '@mui/icons-material/ViewQuilt';
-// import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import React, { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Box, Button, CircularProgress, FormControl, IconButton, InputAdornment, InputLabel, List, ListItemButton, ListItemIcon, ListItemText, MenuItem, Select, TextField, Typography } from '@mui/material';
+import { Search, X, Settings2, SlidersHorizontal, Bot, Wrench, BookOpen, MessageSquare, Brain, LayoutTemplate, Cloud, Plug, Network, Activity, KeyRound, Users, Cpu, Database, Boxes, Building2, UserRound, ShieldCheck } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { LanguageService } from '../../../api/config/LanguageService';
 import { usePermissionStore } from '../../../store/permissions';
 import { useUserStore } from '../../../store/user';
-import ModelConfiguration from './Models';
-import APIKeys from './APIKeys/APIKeys';
-import ObjectManagement from './ObjectManagement/index';
-import ToolsConfiguration from './Tools/ToolsConfiguration';
-import Prompts from './Prompts';
-import DatabricksConfiguration from './DatabricksConfiguration';
-import MLflowConfiguration from './MLflowConfiguration';
-import MCPConfiguration from './MCP/MCPConfiguration';
-import RemoteAgents from './RemoteAgents/RemoteAgents';
-import SkillsConfiguration from './Skills/SkillsConfiguration';
-import EnginesConfiguration from './Engines/index';
-import { MemoryConfiguration } from '../../memory/components/index';
-import DatabaseManagement from './DatabaseManagement';
-import AccessManagement from './AccessManagement';
-import UIConfigurator from './UIConfigurator';
-import WorkspaceOverview from './WorkspaceOverview';
-// import DSPyConfiguration from './DSPyConfiguration'; // Temporarily disabled
-import { LANGUAGES } from '../../../config/i18n/config';
+import { useGroupStore } from '../../../store/groups';
+import { useThemeStore } from '../../../store/theme';
+import { kasalStageSurface } from '../../../theme/kasalSurfaces';
+import { getSettingsSections, SettingsGroup, SettingsScope, SettingsSection, SettingsSectionId } from './settingsSections';
+import GeneralSettings from './GeneralSettings';
+import { readSettingsNavigation, clearSettingsNavigation, switchSettingsTeamspace } from '../lib/settingsNavigation';
 
-interface ConfigurationProps {
-  onClose?: () => void;
+const ModelConfiguration = lazy(() => import('./Models'));
+const APIKeys = lazy(() => import('./APIKeys/APIKeys'));
+const ObjectManagement = lazy(() => import('./ObjectManagement'));
+const ToolsConfiguration = lazy(() => import('./Tools/ToolsConfiguration'));
+const Prompts = lazy(() => import('./Prompts'));
+const DatabricksConfiguration = lazy(() => import('./DatabricksConfiguration'));
+const MLflowConfiguration = lazy(() => import('./MLflowConfiguration'));
+const MCPConfiguration = lazy(() => import('./MCP/MCPConfiguration'));
+const RemoteAgents = lazy(() => import('./RemoteAgents/RemoteAgents'));
+const SkillsConfiguration = lazy(() => import('./Skills/SkillsConfiguration'));
+const EnginesConfiguration = lazy(() => import('./Engines'));
+const MemoryConfiguration = lazy(() => import('../../memory/components').then(module => ({ default: module.MemoryConfiguration })));
+const DatabaseManagement = lazy(() => import('./DatabaseManagement'));
+const AccessManagement = lazy(() => import('./AccessManagement'));
+const UIConfigurator = lazy(() => import('./UIConfigurator'));
+const WorkspaceOverview = lazy(() => import('./WorkspaceOverview'));
+
+const icons = { general: SlidersHorizontal, overview: Building2, models: Bot, tools: Wrench, skills: BookOpen, prompts: MessageSquare, memory: Brain, ui: LayoutTemplate, databricks: Cloud, mcp: Plug, 'remote-agents': Network, mlflow: Activity, 'api-keys': KeyRound, access: Users, engines: Cpu, database: Database, objects: Boxes };
+const groups: { id: SettingsGroup; label: string }[] = [
+  { id: 'general', label: 'General' }, { id: 'ai', label: 'AI capabilities' }, { id: 'connections', label: 'Connections' }, { id: 'administration', label: 'Administration' },
+];
+
+function SectionContent({ id, scope, onNavigate }: { id: SettingsSectionId; scope: SettingsScope; onNavigate: (id: SettingsSectionId) => void }) {
+  const mode = scope === 'system' ? 'system' : 'workspace';
+  switch (id) {
+    case 'general': return <GeneralSettings />;
+    case 'overview': return <WorkspaceOverview embedded onConfigureSection={section => { if (section === 'mcp') onNavigate('mcp'); }} />;
+    case 'models': return <ModelConfiguration mode={mode} />;
+    case 'tools': return <ToolsConfiguration mode={mode} />;
+    case 'mcp': return <MCPConfiguration mode={mode} />;
+    case 'remote-agents': return <RemoteAgents mode={mode} />;
+    case 'skills': return <SkillsConfiguration />;
+    case 'prompts': return <Prompts />;
+    case 'memory': return <MemoryConfiguration />;
+    case 'ui': return <UIConfigurator />;
+    case 'databricks': return <DatabricksConfiguration />;
+    case 'mlflow': return <MLflowConfiguration />;
+    case 'api-keys': return <APIKeys />;
+    case 'access': return <AccessManagement />;
+    case 'engines': return <EnginesConfiguration />;
+    case 'database': return <DatabaseManagement />;
+    case 'objects': return <ObjectManagement />;
+  }
 }
 
-interface ContentPanelProps {
-  children?: React.ReactNode;
-  index: number;
-  value: number;
-}
-
-function ContentPanel(props: ContentPanelProps) {
-  const { children, value, index, ...other } = props;
-
-  return (
-    <div
-      role="tabpanel"
-      hidden={value !== index}
-      id={`config-panel-${index}`}
-      aria-labelledby={`config-nav-${index}`}
-      {...other}
-    >
-      {value === index && (
-        <Box sx={{ py: 2 }}>
-          {children}
-        </Box>
-      )}
-    </div>
-  );
-}
-
-// Navigation item interface
-interface NavItem {
-  label: string;
-  icon: JSX.Element;
-  index: number;
-  group: 'general' | 'system' | 'workspace';
-}
-
-function Configuration({ onClose }: ConfigurationProps): JSX.Element {
+export default function Configuration({ onClose }: { onClose?: () => void }) {
   const { t } = useTranslation();
-  const [currentLanguage, setCurrentLanguage] = useState<string>('en');
-
-  // Get permission state from store and selected group ID
-  const {
-    userRole,
-    isLoading: permissionsLoading,
-    loadPermissions,
-    isSystemAdmin: storeIsSystemAdmin,
-    isPersonalWorkspaceManager
-  } = usePermissionStore(state => ({
-    userRole: state.userRole,
-    isLoading: state.isLoading,
-    loadPermissions: state.loadPermissions,
-    isSystemAdmin: state.isSystemAdmin,
-    isPersonalWorkspaceManager: state.isPersonalWorkspaceManager
-  }));
-
-  // Get current user to watch for changes
-  const currentUser = useUserStore(state => state.currentUser);
-
-  // Get selected group ID to determine workspace context
-  const selectedGroupId = localStorage.getItem('selectedGroupId');
-  const isPersonalWorkspace = selectedGroupId && selectedGroupId.startsWith('user_');
-
-  // Check if permissions have been loaded at least once
-  // System admins should always have access, others need their role loaded
-  const permissionsReady = !permissionsLoading && (
-    storeIsSystemAdmin || // System admins always ready
-    isPersonalWorkspaceManager || // Personal workspace managers always ready
-    userRole !== null // Others need group role loaded
-  );
-
-  // Check if user has admin permissions
-  // Workspace admin: Either admin role in current workspace OR owner of personal workspace OR personal workspace manager in personal workspace
-  const isWorkspaceAdmin = storeIsSystemAdmin || (permissionsReady && (
-    userRole === 'admin' ||
-    (isPersonalWorkspace && isPersonalWorkspaceManager)
+  const dark = useThemeStore(state => state.isDarkMode);
+  const { userRole, isLoading, isSystemAdmin, isPersonalWorkspaceManager, loadPermissions } = usePermissionStore();
+  const email = useUserStore(state => state.currentUser?.email);
+  const groupId = useGroupStore(state => state.currentGroupId);
+  const teamspaces = useGroupStore(state => state.groups);
+  const fetchMyGroups = useGroupStore(state => state.fetchMyGroups);
+  const currentGroup = useGroupStore(state => state.getCurrentGroup());
+  const permissionsReady = !isLoading && (isSystemAdmin || isPersonalWorkspaceManager || userRole !== null);
+  const isWorkspaceAdmin = isSystemAdmin || userRole === 'admin' || (!!groupId?.startsWith('user_') && isPersonalWorkspaceManager);
+  const access = useMemo(() => ({ isSystemAdmin, isWorkspaceAdmin, isEditor: userRole === 'editor' }), [isSystemAdmin, isWorkspaceAdmin, userRole]);
+  const [scope, setScope] = useState<SettingsScope>('workspace');
+  const [selected, setSelected] = useState<SettingsSectionId>(() => readSettingsNavigation()?.section || 'overview');
+  const [switchingTeamspace, setSwitchingTeamspace] = useState(false);
+  const [switchError, setSwitchError] = useState('');
+  const [query, setQuery] = useState('');
+  const contentRef = useRef<HTMLDivElement>(null);
+  const workspaceName = currentGroup?.name || 'Current teamspace';
+  const canConfigureCurrent = getSettingsSections('workspace', access).length > 0;
+  const administeredTeamspaces = teamspaces.filter(group => group.status === 'active' && (
+    (group.id === groupId && canConfigureCurrent) || isSystemAdmin || group.user_role === 'ADMIN' ||
+    (group.id.startsWith('user_') && isPersonalWorkspaceManager)
   ));
-  const isSystemAdmin = storeIsSystemAdmin; // System admin status is not dependent on group permissions
-  const isAdmin = permissionsReady && userRole === 'admin';
-  const isOperator = permissionsReady && userRole === 'operator';
-  const isEditor = permissionsReady && userRole === 'editor';
+  const scopeOptions = [
+    { id: 'personal', scope: 'personal' as const, label: 'My preferences', icon: UserRound },
+    ...administeredTeamspaces.map(group => ({ id: `workspace:${group.id}`, scope: 'workspace' as const, label: group.name, icon: Building2 })),
+    ...(canConfigureCurrent && !administeredTeamspaces.some(group => group.id === groupId) ? [{ id: `workspace:${groupId || ''}`, scope: 'workspace' as const, label: workspaceName, icon: Building2 }] : []),
+    ...(isSystemAdmin ? [{ id: 'system', scope: 'system' as const, label: 'System administration', icon: ShieldCheck }] : []),
+  ];
+  const activeScope = (scope === 'workspace' && !canConfigureCurrent) || (scope === 'system' && !isSystemAdmin) ? 'personal' : scope;
+  const scopeValue = activeScope === 'workspace' ? `workspace:${groupId || ''}` : activeScope;
+  const sections = useMemo(() => getSettingsSections(activeScope, access), [activeScope, access]);
+  const active = sections.find(section => section.id === selected) || sections[0];
+  const label = (section: SettingsSection) => t(`configuration.${section.key}`, { defaultValue: section.title });
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const filtered = sections.filter(section => `${label(section)} ${section.title} ${section.description} ${section.group}`.toLocaleLowerCase().includes(normalizedQuery));
+  const scopeLabel = scopeOptions.find(option => option.id === scopeValue)?.label;
 
-  // Debug logging
+  useEffect(() => { clearSettingsNavigation(); }, []);
+  useEffect(() => { if (email) void fetchMyGroups(); }, [email, fetchMyGroups]);
+  useEffect(() => { void loadPermissions(); }, [email, groupId, loadPermissions]);
+  useEffect(() => { contentRef.current?.scrollTo?.({ top: 0 }); }, [active?.id, activeScope, groupId]);
   useEffect(() => {
-    console.log('Configuration - Permissions loading:', permissionsLoading);
-    console.log('Configuration - Permissions ready:', permissionsReady);
-    console.log('Configuration - User role:', userRole);
-    console.log('Configuration - Store isSystemAdmin:', storeIsSystemAdmin);
-    console.log('Configuration - Store isPersonalWorkspaceManager:', isPersonalWorkspaceManager);
-    console.log('Configuration - Selected group ID:', selectedGroupId);
-    console.log('Configuration - Is personal workspace:', isPersonalWorkspace);
-    console.log('Configuration - Is workspace admin:', isWorkspaceAdmin);
-    console.log('Configuration - Is system admin (computed):', isSystemAdmin);
-    console.log('Configuration - Is admin:', isAdmin);
-    console.log('Configuration - Is operator:', isOperator);
-    console.log('Configuration - Is editor:', isEditor);
-  }, [permissionsReady, userRole, isAdmin, isOperator, isEditor, isWorkspaceAdmin, isSystemAdmin, isPersonalWorkspace, selectedGroupId, permissionsLoading, storeIsSystemAdmin, isPersonalWorkspaceManager]);
-
-  const [notification, setNotification] = useState({
-    open: false,
-    message: '',
-    severity: 'success' as 'success' | 'error',
-  });
-  const [activeSection, setActiveSection] = useState(0);
-  // Always show Database Management now (no permission check needed)
-  // Future: Will check for admin group membership
-  const [showDatabaseManagement, setShowDatabaseManagement] = useState(true);
-
-  // Build navigation items dynamically based on permissions
-  const navItems: NavItem[] = React.useMemo(() => {
-    let currentIndex = 0;
-    const baseNavItems: NavItem[] = [];
-
-    // General section - always visible
-    baseNavItems.push({
-      label: t('configuration.general.title', { defaultValue: 'General' }),
-      icon: <TranslateIcon fontSize="small" />,
-      index: currentIndex++,
-      group: 'general'
-    });
-
-    // System admin-only sections (manage entire system)
-    if (isSystemAdmin) {
-      // Access = the old Teamspaces + User Permissions screens combined: one
-      // People lens (global flags + per-teamspace role chips) and the
-      // space-lifecycle lens.
-      baseNavItems.push({
-        label: t('configuration.access.tab', { defaultValue: 'Access' }),
-        icon: <WorkspacesIcon fontSize="small" />,
-        index: currentIndex++,
-        group: 'system'
-      });
-      baseNavItems.push({
-        label: t('configuration.engines.tab', { defaultValue: 'Engines' }),
-        icon: <EngineeringIcon fontSize="small" />,
-        index: currentIndex++,
-        group: 'system'
-      });
-      baseNavItems.push({
-        label: t('configuration.models.global', { defaultValue: 'Models (Global)' }),
-        icon: <ModelIcon fontSize="small" />,
-        index: currentIndex++,
-        group: 'system'
-      });
-      // Tools (Global) - system-wide tools
-      baseNavItems.push({
-        label: t('configuration.tools.global', { defaultValue: 'Tools (Global)' }),
-        icon: <BuildIcon fontSize="small" />,
-        index: currentIndex++,
-        group: 'system'
-      });
-      // MCP (Global) - system-wide MCP servers available to all workspaces
-      baseNavItems.push({
-        label: t('configuration.mcp.global', { defaultValue: 'MCP (Global)' }),
-        icon: <CloudIcon fontSize="small" />,
-        index: currentIndex++,
-        group: 'system'
-      });
-      // Remote Agents (Global) - registered once, offered to workspaces. A
-      // remote agent carries an outbound URL and a credential, so registering
-      // one is system administration — the same split MCP servers have.
-      baseNavItems.push({
-        label: t('configuration.remoteAgents.global', { defaultValue: 'Remote Agents (Global)' }),
-        icon: <HubIcon fontSize="small" />,
-        index: currentIndex++,
-        group: 'system'
-      });
-      if (showDatabaseManagement) {
-        baseNavItems.push({
-          label: t('configuration.database.tab', { defaultValue: 'Database Management' }),
-          icon: <StorageIcon fontSize="small" />,
-          index: currentIndex++,
-          group: 'system'
-        });
-      }
-    }
-
-    // Workspace admin sections (configure workspace-specific settings)
-    if (isWorkspaceAdmin) {
-      baseNavItems.push({
-        label: t('configuration.workspaceOverview.tab', { defaultValue: 'Teamspace Overview' }),
-        icon: <WorkspacesIcon fontSize="small" />,
-        index: currentIndex++,
-        group: 'workspace'
-      });
-      baseNavItems.push({
-        label: t('configuration.databricks.tab', { defaultValue: 'Databricks' }),
-        icon: <CloudIcon fontSize="small" />,
-        index: currentIndex++,
-        group: 'workspace'
-      });
-      baseNavItems.push({
-        label: t('configuration.memoryBackend.tab', { defaultValue: 'Memory' }),
-        icon: <MemoryIcon fontSize="small" />,
-        index: currentIndex++,
-        group: 'workspace'
-      });
-      baseNavItems.push({
-        label: t('configuration.mlflow.tab', { defaultValue: 'MLflow' }),
-        icon: <TimelineIcon fontSize="small" />,
-        index: currentIndex++,
-        group: 'workspace'
-      });
-      // Models (Workspace) - workspace models management
-      baseNavItems.push({
-        label: t('configuration.models.workspace', { defaultValue: 'Models (Teamspace)' }),
-        icon: <ModelIcon fontSize="small" />,
-        index: currentIndex++,
-        group: 'workspace'
-      });
-      // Tools (Workspace) - workspace tools management
-      baseNavItems.push({
-        label: t('configuration.tools.workspace', { defaultValue: 'Tools (Teamspace)' }),
-        icon: <BuildIcon fontSize="small" />,
-        index: currentIndex++,
-        group: 'workspace'
-      });
-      // MCP (Workspace) - workspace MCP servers. Ordered after Models/Tools to
-      // match the System Administration section (Models → Tools → MCP).
-      baseNavItems.push({
-        label: t('configuration.mcp.workspace', { defaultValue: 'MCP (Teamspace)' }),
-        icon: <CloudIcon fontSize="small" />,
-        index: currentIndex++,
-        group: 'workspace'
-      });
-      // Skills (Workspace) — procedural know-how attached to agents. Beside
-      // Tools because that is the comparison a user will make: a tool is code
-      // the agent calls, a skill is how it works.
-      baseNavItems.push({
-        label: t('configuration.skills.tab', { defaultValue: 'Skills' }),
-        icon: <SchoolIcon fontSize="small" />,
-        index: currentIndex++,
-        group: 'workspace'
-      });
-      // Remote Agents (Workspace) — the outbound half of A2A. Beside MCP
-      // because they are the same kind of thing to an operator: an external
-      // capability attached to this workspace's agents.
-      baseNavItems.push({
-        label: t('configuration.remoteAgents.workspace', { defaultValue: 'Remote Agents (Teamspace)' }),
-        icon: <HubIcon fontSize="small" />,
-        index: currentIndex++,
-        group: 'workspace'
-      });
-      // Predefined UI (Workspace) - structured, on-brand crew output
-      baseNavItems.push({
-        label: t('configuration.uiConfigurator.tab', { defaultValue: 'UI Configurator' }),
-        icon: <ViewQuiltIcon fontSize="small" />,
-        index: currentIndex++,
-        group: 'workspace'
-      });
-      // DSPy Optimization (Workspace) - temporarily disabled
-      // baseNavItems.push({
-      //   label: t('configuration.dspy.tab', { defaultValue: 'DSPy Optimization' }),
-      //   icon: <AutoFixHighIcon fontSize="small" />,
-      //   index: currentIndex++,
-      //   group: 'workspace'
-      // });
-    }
-
-    // Sections visible to editors and admins (but not operators) — workspace-relevant
-    if (!isOperator) {
-      baseNavItems.push({
-        label: t('configuration.apiKeys.tab', { defaultValue: 'API Keys' }),
-        icon: <KeyIcon fontSize="small" />,
-        index: currentIndex++,
-        group: 'workspace'
-      });
-      baseNavItems.push({
-        label: t('configuration.objects.tab', { defaultValue: 'Object Management' }),
-        icon: <CodeIcon fontSize="small" />,
-        index: currentIndex++,
-        group: 'workspace'
-      });
-      baseNavItems.push({
-        label: t('configuration.prompts.tab', { defaultValue: 'Prompts' }),
-        icon: <TextFormatIcon fontSize="small" />,
-        index: currentIndex++,
-        group: 'workspace'
-      });
-    }
-
-    return baseNavItems;
-  }, [showDatabaseManagement, t, isSystemAdmin, isWorkspaceAdmin, isOperator]);
-
-  // Ensure permissions are loaded on mount
-  useEffect(() => {
-    // Load permissions immediately if not ready
-    if (!permissionsReady && !permissionsLoading) {
-      console.log('Configuration - Loading permissions');
-      loadPermissions();
-    }
-  }, [permissionsReady, permissionsLoading, loadPermissions]);
-
-  // Reload permissions when user changes (e.g., user fetch completes)
-  useEffect(() => {
-    if (currentUser && currentUser.email) {
-      console.log('Configuration - User changed, reloading permissions for:', currentUser.email);
-      loadPermissions();
-    }
-  }, [currentUser, loadPermissions]);
-
-  useEffect(() => {
-    const loadConfig = async () => {
-      try {
-        // Load language configuration
-        const languageService = LanguageService.getInstance();
-        const currentLang = await languageService.getCurrentLanguage();
-        setCurrentLanguage(currentLang);
-
-
-        // Database Management is now always visible
-        // Future: Will check for admin group membership
-        setShowDatabaseManagement(true);
-        console.log('Database Management enabled for all users');
-      } catch (error) {
-        console.error('Error loading configuration:', error);
-      }
+    const handler = (event: Event) => {
+      const section = (event as CustomEvent<{ section?: string }>).detail?.section;
+      // Retain the existing tools → API Keys shortcut, with stable IDs for new callers.
+      const id = section === 'API Keys' ? 'api-keys' : section;
+      const target = getSettingsSections('workspace', access).find(item => item.id === id);
+      if (target) { setScope('workspace'); setSelected(target.id); setQuery(''); }
     };
-
-    loadConfig();
-  }, []);
-
-  const handleNavChange = (index: number) => {
-    setActiveSection(index);
+    window.addEventListener('kasal:navigate-config', handler);
+    return () => window.removeEventListener('kasal:navigate-config', handler);
+  }, [access]);
+  const changeScope = (value: string) => {
+    const option = scopeOptions.find(item => item.id === value);
+    if (!option) return;
+    setQuery(''); setSwitchError('');
+    if (option.scope !== 'workspace') { setScope(option.scope); return; }
+    const targetId = value.slice('workspace:'.length);
+    if (targetId === groupId) { setScope('workspace'); return; }
+    setSwitchingTeamspace(true);
+    try { switchSettingsTeamspace(targetId, active.id); }
+    catch (error) { setSwitchError(error instanceof Error ? error.message : 'Could not switch teamspace.'); setSwitchingTeamspace(false); }
   };
 
-  const handleLanguageChange = async (event: SelectChangeEvent<string>) => {
-    const newLanguage = event.target.value;
-    try {
-      const languageService = LanguageService.getInstance();
-      await languageService.setLanguage(newLanguage);
-      setCurrentLanguage(newLanguage);
-      setNotification({
-        open: true,
-        message: t('configuration.language.saved', { defaultValue: 'Language changed successfully' }),
-        severity: 'success',
-      });
-    } catch (error) {
-      console.error('Error changing language:', error);
-      setNotification({
-        open: true,
-        message: error instanceof Error ? error.message : 'Failed to change language',
-        severity: 'error',
-      });
-    }
-  };
-
-  const handleCloseNotification = () => {
-    setNotification({ ...notification, open: false });
-  };
-
-  useEffect(() => {
-    // Allow deep-link navigation into specific configuration sections (e.g., API Keys)
-    const handler = (_evt: Event) => {
-      try {
-
-
-        const target = navItems.find(i => i.label === t('configuration.apiKeys.tab', { defaultValue: 'API Keys' }));
-        if (target) {
-          setActiveSection(target.index);
-        }
-      } catch (e) {
-        // no-op
-      }
-    };
-    window.addEventListener('kasal:navigate-config', handler as EventListener);
-    return () => window.removeEventListener('kasal:navigate-config', handler as EventListener);
-  }, [navItems, t]);
-  // Group nav items for sidebar sections (for clearer separation in sidebar)
-  const generalItems = React.useMemo(() => navItems.filter(i => i.group === 'general'), [navItems]);
-  const systemItems = React.useMemo(() => navItems.filter(i => i.group === 'system'), [navItems]);
-  const workspaceItems = React.useMemo(() => navItems.filter(i => i.group === 'workspace'), [navItems]);
-
-
-  return (
-    <Box sx={{
-      width: '80vw',
-      height: '80vh',
-      mx: 'auto',
-      px: 2,
-      py: 1.5
-    }}>
-
-      <Box sx={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        mb: 3,
-        pb: 1.5,
-        borderBottom: '1px solid',
-        borderColor: 'divider'
-      }}>
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <SettingsIcon sx={{ mr: 1.5, color: 'primary.main', fontSize: '1.4rem' }} />
-          <Typography variant="h5">{t('configuration.title')}</Typography>
-        </Box>
-        {onClose && (
-          <IconButton
-            onClick={onClose}
-            size="small"
-            sx={{
-              color: 'text.secondary',
-              '&:hover': {
-                color: 'text.primary',
-              }
-            }}
-          >
-            <CloseIcon />
-          </IconButton>
-        )}
-      </Box>
-
-      {/* Show loading state while permissions are being determined */}
-      {!permissionsReady ? (
-        <Box sx={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          height: 'calc(100% - 60px)'
-        }}>
-          <Typography variant="body1" color="text.secondary">
-            Loading permissions...
-          </Typography>
-        </Box>
-      ) : (
-        <Box sx={{
-          display: 'flex',
-          flexDirection: 'row',
-          gap: 2,
-          height: 'calc(100% - 60px)',
-          overflow: 'hidden'
-        }}>
-        {/* Left Sidebar Navigation */}
-        <Paper
-          sx={{
-            width: 240,
-            flexShrink: 0,
-            borderRadius: 1,
-            height: '100%',
-            overflow: 'auto'
-          }}
-          elevation={1}
-        >
-          <List sx={{ py: 1 }}>
-            {/* General */}
-            {generalItems.map((item) => (
-              <ListItemButton
-                key={item.index}
-                selected={activeSection === item.index}
-                onClick={() => handleNavChange(item.index)}
-                sx={{
-                  mb: 0.5,
-                  borderRadius: 1,
-                  mx: 0.5,
-                  '&.Mui-selected': {
-                    backgroundColor: 'action.selected',
-                    '&:hover': {
-                      backgroundColor: 'action.hover',
-                    },
-                  },
-                }}
-              >
-                <ListItemIcon sx={{ minWidth: 40 }}>
-                  {item.icon}
-                </ListItemIcon>
-                <ListItemText primary={item.label} />
-              </ListItemButton>
-            ))}
-
-            {/* System Administration */}
-            {systemItems.length > 0 && (
-              <Box sx={{ px: 2, pt: 1, pb: 0.5 }}>
-                <Typography variant="overline" color="text.secondary">System Administration</Typography>
-              </Box>
-            )}
-            {systemItems.map((item) => (
-              <ListItemButton
-                key={item.index}
-                selected={activeSection === item.index}
-                onClick={() => handleNavChange(item.index)}
-                sx={{
-                  mb: 0.5,
-                  borderRadius: 1,
-                  mx: 0.5,
-                  '&.Mui-selected': {
-                    backgroundColor: 'action.selected',
-                    '&:hover': {
-                      backgroundColor: 'action.hover',
-                    },
-                  },
-                }}
-              >
-                <ListItemIcon sx={{ minWidth: 40 }}>
-                  {item.icon}
-                </ListItemIcon>
-                <ListItemText primary={item.label} />
-              </ListItemButton>
-            ))}
-
-            {/* Workspace Settings */}
-            {workspaceItems.length > 0 && (
-              <Box sx={{ px: 2, pt: 1, pb: 0.5 }}>
-                <Typography variant="overline" color="text.secondary">Teamspace Settings</Typography>
-              </Box>
-            )}
-            {workspaceItems.map((item) => (
-              <ListItemButton
-                key={item.index}
-                selected={activeSection === item.index}
-                onClick={() => handleNavChange(item.index)}
-                sx={{
-                  mb: 0.5,
-                  borderRadius: 1,
-                  mx: 0.5,
-                  '&.Mui-selected': {
-                    backgroundColor: 'action.selected',
-                    '&:hover': {
-                      backgroundColor: 'action.hover',
-                    },
-                  },
-                }}
-              >
-                <ListItemIcon sx={{ minWidth: 40 }}>
-                  {item.icon}
-                </ListItemIcon>
-                <ListItemText primary={item.label} />
-              </ListItemButton>
-            ))}
-          </List>
-        </Paper>
-
-        {/* Content Area */}
-        <Box sx={{
-          flex: 1,
-          bgcolor: 'background.paper',
-          borderRadius: 1,
-          p: 2,
-          overflow: 'auto',
-          height: '100%'
-        }}>
-          {/* Render content panels dynamically based on navigation items */}
-          {navItems.map((item) => {
-            // General Settings
-            if (item.label === t('configuration.general.title', { defaultValue: 'General' })) {
-              return (
-                <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  {/* Language Settings */}
-                  <Box sx={{ mb: 3 }}>
-                    <Box sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      mb: 1.5
-                    }}>
-                      <TranslateIcon sx={{ mr: 1, color: 'primary.main', fontSize: '1.2rem' }} />
-                      <Typography variant="subtitle1" fontWeight="medium">{t('configuration.language.title')}</Typography>
-                    </Box>
-
-                    <FormControl fullWidth size="small">
-                      <InputLabel id="language-select-label">
-                        {t('configuration.language.select')}
-                      </InputLabel>
-                      <Select
-                        labelId="language-select-label"
-                        value={currentLanguage}
-                        onChange={handleLanguageChange}
-                        label={t('configuration.language.select')}
-                        size="small"
-                      >
-                        {Object.entries(LANGUAGES).map(([code, { nativeName }]) => (
-                          <MenuItem key={code} value={code}>
-                            {nativeName}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  </Box>
-
-                </ContentPanel>
-              );
-            }
-
-            // Workspace Overview (Workspace Admins)
-            if (item.label === t('configuration.workspaceOverview.tab', { defaultValue: 'Teamspace Overview' })) {
-              return (
-                <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <WorkspaceOverview />
-                </ContentPanel>
-              );
-            }
-
-            // Access (System Admin only) — People + Teamspaces lenses
-            if (item.label === t('configuration.access.tab', { defaultValue: 'Access' })) {
-              return (
-                <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <AccessManagement />
-                </ContentPanel>
-              );
-            }
-
-            // Engines (Admin only)
-            if (item.label === t('configuration.engines.tab', { defaultValue: 'Engines' })) {
-              return (
-                <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <EnginesConfiguration />
-                </ContentPanel>
-              );
-            }
-
-            // Models (Global) - System Administration
-            if (item.label === t('configuration.models.global', { defaultValue: 'Models (Global)' })) {
-              return (
-                <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <ModelConfiguration mode="system" />
-                </ContentPanel>
-              );
-            }
-
-            // Models (Workspace) - Workspace Settings
-            if (item.label === t('configuration.models.workspace', { defaultValue: 'Models (Teamspace)' })) {
-              return (
-                <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <ModelConfiguration mode="workspace" />
-                </ContentPanel>
-              );
-            }
-
-            // Tools (Global) - System Administration
-            if (item.label === t('configuration.tools.global', { defaultValue: 'Tools (Global)' })) {
-              return (
-                <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <ToolsConfiguration mode="system" />
-                </ContentPanel>
-              );
-            }
-
-            // Tools (Workspace) - Workspace Settings
-            if (item.label === t('configuration.tools.workspace', { defaultValue: 'Tools (Teamspace)' })) {
-              return (
-                <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <ToolsConfiguration mode="workspace" />
-                </ContentPanel>
-              );
-            }
-
-            // Predefined UI - Workspace Settings
-            if (item.label === t('configuration.uiConfigurator.tab', { defaultValue: 'UI Configurator' })) {
-              return (
-                <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <UIConfigurator />
-                </ContentPanel>
-              );
-            }
-
-            // DSPy Optimization - Workspace Settings (temporarily disabled)
-            // if (item.label === t('configuration.dspy.tab', { defaultValue: 'DSPy Optimization' })) {
-            //   return (
-            //     <ContentPanel key={item.index} value={activeSection} index={item.index}>
-            //       <DSPyConfiguration />
-            //     </ContentPanel>
-            //   );
-            // }
-
-
-            // Database Management (Admin only)
-            if (item.label === t('configuration.database.tab', { defaultValue: 'Database Management' })) {
-              return (
-                <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <DatabaseManagement />
-                </ContentPanel>
-              );
-            }
-
-            // MCP (Workspace) - Workspace Settings
-            if (item.label === t('configuration.mcp.workspace', { defaultValue: 'MCP (Teamspace)' })) {
-              return (
-                <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <MCPConfiguration mode="workspace" />
-                </ContentPanel>
-              );
-            }
-
-            // Skills (Workspace)
-            if (item.label === t('configuration.skills.tab', { defaultValue: 'Skills' })) {
-              return (
-                <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <SkillsConfiguration />
-                </ContentPanel>
-              );
-            }
-
-            // Remote Agents (Workspace) - opt in to what a Kasal admin offered
-            if (item.label === t('configuration.remoteAgents.workspace', { defaultValue: 'Remote Agents (Teamspace)' })) {
-              return (
-                <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <RemoteAgents mode="workspace" />
-                </ContentPanel>
-              );
-            }
-
-            // Remote Agents (Global) - System Administration
-            if (item.label === t('configuration.remoteAgents.global', { defaultValue: 'Remote Agents (Global)' })) {
-              return (
-                <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <RemoteAgents mode="system" />
-                </ContentPanel>
-              );
-            }
-
-            // MCP (Global) - System Administration
-            if (item.label === t('configuration.mcp.global', { defaultValue: 'MCP (Global)' })) {
-              return (
-                <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <MCPConfiguration mode="system" />
-                </ContentPanel>
-              );
-            }
-
-            // Memory Backend
-            if (item.label === t('configuration.memoryBackend.tab', { defaultValue: 'Memory' })) {
-              return (
-                <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <MemoryConfiguration />
-                </ContentPanel>
-              );
-            }
-
-            // MLflow — its own section: the backend may be Databricks or a
-            // local server, so it cannot live inside the Databricks tab.
-            if (item.label === t('configuration.mlflow.tab', { defaultValue: 'MLflow' })) {
-              return (
-                <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <MLflowConfiguration />
-                </ContentPanel>
-              );
-            }
-
-            // Databricks
-            if (item.label === t('configuration.databricks.tab', { defaultValue: 'Databricks' })) {
-              return (
-                <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <DatabricksConfiguration onSaved={onClose} />
-                </ContentPanel>
-              );
-            }
-
-            // API Keys
-            if (item.label === t('configuration.apiKeys.tab', { defaultValue: 'API Keys' })) {
-              return (
-                <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <APIKeys />
-                </ContentPanel>
-              );
-            }
-
-            // Object Management
-            if (item.label === t('configuration.objects.tab', { defaultValue: 'Object Management' })) {
-              return (
-                <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <ObjectManagement />
-                </ContentPanel>
-              );
-            }
-
-            // Prompts — instructions (view/edit) + GEPA optimization, one surface
-            if (item.label === t('configuration.prompts.tab', { defaultValue: 'Prompts' })) {
-              return (
-                <ContentPanel key={item.index} value={activeSection} index={item.index}>
-                  <Prompts />
-                </ContentPanel>
-              );
-            }
-
-            return null;
-          })}
-
-        </Box>
-      </Box>
-      )}
-
-      <Snackbar
-        open={notification.open}
-        autoHideDuration={6000}
-        onClose={handleCloseNotification}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert
-          onClose={handleCloseNotification}
-          severity={notification.severity}
-          sx={{ width: '100%' }}
-        >
-          {notification.message}
-        </Alert>
-      </Snackbar>
+  return <Box data-testid="settings-workspace" sx={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', ...kasalStageSurface(dark), color: 'text.primary' }}>
+    <Box component="header" sx={{ display: 'flex', alignItems: 'center', gap: 1.5, px: { xs: 2, md: 4 }, py: 2.5, flexShrink: 0 }}>
+      <Box sx={{ display: 'grid', placeItems: 'center', width: 38, height: 38, borderRadius: 3, bgcolor: 'action.hover' }}><Settings2 size={20} /></Box>
+      <Box sx={{ flex: 1 }}><Typography component="h1" sx={{ fontSize: 20, fontWeight: 650 }}>Settings</Typography><Typography sx={{ fontSize: 12, color: 'text.secondary' }}>Your preferences, teamspace, and connected services</Typography></Box>
+      {onClose && <IconButton aria-label="Close settings" onClick={onClose}><X size={20} /></IconButton>}
     </Box>
-  );
+    {switchError && <Alert severity="error" sx={{ mx: 4, mb: 2 }}>{switchError}</Alert>}
+    {!permissionsReady || switchingTeamspace ? <Box role="status" sx={{ flex: 1, display: 'flex', gap: 1.5, alignItems: 'center', justifyContent: 'center' }}><CircularProgress size={20} color="inherit" /><Typography color="text.secondary">{switchingTeamspace ? 'Switching teamspace…' : 'Loading settings…'}</Typography></Box> :
+    <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, flex: 1, minHeight: 0, gap: { xs: 1, md: 4 }, px: { xs: 2, md: 4 }, pb: { xs: 2, md: 4 } }}>
+      <Box component="nav" aria-label="Settings sections" sx={{ width: { xs: '100%', md: 240 }, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <FormControl fullWidth size="small" sx={{ mt: 1, mb: 2 }}>
+          <InputLabel id="settings-scope-label">Settings for</InputLabel>
+          <Select labelId="settings-scope-label" label="Settings for" value={scopeValue} onChange={event => changeScope(event.target.value)} sx={{ borderRadius: 3, fontSize: 13, '& fieldset': { border: 0 }, bgcolor: 'action.hover' }}>
+            {scopeOptions.map(option => <MenuItem key={option.id} value={option.id}><Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}><option.icon size={16} style={{ flexShrink: 0 }} /><Typography noWrap sx={{ fontSize: 13 }}>{option.label}</Typography></Box></MenuItem>)}
+          </Select>
+        </FormControl>
+        <Box sx={{ display: { xs: 'none', md: 'flex' }, flexDirection: 'column', flex: 1, minHeight: 0 }}>
+          <TextField size="small" placeholder="Search settings" value={query} onChange={event => setQuery(event.target.value)} inputProps={{ 'aria-label': 'Search settings' }}
+            InputProps={{ startAdornment: <InputAdornment position="start"><Search size={15} /></InputAdornment>, endAdornment: query ? <IconButton size="small" aria-label="Clear settings search" onClick={() => setQuery('')}><X size={14} /></IconButton> : undefined }}
+            sx={{ mb: 1, '& .MuiOutlinedInput-root': { borderRadius: 3, fontSize: 13, '& fieldset': { border: 0 }, bgcolor: 'action.hover' } }} />
+          <Box sx={{ flex: 1, overflowY: 'auto', minHeight: 0, pr: 0.5 }}>
+            {groups.map(group => {
+              const items = filtered.filter(section => section.group === group.id);
+              if (!items.length) return null;
+              return <Box key={group.id} sx={{ mt: 2 }}><Typography sx={{ px: 1.5, mb: 0.75, fontSize: 11, fontWeight: 600, color: 'text.secondary' }}>{group.label}</Typography>
+                <List disablePadding>{items.map(section => {
+                  const Icon = icons[section.id];
+                  return <ListItemButton key={section.id} id={`settings-nav-${section.id}`} selected={active.id === section.id} aria-current={active.id === section.id ? 'page' : undefined} onClick={() => setSelected(section.id)} sx={{ py: 0.8, px: 1.5, mb: 0.25, borderRadius: 2.5, '&.Mui-selected': { bgcolor: 'action.selected' } }}>
+                    <ListItemIcon sx={{ minWidth: 30, color: active.id === section.id ? 'text.primary' : 'text.secondary' }}><Icon size={17} strokeWidth={1.6} /></ListItemIcon>
+                    <ListItemText primary={label(section)} primaryTypographyProps={{ fontSize: 13, fontWeight: active.id === section.id ? 600 : 400 }} />
+                  </ListItemButton>;
+                })}</List>
+              </Box>;
+            })}
+            {!filtered.length && <Box role="status" sx={{ p: 2 }}><Typography variant="body2" color="text.secondary">No settings found in {scopeLabel}.</Typography><Button size="small" color="inherit" onClick={() => setQuery('')}>Clear search</Button></Box>}
+          </Box>
+        </Box>
+        <FormControl size="small" fullWidth sx={{ display: { xs: 'flex', md: 'none' } }}><InputLabel id="settings-section-label">Section</InputLabel><Select labelId="settings-section-label" label="Section" value={active.id} onChange={event => setSelected(event.target.value as SettingsSectionId)}>{sections.map(section => <MenuItem key={section.id} value={section.id}>{label(section)}</MenuItem>)}</Select></FormControl>
+      </Box>
+      <Box component="main" ref={contentRef} aria-label={`${label(active)} settings`} sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto', px: { xs: 0, md: 2 }, pt: { xs: 2, md: 0.5 } }}>
+        <Box sx={{ maxWidth: 1180, mx: 'auto' }}>
+          <Typography sx={{ fontSize: 11, color: 'text.secondary', mb: 0.75 }}>{scopeLabel}</Typography>
+          <Typography component="h2" sx={{ fontSize: 26, fontWeight: 650, letterSpacing: '-0.025em' }}>{label(active)}</Typography>
+          <Typography sx={{ fontSize: 14, color: 'text.secondary', mt: 0.75, mb: 4 }}>{active.description}</Typography>
+          <Box data-settings-content sx={{ '& > .MuiBox-root': { p: { xs: 0, md: 0 } }, '& .MuiPaper-elevation1': { boxShadow: 'none' }, '& .MuiOutlinedInput-root': { borderRadius: 2.5 }, '& .MuiButton-root': { borderRadius: 2.5, textTransform: 'none' }, '& .MuiTypography-h4, & .MuiTypography-h5': { fontSize: 19, fontWeight: 600 }, '& .MuiTableCell-head': { fontSize: 12, color: 'text.secondary' } }}>
+            <Suspense fallback={<Box role="status" sx={{ py: 5, display: 'flex', alignItems: 'center', gap: 1.5 }}><CircularProgress size={18} color="inherit" /><Typography variant="body2">Loading {label(active).toLocaleLowerCase()}…</Typography></Box>}>
+              <SectionContent key={`${groupId}:${activeScope}:${active.id}`} id={active.id} scope={activeScope} onNavigate={setSelected} />
+            </Suspense>
+          </Box>
+        </Box>
+      </Box>
+    </Box>}
+  </Box>;
 }
-
-export default Configuration;

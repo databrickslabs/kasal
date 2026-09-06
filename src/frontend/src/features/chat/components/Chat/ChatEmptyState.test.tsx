@@ -1,86 +1,15 @@
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import ChatEmptyState from './ChatEmptyState';
-import { useExecutionStore } from '../../store/executionStore';
-import { useUILayoutStore } from '../../../../store/uiLayout';
-import { useFlowConfigStore } from '../../../../store/flowConfig';
-import { useAppStore } from '../../store/appStore';
 
-const setAppMode = vi.fn();
-
-beforeEach(() => {
-  vi.clearAllMocks();
-  useUILayoutStore.setState({ setAppMode });
-  useFlowConfigStore.setState({ kasalFlowEnabled: true });
-  useExecutionStore.setState({ chatModeType: 'chat' });
-  useAppStore.setState({ models: [], selectedModel: '' });
-});
-
-const asModel = (key: string, supports_reasoning_effort: boolean) =>
-  ({
-    id: 1,
-    key,
-    name: key,
-    provider: 'openai',
-    temperature: 1,
-    context_window: 128000,
-    max_output_tokens: 32000,
-    extended_thinking: false,
-    enabled: true,
-    supports_reasoning_effort,
-    created_at: '',
-    updated_at: '',
-  }) as never;
-
-describe('ChatEmptyState — chat-only users', () => {
-  it('hides the builder bridge when no builder capability (docs line stays)', async () => {
-    const { usePermissionStore } = await import('../../../../store/permissions');
-    usePermissionStore.setState({ allowAgentBuilder: false, allowFlowBuilder: false });
-    render(<ChatEmptyState onPrefill={() => {}} />);
-    expect(screen.queryByText('Agent Builder')).toBeNull();
-    expect(screen.queryByText('Flow Builder')).toBeNull();
-    expect(screen.getByText('Check the docs')).toBeInTheDocument();
-    usePermissionStore.setState({ allowAgentBuilder: true, allowFlowBuilder: true });
+describe('Chat empty state', () => {
+  it('keeps editable starters without the retired builder and docs footer', () => {
+    const prefill = vi.fn();
+    render(<ChatEmptyState onPrefill={prefill} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Create a diagram' }));
+    expect(prefill).toHaveBeenCalledWith('Create a diagram of ');
+    expect(screen.queryByText(/Want to design it yourself/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/New to Kasal/)).not.toBeInTheDocument();
   });
 });
-
-describe('ChatEmptyState', () => {
-        it('switches to Agent Builder from the builder bridge', () => {
-    render(<ChatEmptyState onPrefill={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Agent Builder' }));
-    expect(setAppMode).toHaveBeenCalledWith('crew');
-  });
-
-  it('offers Flow Builder only when the flow feature is enabled', () => {
-    useFlowConfigStore.setState({ kasalFlowEnabled: false });
-    const { rerender } = render(<ChatEmptyState onPrefill={vi.fn()} />);
-    expect(screen.queryByRole('button', { name: 'Flow Builder' })).toBeNull();
-
-    useFlowConfigStore.setState({ kasalFlowEnabled: true });
-    rerender(<ChatEmptyState onPrefill={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Flow Builder' }));
-    expect(setAppMode).toHaveBeenCalledWith('flow');
-  });
-
-  it('links to the docs (new tab) and opens an absolute URL imperatively', () => {
-    // The Databricks Apps iframe defeats bare target="_blank"; clicking must open
-    // an absolute /docs URL via window.open so it escapes into a real new tab.
-    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
-    render(<ChatEmptyState onPrefill={vi.fn()} />);
-    const docs = screen.getByRole('link', { name: 'Check the docs' });
-    expect(docs).toHaveAttribute('href', '/docs'); // middle-click / keyboard fallback
-    expect(docs).toHaveAttribute('target', '_blank');
-    fireEvent.click(docs);
-    expect(openSpy).toHaveBeenCalledWith(
-      `${window.location.origin}/docs`,
-      '_blank',
-      'noopener,noreferrer',
-    );
-    openSpy.mockRestore();
-  });
-});
-
-// A model with no reasoning budget makes Deep Research identical to Research —
-// same crew, same tools, both efforts dropped by the engine. Offering it would
-// promise a difference that cannot happen.

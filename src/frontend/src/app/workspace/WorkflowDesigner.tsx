@@ -13,7 +13,8 @@ import {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Box, Snackbar, Alert, Dialog, DialogContent, Menu, Button, DialogTitle, IconButton, Typography, Drawer, SpeedDial, SpeedDialAction, SpeedDialIcon } from '@mui/material';
-import { PanelsTopLeft } from 'lucide-react';
+import { ArrowLeftRight } from 'lucide-react';
+import WorkspaceSplitDivider from './WorkspaceSplitDivider';
 import ChatIcon from '@mui/icons-material/Chat';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import HistoryIcon from '@mui/icons-material/History';
@@ -325,7 +326,9 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     assistantPanelSide,
     setAssistantPanelVisible,
     assistantResponseFocused,
-    setAssistantResponseFocused,
+    assistantPanelRatio,
+    setAssistantPanelRatio,
+    setAssistantPanelSide,
     panelPosition,
     areFlowsVisible,
     appMode,
@@ -381,9 +384,10 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   // Responsive layout — computed overrides, never mutates the store
   const { isCompact, isMobile } = useResponsiveLayout();
   const effectiveChatVisible = showChatPanel; // Always respect user toggle
-  const responseFocused = assistantResponseFocused && assistantPanelVisible && showRunHistory && !areFlowsVisible;
-  const responseMainWidth = (window.innerWidth - leftSidebarBaseWidth - rightSidebarWidth) * 0.62;
-  const effectiveLeftMargin = leftSidebarBaseWidth + (responseFocused && !isCompact ? responseMainWidth : 0); // Always reserve sidebar space
+  const responseFocused = assistantResponseFocused && showRunHistory;
+  const showingResponses = assistantPanelVisible && !areFlowsVisible;
+  const responseMainWidth = (window.innerWidth - leftSidebarBaseWidth - rightSidebarWidth) * assistantPanelRatio;
+  const effectiveLeftMargin = leftSidebarBaseWidth + (responseFocused && !isCompact && assistantPanelSide === 'left' ? responseMainWidth : 0); // Always reserve sidebar space
 
   // Use the panel manager
   const {
@@ -433,9 +437,9 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
   // Toggle execution history function
   React.useEffect(() => {
-    const id = requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('recalculateNodePositions', { detail: { reason: 'execution-history-resize' } })));
-    return () => cancelAnimationFrame(id);
-  }, [showRunHistory, assistantPanelVisible, assistantPanelSide, responseFocused]);
+    const id = window.setTimeout(() => window.dispatchEvent(new CustomEvent('recalculateNodePositions', { detail: { reason: 'execution-history-resize' } })), 120);
+    return () => window.clearTimeout(id);
+  }, [showRunHistory, assistantPanelVisible, assistantPanelSide, responseFocused, assistantPanelRatio]);
 
   const toggleExecutionHistory = React.useCallback(() => {
     setExecutionHistoryVisible(!(showRunHistory && !assistantPanelVisible));
@@ -1209,7 +1213,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               position: 'relative',
             }}
           >
-            <ChatWorkspace />
+            <ChatWorkspace onOpenSettings={() => dialogManager.setIsConfigurationDialogOpen(true)} />
           </Box>
         )}
 
@@ -1220,7 +1224,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           flexDirection: 'row',
           overflow: 'hidden',
           position: 'relative',
-          marginRight: showRunHistory && !responseFocused && !isCompact ? '268px' : 0,
+          marginRight: `${rightSidebarWidth + (!isCompact && showRunHistory ? (responseFocused ? (assistantPanelSide === 'right' ? responseMainWidth : 0) : 268) : 0)}px`,
           marginTop: responseFocused && isCompact ? '55vh' : 0,
           marginLeft: `${effectiveLeftMargin}px` // Push entire content area to the right of LeftSidebar
         }}>
@@ -1392,19 +1396,27 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         )}
 
 
-        {/* Job history and responses share the same narrow, movable sidebar. */}
+        {/* Responses and execution history share a resizable workspace pane. */}
+        {!isChatMode && showRunHistory && !isCompact && (
+          <WorkspaceSplitDivider side={assistantPanelSide} ratio={assistantPanelRatio} leftInset={leftSidebarBaseWidth} rightInset={rightSidebarWidth} onChange={setAssistantPanelRatio} />
+        )}
         {!isChatMode && showRunHistory && (
-          <Drawer anchor={responseFocused ? 'left' : 'right'} variant={isCompact && !responseFocused ? 'temporary' : 'persistent'} open onClose={() => setExecutionHistoryVisible(false)}
-            PaperProps={{ sx: { ...(responseFocused ? { left: 56 } : { right: isCompact ? 8 : 56 }), top: 56, bottom: 8, height: 'auto', width: responseFocused ? (isCompact ? 'calc(100vw - 112px)' : responseMainWidth - 16) : isCompact ? 'min(320px, calc(100vw - 16px))' : 260, ...(responseFocused && isCompact ? { bottom: 'auto', height: 'calc(55vh - 16px)' } : {}), border: 0, borderRadius: '20px', overflow: 'hidden', boxShadow: 'none' } }}>
+          <Drawer anchor={assistantPanelSide} variant={isCompact && !responseFocused ? 'temporary' : 'persistent'} open onClose={() => setExecutionHistoryVisible(false)}
+            PaperProps={{ 'data-testid': 'workspace-conversation-pane', sx: { background: 'transparent', left: isCompact ? 56 : assistantPanelSide === 'left' ? leftSidebarBaseWidth + 8 : 'auto', right: isCompact ? 56 : assistantPanelSide === 'right' ? rightSidebarWidth + 8 : 'auto', top: 56, bottom: 8, height: 'auto', width: isCompact ? 'calc(100vw - 112px)' : responseMainWidth - 16, ...(isCompact ? { bottom: 'auto', height: 'calc(55vh - 16px)' } : {}), border: 0, borderRadius: '20px', overflow: 'hidden', boxShadow: 'none' } }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, px: 1, pt: 1.5, pb: 1, flexShrink: 0 }}>
-              <Button color="inherit" size="small" aria-pressed={!assistantPanelVisible} onClick={() => setExecutionHistoryVisible(true)} sx={{ fontSize: 12, minWidth: 0, px: 1, borderRadius: 2, bgcolor: !assistantPanelVisible ? 'action.selected' : 'transparent' }}>Runs</Button>
-              <Button color="inherit" size="small" aria-pressed={assistantPanelVisible} onClick={() => setAssistantPanelVisible(true)} sx={{ fontSize: 12, minWidth: 0, px: 1, borderRadius: 2, bgcolor: assistantPanelVisible ? 'action.selected' : 'transparent' }}>Responses</Button>
-              {!areFlowsVisible && <IconButton aria-label={responseFocused ? 'Focus canvas' : 'Focus responses'} title={responseFocused ? 'Focus canvas' : 'Focus responses'} size="small" onClick={() => setAssistantResponseFocused(!responseFocused)} sx={{ ml: 'auto' }}><PanelsTopLeft size={16} /></IconButton>}
+              <Button color="inherit" size="small" aria-pressed={!showingResponses} onClick={() => setExecutionHistoryVisible(true)} sx={{ fontSize: 12, minWidth: 0, px: 1, borderRadius: 2, bgcolor: !showingResponses ? 'action.selected' : 'transparent' }}>Runs</Button>
+              {!areFlowsVisible && <Button color="inherit" size="small" aria-pressed={showingResponses} onClick={() => setAssistantPanelVisible(true)} sx={{ fontSize: 12, minWidth: 0, px: 1, borderRadius: 2, bgcolor: showingResponses ? 'action.selected' : 'transparent' }}>Responses</Button>}
+              <Box sx={{ display: 'flex', ml: 'auto' }}>
+                {!isCompact && <>
+                  <IconButton aria-label={`Move workspace panel to ${assistantPanelSide === 'left' ? 'right' : 'left'}`} title="Swap panel and canvas" size="small" onClick={() => setAssistantPanelSide(assistantPanelSide === 'left' ? 'right' : 'left')}><ArrowLeftRight size={15} /></IconButton>
+                </>}
+              </Box>
 
               <IconButton aria-label="Close workspace panel" size="small" onClick={() => setExecutionHistoryVisible(false)}><CloseIcon sx={{ fontSize: 17 }} /></IconButton>
             </Box>
-            <Box sx={{ flex: 1, minHeight: 0, display: assistantPanelVisible ? 'none' : 'block' }}><JobsPanel /></Box>
-            <Box id="builder-assistant-response-host" sx={{ flex: 1, minHeight: 0, display: assistantPanelVisible ? 'flex' : 'none', flexDirection: 'column' }} />
+            <Box sx={{ flex: 1, minHeight: 0, display: showingResponses ? 'none' : 'block' }}><JobsPanel /></Box>
+            <Box id="builder-assistant-response-host" sx={{ flex: 1, minHeight: 0, display: showingResponses ? 'flex' : 'none', flexDirection: 'column' }} />
+            {!areFlowsVisible && <Box id="builder-assistant-composer-host" sx={{ flexShrink: 0 }} />}
           </Drawer>
         )}
 
@@ -1539,17 +1551,17 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         <Dialog
           open={dialogManager.isConfigurationDialogOpen}
           onClose={() => dialogManager.setIsConfigurationDialogOpen(false)}
-          fullWidth
-          maxWidth="xl"
+          fullScreen
+          aria-label="Settings"
           PaperProps={{
             sx: {
-              width: '80vw',
-              maxWidth: 'none',
-              height: '80vh'
+              border: 0,
+              borderRadius: 0,
+              boxShadow: 'none'
             }
           }}
         >
-          <DialogContent sx={{ p: 0 }}>
+          <DialogContent sx={{ p: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <Configuration onClose={() => dialogManager.setIsConfigurationDialogOpen(false)} />
           </DialogContent>
         </Dialog>

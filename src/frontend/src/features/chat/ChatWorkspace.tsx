@@ -21,11 +21,12 @@ import GroupSelector from '../groups/components/GroupSelector';
 import ThemeModeIcon from '../../components/ThemeModeIcon';
 import { useThemeStore } from '../../store/theme';
 import ChatMcpDialog from './components/Chat/ChatMcpDialog';
+import SettingsIcon from '@mui/icons-material/Settings';
 import './chat.css';
 
 
 
-const ChatWorkspace: React.FC = () => {
+const ChatWorkspace: React.FC<{ onOpenSettings?: () => void }> = ({ onOpenSettings }) => {
   // --- Zustand Stores ---
   const sessions = useSessionStore((s) => s.sessions);
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
@@ -139,20 +140,11 @@ const ChatWorkspace: React.FC = () => {
   // MCP config dialog opened from the composer's "+" picker ("Connect a tool").
   const [mcpConfigOpen, setMcpConfigOpen] = useState(false);
 
-  // Sync chat theme from Kasal's theme store (dark-mode toggle).
-  const kasalIsDarkMode = useThemeStore((s) => s.isDarkMode);
-  // The chat-scoped theme (drives the sidebar dark-mode toggle — flips instantly,
-  // no page reload, persisted to localStorage by appStore).
-  const chatThemeIsDark = useAppStore((s) => s.theme) === 'dark';
-  useEffect(() => {
-    useAppStore.getState().setTheme(kasalIsDarkMode ? 'dark' : 'light');
-  }, [kasalIsDarkMode]);
+  const chatThemeIsDark = useThemeStore((s) => s.isDarkMode);
 
   // --- Initialize stores on mount ---
   useEffect(() => {
     useAppStore.getState().init();
-    // Apply Kasal's current theme to the chat container immediately on mount.
-    useAppStore.getState().setTheme(useThemeStore.getState().isDarkMode ? 'dark' : 'light');
     useAppStore.getState().loadModels();
     useAppStore.getState().loadTools();
     useSessionStore.getState().init().then(() => {
@@ -322,7 +314,7 @@ const ChatWorkspace: React.FC = () => {
             // The auto-executed run's id rides on generation_complete; a
             // generate-only turn has none yet and binds when its stream starts.
             jobId: ((raw as { execution_id?: string }).execution_id as string) || null,
-            mode: useExecutionStore.getState().chatModeType,
+            mode: 'chat',
             // memoryEnabled === true means the run used Workspace memory (false =
             // session-only). Snapshot it now so a later toggle can't change it.
             usedWorkspaceMemory: useExecutionStore.getState().memoryEnabled,
@@ -412,8 +404,7 @@ const ChatWorkspace: React.FC = () => {
   });
 
   /**
-   * "Use existing" matched nothing — build one instead, at the answer mode the
-   * user already had selected.
+   * "Use existing" matched nothing — answer the same prompt directly.
    *
    * Deliberately a user action, not a fallback. Silently generating here would
    * run a full crew nobody asked for; this flips the source back and re-sends
@@ -455,9 +446,9 @@ const ChatWorkspace: React.FC = () => {
 
 
   return (
-    <div id="kasal-chat-root" className="kasal-chat-root h-full w-full flex">
+    <div id="kasal-chat-root" data-theme={chatThemeIsDark ? 'dark' : 'light'} className="kasal-chat-root h-full w-full flex">
       {/* Sidebar — collapses to a slim icon rail, never fully disappears */}
-      {!sidebarOpen && <CollapsedRail onNewChat={handleNewChat} />}
+      {!sidebarOpen && <CollapsedRail onNewChat={handleNewChat} onOpenSettings={onOpenSettings} />}
       {sidebarOpen && (
         <aside
           className="w-64 flex flex-col flex-shrink-0"
@@ -581,6 +572,11 @@ const ChatWorkspace: React.FC = () => {
           <div
             className="flex-shrink-0 flex flex-col items-start gap-1 px-2 pt-2 pb-3 mt-1"
           >
+            {onOpenSettings && <button
+              type="button" aria-label="Settings" onClick={onOpenSettings}
+              className="w-full flex items-center gap-2.5 rounded-lg text-[13px] font-medium transition-colors hover:bg-[var(--bg-rail-hover)]"
+              style={{ color: 'var(--text-secondary)', padding: '8px 10px' }}
+            ><SettingsIcon sx={{ fontSize: 20 }} />Settings</button>}
             <button
               onClick={() => { void useThemeStore.getState().toggleTheme(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors hover:bg-[var(--bg-rail-hover)]"

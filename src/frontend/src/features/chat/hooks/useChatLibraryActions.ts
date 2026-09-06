@@ -26,9 +26,6 @@ export function useChatLibraryActions() {
       // Capture the chat's current memory choice so the saved crew matches what
       // the user sees here (no-memory mode → saved crew has memory disabled).
       // opts carries overwrite + the picked Genie space from the crew card.
-      // Answer mode → persist reasoning so a Research/Deep crew reloads with the
-      // same behaviour.
-      const mode = useExecutionStore.getState().chatModeType;
       return saveGeneratedCrew(data, undefined, {
         ...opts,
         memoryEnabled: useExecutionStore.getState().memoryEnabled,
@@ -37,7 +34,7 @@ export function useChatLibraryActions() {
         // Persist the Agent Bricks endpoint picked in the "+" so the saved crew
         // reloads with the agent assigned and runs against it.
         agentBricksEndpoints: useExecutionStore.getState().selectedAgentBricksEndpoints,
-        reasoning: mode === 'research' || mode === 'deep',
+        reasoning: false,
       }).then((r) => {
         // Surface the freshly saved crew in the rail library.
         void refreshLibrary();

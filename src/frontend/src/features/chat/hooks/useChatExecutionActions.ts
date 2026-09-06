@@ -296,16 +296,8 @@ export function useChatExecutionActions({
           data.user_request,
           // Agent Bricks endpoints picked via the chat input's "+" menu.
           useExecutionStore.getState().selectedAgentBricksEndpoints,
-          // Answer mode → reasoning (research/deep) so a manually re-run crew
-          // matches what the mode (and save) produced.
-          useExecutionStore.getState().chatModeType === 'research' ||
-            useExecutionStore.getState().chatModeType === 'deep',
-          // …and the mode itself, so the backend applies the REST of what the
-          // mode means (guardrail retries, execution budget, and deep's JSON
-          // envelope + gate). A re-run from here skips generation entirely, so
-          // without this it would run ungated while the identical
-          // auto-executed run was gated.
-          useExecutionStore.getState().chatModeType,
+          false,
+          'chat',
         );
         const execution = await createExecution(crewConfig);
         const jobId = execution.job_id || execution.execution_id;

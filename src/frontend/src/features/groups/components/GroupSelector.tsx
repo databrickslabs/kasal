@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useId } from 'react';
+import { CircleUserRound } from 'lucide-react';
 import {
   Box,
   IconButton,
@@ -131,7 +132,7 @@ const GroupSelector: React.FC<{ showLabel?: boolean }> = ({ showLabel = false })
     }
   };
 
-  const avatarElement = useMemo(() => <ProfileIcon sx={{ fontSize: 28, color: 'text.secondary' }} />, []);
+  const avatarElement = useMemo(() => <CircleUserRound size={20} strokeWidth={1.8} aria-hidden="true" />, []);
 
   if (loading || isSwitching || isLoadingUser) {
     return (
@@ -174,7 +175,7 @@ const GroupSelector: React.FC<{ showLabel?: boolean }> = ({ showLabel = false })
               : `Switch teamspace: ${currentGroup.name} - Shared Teamspace`
           }
           sx={{
-            width: showLabel ? '100%' : 40, height: 40, p: 0.5,
+            width: showLabel ? '100%' : 40, height: 40, p: 0.5, color: 'text.secondary',
             minWidth: 0,
             justifyContent: showLabel ? 'flex-start' : 'center',
             borderRadius: 2,

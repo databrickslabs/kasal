@@ -556,8 +556,8 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
   return (
     <>
       <Card component="section" aria-label="Job history" sx={{
-        boxShadow: 'none', height: '100%', borderRadius: 0,
-        bgcolor: dark ? '#1B1F23' : '#FFFFFF', color: dark ? '#E8ECEF' : '#20262D',
+        boxShadow: 'none', height: '100%', borderRadius: 0, backgroundImage: 'none',
+        bgcolor: 'transparent', color: dark ? '#E8ECEF' : '#20262D',
       }}>
         <CardContent sx={{ p: 0, height: '100%', '&:last-child': { pb: 0 }, display: 'flex', flexDirection: 'column' }}>
           <Box sx={{ px: 1.5, pt: 2, pb: 1, flexShrink: 0 }}>

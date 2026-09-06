@@ -206,12 +206,11 @@ export function useChatCommands({ dispatcher, executionStream, handleRefine, las
         const name = arg;
         const memoryEnabled = useExecutionStore.getState().memoryEnabled;
         const mcpServers = useExecutionStore.getState().selectedMcpServers;
-        const saveMode = useExecutionStore.getState().chatModeType;
         try {
           const agentBricksEndpoints = useExecutionStore.getState().selectedAgentBricksEndpoints;
           const saved = await saveGeneratedCrew(data, name || undefined, {
             overwrite, memoryEnabled, mcpServers, agentBricksEndpoints,
-            reasoning: saveMode === 'research' || saveMode === 'deep',
+            reasoning: false,
           });
           void refreshLibrary();
           addMessage(

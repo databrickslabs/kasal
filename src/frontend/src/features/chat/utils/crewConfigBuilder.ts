@@ -44,14 +44,7 @@ export interface CrewExecutionConfig {
   session_id?: string;
   /** Memory READ scope: true = workspace-wide (default), false = this chat session only. */
   memory_workspace_scope?: boolean;
-  /**
-   * ChatMode answer mode. The BACKEND turns this into the mode's actual
-   * behaviour — execution budget, per-task guardrail retries, degrade-vs-abort,
-   * and in deep the JSON envelope and its gate — in one place
-   * (`generation/crew/answer_mode.py`, applied again at config adaptation so a
-   * re-run from here is gated identically to an auto-executed run). Do not
-   * reimplement any of that here; just say which mode this is.
-   */
+  /** Direct Chat execution; the backend applies its execution defaults. */
   chat_mode_type?: string;
 }
 

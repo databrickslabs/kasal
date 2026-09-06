@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useThemeStore } from '../../../store/theme';
 import { AppConfig } from '../types/chat';
 import { ModelConfigResponse } from '../types/dispatcher';
 import { updateClient } from '../api/client';
@@ -11,34 +12,14 @@ import { ScheduleService, Schedule } from '../../../api/execution/ScheduleServic
 
 const CONFIG_STORAGE_KEY = 'kasal-chat-config';
 const MODEL_STORAGE_KEY = 'kasal-chat-model';
-const THEME_STORAGE_KEY = 'kasal-chat-theme';
 // Preferred default model for chat mode when the user hasn't picked one yet.
 // Falls back to the first enabled model if this endpoint isn't available.
 const PREFERRED_DEFAULT_MODEL = 'databricks-gpt-5-3-codex';
 
 export type Theme = 'light' | 'dark';
 
-function getStoredTheme(): Theme {
-  try {
-    const stored = localStorage.getItem(THEME_STORAGE_KEY);
-    if (stored === 'dark' || stored === 'light') return stored;
-  } catch { /* */ }
-  return window.matchMedia?.('(prefers-color-scheme: dark)').matches
-    ? 'dark'
-    : 'light';
-}
-
 function applyTheme(theme: Theme): void {
-  // Scope the theme to the chat container only, so it never overrides the
-  // Material-UI theme applied to the rest of Kasal. Falls back to the root
-  // element if the chat container isn't mounted yet.
-  const chatRoot = document.getElementById('kasal-chat-root');
-  if (chatRoot) {
-    chatRoot.setAttribute('data-theme', theme);
-  }
-  try {
-    localStorage.setItem(THEME_STORAGE_KEY, theme);
-  } catch { /* */ }
+  document.getElementById('kasal-chat-root')?.setAttribute('data-theme', theme);
 }
 
 function getDefaultApiUrl(): string {
@@ -125,7 +106,7 @@ type AppStore = AppState & AppActions;
 export const useAppStore = create<AppStore>((set, get) => ({
   // --- State ---
   config: loadConfig(),
-  theme: getStoredTheme(),
+  theme: useThemeStore.getState().isDarkMode ? 'dark' : 'light',
   models: [],
   tools: [],
   toolNameMap: {},
@@ -238,18 +219,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
   },
 
-  toggleTheme: () => {
-    set((state) => {
-      const next: Theme = state.theme === 'dark' ? 'light' : 'dark';
-      applyTheme(next);
-      return { theme: next };
-    });
-  },
+  toggleTheme: () => { void useThemeStore.getState().toggleTheme(); },
 
-  // Sync the chat theme from Kasal's theme store (dark-mode toggle).
   setTheme: (theme: Theme) => {
-    applyTheme(theme);
-    set({ theme });
+    void useThemeStore.getState().changeTheme(theme);
   },
 
   setSelectedModel: (model) => {
@@ -277,3 +250,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
   toggleSettings: () => set((s) => ({ settingsOpen: !s.settingsOpen })),
 }));
+
+// Chat's CSS tokens mirror the shared appearance, including changes made while
+// Chat is unmounted. Both toggles persist through the same ThemeService.
+useThemeStore.subscribe((state) => {
+  const theme: Theme = state.isDarkMode ? 'dark' : 'light';
+  applyTheme(theme);
+  if (useAppStore.getState().theme !== theme) useAppStore.setState({ theme });
+});

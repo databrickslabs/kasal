@@ -14,7 +14,7 @@ import { usePermissionStore } from '../../../../store/permissions';
  *     must exist in the catalog first; `ensureSaved` saves it (idempotent) and
  *     returns the id, then a crewNode is handed over via `catalogLoadFlow`.
  *
- * Shared by the post-generation actions row (research/deep crews) and the
+ * Shared by the post-generation actions row and the
  * answer-mode "Saved to catalog" card, so both expose the identical actions.
  */
 interface OpenOnCanvasButtonsProps {

@@ -1,4 +1,3 @@
-import { kasalStageSurface } from '../../theme/kasalSurfaces';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Box,
@@ -442,7 +441,7 @@ const TabBar: React.FC<TabBarProps> = ({
           // bar lets it through, so bar + sidebar + stage read as one surface.
           borderBottom: 0,
           borderColor: 'divider',
-          ...(hideTabsAndButtons ? { background: 'transparent' } : kasalStageSurface(isDarkMode)),
+          background: 'transparent',
           display: 'flex',
           alignItems: 'center',
           minHeight: isMobile ? '40px' : '48px',

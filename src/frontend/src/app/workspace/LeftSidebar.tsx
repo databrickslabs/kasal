@@ -86,7 +86,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   const sidebarItems = [
     {
       id: 'configuration',
-      icon: <SettingsIcon />,
+      icon: <SettingsIcon sx={{ fontSize: 20 }} />,
       tooltip: 'Configuration',
       content: null, // No expandable content, handled by direct click
       dataTour: 'configuration-button'
@@ -143,7 +143,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
             sx={{
               width: 48,
               height: '100%',
-              bgcolor: 'background.paper',
+              background: 'transparent',
               borderRadius: 0,
               borderRight: 0,
               borderColor: 'divider',
@@ -344,7 +344,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
 
             <Tooltip title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'} placement="right">
               <IconButton aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'} onClick={() => { void toggleTheme(); }} sx={{ width: 40, height: 40, mb: 0.5, borderRadius: 2, color: 'text.secondary' }}>
-                <ThemeModeIcon dark={isDarkMode} size={18} />
+                <ThemeModeIcon dark={isDarkMode} size={20} />
               </IconButton>
             </Tooltip>
             {/* Help button pinned to bottom */}
@@ -415,7 +415,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
               sx={{
                 width: 280,
                 height: '100%',
-                bgcolor: 'background.paper',
+                background: 'transparent',
                 borderRadius: 0,
                 borderRight: 0,
                 borderColor: 'divider',

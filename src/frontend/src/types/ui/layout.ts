@@ -21,6 +21,7 @@ export interface UILayoutState {
   assistantPanelVisible?: boolean;
   assistantResponseFocused?: boolean;
   assistantPanelSide?: 'left' | 'right';
+  assistantPanelRatio?: number;
   assistantDockHeight?: number;
   chatPanelVisible: boolean;
   chatPanelCollapsed: boolean;

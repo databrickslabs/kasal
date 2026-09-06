@@ -8,7 +8,7 @@ const props = {
   response: <p>A response to review</p>, hasMessages: true, responseKey: 'reply-1', busy: false,
   dark: false, historyOpen: false, onHistory: vi.fn(), onNewChat: vi.fn(), showEarlier: false, onToggleEarlier: vi.fn(),
 };
-const wrapper = ({ children }: { children: React.ReactNode }) => <><div id="builder-assistant-response-host" />{children}</>;
+const wrapper = ({ children }: { children: React.ReactNode }) => <><div id="builder-assistant-response-host" /><div id="builder-assistant-composer-host" />{children}</>;
 beforeEach(() => useUILayoutStore.setState({ assistantResponseFocused: false, assistantPanelSide: 'right', assistantPanelVisible: false, executionHistoryVisible: true }));
 describe('Canvas assistant sidebar', () => {
   it('opens on the right and can move left without losing the draft', () => {
@@ -25,11 +25,11 @@ describe('Canvas assistant sidebar', () => {
   });
   it('closes and restores the answer without clearing the composer', () => {
     const { rerender } = render(<CanvasAssistantLayout {...props} />, { wrapper });
-    fireEvent.click(screen.getByRole('button', { name: 'Hide response' }));
+    act(() => useUILayoutStore.getState().setExecutionHistoryVisible(false));
     expect(screen.queryByRole('region', { name: 'Kasal responses' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Responses' }));
     expect(screen.getByText('A response to review')).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Hide response' }));
+    act(() => useUILayoutStore.getState().setExecutionHistoryVisible(false));
     rerender(<CanvasAssistantLayout {...props} responseKey="reply-2" />);
     expect(screen.getByText('A response to review')).toBeVisible();
     expect(screen.getByRole('textbox', { name: 'Draft' })).toHaveValue('Keep this draft');
@@ -57,7 +57,7 @@ describe('Canvas assistant sidebar', () => {
     fireEvent.change(input, { target: { value: 'Before focusing' } });
     act(() => useUILayoutStore.getState().setAssistantResponseFocused(true));
     expect(screen.getByRole('textbox', { name: 'Draft' })).toBe(input);
-    expect(input.closest('#builder-assistant-response-host')).not.toBeNull();
+    expect(input.closest('#builder-assistant-composer-host')).not.toBeNull();
     fireEvent.change(input, { target: { value: 'Edited beside the canvas' } });
     act(() => useUILayoutStore.getState().setAssistantResponseFocused(false));
     expect(screen.getByRole('textbox', { name: 'Draft' })).toBe(input);

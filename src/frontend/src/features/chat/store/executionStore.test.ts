@@ -85,15 +85,15 @@ afterEach(() => {
 const preview = { type: 'ui' as const, data: '<p>hi</p>', title: 'T' };
 
 describe('executionStore - basic setters & log', () => {
-  it('chatModeType defaults to chat (single light agent) and setChatModeType updates it', () => {
-    // Default answer mode is the fast single-agent path.
-    expect(useExecutionStore.getState().chatModeType).toBe('chat');
-    useExecutionStore.getState().setChatModeType('research');
-    expect(useExecutionStore.getState().chatModeType).toBe('research');
-    useExecutionStore.getState().setChatModeType('deep');
-    expect(useExecutionStore.getState().chatModeType).toBe('deep');
-    // restore default so other tests start clean
-    useExecutionStore.getState().setChatModeType('chat');
+  it('migrates retired modes without losing other composer preferences', async () => {
+    localStorage.setItem('kasal-chatmode-mcp-selection', JSON.stringify({
+      version: 2, state: { chatModeType: 'deep', memoryEnabled: true, selectedMcpServers: ['Saved server'] },
+    }));
+    await useExecutionStore.persist.rehydrate();
+    expect(useExecutionStore.getState()).not.toHaveProperty('chatModeType');
+    expect(useExecutionStore.getState().memoryEnabled).toBe(true);
+    expect(useExecutionStore.getState().selectedMcpServers).toEqual(['Saved server']);
+    useExecutionStore.setState({ memoryEnabled: false, selectedMcpServers: [] });
   });
 
   it('setIsLoading / setExecutionContext / setChatCollapsed / toggleChatCollapsed', () => {

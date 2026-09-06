@@ -1,4 +1,6 @@
 import React from 'react';
+import SettingsIcon from '@mui/icons-material/Settings';
+import ThemeModeIcon from '../../../components/ThemeModeIcon';
 import GroupSelector from '../../groups/components/GroupSelector';
 import { useAppStore } from '../store/appStore';
 
@@ -9,7 +11,7 @@ import { useAppStore } from '../store/appStore';
  * footer. (Expanding back is the top-bar SidebarToggle — the one fixed
  * control for both directions.)
  */
-const CollapsedRail: React.FC<{ onNewChat: () => void }> = ({ onNewChat }) => {
+const CollapsedRail: React.FC<{ onNewChat: () => void; onOpenSettings?: () => void }> = ({ onNewChat, onOpenSettings }) => {
   const isDark = useAppStore((s) => s.theme) === 'dark';
   const toggleTheme = useAppStore((s) => s.toggleTheme);
 
@@ -35,26 +37,19 @@ const CollapsedRail: React.FC<{ onNewChat: () => void }> = ({ onNewChat }) => {
       </button>
 
       <div className="flex-1" />
+      {onOpenSettings && <button type="button" aria-label="Settings" title="Settings" onClick={onOpenSettings}
+        className={iconButton} style={{ color: 'var(--text-secondary)', width: 40, height: 40 }}>
+        <SettingsIcon sx={{ fontSize: 20 }} />
+      </button>}
 
       <button
         type="button"
         onClick={toggleTheme}
         className={iconButton}
-        style={{ color: 'var(--text-secondary)' }}
+        style={{ color: 'var(--text-secondary)', width: 40, height: 40 }}
         aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
       >
-        {isDark ? (
-          // Sun — currently dark, click for light
-          <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-            <circle cx="12" cy="12" r="4" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32l1.41-1.41" />
-          </svg>
-        ) : (
-          // Moon — currently light, click for dark
-          <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-          </svg>
-        )}
+        <ThemeModeIcon dark={isDark} />
       </button>
       <GroupSelector />
     </aside>

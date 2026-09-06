@@ -109,28 +109,7 @@ interface ExecutionState {
    */
   skipContinuation: boolean;
   setSkipContinuation: (skip: boolean) => void;
-  /**
-   * ChatMode answer mode chosen in the chat input's mode pill:
-   *   'chat'     – a single light agent (Agent.kickoff_async), fast, no crew;
-   *   'research' – a full crew with balanced model reasoning;
-   *   'deep'     – a full crew with maximum model reasoning.
-   * Persisted (like ``memoryEnabled``) so the choice survives a reload.
-   */
-  chatModeType: 'chat' | 'research' | 'deep';
-  /**
-   * The SOURCE the next prompt is answered from: build something new (false,
-   * the default) or run something already published to chat (true).
-   *
-   * A separate axis from ``chatModeType``, not a fourth value of it. The
-   * catalogue only stores crews, so reuse could never honour 'chat' — putting
-   * it in the answer-mode pill would create a value that silently invalidates
-   * its own neighbours, and a "reuse" mode that found no match would quietly
-   * become Research.
-   *
-   * ``chatModeType`` is deliberately NOT cleared while this is on: the user gets
-   * their selection back when they switch source, and it is what the "build one
-   * instead" offer runs at when nothing matches.
-   */
+  /** Run a published capability instead of answering directly. */
   preferExisting: boolean;
   /**
    * MCP servers (Kasal server NAMES) selected via the chat input's "+" picker.
@@ -200,7 +179,6 @@ interface ExecutionActions {
   toggleChatCollapsed: () => void;
   setWorkspaceMemory: (value: boolean) => void;
   setMemoryEnabled: (value: boolean) => void;
-  setChatModeType: (mode: 'chat' | 'research' | 'deep') => void;
   setPreferExisting: (preferExisting: boolean) => void;
   toggleMcpServer: (name: string) => void;
   setSelectedMcpServers: (names: string[]) => void;
@@ -783,7 +761,6 @@ export const useExecutionStore = create<ExecutionStore>()(
   routedCapability: null,
   heldConversation: null,
   skipContinuation: false,
-  chatModeType: 'chat',
   preferExisting: false,
   selectedMcpServers: [],
   selectedAgentBricksEndpoints: [],
@@ -904,7 +881,6 @@ export const useExecutionStore = create<ExecutionStore>()(
   setRoutedCapability: (name) => set({ routedCapability: name }),
   setHeldConversation: (name) => set({ heldConversation: name }),
   setSkipContinuation: (skip) => set({ skipContinuation: skip }),
-  setChatModeType: (mode) => set({ chatModeType: mode }),
   setPreferExisting: (preferExisting) => set({ preferExisting }),
   toggleMcpServer: (name) =>
     set((s) => ({
@@ -1910,13 +1886,16 @@ export const useExecutionStore = create<ExecutionStore>()(
       // (memoryEnabled=false) so a new chat doesn't pull in unrelated workspace
       // history unless the user opts in. Reset the persisted value once so existing
       // browsers pick up the new default instead of keeping the old "Workspace".
-      version: 2,
+      version: 3,
       migrate: (persisted, version) => {
         if (version < 1 && persisted && typeof persisted === 'object') {
           (persisted as { activityPlacement?: string }).activityPlacement = 'chat';
         }
         if (version < 2 && persisted && typeof persisted === 'object') {
           (persisted as { memoryEnabled?: boolean }).memoryEnabled = false;
+        }
+        if (persisted && typeof persisted === 'object') {
+          delete (persisted as { chatModeType?: unknown }).chatModeType;
         }
         return persisted as ExecutionStore;
       },
@@ -1935,7 +1914,6 @@ export const useExecutionStore = create<ExecutionStore>()(
         activityPlacement: s.activityPlacement,
         workspaceMemory: s.workspaceMemory,
         memoryEnabled: s.memoryEnabled,
-        chatModeType: s.chatModeType,
         preferExisting: s.preferExisting,
       }),
     },

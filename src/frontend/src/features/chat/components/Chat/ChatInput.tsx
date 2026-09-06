@@ -4,7 +4,6 @@ import AssetThumb from './AssetThumb';
 import { isImageFile, measureImage } from '../../utils/imageFiles';
 import type { ImageRef } from '../../types/chat';
 import { ModelConfigResponse } from '../../types/dispatcher';
-import { modelLacksReasoning } from '../../utils/answerModes';
 import HeldConversationPill from './HeldConversationPill';
 import { forgetKnowledgeFile, uploadKnowledgeFile } from '../../api/knowledge';
 import { improveChatPrompt } from '../../api/prompt';
@@ -67,15 +66,6 @@ const SLASH_COMMANDS: { command: string; arg?: string; description: string }[] =
   { command: '/refine ', arg: 'instruction', description: 'Refine the current result' },
   { command: '/clear', description: 'Clear chat history' },
 ];
-
-// Answer modes shown in the composer's mode pill. 'chat' runs a single light
-// agent (fast); 'research'/'deep' build a crew, with progressively deeper model
-// reasoning ON MODELS THAT HAVE A REASONING BUDGET.
-// `label` is the full name (dropdown rows + aria); `short` is the compact label
-// shown on the collapsed trigger pill so the composer's control row stays tidy.
-// Hints are resolved per model at render (see utils/answerModes): on a model
-// with no budget, Research is still a real crew but Deep Research would be
-// identical to it, so its promise — and the mode itself — is withdrawn.
 
 // NOTE: there is deliberately NO per-message output-format picker. The
 // deliverable type (presentation, dashboard, quiz, …) is derived from the
@@ -196,32 +186,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // Viewport-anchored fixed coords for each pop-up menu (escape overflow-hidden).
-  // Answer mode (chat|research|deep) lives in the store so the choice persists
-  // and is consistent across ChatInput's dual mount (read store-direct, not props).
-  const chatModeType = useExecutionStore((s) => s.chatModeType);
-  const setChatModeType = useExecutionStore((s) => s.setChatModeType);
-  // The SOURCE axis. Only read here to grey the answer-mode pill — the control
-  // itself owns its own state in SourcePill. chatModeType is deliberately left
-  // alone while this is on: the user gets their selection back on switching
-  // back, and it is what the "build one instead" offer runs at.
   const preferExisting = useExecutionStore((s) => s.preferExisting);
   // A capability that holds a conversation keeps the next turn even when the
   // message is a fragment. Shown, and leavable — stickiness the user cannot see
   // or refuse is indistinguishable from a bug.
   const heldConversation = useExecutionStore((s) => s.heldConversation);
-  // Whether the SELECTED model can spend a reasoning budget. Drives the mode
-  // hints and disables Deep Research, which on such a model is byte-for-byte
-  // identical to Research (the engine drops the effort).
-  const lacksReasoning = modelLacksReasoning(models, selectedModel);
-  // The mode persists in the store, so a Deep selection made under a
-  // reasoning-capable model would otherwise stick after switching to one
-  // without a budget — silently running as Research while the pill still reads
-  // "Deep". Fall back explicitly instead.
-  useEffect(() => {
-    if (chatModeType === 'deep' && lacksReasoning) {
-      setChatModeType('research');
-    }
-  }, [chatModeType, lacksReasoning, setChatModeType]);
   // Memory mode is a single binary toggle: workspace (semantic memory on) vs
   // session (semantic memory off — recall comes only from this chat's history).
   const toggleMemoryMode = () => {
@@ -826,15 +795,13 @@ const ChatInput: React.FC<ChatInputProps> = ({
               )}
             </button>
 
-            {/* The "+" menu — source, answer mode, memory, model, attach and
+            {/* The "+" menu — source, memory, model, attach and
                 the MCP tools all live here now; the bar stays sparkle + send. */}
             <ComposerMenu
               disabled={disabled}
               menuPlacement={menuPlacement}
               menuAnimClass={menuAnimClass}
               onPicked={() => inputRef.current?.focus()}
-              chatModeType={chatModeType}
-              setChatModeType={setChatModeType}
               models={models}
               selectedModel={selectedModel}
               onModelChange={onModelChange}

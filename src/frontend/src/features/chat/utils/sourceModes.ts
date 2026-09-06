@@ -1,13 +1,4 @@
-/**
- * Where the next answer comes FROM: something built now, or something saved.
- *
- * A different question from the answer-mode pill, which asks what SHAPE to
- * build. Kept in its own file for that reason — `answerModes.ts` is deliberately
- * untouched by this feature. The moment reuse becomes a fourth answer mode it is
- * a value that invalidates its own neighbours: the catalogue only stores crews,
- * so reuse can never honour 'chat', and a reuse mode that matched nothing would
- * quietly turn into Research.
- */
+/** Answer directly, or run a published capability. */
 
 export type SourceModeId = 'build' | 'existing';
 
@@ -35,9 +26,7 @@ export const SOURCE_MODES: {
  * True when the workspace is KNOWN to have nothing published to chat.
  *
  * Deliberately not `count === 0`: a count that has not loaded yet is `null`, and
- * an unloaded list must NOT disable the control. Same stance as
- * `modelLacksReasoning` in `answerModes.ts`, for the same reason — a false
- * "unavailable" is worse than briefly offering something that turns out to be a
+ * an unloaded list must NOT disable the control. A false "unavailable" is worse than briefly offering something that turns out to be a
  * no-op, because the user believes it and stops looking.
  */
 export function nothingPublishedToChat(count: number | null): boolean {

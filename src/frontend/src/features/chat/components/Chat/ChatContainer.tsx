@@ -454,7 +454,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
       }
     }
     // Each run's deliverable, so its pane icon opens the right artifact: an
-    // A2UI surface (research/deep) wins; otherwise the plain-text answer
+    // A2UI surface wins; otherwise the plain-text answer
     // (chat mode). A later A2UI surface overrides an earlier text answer;
     // a text answer never displaces an A2UI surface already found.
     const segDeliverables = new Map<

@@ -41,10 +41,11 @@ interface WorkspaceInfo {
 }
 
 interface WorkspaceOverviewProps {
+  embedded?: boolean;
   onConfigureSection?: (section: string) => void;
 }
 
-function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.Element {
+function WorkspaceOverview({ onConfigureSection, embedded = false }: WorkspaceOverviewProps): JSX.Element {
   const [loading, setLoading] = useState(true);
   const [workspaceInfo, setWorkspaceInfo] = useState<WorkspaceInfo | null>(null);
   const [databricksConfig, setDatabricksConfig] = useState<DatabricksConfig | null>(null);
@@ -187,17 +188,17 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
   return (
     <Box>
       {/* Workspace Header */}
-      <Box sx={{ mb: 3 }}>
+      {!embedded && <Box sx={{ mb: 3 }}>
         <Typography variant="h5" gutterBottom>
           Teamspace Configuration Overview
         </Typography>
         <Typography variant="body2" color="text.secondary">
           Manage your teamspace settings and configurations
         </Typography>
-      </Box>
+      </Box>}
 
       {/* Workspace Info Card */}
-      <Card sx={{ mb: 3 }}>
+      <Card sx={{ mb: 3, ...(embedded ? { backgroundImage: 'none', bgcolor: 'action.hover', borderRadius: 3, boxShadow: 'none' } : {}) }}>
         <CardContent>
           <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
             <GroupIcon sx={{ mr: 1, color: 'primary.main' }} />
@@ -263,7 +264,7 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
       <Grid container spacing={2}>
         {/* Databricks Configuration */}
         <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2, height: '100%' }}>
+          <Paper sx={{ p: 2, height: '100%', boxSizing: 'border-box', ...(embedded ? { backgroundImage: 'none', bgcolor: 'action.hover', borderRadius: 3, boxShadow: 'none' } : {}) }}>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
               <CloudIcon sx={{ mr: 1, color: 'primary.main' }} />
               <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>
@@ -332,7 +333,7 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
 
         {/* Memory Backend Configuration */}
         <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2, height: '100%' }}>
+          <Paper sx={{ p: 2, height: '100%', boxSizing: 'border-box', ...(embedded ? { backgroundImage: 'none', bgcolor: 'action.hover', borderRadius: 3, boxShadow: 'none' } : {}) }}>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
               <MemoryIcon sx={{ mr: 1, color: 'primary.main' }} />
               <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>
@@ -384,7 +385,7 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
 
         {/* Volume Configuration (Future) */}
         <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2, height: '100%' }}>
+          <Paper sx={{ p: 2, height: '100%', boxSizing: 'border-box', ...(embedded ? { backgroundImage: 'none', bgcolor: 'action.hover', borderRadius: 3, boxShadow: 'none' } : {}) }}>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
               <StorageIcon sx={{ mr: 1, color: 'primary.main' }} />
               <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>
@@ -425,7 +426,7 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
 
         {/* Knowledge Volume (Future) */}
         <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2, height: '100%' }}>
+          <Paper sx={{ p: 2, height: '100%', boxSizing: 'border-box', ...(embedded ? { backgroundImage: 'none', bgcolor: 'action.hover', borderRadius: 3, boxShadow: 'none' } : {}) }}>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
               <StorageIcon sx={{ mr: 1, color: 'primary.main' }} />
               <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>
@@ -464,7 +465,7 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
         </Grid>
         {/* Tools Enabled in Workspace */}
         <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2, height: '100%' }}>
+          <Paper sx={{ p: 2, height: '100%', boxSizing: 'border-box', ...(embedded ? { backgroundImage: 'none', bgcolor: 'action.hover', borderRadius: 3, boxShadow: 'none' } : {}) }}>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
               <BuildIcon sx={{ mr: 1, color: 'primary.main' }} />
               <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>
@@ -498,7 +499,7 @@ function WorkspaceOverview({ onConfigureSection }: WorkspaceOverviewProps): JSX.
 
         {/* MCP Servers Enabled in Workspace */}
         <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2, height: '100%' }}>
+          <Paper sx={{ p: 2, height: '100%', boxSizing: 'border-box', ...(embedded ? { backgroundImage: 'none', bgcolor: 'action.hover', borderRadius: 3, boxShadow: 'none' } : {}) }}>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
               <BuildIcon sx={{ mr: 1, color: 'primary.main' }} />
               <Typography variant="subtitle1" sx={{ flexGrow: 1 }}>

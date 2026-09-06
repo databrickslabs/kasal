@@ -41,7 +41,7 @@ export const useChatSession = (providedChatSessionId?: string) => {
   const convertBackendMessage = (msg: BackendChatMessage): ChatMessage => {
     const baseMessage: ChatMessage = {
       id: msg.id,
-      type: msg.message_type as 'user' | 'assistant' | 'execution' | 'trace',
+      type: msg.message_type as ChatMessage['type'],
       content: msg.content || '',
       timestamp: new Date(msg.timestamp),
       intent: msg.intent,
@@ -50,7 +50,7 @@ export const useChatSession = (providedChatSessionId?: string) => {
     };
 
     // For execution and trace messages, restore additional fields from generation_result
-    if ((msg.message_type === 'execution' || msg.message_type === 'trace') && msg.generation_result) {
+    if ((msg.message_type === 'execution' || msg.message_type === 'trace' || msg.message_type === 'result') && msg.generation_result) {
       const genResult = msg.generation_result as Record<string, unknown> & {
         jobId?: string;
         agentName?: string;
@@ -122,7 +122,7 @@ export const useChatSession = (providedChatSessionId?: string) => {
 
     try {
       let generationResult = message.result;
-      if (message.type === 'execution' || message.type === 'trace') {
+      if (message.type === 'execution' || message.type === 'trace' || message.type === 'result') {
         generationResult = {
           ...(message.result || {}),
           jobId: message.jobId,

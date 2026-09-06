@@ -15,7 +15,7 @@ interface NoMatchPromptProps {
   message: string;
   /** 'nothing_published' | 'no_match' | 'unresolved'. */
   reason: string;
-  /** Flips the source back to "Build new" and re-sends at the stored answer mode. */
+  /** Flips the source back to "Build new" and re-sends the prompt. */
   onBuildInstead?: () => void;
 }
 

@@ -33,7 +33,7 @@ vi.mock('../../../api/workflow/PublicationService', () => ({
 
 const CONFIG_STORAGE_KEY = 'kasal-chat-config';
 const MODEL_STORAGE_KEY = 'kasal-chat-model';
-const THEME_STORAGE_KEY = 'kasal-chat-theme';
+const THEME_STORAGE_KEY = 'APP_THEME';
 
 // Helper: import a fresh copy of the store module so module-level state
 // (loadConfig / getStoredTheme / selectedModel IIFE) is recomputed.
@@ -43,6 +43,8 @@ async function freshStore() {
   listChatPublished.mockRejectedValue(new Error('not mocked'));
   vi.resetModules();
   const mod = await import('./appStore');
+  const { useThemeStore } = await import('../../../store/theme');
+  await useThemeStore.getState().initializeTheme();
   return mod.useAppStore;
 }
 
@@ -79,50 +81,24 @@ describe('appStore', () => {
   // ---------------------------------------------------------------------------
   // getStoredTheme branches
   // ---------------------------------------------------------------------------
-  describe('getStoredTheme (initial theme)', () => {
-    it('uses stored "dark" theme', async () => {
-      localStorage.setItem(THEME_STORAGE_KEY, 'dark');
+  describe('shared appearance', () => {
+    it('ignores retired Chat preferences and mirrors the global theme', async () => {
+      localStorage.setItem('kasal-chat-theme', 'light');
+      localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify({ theme: 'deepOcean' }));
       const store = await freshStore();
       expect(store.getState().theme).toBe('dark');
-    });
-
-    it('uses stored "light" theme', async () => {
-      localStorage.setItem(THEME_STORAGE_KEY, 'light');
-      const store = await freshStore();
+      const { useThemeStore } = await import('../../../store/theme');
+      await useThemeStore.getState().toggleTheme();
       expect(store.getState().theme).toBe('light');
     });
-
-    it('falls back to matchMedia dark when nothing stored', async () => {
-      matchMediaMatches = true;
+    it('a Chat toggle updates the builder appearance and persists across initialization', async () => {
       const store = await freshStore();
+      store.getState().toggleTheme();
+      const { useThemeStore } = await import('../../../store/theme');
+      expect(useThemeStore.getState().isDarkMode).toBe(true);
+      expect(JSON.parse(localStorage.getItem(THEME_STORAGE_KEY)!)).toEqual({ theme: 'deepOcean' });
+      await useThemeStore.getState().initializeTheme();
       expect(store.getState().theme).toBe('dark');
-    });
-
-    it('falls back to light when matchMedia does not match dark', async () => {
-      matchMediaMatches = false;
-      const store = await freshStore();
-      expect(store.getState().theme).toBe('light');
-    });
-
-    it('falls back to matchMedia when localStorage.getItem throws', async () => {
-      const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-        throw new Error('boom');
-      });
-      matchMediaMatches = true;
-      const store = await freshStore();
-      expect(store.getState().theme).toBe('dark');
-      spy.mockRestore();
-    });
-
-    it('falls back to light when matchMedia is undefined', async () => {
-      // matchMedia?.(...) -> undefined optional chaining short-circuit.
-      Object.defineProperty(window, 'matchMedia', {
-        writable: true,
-        configurable: true,
-        value: undefined,
-      });
-      const store = await freshStore();
-      expect(store.getState().theme).toBe('light');
     });
   });
 
@@ -209,12 +185,12 @@ describe('appStore', () => {
       root.id = 'kasal-chat-root';
       document.body.appendChild(root);
 
-      localStorage.setItem(THEME_STORAGE_KEY, 'dark');
+      localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify({ theme: 'deepOcean' }));
       const store = await freshStore();
       store.getState().init();
 
       expect(root.getAttribute('data-theme')).toBe('dark');
-      expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
+      expect(JSON.parse(localStorage.getItem(THEME_STORAGE_KEY)!)).toEqual({ theme: 'deepOcean' });
       expect(updateClient).toHaveBeenCalledWith(store.getState().config);
     });
 
@@ -492,17 +468,17 @@ describe('appStore', () => {
   // ---------------------------------------------------------------------------
   describe('toggleTheme', () => {
     it('toggles from light to dark', async () => {
-      localStorage.setItem(THEME_STORAGE_KEY, 'light');
+      localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify({ theme: 'professional' }));
       const store = await freshStore();
 
       store.getState().toggleTheme();
 
       expect(store.getState().theme).toBe('dark');
-      expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
+      expect(JSON.parse(localStorage.getItem(THEME_STORAGE_KEY)!)).toEqual({ theme: 'deepOcean' });
     });
 
     it('toggles from dark to light', async () => {
-      localStorage.setItem(THEME_STORAGE_KEY, 'dark');
+      localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify({ theme: 'deepOcean' }));
       const store = await freshStore();
 
       store.getState().toggleTheme();

@@ -1,7 +1,7 @@
 /**
  * The composer's "+" menu — one home for every input-bar setting.
  *
- * The bar used to line up five separate controls (source, answer mode, memory,
+ * The bar used to line up five separate controls (source, memory,
  * model, attach) beside the MCP picker; on narrow panes they wrapped and read
  * as clutter. They all live here now as UNIFORM rows — label left, current
  * value right — and picking one SWAPS the panel to that section (back header +
@@ -17,21 +17,11 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { ModelConfigResponse } from '../../types/dispatcher';
-import {
-  isAnswerModeDisabled,
-  modelLacksReasoning,
-} from '../../utils/answerModes';
 import { SOURCE_MODES } from '../../utils/sourceModes';
 import McpPicker from './McpPicker';
 import SkillsPicker from './SkillsPicker';
 import { useAnchoredFixedStyle } from '../../hooks/useAnchoredFixedStyle';
 import { useExecutionStore } from '../../store/executionStore';
-
-export const MODES = [
-  { id: 'chat', label: 'Chat', desc: 'Quick answer from a single agent' },
-  { id: 'research', label: 'Research', desc: 'Full multi-agent crew' },
-  { id: 'deep', label: 'Deep Research', desc: 'Maximum reasoning effort' },
-] as const;
 
 export type MemoryModeId = 'workspace' | 'session';
 export const MEMORY_MODES: { id: MemoryModeId; label: string; hint: string }[] = [
@@ -39,7 +29,7 @@ export const MEMORY_MODES: { id: MemoryModeId; label: string; hint: string }[] =
   { id: 'session', label: 'Session memory', hint: "Recall only this chat's history — no teamspace memory" },
 ];
 
-type SectionId = '' | 'source' | 'mode' | 'memory' | 'model' | 'tools' | 'skills';
+type SectionId = '' | 'source' | 'memory' | 'model' | 'tools' | 'skills';
 
 /** Model lists at or under this length render without a search box. */
 const MODEL_SEARCH_THRESHOLD = 6;
@@ -47,7 +37,6 @@ const MODEL_SEARCH_THRESHOLD = 6;
 const SECTION_TITLES: Record<Exclude<SectionId, ''>, string> = {
   model: 'Model',
   source: 'Source',
-  mode: 'Answer mode',
   memory: 'Memory',
   tools: 'Tools & MCP',
   skills: 'Skills',
@@ -59,8 +48,6 @@ interface ComposerMenuProps {
   menuAnimClass: string;
   /** Focus the input after a pick inside the menu. */
   onPicked: () => void;
-  chatModeType: string;
-  setChatModeType: (id: 'chat' | 'research' | 'deep') => void;
   models: ModelConfigResponse[];
   selectedModel: string;
   onModelChange: (key: string) => void;
@@ -147,8 +134,6 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
   menuPlacement,
   menuAnimClass,
   onPicked,
-  chatModeType,
-  setChatModeType,
   models,
   selectedModel,
   onModelChange,
@@ -188,8 +173,6 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
   }, [open]);
 
   const activeSource = preferExisting ? SOURCE_MODES[1] : SOURCE_MODES[0];
-  const activeMode = MODES.find((m) => m.id === chatModeType) ?? MODES[0];
-  const lacksReasoning = modelLacksReasoning(models, selectedModel);
   const modelName = models.find((m) => m.key === selectedModel)?.name || selectedModel || 'Default';
   const activeMemory = MEMORY_MODES[memoryEnabled ? 0 : 1];
 
@@ -277,24 +260,6 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
           />
         ))}
 
-      {id === 'mode' &&
-        MODES.map((m) => {
-          const modeDisabled = isAnswerModeDisabled(m.id, lacksReasoning);
-          return (
-            <Option
-              key={m.id}
-              label={m.label}
-              desc={m.desc}
-              active={m.id === chatModeType}
-              disabled={modeDisabled}
-              onClick={() => {
-                if (modeDisabled) return;
-                pick(() => setChatModeType(m.id));
-              }}
-            />
-          );
-        })}
-
       {id === 'memory' && (
         <div role="radiogroup" aria-label="Memory mode">
           {MEMORY_MODES.map((m) => (
@@ -377,12 +342,6 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
                 )}
 
                 <Row label="Source" value={activeSource.short} onClick={() => setSection('source')} />
-
-                {/* Answer mode — hidden, not greyed, while "Use existing" is on:
-                    a saved crew carries its own agents/process/model. */}
-                {!preferExisting && (
-                  <Row label="Answer mode" value={activeMode.label} onClick={() => setSection('mode')} />
-                )}
 
                 <Row label="Memory" value={activeMemory.label} onClick={() => setSection('memory')} />
 

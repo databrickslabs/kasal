@@ -1,4 +1,3 @@
-import { kasalStageSurface } from '../../../../theme/kasalSurfaces';
 import { normalizeEdgeColor } from '../../../../config/edgeConfig';
 import React, { useCallback, useRef, useState, memo, useEffect, useLayoutEffect } from 'react';
 import ReactFlow, {
@@ -541,7 +540,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
         display: 'flex',
         flexDirection: 'column',
         position: 'relative',
-        ...kasalStageSurface(isDarkMode),
+        background: 'transparent',
       }}
     >
       {errorStore.showError ? (
