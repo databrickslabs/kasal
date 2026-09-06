@@ -582,7 +582,7 @@ describe('getRunByJobId (PERF-037)', () => {
     mockGet.mockImplementation((url: string) =>
       url === '/executions/job-123'
         ? Promise.resolve({
-            data: { id: 1, job_id: 'job-123', status: 'completed', created_at: '2026-01-01T00:00:00Z' },
+            data: { id: 1, job_id: 'job-123', crew_id: 'saved-crew', status: 'completed', created_at: '2026-01-01T00:00:00Z' },
           })
         : Promise.resolve({ data: {} })
     );
@@ -590,6 +590,7 @@ describe('getRunByJobId (PERF-037)', () => {
     const run = await service.getRunByJobId('job-123');
 
     expect(run?.job_id).toBe('job-123');
+    expect(run?.crew_id).toBe('saved-crew');
     expect(mockGet).toHaveBeenCalledWith('/executions/job-123');
   });
 

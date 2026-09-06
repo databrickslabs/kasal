@@ -139,6 +139,18 @@ beforeEach(() => {
   getEnabledModels.mockResolvedValue({ 'qwen-30b': {} });
 });
 
+describe('Optimization setup', () => {
+  it('shows clear model defaults and disables starting until the prompt registry is configured', async () => {
+    service.judgeRegistryInfo.mockResolvedValue({ kind: null, message: 'No MLflow backend for this workspace.' });
+    renderDialog();
+    expect(await screen.findByText('Connect a prompt registry to start')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Optimizer model' })).toHaveTextContent('Use crew’s model');
+    expect(screen.getByRole('combobox', { name: 'Judge model' })).toHaveTextContent('Use configured judge');
+    expect(screen.getByRole('button', { name: 'Start optimization' })).toBeDisabled();
+    expect(service.startCrewOptimization).not.toHaveBeenCalled();
+  });
+});
+
 describe('judge scoping', () => {
   it('shows assigned judges as chips and only unassigned library judges in the menu', async () => {
     renderDialog();
@@ -205,13 +217,14 @@ describe('judge lifecycle', () => {
     service.createJudge.mockResolvedValue({ name: 'freshness' });
     renderDialog();
     await screen.findByText('accuracy');
-    await userEvent.click(screen.getByText('+ Create judge'));
-    await userEvent.type(screen.getByLabelText(/Judge name/), 'freshness');
+    await userEvent.click(screen.getByText('+ Custom criteria'));
+    expect(screen.getAllByRole('combobox', { name: 'Judge model' })).toHaveLength(1);
+    await userEvent.type(screen.getByLabelText(/Criteria name/), 'freshness');
     await userEvent.type(
       screen.getByLabelText(/Evaluation criteria/),
       'Listings must be recent.',
     );
-    await userEvent.click(screen.getByRole('button', { name: 'Create judge' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Add criteria' }));
     await waitFor(() =>
       expect(service.createJudge).toHaveBeenCalledWith(
         'freshness',
@@ -240,7 +253,7 @@ describe('runs and progress chips', () => {
     });
     renderDialog();
     await screen.findByText('10/10 executions');
-    await userEvent.click(screen.getByRole('button', { name: 'Start GEPA' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Start optimization' }));
     await waitFor(() => expect(service.startCrewOptimization).toHaveBeenCalled());
     const request = service.startCrewOptimization.mock.calls[0][0];
     expect(request.crew_id).toBe(CREW_ID);

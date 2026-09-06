@@ -413,6 +413,7 @@ export class RunService {
       // Execution type and flow_id for flow scheduling
       execution_type: execution_type,
       flow_id: flow_id,
+      crew_id: typeof executionItem.crew_id === 'string' ? executionItem.crew_id : undefined,
       inputs,
       result: executionItem.result as Record<string, OutputDataType> | undefined,
       error: executionItem.error as string | undefined,

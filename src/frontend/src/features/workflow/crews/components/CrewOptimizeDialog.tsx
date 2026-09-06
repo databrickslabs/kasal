@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useId } from 'react';
 import {
   Alert,
   Box,
@@ -20,6 +20,9 @@ import {
   TextField,
   Tooltip,
   Typography,
+  FormHelperText,
+  useTheme,
+  useMediaQuery,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
@@ -41,6 +44,7 @@ import {
   PromptOptimizationRun,
   PromptOptimizationService,
 } from '../../../../api/config/PromptOptimizationService';
+import { kasalStageSurface } from '../../../../theme/kasalSurfaces';
 import { ModelService } from '../../../../api/config/ModelService';
 
 interface CrewOptimizeDialogProps {
@@ -52,14 +56,6 @@ interface CrewOptimizeDialogProps {
 
 const POLL_INTERVAL_MS = 10000;
 
-/* Layout constants for the run-configuration row. Every control in that row has
-   a width that does NOT depend on its content, so the row wraps only when the
-   dialog itself is narrow — never because a model id happens to be long or
-   because the start button's label changed to "Run in progress…". Both the
-   target and judge Selects share one width so the pair reads as a set; it is
-   narrower than the single-Select surfaces because two of them sit in this row. */
-const MODEL_SELECT_WIDTH = 220;
-const START_BUTTON_WIDTH = 172;
 const ELLIPSIS_SELECT_SX = {
   '& .MuiSelect-select': {
     overflow: 'hidden',
@@ -106,8 +102,8 @@ const fieldLabel = (key: string): string => {
 const SectionHeader: React.FC<{ title: string; hint?: string }> = ({ title, hint }) => (
   <Box sx={{ mt: 3, mb: 1 }}>
     <Typography
-      variant="overline"
-      sx={{ letterSpacing: 1, color: 'text.secondary', lineHeight: 1.5 }}
+      variant="subtitle2"
+      sx={{ fontWeight: 600, color: 'text.secondary', lineHeight: 1.5 }}
     >
       {title}
     </Typography>
@@ -130,13 +126,14 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
   crewName,
   onClose,
 }) => {
+  const theme = useTheme();
+  const compact = useMediaQuery(theme.breakpoints.down('sm'));
+  const titleId = useId();
+  const optimizerLabelId = useId();
+  const judgeLabelId = useId();
   const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState('');
-  // The correctness judge for THIS run (distinct from `judgeModel` below, which
-  // belongs to the custom-judge creation form). Must not be the crew's own
-  // execution model: a model grading its own deliverables prefers them, which
-  // inflates the score without improving the prompts. Empty = the backend's
-  // configured default (GEPA_JUDGE_MODEL), which warns if it has none.
+  // One evaluator selection drives the run and newly created criteria.
   const [runJudgeModel, setRunJudgeModel] = useState('');
   const [budget, setBudget] = useState(10);
   const [guidance, setGuidance] = useState('');
@@ -168,7 +165,6 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
   const [showJudgeForm, setShowJudgeForm] = useState(false);
   const [judgeName, setJudgeName] = useState('');
   const [judgeCriteria, setJudgeCriteria] = useState('');
-  const [judgeModel, setJudgeModel] = useState('');
   const [savingJudge, setSavingJudge] = useState(false);
   const [editJudge, setEditJudge] = useState<LLMJudge | null>(null);
   const [editInstructions, setEditInstructions] = useState('');
@@ -380,7 +376,7 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
       await PromptOptimizationService.createJudge(
         judgeName,
         judgeCriteria,
-        judgeModel || undefined,
+        runJudgeModel || undefined,
         crewId,
       );
       toast.success('Judge created — it will grade the next optimization run');
@@ -508,30 +504,19 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
   };
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
-      <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, pb: 1 }}>
-        <AutoFixHighIcon fontSize="small" color="primary" />
-        <Box>
-          <Typography variant="h6" component="span">
-            Optimize crew
-          </Typography>
-          {crewName && (
-            <Typography variant="h6" component="span" color="text.secondary">
-              {' '}
-              — {crewName}
-            </Typography>
-          )}
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg" fullScreen={compact} aria-labelledby={titleId}
+      PaperProps={{ sx: { ...kasalStageSurface(theme.palette.mode === 'dark'), borderRadius: compact ? 0 : 4, maxHeight: compact ? '100%' : '90vh', border: 0, '& .MuiPaper-outlined': { border: 0, borderRadius: 3, bgcolor: 'action.hover', backgroundImage: 'none' }, '& .MuiOutlinedInput-root': { borderRadius: 2.5, bgcolor: 'action.hover' }, '& .MuiOutlinedInput-notchedOutline': { border: 0 }, '& .MuiOutlinedInput-root.Mui-focused': { boxShadow: '0 0 0 2px var(--text-muted, #8D99A4)' }, '& .MuiChip-outlined': { border: 0, bgcolor: 'action.hover', color: 'text.secondary' }, '& .MuiButton-outlined': { border: 0, color: 'text.secondary' } } }}>
+      <DialogTitle id={`${titleId}-header`} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, px: 3, pt: 3, pb: 1.5 }}>
+        <AutoFixHighIcon sx={{ fontSize: 23, color: 'text.secondary', mt: 0.5 }} />
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography id={titleId} variant="h6" component="h2" sx={{ fontWeight: 600 }}>Optimize crew</Typography>
+          {crewName && <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{crewName}</Typography>}
         </Box>
-        <Box sx={{ flexGrow: 1 }} />
-        <IconButton onClick={onClose} size="small">
-          <CloseIcon fontSize="small" />
-        </IconButton>
+        <IconButton aria-label="Close optimization" onClick={onClose} size="small"><CloseIcon fontSize="small" /></IconButton>
       </DialogTitle>
-      <DialogContent>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-          GEPA searches for better agent and task prompts. Every evaluation runs
-          the crew for real and your judges score the final deliverable — the
-          budget is the number of crew executions.
+      <DialogContent sx={{ px: 3, pb: 3 }}>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 3, maxWidth: 760 }}>
+          Improve this crew’s agent and task prompts. Each evaluation runs the crew and scores its deliverable. Review the results before applying any changes.
         </Typography>
         {error && (
           <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
@@ -549,85 +534,35 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
         )}
 
         {/* Run configuration */}
-        <Paper variant="outlined" sx={{ p: 2 }}>
-          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
-            {/* FIXED width, not minWidth: a Select sizes itself to its selected
-                value, so a long model id used to widen this control and shove
-                the Start button onto its own line. Truncate instead, so the row
-                is laid out identically whatever models are picked. */}
-            {/* Labelled "Optimizer model", not "Model": it does NOT change what
-                the crew runs on. Each agent keeps its own configured llm during
-                optimization, so this drives the reflection model that WRITES the
-                improved prompts (and stands in for agents that declare no llm).
-                Left on Default it now resolves to the crew's own model rather
-                than a global default that never executes anything. */}
-            <FormControl size="small" sx={{ width: MODEL_SELECT_WIDTH, flexShrink: 0 }}>
-              <InputLabel>Optimizer model</InputLabel>
-              <Select
-                value={model}
-                label="Optimizer model"
-                onChange={(e) => setModel(e.target.value)}
-                SelectDisplayProps={{ title: model || "Default (crew's model)" }}
-                sx={ELLIPSIS_SELECT_SX}
-              >
-                <MenuItem value="">
-                  <em>Default (crew&apos;s model)</em>
-                </MenuItem>
-                {models.map((key) => (
-                  <MenuItem key={key} value={key}>
-                    {key}
-                  </MenuItem>
-                ))}
+        <Box>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2.5 }}>
+            <FormControl fullWidth size="small">
+              <Typography id={optimizerLabelId} variant="body2" sx={{ mb: 1, fontWeight: 600 }}>Optimizer model</Typography>
+              <Select value={model} displayEmpty labelId={optimizerLabelId} onChange={event => setModel(event.target.value)} sx={ELLIPSIS_SELECT_SX}>
+                <MenuItem value="">Use crew’s model</MenuItem>
+                {models.map(key => <MenuItem key={key} value={key}>{key}</MenuItem>)}
               </Select>
+              <FormHelperText sx={{ mx: 0 }}>Writes improved prompts. Agents keep their execution models.</FormHelperText>
             </FormControl>
-            <FormControl size="small" sx={{ width: MODEL_SELECT_WIDTH, flexShrink: 0 }}>
-              <InputLabel>Judge model</InputLabel>
-              <Select
-                value={runJudgeModel}
-                label="Judge model"
-                onChange={(e) => setRunJudgeModel(e.target.value)}
-                SelectDisplayProps={{ title: runJudgeModel || 'Default (configured judge)' }}
-                sx={ELLIPSIS_SELECT_SX}
-              >
-                <MenuItem value="">
-                  <em>Default (configured judge)</em>
-                </MenuItem>
-                {models.map((key) => (
-                  <MenuItem key={key} value={key}>
-                    {key}
-                  </MenuItem>
-                ))}
+
+            <TextField size="small" type="number" label="Max crew executions" value={budget}
+              onChange={event => setBudget(Math.max(4, Math.min(40, Number(event.target.value) || 10)))}
+              inputProps={{ min: 4, max: 40 }} InputLabelProps={{ shrink: true }}
+              helperText="A hard limit of 4–40 real crew executions, including the baseline." />
+
+          </Box>
+          <SectionHeader title="Evaluation" hint="The built-in quality check is included. Add criteria only when you need more specific scoring." />
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2.5, alignItems: 'start' }}>
+            <FormControl fullWidth size="small">
+              <Typography id={judgeLabelId} variant="body2" sx={{ mb: 1, fontWeight: 600 }}>Judge model</Typography>
+              <Select value={runJudgeModel} displayEmpty labelId={judgeLabelId} onChange={event => setRunJudgeModel(event.target.value)} sx={ELLIPSIS_SELECT_SX}>
+                <MenuItem value="">Use configured judge</MenuItem>
+                {models.map(key => <MenuItem key={key} value={key}>{key}</MenuItem>)}
               </Select>
+              <FormHelperText sx={{ mx: 0 }}>Evaluates the quality of each deliverable.</FormHelperText>
             </FormControl>
-            <Tooltip title="HARD CAP on crew executions — the run never exceeds this number. The baseline costs 1 execution; each further execution evaluates one NEW candidate prompt set (re-evaluations are cached and free). Executions have real side effects (tools, emails, database writes).">
-              <TextField
-                size="small"
-                type="number"
-                label="Max crew executions"
-                value={budget}
-                onChange={(e) =>
-                  setBudget(Math.max(4, Math.min(40, Number(e.target.value) || 10)))
-                }
-                sx={{ width: 170 }}
-              />
-            </Tooltip>
-            <TextField
-              size="small"
-              label="Judging guidance (optional)"
-              placeholder="what does a good deliverable look like?"
-              value={guidance}
-              onChange={(e) => setGuidance(e.target.value)}
-              sx={{ flex: 1, minWidth: 180 }}
-            />
-            <Button
-              variant="contained"
-              onClick={handleStart}
-              disabled={starting || hasActiveRun || !crewId}
-              startIcon={starting ? <CircularProgress size={16} /> : <AutoFixHighIcon />}
-              sx={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: START_BUTTON_WIDTH }}
-            >
-              {starting ? 'Starting…' : hasActiveRun ? 'Run in progress…' : 'Start GEPA'}
-            </Button>
+            <TextField size="small" label="Judging guidance (optional)" placeholder="What should a good deliverable include?"
+              value={guidance} onChange={event => setGuidance(event.target.value)} multiline minRows={2} InputLabelProps={{ shrink: true }} />
           </Box>
 
           {/* Judges */}
@@ -639,13 +574,13 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
               flexWrap: 'wrap',
               mt: 2,
               pt: 1.5,
-              borderTop: '1px dashed',
+              borderTop: 0,
               borderColor: 'divider',
             }}
           >
             <GavelIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
             <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
-              Judges
+              Scoring criteria
               {judgeRegistry?.location && (
                 <>
                   {' · '}
@@ -664,11 +599,6 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
                 </>
               )}
             </Typography>
-            {judgeRegistry && !judgeRegistry.kind && (
-              <Typography variant="caption" color="warning.main">
-                {judgeRegistry.message}
-              </Typography>
-            )}
             <Chip
               size="small"
               variant="outlined"
@@ -800,7 +730,7 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
               </>
             )}
             <Button size="small" onClick={() => setShowJudgeForm((v) => !v)}>
-              {showJudgeForm ? 'Cancel' : '+ Create judge'}
+              {showJudgeForm ? 'Cancel' : '+ Custom criteria'}
             </Button>
           </Box>
           {Object.values(alignments).map((a) => (
@@ -842,28 +772,12 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
               <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 1 }}>
                 <TextField
                   size="small"
-                  label="Judge name"
+                  label="Criteria name"
                   value={judgeName}
                   onChange={(e) => setJudgeName(e.target.value)}
                   sx={{ width: 200 }}
                 />
-                <FormControl size="small" sx={{ minWidth: 220 }}>
-                  <InputLabel>Judge model</InputLabel>
-                  <Select
-                    value={judgeModel}
-                    label="Judge model"
-                    onChange={(e) => setJudgeModel(e.target.value)}
-                  >
-                    <MenuItem value="">
-                      <em>Default</em>
-                    </MenuItem>
-                    {models.map((key) => (
-                      <MenuItem key={key} value={key}>
-                        {key}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+
               </Box>
               <TextField
                 fullWidth
@@ -882,18 +796,32 @@ const CrewOptimizeDialog: React.FC<CrewOptimizeDialogProps> = ({
                   disabled={savingJudge || !judgeName.trim() || !judgeCriteria.trim()}
                   onClick={handleCreateJudge}
                 >
-                  {savingJudge ? 'Creating…' : 'Create judge'}
+                  {savingJudge ? 'Creating…' : 'Add criteria'}
                 </Button>
               </Box>
             </Box>
           )}
-        </Paper>
+          <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 2, mt: 2.5 }}>
+            <Button variant="contained" color="inherit" onClick={handleStart} disabled={starting || hasActiveRun || !crewId || Boolean(judgeRegistry && !judgeRegistry.kind)}
+              startIcon={starting ? <CircularProgress size={16} /> : <AutoFixHighIcon />}
+              sx={{ borderRadius: 2.5, boxShadow: 'none', bgcolor: 'text.primary', color: 'background.paper', '&:hover': { bgcolor: 'text.secondary', boxShadow: 'none' } }}>
+              {starting ? 'Starting…' : hasActiveRun ? 'Run in progress…' : 'Start optimization'}
+            </Button>
+            <Typography variant="caption" color="text.secondary">Up to {budget} evaluations · GEPA prompt optimization</Typography>
+          </Box>
+          {judgeRegistry && !judgeRegistry.kind && <Alert severity="info" icon={false} sx={{ mt: 2, bgcolor: 'action.hover', color: 'text.secondary', borderRadius: 3 }}>
+            <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>Connect a prompt registry to start</Typography>
+            <Typography variant="body2">Configure MLflow for this workspace to store prompt versions and optimization results.</Typography>
+            {judgeRegistry.message && <Box component="details" sx={{ mt: 1, fontSize: 12 }}><summary>Setup details</summary><Typography variant="caption" component="p">{judgeRegistry.message}</Typography></Box>}
+          </Alert>}
+
+        </Box>
 
         {/* Runs */}
         <SectionHeader title="Optimization runs" />
         {runs.length === 0 && (
           <Typography variant="body2" color="text.secondary">
-            No optimization runs for this crew yet.
+            No optimizations yet. Start an evaluation to compare prompt quality and review proposed improvements.
           </Typography>
         )}
         {runs.map((run) => {

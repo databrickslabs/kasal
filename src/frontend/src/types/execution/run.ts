@@ -27,6 +27,8 @@ export interface Run {
   harness?: string;
   // Flow-specific fields
   flow_id?: string;
+  /** Saved crew definition used by this execution. */
+  crew_id?: string;
   inputs?: {
     agents_yaml?: Record<string, any>;
     tasks_yaml?: Record<string, any>;
@@ -59,4 +61,4 @@ export interface RunsResponse {
   total: number;
   limit: number;
   offset: number;
-} 
+}

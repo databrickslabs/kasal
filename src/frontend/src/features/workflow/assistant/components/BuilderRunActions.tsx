@@ -9,6 +9,7 @@ import type { Run } from '../../../../types/execution/run';
 import CompletedRunActions from '../../../chat/components/Cards/CompletedRunActions';
 import MemoryPane from '../../../chat/components/Preview/MemoryPane';
 import { BuilderPreviewContext } from './BuilderPreviewContext';
+import BuilderOptimizeAction from './BuilderOptimizeAction';
 import '../../../chat/chat.css';
 
 /** Read the saved execution configuration, never the current canvas's settings. */
@@ -53,6 +54,7 @@ const BuilderRunActions: React.FC<{ jobId: string }> = ({ jobId }) => {
           usedWorkspaceMemory={hasMemoryTrace || runUsedMemory(run)}
           onOpenMemory={() => openPreview ? openPreview.openMemory(jobId) : setMemoryOpen(true)}
         />
+        <BuilderOptimizeAction run={run} />
       </div>
       <Dialog open={memoryOpen} onClose={() => setMemoryOpen(false)} maxWidth="md" fullWidth
         aria-labelledby="builder-run-memory-title"
