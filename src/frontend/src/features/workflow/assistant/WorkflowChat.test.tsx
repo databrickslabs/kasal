@@ -16,6 +16,8 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { vi, describe, it, expect, beforeEach, afterEach, Mock } from 'vitest';
 import WorkflowChat from './WorkflowChat';
+import { improveChatPrompt } from '../../chat/api/prompt';
+vi.mock('../../chat/api/prompt', () => ({ improveChatPrompt: vi.fn() }));
 import { Node, Edge } from 'reactflow';
 
 // Mock DOM methods not implemented in jsdom
@@ -230,7 +232,17 @@ describe('WorkflowChatRefactored', () => {
     it('displays empty state message when no messages', () => {
       render(<WorkflowChat {...defaultProps} />);
 
-      expect(screen.getByText('Try saying something like:')).toBeInTheDocument();
+      expect(screen.getByText('What would you like to build?')).toBeInTheDocument();
+    });
+
+    it('puts a suggestion in the composer without submitting it', async () => {
+      const DispatcherService = await import('../../../api/execution/DispatcherService');
+      render(<WorkflowChat {...defaultProps} />);
+      await userEvent.click(screen.getByRole('button', { name: 'Create an agent', exact: true }));
+      const input = screen.getByRole('textbox', { name: 'Message Kasal' });
+      expect(input).toHaveValue('Create an agent that can analyze financial data');
+      expect(input).toHaveFocus();
+      expect(DispatcherService.default.dispatch).not.toHaveBeenCalled();
     });
 
     it('renders input field', () => {
@@ -253,9 +265,10 @@ describe('WorkflowChatRefactored', () => {
       expect(screen.getByLabelText('Collapse Chat')).toBeInTheDocument();
     });
 
-    it('renders swap side button', () => {
+    it('offers side placement in assistant options', async () => {
       render(<WorkflowChat {...defaultProps} />);
 
+      await userEvent.click(screen.getByRole('button', { name: 'Assistant options' }));
       expect(screen.getByLabelText(/Move Chat to/)).toBeInTheDocument();
     });
   });
@@ -282,10 +295,7 @@ describe('WorkflowChatRefactored', () => {
       const input = screen.getByPlaceholderText('Describe what you want to create...');
       await userEvent.type(input, 'Hello world');
 
-      // Find and click the send button
-      const sendButton = screen.getByRole('button', { name: '' }); // The send button has no accessible name
-      // Instead, find by the parent element or by clicking
-      fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+      await userEvent.click(screen.getByRole('button', { name: 'Send message' }));
 
       await waitFor(() => {
         expect(input).toHaveValue('');
@@ -459,9 +469,10 @@ describe('WorkflowChatRefactored', () => {
       expect(mockToggle).toHaveBeenCalled();
     });
 
-    it('renders swap side button with correct label for right side', () => {
+    it('offers the correct side placement for the right side', async () => {
       render(<WorkflowChat {...defaultProps} />);
 
+      await userEvent.click(screen.getByRole('button', { name: 'Assistant options' }));
       expect(screen.getByLabelText('Move Chat to Left')).toBeInTheDocument();
     });
   });
@@ -475,13 +486,47 @@ describe('WorkflowChatRefactored', () => {
     });
   });
 
-  describe('Model Selection', () => {
-    it('renders model selector when setSelectedModel provided', () => {
-      render(<WorkflowChat {...defaultProps} />);
+  describe('Prompt improvement', () => {
+    it('replaces the draft with the rewrite without sending it', async () => {
+      vi.mocked(improveChatPrompt).mockResolvedValue('Research the topic and summarize key findings.');
+      const onNodesGenerated = vi.fn();
+      render(<WorkflowChat {...defaultProps} onNodesGenerated={onNodesGenerated} />);
+      const input = screen.getByRole('textbox', { name: 'Message Kasal' });
+      fireEvent.change(input, { target: { value: 'Research this' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Improve prompt' }));
+      await waitFor(() => expect(input).toHaveValue('Research the topic and summarize key findings.'));
+      expect(improveChatPrompt).toHaveBeenCalledWith('Research this', 'test-model');
+      expect(onNodesGenerated).not.toHaveBeenCalled();
+    });
 
-      // The model selector should be visible (showing the truncated model name)
-      // Look for the container that shows model name
-      expect(screen.getByText('test-model')).toBeInTheDocument();
+    it('preserves newer typing when an older rewrite finishes', async () => {
+      let finish!: (text: string) => void;
+      vi.mocked(improveChatPrompt).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+      render(<WorkflowChat {...defaultProps} />);
+      const input = screen.getByRole('textbox', { name: 'Message Kasal' });
+      fireEvent.change(input, { target: { value: 'Original request' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Improve prompt' }));
+      fireEvent.change(input, { target: { value: 'My newer request' } });
+      finish('Outdated rewrite');
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Improve prompt' })).toBeEnabled());
+      expect(input).toHaveValue('My newer request');
+    });
+
+    it('keeps slash commands literal', () => {
+      render(<WorkflowChat {...defaultProps} />);
+      fireEvent.change(screen.getByRole('textbox', { name: 'Message Kasal' }), { target: { value: '/execute' } });
+      expect(screen.getByRole('button', { name: 'Improve prompt' })).toBeDisabled();
+    });
+  });
+
+  describe('Model Selection', () => {
+    it('selects a model through the input plus menu', async () => {
+      const onModelChange = vi.fn();
+      render(<WorkflowChat {...defaultProps} setSelectedModel={onModelChange} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Files and run settings' }));
+      fireEvent.click(await screen.findByText('Model'));
+      fireEvent.click(await screen.findByText('test-model'));
+      expect(onModelChange).toHaveBeenCalledWith('test-model');
     });
   });
 
@@ -497,19 +542,19 @@ describe('WorkflowChatRefactored', () => {
     it('displays suggestion for creating an agent', () => {
       render(<WorkflowChat {...defaultProps} />);
 
-      expect(screen.getByText('Create an agent that can analyze financial data')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Create an agent', exact: true })).toBeInTheDocument();
     });
 
     it('displays suggestion for creating a task', () => {
       render(<WorkflowChat {...defaultProps} />);
 
-      expect(screen.getByText('I need a task to summarize documents')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Summarize documents', exact: true })).toBeInTheDocument();
     });
 
     it('displays suggestion for building a research team', () => {
       render(<WorkflowChat {...defaultProps} />);
 
-      expect(screen.getByText('Build a research team with a researcher and writer')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Build a research team', exact: true })).toBeInTheDocument();
     });
   });
 

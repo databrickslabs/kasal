@@ -30,6 +30,8 @@ import type { ToolConfigNeededData } from '../../../../hooks/global/useCrewGener
 interface ChatMessageItemProps {
   message: ChatMessage;
   onOpenLogs?: (jobId: string) => void;
+  appearance?: 'default' | 'assistant-panel';
+  dark?: boolean;
 }
 
 /** Pick the human-readable answer out of a result envelope object: the runner
@@ -166,7 +168,8 @@ const resultTextSx = {
   lineHeight: 1.5,
 } as const;
 
-export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpenLogs }) => {
+export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpenLogs, appearance = 'default', dark = false }) => {
+  const panel = appearance === 'assistant-panel';
   const getIntentIcon = (intent?: string) => {
     switch (intent) {
       case 'generate_agent':
@@ -219,7 +222,7 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
           <Box sx={{ width: '100%', maxWidth: '100%' }}>
             {answerText && (
               <Box data-testid="result-text" sx={{ ...resultTextSx, mb: 1.5 }}>
-                <MessageContent content={normalizeResultMarkdown(answerText)} />
+                <MessageContent uniformTypography={panel} content={normalizeResultMarkdown(answerText)} />
               </Box>
             )}
             <UiSurfaceResult surface={surface} />
@@ -231,7 +234,7 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
       if (answerText) {
         return (
           <Box data-testid="result-text" sx={resultTextSx}>
-            <MessageContent content={normalizeResultMarkdown(answerText)} />
+            <MessageContent uniformTypography={panel} content={normalizeResultMarkdown(answerText)} />
           </Box>
         );
       }
@@ -275,7 +278,7 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
         // chat's default background — no border, no card chrome.
         return (
           <Box data-testid="result-text" sx={resultTextSx}>
-            <MessageContent content={normalizeResultMarkdown(processedContent)} />
+            <MessageContent uniformTypography={panel} content={normalizeResultMarkdown(processedContent)} />
           </Box>
         );
       }
@@ -409,11 +412,11 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
     
     // Wrap raw HTML documents in a code fence so they get syntax highlighting + Preview button
     if (isHtmlDocument(processedContent)) {
-      return <MessageContent content={'```html\n' + processedContent + '\n```'} />;
+      return <MessageContent uniformTypography={panel} content={'```html\n' + processedContent + '\n```'} />;
     }
 
     // Default content rendering
-    return <MessageContent content={processedContent} />;
+    return <MessageContent uniformTypography={panel} content={processedContent} />;
   };
 
 
@@ -422,7 +425,9 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
       <ListItem
         alignItems="flex-start"
         sx={{
-          flexDirection: 'row', // Always left-aligned
+          flexDirection: 'row',
+          justifyContent: panel && message.type === 'user' ? 'flex-end' : 'flex-start',
+          px: panel ? 0 : 2,
           gap: 1,
           py: 1.5,
           width: '100%',
@@ -434,7 +439,7 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
           }
         }}
       >
-        <ListItemAvatar sx={{ minWidth: 'auto' }}>
+        <ListItemAvatar sx={{ minWidth: 'auto', display: panel ? 'none' : undefined }}>
           <Avatar
             sx={{
               bgcolor: message.type === 'user' 
@@ -461,14 +466,17 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
         </ListItemAvatar>
         <ListItemText
           sx={{
-            flex: 1, // Take all available space
-            maxWidth: 'calc(100% - 40px)', // Full width minus avatar
+            flex: panel && message.type === 'user' ? '0 1 auto' : 1,
+            maxWidth: panel ? (message.type === 'user' ? '90%' : '100%') : 'calc(100% - 40px)',
+            backgroundColor: panel && message.type === 'user' ? (dark ? '#2B333D' : '#F2F4F7') : 'transparent',
+            borderRadius: '16px',
+            p: panel && message.type === 'user' ? 1.5 : 0,
             mx: 0,
             overflow: 'hidden',
           }}
           primary={
             <Stack direction="column" spacing={1}>
-              {message.intent && message.type === 'assistant' && (
+              {!panel && message.intent && message.type === 'assistant' && (
                 <Stack direction="row" spacing={1} alignItems="center">
                   <Chip
                     icon={getIntentIcon(message.intent)}
@@ -520,7 +528,7 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
               )}
               <Box
                 sx={{
-                  color: message.type === 'user'
+                  color: panel ? (dark ? '#E8ECEF' : '#1B1F23') : message.type === 'user'
                     ? 'primary.main'
                     : message.type === 'result'
                     ? 'text.primary' // Final results in black
@@ -534,7 +542,7 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
               >
                 {renderMessageContent()}
               </Box>
-              <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ ml: 1, display: panel ? 'none' : undefined }}>
                 {message.timestamp.toLocaleTimeString()}
               </Typography>
             </Stack>

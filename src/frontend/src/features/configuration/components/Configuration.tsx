@@ -18,7 +18,6 @@ import {
 } from '@mui/material';
 import SettingsIcon from '@mui/icons-material/Settings';
 import TranslateIcon from '@mui/icons-material/Translate';
-import DarkModeIcon from '@mui/icons-material/DarkMode';
 import ModelIcon from '@mui/icons-material/ModelTraining';
 import KeyIcon from '@mui/icons-material/Key';
 import BuildIcon from '@mui/icons-material/Build';
@@ -39,11 +38,9 @@ import ViewQuiltIcon from '@mui/icons-material/ViewQuilt';
 // import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import { useTranslation } from 'react-i18next';
 import { LanguageService } from '../../../api/config/LanguageService';
-import { ThemeConfig as _ThemeConfig } from '../../../api/config/ThemeService';
-import { useThemeStore } from '../../../store/theme';
 import { usePermissionStore } from '../../../store/permissions';
 import { useUserStore } from '../../../store/user';
-import ModelConfiguration from './Models/index';
+import ModelConfiguration from './Models';
 import APIKeys from './APIKeys/APIKeys';
 import ObjectManagement from './ObjectManagement/index';
 import ToolsConfiguration from './Tools/ToolsConfiguration';
@@ -103,7 +100,6 @@ interface NavItem {
 function Configuration({ onClose }: ConfigurationProps): JSX.Element {
   const { t } = useTranslation();
   const [currentLanguage, setCurrentLanguage] = useState<string>('en');
-  const { currentTheme, changeTheme } = useThemeStore();
 
   // Get permission state from store and selected group ID
   const {
@@ -411,16 +407,6 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
     }
   };
 
-  const handleThemeChange = (event: SelectChangeEvent<string>) => {
-    const newTheme = event.target.value;
-    changeTheme(newTheme);
-    setNotification({
-      open: true,
-      message: t('configuration.theme.saved', { defaultValue: 'Theme changed successfully' }),
-      severity: 'success',
-    });
-  };
-
   const handleCloseNotification = () => {
     setNotification({ ...notification, open: false });
   };
@@ -651,31 +637,6 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
                     </FormControl>
                   </Box>
 
-                  {/* Theme Settings */}
-                  <Box sx={{ mb: 3 }}>
-                    <Box sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      mb: 1.5
-                    }}>
-                      <DarkModeIcon sx={{ mr: 1, color: 'primary.main', fontSize: '1.2rem' }} />
-                      <Typography variant="subtitle1" fontWeight="medium">{t('configuration.theme.title')}</Typography>
-                    </Box>
-
-                    <FormControl fullWidth size="small">
-                      <InputLabel>{t('configuration.theme.select')}</InputLabel>
-                      <Select
-                        value={currentTheme}
-                        onChange={handleThemeChange}
-                        label={t('configuration.theme.select')}
-                      >
-                        <MenuItem value="professional">Professional (Blue)</MenuItem>
-                        <MenuItem value="calmEarth">Calm Earth (Green)</MenuItem>
-                        <MenuItem value="deepOcean">Deep Ocean (Dark)</MenuItem>
-                        <MenuItem value="vibrantCreative">Vibrant Creative (Purple)</MenuItem>
-                      </Select>
-                    </FormControl>
-                  </Box>
                 </ContentPanel>
               );
             }

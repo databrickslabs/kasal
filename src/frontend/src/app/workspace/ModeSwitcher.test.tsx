@@ -32,7 +32,7 @@ describe('ModeSwitcher — capability-gated entries', () => {
     usePermissionStore.setState({ allowAgentBuilder: true, allowFlowBuilder: false });
     render(<ModeSwitcher />);
     fireEvent.click(screen.getByRole('button'));
-    expect(screen.getByText('Agent Builder')).toBeInTheDocument();
+    expect(within(screen.getByRole('menu')).getByText('Agent Builder')).toBeInTheDocument();
     expect(screen.queryByText('Flow Builder')).toBeNull();
     expect(screen.getByText('Chat')).toBeInTheDocument();
     usePermissionStore.setState({ allowFlowBuilder: true });
@@ -46,16 +46,16 @@ describe('ModeSwitcher', () => {
     mockFlowEnabled = true;
   });
 
-  it('renders the grid trigger button (menu closed initially)', () => {
+  it('renders the labelled composer trigger (menu closed initially)', () => {
     render(<ModeSwitcher />);
     expect(screen.getByRole('button', { name: /Workspace mode: Agent Builder/i })).toBeInTheDocument();
-    expect(screen.queryByText('Switch Mode')).not.toBeInTheDocument();
+    expect(screen.queryByText('Switch mode')).not.toBeInTheDocument();
   });
 
   it('opens the menu with all three options when flow is enabled', () => {
     render(<ModeSwitcher />);
     fireEvent.click(screen.getByRole('button', { name: /Workspace mode/i }));
-    expect(screen.getByText('Switch Mode')).toBeInTheDocument();
+    expect(screen.getByText('Switch mode')).toBeInTheDocument();
     const menu = screen.getByRole('menu');
     expect(within(menu).getByText('Agent Builder')).toBeInTheDocument();
     expect(within(menu).getByText('Flow Builder')).toBeInTheDocument();
@@ -77,7 +77,7 @@ describe('ModeSwitcher', () => {
     fireEvent.click(screen.getByRole('button', { name: /Workspace mode/i }));
     fireEvent.click(screen.getByText('Chat'));
     expect(setAppMode).toHaveBeenCalledWith('chat');
-    await waitFor(() => expect(screen.queryByText('Switch Mode')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText('Switch mode')).not.toBeInTheDocument());
   });
 
   it('selecting Flow calls setAppMode("flow")', () => {
@@ -126,7 +126,7 @@ describe('ModeSwitcher', () => {
     expect(screen.getByRole('button', { name: /Workspace mode: Chat/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Workspace mode/i }));
     // MUI marks the active MenuItem with the Mui-selected class
-    const chatItem = screen.getByText('Chat').closest('li');
+    const chatItem = within(screen.getByRole('menu')).getByText('Chat').closest('li');
     expect(chatItem?.className).toContain('Mui-selected');
   });
 
@@ -141,10 +141,10 @@ describe('ModeSwitcher', () => {
   it('closes the menu via onClose (backdrop)', async () => {
     render(<ModeSwitcher />);
     fireEvent.click(screen.getByRole('button', { name: /Workspace mode/i }));
-    expect(screen.getByText('Switch Mode')).toBeInTheDocument();
+    expect(screen.getByText('Switch mode')).toBeInTheDocument();
     // MUI Menu renders a backdrop; Escape triggers onClose
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape', code: 'Escape' });
     // After close (async transition) the heading is gone
-    await waitFor(() => expect(screen.queryByText('Switch Mode')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText('Switch mode')).not.toBeInTheDocument());
   });
 });

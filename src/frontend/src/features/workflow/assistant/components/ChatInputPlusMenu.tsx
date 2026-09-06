@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   Badge,
+  CircularProgress,
   Divider,
   IconButton,
   ListItemIcon,
@@ -14,6 +15,7 @@ import {
 } from '@mui/material';
 import {
   Add as AddIcon,
+  ArrowBack as BackIcon,
   AttachFile as AttachFileIcon,
   Check as CheckIcon,
   ChevronRight as ChevronRightIcon,
@@ -26,29 +28,9 @@ import {
 } from '../../../../hooks/global/useReasoningSupport';
 
 /**
- * The composer's "+" menu — occasional actions and rarely-changed run settings,
- * so the input row stays a text field, a model and a send button.
- *
- * **What belongs in here, and what does not.** Claude's and Perplexity's "+"
- * menus hold one-shot ACTIONS (attach a file, add a connector); Claude keeps its
- * mode switch OUTSIDE the menu, visibly, and that is the right line. A menu
- * hides state, which is free for an action you perform and forget, and costly
- * for a setting that changes what the next run does. So:
- *
- * - the "Add files" ACTION moves in here, while the attached-file CHIPS stay in
- *   the composer (a chip is state that goes out with the next message);
- * - Process and Reasoning move in here because they are set once per workflow,
- *   but anything non-default raises a dot on the "+" — otherwise someone flips
- *   Hierarchical, forgets, and cannot see why later runs behave differently.
- *
- * **Rows, not nested dropdowns.** An MUI `Select` inside a `Menu` opens a second
- * popover on top of the first and renders as a heavy boxed field in a surface
- * that is otherwise a list. Every choice here is a short closed set, so each is
- * a row with a check — which is what a menu is for. The manager model is the
- * one open-ended list, so it opens a submenu instead of filling the sheet.
- *
- * Settings read and write ``useCrewExecutionStore`` directly, the same source
- * the left sidebar used, so there is exactly ONE control for each.
+ * Composer settings: files, generation model, process, and reasoning.
+ * The model picker replaces the menu contents so it stays anchored to the plus
+ * button. Attachments remain visible in the composer after this menu closes.
  */
 
 export interface ChatInputPlusMenuProps {
@@ -68,6 +50,9 @@ export interface ChatInputPlusMenuProps {
    * menu blames a stale canvas agent for a model the user has just changed.
    */
   selectedModel?: string;
+  onModelChange?: (model: string) => void;
+  modelLabels?: Record<string, string>;
+  loadingModels?: boolean;
   /** The whole menu is unavailable while a run is in flight. */
   disabled?: boolean;
 }
@@ -127,11 +112,15 @@ const ChatInputPlusMenu: React.FC<ChatInputPlusMenuProps> = ({
   attachDisabledReason,
   models,
   selectedModel,
+  onModelChange,
+  modelLabels = {},
+  loadingModels = false,
   disabled = false,
 }) => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [managerAnchorEl, setManagerAnchorEl] = useState<null | HTMLElement>(null);
   const open = Boolean(anchorEl);
+  const [section, setSection] = useState<'settings' | 'models'>('settings');
 
   const {
     processType,
@@ -162,9 +151,9 @@ const ChatInputPlusMenu: React.FC<ChatInputPlusMenuProps> = ({
             aria-expanded={open}
             size="small"
             disabled={disabled}
-            onClick={(e) => setAnchorEl(e.currentTarget)}
+            onClick={(e) => { setSection('settings'); setAnchorEl(e.currentTarget); }}
             sx={{
-              padding: '4px',
+              width: 32, height: 32, borderRadius: '12px', bgcolor: 'background.subtle',
               color: 'text.secondary',
               '&:hover': { backgroundColor: 'action.hover', color: 'primary.main' },
             }}
@@ -182,8 +171,18 @@ const ChatInputPlusMenu: React.FC<ChatInputPlusMenuProps> = ({
         onClose={close}
         anchorOrigin={{ vertical: 'top', horizontal: 'left' }}
         transformOrigin={{ vertical: 'bottom', horizontal: 'left' }}
-        slotProps={{ paper: { sx: { minWidth: 264, maxWidth: 300, py: 0.5 } } }}
+        slotProps={{ paper: { sx: { width: 300, maxWidth: 'calc(100vw - 24px)', maxHeight: 'min(480px, calc(100vh - 32px))', p: 0.5, borderRadius: '16px' } } }}
       >
+        {section === 'models' ? <>
+          <MenuItem onClick={() => setSection('settings')} sx={{ ...ROW_SX, gap: 1 }}><BackIcon sx={{ fontSize: 16 }} /><Typography sx={{ fontSize: 13, fontWeight: 600 }}>Model</Typography></MenuItem>
+          {loadingModels ? <MenuItem disabled><CircularProgress size={14} sx={{ mr: 1 }} />Loading models…</MenuItem>
+            : Object.keys(models).length === 0 ? <MenuItem disabled>No models available</MenuItem>
+            : Object.entries(models).map(([key, model]) => <ChoiceRow key={key} label={modelLabels[key] || model?.name || key} hint="" selected={selectedModel === key} onClick={() => { onModelChange?.(key); setSection('settings'); }} />)}
+        </> : <>
+          {onModelChange && <MenuItem onClick={() => setSection('models')} sx={ROW_SX}>
+            <ListItemText primary="Model" secondary={loadingModels ? 'Loading models…' : modelLabels[selectedModel || ''] || models[selectedModel || '']?.name || selectedModel || 'Choose model'} primaryTypographyProps={{ fontSize: 13 }} secondaryTypographyProps={{ fontSize: 11, noWrap: true }} />
+            <ChevronRightIcon sx={{ fontSize: 17, color: 'text.secondary' }} />
+          </MenuItem>}
         <Tooltip title={attachDisabled ? attachDisabledReason ?? '' : ''} placement="right">
           <span>
             <MenuItem
@@ -282,6 +281,7 @@ const ChatInputPlusMenu: React.FC<ChatInputPlusMenuProps> = ({
             {reasoningUnsupportedReason(agentModelNames)}
           </Typography>
         )}
+        </>}
       </Menu>
 
       <Menu

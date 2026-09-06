@@ -1,3 +1,4 @@
+import { kasalStageSurface } from '../../theme/kasalSurfaces';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Box,
@@ -35,7 +36,6 @@ import {
 } from '@mui/icons-material';
 import { useTabManagerStore } from '../../store/tabManager';
 import { useThemeManager } from '../../hooks/workflow/useThemeManager';
-import ModeSwitcher from './ModeSwitcher';
 
 interface TabBarProps {
   onRunTab?: (tabId: string) => void;
@@ -440,19 +440,15 @@ const TabBar: React.FC<TabBarProps> = ({
           // Chat mode: no divider and NO color of its own — the chat root paints
           // a fixed full-viewport vignette behind everything, and a transparent
           // bar lets it through, so bar + sidebar + stage read as one surface.
-          borderBottom: hideTabsAndButtons ? 0 : 1,
+          borderBottom: 0,
           borderColor: 'divider',
-          background: hideTabsAndButtons
-            ? 'transparent'
-            : isDarkMode
-              ? '#1a1a1a'
-              : '#ffffff',
+          ...(hideTabsAndButtons ? { background: 'transparent' } : kasalStageSurface(isDarkMode)),
           display: 'flex',
           alignItems: 'center',
           minHeight: isMobile ? '40px' : '48px',
           height: isMobile ? '40px' : '48px',  // Fixed height to prevent shifts
           paddingLeft: 1,
-          paddingRight: isMobile ? '16px' : '60px', // Reserve space for the fixed GroupSelector in top-right
+          paddingRight: '16px',
           position: 'relative',
           zIndex: 1001, // Above the toolbar
           overflow: 'hidden'  // Prevent overflow from causing layout shifts
@@ -483,11 +479,13 @@ const TabBar: React.FC<TabBarProps> = ({
                   transition: 'max-width 0.2s ease',
                   cursor: disabled ? 'not-allowed' : 'pointer',
                   '&.Mui-selected': {
-                    color: isDarkMode ? '#90caf9' : '#1976d2',
+                    color: 'text.primary',
+                    backgroundColor: 'action.selected',
+                    borderRadius: '8px',
                   }
                 },
                 '& .MuiTabs-indicator': {
-                  backgroundColor: isDarkMode ? '#90caf9' : '#1976d2',
+                  display: 'none',
                 }
               }}
             >
@@ -656,11 +654,9 @@ const TabBar: React.FC<TabBarProps> = ({
           </Box>
         )}
 
-        {/* Spacer so the mode switcher stays right-aligned when tabs are hidden */}
+        {/* Preserve the top bar layout when canvas tabs are hidden */}
         {hideTabsAndButtons && <Box sx={{ flex: 1 }} />}
 
-        {/* Workspace mode switcher (Crew / Flow / Chat) — right-most control */}
-        <ModeSwitcher />
       </Box>
 
       {/* New Tab Menu */}

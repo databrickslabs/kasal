@@ -1,3 +1,5 @@
+import { kasalStageSurface } from '../../../../theme/kasalSurfaces';
+import { normalizeEdgeColor } from '../../../../config/edgeConfig';
 import React, { useCallback, useRef, useState, memo, useEffect, useLayoutEffect } from 'react';
 import ReactFlow, {
   Background,
@@ -36,6 +38,7 @@ import { useDialogHandlers } from '../../../../hooks/workflow/useDialogHandlers'
 import ManagerNodeController from './ManagerNodeController';
 import RightSidebar from '../../../../app/workspace/RightSidebar';
 import FlowBackLink from '../../../../app/workspace/FlowBackLink';
+import { useAgentTaskLayout } from '../../../../hooks/workflow/useAgentTaskLayout';
 
 // Node and edge types are imported from flow-config
 
@@ -124,6 +127,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   onPlayFlow
 }) => {
 
+  useAgentTaskLayout(nodes, edges, setNodes);
   const [isRendering, setIsRendering] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
   const reactFlowInstanceRef = useRef<ReactFlowInstance | null>(null);
@@ -335,29 +339,11 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
     });
 
     return crewNodes.map(node => {
-      const defaultWidth = node.type === 'agentNode' ? 170 : node.type === 'managerNode' ? 200 : 270;
-      const defaultHeight = node.type === 'agentNode' ? 170 : node.type === 'managerNode' ? 150 : 135;
-      
-      if (!node.style || (!node.style.width && !node.style.height)) {
-        return {
-          ...node,
-          width: typeof node.style?.width === 'number' ? node.style.width : defaultWidth,
-          height: typeof node.style?.height === 'number' ? node.style.height : defaultHeight,
-          style: {
-            ...node.style,
-            width: node.style?.width || defaultWidth,
-            height: node.style?.height || defaultHeight
-          }
-        };
-      }
-      
-      return {
-        ...node,
-        width: typeof node.width === 'number' ? node.width : 
-               typeof node.style?.width === 'number' ? node.style.width : defaultWidth,
-        height: typeof node.height === 'number' ? node.height : 
-                typeof node.style?.height === 'number' ? node.style.height : defaultHeight
-      };
+      if (node.type !== 'agentNode' && node.type !== 'taskNode') return node;
+      // Let React Flow measure the actual card. Old fixed wrapper heights were
+      // shorter than the content, so placement and fit-view underestimated it.
+      const { width: _width, height: _height, ...style } = node.style || {};
+      return { ...node, style };
     });
   }, [nodes]);
 
@@ -416,7 +402,8 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
       const edgesWithType = uniqueEdges.map(edge => ({
         ...edge,
         id: edge.id, // Explicitly preserve ID
-        type: edge.type || 'default', // Ensure edge type is set
+        type: edge.type || 'default',
+        markerEnd: typeof edge.markerEnd === 'object' ? { ...edge.markerEnd, color: normalizeEdgeColor(edge.markerEnd.color) } : edge.markerEnd, // Ensure edge type is set
         // Preserve the animated property from the edge (don't override it)
       }));
 
@@ -554,7 +541,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
         display: 'flex',
         flexDirection: 'column',
         position: 'relative',
-        backgroundColor: isDarkMode ? '#1a1a1a' : '#f5f5f5',
+        ...kasalStageSurface(isDarkMode),
       }}
     >
       {errorStore.showError ? (
@@ -610,11 +597,11 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
           // Removed automatic fitView to prevent ResizeObserver loops
           // fitView is handled manually in handleInit and via controls
           attributionPosition="bottom-left"
-          minZoom={0.1}
+          minZoom={0.01}
           maxZoom={4}
           defaultViewport={{ x: 0, y: 0, zoom: 1 }}
           proOptions={{ hideAttribution: true }}
-          style={{ background: isDarkMode ? '#1a1a1a' : '#f8f8f8' }}
+          style={{ background: 'transparent' }}
           nodesDraggable={true}
           nodesConnectable={true}
           elementsSelectable={true}

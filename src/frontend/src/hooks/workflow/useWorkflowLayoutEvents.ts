@@ -100,6 +100,7 @@ export function useWorkflowLayoutEvents(params: {
 
       // Only handle specific reasons, not general UI changes
       if (
+        reason !== 'assistant-dock-resize' &&
         reason !== 'chat-panel-resize' &&
         reason !== 'execution-history-resize' &&
         reason !== 'layout-orientation-toggle'
@@ -108,7 +109,7 @@ export function useWorkflowLayoutEvents(params: {
       }
 
       // For chat panel and execution history resize: just recenter viewport, don't move nodes
-      if (reason === 'chat-panel-resize' || reason === 'execution-history-resize') {
+      if (reason === 'assistant-dock-resize' || reason === 'chat-panel-resize' || reason === 'execution-history-resize') {
         setTimeout(() => {
           if (areFlowsVisible) {
             // Flow canvas: use UI-aware fitView that accounts for execution history
@@ -120,13 +121,9 @@ export function useWorkflowLayoutEvents(params: {
               layoutManager.updateUIState(currentUIState);
 
               // Calculate padding based on execution history
-              const basePadding = 0.2;
-              const executionHistoryPadding = currentUIState.executionHistoryVisible
-                ? currentUIState.executionHistoryHeight / currentUIState.screenHeight
-                : 0;
 
               flowFlowInstanceRef.current.fitView({
-                padding: basePadding + executionHistoryPadding * 0.5,
+                padding: 0.2,
                 includeHiddenNodes: false,
                 duration: 800,
               });
@@ -196,13 +193,8 @@ export function useWorkflowLayoutEvents(params: {
             currentUIState.screenHeight = window.innerHeight;
             layoutManager.updateUIState(currentUIState);
 
-            const basePadding = 0.2;
-            const executionHistoryPadding = currentUIState.executionHistoryVisible
-              ? currentUIState.executionHistoryHeight / currentUIState.screenHeight
-              : 0;
-
             flowFlowInstanceRef.current.fitView({
-              padding: basePadding + executionHistoryPadding * 0.5,
+              padding: 0.2,
               includeHiddenNodes: false,
               duration: 800,
             });

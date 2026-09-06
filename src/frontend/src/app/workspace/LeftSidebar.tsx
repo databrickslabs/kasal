@@ -16,6 +16,9 @@ import {
   Settings as SettingsIcon,
   HelpOutline as HelpOutlineIcon,
 } from '@mui/icons-material';
+import GroupSelector from '../../features/groups/components/GroupSelector';
+import ThemeModeIcon from '../../components/ThemeModeIcon';
+import { useThemeStore } from '../../store/theme';
 import { useWorkflowStore } from '../../store/workflow';
 import { useUILayoutStore } from '../../store/uiLayout';
 
@@ -34,6 +37,7 @@ interface LeftSidebarProps {
   // Logs dialog prop
   onOpenLogsDialog?: () => void;
   // Execution history visibility
+  onToggleExecutionHistory?: () => void;
   showRunHistory?: boolean;
   executionHistoryHeight?: number;
   // Tutorial dialog prop
@@ -50,10 +54,12 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   setIsConfigurationDialogOpen,
   onOpenLogsDialog,
   showRunHistory,
+  onToggleExecutionHistory,
   executionHistoryHeight = 200,
   onOpenTutorial
 }) => {
   const theme = useTheme();
+  const { isDarkMode, toggleTheme } = useThemeStore();
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const { layoutOrientation, setLayoutOrientation } = useUILayoutStore();
 
@@ -124,7 +130,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
         position: 'absolute',
         top: '48px', // Account for TabBar height
         left: 0,
-        height: showRunHistory ? `calc(100% - 48px - ${executionHistoryHeight}px)` : 'calc(100% - 48px)',
+        height: 'calc(100% - 48px)',
         zIndex: 5, // Lower than execution history to prevent overlap at high zoom
         display: 'flex',
         flexDirection: 'row'
@@ -139,9 +145,9 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
               height: '100%',
               bgcolor: 'background.paper',
               borderRadius: 0,
-              borderRight: '1px solid',
+              borderRight: 0,
               borderColor: 'divider',
-              boxShadow: '2px 0 4px rgba(0,0,0,0.1)', // Temporary shadow for visibility
+              boxShadow: 'none',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
@@ -195,16 +201,14 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                           ? 'pulse 2s infinite'
                           : 'none',
                         '@keyframes pulse': {
-                          '0%': { boxShadow: '0 0 0 0 rgba(25, 118, 210, 0.4)' },
-                          '70%': { boxShadow: '0 0 0 8px rgba(25, 118, 210, 0)' },
-                          '100%': { boxShadow: '0 0 0 0 rgba(25, 118, 210, 0)' }
+                          '0%': { boxShadow: '0 0 0 0 rgba(70, 83, 98, 0.4)' },
+                          '70%': { boxShadow: '0 0 0 8px rgba(70, 83, 98, 0)' },
+                          '100%': { boxShadow: '0 0 0 0 rgba(70, 83, 98, 0)' }
                         },
                         backgroundColor: activeSection === item.id
                           ? 'action.selected'
                           : 'transparent',
-                        borderLeft: activeSection === item.id
-                          ? `2px solid ${theme.palette.primary.main}`
-                          : '2px solid transparent',
+                        borderLeft: 0,
                         borderRadius: 0,
                         transition: 'all 0.2s ease-in-out',
                         '&:hover': {
@@ -226,7 +230,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                       sx={{
                         width: '80%',
                         height: '1px',
-                        backgroundColor: 'divider',
+                        backgroundColor: 'transparent',
                         mb: 1,
                         alignSelf: 'center'
                       }}
@@ -338,6 +342,11 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
             {/* Spacer to push the bottom group to the end */}
             <Box sx={{ flexGrow: 1 }} />
 
+            <Tooltip title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'} placement="right">
+              <IconButton aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'} onClick={() => { void toggleTheme(); }} sx={{ width: 40, height: 40, mb: 0.5, borderRadius: 2, color: 'text.secondary' }}>
+                <ThemeModeIcon dark={isDarkMode} size={18} />
+              </IconButton>
+            </Tooltip>
             {/* Help button pinned to bottom */}
             {helpItem && (
               <>
@@ -373,16 +382,14 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                         color: !hasSeenTutorial ? theme.palette.primary.main : theme.palette.info.main,
                         animation: !hasSeenTutorial ? 'pulse 2s infinite' : 'none',
                         '@keyframes pulse': {
-                          '0%': { boxShadow: '0 0 0 0 rgba(25, 118, 210, 0.4)' },
-                          '70%': { boxShadow: '0 0 0 8px rgba(25, 118, 210, 0)' },
-                          '100%': { boxShadow: '0 0 0 0 rgba(25, 118, 210, 0)' }
+                          '0%': { boxShadow: '0 0 0 0 rgba(70, 83, 98, 0.4)' },
+                          '70%': { boxShadow: '0 0 0 8px rgba(70, 83, 98, 0)' },
+                          '100%': { boxShadow: '0 0 0 0 rgba(70, 83, 98, 0)' }
                         },
                         backgroundColor: activeSection === helpItem.id
                           ? 'action.selected'
                           : 'transparent',
-                        borderLeft: activeSection === helpItem.id
-                          ? `2px solid ${theme.palette.primary.main}`
-                          : '2px solid transparent',
+                        borderLeft: 0,
                         borderRadius: 0,
                         transition: 'all 0.2s ease-in-out',
                         '&:hover': {
@@ -398,6 +405,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 </Tooltip>
               </>
             )}
+            <GroupSelector />
           </Paper>
 
           {/* Side Panel Content */}
@@ -409,7 +417,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 height: '100%',
                 bgcolor: 'background.paper',
                 borderRadius: 0,
-                borderRight: '1px solid',
+                borderRight: 0,
                 borderColor: 'divider',
                 overflow: 'hidden',
                 transition: 'all 0.2s ease-in-out'

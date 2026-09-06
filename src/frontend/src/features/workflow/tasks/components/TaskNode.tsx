@@ -1,7 +1,8 @@
+import { kasalNodeSurface, kasalNodePalette } from '../../../../theme/kasalSurfaces';
 import React, { useCallback, useState, useEffect } from 'react';
 import { Handle, Position, useReactFlow } from 'reactflow';
 import { Box, Typography, Dialog, DialogTitle, DialogContent, Tooltip, CircularProgress } from '@mui/material';
-import AddTaskIcon from '@mui/icons-material/AddTask';
+import { ListChecks } from 'lucide-react';
 import DeleteIcon from '@mui/icons-material/Delete';
 import IconButton from '@mui/material/IconButton';
 import EditIcon from '@mui/icons-material/Edit';
@@ -347,22 +348,11 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
     setIsToolDialogOpen(false);
   }, [id, data.taskId, data.label, data.tool_configs, setNodes, markCurrentTabDirty, showErrorMessage]);
 
-  const iconStyles = {
-    mr: 1.5,
-    color: (theme: Theme) => theme.palette.primary.main,
-    fontSize: '2rem',
-    padding: '4px',
-    borderRadius: '50%',
-    backgroundColor: 'rgba(25, 118, 210, 0.05)',
-  };
-
-  const getTaskIcon = () => {
-    if (data.icon) {
-      return <Box component="span" sx={iconStyles}>{data.icon}</Box>;
-    }
-
-    return <AddTaskIcon sx={iconStyles} />;
-  };
+  const getTaskIcon = () => (
+    <Box component="span" sx={{ width: 30, height: 30, flexShrink: 0, borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: (theme: Theme) => kasalNodePalette(theme.palette.mode === 'dark', 'task').badge, color: (theme: Theme) => kasalNodePalette(theme.palette.mode === 'dark', 'task').accent }}>
+      {data.icon || <ListChecks size={18} strokeWidth={1.6} />}
+    </Box>
+  );
 
   const getStatusIcon = () => {
     if (!taskStatus) return null;
@@ -407,8 +397,9 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
       position: 'relative',
       padding: 2,
       cursor: 'pointer',
-      background: (theme: Theme) => theme.palette.background.paper,
-      borderRadius: '8px',
+      background: (theme: Theme) => kasalNodeSurface(theme.palette.mode === 'dark', 'task').background,
+      borderRadius: '16px',
+      transition: 'box-shadow 180ms ease, background 180ms ease',
       border: '1px solid',
       borderColor: (theme: Theme) => {
         if (data.error) return theme.palette.error.main;
@@ -418,11 +409,11 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         if (isFailed) return theme.palette.error.main;
         return isSelected
           ? theme.palette.primary.main
-          : theme.palette.grey[300];
+          : 'transparent';
       },
       boxShadow: (theme: Theme) => isSelected
         ? `0 0 0 2px ${theme.palette.primary.main}`
-        : `0 2px 4px ${theme.palette.mode === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(0, 0, 0, 0.2)'}`,
+        : kasalNodeSurface(theme.palette.mode === 'dark', 'task').boxShadow,
       animation: data.loading
         ? 'pulse 2s infinite'
         : taskStatus?.status === 'planning'
@@ -434,12 +425,12 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         '100%': { boxShadow: '0 0 0 0 rgba(255, 167, 38, 0)' }
       },
       '@keyframes pulse': {
-        '0%': { boxShadow: '0 0 0 0 rgba(33, 150, 243, 0.4)' },
-        '70%': { boxShadow: '0 0 0 10px rgba(33, 150, 243, 0)' },
-        '100%': { boxShadow: '0 0 0 0 rgba(33, 150, 243, 0)' }
+        '0%': { boxShadow: '0 0 0 0 rgba(119, 131, 141, 0.4)' },
+        '70%': { boxShadow: '0 0 0 10px rgba(119, 131, 141, 0)' },
+        '100%': { boxShadow: '0 0 0 0 rgba(119, 131, 141, 0)' }
       },
       '&:hover': {
-        boxShadow: '0 4px 8px rgba(0, 0, 0, 0.15)',
+        boxShadow: (theme: Theme) => theme.palette.mode === 'dark' ? '0 8px 24px rgba(0,0,0,.32)' : '0 8px 22px rgba(27,31,35,.13)',
         '& .action-buttons': {
           display: 'flex'
         }
@@ -536,7 +527,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         position={Position.Top}
         id="top"
         style={{
-          background: '#2196f3',
+          background: '#77838D',
           width: '7px',
           height: '7px',
           opacity: layoutOrientation === 'vertical' ? 1 : 0,
@@ -550,7 +541,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
         position={Position.Left}
         id="left"
         style={{
-          background: '#2196f3',
+          background: '#77838D',
           width: '7px',
           height: '7px',
           opacity: layoutOrientation === 'horizontal' ? 1 : 0,
@@ -612,8 +603,8 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
               onMouseLeave={() => setEditTooltipOpen(false)}
               sx={{
                 mr: 0.5,
-                backgroundColor: 'rgba(255, 255, 255, 0.3)',
-                '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.5)' },
+                backgroundColor: 'background.paper',
+                '&:hover': { backgroundColor: 'action.hover' },
                 zIndex: 20
               }}
             >
@@ -627,8 +618,8 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
               onMouseEnter={() => setDeleteTooltipOpen(true)}
               onMouseLeave={() => setDeleteTooltipOpen(false)}
               sx={{
-                backgroundColor: 'rgba(255, 255, 255, 0.3)',
-                '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.5)' },
+                backgroundColor: 'background.paper',
+                '&:hover': { backgroundColor: 'action.hover' },
                 zIndex: 20
               }}
             >
@@ -636,23 +627,26 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
             </IconButton>
           </Tooltip>
         </div>
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, width: '100%', overflow: 'hidden' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.25 }}>
           {getTaskIcon()}
+          <Typography sx={{ fontSize: 11, fontWeight: 600, color: (theme: Theme) => kasalNodePalette(theme.palette.mode === 'dark', 'task').accent }}>Task</Typography>
+        </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.75, width: '100%', overflow: 'hidden' }}>
           <Tooltip title={data.label} placement="top" arrow>
             <Typography variant="body2" sx={{
-              fontWeight: 500,
+              fontWeight: 650,
               color: (theme: Theme) => {
                 // Match CrewNode's status-based text color
                 if (taskStatus?.status === 'planning') return theme.palette.warning.main;
                 if (taskStatus?.status === 'running') return theme.palette.info.main;
                 if (taskStatus?.status === 'completed') return theme.palette.success.main;
                 if (taskStatus?.status === 'failed') return theme.palette.error.main;
-                return theme.palette.primary.main;
+                return theme.palette.text.primary;
               },
               fontSize: '0.9rem',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
+              display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', lineHeight: 1.4, wordBreak: 'break-word',
               flex: 1,
             }}>
               {data.label}
@@ -664,7 +658,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
           variant="body2"
           color="textSecondary"
           sx={{
-            fontSize: '0.8rem',
+            fontSize: '0.8rem', lineHeight: 1.6,
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             display: '-webkit-box',
@@ -692,8 +686,9 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
                 fontSize: '0.7rem',
                 color: 'text.secondary',
                 cursor: 'pointer',
-                padding: '2px 6px',
-                borderRadius: '4px',
+                padding: '4px 8px',
+                backgroundColor: (theme: Theme) => kasalNodePalette(theme.palette.mode === 'dark', 'task').chip,
+                borderRadius: '7px',
                 transition: 'all 0.2s ease',
                 '&:hover': {
                   backgroundColor: (theme: Theme) => `${theme.palette.primary.main}15`,
@@ -709,8 +704,9 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
                 fontSize: '0.7rem',
                 color: mcpServerCount > 0 ? 'primary.main' : 'text.secondary',
                 cursor: 'pointer',
-                padding: '2px 6px',
-                borderRadius: '4px',
+                padding: '4px 8px',
+                backgroundColor: (theme: Theme) => kasalNodePalette(theme.palette.mode === 'dark', 'task').chip,
+                borderRadius: '7px',
                 transition: 'all 0.2s ease',
                 fontWeight: mcpServerCount > 0 ? 500 : 400,
                 '&:hover': {
@@ -786,7 +782,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
       <Handle
         type="source"
         position={Position.Right}
-        style={{ background: '#2196f3', width: '7px', height: '7px' }}
+        style={{ background: '#77838D', width: '7px', height: '7px' }}
         onDoubleClick={handleRightHandleDoubleClick}
       />
 

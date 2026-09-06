@@ -15,6 +15,13 @@ interface UILayoutStore extends UILayoutState {
   appMode: AppMode;
   setAppMode: (mode: AppMode) => void;
 
+  assistantPanelVisible: boolean;
+  assistantPanelSide: 'left' | 'right';
+  assistantResponseFocused: boolean;
+  setAssistantResponseFocused: (focused: boolean) => void;
+  setAssistantPanelVisible: (visible: boolean) => void;
+  setAssistantPanelSide: (side: 'left' | 'right') => void;
+  setAssistantDockHeight: (height: number) => void;
   // Actions to update the UI state
   updateScreenDimensions: (width: number, height: number) => void;
   setChatPanelWidth: (width: number) => void;
@@ -86,6 +93,17 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
   // the mode switcher; an explicit persisted choice always wins.
   appMode: persistedState.appMode || 'chat',
 
+  assistantPanelVisible: false,
+  assistantPanelSide: 'right',
+  assistantResponseFocused: false,
+  setAssistantResponseFocused: focused => set({ assistantResponseFocused: focused, assistantPanelVisible: true, executionHistoryVisible: true, chatPanelVisible: true }),
+  setAssistantPanelVisible: visible => set(state => ({ assistantPanelVisible: visible, executionHistoryVisible: visible || (state.executionHistoryVisible && !state.assistantPanelVisible), ...(visible ? { chatPanelVisible: true } : { assistantResponseFocused: false }) })),
+  setAssistantPanelSide: side => { set({ assistantPanelSide: side }); saveToLocalStorage({ assistantPanelSide: side }); },
+  assistantDockHeight: 128,
+  setAssistantDockHeight: height => {
+    set({ assistantDockHeight: height });
+    window.dispatchEvent(new CustomEvent('recalculateNodePositions', { detail: { reason: 'assistant-dock-resize' } }));
+  },
   // Actions
   setAppMode: (mode: AppMode) => {
     // The ONE funnel every mode entrance calls (ModeSwitcher, the empty-state
@@ -131,7 +149,7 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
   },
 
   setExecutionHistoryVisible: (visible: boolean) => {
-    set({ executionHistoryVisible: visible });
+    set({ executionHistoryVisible: visible, assistantPanelVisible: false, assistantResponseFocused: false });
     saveToLocalStorage({ executionHistoryVisible: visible });
   },
 
@@ -184,6 +202,10 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
       leftSidebarExpandedWidth: state.leftSidebarExpandedWidth,
       rightSidebarVisible: state.rightSidebarVisible,
       rightSidebarWidth: state.rightSidebarWidth,
+      assistantPanelVisible: state.assistantPanelVisible,
+      assistantResponseFocused: state.assistantResponseFocused,
+      assistantPanelSide: state.assistantPanelSide,
+      assistantDockHeight: state.assistantDockHeight,
       chatPanelVisible: state.chatPanelVisible,
       chatPanelCollapsed: state.chatPanelCollapsed,
       chatPanelWidth: state.chatPanelWidth,

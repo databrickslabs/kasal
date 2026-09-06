@@ -128,7 +128,7 @@ const ManagerNode: React.FC<{ data: ManagerNodeData; id: string }> = ({ data, id
         position={Position.Bottom}
         id="bottom"
         style={{
-          background: '#2196f3',
+          background: '#77838D',
           width: '7px',
           height: '7px',
           opacity: layoutOrientation === 'vertical' ? 1 : 0,
@@ -142,7 +142,7 @@ const ManagerNode: React.FC<{ data: ManagerNodeData; id: string }> = ({ data, id
         position={Position.Right}
         id="right"
         style={{
-          background: '#2196f3',
+          background: '#77838D',
           width: '7px',
           height: '7px',
           opacity: layoutOrientation === 'horizontal' ? 1 : 0,

@@ -67,7 +67,7 @@ const CrewEdge: React.FC<EdgeProps<CrewEdgeData>> = (props) => {
 
   // Get style based on configuration status
   const getEdgeColor = () => {
-    if (selected) return '#2196f3'; // Blue when selected
+    if (selected) return '#77838D'; // Neutral selection
     if (!isConfigured) return '#ff9800'; // Orange for unconfigured
 
     switch (logicType) {

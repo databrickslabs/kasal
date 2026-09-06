@@ -1,5 +1,5 @@
 import { getDefaultModel } from '../../../config/defaultModel';
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
 import {
   Box,
   TextField,
@@ -8,30 +8,21 @@ import {
   Typography,
   CircularProgress,
   List,
-  ListItem,
   ListItemButton,
   ListItemText,
-  Divider,
-  ListSubheader,
   Tooltip,
   Stack,
-  Menu,
-  MenuItem,
 } from '@mui/material';
+import { Sparkles } from 'lucide-react';
+import { improveChatPrompt } from '../../chat/api/prompt';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
-import ChatIcon from '@mui/icons-material/Chat';
-import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CloseIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
-import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
-import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 
-// Resolve public asset path using Vite's base URL (handles Databricks Apps proxy path)
-const kasalIcon16 = `${import.meta.env.BASE_URL}kasal-icon-16.png`;
 
 import DispatcherService, { DispatchResult, ConfigureCrewResult, CatalogListResult, CatalogLoadResult, FlowListResult, FlowLoadResult, StreamingGenerationResult } from '../../../api/execution/DispatcherService';
+import { useThemeStore } from '../../../store/theme';
 import { useWorkflowStore } from '../../../store/workflow';
 import { useCrewExecutionStore } from '../../../store/crewExecution';
 import { useChatMessagesStore, deduplicateMessages } from './store/chatMessagesStore';
@@ -81,10 +72,16 @@ import { ChatMessageItem } from './components/ChatMessageItem';
 import { GroupedTraceMessages } from './components/GroupedTraceMessages';
 import { KnowledgeFileUpload, KnowledgeFileUploadHandle } from './KnowledgeFileUpload';
 import ChatInputPlusMenu from './components/ChatInputPlusMenu';
+import ModeSwitcher from '../../../app/workspace/ModeSwitcher';
 import SlashCommandMenu from './components/SlashCommandMenu';
+import { openConversationCanvas } from './utils/conversationCanvas';
+import { CanvasAssistantLayout } from './components/CanvasAssistantLayout';
+import { BuilderAssistantHeader } from './components/BuilderAssistantHeader';
+import { BuilderAssistantWelcome, BuilderAssistantStarters } from './components/BuilderAssistantWelcome';
 import { HtmlPreviewDialog } from './components/HtmlPreviewDialog';
 
 const WorkflowChat: React.FC<WorkflowChatProps> = ({
+  layout = 'panel',
   onNodesGenerated,
   onLoadingStateChange,
   selectedModel = 'databricks-gpt-5-3-codex',
@@ -99,7 +96,33 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   onOpenLogs,
 }) => {
   const [inputValue, setInputValue] = useState('');
+  const [isImproving, setIsImproving] = useState(false);
+  const improveRequest = useRef(0);
+  useLayoutEffect(() => {
+    setIsImproving(false);
+    return () => { improveRequest.current += 1; };
+  }, [providedChatSessionId]);
+  const [showEarlierMessages, setShowEarlierMessages] = useState(false);
+  const drafts = useRef(new Map<string, string>());
+  const draftSession = useRef(providedChatSessionId);
+  const currentDraft = useRef(inputValue);
+  currentDraft.current = inputValue;
+  useLayoutEffect(() => {
+    if (layout !== 'canvas' || providedChatSessionId === draftSession.current) return;
+    if (draftSession.current) drafts.current.set(draftSession.current, currentDraft.current);
+    draftSession.current = providedChatSessionId;
+    setInputValue(providedChatSessionId ? drafts.current.get(providedChatSessionId) || '' : '');
+    setShowEarlierMessages(false);
+  }, [providedChatSessionId, layout]);
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
+  const composerDark = useThemeStore(state => state.isDarkMode);
+  const composerColors = {
+    surface: composerDark ? '#232930' : '#FFFFFF',
+    text: composerDark ? '#E8ECEF' : '#1B1F23',
+    secondary: composerDark ? '#A0AAB4' : '#5A6872',
+    muted: composerDark ? '#84909C' : '#8D99A4',
+    hover: composerDark ? 'rgba(255,255,255,0.07)' : '#F2F4F7',
+  };
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [isLoading, setIsLoading] = useState(false);
   const [showSessionList, setShowSessionList] = useState(false);
@@ -108,7 +131,6 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   // three "GPT-5" rows you can't tell apart is worse than three long ids.
   const modelLabels = useMemo(() => buildModelLabels(models), [models]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
-  const [modelMenuAnchor, setModelMenuAnchor] = useState<null | HTMLElement>(null);
 
   // rather than in Configuration because it is a per-RUN choice: the value is
   // sent with the execution payload and recorded on the run's own row.
@@ -499,7 +521,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         {
           id: msgId,
           type: 'assistant' as const,
-          content: `**Crew Plan** — ${complexityLabel} ${processLabel} · ${plan.agents.length} agents · ${plan.tasks.length} tasks`,
+          content: `**Crew Plan** — ${complexityLabel} ${processLabel} · ${plan.agents.length} agent${plan.agents.length === 1 ? '' : 's'} · ${plan.tasks.length} task${plan.tasks.length === 1 ? '' : 's'}`,
           timestamp: new Date(),
         },
       ]);
@@ -513,7 +535,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       const goal = (data.agent.goal as string) || '';
       const toolCount = Array.isArray(data.agent.tools) ? data.agent.tools.length : 0;
       const toolsLabel = toolCount > 0 ? ` · ${toolCount} tool${toolCount > 1 ? 's' : ''}` : '';
-      appendProgressLine(`\n  **${name}** — ${role}${toolsLabel}\n     _${goal}_`);
+      appendProgressLine(`\n**${name}** — ${role}${toolsLabel}\n\n${goal}`);
     },
     onTaskDetail: (data) => {
       if (indexMapRef.current) {
@@ -522,7 +544,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       const name = (data.task.name as string) || `Task ${data.index + 1}`;
       const desc = (data.task.description as string) || '';
       const shortDesc = desc.length > 120 ? desc.substring(0, 120) + '...' : desc;
-      appendProgressLine(`  ${data.index + 1}. **${name}**\n     ${shortDesc}`);
+      appendProgressLine(`\n${data.index + 1}. **${name}**\n\n   ${shortDesc}`);
     },
     onEntityError: (data) => {
       if (indexMapRef.current) {
@@ -1498,116 +1520,57 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       }
     }
   };
+  const canImprove = Boolean(inputValue.trim()) && !inputValue.trim().startsWith('/') && !isLoading && !executingJobId && !isImproving;
+  const handleImprovePrompt = async () => {
+    if (!canImprove) return;
+    const draft = inputValue;
+    const request = ++improveRequest.current;
+    setIsImproving(true);
+    try {
+      const improved = await improveChatPrompt(draft.trim(), selectedModel);
+      // A late rewrite must never replace a newer draft or another canvas's input.
+      if (improved && request === improveRequest.current && currentDraft.current === draft && inputRef.current) {
+        setInputValue(improved);
+        inputRef.current.focus();
+      }
+    } finally {
+      if (request === improveRequest.current) setIsImproving(false);
+    }
+  };
+
   const isSendMode = inputValue.trim().length > 0;
   const isActionDisabled = isLoading || !!executingJobId || !isSendMode;
 
 
 
-  return (
-    <Box
-      sx={{
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        position: 'relative',
-        overflow: 'hidden',
-        maxWidth: '100%',
-        width: '100%',
-      }}>
-      {/* Header with session controls */}
-      <Box sx={{
-        p: 1,
-        borderBottom: 1,
-        borderColor: 'divider',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        backgroundColor: theme => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.50',
-        flexShrink: 0,
-      }}>
-        <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-          <Typography
-            variant="subtitle2"
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 1,
-              fontWeight: 600
-            }}
-          >
-            <Box component="img" src={kasalIcon16} alt="Kasal" sx={{ width: 16, height: 16, borderRadius: 0.5 }} />
-            Kasal
-          </Typography>
-          {currentSessionName !== 'New Chat' && (
-            <Typography
-              variant="caption"
-              sx={{
-                color: 'text.secondary',
-                ml: 3
-              }}
-            >
-              {currentSessionName}
-            </Typography>
-          )}
-        </Box>
-        <Stack direction="row" spacing={1}>
-          <Tooltip title="New Chat">
-            <IconButton size="small" onClick={startNewChat}>
-              <AddIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Chat History">
-            <IconButton
-              size="small"
-              onClick={() => {
-                setShowSessionList(true);
-                loadChatSessions();
-              }}
-            >
-              <ChatIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title={chatPanelSide === 'right' ? 'Move Chat to Left' : 'Move Chat to Right'}>
-            <IconButton
-              size="small"
-              onClick={() => setChatPanelSide(chatPanelSide === 'right' ? 'left' : 'right')}
-            >
-              <SwapHorizIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Collapse Chat">
-            <IconButton
-              size="small"
-              onClick={onToggleCollapse}
-            >
-              <ChevronLeftIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        </Stack>
-      </Box>
+  const handleNewConversation = () => {
+    if (layout === 'canvas') openConversationCanvas();
+    else startNewChat();
+    setShowSessionList(false);
+    setShowEarlierMessages(false);
+  };
+  const handleOpenConversation = (selectedSessionId: string) => {
+    if (layout === 'canvas') {
+      openConversationCanvas(selectedSessionId);
+      setShowSessionList(false);
+      setShowEarlierMessages(true);
+    } else { void loadSessionMessages(selectedSessionId); }
+  };
 
-      {/* Session List - Slides over the chat content */}
+  const historyContent = (
+showSessionList && (
       <Box
-        sx={{
-          position: 'absolute',
-          top: 0,
-          right: showSessionList ? 0 : '-450px',
-          width: 450,
-          height: '100%',
-          backgroundColor: theme => theme.palette.background.paper,
-          boxShadow: theme => showSessionList ? theme.shadows[8] : 'none',
-          transition: 'right 0.3s ease-in-out',
-          zIndex: 10,
-          display: 'flex',
-          flexDirection: 'column',
-        }}
+        role="region"
+        aria-label="Conversation history"
+        onKeyDown={e => { if (e.key === 'Escape') { setShowSessionList(false); requestAnimationFrame(() => inputRef.current?.focus()); } }}
+        sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
       >
         {/* Session list header and content (simplified for brevity) */}
         <Box sx={{
-          p: 1.5,
-          borderBottom: 1,
+          p: 2.5,
+          borderBottom: 0,
           borderColor: 'divider',
-          backgroundColor: theme => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.50',
+          backgroundColor: 'transparent',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between'
@@ -1626,7 +1589,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             <Tooltip title="Close">
               <IconButton
                 size="small"
-                onClick={() => setShowSessionList(false)}
+                autoFocus
+                onClick={() => { setShowSessionList(false); requestAnimationFrame(() => inputRef.current?.focus()); }}
               >
                 <CloseIcon fontSize="small" />
               </IconButton>
@@ -1645,13 +1609,14 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               {chatSessions.map((session) => (
                 <ListItemButton
                   key={session.session_id}
-                  onClick={() => loadSessionMessages(session.session_id)}
+                  onClick={() => handleOpenConversation(session.session_id)}
+                  disabled={layout === 'canvas' && (isLoading || !!executingJobId)}
                   selected={session.session_id === sessionId}
                   sx={{
-                    borderRadius: 1,
-                    mb: 1,
-                    border: 1,
-                    borderColor: 'divider',
+                    borderRadius: '12px',
+                    mb: 0.5,
+                    border: 0,
+                    '&.Mui-selected': { backgroundColor: composerColors.hover },
                   }}
                 >
                   <ListItemText
@@ -1696,103 +1661,29 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         </Box>
       </Box>
 
-      {/* Backdrop for closing when clicking outside */}
-      {showSessionList && (
-        <Box
-          onClick={() => setShowSessionList(false)}
-          sx={{
-            position: 'absolute',
-            top: 0,
-            left: -1000,
-            right: 450,
-            bottom: 0,
-            zIndex: 9,
-          }}
-        />
-      )}
-
-      <Box
+      )
+  );
+  const responseContent = (
+<Box
         ref={messagesContainerRef}
         onScroll={handleMessagesScroll}
         sx={{
-          flex: 1,
-          overflow: 'auto',
-          px: 1, // Reduced horizontal padding from 2 to 1
-          py: 2, // Keep vertical padding
+          flex: messages.length === 0 ? '0 0 auto' : 1,
+          mt: messages.length === 0 ? 'auto' : 0,
+          minHeight: 0,
+          overflow: messages.length === 0 ? 'visible' : 'auto',
+          px: messages.length === 0 ? 0 : layout === 'canvas' ? 2 : 2.5,
+          py: messages.length === 0 || layout === 'canvas' ? 0 : 2,
           width: '100%',
           maxWidth: '100%',
           position: 'relative',
+          ...(layout === 'canvas' && { '& .MuiListItem-root': { py: 0 }, '& .MuiListItemText-root': { my: 0 } }),
           minWidth: 0, // Prevent flex item from growing
-          display: 'flex',
+          display: showSessionList ? 'none' : 'flex',
           flexDirection: 'column',
         }}>
         {messages.length === 0 ? (
-          <Box sx={{ textAlign: 'center', mt: 4 }}>
-            <Typography variant="body2" color="text.secondary" paragraph>
-              Try saying something like:
-            </Typography>
-            <List dense>
-              <ListItem>
-                <ListItemText
-                  primary="Create an agent that can analyze financial data"
-                  secondary="Creates a single agent"
-                />
-              </ListItem>
-              <ListItem>
-                <ListItemText
-                  primary="I need a task to summarize documents"
-                  secondary="Creates a single task"
-                />
-              </ListItem>
-              <ListItem>
-                <ListItemText
-                  primary="Build a research team with a researcher and writer"
-                  secondary="Creates a complete plan"
-                />
-              </ListItem>
-            </List>
-            <Typography variant="body2" color="text.secondary" paragraph sx={{ mt: 2 }}>
-              Or use slash commands:
-            </Typography>
-            <List dense>
-              <ListItem>
-                <ListItemText
-                  primary="/list crews"
-                  secondary="Browse your saved crews"
-                />
-              </ListItem>
-              <ListItem>
-                <ListItemText
-                  primary="/load crew <name>"
-                  secondary="Load a saved crew onto the canvas"
-                />
-              </ListItem>
-              <ListItem>
-                <ListItemText
-                  primary="/run crew"
-                  secondary="Execute the current crew"
-                />
-              </ListItem>
-              <ListItem>
-                <ListItemText
-                  primary="/list flows"
-                  secondary="Browse your saved flows"
-                />
-              </ListItem>
-              <ListItem>
-                <ListItemText
-                  primary="/run flow"
-                  secondary="Execute the current flow"
-                />
-              </ListItem>
-              <ListItem>
-                <ListItemText
-                  primary="/help"
-                  secondary="See all available commands"
-                />
-              </ListItem>
-            </List>
-          </Box>
+          layout === 'canvas' ? <Box sx={{ p: 2.5 }}><Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Ask Kasal to create or refine your workflow. Responses will appear here.</Typography></Box> : <BuilderAssistantWelcome dark={composerDark} hasNodes={nodes.length > 0} />
         ) : (
           <List sx={{
             width: '100%',
@@ -1802,7 +1693,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           }}>
             {(() => {
               // Messages are already deduplicated by Zustand store
-              const deduplicatedMessages = messages;
+              const lastUserIndex = messages.map(message => message.type).lastIndexOf('user');
+              const deduplicatedMessages = layout === 'canvas' && !showEarlierMessages ? messages.slice(Math.max(0, lastUserIndex)).filter(message => message.type !== 'user') : messages;
 
               const filteredMessages = deduplicatedMessages.filter(message => {
                 // Run activity does not render in this chat: trace rows
@@ -1847,9 +1739,6 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
               return (
                 <>
                   {groupedMessages.map((item, index) => {
-                    // Skip the divider next to a run-activity card — it is a
-                    // self-contained bordered container, like in Chat mode.
-                    const nextIsTraceGroup = Array.isArray(groupedMessages[index + 1]);
                     if (Array.isArray(item)) {
                       // It's a group of trace messages. Key on the FIRST id
                       // only — including the last id would remount (and
@@ -1869,10 +1758,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                       // It's a regular message
                       return (
                         <React.Fragment key={item.id}>
-                          <ChatMessageItem message={item} onOpenLogs={onOpenLogs} />
-                          {index < groupedMessages.length - 1 && !nextIsTraceGroup && (
-                            <Divider component="li" sx={{ ml: 0 }} />
-                          )}
+                          <ChatMessageItem message={item} onOpenLogs={onOpenLogs} appearance="assistant-panel" dark={composerDark} />
                         </React.Fragment>
                       );
                     }
@@ -1884,12 +1770,26 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         )}
         <div ref={messagesEndRef} />
       </Box>
-
-      <Paper
-        elevation={3}
-        sx={{ p: 2, borderTop: 1, borderColor: 'divider', borderRadius: 0, flexShrink: 0 }}
-      >
-        <Box sx={{ position: 'relative' }}>
+  );
+  const composerContent = (
+<Box sx={{ display: showSessionList && layout !== 'canvas' ? 'none' : 'block', px: layout === 'canvas' ? 0 : 2.5, pt: layout === 'canvas' ? 0 : 0.5, pb: layout === 'canvas' || messages.length === 0 ? 0 : 2.5, flexShrink: 0, backgroundColor: 'transparent' }}>
+        <Paper
+          elevation={0}
+          data-testid="builder-composer"
+          sx={{
+            position: 'relative', p: 2, borderRadius: '24px',
+            backgroundColor: composerColors.surface, backgroundImage: 'none', color: composerColors.text,
+            boxShadow: composerDark
+              ? '0 2px 16px rgba(0,0,0,0.28), 0 0 0 1px rgba(255,255,255,0.06)'
+              : '0 4px 20px rgba(16,24,40,0.055), 0 0 0 1px rgba(16,24,40,0.065)',
+            transition: 'box-shadow 150ms ease',
+            '&:focus-within': {
+              boxShadow: composerDark
+                ? '0 0 0 2px rgba(160,170,180,0.30), 0 4px 18px rgba(0,0,0,0.28)'
+                : '0 0 0 2px rgba(90,104,114,0.16), 0 4px 18px rgba(16,24,40,0.08)',
+            },
+          }}
+        >
           {showSlashMenu && (
             <SlashCommandMenu
               commands={slashFilteredCommands}
@@ -1900,7 +1800,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
           <TextField
             inputRef={inputRef}
             fullWidth
-            variant="outlined"
+            variant="standard"
             placeholder={executingJobId ? "Execution in progress..." : "Describe what you want to create..."}
             value={inputValue}
             onChange={(e) => handleInputChange(e.target.value)}
@@ -1910,12 +1810,17 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
             }}
             disabled={isLoading || !!executingJobId}
             multiline
+            minRows={2}
             maxRows={6}
             size="small"
             sx={{
-              '& .MuiOutlinedInput-root': {
-                paddingRight: '210px',
-                borderRadius: 1,
+              '& .MuiInputBase-root': {
+                padding: 0,
+                alignItems: 'flex-start', color: composerColors.text,
+                backgroundColor: 'transparent', fontSize: '0.9375rem', lineHeight: 1.6,
+                '& fieldset': { border: 0 },
+                '& textarea::placeholder': { color: composerColors.muted, opacity: 1 },
+                '& textarea.Mui-disabled': { WebkitTextFillColor: composerColors.secondary },
               },
               '& .MuiInputBase-inputMultiline': {
                 overflowY: 'auto',
@@ -1927,137 +1832,121 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
                 },
               },
             }}
-            InputProps={{
-              endAdornment: (
-                <Box
-                  sx={{
-                    position: 'absolute',
-                    right: 8,
-                    bottom: 8,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 0.25,
-                    zIndex: 1,
-                    backgroundColor: 'background.paper',
-                    borderRadius: 1,
-                    padding: '2px 4px',
-                  }}
-                >
-                  {/* The composer's "+" — the ADD-FILES action plus the run
-                      settings that used to sit in the left sidebar. The
-                      attachment CHIPS stay below, rendered by the uploader
-                      itself: an attached file is state that goes out with the
-                      next message, so hiding it behind a menu is how people
-                      re-upload a file they already attached. */}
-                  <ChatInputPlusMenu
-                    onAddFiles={() => knowledgeUploadRef.current?.open()}
-                    models={models}
-                    selectedModel={selectedModel}
-                    disabled={isLoading || !!executingJobId}
-                    attachDisabled={
-                      !nodes.some(n => n.type === 'agentNode') ||
-                      !nodes.some(n => n.type === 'taskNode')
-                    }
-                    attachDisabledReason={
-                      !nodes.some(n => n.type === 'agentNode')
-                        ? 'Add at least one agent to the canvas before attaching files'
-                        : 'Add at least one task to the canvas before attaching files'
-                    }
-                  />
+            InputProps={{ disableUnderline: true }}
+            inputProps={{ 'aria-label': 'Message Kasal' }}
+          />
+          <Box
+            sx={{
+              position: 'relative',
+              width: '100%',
+              mt: 1,
+              minHeight: 32,
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              gap: 0.5,
+              backgroundColor: 'transparent',
+              '& .MuiIconButton-root': { color: composerColors.secondary },
+            }}
+          >
+            {/* The composer's "+" — the ADD-FILES action plus the run
+                settings that used to sit in the left sidebar. The
+                attachment CHIPS stay below, rendered by the uploader
+                itself: an attached file is state that goes out with the
+                next message, so hiding it behind a menu is how people
+                re-upload a file they already attached. */}
+            <ModeSwitcher />
 
-                  {/* Knowledge File Upload — trigger hidden (the "+" owns it),
-                      chips still rendered here. */}
-                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <KnowledgeFileUpload
-                      ref={knowledgeUploadRef}
-                      hideTrigger
-                      executionId={sessionId || 'default'}
-                      groupId={localStorage.getItem('groupId') || 'default'}
-                      hasAgents={nodes.some(n => n.type === 'agentNode')}
-                      hasTasks={nodes.some(n => n.type === 'taskNode')}
-                      // No Databricks-config gate: uploads embed into the
-                      // LOCAL knowledge store (SQLite, or Lakebase pgvector when
-                      // deployed) and the search reads the same table, so a
-                      // memory backend and a knowledge volume are not needed —
-                      // Chat mode calls this endpoint with no gate at all. The
-                      // agent/task conditions stay because the canvas WIRES the
-                      // uploaded file into an agent's knowledge sources and a
-                      // task's tool config; with neither there is nothing to
-                      // attach it to.
-                      disabled={
-                        isLoading ||
-                        !!executingJobId ||
-                        !nodes.some(n => n.type === 'agentNode') ||
-                        !nodes.some(n => n.type === 'taskNode')
-                      }
-                      onFilesUploaded={(files) => {
-                        console.log('Knowledge files uploaded:', files);
-                      }}
-                      onTasksUpdated={async (uploadedFilePath) => {
-                        console.log('[WorkflowChat] Updating task nodes with file path:', uploadedFilePath);
 
-                        // Find the agent connected to tasks (for agent_id in tool_configs)
-                        const agentNode = nodes.find(n => n.type === 'agentNode');
-                        const agentId = agentNode?.data?.agentId || agentNode?.id;
-                        console.log('[WorkflowChat] Found agent for access control:', agentId);
+            {/* Knowledge File Upload — trigger hidden (the "+" owns it),
+                chips still rendered here. */}
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <KnowledgeFileUpload
+                ref={knowledgeUploadRef}
+                hideTrigger
+                executionId={sessionId || 'default'}
+                groupId={localStorage.getItem('groupId') || 'default'}
+                hasAgents={nodes.some(n => n.type === 'agentNode')}
+                hasTasks={nodes.some(n => n.type === 'taskNode')}
+                // No Databricks-config gate: uploads embed into the
+                // LOCAL knowledge store (SQLite, or Lakebase pgvector when
+                // deployed) and the search reads the same table, so a
+                // memory backend and a knowledge volume are not needed —
+                // Chat mode calls this endpoint with no gate at all. The
+                // agent/task conditions stay because the canvas WIRES the
+                // uploaded file into an agent's knowledge sources and a
+                // task's tool config; with neither there is nothing to
+                // attach it to.
+                disabled={
+                  isLoading ||
+                  !!executingJobId ||
+                  !nodes.some(n => n.type === 'agentNode') ||
+                  !nodes.some(n => n.type === 'taskNode')
+                }
+                onFilesUploaded={(files) => {
+                  console.log('Knowledge files uploaded:', files);
+                }}
+                onTasksUpdated={async (uploadedFilePath) => {
+                  console.log('[WorkflowChat] Updating task nodes with file path:', uploadedFilePath);
 
-                        // Update all task nodes to include DatabricksKnowledgeSearchTool with file path in tool_configs
-                        const updatedNodes = nodes.map(node => {
-                          if (node.type === 'taskNode') {
-                            const currentTools = node.data.tools || [];
-                            const currentToolConfigs = node.data.tool_configs || {};
+                  // Find the agent connected to tasks (for agent_id in tool_configs)
+                  const agentNode = nodes.find(n => n.type === 'agentNode');
+                  const agentId = agentNode?.data?.agentId || agentNode?.id;
+                  console.log('[WorkflowChat] Found agent for access control:', agentId);
 
-                            // Add DatabricksKnowledgeSearchTool to tools array if not present
-                            const hasKnowledgeTool = currentTools.includes('DatabricksKnowledgeSearchTool') ||
-                                                      currentTools.includes('36');
-                            const updatedTools = hasKnowledgeTool ? currentTools : [...currentTools, 'DatabricksKnowledgeSearchTool'];
+                  // Update all task nodes to include DatabricksKnowledgeSearchTool with file path in tool_configs
+                  const updatedNodes = nodes.map(node => {
+                    if (node.type === 'taskNode') {
+                      const currentTools = node.data.tools || [];
+                      const currentToolConfigs = node.data.tool_configs || {};
 
-                            // Add file path AND agent_id to tool_configs for DatabricksKnowledgeSearchTool
-                            const existingFilePaths = currentToolConfigs.DatabricksKnowledgeSearchTool?.file_paths || [];
-                            const updatedToolConfigs = {
-                              ...currentToolConfigs,
-                              DatabricksKnowledgeSearchTool: {
-                                ...currentToolConfigs.DatabricksKnowledgeSearchTool,
-                                file_paths: existingFilePaths.includes(uploadedFilePath)
-                                  ? existingFilePaths
-                                  : [...existingFilePaths, uploadedFilePath],
-                                agent_id: agentId  // Add agent_id for access control filtering
-                              }
-                            };
+                      // Add DatabricksKnowledgeSearchTool to tools array if not present
+                      const hasKnowledgeTool = currentTools.includes('DatabricksKnowledgeSearchTool') ||
+                                                currentTools.includes('36');
+                      const updatedTools = hasKnowledgeTool ? currentTools : [...currentTools, 'DatabricksKnowledgeSearchTool'];
 
-                            console.log(`[WorkflowChat] Updated task ${node.data.label}:`, {
-                              tools: updatedTools,
-                              tool_configs: updatedToolConfigs
-                            });
+                      // Add file path AND agent_id to tool_configs for DatabricksKnowledgeSearchTool
+                      const existingFilePaths = currentToolConfigs.DatabricksKnowledgeSearchTool?.file_paths || [];
+                      const updatedToolConfigs = {
+                        ...currentToolConfigs,
+                        DatabricksKnowledgeSearchTool: {
+                          ...currentToolConfigs.DatabricksKnowledgeSearchTool,
+                          file_paths: existingFilePaths.includes(uploadedFilePath)
+                            ? existingFilePaths
+                            : [...existingFilePaths, uploadedFilePath],
+                          agent_id: agentId  // Add agent_id for access control filtering
+                        }
+                      };
 
-                            // Update the task in the backend
-                            if (node.data.taskId) {
-                              import('../../../api/workflow/TaskService').then(({ TaskService }) => {
-                                TaskService.updateTask(node.data.taskId, {
-                                  tools: updatedTools,
-                                  tool_configs: updatedToolConfigs
-                                }).catch(err => {
-                                  console.error(`Failed to update task ${node.data.taskId}:`, err);
-                                });
-                              });
-                            }
 
-                            return {
-                              ...node,
-                              data: {
-                                ...node.data,
-                                tools: updatedTools,
-                                tool_configs: updatedToolConfigs
-                              }
-                            };
-                          }
-                          return node;
+                      // Update the task in the backend
+                      if (node.data.taskId) {
+                        import('../../../api/workflow/TaskService').then(({ TaskService }) => {
+                          TaskService.updateTask(node.data.taskId, {
+                            tools: updatedTools,
+                            tool_configs: updatedToolConfigs
+                          }).catch(err => {
+                            console.error(`Failed to update task ${node.data.taskId}:`, err);
+                          });
                         });
+                      }
 
-                        setNodes(updatedNodes as FlowNode[]);
-                        console.log('[WorkflowChat] Task nodes updated successfully');
-                      }}
-                      onAgentsUpdated={(updatedAgents) => {
+                      return {
+                        ...node,
+                        data: {
+                          ...node.data,
+                          tools: updatedTools,
+                          tool_configs: updatedToolConfigs
+                        }
+                      };
+                    }
+                    return node;
+                  });
+
+                  setNodes(updatedNodes as FlowNode[]);
+                  console.log('[WorkflowChat] Task nodes updated successfully');
+                }}
+                onAgentsUpdated={(updatedAgents) => {
 
 
 
@@ -2065,223 +1954,187 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
 
 // Check if any agent has knowledge sources
-                        const hasKnowledgeSources = updatedAgents.some(agent =>
-                          agent.knowledge_sources && agent.knowledge_sources.length > 0
-                        );
+                  const hasKnowledgeSources = updatedAgents.some(agent =>
+                    agent.knowledge_sources && agent.knowledge_sources.length > 0
+                  );
 
-                        // Update the canvas nodes with the updated agent data
-                        const updatedNodes = nodes.map(node => {
-                          if (node.type === 'agentNode') {
-                            const updatedAgent = updatedAgents.find(a => {
-                              // Try multiple matching strategies
-                              const matches =
-                                a.id === node.data.agentId ||  // Match by agentId
-                                a.id === node.data.id ||        // Match by id
-                                (a.id && `agent-${a.id}` === node.id) ||  // Match by node.id pattern
-                                `agent-${a.name}` === node.id;  // Match by name pattern
+                  // Update the canvas nodes with the updated agent data
+                  const updatedNodes = nodes.map(node => {
+                    if (node.type === 'agentNode') {
+                      const updatedAgent = updatedAgents.find(a => {
+                        // Try multiple matching strategies
+                        const matches =
+                          a.id === node.data.agentId ||  // Match by agentId
+                          a.id === node.data.id ||        // Match by id
+                          (a.id && `agent-${a.id}` === node.id) ||  // Match by node.id pattern
+                          `agent-${a.name}` === node.id;  // Match by name pattern
 
-                              return matches;
-                            });
+                        return matches;
+                      });
 
-                            if (updatedAgent) {
-                              return {
-                                ...node,
-                                data: {
-                                  ...node.data,
-                                  ...updatedAgent,  // Update all agent fields
-                                  agentId: updatedAgent.id,  // Ensure agentId is set
-                                  tools: updatedAgent.tools,  // Explicitly set tools array
-                                  knowledge_sources: updatedAgent.knowledge_sources  // Explicitly set knowledge_sources
-                                }
-                              };
-                            }
-                          }
-
-                          // Update task nodes to add DatabricksKnowledgeSearchTool if knowledge sources exist
-                          if (node.type === 'taskNode' && hasKnowledgeSources) {
-                            const currentTools = node.data.tools || [];
-                            const hasKnowledgeTool = currentTools.includes('DatabricksKnowledgeSearchTool') ||
-                                                      currentTools.includes('36');
-
-                            // Add the tool if it doesn't exist
-                            if (!hasKnowledgeTool) {
-                              return {
-                                ...node,
-                                data: {
-                                  ...node.data,
-                                  tools: [...currentTools, 'DatabricksKnowledgeSearchTool']
-                                }
-                              };
-                            }
-                          }
-
-                          return node;
-                        });
-                        setNodes(updatedNodes as FlowNode[]);
-
-
-
-                      }}
-                      // Pass only agents that are currently on the canvas
-                      availableAgents={nodes
-                        .filter(node => node.type === 'agentNode')
-                        .map(node => {
-
-
-
-
-
-
-
-                          return {
+                      if (updatedAgent) {
+                        return {
+                          ...node,
+                          data: {
                             ...node.data,
-                            id: node.data.agentId || node.data.id  // Ensure we have an ID
-                          };
-                        })}
-                          compact={true}
-                        />
-                  </Box>
-                  {/* Model Selector */}
-                  {setSelectedModel && (
-                    <Box
-                      onClick={(e) => setModelMenuAnchor(e.currentTarget)}
-                      sx={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 0.25,
-                        cursor: 'pointer',
-                        padding: '2px 6px',
-                        borderRadius: 0.5,
-                        fontSize: '0.75rem',
-                        color: 'text.secondary',
-                        transition: 'all 0.2s',
-                        backgroundColor: 'rgba(255, 255, 255, 0.8)',
-                        maxWidth: '110px',
-                        '&:hover': {
-                          backgroundColor: 'action.hover',
-                          color: 'text.primary',
-                        },
-                      }}
-                    >
-                      <Typography
-                        variant="caption"
-                        sx={{
-                          fontSize: '0.75rem',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          maxWidth: '90px'
-                        }}
-                      >
-                        {modelLabels[selectedModel] || models[selectedModel]?.name || selectedModel}
-                      </Typography>
-                      <KeyboardArrowDownIcon sx={{ fontSize: 14 }} />
-                    </Box>
-                  )}
-                  <Menu
-                    anchorEl={modelMenuAnchor}
-                    open={Boolean(modelMenuAnchor)}
-                    onClose={() => setModelMenuAnchor(null)}
-                    anchorOrigin={{
-                      vertical: 'top',
-                      horizontal: 'right',
-                    }}
-                    transformOrigin={{
-                      vertical: 'bottom',
-                      horizontal: 'right',
-                    }}
-                    slotProps={{
-                      paper: {
-                        sx: {
-                          mt: -1,
-                          minWidth: 250,
-                          maxHeight: 400,
-                        },
-                      },
-                    }}
-                  >
-                    {isLoadingModels ? (
-                      <MenuItem disabled>
-                        <CircularProgress size={16} sx={{ mr: 1 }} />
-                        Loading models...
-                      </MenuItem>
-                    ) : Object.keys(models).length === 0 ? (
-                      <MenuItem disabled>No models available</MenuItem>
-                    ) : (
-                      Object.entries(models).map(([key, model]) => (
-                        <MenuItem
-                          key={key}
-                          onClick={() => {
-                            if (setSelectedModel) {
-                              setSelectedModel(key);
-                            }
-                            setModelMenuAnchor(null);
-                          }}
-                          selected={key === selectedModel}
-                          sx={{
-                            fontSize: '0.813rem',
-                            py: 0.75,
-                            '&.Mui-selected': {
-                              backgroundColor: 'action.selected',
-                            },
-                          }}
-                        >
-                          <Box sx={{ width: '100%' }}>
-                            <Typography variant="body2" sx={{ fontSize: '0.813rem' }}>
-                              {modelLabels[key] || model.name}
-                            </Typography>
-                            {model.provider && (
-                              <Typography
-                                variant="caption"
-                                sx={{
-                                  fontSize: '0.688rem',
-                                  color: 'text.secondary',
-                                  display: 'block',
-                                }}
-                              >
-                                {model.provider}
-                              </Typography>
-                            )}
-                          </Box>
-                        </MenuItem>
-                      ))
-                    )}
-                  </Menu>
-                  {/* Send button - on same level as model selector */}
-                  <IconButton
-                    color="primary"
-                    onClick={handleSendMessage}
-                    disabled={isActionDisabled}
-                    size="small"
-                    sx={{
-                      padding: '4px',
-                      backgroundColor: 'primary.main',
-                      color: 'primary.contrastText',
-                      borderRadius: '50%',
-                      width: 24,
-                      height: 24,
-                      minWidth: 24,
-                      '&:hover': {
-                        backgroundColor: 'primary.dark',
-                      },
-                      '&.Mui-disabled': {
-                        backgroundColor: 'action.disabledBackground',
-                        color: 'action.disabled',
-                      },
-                    }}
-                  >
-                    {isLoading || executingJobId ? (
-                      <CircularProgress size={14} sx={{ color: 'inherit' }} />
-                    ) : (
-                      <ArrowUpwardIcon sx={{ fontSize: 14 }} />
-                    )}
-                  </IconButton>
-                </Box>
-              ),
-            }}
+                            ...updatedAgent,  // Update all agent fields
+                            agentId: updatedAgent.id,  // Ensure agentId is set
+                            tools: updatedAgent.tools,  // Explicitly set tools array
+                            knowledge_sources: updatedAgent.knowledge_sources  // Explicitly set knowledge_sources
+                          }
+                        };
+                      }
+                    }
+
+                    // Update task nodes to add DatabricksKnowledgeSearchTool if knowledge sources exist
+                    if (node.type === 'taskNode' && hasKnowledgeSources) {
+                      const currentTools = node.data.tools || [];
+                      const hasKnowledgeTool = currentTools.includes('DatabricksKnowledgeSearchTool') ||
+                                                currentTools.includes('36');
+
+                      // Add the tool if it doesn't exist
+                      if (!hasKnowledgeTool) {
+                        return {
+                          ...node,
+                          data: {
+                            ...node.data,
+                            tools: [...currentTools, 'DatabricksKnowledgeSearchTool']
+                          }
+                        };
+                      }
+                    }
+
+                    return node;
+                  });
+                  setNodes(updatedNodes as FlowNode[]);
+
+
+
+                }}
+                // Pass only agents that are currently on the canvas
+                availableAgents={nodes
+                  .filter(node => node.type === 'agentNode')
+                  .map(node => {
+
+
+
+
+
+
+
+                    return {
+                      ...node.data,
+                      id: node.data.agentId || node.data.id  // Ensure we have an ID
+                    };
+                  })}
+                    compact={true}
+                  />
+            </Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, ml: 'auto' }}>
+            <Tooltip title="Improve this prompt with AI"><span>
+              <IconButton aria-label="Improve prompt" disabled={!canImprove} onClick={handleImprovePrompt} sx={{ width: 32, height: 32, borderRadius: '12px', bgcolor: 'background.subtle', color: 'text.secondary' }}>
+                {isImproving ? <CircularProgress size={14} color="inherit" /> : <Sparkles size={16} strokeWidth={1.7} />}
+              </IconButton>
+            </span></Tooltip>
+            <ChatInputPlusMenu
+              onAddFiles={() => knowledgeUploadRef.current?.open()}
+              models={models}
+              selectedModel={selectedModel}
+              onModelChange={setSelectedModel}
+              modelLabels={modelLabels}
+              loadingModels={isLoadingModels}
+              disabled={isLoading || !!executingJobId}
+              attachDisabled={
+                !nodes.some(n => n.type === 'agentNode') ||
+                !nodes.some(n => n.type === 'taskNode')
+              }
+              attachDisabledReason={
+                !nodes.some(n => n.type === 'agentNode')
+                  ? 'Add at least one agent to the canvas before attaching files'
+                  : 'Add at least one task to the canvas before attaching files'
+              }
+            />
+            {/* Send beside the settings menu */}
+            <IconButton
+              aria-label="Send message"
+              onClick={handleSendMessage}
+              disabled={isActionDisabled}
+              size="small"
+              sx={{
+                padding: '4px',
+                backgroundColor: composerColors.hover,
+                '&&': { color: composerColors.secondary },
+                borderRadius: '12px',
+                width: 32,
+                height: 32,
+                minWidth: 32,
+                '&:hover': {
+                  backgroundColor: composerDark ? '#333C45' : '#E7EBF2',
+                },
+                '&&.Mui-disabled': {
+                  backgroundColor: composerColors.hover,
+                  color: composerColors.muted,
+                },
+              }}
+            >
+              {isLoading || executingJobId ? (
+                <CircularProgress size={14} sx={{ color: 'inherit' }} />
+              ) : (
+                <ArrowUpwardIcon sx={{ fontSize: 18 }} />
+              )}
+            </IconButton>
+            </Box>
+          </Box>
+        </Paper>
+      </Box>
+  );
+  if (layout === 'canvas') return <>
+    <CanvasAssistantLayout composer={composerContent} response={responseContent}
+      responseKey={messages[messages.length - 1]?.id} hasMessages={messages.length > 0} busy={isLoading || !!executingJobId} dark={composerDark}
+      onNewChat={handleNewConversation}
+      showEarlier={showEarlierMessages} onToggleEarlier={() => setShowEarlierMessages(value => !value)} onHide={onToggleCollapse} />
+    <HtmlPreviewDialog />
+  </>;
+
+  return (
+    <Box
+      sx={{
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        position: 'relative',
+        overflowX: 'hidden',
+        overflowY: messages.length === 0 && !showSessionList ? 'auto' : 'hidden',
+        backgroundColor: composerDark ? '#1B1F23' : '#FFFFFF',
+        color: composerColors.text,
+        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        maxWidth: '100%',
+        width: '100%',
+      }}>
+      {!showSessionList && (
+        <BuilderAssistantHeader
+          sessionName={currentSessionName}
+          side={chatPanelSide}
+          dark={composerDark}
+          onNewChat={handleNewConversation}
+          onHistory={() => { setShowSessionList(true); loadChatSessions(); }}
+          onMove={() => setChatPanelSide(chatPanelSide === 'right' ? 'left' : 'right')}
+          onCollapse={onToggleCollapse}
+        />
+      )}
+
+      {historyContent}
+      {responseContent}
+      {composerContent}
+      {messages.length === 0 && !showSessionList && (
+        <Box sx={{ flexShrink: 0, mb: 'auto' }}>
+          <BuilderAssistantStarters
+            dark={composerDark}
+            disabled={isLoading || !!executingJobId}
+            onPrompt={prompt => { handleInputChange(prompt); inputRef.current?.focus(); }}
           />
         </Box>
-      </Paper>
+      )}
       <HtmlPreviewDialog />
     </Box>
   );

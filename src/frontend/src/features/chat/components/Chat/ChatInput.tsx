@@ -9,6 +9,7 @@ import HeldConversationPill from './HeldConversationPill';
 import { forgetKnowledgeFile, uploadKnowledgeFile } from '../../api/knowledge';
 import { improveChatPrompt } from '../../api/prompt';
 import ComposerMenu from './ComposerMenu';
+import ModeSwitcher from '../../../../app/workspace/ModeSwitcher';
 import TrifectaNotice from './TrifectaNotice';
 import SharedWorkspaceNotice from './SharedWorkspaceNotice';
 import { useExecutionStore } from '../../store/executionStore';
@@ -798,10 +799,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
           </div>
         )}
 
-        {/* Bottom row — controls + attach + send, all right-aligned */}
-        <div className="flex items-center justify-end px-4 py-2.5">
+        {/* Bottom row — workspace selector beside the prompt controls */}
+        <div className="flex items-center justify-between flex-wrap gap-2 px-4 py-2.5">
+          <ModeSwitcher placement={menuPlacement} />
           {/* mode + memory + model selector + attach + send */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 ml-auto">
             {/* Improve prompt — rewrites the typed request with prompt-
                 engineering best practices before sending. */}
             <button

@@ -1,20 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useId } from 'react';
 import {
   Box,
-  IconButton,
+  Button,
   Menu,
   MenuItem,
   ListItemIcon,
   ListItemText,
   Typography,
+  useTheme,
 } from '@mui/material';
-import {
-  GridViewRounded as GridIcon,
-  SmartToy as CrewIcon,
-  AccountTree as FlowModeIcon,
-  ChatBubbleOutline as ChatIcon,
-  Check as CheckIcon,
-} from '@mui/icons-material';
+import { ChevronDown, Bot, Workflow, MessageCircle, Check } from 'lucide-react';
 import { usePermissionStore } from '../../store/permissions';
 import { useUILayoutStore, AppMode } from '../../store/uiLayout';
 import { useFlowConfigStore } from '../../store/flowConfig';
@@ -27,21 +22,10 @@ interface ModeOption {
   icon: React.ReactNode;
 }
 
-/**
- * Top-level workspace mode switcher. Lives at the right-most side of the TabBar
- * (just before the workspace/group selector). A single grid-icon button opens a
- * menu to switch the whole app between the Crew, Flow, and Chat workspaces.
- */
-// Kasal's brand accent (chat.css --accent), used ONLY while chat mode is
-// active — in chat the MUI blue reads as a foreign product, and on the
-// builder canvases the reverse is true (the canvases are MUI-themed, so the
-// menus keep their original primary colors there). CSS vars can't reach
-// here (outside #kasal-chat-root).
-const KASAL_ACCENT = '#FF3621';
-const KASAL_ACCENT_SOFT = 'rgba(255, 54, 33, 0.08)';
-const KASAL_ACCENT_SOFT_HOVER = 'rgba(255, 54, 33, 0.12)';
-
-const ModeSwitcher: React.FC = () => {
+/** Shared workspace selector beside the composer controls. */
+const ModeSwitcher: React.FC<{ placement?: 'up' | 'down' }> = ({ placement = 'up' }) => {
+  const id = useId();
+  const dark = useTheme().palette.mode === 'dark';
   const appMode = useUILayoutStore((s) => s.appMode);
   const setAppMode = useUILayoutStore((s) => s.setAppMode);
   const { kasalFlowEnabled } = useFlowConfigStore();
@@ -54,19 +38,19 @@ const ModeSwitcher: React.FC = () => {
       mode: 'crew',
       label: 'Agent Builder',
       description: 'Design and run agent crews',
-      icon: <CrewIcon fontSize="small" />,
+      icon: <Bot size={17} strokeWidth={1.7} />,
     },
     {
       mode: 'flow',
       label: 'Flow Builder',
       description: 'Build multi-crew workflows',
-      icon: <FlowModeIcon fontSize="small" />,
+      icon: <Workflow size={17} strokeWidth={1.7} />,
     },
     {
       mode: 'chat',
       label: 'Chat',
       description: 'Converse with Kasal',
-      icon: <ChatIcon fontSize="small" />,
+      icon: <MessageCircle size={17} strokeWidth={1.7} />,
     },
   ];
 
@@ -88,11 +72,9 @@ const ModeSwitcher: React.FC = () => {
   );
 
   const activeOption = options.find((o) => o.mode === appMode) || options[0];
-  // Chat follows the Kasal accent; the builder canvases keep MUI primary.
-  const isChat = appMode === 'chat';
-  const accent = isChat ? KASAL_ACCENT : 'primary.main';
-  const accentSoft = isChat ? KASAL_ACCENT_SOFT : 'action.selected';
-  const accentSoftHover = isChat ? KASAL_ACCENT_SOFT_HOVER : 'action.selected';
+  const accent = 'text.primary';
+  const accentSoft = 'action.selected';
+  const accentSoftHover = 'action.hover';
 
   const handleOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -118,59 +100,59 @@ const ModeSwitcher: React.FC = () => {
 
   return (
     <>
-      <IconButton
-          id="mode-switcher-button"
-          aria-controls={open ? 'mode-switcher-menu' : undefined}
-          aria-haspopup="true"
-          aria-expanded={open ? 'true' : undefined}
-          onClick={handleOpen}
-          size="small"
-          aria-label={`Workspace mode: ${activeOption.label}`}
-          sx={{
-            ml: 0.5,
-            p: 0.75,
-            borderRadius: 2,
-            color: open ? accent : 'text.secondary',
-            backgroundColor: open ? accentSoft : 'transparent',
-            transition: 'all 0.2s ease',
-            '&:hover': {
-              backgroundColor: 'action.hover',
-              color: 'text.primary',
-            },
-          }}
-        >
-          <GridIcon fontSize="small" />
-        </IconButton>
+      <Button
+        id={`${id}-button`}
+        aria-controls={open ? `${id}-menu` : undefined}
+        aria-haspopup="menu"
+        aria-expanded={open ? 'true' : undefined}
+        onClick={handleOpen}
+        size="small"
+        color="inherit"
+        aria-label={`Workspace mode: ${activeOption.label}`}
+        startIcon={activeOption.icon}
+        endIcon={<ChevronDown size={14} strokeWidth={1.7} style={{ transform: open ? 'rotate(180deg)' : undefined, transition: 'transform 150ms' }} />}
+        disableRipple
+        style={{ padding: '0 10px', height: 32, fontSize: 12, lineHeight: 1, borderRadius: 12, color: dark ? '#C4CDD5' : '#586570', backgroundColor: dark ? '#232930' : '#F5F7FA', border: 'none' }}
+        sx={{
+          minWidth: 0, flexShrink: 0, px: 1, py: 0.5, borderRadius: 2,
+          fontSize: 12, fontWeight: 500, lineHeight: 1.6, textTransform: 'none',
+          color: 'text.secondary', bgcolor: open ? 'action.selected' : 'transparent',
+          '& .MuiButton-startIcon': { mr: 0.75, '& > *': { fontSize: 16 } },
+          '& .MuiButton-endIcon': { ml: 0.5 },
+          '&:hover': { bgcolor: 'action.hover', color: 'text.primary' },
+        }}
+      >
+        {activeOption.label}
+      </Button>
 
       <Menu
-        id="mode-switcher-menu"
+        id={`${id}-menu`}
         anchorEl={anchorEl}
         open={open}
         onClose={handleClose}
         disableScrollLock
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+        anchorOrigin={{ vertical: placement === 'up' ? 'top' : 'bottom', horizontal: 'left' }}
+        transformOrigin={{ vertical: placement === 'up' ? 'bottom' : 'top', horizontal: 'left' }}
         slotProps={{
           paper: {
             elevation: 0,
             sx: {
-              minWidth: 250,
-              mt: 1,
-              borderRadius: 3,
-              border: '1px solid',
-              borderColor: 'divider',
-              boxShadow: '0 12px 32px rgba(16,24,40,0.10), 0 2px 8px rgba(16,24,40,0.06)',
+              width: 284, maxWidth: 'calc(100vw - 24px)',
+              ...(placement === 'up' ? { mt: -1 } : { mt: 1 }),
+              borderRadius: '16px',
+              border: 'none',
+              boxShadow: dark ? '0 8px 32px rgba(0,0,0,.3)' : '0 8px 32px rgba(16,24,40,.12), 0 2px 6px rgba(16,24,40,.04)',
             },
           },
         }}
-        MenuListProps={{ 'aria-labelledby': 'mode-switcher-button', sx: { py: 0.75 } }}
+        MenuListProps={{ 'aria-labelledby': `${id}-button`, sx: { py: 0.75 } }}
       >
         <Box sx={{ px: 2, pt: 1, pb: 0.5 }}>
           <Typography
-            sx={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}
+            sx={{ fontSize: 11, fontWeight: 500 }}
             color="text.secondary"
           >
-            Switch Mode
+            Switch mode
           </Typography>
         </Box>
         {visibleOptions.map((option) => {
@@ -181,11 +163,12 @@ const ModeSwitcher: React.FC = () => {
               onClick={() => handleSelect(option.mode)}
               selected={isSelected}
               sx={{
-                minHeight: 50,
-                mx: 0.75,
-                px: 1.5,
+                minHeight: 58,
+                mx: 0,
+                px: 1.25,
                 py: 1,
-                borderRadius: 2,
+                borderRadius: '11px',
+                gap: 1.25,
                 '&.Mui-selected': {
                   backgroundColor: accentSoft,
                   '&:hover': { backgroundColor: accentSoftHover },
@@ -193,24 +176,24 @@ const ModeSwitcher: React.FC = () => {
               }}
             >
               <ListItemIcon
-                sx={{ minWidth: 36, color: isSelected ? accent : 'text.secondary' }}
+                sx={{ minWidth: '32px !important', width: 32, height: 32, borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'action.hover', color: isSelected ? accent : 'text.secondary' }}
               >
                 {option.icon}
               </ListItemIcon>
               <ListItemText
                 primary={
-                  <Typography variant="body2" sx={{ fontWeight: isSelected ? 600 : 400 }}>
+                  <Typography variant="body2" sx={{ fontSize: 13, fontWeight: isSelected ? 600 : 500 }}>
                     {option.label}
                   </Typography>
                 }
                 secondary={
-                  <Typography variant="caption" color="text.secondary">
+                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: 11, lineHeight: 1.5 }}>
                     {option.description}
                   </Typography>
                 }
                 sx={{ my: 0 }}
               />
-              {isSelected && <CheckIcon fontSize="small" sx={{ color: accent, ml: 1 }} />}
+              {isSelected && <Check size={15} strokeWidth={2} style={{ flexShrink: 0 }} />}
             </MenuItem>
           );
         })}

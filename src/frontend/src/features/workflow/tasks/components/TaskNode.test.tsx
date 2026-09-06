@@ -174,7 +174,7 @@ describe('TaskNode', () => {
       expect(text).toBeInTheDocument();
       // Check truncation styles are applied
       expect(text).toHaveStyle({ overflow: 'hidden' });
-      expect(text).toHaveStyle({ whiteSpace: 'nowrap' });
+      expect(text).toHaveStyle({ WebkitLineClamp: '2' });
     });
 
     it('should show full name in tooltip', () => {

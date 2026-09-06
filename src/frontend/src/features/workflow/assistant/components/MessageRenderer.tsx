@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link } from '@mui/material';
+import { Box, Link } from '@mui/material';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -62,9 +62,32 @@ export const renderWithLinks = (text: string) => {
 
 interface MessageContentProps {
   content: string;
+  uniformTypography?: boolean;
 }
 
-export const MessageContent: React.FC<MessageContentProps> = ({ content }) => {
+// Keep builder prose consistent across paragraphs, lists and plain-text messages.
+// Scope this to text so generated UI and code retain their own typography.
+export const MessageContent: React.FC<MessageContentProps> = ({ content, uniformTypography = false }) => {
+  const rendered = <RenderedMessageContent content={content} />;
+  if (!uniformTypography) return rendered;
+  return (
+    <Box className="builder-message-prose" sx={{
+      fontFamily: 'inherit', fontSize: 14, fontWeight: 400, lineHeight: 1.6,
+      '& p, & ul, & ol, & li, & blockquote, & a, & strong, & em': {
+        fontFamily: 'inherit', fontSize: 'inherit', lineHeight: 'inherit',
+      },
+      '& h1, & h2, & h3, & h4, & h5, & h6': {
+        fontFamily: 'inherit', fontSize: 'inherit', lineHeight: 'inherit',
+        fontWeight: 600, mt: 1.5, mb: 0.5,
+      },
+      '& strong': { fontWeight: 600 },
+    }}>
+      {rendered}
+    </Box>
+  );
+};
+
+const RenderedMessageContent: React.FC<{ content: string }> = ({ content }) => {
   // Check if content is markdown
   if (isMarkdown(content)) {
     return (

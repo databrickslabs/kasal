@@ -17,6 +17,8 @@ import ScheduleLibrary from './components/ScheduleLibrary';
 import CollapsedRail from './components/CollapsedRail';
 import PreviewPanel from './components/Preview/PreviewPanel';
 import PreviewSkeleton, { shouldShowPreviewSkeleton } from './components/Preview/PreviewSkeleton';
+import GroupSelector from '../groups/components/GroupSelector';
+import ThemeModeIcon from '../../components/ThemeModeIcon';
 import { useThemeStore } from '../../store/theme';
 import ChatMcpDialog from './components/Chat/ChatMcpDialog';
 import './chat.css';
@@ -575,34 +577,21 @@ const ChatWorkspace: React.FC = () => {
             })}
           </div>
 
-          {/* Sidebar footer — dark-mode toggle, pinned at the bottom. A divider +
-              padding above it leaves clear space between the scrolling session
-              list and the toggle. */}
+          {/* Keep teamspace directly below the theme toggle, matching the collapsed rail. */}
           <div
-            className="flex-shrink-0 px-2 pt-2 pb-3 mt-1"
-            style={{ borderTop: '1px solid var(--border-color)' }}
+            className="flex-shrink-0 flex flex-col items-start gap-1 px-2 pt-2 pb-3 mt-1"
           >
             <button
-              onClick={() => useAppStore.getState().toggleTheme()}
+              onClick={() => { void useThemeStore.getState().toggleTheme(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors hover:bg-[var(--bg-rail-hover)]"
-              style={{ color: 'var(--text-secondary)' }}
+              style={{ color: 'var(--text-secondary)', padding: '8px 10px' }}
               title={chatThemeIsDark ? 'Switch to light mode' : 'Switch to dark mode'}
               aria-label={chatThemeIsDark ? 'Switch to light mode' : 'Switch to dark mode'}
             >
-              {chatThemeIsDark ? (
-                // Sun — currently dark, click for light
-                <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                  <circle cx="12" cy="12" r="4" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32l1.41-1.41" />
-                </svg>
-              ) : (
-                // Moon — currently light, click for dark
-                <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-                </svg>
-              )}
+              <ThemeModeIcon dark={chatThemeIsDark} />
               {chatThemeIsDark ? 'Light mode' : 'Dark mode'}
             </button>
+            <GroupSelector showLabel />
           </div>
 
           {/* Context menu */}

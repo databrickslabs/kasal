@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { BaseEdge, EdgeProps, getSmoothStepPath, EdgeText } from 'reactflow';
-import { Dialog, DialogContent } from '@mui/material';
+import { Dialog, DialogContent, useTheme } from '@mui/material';
 import { EdgeStateForm } from '../../flows/components/index';
 import { getEdgeStyle, getEdgeLabel, edgeColors } from '../../../../config/edgeConfig';
 import { useRunStatusStore } from '../../../../store/runStatus';
@@ -48,6 +48,7 @@ const AnimatedEdge: React.FC<ExtendedEdgeProps> = ({
     offset: 12,
   });
 
+  const theme = useTheme();
   // Check if both source and target are flow nodes
   const isFlowEdge = source?.includes('flow') && target?.includes('flow');
 
@@ -158,12 +159,12 @@ const AnimatedEdge: React.FC<ExtendedEdgeProps> = ({
               y={labelY}
               label={label}
               labelStyle={{
-                fill: isFlowEdge ? '#9c27b0' : '#2196f3',
+                fill: theme.palette.text.primary,
                 fontSize: '12px',
                 fontWeight: 600,
               }}
               labelBgStyle={{
-                fill: 'white',
+                fill: theme.palette.background.paper,
                 fillOpacity: 0.8,
               }}
               labelBgPadding={[2, 4]}

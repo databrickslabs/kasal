@@ -191,7 +191,7 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
           id="top"
           isConnectable={isConnectable}
           style={{
-            background: '#2196f3',
+            background: '#77838D',
             width: '7px',
             height: '7px',
             opacity: layoutOrientation === 'vertical' ? 1 : 0,
@@ -206,7 +206,7 @@ const CrewNode: React.FC<NodeProps<CrewNodeData>> = ({ data, selected, id, isCon
           id="left"
           isConnectable={isConnectable}
           style={{
-            background: '#2196f3',
+            background: '#77838D',
             width: '7px',
             height: '7px',
             opacity: layoutOrientation === 'horizontal' ? 1 : 0,

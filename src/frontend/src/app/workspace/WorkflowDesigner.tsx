@@ -13,6 +13,7 @@ import {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Box, Snackbar, Alert, Dialog, DialogContent, Menu, Button, DialogTitle, IconButton, Typography, Drawer, SpeedDial, SpeedDialAction, SpeedDialIcon } from '@mui/material';
+import { PanelsTopLeft } from 'lucide-react';
 import ChatIcon from '@mui/icons-material/Chat';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import HistoryIcon from '@mui/icons-material/History';
@@ -20,6 +21,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import { useWorkflowStore } from '../../store/workflow';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { getThemeOptions } from '../../theme/theme';
+import { kasalStageSurface } from '../../theme/kasalSurfaces';
 import { useAppStore as useChatAppStore } from '../../features/chat/store/appStore';
 import { usePermissionStore } from '../../store/permissions';
 import SidebarToggle from '../../features/chat/SidebarToggle';
@@ -31,8 +33,6 @@ import { useTabManagerStore } from '../../store/tabManager';
 import { useTabSync } from '../../hooks/workflow/useTabSync';
 import { useTabExecutionSync } from '../../hooks/workflow/useTabExecutionSync';
 import { useRunStatusStore } from '../../store/runStatus';
-import { useChatPanelResize } from '../../hooks/workflow/useChatPanelResize';
-import { useExecutionHistoryResize } from '../../hooks/workflow/useExecutionHistoryResize';
 import { useResponsiveLayout } from '../../hooks/workflow/useResponsiveLayout';
 
 import { v4 as _uuidv4 } from 'uuid';
@@ -47,10 +47,10 @@ import CloseIcon from '@mui/icons-material/Close';
 import { InputVariablesDialog } from '../../features/executions/components/InputVariablesDialog';
 import WorkflowPanels from './WorkflowPanels';
 import TabBar from './TabBar';
+import ModeSwitcher from './ModeSwitcher';
 import ChatPanel from '../../features/workflow/assistant/ChatPanel';
 import RightSidebar from './RightSidebar';
 import LeftSidebar from './LeftSidebar';
-import GroupSelector from '../../features/groups/components/GroupSelector';
 import ChatWorkspace from '../../features/chat/ChatWorkspace';
 import { useUILayoutStore } from '../../store/uiLayout';
 import { useUIFitView } from '../../hooks/workflow/useUIFitView';
@@ -312,22 +312,20 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   // UI Layout store
   const {
     updateScreenDimensions,
-    setChatPanelWidth,
-    setChatPanelCollapsed,
     setChatPanelVisible,
-    setExecutionHistoryHeight,
     setExecutionHistoryVisible,
     setPanelPosition: setUIStorePanelPosition,
     setAreFlowsVisible: setUIStoreAreFlowsVisible,
-    chatPanelWidth,
-    chatPanelCollapsedWidth,
-    chatPanelCollapsed: isChatCollapsed,
-    chatPanelSide,
     leftSidebarBaseWidth,
     rightSidebarWidth,
     executionHistoryHeight,
     chatPanelVisible: showChatPanel,
     executionHistoryVisible: showRunHistory,
+    assistantPanelVisible,
+    assistantPanelSide,
+    setAssistantPanelVisible,
+    assistantResponseFocused,
+    setAssistantResponseFocused,
     panelPosition,
     areFlowsVisible,
     appMode,
@@ -383,9 +381,9 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   // Responsive layout — computed overrides, never mutates the store
   const { isCompact, isMobile } = useResponsiveLayout();
   const effectiveChatVisible = showChatPanel; // Always respect user toggle
-  const effectiveChatCollapsed = (isCompact || isMobile) ? true : isChatCollapsed; // Force-collapse on compact & mobile
-  const effectiveChatWidth = effectiveChatCollapsed ? chatPanelCollapsedWidth : chatPanelWidth;
-  const effectiveLeftMargin = leftSidebarBaseWidth; // Always reserve sidebar space
+  const responseFocused = assistantResponseFocused && assistantPanelVisible && showRunHistory && !areFlowsVisible;
+  const responseMainWidth = (window.innerWidth - leftSidebarBaseWidth - rightSidebarWidth) * 0.62;
+  const effectiveLeftMargin = leftSidebarBaseWidth + (responseFocused && !isCompact ? responseMainWidth : 0); // Always reserve sidebar space
 
   // Use the panel manager
   const {
@@ -434,9 +432,14 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
 
   // Toggle execution history function
+  React.useEffect(() => {
+    const id = requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('recalculateNodePositions', { detail: { reason: 'execution-history-resize' } })));
+    return () => cancelAnimationFrame(id);
+  }, [showRunHistory, assistantPanelVisible, assistantPanelSide, responseFocused]);
+
   const toggleExecutionHistory = React.useCallback(() => {
-    setExecutionHistoryVisible(!showRunHistory);
-  }, [showRunHistory, setExecutionHistoryVisible]);
+    setExecutionHistoryVisible(!(showRunHistory && !assistantPanelVisible));
+  }, [showRunHistory, setExecutionHistoryVisible, assistantPanelVisible]);
 
   // Auto-open execution history when crew is executed
   React.useEffect(() => {
@@ -490,9 +493,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   React.useEffect(() => {
     if (appMode === 'chat') setChatEverOpened(true);
   }, [appMode]);
-  const [mobileChatDrawerOpen, setMobileChatDrawerOpen] = React.useState(false);
-  const [hasManuallyResized, setHasManuallyResized] = React.useState(false);
-  const [executionCount, setExecutionCount] = React.useState(0);
 
   // Execution logs dialog state
   const [showExecutionLogsDialog, setShowExecutionLogsDialog] = React.useState(false);
@@ -503,9 +503,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   const [lastViewedJobId, setLastViewedJobId] = React.useState<string | null>(null);
   const [runningTabId, setRunningTabId] = React.useState<string | null>(null);
 
-  // Chat panel resize handlers (cap max width on compact screens)
-  const chatMaxWidthOverride = isCompact ? Math.min(400, window.innerWidth * 0.4) : undefined;
-  const { handleResizeStart } = useChatPanelResize(setChatPanelWidth, chatMaxWidthOverride);
 
   // Update screen dimensions in store on window resize
   React.useEffect(() => {
@@ -520,40 +517,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     return () => window.removeEventListener('resize', handleResize);
   }, [updateScreenDimensions]);
 
-  // Execution history resize handlers (cap max height on compact screens)
-  const historyMaxHeightOverride = isCompact ? Math.min(300, window.innerHeight * 0.4) : undefined;
-  const { handleHistoryResizeStart } = useExecutionHistoryResize(
-    setExecutionHistoryHeight,
-    setHasManuallyResized,
-    historyMaxHeightOverride
-  );
-
-  // Auto-adjust execution history height based on execution count
-  React.useEffect(() => {
-    if (!hasManuallyResized && showRunHistory) {
-      // Calculate height based on execution count
-      // Header ~40px, each row ~32px, pagination ~40px, padding ~20px
-      const baseHeight = 40 + 40 + 20; // Header + pagination + padding
-      const rowHeight = 32;
-      const maxRows = 4; // Maximum 4 rows before scrolling
-
-      if (executionCount === 0) {
-        // Just header with "no executions" message
-        setExecutionHistoryHeight(baseHeight + rowHeight);
-      } else {
-        // Show up to 4 rows
-        const visibleRows = Math.min(executionCount, maxRows);
-        setExecutionHistoryHeight(baseHeight + (visibleRows * rowHeight));
-      }
-
-      // Trigger viewport recalculation after height adjustment
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('recalculateNodePositions', {
-          detail: { reason: 'execution-history-resize' }
-        }));
-      }, 100);
-    }
-  }, [executionCount, hasManuallyResized, showRunHistory, setExecutionHistoryHeight]);
 
   // Use crew execution store
   const {
@@ -1200,7 +1163,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         width: '100%',
         height: '100vh', // Set full viewport height
         position: 'relative',
-        // Remove background - let body/app background show through
+        // Continue the canvas surface behind the rounded sidebar corners and gaps.
+        ...(!isChatMode ? kasalStageSurface(isDarkMode) : {}),
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden' // Prevent scrolling
@@ -1256,112 +1220,10 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           flexDirection: 'row',
           overflow: 'hidden',
           position: 'relative',
+          marginRight: showRunHistory && !responseFocused && !isCompact ? '268px' : 0,
+          marginTop: responseFocused && isCompact ? '55vh' : 0,
           marginLeft: `${effectiveLeftMargin}px` // Push entire content area to the right of LeftSidebar
         }}>
-          {/* Chat Panel on Left (when positioned left) - Hidden when flow panel is visible */}
-          {effectiveChatVisible && chatPanelSide === 'left' && !areFlowsVisible && (
-            <Box
-              onMouseEnter={() => {
-                window.postMessage({ type: 'chat-hover-state', isHovering: true }, window.location.origin);
-              }}
-              onMouseLeave={() => {
-                window.postMessage({ type: 'chat-hover-state', isHovering: false }, window.location.origin);
-              }}
-              sx={{
-                width: effectiveChatCollapsed ? `${chatPanelCollapsedWidth}px` : `${effectiveChatWidth}px`,
-                height: showRunHistory ? `calc(100% - ${executionHistoryHeight}px)` : '100%',
-                display: 'flex',
-                flexDirection: 'row',
-                overflow: 'hidden',
-                backgroundColor: 'background.paper',
-                borderRight: 1,
-                borderColor: 'divider',
-                zIndex: 15, // Higher than LeftSidebar (10) to ensure collapsed chat is visible
-                transition: effectiveChatCollapsed ? 'width 0.3s ease-in-out' : 'none',
-              }}>
-              {/* Chat Content */}
-              <Box sx={{ flex: 1, overflow: 'hidden' }}>
-                <ChatPanel
-                  chatSide={chatPanelSide}
-                  onNodesGenerated={(newNodes, newEdges) => {
-                    handleNodesGenerated(newNodes, newEdges, setNodes, setEdges);
-                  }}
-                  onLoadingStateChange={setIsChatProcessing}
-                  isVisible={showChatPanel}
-                  nodes={nodes}
-                  edges={edges}
-                  onExecuteCrew={() => {
-                    // Set current tab as running when executing from chat
-                    const activeTab = getActiveTab();
-                    if (activeTab) {
-                      setRunningTabId(activeTab.id);
-                      updateTabExecutionStatus(activeTab.id, 'running');
-
-                      // Clear any existing timeout
-                      if (runningTabTimeoutRef.current) {
-                        clearTimeout(runningTabTimeoutRef.current);
-                      }
-
-                      // Set a safety timeout to clear running state after 5 minutes
-                      const tabIdToTimeout = activeTab.id; // Capture the tab ID
-                      runningTabTimeoutRef.current = setTimeout(() => {
-                        setRunningTabId((currentRunningTabId) => {
-                          if (currentRunningTabId === tabIdToTimeout) {
-                            return null;
-                          }
-                          return currentRunningTabId;
-                        });
-                        updateTabExecutionStatus(tabIdToTimeout, 'completed');
-                      }, 5 * 60 * 1000); // 5 minutes
-                    }
-                    // Make sure nodes are synced to the execution store
-                    setCrewExecutionNodes(nodes);
-                    setCrewExecutionEdges(edges);
-                    // Small delay to ensure state is updated
-                    setTimeout(() => {
-                      handleRunClick('crew');
-                    }, 100);
-                  }}
-                  isCollapsed={effectiveChatCollapsed}
-                  onToggleCollapse={() => {
-                    if (isMobile || isCompact) {
-                      // On small screens, open full-screen drawer instead of expanding inline
-                      setMobileChatDrawerOpen(true);
-                    } else {
-                      setChatPanelCollapsed(!isChatCollapsed);
-                      // Trigger node repositioning when toggling collapse
-                      setTimeout(() => {
-                        const event = new CustomEvent('recalculateNodePositions', {
-                          detail: { reason: 'chat-panel-toggle' }
-                        });
-                        window.dispatchEvent(event);
-                      }, 350); // Wait for animation to complete
-                    }
-                  }}
-                  chatSessionId={getActiveTab()?.chatSessionId}
-                  onOpenLogs={handleShowExecutionLogs}
-                />
-              </Box>
-              {/* Resize Handle - on the right side when chat is on left */}
-              {!effectiveChatCollapsed && (
-                <Box
-                  onMouseDown={handleResizeStart}
-                  sx={{
-                    width: 4,
-                    height: '100%',
-                    backgroundColor: 'divider',
-                    cursor: 'ew-resize',
-                    '&:hover': {
-                      backgroundColor: 'primary.main',
-                    },
-                    transition: 'background-color 0.2s ease',
-                    zIndex: 7,
-                  }}
-                />
-              )}
-            </Box>
-          )}
-
           {/* Main content area with WorkflowPanels */}
           <Box sx={{
             flex: 1,
@@ -1372,7 +1234,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           }}>
             <WorkflowPanels
               areFlowsVisible={areFlowsVisible}
-              showRunHistory={showRunHistory}
+              showRunHistory={false}
               executionHistoryHeight={executionHistoryHeight}
               panelPosition={panelPosition}
               isDraggingPanel={isDraggingPanel}
@@ -1474,109 +1336,55 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               }}
             />
 
-            {/* Chat Panel on Right (when positioned right) - Hidden when flow panel is visible */}
-            {effectiveChatVisible && chatPanelSide === 'right' && !areFlowsVisible && (
-              <Box
-                onMouseEnter={() => {
-                  window.postMessage({ type: 'chat-hover-state', isHovering: true }, window.location.origin);
-                }}
-                onMouseLeave={() => {
-                  window.postMessage({ type: 'chat-hover-state', isHovering: false }, window.location.origin);
-                }}
-                sx={{
-                  position: 'absolute',
-                  top: 0,
-                  right: rightSidebarWidth,
-                  bottom: showRunHistory ? `${executionHistoryHeight}px` : 0,
-                  width: effectiveChatCollapsed ? `${chatPanelCollapsedWidth}px` : `${effectiveChatWidth}px`,
-                  display: 'flex',
-                  flexDirection: 'row',
-                  overflow: 'hidden',
-                  backgroundColor: 'background.paper',
-                  zIndex: 10,
-                  transition: effectiveChatCollapsed ? 'width 0.3s ease-in-out' : 'none',
-                }}>
-                {/* Resize Handle */}
-                {!effectiveChatCollapsed && (
-                  <Box
-                    onMouseDown={handleResizeStart}
-                    sx={{
-                      width: 4,
-                      height: '100%',
-                      backgroundColor: 'divider',
-                      cursor: 'ew-resize',
-                      '&:hover': {
-                        backgroundColor: 'primary.main',
-                      },
-                      transition: 'background-color 0.2s ease',
-                      zIndex: 7,
-                    }}
-                  />
-                )}
-
-                {/* Chat Panel Content */}
-                <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                  <ChatPanel
-                    onNodesGenerated={(newNodes, newEdges) => {
-                      handleNodesGenerated(newNodes, newEdges, setNodes, setEdges);
-                    }}
-                    onLoadingStateChange={setIsChatProcessing}
-                    isVisible={showChatPanel}
-                    nodes={nodes}
-                    edges={edges}
-                    onExecuteCrew={() => {
-                      // Set current tab as running when executing from chat
-                      const activeTab = getActiveTab();
-                      if (activeTab) {
-                        setRunningTabId(activeTab.id);
-                        updateTabExecutionStatus(activeTab.id, 'running');
-
-                        // Clear any existing timeout
-                        if (runningTabTimeoutRef.current) {
-                          clearTimeout(runningTabTimeoutRef.current);
-                        }
-
-                        // Set a safety timeout to clear running state after 5 minutes
-                        const tabIdToTimeout = activeTab.id; // Capture the tab ID
-                        runningTabTimeoutRef.current = setTimeout(() => {
-                          setRunningTabId((currentRunningTabId) => {
-                            if (currentRunningTabId === tabIdToTimeout) {
-                              return null;
-                            }
-                            return currentRunningTabId;
-                          });
-                          updateTabExecutionStatus(tabIdToTimeout, 'completed');
-                        }, 5 * 60 * 1000); // 5 minutes
-                      }
-                      // Make sure nodes are synced to the execution store
-                      setCrewExecutionNodes(nodes);
-                      setCrewExecutionEdges(edges);
-                      // Small delay to ensure state is updated
-                      setTimeout(() => {
-                        handleRunClick('crew');
-                      }, 100);
-                    }}
-                    isCollapsed={effectiveChatCollapsed}
-                    onToggleCollapse={() => {
-                      if (isMobile || isCompact) {
-                        // On small screens, open full-screen drawer instead of expanding inline
-                        setMobileChatDrawerOpen(true);
-                      } else {
-                        setChatPanelCollapsed(!isChatCollapsed);
-                        // Trigger node repositioning when toggling collapse
-                        setTimeout(() => {
-                          const event = new CustomEvent('recalculateNodePositions', {
-                            detail: { reason: 'chat-panel-toggle' }
-                          });
-                          window.dispatchEvent(event);
-                        }, 350); // Wait for animation to complete
-                      }
-                    }}
-                    chatSessionId={getActiveTab()?.chatSessionId}
-                    onOpenLogs={handleShowExecutionLogs}
-                    chatSide={chatPanelSide}
-                  />
+            {/* Keep workspace navigation available in flow mode and with the composer hidden. */}
+            {(areFlowsVisible || !effectiveChatVisible) && (
+              <Box sx={{ position: 'absolute', left: 12, right: rightSidebarWidth + 12, bottom: isMobile ? 76 : 12, zIndex: 10, display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
+                <Box sx={{ pointerEvents: 'auto', display: 'flex', alignItems: 'center', gap: 1, p: 0.75, borderRadius: 3, bgcolor: 'background.paper' }}>
+                  <ModeSwitcher />
+                  {!areFlowsVisible && <Button color="inherit" size="small" onClick={() => setChatPanelVisible(true)} sx={{ fontSize: 12 }}>Show input</Button>}
                 </Box>
+              </Box>
+            )}
+
+            {effectiveChatVisible && !areFlowsVisible && (
+              <Box sx={{ position: 'absolute', top: 0, left: 12, right: rightSidebarWidth + 12, bottom: isMobile ? 76 : 12, zIndex: 10, pointerEvents: 'none' }}>
+                <ChatPanel layout="canvas"
+                  onNodesGenerated={(newNodes, newEdges) => { handleNodesGenerated(newNodes, newEdges, setNodes, setEdges); }}
+                  onLoadingStateChange={setIsChatProcessing} isVisible={showChatPanel} nodes={nodes} edges={edges}
+                  onExecuteCrew={() => {
+                    // Set current tab as running when executing from chat
+                    const activeTab = getActiveTab();
+                    if (activeTab) {
+                      setRunningTabId(activeTab.id);
+                      updateTabExecutionStatus(activeTab.id, 'running');
+
+                      // Clear any existing timeout
+                      if (runningTabTimeoutRef.current) {
+                        clearTimeout(runningTabTimeoutRef.current);
+                      }
+
+                      // Set a safety timeout to clear running state after 5 minutes
+                      const tabIdToTimeout = activeTab.id; // Capture the tab ID
+                      runningTabTimeoutRef.current = setTimeout(() => {
+                        setRunningTabId((currentRunningTabId) => {
+                          if (currentRunningTabId === tabIdToTimeout) {
+                            return null;
+                          }
+                          return currentRunningTabId;
+                        });
+                        updateTabExecutionStatus(tabIdToTimeout, 'completed');
+                      }, 5 * 60 * 1000); // 5 minutes
+                    }
+                    // Make sure nodes are synced to the execution store
+                    setCrewExecutionNodes(nodes);
+                    setCrewExecutionEdges(edges);
+                    // Small delay to ensure state is updated
+                    setTimeout(() => {
+                      handleRunClick('crew');
+                    }, 100);
+                  }}
+                  onToggleCollapse={() => setChatPanelVisible(false)}
+                  chatSessionId={getActiveTab()?.chatSessionId} onOpenLogs={handleShowExecutionLogs} />
               </Box>
             )}
           </Box>
@@ -1584,56 +1392,20 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         )}
 
 
-        {/* Jobs Panel with Run History and Kasal - Overlay on canvas */}
+        {/* Job history and responses share the same narrow, movable sidebar. */}
         {!isChatMode && showRunHistory && (
-          <Box sx={{
-            position: 'absolute',
-            bottom: 0,
-            left: 0,
-            right: 0,
-            height: `${executionHistoryHeight}px`, // Dynamic height
-            backgroundColor: isDarkMode ? 'rgba(26, 26, 26, 0.95)' : 'rgba(255, 255, 255, 0.95)', // Semi-transparent background
-            backdropFilter: 'blur(8px)', // Glass effect
-            display: 'flex',
-            flexDirection: 'column',
-            borderTop: 1,
-            borderColor: 'divider',
-            zIndex: 8, // Above canvas but below chat panel
-            // Don't extend under chat panel - let chat panel overlap
-          }}>
-            {/* Resize Handle */}
-            <Box
-              onMouseDown={handleHistoryResizeStart}
-              sx={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                height: 4,
-                backgroundColor: 'divider',
-                cursor: 'ns-resize',
-                '&:hover': {
-                  backgroundColor: 'primary.main',
-                },
-                transition: 'background-color 0.2s ease',
-                zIndex: 7,
-              }}
-            />
+          <Drawer anchor={responseFocused ? 'left' : 'right'} variant={isCompact && !responseFocused ? 'temporary' : 'persistent'} open onClose={() => setExecutionHistoryVisible(false)}
+            PaperProps={{ sx: { ...(responseFocused ? { left: 56 } : { right: isCompact ? 8 : 56 }), top: 56, bottom: 8, height: 'auto', width: responseFocused ? (isCompact ? 'calc(100vw - 112px)' : responseMainWidth - 16) : isCompact ? 'min(320px, calc(100vw - 16px))' : 260, ...(responseFocused && isCompact ? { bottom: 'auto', height: 'calc(55vh - 16px)' } : {}), border: 0, borderRadius: '20px', overflow: 'hidden', boxShadow: 'none' } }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, px: 1, pt: 1.5, pb: 1, flexShrink: 0 }}>
+              <Button color="inherit" size="small" aria-pressed={!assistantPanelVisible} onClick={() => setExecutionHistoryVisible(true)} sx={{ fontSize: 12, minWidth: 0, px: 1, borderRadius: 2, bgcolor: !assistantPanelVisible ? 'action.selected' : 'transparent' }}>Runs</Button>
+              <Button color="inherit" size="small" aria-pressed={assistantPanelVisible} onClick={() => setAssistantPanelVisible(true)} sx={{ fontSize: 12, minWidth: 0, px: 1, borderRadius: 2, bgcolor: assistantPanelVisible ? 'action.selected' : 'transparent' }}>Responses</Button>
+              {!areFlowsVisible && <IconButton aria-label={responseFocused ? 'Focus canvas' : 'Focus responses'} title={responseFocused ? 'Focus canvas' : 'Focus responses'} size="small" onClick={() => setAssistantResponseFocused(!responseFocused)} sx={{ ml: 'auto' }}><PanelsTopLeft size={16} /></IconButton>}
 
-            {/* Jobs Panel Content */}
-            <Box sx={{
-              flex: 1,
-              paddingTop: '4px', // Space for resize handle
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column'
-            }}>
-              <JobsPanel
-                executionHistoryHeight={executionHistoryHeight}
-                onExecutionCountChange={setExecutionCount}
-              />
+              <IconButton aria-label="Close workspace panel" size="small" onClick={() => setExecutionHistoryVisible(false)}><CloseIcon sx={{ fontSize: 17 }} /></IconButton>
             </Box>
-          </Box>
+            <Box sx={{ flex: 1, minHeight: 0, display: assistantPanelVisible ? 'none' : 'block' }}><JobsPanel /></Box>
+            <Box id="builder-assistant-response-host" sx={{ flex: 1, minHeight: 0, display: assistantPanelVisible ? 'flex' : 'none', flexDirection: 'column' }} />
+          </Drawer>
         )}
 
         {/* Dialogs */}
@@ -1867,6 +1639,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         {/* Right Sidebar — hidden in chat mode */}
         {!isChatMode && (
         <RightSidebar
+            showWorkspaceActions
             onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
             onToggleChat={() => setChatPanelVisible(!showChatPanel)}
             isChatOpen={showChatPanel}
@@ -1904,7 +1677,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                 window.dispatchEvent(new CustomEvent('openSaveFlowDialog'));
               }
             }}
-            showRunHistory={showRunHistory}
+            showRunHistory={false}
             executionHistoryHeight={executionHistoryHeight}
             onOpenSchedulesDialog={() => {
               // Open schedule dialog
@@ -1913,7 +1686,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             onOpenTriggersDialog={() => {
               dialogManager.setTriggersDialogOpen(true);
             }}
-            onToggleExecutionHistory={toggleExecutionHistory}
             areFlowsVisible={areFlowsVisible}
             toggleFlowsVisibility={toggleFlowsVisibility}
             hasCrewNodes={nodes.some(node => node.type === 'agentNode' || node.type === 'taskNode' || node.type === 'managerNode')}
@@ -1973,76 +1745,13 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             setIsConfigurationDialogOpen={dialogManager.setIsConfigurationDialogOpen}
             onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
             showRunHistory={showRunHistory}
+            onToggleExecutionHistory={toggleExecutionHistory}
             executionHistoryHeight={executionHistoryHeight}
             onOpenTutorial={() => {
               console.log('[WorkflowDesigner] Opening tutorial from LeftSidebar');
               dialogManager.setIsTutorialOpen(true);
             }}
           />
-        )}
-
-        {/* Workspace Selector - Upper Right Corner. Span the TabBar height and
-            center vertically so it lines up with the mode switcher to its left. */}
-        <Box
-          sx={{
-            position: 'fixed',
-            top: 0,
-            height: isMobile ? '40px' : '48px',
-            right: isMobile ? '8px' : '20px',
-            zIndex: 1002, // Above everything else
-            display: 'flex',
-            alignItems: 'center'
-          }}
-        >
-          {themeStrip(<GroupSelector />)}
-        </Box>
-
-        {/* Full-screen chat drawer (opens on mobile/compact when tapping collapsed chat) */}
-        {(isMobile || isCompact) && (
-          <Drawer
-            anchor="right"
-            open={mobileChatDrawerOpen}
-            onClose={() => setMobileChatDrawerOpen(false)}
-            sx={{ '& .MuiDrawer-paper': { width: isMobile ? '100vw' : '80vw', maxWidth: 600 } }}
-          >
-            <ChatPanel
-              chatSide="right"
-              onNodesGenerated={(newNodes, newEdges) => {
-                handleNodesGenerated(newNodes, newEdges, setNodes, setEdges);
-              }}
-              onLoadingStateChange={setIsChatProcessing}
-              isVisible={true}
-              nodes={nodes}
-              edges={edges}
-              onExecuteCrew={() => {
-                const activeTab = getActiveTab();
-                if (activeTab) {
-                  setRunningTabId(activeTab.id);
-                  updateTabExecutionStatus(activeTab.id, 'running');
-                  if (runningTabTimeoutRef.current) {
-                    clearTimeout(runningTabTimeoutRef.current);
-                  }
-                  const tabIdToTimeout = activeTab.id;
-                  runningTabTimeoutRef.current = setTimeout(() => {
-                    setRunningTabId((currentRunningTabId) => {
-                      if (currentRunningTabId === tabIdToTimeout) return null;
-                      return currentRunningTabId;
-                    });
-                    updateTabExecutionStatus(tabIdToTimeout, 'completed');
-                  }, 5 * 60 * 1000);
-                }
-                setCrewExecutionNodes(nodes);
-                setCrewExecutionEdges(edges);
-                setTimeout(() => {
-                  handleRunClick('crew');
-                }, 100);
-              }}
-              isCollapsed={false}
-              onToggleCollapse={() => setMobileChatDrawerOpen(false)}
-              chatSessionId={getActiveTab()?.chatSessionId}
-              onOpenLogs={handleShowExecutionLogs}
-            />
-          </Drawer>
         )}
 
         {/* Mobile: SpeedDial for quick actions */}
@@ -2052,7 +1761,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             sx={{ position: 'fixed', bottom: 16, right: 16, zIndex: 1100 }}
             icon={<SpeedDialIcon />}
           >
-            <SpeedDialAction icon={<ChatIcon />} tooltipTitle="Chat" onClick={() => setMobileChatDrawerOpen(true)} />
+            <SpeedDialAction icon={<ChatIcon />} tooltipTitle="Chat" onClick={() => setChatPanelVisible(true)} />
             <SpeedDialAction icon={<PlayArrowIcon />} tooltipTitle="Run" onClick={() => handleRunClick('crew')} />
             <SpeedDialAction icon={<HistoryIcon />} tooltipTitle="History" onClick={toggleExecutionHistory} />
             <SpeedDialAction icon={<SettingsIcon />} tooltipTitle="Settings" onClick={() => dialogManager.setIsConfigurationDialogOpen(true)} />

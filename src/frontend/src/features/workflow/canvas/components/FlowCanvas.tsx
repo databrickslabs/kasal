@@ -1,3 +1,4 @@
+import { kasalStageSurface } from '../../../../theme/kasalSurfaces';
 import React, { useCallback, useRef, useState, memo, useEffect, useLayoutEffect } from 'react';
 import ReactFlow, {
   Background,
@@ -771,7 +772,7 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
         display: 'flex',
         flexDirection: 'row',
         position: 'relative',
-        backgroundColor: isDarkMode ? '#1a1a1a' : '#f5f5f5',
+        ...kasalStageSurface(isDarkMode),
       }}
     >
       {/* Crew Palette - Left Sidebar */}
@@ -781,15 +782,15 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
           sx={{
             width: '250px',
             height: showRunHistory ? `calc(100% - ${executionHistoryHeight}px)` : '100%',
-            borderRight: `1px solid ${isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
-            backgroundColor: isDarkMode ? '#2a2a2a' : '#ffffff',
+            borderRight: 0,
+            backgroundColor: isDarkMode ? '#232930' : '#ffffff',
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden'
           }}
         >
           {/* Header */}
-          <Box sx={{ p: 2, borderBottom: `1px solid ${isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}` }}>
+          <Box sx={{ p: 2, borderBottom: 0 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
               <Typography variant="h6" sx={{ fontSize: '1rem', fontWeight: 600 }}>
                 Available Crews
@@ -895,7 +896,7 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
             snapToGrid={true}
             minZoom={0.1}
             maxZoom={4}
-            style={{ background: isDarkMode ? '#1a1a1a' : '#f5f5f5' }}
+            style={{ background: 'transparent' }}
           >
             <Background
               color={isDarkMode ? '#333' : '#aaa'}

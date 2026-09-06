@@ -1,4 +1,4 @@
-import { tasksByAgent } from './canvasGraphIndexes';
+import { layoutAgentTaskGroups } from './layoutAgentTaskGroups';
 import type { Node } from 'reactflow';
 import type { UILayoutState } from '../../../../types/ui/layout';
 
@@ -122,7 +122,7 @@ export class CanvasLayoutManager {
   getAvailableCanvasArea(canvasType: 'crew' | 'flow' | 'full' = 'full'): CanvasArea {
     // Start with full screen
     let availableX = 0;
-    const availableY = this.uiState.tabBarHeight; // Account for tab bar
+    let availableY = this.uiState.tabBarHeight; // Account for tab bar
     let availableWidth = this.uiState.screenWidth;
     let availableHeight = this.uiState.screenHeight - this.uiState.tabBarHeight;
 
@@ -140,22 +140,25 @@ export class CanvasLayoutManager {
       availableWidth -= this.uiState.rightSidebarWidth;
     }
 
-    // Subtract chat panel (overlay from the configured side)
-    if (this.uiState.chatPanelVisible) {
-      const chatWidth = this.uiState.chatPanelCollapsed
-        ? this.uiState.chatPanelCollapsedWidth
-        : this.uiState.chatPanelWidth;
-      // Reduce available width regardless of side
-      availableWidth -= chatWidth;
-      // If docked on the left, also shift the available X start position
-      if (this.uiState.chatPanelSide === 'left') {
-        availableX += chatWidth;
+    const responseFocused = this.uiState.assistantResponseFocused && this.uiState.assistantPanelVisible && this.uiState.executionHistoryVisible && !this.uiState.areFlowsVisible;
+    if (responseFocused) {
+      if (this.uiState.screenWidth >= 900) {
+        availableX += availableWidth * 0.62;
+        availableWidth *= 0.38;
+      } else {
+        availableY += this.uiState.screenHeight * 0.55;
+        availableHeight -= this.uiState.screenHeight * 0.55;
       }
     }
+    // The composer moves into the main response area in focus view.
+    if (!responseFocused && this.uiState.chatPanelVisible && !this.uiState.areFlowsVisible) {
+      availableHeight -= this.uiState.assistantDockHeight ?? 128;
+    }
 
-    // Subtract execution history (overlay from the bottom)
-    if (this.uiState.executionHistoryVisible) {
-      availableHeight -= this.uiState.executionHistoryHeight;
+    // Runs and responses share one narrow sidebar; never reserve two columns.
+    if (!responseFocused && this.uiState.executionHistoryVisible && this.uiState.screenWidth >= 900) {
+      availableWidth -= 268;
+      if (this.uiState.assistantPanelSide === 'left') availableX += 268;
     }
 
     // Handle panel splits for dual canvas mode
@@ -181,350 +184,57 @@ export class CanvasLayoutManager {
     return finalArea;
   }
 
-  /**
-   * Get optimal position for a new agent node
-   */
+  /** Append individual nodes below their peers without moving the existing canvas. */
   getAgentNodePosition(existingNodes: Node[], canvasType: 'crew' | 'flow' | 'full' = 'crew'): { x: number; y: number } {
-    const availableArea = this.getAvailableCanvasArea(canvasType);
-    const agentNodes = existingNodes.filter(node => node.type === 'agentNode');
-    const taskNodes = existingNodes.filter(node => node.type === 'taskNode');
-    const nodeDims = CanvasLayoutManager.NODE_DIMENSIONS.agentNode;
-    const isNarrow = availableArea.width < 600;
-    const spacing = isNarrow ? Math.max(20, this.minNodeSpacing / 2) : this.minNodeSpacing;
-
-    if (agentNodes.length === 0) {
-      // First agent - position in top-left of available area with proper margin
-      return {
-        x: availableArea.x + spacing,
-        y: availableArea.y + spacing
-      };
-    }
-
-    // Get current layout orientation from UI state
-    // ALWAYS respect the layout orientation, even on narrow screens
-    const currentLayout = this.uiState?.layoutOrientation || 'horizontal';
-
-    // Only perform layout detection if there are 2+ agents
-    // With just 1 agent, we can't determine the actual layout, so use the configured layout
-    let effectiveLayout = currentLayout;
-
-    if (agentNodes.length >= 2) {
-      // Check if existing agents are properly aligned for the current layout
-      const agentYPositions = agentNodes.map(n => n.position.y);
-      const agentXPositions = agentNodes.map(n => n.position.x);
-      const yVariance = Math.max(...agentYPositions) - Math.min(...agentYPositions);
-      const xVariance = Math.max(...agentXPositions) - Math.min(...agentXPositions);
-
-      // In vertical layout, agents should have similar Y (low variance) and different X (high variance)
-      // In horizontal layout, agents should have similar X (low variance) and different Y (high variance)
-      // Use stricter thresholds: X variance < 10 for horizontal (agents in same column)
-      // Y variance < 10 for vertical (agents in same row)
-      const isProperlyAlignedForVertical = yVariance < 10 && xVariance > 150;
-      const isProperlyAlignedForHorizontal = xVariance < 10 && yVariance > 150;
-
-      console.log('[CanvasLayoutManager] getAgentNodePosition - Layout Analysis:', {
-        currentLayout,
-        existingAgents: agentNodes.length,
-        existingTasks: taskNodes.length,
-        yVariance,
-        xVariance,
-        isProperlyAlignedForVertical,
-        isProperlyAlignedForHorizontal,
-        agentPositions: agentNodes.map(n => ({ id: n.id.substring(0, 20), x: Math.round(n.position.x), y: Math.round(n.position.y) })),
-        taskPositions: taskNodes.map(n => ({ id: n.id.substring(0, 20), x: Math.round(n.position.x), y: Math.round(n.position.y) }))
-      });
-
-      // Detect if we need to adapt to the actual layout vs the configured layout
-      // If agents are misaligned for the current layout, position based on actual layout
-      const useActualLayout = currentLayout === 'vertical' ? !isProperlyAlignedForVertical : !isProperlyAlignedForHorizontal;
-
-      // Determine effective layout: use actual layout if misaligned, otherwise use configured layout
-      effectiveLayout = useActualLayout
-        ? (isProperlyAlignedForHorizontal ? 'horizontal' : 'vertical')
-        : currentLayout;
-
-      console.log('[CanvasLayoutManager] Layout Decision:', {
-        configuredLayout: currentLayout,
-        effectiveLayout,
-        useActualLayout,
-        reason: useActualLayout
-          ? `Agents are misaligned for ${currentLayout} layout (yVar=${yVariance}, xVar=${xVariance}). Using ${effectiveLayout} layout instead.`
-          : `Agents are properly aligned for ${currentLayout} layout.`
-      });
-    } else {
-      console.log('[CanvasLayoutManager] Layout Decision:', {
-        configuredLayout: currentLayout,
-        effectiveLayout,
-        reason: 'Only 1 agent exists, using configured layout.'
-      });
-    }
-
-    if (effectiveLayout === 'vertical') {
-      // Vertical layout: agents in a row at the top, tasks below
-      // Place new agent to the right of existing agents (same Y, increasing X)
-
-      // Sort agents by X position to find the rightmost one
-      const sortedAgents = [...agentNodes].sort((a, b) => a.position.x - b.position.x);
-      const rightmostAgent = sortedAgents[sortedAgents.length - 1];
-
-      // Get the Y position - use the minimum Y among all agents to ensure alignment at the top row
-      // Round to nearest integer to avoid floating point precision issues
-      const minAgentY = Math.min(...agentNodes.map(n => n.position.y));
-      const agentRowY = Math.round(minAgentY);
-
-      // Calculate X position to the right of the rightmost agent
-      // Use larger spacing in vertical layout to accommodate wider tasks (220px) under agents (200px)
-      // Need at least taskWidth + gap between task columns
-      const taskDims = CanvasLayoutManager.NODE_DIMENSIONS.taskNode;
-      const verticalAgentSpacing = Math.max(spacing, taskDims.width + 80); // Task width + 80px gap
-      const newX = rightmostAgent.position.x + nodeDims.width + verticalAgentSpacing;
-
-      const newPosition = {
-        x: Math.round(newX),
-        y: agentRowY
-      };
-
-      console.log('[CanvasLayoutManager] ✅ Vertical Layout - New Agent Position:', {
-        rightmostAgent: { x: rightmostAgent.position.x, y: rightmostAgent.position.y },
-        agentWidth: nodeDims.width,
-        taskWidth: taskDims.width,
-        verticalAgentSpacing,
-        minAgentY,
-        agentRowY,
-        newPosition,
-        allAgents: agentNodes.map(n => ({ id: n.id.substring(0, 20), x: Math.round(n.position.x), y: Math.round(n.position.y) }))
-      });
-      return newPosition;
-    } else {
-      // Horizontal layout: agents in left column, tasks in right column
-      // ALWAYS place new agent underneath existing agents (same X, increasing Y)
-      // Simple rule: stack agents vertically, no exceptions
-
-      // Find the bottommost agent
-      const maxAgentY = Math.max(...agentNodes.map(n => n.position.y));
-      const bottommostAgent = agentNodes.find(n => n.position.y === maxAgentY);
-
-      // Get the X position from existing agents (they should all be at the same X in horizontal mode)
-      const agentColumnX = bottommostAgent?.position.x || availableArea.x + spacing;
-
-      // Calculate new Y position below the bottommost agent
-      // Simple: just add height + spacing, no complex logic
-      const newY = maxAgentY + nodeDims.height + spacing;
-
-      const newPosition = {
-        x: Math.round(agentColumnX),
-        y: Math.round(newY)
-      };
-
-      console.log('[CanvasLayoutManager] ✅ Horizontal Layout - New Agent Position:', {
-        bottommostAgent: { x: Math.round(bottommostAgent?.position.x || 0), y: Math.round(maxAgentY) },
-        agentColumnX: Math.round(agentColumnX),
-        newY: Math.round(newY),
-        newPosition,
-        allAgents: agentNodes.map(n => ({ id: n.id.substring(0, 20), x: Math.round(n.position.x), y: Math.round(n.position.y) }))
-      });
-      return newPosition;
-    }
+    return this.getAppendedNodePosition(existingNodes, 'agentNode', canvasType);
   }
 
-  /**
-   * Get optimal position for a new task node
-   * Tasks are distributed under agents in a round-robin fashion:
-   * - 1st task goes under 1st agent
-   * - 2nd task goes under 2nd agent
-   * - 3rd task goes under 3rd agent
-   * - 4th task goes under 1st agent (below existing tasks)
-   * etc.
-   */
   getTaskNodePosition(existingNodes: Node[], canvasType: 'crew' | 'flow' | 'full' = 'crew'): { x: number; y: number } {
-    const availableArea = this.getAvailableCanvasArea(canvasType);
-    const taskNodes = existingNodes.filter(node => node.type === 'taskNode');
-    const agentNodes = existingNodes.filter(node => node.type === 'agentNode');
-    const agentDims = CanvasLayoutManager.NODE_DIMENSIONS.agentNode;
-    const taskDims = CanvasLayoutManager.NODE_DIMENSIONS.taskNode;
-    const isNarrow = availableArea.width < 600;
-    const spacing = isNarrow ? Math.max(20, this.minNodeSpacing / 2) : this.minNodeSpacing;
+    return this.getAppendedNodePosition(existingNodes, 'taskNode', canvasType);
+  }
 
-    // Get current layout orientation from UI state
-    const currentLayout = this.uiState?.layoutOrientation || 'horizontal';
-
-    // Only perform layout detection if there are 2+ agents
-    let effectiveLayout = currentLayout;
-
-    if (agentNodes.length >= 2) {
-      // Check if existing agents are properly aligned for the current layout
-      const agentYPositions = agentNodes.map(n => n.position.y);
-      const agentXPositions = agentNodes.map(n => n.position.x);
-      const yVariance = Math.max(...agentYPositions) - Math.min(...agentYPositions);
-      const xVariance = Math.max(...agentXPositions) - Math.min(...agentXPositions);
-
-      const isProperlyAlignedForVertical = yVariance < 10 && xVariance > 150;
-      const isProperlyAlignedForHorizontal = xVariance < 10 && yVariance > 150;
-
-      // Detect if we need to adapt to the actual layout vs the configured layout
-      const useActualLayout = currentLayout === 'vertical' ? !isProperlyAlignedForVertical : !isProperlyAlignedForHorizontal;
-
-      // Determine effective layout
-      effectiveLayout = useActualLayout
-        ? (isProperlyAlignedForHorizontal ? 'horizontal' : 'vertical')
-        : currentLayout;
-
-      console.log('[CanvasLayoutManager] getTaskNodePosition:', {
-        currentLayout,
-        effectiveLayout,
-        useActualLayout,
-        existingAgents: agentNodes.length,
-        existingTasks: taskNodes.length,
-        yVariance,
-        xVariance,
-        agentPositions: agentNodes.map(n => ({ id: n.id.substring(0, 20), x: Math.round(n.position.x), y: Math.round(n.position.y) })),
-        taskPositions: taskNodes.map(n => ({ id: n.id.substring(0, 20), x: Math.round(n.position.x), y: Math.round(n.position.y) }))
-      });
-    } else {
-      console.log('[CanvasLayoutManager] getTaskNodePosition:', {
-        currentLayout,
-        effectiveLayout,
-        existingAgents: agentNodes.length,
-        existingTasks: taskNodes.length,
-        reason: agentNodes.length === 0 ? 'No agents' : 'Only 1 agent, using configured layout',
-        agentPositions: agentNodes.map(n => ({ id: n.id.substring(0, 20), x: Math.round(n.position.x), y: Math.round(n.position.y) })),
-        taskPositions: taskNodes.map(n => ({ id: n.id.substring(0, 20), x: Math.round(n.position.x), y: Math.round(n.position.y) }))
-      });
-    }
-
-    if (agentNodes.length === 0) {
-      // No agents, position task in default location
-      return {
-        x: availableArea.x + spacing,
-        y: availableArea.y + spacing
-      };
-    }
-
-    // Sort agents by position (left to right in vertical, top to bottom in horizontal)
-    const sortedAgents = [...agentNodes].sort((a, b) => {
-      if (effectiveLayout === 'vertical') {
-        // In vertical layout, agents are in a row (sort by X)
-        return a.position.x - b.position.x;
-      } else {
-        // In horizontal layout, agents are in a column (sort by Y)
-        return a.position.y - b.position.y;
-      }
+  private getAppendedNodePosition(existingNodes: Node[], type: 'agentNode' | 'taskNode', canvasType: 'crew' | 'flow' | 'full'): { x: number; y: number } {
+    const area = this.getAvailableCanvasArea(canvasType);
+    const gap = Math.max(40, this.minNodeSpacing);
+    // Measured dimensions are in canvas coordinates (unaffected by zoom).
+    // Conservative fallbacks cover wrapped titles before React Flow measures a node.
+    const defaults = { agentNode: { width: 200, height: 210 }, taskNode: { width: 270, height: 230 } };
+    const size = (node: Node) => ({
+      width: node.width || defaults[node.type as keyof typeof defaults]?.width || CanvasLayoutManager.NODE_DIMENSIONS[node.type || 'default']?.width || 200,
+      height: node.height || defaults[node.type as keyof typeof defaults]?.height || CanvasLayoutManager.NODE_DIMENSIONS[node.type || 'default']?.height || 200,
     });
-
-    // Determine which agent this task should go under (round-robin)
-    const agentIndex = taskNodes.length % sortedAgents.length;
-    const targetAgent = sortedAgents[agentIndex];
-
-    console.log('[CanvasLayoutManager] Task assignment:', {
-      taskNumber: taskNodes.length + 1,
-      totalTasks: taskNodes.length,
-      totalAgents: sortedAgents.length,
-      agentIndex,
-      targetAgentId: targetAgent.id.substring(0, 30),
-      targetAgentPos: { x: Math.round(targetAgent.position.x), y: Math.round(targetAgent.position.y) },
-      allAgents: sortedAgents.map(a => ({
-        id: a.id.substring(0, 30),
-        x: Math.round(a.position.x),
-        y: Math.round(a.position.y)
-      })),
-      existingTasks: taskNodes.map(t => ({
-        id: t.id.substring(0, 30),
-        x: Math.round(t.position.x),
-        y: Math.round(t.position.y)
-      }))
-    });
-
-    if (effectiveLayout === 'vertical') {
-      // Vertical layout: tasks go below their assigned agent
-      // Use larger spacing for vertical task stacking to match reorganizeNodes behavior
-      const verticalTaskSpacing = Math.max(spacing, 100);
-
-      // Center task under agent (task is wider than agent by 20px)
-      // Agent width: 200px, Task width: 220px
-      // Offset task X by -10px to center it under the agent
-      const taskXOffset = (taskDims.width - agentDims.width) / 2;
-      const taskX = targetAgent.position.x - taskXOffset;
-
-      // Find how many tasks are already under this agent (within same column)
-      const columnTolerance = 50; // Allow some tolerance for column detection
-      const tasksUnderThisAgent = taskNodes.filter(t =>
-        Math.abs(t.position.x - taskX) < columnTolerance
-      ).sort((a, b) => a.position.y - b.position.y); // Sort by Y position
-
-      // Calculate Y position:
-      // If no tasks under this agent: agent Y + agent height + spacing
-      // If tasks exist: position below the bottommost task
-      let taskY: number;
-
-      if (tasksUnderThisAgent.length === 0) {
-        // First task under this agent
-        const agentBottomY = targetAgent.position.y + agentDims.height;
-        taskY = agentBottomY + verticalTaskSpacing;
-      } else {
-        // Position below the last task in this column
-        const lastTask = tasksUnderThisAgent[tasksUnderThisAgent.length - 1];
-        taskY = lastTask.position.y + taskDims.height + verticalTaskSpacing;
+    const obstacles = existingNodes.filter(node => !node.hidden);
+    const peers = obstacles.filter(node => node.type === type);
+    const position = { x: area.x + gap, y: area.y + gap };
+    if (peers.length) {
+      const bottommost = peers.reduce((bottom, node) => node.position.y + size(node).height > bottom.position.y + size(bottom).height ? node : bottom);
+      position.x = bottommost.position.x;
+      position.y = bottommost.position.y + size(bottommost).height + gap;
+    } else if (type === 'taskNode') {
+      const agent = obstacles.find(node => node.type === 'agentNode');
+      if (agent) {
+        if (this.uiState.layoutOrientation === 'vertical') {
+          position.x = agent.position.x + (size(agent).width - defaults.taskNode.width) / 2;
+          position.y = agent.position.y + size(agent).height + gap;
+        } else {
+          position.x = agent.position.x + size(agent).width + gap;
+          position.y = agent.position.y;
+        }
       }
-
-      const newPosition = {
-        x: Math.round(taskX),
-        y: Math.round(taskY)
-      };
-
-      console.log('[CanvasLayoutManager] Vertical layout - new task position:', {
-        agentX: Math.round(targetAgent.position.x),
-        agentWidth: agentDims.width,
-        taskWidth: taskDims.width,
-        taskXOffset,
-        taskX: Math.round(taskX),
-        agentY: Math.round(targetAgent.position.y),
-        agentHeight: agentDims.height,
-        verticalTaskSpacing,
-        tasksUnderThisAgent: tasksUnderThisAgent.length,
-        lastTaskY: tasksUnderThisAgent.length > 0 ? Math.round(tasksUnderThisAgent[tasksUnderThisAgent.length - 1].position.y) : 'none',
-        newPosition
-      });
-
-      return newPosition;
-    } else {
-      // Horizontal layout: tasks go to the right of their assigned agent
-      // Find how many tasks are already in the same row as this agent
-      const agentY = targetAgent.position.y;
-      const rowTolerance = 50; // Allow some tolerance for row detection
-      const tasksInThisRow = taskNodes.filter(t =>
-        Math.abs(t.position.y - agentY) < rowTolerance
-      ).sort((a, b) => a.position.x - b.position.x); // Sort by X position
-
-      // Calculate X position:
-      // If no tasks in this row: agent X + agent width + spacing
-      // If tasks exist: position to the right of the rightmost task
-      let taskX: number;
-
-      if (tasksInThisRow.length === 0) {
-        // First task in this row
-        taskX = targetAgent.position.x + agentDims.width + spacing;
-      } else {
-        // Position to the right of the last task in this row
-        const lastTask = tasksInThisRow[tasksInThisRow.length - 1];
-        taskX = lastTask.position.x + taskDims.width + spacing;
-      }
-
-      const newPosition = {
-        x: taskX,
-        y: agentY
-      };
-
-      console.log('[CanvasLayoutManager] Horizontal layout - new task position:', {
-        agentY,
-        agentX: targetAgent.position.x,
-        agentWidth: agentDims.width,
-        tasksInThisRow: tasksInThisRow.length,
-        lastTaskX: tasksInThisRow.length > 0 ? tasksInThisRow[tasksInThisRow.length - 1].position.x : 'none',
-        newPosition
-      });
-
-      return newPosition;
     }
+    // A manually moved node of another type may occupy the next slot. Step
+    // below every intersecting card until the whole new card has clear space.
+    const dimensions = defaults[type];
+    for (let i = 0; i <= obstacles.length; i++) {
+      const collisions = obstacles.filter(node => {
+        const bounds = size(node);
+        return position.x < node.position.x + bounds.width + gap && position.x + dimensions.width + gap > node.position.x &&
+          position.y < node.position.y + bounds.height + gap && position.y + dimensions.height + gap > node.position.y;
+      });
+      if (!collisions.length) break;
+      position.y = Math.max(...collisions.map(node => node.position.y + size(node).height + gap));
+    }
+    return position;
   }
 
   /**
@@ -822,181 +532,13 @@ export class CanvasLayoutManager {
    */
   reorganizeNodes(nodes: Node[], canvasType: 'crew' | 'flow' | 'full' = 'full', edges: Array<{ id: string; source: string; target: string }> = []): Node[] {
     const availableArea = this.getAvailableCanvasArea(canvasType);
-    const agentNodes = nodes.filter(n => n.type === 'agentNode');
-    const managerNodes = nodes.filter(n => n.type === 'managerNode');
-    const taskNodes = nodes.filter(n => n.type === 'taskNode');
-    // Flow canvas uses 'crewNode' type, not 'flowNode'
-    const flowNodes = nodes.filter(n => n.type === 'crewNode');
-    const otherNodes = nodes.filter(n => !['agentNode', 'managerNode', 'taskNode', 'crewNode'].includes(n.type || ''));
-
-    // Keep manager nodes as-is (their position is managed by useManagerNode hook)
-    const reorganizedNodes: Node[] = [...otherNodes, ...managerNodes];
-
-    const agentDims = CanvasLayoutManager.NODE_DIMENSIONS.agentNode;
-    const taskDims = CanvasLayoutManager.NODE_DIMENSIONS.taskNode;
-    // Use crewNode dimensions for flow canvas nodes
-    const flowDims = CanvasLayoutManager.NODE_DIMENSIONS.crewNode;
-
     const orientation = this.uiState.layoutOrientation || 'horizontal';
-    const agentTaskMap = tasksByAgent(taskNodes, edges);
-
-    if (orientation === 'horizontal') {
-      // Horizontal layout: agents left column, tasks right column (side by side)
-      // Each agent aligns with its first connected task
-
-
-      const taskSpacing = Math.max(this.minNodeSpacing, 80);
-      const taskStartX = availableArea.x + agentDims.width + this.minNodeSpacing * 2;
-
-      let currentTaskY = availableArea.y;
-      const taskPositions = new Map<string, { x: number; y: number }>();
-
-      // Process each agent and its tasks
-      agentNodes.forEach((agentNode) => {
-        const connectedTasks = agentTaskMap.get(agentNode.id) || [];
-
-        if (connectedTasks.length > 0) {
-          // Calculate the starting Y position for tasks
-          const taskStartY = currentTaskY;
-
-          // Position this agent's tasks (top to bottom)
-          connectedTasks.forEach((taskNode) => {
-            taskPositions.set(taskNode.id, { x: taskStartX, y: currentTaskY });
-            reorganizedNodes.push({
-              ...taskNode,
-              position: { x: taskStartX, y: currentTaskY }
-            });
-            currentTaskY += taskDims.height + taskSpacing;
-          });
-
-          // Calculate agent Y position to center it between task handles
-          // Task handles are at the vertical center of each task
-          const taskCenters = connectedTasks.map((_, idx) =>
-            taskStartY + (idx * (taskDims.height + taskSpacing)) + (taskDims.height / 2)
-          );
-
-          // Find the midpoint between first and last task centers
-          const firstTaskCenter = taskCenters[0];
-          const lastTaskCenter = taskCenters[taskCenters.length - 1];
-          const midpointOfTaskCenters = (firstTaskCenter + lastTaskCenter) / 2;
-
-          // Position agent so its center (handle) aligns with the midpoint
-          // Adjust slightly higher in horizontal view for better visual balance
-          const verticalOffset = -10; // Move agent 10px higher
-          const agentY = midpointOfTaskCenters - (agentDims.height / 2) + verticalOffset;
-
-          console.log(`[Layout] Agent ${agentNode.id} centering:`, {
-            taskCount: connectedTasks.length,
-            taskStartY,
-            taskDims,
-            agentDims,
-            taskSpacing,
-            taskCenters,
-            firstTaskCenter,
-            lastTaskCenter,
-            midpointOfTaskCenters,
-            agentY,
-            agentCenter: agentY + (agentDims.height / 2),
-            taskPositions: connectedTasks.map(t => taskPositions.get(t.id))
-          });
-
-          reorganizedNodes.push({
-            ...agentNode,
-            position: { x: availableArea.x, y: agentY }
-          });
-        } else {
-          // Agent with no tasks - position at current Y
-          reorganizedNodes.push({
-            ...agentNode,
-            position: { x: availableArea.x, y: currentTaskY }
-          });
-          currentTaskY += agentDims.height + taskSpacing;
-        }
-      });
-
-      // Add any unconnected tasks at the end
-      const connectedTaskIds = new Set(Array.from(agentTaskMap.values()).flat().map(task => task.id));
-      const unconnectedTasks = taskNodes.filter(t => !connectedTaskIds.has(t.id));
-      unconnectedTasks.forEach((taskNode) => {
-        reorganizedNodes.push({
-          ...taskNode,
-          position: { x: taskStartX, y: currentTaskY }
-        });
-        currentTaskY += taskDims.height + taskSpacing;
-      });
-
-      // Manager node position is handled by useManagerNode hook, not here
-
-      // Flow nodes: dependency-aware layered layout (start → branches → merge),
-      // flowing left → right by graph depth so siblings sit in the same column.
-      reorganizedNodes.push(
-        ...this.layoutFlowNodesByDependency(flowNodes, edges, 'horizontal', availableArea, flowDims)
-      );
-    } else {
-      // Vertical layout: agents above their connected tasks, centered
-
-      const taskSpacing = Math.max(this.minNodeSpacing, 100);
-      const agentRowY = availableArea.y;
-      const taskRowY = agentRowY + agentDims.height + this.minNodeSpacing * 2;
-
-      let currentTaskX = availableArea.x;
-      const taskPositions = new Map<string, { x: number; y: number }>();
-
-      // Process each agent and its tasks
-      agentNodes.forEach((agentNode) => {
-        const connectedTasks = agentTaskMap.get(agentNode.id) || [];
-
-        // Position this agent's tasks (left to right)
-        const agentTaskStartX = currentTaskX;
-        connectedTasks.forEach((taskNode) => {
-          const taskX = currentTaskX;
-          taskPositions.set(taskNode.id, { x: taskX, y: taskRowY });
-          reorganizedNodes.push({
-            ...taskNode,
-            position: { x: taskX, y: taskRowY }
-          });
-          currentTaskX += taskDims.width + taskSpacing;
-        });
-
-        // Position agent centered above its tasks
-        if (connectedTasks.length > 0) {
-          const agentTaskEndX = currentTaskX - taskSpacing;
-          // Adjust slightly to the right in vertical view for better visual balance
-          const horizontalOffset = 35; // Move agent 30px to the right
-          const agentX = agentTaskStartX + (agentTaskEndX - agentTaskStartX) / 2 - agentDims.width / 2 + horizontalOffset;
-          reorganizedNodes.push({
-            ...agentNode,
-            position: { x: agentX, y: agentRowY }
-          });
-        } else {
-          // Agent with no tasks - position at current X
-          reorganizedNodes.push({
-            ...agentNode,
-            position: { x: currentTaskX, y: agentRowY }
-          });
-          currentTaskX += agentDims.width + taskSpacing;
-        }
-      });
-
-      // Add any unconnected tasks at the end
-      const connectedTaskIds = new Set(Array.from(agentTaskMap.values()).flat().map(task => task.id));
-      const unconnectedTasks = taskNodes.filter(t => !connectedTaskIds.has(t.id));
-      unconnectedTasks.forEach((taskNode) => {
-        reorganizedNodes.push({
-          ...taskNode,
-          position: { x: currentTaskX, y: taskRowY }
-        });
-        currentTaskX += taskDims.width + taskSpacing;
-      });
-
-      // Manager node position is handled by useManagerNode hook, not here
-
-      // Flow nodes: dependency-aware layered layout (start → branches → merge),
-      // flowing top → bottom by graph depth so siblings sit in the same row.
-      reorganizedNodes.push(
-        ...this.layoutFlowNodesByDependency(flowNodes, edges, 'vertical', availableArea, flowDims)
-      );
-    }
+    const crewNodes = nodes.filter(node => node.type !== 'crewNode');
+    const flowNodes = nodes.filter(node => node.type === 'crewNode');
+    const reorganizedNodes = layoutAgentTaskGroups(crewNodes, edges, orientation, availableArea, Math.max(this.minNodeSpacing, 80));
+    reorganizedNodes.push(...this.layoutFlowNodesByDependency(
+      flowNodes, edges, orientation, availableArea, CanvasLayoutManager.NODE_DIMENSIONS.crewNode,
+    ));
 
     return reorganizedNodes;
   }
@@ -1147,17 +689,17 @@ export class CanvasLayoutManager {
     }
 
     if (availableAreas.crew.height < 300) {
-      recommendations.push('❌ CRITICAL: Canvas height is too small. Reduce execution history height!');
+      recommendations.push('❌ CRITICAL: Canvas height is too small. Close a side panel to free canvas space!');
     } else if (availableAreas.crew.height < 400) {
-      recommendations.push('⚠️ Canvas height is limited - consider reducing execution history height');
+      recommendations.push('⚠️ Canvas height is limited - consider closing a side panel');
     }
 
     if (this.uiState.chatPanelVisible && !this.uiState.chatPanelCollapsed && this.uiState.chatPanelWidth > 350) {
       recommendations.push('💡 TIP: Reduce chat panel width or collapse it temporarily for better node visibility');
     }
 
-    if (this.uiState.executionHistoryVisible && this.uiState.executionHistoryHeight > 200) {
-      recommendations.push('💡 TIP: Reduce execution history height to give more space for nodes');
+    if (this.uiState.executionHistoryVisible) {
+      recommendations.push('💡 TIP: Close job history to give more space for nodes');
     }
 
     // Add specific action suggestions

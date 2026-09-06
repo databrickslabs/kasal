@@ -1,39 +1,28 @@
 import React, { useState, useEffect, forwardRef, useRef } from 'react';
 import {
   Box,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Chip,
   Card,
   CardContent,
   Alert,
   IconButton,
-  Tooltip,
   TextField,
-  InputAdornment,
   Pagination,
-  Popover,
   CircularProgress,
+  Typography,
+  Button,
+  Menu,
+  MenuItem,
 } from '@mui/material';
-import { Theme } from '@mui/material/styles';
+import { History, X, ArrowDownWideNarrow } from 'lucide-react';
+import { useThemeStore } from '../../../store/theme';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SearchIcon from '@mui/icons-material/Search';
-import FilterListIcon from '@mui/icons-material/FilterList';
 import InsightsIcon from '@mui/icons-material/Insights';
 import RecipeCurationButton from './RecipeCurationButton';
 import ExecutionMemoryButton from './ExecutionMemoryButton';
 import ExecutionHistorySkeleton from './ExecutionHistorySkeleton';
 import { refreshRecipeIndexIfStale } from './recipeIndexCache';
 import RecipeEffectivenessDialog from './RecipeEffectivenessDialog';
-import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
-import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
-import PreviewIcon from '@mui/icons-material/Preview';
-import VisibilityIcon from '@mui/icons-material/Visibility';
-import ScheduleIcon from '@mui/icons-material/Schedule';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import { Run, calculateDurationFromTraces } from '../../../api/execution/ExecutionHistoryService';
 import { ScheduleService } from '../../../api/execution/ScheduleService';
@@ -54,7 +43,6 @@ import { AgentYaml, TaskYaml } from '../../../types/workflow/crewPayload';
 import { useTaskExecutionStore } from '../../../store/taskExecutionStore';
 import { usePermissions } from '../../../hooks/usePermissions';
 import ExecutionStatusBadge from './ExecutionStatusBadge';
-import { useResponsiveLayout } from '../../../hooks/workflow/useResponsiveLayout';
 
 export interface RunHistoryRef {
   refreshRuns: () => Promise<void>;
@@ -97,47 +85,10 @@ const DurationCell: React.FC<{ run: Run }> = ({ run }) => {
     };
   }, [run]);
 
-  if (loading) {
-    return (
-      <Chip
-        label={<CircularProgress size={10} thickness={4} />}
-        size="small"
-        variant="outlined"
-        sx={{
-          height: '18px',
-          '& .MuiChip-label': { px: 0.75 },
-          borderColor: (theme: Theme) => theme.palette.grey[400]
-        }}
-      />
-    );
-  }
-
-  // Format duration with icon
-  if (duration === '-') {
-    return <span style={{ color: '#999', fontSize: '0.75rem' }}>-</span>;
-  }
-
-  return (
-    <Chip
-      label={
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-          <AccessTimeIcon sx={{ fontSize: '0.75rem' }} />
-          <span>{duration}</span>
-        </Box>
-      }
-      size="small"
-      variant="outlined"
-      sx={{
-        height: '20px',
-        '& .MuiChip-label': {
-          px: 0.5,
-          fontSize: '0.7rem',
-          fontWeight: 500
-        },
-        borderColor: (theme: Theme) => theme.palette.grey[400]
-      }}
-    />
-  );
+  if (loading) return <CircularProgress size={12} color="inherit" />;
+  return <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, color: 'text.secondary', fontSize: 12 }}>
+    {duration !== '-' && <AccessTimeIcon sx={{ fontSize: 13 }} />}{duration}
+  </Box>;
 };
 
 interface ScheduleCreateData {
@@ -159,15 +110,17 @@ interface ScheduleCreateData {
 }
 
 interface RunHistoryProps {
+  onClose?: () => void;
   executionHistoryHeight?: number;
   onExecutionCountChange?: (count: number) => void;
 }
 
-const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistoryHeight = 200, onExecutionCountChange }, ref) => {
+const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExecutionCountChange }, ref) => {
   const { t } = useTranslation();
   const { showRunResult, selectedRun, isOpen, closeRunResult } = useRunResult();
   const { userRole } = usePermissions();
-  const { isMobile } = useResponsiveLayout();
+  const dark = useThemeStore(state => state.isDarkMode);
+  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const {
     runs,
     searchQuery,
@@ -207,7 +160,6 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
   const [scheduleName, setScheduleName] = useState('');
   const [cronExpression, setCronExpression] = useState('0 0 * * *');
   const [anchorEl, setAnchorEl] = useState<HTMLButtonElement | null>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
   const scheduleNameInputRef = useRef<HTMLInputElement>(null);
   const [deleteRunDialogOpen, setDeleteRunDialogOpen] = useState(false);
   const [runToDelete, setRunToDelete] = useState<Run | null>(null);
@@ -219,12 +171,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
   const previousLogsDialogRef = useRef<boolean>(false);
   const userActivityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Calculate items per page based on execution history height
-  // Each row is approximately 32px, header is ~40px, pagination is ~40px
-  const itemsPerPage = React.useMemo(() => {
-    const availableHeight = executionHistoryHeight - 80; // Subtract header and pagination
-    return Math.max(6, Math.floor(availableHeight / 32)); // At least 6 items
-  }, [executionHistoryHeight]);
+  const itemsPerPage = 20;
   const startIndex = (localPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
   const displayedRuns = runs.slice(startIndex, endIndex);
@@ -244,7 +191,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
   // Reset local page when runs change or search query changes
   useEffect(() => {
     setLocalPage(1);
-  }, [runs.length, searchQuery]);
+  }, [runs.length, searchQuery, itemsPerPage]);
 
   // Notify parent of execution count changes
   useEffect(() => {
@@ -585,28 +532,6 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
     }, 150);
   };
 
-  const handleFilterClick = (event: React.MouseEvent<HTMLButtonElement>) => {
-    setAnchorEl(event.currentTarget);
-    setTimeout(() => {
-      if (searchInputRef.current) {
-        searchInputRef.current.focus();
-      }
-    }, 150);
-  };
-  
-  const handleFilterClose = () => {
-    setAnchorEl(null);
-  };
-  
-  const open = Boolean(anchorEl);
-  const filterId = open ? 'filter-popover' : undefined;
-
-
-  const renderSortIcon = (field: 'status' | 'created_at') => {
-    if (sortField !== field) return null;
-    return sortOrder === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />;
-  };
-
   // Expose refreshRuns method to parent components via ref
   React.useImperativeHandle(ref, () => ({
     refreshRuns: async () => {
@@ -630,379 +555,73 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ executionHistor
 
   return (
     <>
-      <Card sx={{ boxShadow: 'none', height: '100%' }}>
+      <Card component="section" aria-label="Job history" sx={{
+        boxShadow: 'none', height: '100%', borderRadius: 0,
+        bgcolor: dark ? '#1B1F23' : '#FFFFFF', color: dark ? '#E8ECEF' : '#20262D',
+      }}>
         <CardContent sx={{ p: 0, height: '100%', '&:last-child': { pb: 0 }, display: 'flex', flexDirection: 'column' }}>
-          <TableContainer sx={{ flex: '1 1 auto', overflow: 'auto' }}>
-            <Table size="small" stickyHeader>
-              <TableHead>
-                <TableRow>
-                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      {t('runHistory.columns.jobId')}
-                      <Tooltip title={t('runHistory.filter')}>
-                        <IconButton 
-                          size="small" 
-                          onClick={handleFilterClick}
-                          sx={{ 
-                            p: 0.25,
-                            color: searchQuery ? (theme: Theme) => theme.palette.primary.main : 'inherit'
-                          }}
-                          aria-describedby={filterId}
-                        >
-                          <FilterListIcon sx={{ fontSize: '1rem' }} />
-                        </IconButton>
-                      </Tooltip>
-                      <Popover
-                        id={filterId}
-                        open={open}
-                        anchorEl={anchorEl}
-                        onClose={handleFilterClose}
-                        anchorOrigin={{
-                          vertical: 'bottom',
-                          horizontal: 'left',
-                        }}
-                      >
-                        <Box
-                          sx={{ p: 1.5 }}
-                          onKeyDown={(e) => {
-                            // Prevent popover from closing on keyboard events
-                            e.stopPropagation();
-                          }}
-                        >
-                          <TextField
-                            inputRef={searchInputRef}
-                            size="small"
-                            placeholder={t('runHistory.search')}
-                            variant="outlined"
-                            value={searchQuery}
-                            onChange={handleSearchChange}
-                            onKeyDown={(e) => {
-                              // Stop propagation to prevent any parent handlers from interfering
-                              e.stopPropagation();
-                              // Allow ESC key to close the popover
-                              if (e.key === 'Escape') {
-                                handleFilterClose();
-                              }
-                            }}
-                            InputProps={{
-                              startAdornment: (
-                                <InputAdornment position="start">
-                                  <SearchIcon fontSize="small" />
-                                </InputAdornment>
-                              ),
-                            }}
-                            sx={{ width: '200px' }}
-                          />
-                        </Box>
-                      </Popover>
-                    </Box>
-                  </TableCell>
-                  <TableCell
-                    sx={{ py: 0.25, fontSize: '0.8125rem', cursor: 'pointer', backgroundColor: theme => theme.palette.background.paper }}
-                    onClick={() => handleSort('status')}
-                  >
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                      {t('runHistory.columns.status')}
-                      {renderSortIcon('status')}
-                    </Box>
-                  </TableCell>
-                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center', display: isMobile ? 'none' : 'table-cell' }}>
-                    Agents/Tasks
-                  </TableCell>
-                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, display: isMobile ? 'none' : 'table-cell' }}>
-                    Submitter
-                  </TableCell>
-                  <TableCell
-                    sx={{ py: 0.25, fontSize: '0.8125rem', cursor: 'pointer', backgroundColor: theme => theme.palette.background.paper, display: isMobile ? 'none' : 'table-cell' }}
-                    onClick={() => handleSort('created_at')}
-                  >
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                      {t('runHistory.columns.startTime')}
-                      {renderSortIcon('created_at')}
-                    </Box>
-                  </TableCell>
-                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, display: isMobile ? 'none' : 'table-cell' }}>
-                    Duration
-                  </TableCell>
-                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center' }}>
-                    Result
-                  </TableCell>
-                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center', display: isMobile ? 'none' : 'table-cell' }}>
-                    Trace
-                  </TableCell>
-                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center', display: isMobile ? 'none' : 'table-cell' }}>
-                    Memory
-                  </TableCell>
-                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center', display: isMobile ? 'none' : 'table-cell' }}>
-                    Schedule Execution
-                  </TableCell>
-                  {/* Reuse judgement sits next to Result and Trace on purpose:
-                      marking a crew reusable is a claim about its OUTPUT, and
-                      this is the only place the output is one click away. */}
-                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', backgroundColor: theme => theme.palette.background.paper, textAlign: 'center', display: isMobile ? 'none' : 'table-cell' }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
-                      Reusable
-                      <Tooltip title="Is reuse helping? Coverage and per-arm outcomes">
-                        <IconButton
-                          size="small"
-                          color="primary"
-                          onClick={() => setRecipesDialogOpen(true)}
-                          sx={{ height: '18px', width: '18px', p: 0 }}
-                        >
-                          <InsightsIcon sx={{ fontSize: '0.8125rem' }} />
-                        </IconButton>
-                      </Tooltip>
-                    </Box>
-                  </TableCell>
-                  <TableCell sx={{ py: 0.25, fontSize: '0.8125rem', width: '120px', backgroundColor: theme => theme.palette.background.paper }}>
-                    <Box sx={{ 
-                      display: 'flex', 
-                      justifyContent: 'space-between', 
-                      alignItems: 'center',
-                      position: 'relative',
-                      '&:hover .delete-all-button, &:hover .settings-button': {
-                        opacity: 1,
-                        visibility: 'visible'
-                      }
-                    }}>
-                      <Box>{t('runHistory.columns.actions')}</Box>
-                      <Box sx={{ display: 'flex', gap: 0.5 }}>
-                        {userRole !== 'operator' && (
-                          <Tooltip title={t('runHistory.deleteAllRuns')}>
-                            {/* span wrapper so the Tooltip works while the button is disabled */}
-                            <span style={{ display: 'inline-flex' }}>
-                            <IconButton
-                              className="delete-all-button"
-                              size="small"
-                              color="error"
-                              onClick={() => setDeleteDialogOpen(true)}
-                              disabled={runs.length === 0}
-                              sx={{
-                                height: '20px',
-                                width: '20px',
-                                p: 0.25,
-                                opacity: 0,
-                                visibility: 'hidden',
-                                transition: 'opacity 0.2s ease-in-out, visibility 0.2s ease-in-out',
-                                '&.Mui-disabled': {
-                                  opacity: 0,
-                                  visibility: 'hidden'
-                                }
-                              }}
-                            >
-                              <DeleteIcon sx={{ fontSize: '0.875rem' }} />
-                            </IconButton>
-                            </span>
-                          </Tooltip>
-                        )}
-                      </Box>
-                    </Box>
-                  </TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {displayedRuns.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={isMobile ? 4 : 12} align="center" sx={{ py: 1, fontSize: '0.8125rem' }}>
-                      {searchQuery ? t('runHistory.noSearchResults') : t('runHistory.noRuns')}
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  displayedRuns.map((run) => (
-                    <TableRow 
-                      key={`${run.id}-${run.status}`} 
-                      sx={{ 
-                        transition: 'all 0.2s ease-in-out',
-                        '&:hover': {
-                          backgroundColor: (theme) => theme.palette.action.hover
-                        },
-                        '& td': { py: 0.25, fontSize: '0.8125rem' }
-                      }}
-                    >
-                      <TableCell>
-                        {run.run_name?.startsWith('"') && run.run_name?.endsWith('"')
-                          ? run.run_name.slice(1, -1)
-                          : run.run_name}
-                        {/* Which runtime ran it. Recorded on the row since the
-                            harness landed, and shown nowhere until now — so the
-                            only way to answer "what ran this?" was the database. */}
-                        {run.harness && (
-                          <Chip
-                            label={run.harness === 'crewai' ? 'CrewAI' : 'Kasal'}
-                            size="small"
-                            variant="outlined"
-                            sx={{
-                              ml: 1,
-                              height: 18,
-                              fontSize: '0.65rem',
-                              '& .MuiChip-label': { px: 0.75 },
-                            }}
-                          />
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <ExecutionStatusBadge
-                          status={run.status}
-                          size="small"
-                          executionId={run.job_id}
-                          onApprovalComplete={() => {
-                            // Refresh the run list after approval action
-                            fetchRuns();
-                          }}
-                        />
-                      </TableCell>
-                      <TableCell align="center" sx={{ display: isMobile ? 'none' : 'table-cell' }}>
-                        {(() => {
-                          let agentCount = 0;
-                          let taskCount = 0;
-                          let hasData = false;
-
-                          try {
-                            // Try to get agents count from inputs first
-                            if (run.inputs?.agents_yaml && typeof run.inputs.agents_yaml === 'object') {
-                              agentCount = Object.keys(run.inputs.agents_yaml).length;
-                              hasData = true;
-                            } else if (run.agents_yaml) {
-                              // Fallback to parsing agents_yaml string
-                              const agents = typeof run.agents_yaml === 'string'
-                                ? JSON.parse(run.agents_yaml)
-                                : run.agents_yaml;
-                              agentCount = Object.keys(agents).length;
-                              hasData = true;
-                            }
-
-                            // Try to get tasks count from inputs first
-                            if (run.inputs?.tasks_yaml && typeof run.inputs.tasks_yaml === 'object') {
-                              taskCount = Object.keys(run.inputs.tasks_yaml).length;
-                              hasData = true;
-                            } else if (run.tasks_yaml) {
-                              // Fallback to parsing tasks_yaml string
-                              const tasks = typeof run.tasks_yaml === 'string'
-                                ? JSON.parse(run.tasks_yaml)
-                                : run.tasks_yaml;
-                              taskCount = Object.keys(tasks).length;
-                              hasData = true;
-                            }
-                          } catch (e) {
-                            // If parsing fails, hasData stays false
-                          }
-
-                          if (hasData && (agentCount > 0 || taskCount > 0)) {
-                            return (
-                              <Chip
-                                label={`${agentCount}/${taskCount}`}
-                                size="small"
-                                variant="outlined"
-                                sx={{
-                                  height: '20px',
-                                  minWidth: '45px',
-                                  '& .MuiChip-label': {
-                                    px: 0.75,
-                                    fontSize: '0.75rem',
-                                    fontWeight: 600
-                                  },
-                                  borderColor: (theme: Theme) => theme.palette.divider
-                                }}
-                              />
-                            );
-                          }
-
-                          return <span style={{ color: '#999', fontSize: '0.75rem' }}>-</span>;
-                        })()}
-                      </TableCell>
-                      <TableCell sx={{ display: isMobile ? 'none' : 'table-cell' }}>{run.group_email || '-'}</TableCell>
-                      <TableCell sx={{ display: isMobile ? 'none' : 'table-cell' }}>{new Date(run.created_at).toLocaleString()}</TableCell>
-                      <TableCell sx={{ display: isMobile ? 'none' : 'table-cell' }}>
-                        <DurationCell run={run} />
-                      </TableCell>
-                      <TableCell align="center">
-                        <Tooltip title={t('runHistory.actions.viewResult')}>
-                          <span>
-                            <IconButton
-                              size="small"
-                              onClick={() => handleShowResult(run)}
-                              color="primary"
-                              disabled={['running', 'pending', 'queued', 'in_progress'].includes(run.status?.toLowerCase() || '')}
-                            >
-                              <PreviewIcon fontSize="small" />
-                            </IconButton>
-                          </span>
-                        </Tooltip>
-                      </TableCell>
-                      <TableCell align="center" sx={{ display: isMobile ? 'none' : 'table-cell' }}>
-                        <Tooltip title={t('runHistory.actions.viewTrace')}>
-                          <IconButton
-                            size="small"
-                            onClick={() => handleShowTrace(run.id)}
-                            color="primary"
-                          >
-                            <VisibilityIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      </TableCell>
-                      <TableCell align="center" sx={{ display: isMobile ? 'none' : 'table-cell' }}>
-                        {/* Renders nothing when the workspace has no memory
-                            memory store, so the column stays quiet instead of
-                            showing a dead icon on every row. */}
-                        <ExecutionMemoryButton jobId={run.job_id} />
-                      </TableCell>
-                      <TableCell align="center" sx={{ display: isMobile ? 'none' : 'table-cell' }}>
-                        <Tooltip title={t('runHistory.actions.schedule')}>
-                          <IconButton
-                            size="small"
-                            onClick={() => handleOpenScheduleDialog(run)}
-                            color="primary"
-                          >
-                            <ScheduleIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      </TableCell>
-                      <TableCell align="center" sx={{ display: isMobile ? 'none' : 'table-cell' }}>
-                        {/* Renders nothing for runs that were never mined into a
-                            recipe — canvas and chat runs have no reusable crew
-                            structure, so the column stays quiet for them. */}
-                        <RecipeCurationButton jobId={run.job_id} />
-                      </TableCell>
-                      <TableCell>
-                        <RunActions
-                          run={run}
-                          onViewResult={handleShowResult}
-                          onShowTrace={handleShowTrace}
-                          onShowLogs={handleShowLogs}
-                          onSchedule={handleOpenScheduleDialog}
-                          onDelete={openDeleteRunDialog}
-                          onStatusChange={() => {
-                            // Refresh runs when status changes
-                            fetchRuns();
-                          }}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </TableContainer>
-
-          {totalLocalPages > 1 && (
-            <Box sx={{ 
-              display: 'flex', 
-              justifyContent: 'center', 
-              py: 0.25, 
-              borderTop: 1, 
-              borderColor: 'divider',
-              flex: '0 0 auto'
-            }}>
-              <Pagination
-                count={totalLocalPages}
-                page={localPage}
-                onChange={(_, value) => setLocalPage(value)}
-                color="primary"
-                size="small"
-                sx={{ '& .MuiPaginationItem-root': { minWidth: '20px', height: '20px', fontSize: '0.7rem' } }}
-              />
+          <Box sx={{ px: 1.5, pt: 2, pb: 1, flexShrink: 0 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+              <History size={20} strokeWidth={1.7} />
+              <Typography component="h2" sx={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.025em', flex: 1 }}>Job history</Typography>
+              {onClose && <IconButton size="small" aria-label="Close job history" onClick={onClose}><X size={18} /></IconButton>}
             </Box>
-          )}
+            <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 2 }}>Runs and results</Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1, minWidth: 0, bgcolor: dark ? '#292F36' : '#F0F2F5', borderRadius: 2.5, px: 1.25, py: 0.5, '&:focus-within': { boxShadow: dark ? '0 0 0 2px #65717E' : '0 0 0 2px #CDD2D8' } }}>
+                <SearchIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                <TextField fullWidth size="small" variant="standard" placeholder="Search runs" value={searchQuery} onChange={handleSearchChange} onKeyDown={e => e.stopPropagation()}
+                  inputProps={{ 'aria-label': 'Search runs' }} InputProps={{ disableUnderline: true }} sx={{ '& .MuiInputBase-root': { fontSize: 13 } }} />
+              </Box>
+              <IconButton size="small" aria-label="History options" aria-haspopup="menu" aria-expanded={Boolean(anchorEl)} onClick={e => setAnchorEl(e.currentTarget)}><ArrowDownWideNarrow size={19} /></IconButton>
+              <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={() => setAnchorEl(null)} PaperProps={{ sx: { borderRadius: 3, boxShadow: '0 8px 32px rgba(16,24,40,0.14)' } }}>
+                <MenuItem selected={sortField === 'created_at'} onClick={() => { handleSort('created_at'); setAnchorEl(null); }} sx={{ fontSize: 13 }}>Sort by date {sortField === 'created_at' ? (sortOrder === 'desc' ? '↓' : '↑') : ''}</MenuItem>
+                <MenuItem selected={sortField === 'status'} onClick={() => { handleSort('status'); setAnchorEl(null); }} sx={{ fontSize: 13 }}>Sort by status {sortField === 'status' ? (sortOrder === 'desc' ? '↓' : '↑') : ''}</MenuItem>
+                <MenuItem onClick={() => { setAnchorEl(null); setRecipesDialogOpen(true); }} sx={{ fontSize: 13, gap: 1 }}><InsightsIcon fontSize="small" />Reuse insights</MenuItem>
+                {userRole !== 'operator' && <MenuItem disabled={!runs.length} onClick={() => { setAnchorEl(null); setDeleteDialogOpen(true); }} sx={{ fontSize: 13, gap: 1, color: 'error.main' }}><DeleteIcon fontSize="small" />{t('runHistory.deleteAllRuns')}</MenuItem>}
+              </Menu>
+            </Box>
+          </Box>
+          <Box sx={{ px: 1.5, pb: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography sx={{ fontSize: 11, fontWeight: 500, color: 'text.secondary' }}>{runs.length} {runs.length === 1 ? 'run' : 'runs'}</Typography>
+            <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>{sortField === 'status' ? 'By status' : sortOrder === 'desc' ? 'Newest first' : 'Oldest first'}</Typography>
+          </Box>
+          <Box sx={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', px: 0.75, pb: 1.5 }}>
+            {displayedRuns.length === 0 ? <Box sx={{ px: 2.5, py: 6, textAlign: 'center' }}>
+              <Box sx={{ display: 'inline-flex', p: 2, borderRadius: 4, bgcolor: 'action.hover', mb: 2 }}><History size={28} strokeWidth={1.3} /></Box>
+              <Typography sx={{ fontSize: 14, fontWeight: 500, mb: 1 }}>{searchQuery ? t('runHistory.noSearchResults') : 'Your work, all in one place'}</Typography>
+              <Typography sx={{ fontSize: 13, color: 'text.secondary', lineHeight: 1.6 }}>{searchQuery ? 'Try a different run name.' : 'Run your agents or flow to follow progress and return to the results here.'}</Typography>
+            </Box> : <Box component="ul" aria-label="Job runs" sx={{ listStyle: 'none', p: 0, m: 0 }}>
+              {displayedRuns.map(run => {
+                const name = run.run_name?.replace(/^"|"$/g, '') || run.job_id;
+                const expanded = expandedRunId === run.id;
+                const toggleDetails = () => setExpandedRunId(expanded ? null : run.id);
+                const count = (value: unknown) => { try { return Object.keys(typeof value === 'string' ? JSON.parse(value) : value || {}).length; } catch { return 0; } };
+                const agents = count(run.inputs?.agents_yaml || run.agents_yaml);
+                const tasks = count(run.inputs?.tasks_yaml || run.tasks_yaml);
+                return <Box component="li" key={run.id} sx={{ px: 1, py: 1, mb: 0.5, borderRadius: 2, bgcolor: expanded ? (dark ? '#232930' : '#F0F2F5') : 'transparent', '&:hover': { bgcolor: dark ? '#2A3139' : '#EDF0F4' }, transition: 'background-color 150ms' }}>
+                  <Button color="inherit" onClick={toggleDetails} aria-expanded={expanded} aria-label={`Details for ${name}`} title={name}
+                    sx={{ p: 0, mb: 0.5, minWidth: 0, width: '100%', display: 'block', textAlign: 'left', fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</Button>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 0.25 }}>
+                    <ExecutionStatusBadge appearance="soft" showIcon={false} status={run.status} size="small" executionId={run.job_id} onApprovalComplete={() => { fetchRuns(); }} />
+                    <RunActions compact run={run} onShowDetails={toggleDetails} onViewResult={handleShowResult} onShowTrace={handleShowTrace} onShowLogs={handleShowLogs} onSchedule={handleOpenScheduleDialog} onDelete={openDeleteRunDialog} onStatusChange={() => { fetchRuns(); }} />
+                  </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 0.25, gap: 1 }}>
+                    <Typography title={new Date(run.created_at).toLocaleString()} sx={{ fontSize: 10, color: 'text.secondary' }}>{new Date(run.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · {new Date(run.created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</Typography>
+                    <DurationCell run={run} />
+                  </Box>
+                  {expanded && <Box role="region" aria-label={`Details for ${name}`} sx={{ pt: 1.5, overflowWrap: 'anywhere' }}>
+                    <Typography sx={{ fontSize: 11, color: 'text.secondary', mb: 1 }}>{run.harness === 'crewai' ? 'CrewAI' : 'Kasal'} · {agents} agents · {tasks} tasks</Typography><Typography sx={{ fontSize: 11, color: 'text.secondary' }}>Submitter</Typography><Typography sx={{ fontSize: 12, mb: 1 }}>{run.group_email || '—'}</Typography>
+                    <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>Execution ID</Typography><Typography sx={{ fontSize: 12, mb: 1 }}>{run.job_id}</Typography>
+                    <ExecutionMemoryButton jobId={run.job_id} /><RecipeCurationButton jobId={run.job_id} />
+                  </Box>}
+                </Box>;
+              })}
+            </Box>}
+          </Box>
+          {totalLocalPages > 1 && <Box sx={{ display: 'flex', justifyContent: 'center', px: 1, py: 1, flexShrink: 0 }}>
+            <Pagination count={totalLocalPages} page={localPage} onChange={(_, value) => setLocalPage(value)} color="standard" size="small" />
+          </Box>}
 
           {selectedRunId && (
             <ShowTraceTimeline

@@ -345,7 +345,7 @@ export const useEventBindings = (
           targetHandle: taskTargetHandle,
           style: {
             ...e.style,
-            stroke: '#2196f3',
+            stroke: '#77838D',
             strokeWidth: 2,
             // No strokeDasharray = solid line
           },
@@ -361,7 +361,7 @@ export const useEventBindings = (
           targetHandle: 'left',
           style: {
             ...e.style,
-            stroke: '#2196f3',
+            stroke: '#77838D',
             strokeWidth: 2,
             strokeDasharray: '12', // Dashed line
           },
@@ -379,7 +379,7 @@ export const useEventBindings = (
           targetHandle: agentTargetHandle,
           style: {
             ...e.style,
-            stroke: '#2196f3',
+            stroke: '#77838D',
             strokeWidth: 2,
           },
           animated: false

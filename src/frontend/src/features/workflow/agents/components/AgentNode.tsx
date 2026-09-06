@@ -1,8 +1,9 @@
+import { kasalNodeSurface, kasalNodePalette } from '../../../../theme/kasalSurfaces';
 import { getDefaultModel } from '../../../../config/defaultModel';
 import React, { useCallback, useState, useEffect } from 'react';
 import { Handle, Position, useReactFlow } from 'reactflow';
 import { Box, Typography, Dialog, DialogContent, IconButton, Tooltip, CircularProgress } from '@mui/material';
-import PersonIcon from '@mui/icons-material/Person';
+import { Bot } from 'lucide-react';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import CodeIcon from '@mui/icons-material/Code';
@@ -17,7 +18,7 @@ import AgentForm from './AgentForm';
 import LLMSelectionDialog from './LLMSelectionDialog';
 import { ToolService } from '../../../../api/tools/ToolService';
 import { Tool, KnowledgeSource } from '../../../../types/workflow/agent';
-import { Theme } from '@mui/material/styles';
+import { alpha, Theme } from '@mui/material/styles';
 import { useTabDirtyState } from '../../../../hooks/workflow/useTabDirtyState';
 import { useAgentStore } from '../../../../store/agent';
 import { useUILayoutStore } from '../../../../store/uiLayout';
@@ -357,36 +358,31 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       justifyContent: 'space-between',
       gap: 0.1,
       position: 'relative',
-      background: (theme: Theme) => theme.palette.background.paper,
-      borderRadius: '12px',
-      boxShadow: (theme: Theme) => `0 2px 4px ${theme.palette.mode === 'light'
-        ? 'rgba(0, 0, 0, 0.1)'
-        : 'rgba(0, 0, 0, 0.4)'}`,
+      background: (theme: Theme) => kasalNodeSurface(theme.palette.mode === 'dark', 'agent').background,
+      borderRadius: '16px',
+      boxShadow: (theme: Theme) => kasalNodeSurface(theme.palette.mode === 'dark', 'agent').boxShadow,
       border: (theme: Theme) => data.error
         ? `2px solid ${theme.palette.error.main}`
-        : `1px solid ${theme.palette.primary.light}`,
-      transition: 'all 0.3s ease',
+        : '1px solid transparent',
+      transition: 'box-shadow 180ms ease, background 180ms ease',
       padding: '16px 8px',
       animation: data.loading ? 'agentPulse 2s ease-in-out infinite' : 'none',
       '@keyframes agentPulse': {
-        '0%': { boxShadow: '0 0 0 0 rgba(33, 150, 243, 0.3)' },
-        '50%': { boxShadow: '0 0 0 6px rgba(33, 150, 243, 0)' },
-        '100%': { boxShadow: '0 0 0 0 rgba(33, 150, 243, 0)' },
+        '0%': { boxShadow: '0 0 0 0 rgba(119, 131, 141, 0.3)' },
+        '50%': { boxShadow: '0 0 0 6px rgba(119, 131, 141, 0)' },
+        '100%': { boxShadow: '0 0 0 0 rgba(119, 131, 141, 0)' },
       },
       '&:hover': {
-        boxShadow: (theme: Theme) => `0 4px 12px ${theme.palette.mode === 'light'
-          ? 'rgba(0, 0, 0, 0.2)'
-          : 'rgba(0, 0, 0, 0.6)'}`,
-        transform: 'translateY(-1px)',
+        boxShadow: (theme: Theme) => theme.palette.mode === 'dark' ? '0 8px 24px rgba(0,0,0,.32)' : '0 8px 22px rgba(27,31,35,.13)',
       },
       '& .action-buttons': {
         display: 'none',
         position: 'absolute',
-        top: 2,
-        right: 4,
+        top: 12,
+        right: 8,
         gap: '2px'
       },
-      '&:hover .action-buttons': {
+      '&:hover .action-buttons, &:focus-within .action-buttons': {
         display: 'flex'
       }
     };
@@ -395,7 +391,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       return {
         ...baseStyles,
         background: (theme: Theme) => theme.palette.mode === 'light'
-          ? `rgba(${theme.palette.primary.main}, 0.15)`
+          ? alpha(theme.palette.primary.main, 0.15)
           : theme.palette.background.paper,
         border: (theme: Theme) => `3px solid ${theme.palette.primary.main}`,
         transform: 'scale(1.05)',
@@ -421,7 +417,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       return {
         ...baseStyles,
         background: (theme: Theme) => theme.palette.mode === 'light'
-          ? `rgba(${theme.palette.success.main}, 0.1)`
+          ? alpha(theme.palette.success.main, 0.1)
           : theme.palette.background.paper,
         border: (theme: Theme) => `2px solid ${theme.palette.success.main}`,
         boxShadow: (theme: Theme) => `0 0 8px ${theme.palette.success.main}70`,
@@ -499,7 +495,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
         position={Position.Bottom}
         id="bottom"
         style={{
-          background: '#2196f3',
+          background: '#77838D',
           width: '7px',
           height: '7px',
           opacity: layoutOrientation === 'vertical' ? 1 : 0,
@@ -514,7 +510,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
         position={Position.Right}
         id="right"
         style={{
-          background: '#2196f3',
+          background: '#77838D',
           width: '7px',
           height: '7px',
           opacity: layoutOrientation === 'horizontal' ? 1 : 0,
@@ -524,22 +520,17 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       />
 
 
-      <Box sx={{
-        backgroundColor: (theme: Theme) => `${theme.palette.primary.main}20`,
-        borderRadius: '50%',
-        padding: '8px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        border: (theme: Theme) => `2px solid ${theme.palette.primary.main}`,
-      }}>
-        <PersonIcon sx={{ color: (theme: Theme) => theme.palette.primary.main, fontSize: '1.5rem' }} />
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '184px', mb: 1.25 }}>
+        <Box sx={{ width: 30, height: 30, borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: (theme: Theme) => kasalNodePalette(theme.palette.mode === 'dark', 'agent').badge, color: (theme: Theme) => kasalNodePalette(theme.palette.mode === 'dark', 'agent').accent }}>
+          <Bot size={18} strokeWidth={1.6} />
+        </Box>
+        <Typography sx={{ fontSize: 11, fontWeight: 600, color: (theme: Theme) => kasalNodePalette(theme.palette.mode === 'dark', 'agent').accent }}>Agent</Typography>
       </Box>
 
       <Typography variant="body2" sx={{
-        fontWeight: 500,
-        textAlign: 'center',
-        color: (theme: Theme) => theme.palette.primary.main,
+        fontWeight: 650, fontSize: 14, lineHeight: 1.4,
+        textAlign: 'left', width: '184px',
+        color: 'text.primary',
         maxWidth: '184px',
         flexShrink: 0,
         overflow: 'hidden',
@@ -555,38 +546,26 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       <Box
         onClick={handleLLMBadgeClick}
         sx={{
-          background: (theme: Theme) => `linear-gradient(135deg, ${theme.palette.primary.main}15, ${theme.palette.primary.main}30)`,
-          borderRadius: '4px',
-          padding: '2px 6px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          mt: 0.25,
-          mb: 0.25,
-          border: (theme: Theme) => `1px solid ${theme.palette.primary.main}20`,
-          boxShadow: (theme: Theme) => `0 1px 2px ${theme.palette.primary.main}10`,
-          transition: 'all 0.2s ease',
-          maxWidth: '120px',
-          cursor: 'pointer',
-          '&:hover': {
-            background: (theme: Theme) => `linear-gradient(135deg, ${theme.palette.primary.main}25, ${theme.palette.primary.main}40)`,
-            boxShadow: (theme: Theme) => `0 2px 4px ${theme.palette.primary.main}15`,
-            transform: 'scale(1.02)',
-          }
+          background: (theme: Theme) => kasalNodePalette(theme.palette.mode === 'dark', 'agent').chip,
+          borderRadius: '8px', padding: '5px 8px',
+          display: 'flex', alignItems: 'center', justifyContent: 'flex-start',
+          mt: 1, mb: 0.25, width: '184px', boxSizing: 'border-box',
+          transition: 'background 180ms ease', cursor: 'pointer',
+          '&:hover': { background: (theme: Theme) => kasalNodePalette(theme.palette.mode === 'dark', 'agent').badge },
         }}
       >
         <ModelIcon sx={{
-          fontSize: '0.65rem',
+          fontSize: '0.7rem',
           mr: 0.25,
           color: (theme: Theme) => theme.palette.primary.main,
           opacity: 0.8
         }} />
         <Typography variant="caption" sx={{
           color: (theme: Theme) => theme.palette.primary.main,
-          fontSize: '0.65rem',
+          fontSize: '0.7rem',
           fontWeight: 500,
           textAlign: 'center',
-          maxWidth: '100px',
+          maxWidth: '154px',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
@@ -595,16 +574,14 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
         </Typography>
       </Box>
 
-      <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+      <Box sx={{ display: 'flex', gap: 1, mt: 1, width: '184px' }}>
         {data.allow_code_execution && (
           <Tooltip
             title="Code Execution Enabled"
             disableInteractive
             placement="top"
           >
-            <div>
-              <CodeIcon sx={{ fontSize: '1rem', color: '#2196f3' }} />
-            </div>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.secondary' }}><CodeIcon sx={{ fontSize: 14 }} /><Typography sx={{ fontSize: 10 }}>Code</Typography></Box>
           </Tooltip>
         )}
         {data.memory && (
@@ -617,9 +594,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
             disableInteractive
             placement="top"
           >
-            <div>
-              <MemoryIcon sx={{ fontSize: '1rem', color: '#2196f3' }} />
-            </div>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.secondary' }}><MemoryIcon sx={{ fontSize: 14 }} /><Typography sx={{ fontSize: 10 }}>Memory</Typography></Box>
           </Tooltip>
         )}
       </Box>
@@ -634,7 +609,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
             size="small"
             onClick={handleEditClick}
             sx={{
-              opacity: 0.4,
+              opacity: 0.8,
               padding: '4px',
               '&:hover': {
                 opacity: 1,
@@ -642,7 +617,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
               },
             }}
           >
-            <EditIcon sx={{ fontSize: '1rem', color: '#2196f3' }} />
+            <EditIcon sx={{ fontSize: '1rem', color: '#77838D' }} />
           </IconButton>
         </Tooltip>
         <Tooltip
@@ -654,7 +629,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
             size="small"
             onClick={handleDelete}
             sx={{
-              opacity: 0.4,
+              opacity: 0.8,
               padding: '4px',
               '&:hover': {
                 opacity: 1,
@@ -662,7 +637,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
               },
             }}
           >
-            <DeleteIcon sx={{ fontSize: '1rem', color: '#2196f3' }} />
+            <DeleteIcon sx={{ fontSize: '1rem', color: '#77838D' }} />
           </IconButton>
         </Tooltip>
       </Box>
@@ -718,7 +693,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
           }}
         >
           <ErrorIcon sx={{ color: 'error.main', fontSize: '1.2rem' }} />
-          <Typography variant="caption" sx={{ color: 'error.main', textAlign: 'center', px: 1, fontSize: '0.65rem' }}>
+          <Typography variant="caption" sx={{ color: 'error.main', textAlign: 'center', px: 1, fontSize: '0.7rem' }}>
             {data.errorMessage || 'Generation failed'}
           </Typography>
         </Box>

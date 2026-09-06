@@ -44,14 +44,18 @@ export const edgeAnimations = {
 // ============================================================================
 
 export const edgeColors = {
-  primary: '#2196f3',      // Blue - for task-task edges
-  agentToTask: '#1565c0',  // Darker blue - for agent-to-task edges
+  primary: '#77838D',      // Neutral slate for task connections
+  agentToTask: '#77838D',  // Shared Kasal connection color
   flow: '#9c27b0',         // Purple - for flow edges
   dependency: '#ff9800',   // Orange - for task dependencies
-  crew: '#2196f3',         // Blue - for crew-to-crew edges
-  hover: '#1976d2',        // Darker blue for hover states
+  crew: '#77838D',         // Neutral crew connections
+  hover: '#5A6872',        // Stronger neutral hover
   delete: '#666',          // Gray for delete buttons
 };
+
+// Existing saved canvases may contain the previous default blue as an inline style.
+export const normalizeEdgeColor = (color?: string): string | undefined =>
+  color && ['#2196f3', '#1565c0', '#1976d2', '#3b82f6', '#2563eb'].includes(color.toLowerCase()) ? edgeColors.primary : color;
 
 // ============================================================================
 // STYLE CONFIGURATIONS
@@ -112,7 +116,7 @@ export const getEdgeStyleConfig = (
   const baseConfig: EdgeStyleConfig = {
     strokeWidth: 2,
     stroke: edgeColors.primary,
-    filter: 'drop-shadow(0 1px 2px rgba(33, 150, 243, 0.3))',
+    filter: 'drop-shadow(0 1px 2px rgba(27, 31, 35, 0.12))',
     zIndex: 0,
     pointerEvents: 'none',
   };
@@ -168,6 +172,8 @@ export const getEdgeStyle = (
   return {
     ...baseStyle,
     ...customStyle,
+    stroke: normalizeEdgeColor(customStyle.stroke as string) || baseStyle.stroke,
+    filter: customStyle.filter?.replace('rgba(33, 150, 243, 0.3)', 'rgba(27, 31, 35, 0.12)') || baseStyle.filter,
   } as CSSProperties;
 };
 

@@ -67,7 +67,7 @@ export const ExecutionMemoryButton: React.FC<Props> = ({ jobId }) => {
   return (
     <>
       <Tooltip title="View this run's memory graph">
-        <IconButton size="small" color="primary" onClick={() => setOpen(true)}>
+        <IconButton size="small" color="default" onClick={() => setOpen(true)}>
           <PsychologyIcon fontSize="small" />
         </IconButton>
       </Tooltip>

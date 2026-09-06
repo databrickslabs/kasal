@@ -1,11 +1,5 @@
-/**
- * Responsive behaviour tests for ExecutionHistory component.
- *
- * Verifies that table columns are hidden/shown based on viewport breakpoints
- * via the useResponsiveLayout hook.
- */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { ThemeProvider, createTheme } from '@mui/material';
 
 // --- Mocks that must be defined before importing the component ---
@@ -18,6 +12,10 @@ vi.mock('react-router-dom', async (importOriginal) => ({
 }));
 
 let mockIsMobile = false;
+let mockRuns: Run[] = [];
+const mockSearch = vi.fn();
+const mockSort = vi.fn();
+const mockClose = vi.fn();
 
 vi.mock('../../../hooks/workflow/useResponsiveLayout', () => ({
   useResponsiveLayout: () => ({ isMobile: mockIsMobile, isCompact: mockIsMobile }),
@@ -34,7 +32,7 @@ vi.mock('../../../hooks/global/useExecutionResult', () => ({
 
 vi.mock('../../../hooks/global/useExecutionHistory', () => ({
   useRunHistory: () => ({
-    runs: [],
+    runs: mockRuns,
     searchQuery: '',
     loading: false,
     showSkeleton: false,
@@ -47,10 +45,10 @@ vi.mock('../../../hooks/global/useExecutionHistory', () => ({
     sortOrder: 'desc',
     fetchRuns: vi.fn(),
     handlePageChange: vi.fn(),
-    handleSearchChange: vi.fn(),
+    handleSearchChange: mockSearch,
     handleDeleteAllRuns: vi.fn(),
     handleDeleteRun: vi.fn(),
-    handleSort: vi.fn(),
+    handleSort: mockSort,
     setJobsPerPage: vi.fn(),
   }),
 }));
@@ -98,6 +96,14 @@ vi.mock('../../../api/execution/ScheduleService', () => ({
   },
 }));
 
+vi.mock('./recipeIndexCache', () => ({ refreshRecipeIndexIfStale: vi.fn() }));
+vi.mock('./ExecutionMemoryButton', () => ({ default: () => <button>Memory</button> }));
+vi.mock('./RecipeCurationButton', () => ({ default: () => <button>Reusable</button> }));
+vi.mock('../../../api/execution/ExecutionHistoryService', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../api/execution/ExecutionHistoryService')>()),
+  calculateDurationFromTraces: vi.fn().mockResolvedValue('15s'),
+}));
+import type { Run } from '../../../api/execution/ExecutionHistoryService';
 // Import component after mocks are set up
 import ExecutionHistory from './ExecutionHistory';
 
@@ -106,64 +112,43 @@ const theme = createTheme();
 const renderHistory = () =>
   render(
     <ThemeProvider theme={theme}>
-      <ExecutionHistory executionHistoryHeight={200} />
+      <ExecutionHistory onClose={mockClose} />
     </ThemeProvider>
   );
 
-describe('ExecutionHistory responsive columns', () => {
+describe('Job history sidebar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRuns = [];
+    mockIsMobile = false;
   });
-
-  describe('desktop (isMobile=false)', () => {
-    beforeEach(() => {
-      mockIsMobile = false;
-    });
-
-    it('shows all table header columns', () => {
-      renderHistory();
-
-      // These columns should be visible on desktop
-      expect(screen.getByText('Agents/Tasks')).toBeVisible();
-      expect(screen.getByText('Submitter')).toBeVisible();
-      expect(screen.getByText('Duration')).toBeVisible();
-      expect(screen.getByText('Trace')).toBeVisible();
-      expect(screen.getByText('Schedule Execution')).toBeVisible();
-    });
+  it('shows a useful empty state and closes from its header', () => {
+    renderHistory();
+    expect(screen.getByText('Your work, all in one place')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Close job history' }));
+    expect(mockClose).toHaveBeenCalledOnce();
   });
-
-  describe('mobile (isMobile=true)', () => {
-    beforeEach(() => {
-      mockIsMobile = true;
-    });
-
-    it('hides secondary columns on mobile', () => {
-      renderHistory();
-
-      // These columns should be hidden via display: none
-      const agentsTasks = screen.getByText('Agents/Tasks');
-      expect(agentsTasks).toHaveStyle({ display: 'none' });
-
-      const submitter = screen.getByText('Submitter');
-      expect(submitter).toHaveStyle({ display: 'none' });
-
-      const duration = screen.getByText('Duration');
-      expect(duration).toHaveStyle({ display: 'none' });
-
-      const trace = screen.getByText('Trace');
-      expect(trace).toHaveStyle({ display: 'none' });
-
-      const schedule = screen.getByText('Schedule Execution');
-      expect(schedule).toHaveStyle({ display: 'none' });
-    });
-
-    it('keeps primary columns visible on mobile', () => {
-      renderHistory();
-
-      // Status column header (via translation key)
-      expect(screen.getByText('runHistory.columns.status')).toBeVisible();
-      // Result column
-      expect(screen.getByText('Result')).toBeVisible();
-    });
+  it('makes search and sorting available without a table header', () => {
+    renderHistory();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search runs' }), { target: { value: 'research' } });
+    expect(mockSearch).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: 'History options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Sort by status/ }));
+    expect(mockSort).toHaveBeenCalledWith('status');
+  });
+  it.each([false, true])('keeps run actions and secondary details reachable on compact=%s', async compact => {
+    mockIsMobile = compact;
+    mockRuns = [{ id: 'run-1', job_id: 'job-1', run_name: 'Research report', status: 'COMPLETED', created_at: '2026-09-06T10:00:00Z', group_email: 'person@example.com' } as Run];
+    renderHistory();
+    expect(screen.getByRole('list', { name: 'Job runs' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Result' })).toBeVisible();
+    expect(await screen.findByText('15s')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Details for Research report' }));
+    expect(screen.getByRole('region', { name: 'Details for Research report' })).toHaveTextContent('person@example.com');
+    expect(screen.getByRole('button', { name: 'Memory' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Reusable' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Research report' }));
+    expect(screen.getByRole('menuitem', { name: 'Schedule execution' })).toBeVisible();
+    expect(screen.getByRole('menuitem', { name: 'Checkpoint and resume' })).toBeVisible();
   });
 });

@@ -68,6 +68,7 @@ export interface ModelConfig {
 }
 
 export interface WorkflowChatProps {
+  layout?: 'panel' | 'canvas';
   onNodesGenerated?: (nodes: Node[], edges: Edge[]) => void;
   onLoadingStateChange?: (isLoading: boolean) => void;
   selectedModel?: string;

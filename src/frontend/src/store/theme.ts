@@ -1,10 +1,8 @@
 import { create } from 'zustand';
 import { ThemeService } from '../api/config/ThemeService';
 
-// Helper to determine if a theme is dark mode
-const isDarkTheme = (themeName: string): boolean => {
-  return ['deepOcean'].includes(themeName);
-};
+const isDarkTheme = (name: string) => name === 'deepOcean' || name === 'dark';
+const normalizeTheme = (name: string) => isDarkTheme(name) ? 'deepOcean' : 'professional';
 
 interface ThemeState {
   currentTheme: string;
@@ -14,72 +12,27 @@ interface ThemeState {
   initializeTheme: () => Promise<void>;
 }
 
-export const useThemeStore = create<ThemeState>((set) => ({
+export const useThemeStore = create<ThemeState>((set, get) => ({
   currentTheme: 'professional',
   isDarkMode: false,
-  
-  // Initialize theme from server
   initializeTheme: async () => {
     try {
-      const themeService = ThemeService.getInstance();
-      const config = await themeService.getThemeConfig();
-      set({
-        currentTheme: config.theme,
-        isDarkMode: isDarkTheme(config.theme),
-      });
+      const config = await ThemeService.getInstance().getThemeConfig();
+      const currentTheme = normalizeTheme(config.theme);
+      set({ currentTheme, isDarkMode: isDarkTheme(currentTheme) });
     } catch (error) {
       console.error('Failed to load theme:', error);
     }
   },
-
-  toggleTheme: async () => {
-    set((state) => {
-      // Toggle between professional and the deep ocean dark theme
-      const newTheme = state.isDarkMode 
-        ? 'professional' 
-        : 'deepOcean';
-      
-      return {
-        currentTheme: newTheme,
-        isDarkMode: isDarkTheme(newTheme),
-      };
-    });
-
+  toggleTheme: async () => get().changeTheme(get().isDarkMode ? 'professional' : 'deepOcean'),
+  changeTheme: async (name: string) => {
+    const currentTheme = normalizeTheme(name);
+    set({ currentTheme, isDarkMode: isDarkTheme(currentTheme) });
     try {
-      const themeService = ThemeService.getInstance();
-      const newTheme = (await useThemeStore.getState()).currentTheme;
-      await themeService.setThemeConfig({ theme: newTheme });
-      window.location.reload();
+      await ThemeService.getInstance().setThemeConfig({ theme: currentTheme });
     } catch (error) {
-      console.error('Failed to toggle theme:', error);
-      // Revert the state if the API call fails
-      set((state) => {
-        const revertedTheme = state.isDarkMode ? 'professional' : 'deepOcean';
-        return {
-          currentTheme: revertedTheme,
-          isDarkMode: isDarkTheme(revertedTheme),
-        };
-      });
+      // Keep the selected appearance usable even when browser storage is unavailable.
+      console.error('Failed to save theme preference:', error);
     }
   },
-  
-  changeTheme: async (themeName: string) => {
-    set(() => ({
-      currentTheme: themeName,
-      isDarkMode: isDarkTheme(themeName),
-    }));
-
-    try {
-      const themeService = ThemeService.getInstance();
-      await themeService.setThemeConfig({ theme: themeName });
-      window.location.reload();
-    } catch (error) {
-      console.error('Failed to change theme:', error);
-      // Revert the state if the API call fails
-      set((state) => ({
-        currentTheme: state.currentTheme,
-        isDarkMode: isDarkTheme(state.currentTheme),
-      }));
-    }
-  },
-})); 
+}));

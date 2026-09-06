@@ -11,9 +11,11 @@ import {
   PanTool as WaitingApprovalIcon,
   ThumbDown as RejectedIcon,
 } from '@mui/icons-material';
+import { alpha } from '@mui/material/styles';
 import { HITLApprovalDialog } from '../../approvals/components/index';
 
 interface ExecutionStatusBadgeProps {
+  appearance?: 'default' | 'soft';
   status: string;
   size?: 'small' | 'medium';
   showIcon?: boolean;
@@ -25,6 +27,7 @@ interface ExecutionStatusBadgeProps {
 
 const ExecutionStatusBadge: React.FC<ExecutionStatusBadgeProps> = ({
   status,
+  appearance = 'default',
   size = 'small',
   showIcon = true,
   executionId,
@@ -139,6 +142,12 @@ const ExecutionStatusBadge: React.FC<ExecutionStatusBadgeProps> = ({
       variant={['STOPPING', 'WAITING_FOR_APPROVAL'].includes(status?.toUpperCase()) ? 'filled' : 'outlined'}
       onClick={isClickable ? handleClick : undefined}
       sx={{
+        ...(appearance === 'soft' && {
+          border: 0, height: 24, fontSize: 11, fontWeight: 500,
+          color: theme => config.color === 'default' ? theme.palette.text.secondary : theme.palette[config.color][theme.palette.mode === 'dark' ? 'light' : 'dark'],
+          backgroundColor: theme => alpha(config.color === 'default' ? theme.palette.text.secondary : theme.palette[config.color].main, 0.09),
+          '& .MuiChip-icon': { color: 'inherit', fontSize: 14 },
+        }),
         animation: ['STOPPING', 'WAITING_FOR_APPROVAL'].includes(status?.toUpperCase())
           ? 'pulse 2s infinite'
           : 'none',

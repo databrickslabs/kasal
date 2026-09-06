@@ -214,7 +214,7 @@ describe('AgentNode', () => {
     it('renders default "Agent" when name and role are both missing', async () => {
       renderNode({ label: undefined, role: undefined });
       await waitFor(() => expect(mockGetAgent).toHaveBeenCalled());
-      expect(screen.getByText('Agent')).toBeInTheDocument();
+      expect(screen.getByText('Agent', { selector: '.MuiTypography-body2' })).toBeInTheDocument();
     });
 
     it('renders LLM badge with model name', () => {
@@ -1331,7 +1331,7 @@ describe('AgentNode', () => {
         temperature: 'not-a-number',
       });
 
-      const nodeEl = screen.getByText('Agent').closest('[data-nodetype="agent"]')!;
+      const nodeEl = screen.getByText('Agent', { selector: '.MuiTypography-body2' }).closest('[data-nodetype="agent"]')!;
       await act(async () => {
         fireEvent.click(nodeEl, { button: 0 });
       });

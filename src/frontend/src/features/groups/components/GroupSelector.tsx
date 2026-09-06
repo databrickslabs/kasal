@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useId } from 'react';
 import {
   Box,
   IconButton,
@@ -15,7 +15,7 @@ import {
 } from '@mui/material';
 import {
   WorkspacesOutlined as WorkspacesIcon,
-  HomeOutlined as HomeIcon,
+  AccountCircleOutlined as ProfileIcon,
   GroupsOutlined as GroupsIcon
 } from '@mui/icons-material';
 import { GroupWithRole } from '../../../api/groups/GroupService';
@@ -32,7 +32,8 @@ const KASAL_ACCENT = '#FF3621';
 const KASAL_ACCENT_SOFT = 'rgba(255, 54, 33, 0.08)';
 const KASAL_ACCENT_SOFT_HOVER = 'rgba(255, 54, 33, 0.12)';
 
-const GroupSelector: React.FC = () => {
+const GroupSelector: React.FC<{ showLabel?: boolean }> = ({ showLabel = false }) => {
+  const id = useId();
   const appMode = useUILayoutStore((st) => st.appMode);
   const isChatMode = appMode === 'chat';
   const accent = isChatMode ? KASAL_ACCENT : 'primary.main';
@@ -130,33 +131,7 @@ const GroupSelector: React.FC = () => {
     }
   };
 
-  // Memoize the avatar to prevent re-renders, but update when email changes
-  const avatarElement = useMemo(() => {
-    if (!currentGroup) return null;
-
-    if (currentGroup.id.startsWith('user_')) {
-      // Personal workspace icon — kept muted/gray to match the mode-switcher
-      // grid icon sitting just to its left.
-      return (
-        <HomeIcon
-          fontSize="small"
-          sx={{
-            color: 'text.secondary'
-          }}
-        />
-      );
-    }
-
-    // Shared workspace icon
-    return (
-      <WorkspacesIcon
-        fontSize="small"
-        sx={{
-          color: 'text.secondary'
-        }}
-      />
-    );
-  }, [currentGroup]);
+  const avatarElement = useMemo(() => <ProfileIcon sx={{ fontSize: 28, color: 'text.secondary' }} />, []);
 
   if (loading || isSwitching || isLoadingUser) {
     return (
@@ -186,20 +161,22 @@ const GroupSelector: React.FC = () => {
 
   return (
     <>
-      <IconButton
-          id="group-selector-button"
-          aria-controls={open ? 'group-menu' : undefined}
+      <Tooltip title="Switch teamspace" placement="right"><IconButton
+          id={`${id}-button`}
+          aria-controls={open ? `${id}-menu` : undefined}
           aria-haspopup="true"
           aria-expanded={open ? 'true' : undefined}
           onClick={handleClick}
           size="small"
           aria-label={
             currentGroup.id.startsWith('user_')
-              ? `Personal Space (${currentUser?.email})`
-              : `${currentGroup.name} - Shared Teamspace`
+              ? `Switch teamspace: Personal Space (${currentUser?.email})`
+              : `Switch teamspace: ${currentGroup.name} - Shared Teamspace`
           }
           sx={{
-            p: 0.5,
+            width: showLabel ? '100%' : 40, height: 40, p: 0.5,
+            minWidth: 0,
+            justifyContent: showLabel ? 'flex-start' : 'center',
             borderRadius: 2,
             transition: 'background-color 0.2s',
             '&:hover': {
@@ -207,10 +184,19 @@ const GroupSelector: React.FC = () => {
             }
           }}
         >
-          {avatarElement}
-        </IconButton>
+          {showLabel ? (
+            <>
+              <Box component="span" sx={{ width: 36, flexShrink: 0, display: 'flex', justifyContent: 'center' }}>
+                {avatarElement}
+              </Box>
+              <Typography component="span" noWrap sx={{ minWidth: 0, fontSize: 13, fontWeight: 500, color: 'text.secondary' }}>
+                {currentGroup.id.startsWith('user_') ? 'Personal Space' : currentGroup.name}
+              </Typography>
+            </>
+          ) : avatarElement}
+        </IconButton></Tooltip>
       <Menu
-        id="group-menu"
+        id={`${id}-menu`}
         anchorEl={anchorEl}
         open={open}
         onClose={handleClose}
@@ -220,12 +206,12 @@ const GroupSelector: React.FC = () => {
           timeout: 350,
         }}
         anchorOrigin={{
-          vertical: 'bottom',
-          horizontal: 'right',
+          vertical: 'top',
+          horizontal: 'left',
         }}
         transformOrigin={{
-          vertical: 'top',
-          horizontal: 'right',
+          vertical: 'bottom',
+          horizontal: 'left',
         }}
         slotProps={{
           paper: {
@@ -233,9 +219,9 @@ const GroupSelector: React.FC = () => {
             sx: {
               minWidth: 280,
               maxHeight: 400,
-              mt: 1,
+              mt: -1,
               borderRadius: 3,
-              border: '1px solid',
+              border: 0,
               borderColor: 'divider',
               boxShadow: '0 12px 32px rgba(16,24,40,0.10), 0 2px 8px rgba(16,24,40,0.06)',
               overflow: 'auto',  // Changed from 'visible' to 'auto' for better scrolling
@@ -243,7 +229,7 @@ const GroupSelector: React.FC = () => {
           }
         }}
         MenuListProps={{
-          'aria-labelledby': 'group-selector-button',
+          'aria-labelledby': `${id}-button`,
           sx: { py: 0.75 }
         }}
       >
@@ -280,7 +266,7 @@ const GroupSelector: React.FC = () => {
             >
               <ListItemIcon sx={{ minWidth: 36 }}>
                 {isPersonalWorkspace ? (
-                  <HomeIcon
+                  <ProfileIcon
                     fontSize="small"
                     sx={{
                       color: isSelected ? accent : 'text.secondary'

@@ -4,7 +4,6 @@ import {
   IconButton,
   Tooltip,
   Paper,
-  Divider,
   GlobalStyles,
 } from '@mui/material';
 import {
@@ -15,7 +14,6 @@ import {
   Webhook as WebhookIcon,
   Schedule as ScheduleIcon,
   Assessment as LogsIcon,
-  History as HistoryIcon,
   PlayArrow as PlayArrowIcon,
   FileDownload as FileDownloadIcon,
 } from '@mui/icons-material';
@@ -23,6 +21,8 @@ import { Edge } from 'reactflow';
 import { usePermissionStore } from '../../store/permissions';
 import { useTabManagerStore } from '../../store/tabManager';
 import { useEventTriggersStore } from '../../store/eventTriggers';
+import { History, MessageSquare } from 'lucide-react';
+import { useUILayoutStore } from '../../store/uiLayout';
 import ExportCrewDialog from '../../features/workflow/export/components/ExportCrewDialog';
 
 interface SidebarItem {
@@ -36,6 +36,7 @@ interface SidebarItem {
 }
 
 interface RightSidebarProps {
+  showWorkspaceActions?: boolean;
   onOpenLogsDialog: () => void;
   onToggleChat: () => void;
   isChatOpen: boolean;
@@ -60,6 +61,7 @@ interface RightSidebarProps {
 }
 
 const RightSidebar: React.FC<RightSidebarProps> = ({
+  showWorkspaceActions = false,
   onOpenLogsDialog,
   onToggleChat,
   isChatOpen,
@@ -81,6 +83,8 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   onPlayFlow,
   edges = [],
 }) => {
+  const { assistantPanelVisible, executionHistoryVisible, setAssistantPanelVisible, setExecutionHistoryVisible } = useUILayoutStore();
+  const historySelected = executionHistoryVisible && !assistantPanelVisible;
   const [animateAIAssistant, setAnimateAIAssistant] = useState(true);
   const [chatOpenedByClick, setChatOpenedByClick] = useState(false);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
@@ -290,14 +294,6 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
       }
     ] : []),
     {
-      id: 'toggle-execution-history',
-      icon: <HistoryIcon />,
-      tooltip: showRunHistory ? 'Hide Execution History' : 'Show Execution History',
-      onClick: onToggleExecutionHistory,
-      disabled: !onToggleExecutionHistory,
-      isActive: showRunHistory
-    },
-    {
       id: 'schedules',
       icon: <ScheduleIcon />,
       tooltip: 'Schedules',
@@ -325,9 +321,9 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
           100% { transform: scale(1) translateY(0); }
         }
         @keyframes play-pulse {
-          0% { box-shadow: 0 0 0 0 rgba(25, 118, 210, 0.7); transform: scale(1); }
-          50% { box-shadow: 0 0 12px 6px rgba(25, 118, 210, 0.3); transform: scale(1.15); }
-          100% { box-shadow: 0 0 0 0 rgba(25, 118, 210, 0.7); transform: scale(1); }
+          0% { box-shadow: 0 0 0 0 rgba(70, 83, 98, 0.7); transform: scale(1); }
+          50% { box-shadow: 0 0 12px 6px rgba(70, 83, 98, 0.3); transform: scale(1.15); }
+          100% { box-shadow: 0 0 0 0 rgba(70, 83, 98, 0.7); transform: scale(1); }
         }
       `} />
       <Box
@@ -357,7 +353,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
             alignItems: 'center',
             justifyContent: 'flex-start',
             py: 1,
-            borderLeft: 1,
+            borderLeft: 0,
             borderColor: 'divider',
             backgroundColor: 'background.paper',
             zIndex: 5,
@@ -367,7 +363,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
           {sidebarItems.map((item) => (
             <React.Fragment key={item.id}>
               {item.isSeparator ? (
-                <Divider sx={{ width: '80%', my: 0.5 }} />
+                <Box sx={{ height: 8 }} />
               ) : (
                 <Tooltip title={item.tooltip} placement="left">
                   {/* span wrapper: a disabled button doesn't fire the events the
@@ -385,12 +381,8 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                       width: 40,
                       height: 40,
                       mb: 1,
-                      color: isPlayPulsing(item.id)
-                        ? 'primary.main'
-                        : item.isActive ? 'primary.main' : 'text.secondary',
-                      backgroundColor: isPlayPulsing(item.id)
-                        ? 'rgba(25, 118, 210, 0.12)'
-                        : item.isActive ? 'primary.light' : 'transparent',
+                      color: item.isActive ? 'text.primary' : 'text.secondary',
+                      backgroundColor: isPlayPulsing(item.id) || item.isActive ? 'action.selected' : 'transparent',
                       borderRight: '2px solid transparent',
                       borderRadius: '50%',
                       display: 'flex',
@@ -400,8 +392,8 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
                       opacity: item.disabled ? 0.6 : 1,
                       cursor: item.disabled ? 'not-allowed' : 'pointer',
                       '&:hover': !item.disabled ? {
-                        backgroundColor: item.isActive ? 'primary.dark' : 'action.hover',
-                        color: item.isActive ? 'primary.contrastText' : 'text.primary',
+                        backgroundColor: 'action.hover',
+                        color: 'text.primary',
                       } : {},
                       animation: isPlayPulsing(item.id)
                         ? 'play-pulse 0.8s ease-in-out infinite'
@@ -415,6 +407,10 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
               )}
             </React.Fragment>
           ))}
+          {showWorkspaceActions && <Box sx={{ mt: 'auto', pt: 1, pb: { xs: 9, sm: 0 }, flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            <Tooltip title="Execution history" placement="left"><IconButton aria-label="Execution history" aria-pressed={historySelected} onClick={() => setExecutionHistoryVisible(!historySelected)} sx={{ width: 40, height: 40, mb: 1, borderRadius: 2.5, color: 'text.secondary', bgcolor: historySelected ? 'action.selected' : 'transparent' }}><History size={20} strokeWidth={1.7} /></IconButton></Tooltip>
+            <Tooltip title="Assistant responses" placement="left"><IconButton aria-label="Assistant responses" aria-pressed={assistantPanelVisible} onClick={() => setAssistantPanelVisible(!assistantPanelVisible)} sx={{ width: 40, height: 40, mb: 1, borderRadius: 2.5, color: 'text.secondary', bgcolor: assistantPanelVisible ? 'action.selected' : 'transparent' }}><MessageSquare size={19} strokeWidth={1.7} /></IconButton></Tooltip>
+          </Box>}
         </Paper>
       </Box>
 

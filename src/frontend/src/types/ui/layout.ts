@@ -18,6 +18,10 @@ export interface UILayoutState {
   rightSidebarWidth: number;       // Fixed width (48px)
 
   // Chat panel
+  assistantPanelVisible?: boolean;
+  assistantResponseFocused?: boolean;
+  assistantPanelSide?: 'left' | 'right';
+  assistantDockHeight?: number;
   chatPanelVisible: boolean;
   chatPanelCollapsed: boolean;
   chatPanelWidth: number;          // Dynamic width when expanded

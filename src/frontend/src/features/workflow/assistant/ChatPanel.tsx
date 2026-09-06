@@ -18,6 +18,7 @@ import { useJobManagementStore } from '../../../store/jobManagement';
 const kasalIcon24 = `${import.meta.env.BASE_URL}kasal-icon-24.png`;
 
 interface ChatPanelProps {
+  layout?: 'panel' | 'canvas';
   onNodesGenerated?: (nodes: Node[], edges: Edge[]) => void;
   onLoadingStateChange?: (isLoading: boolean) => void;
   isVisible?: boolean;
@@ -32,6 +33,7 @@ interface ChatPanelProps {
 }
 
 const ChatPanel: React.FC<ChatPanelProps> = ({
+  layout = 'panel',
   onNodesGenerated,
   onLoadingStateChange,
   isVisible = true,
@@ -47,6 +49,8 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   const { selectedModel, setSelectedModel } = useCrewExecutionStore();
   const { selectedTools } = useJobManagementStore();
 
+  if (layout === 'canvas') return <WorkflowChat layout="canvas" onNodesGenerated={onNodesGenerated} onLoadingStateChange={onLoadingStateChange} selectedModel={selectedModel} selectedTools={selectedTools} isVisible={isVisible} setSelectedModel={setSelectedModel} nodes={nodes} edges={edges} onExecuteCrew={onExecuteCrew} onToggleCollapse={onToggleCollapse} chatSessionId={chatSessionId} onOpenLogs={onOpenLogs} />;
+
   if (isCollapsed) {
     // Collapsed state - show only icon and expand button
     return (
@@ -58,9 +62,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          ...(chatSide === 'right' ? { borderLeft: 1 } : { borderRight: 1 }),
+          border: 0,
           borderColor: 'divider',
-          borderRadius: 0,
+          borderRadius: 'inherit',
           boxShadow: 'none',
           backgroundColor: 'background.paper',
           overflow: 'hidden',
@@ -69,9 +73,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       >
         <Box sx={{
           p: 1.5,
-          borderBottom: 1,
+          borderBottom: 0,
           borderColor: 'divider',
-          backgroundColor: theme => theme.palette.mode === 'dark' ? 'grey.900' : 'grey.50',
+          backgroundColor: 'transparent',
           width: '100%',
           display: 'flex',
           flexDirection: 'column',
@@ -86,10 +90,11 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
               size="small"
               onClick={onToggleCollapse}
               sx={{
-                backgroundColor: 'primary.main',
-                color: 'primary.contrastText',
+                backgroundColor: 'action.hover',
+                color: 'text.secondary',
+                borderRadius: '12px',
                 '&:hover': {
-                  backgroundColor: 'primary.dark',
+                  backgroundColor: 'action.selected',
                 }
               }}
             >
@@ -114,9 +119,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         width: '100%',
         display: 'flex',
         flexDirection: 'column',
-        ...(chatSide === 'right' ? { borderLeft: 1 } : { borderRight: 1 }),
-        borderColor: 'divider',
-        borderRadius: 0,
+        border: 0,
+        backgroundColor: 'transparent',
+        borderRadius: 'inherit',
         boxShadow: 'none',
         transition: 'all 0.3s ease-in-out', // Smooth animation
         overflow: 'hidden', // Ensure nothing escapes this container

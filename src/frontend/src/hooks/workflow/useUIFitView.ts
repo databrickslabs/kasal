@@ -12,7 +12,9 @@ export function useUIFitView(params: {
 
   // UI-aware fitView function that respects canvas boundaries (crew canvas)
   const handleUIAwareFitView = React.useCallback(() => {
-    if (!crewFlowInstanceRef.current || nodes.length === 0) return;
+    if (!crewFlowInstanceRef.current) return;
+    const currentNodes = crewFlowInstanceRef.current.getNodes().filter(node => !node.hidden);
+    if (!currentNodes.length) return;
 
     // Create layout manager and get the most current UI state
     const layoutManager = new CanvasLayoutManager();
@@ -27,10 +29,10 @@ export function useUIFitView(params: {
 
     // Calculate bounds of all nodes
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    nodes.forEach((node) => {
+    currentNodes.forEach((node) => {
       if (node.position) {
-        const nodeWidth = node.width || 200;
-        const nodeHeight = node.height || 150;
+        const nodeWidth = node.width || (node.type === 'taskNode' ? 270 : 200);
+        const nodeHeight = node.height || (node.type === 'taskNode' ? 230 : 210);
         minX = Math.min(minX, node.position.x);
         minY = Math.min(minY, node.position.y);
         maxX = Math.max(maxX, node.position.x + nodeWidth);
@@ -46,21 +48,12 @@ export function useUIFitView(params: {
     const padding = 50;
     const zoomX = (canvasArea.width - 2 * padding) / nodesWidth;
     const zoomY = (canvasArea.height - 2 * padding) / nodesHeight;
-    const zoom = Math.min(zoomX, zoomY, 1.5); // Cap at 1.5x to prevent over-zooming
+    const zoom = Math.max(0.01, Math.min(zoomX, zoomY, 1.5)); // Cap at 1.5x to prevent over-zooming
 
-    // Calculate center of canvas area in screen coordinates with visual balance adjustments
-    const chatPanelOffset = currentUIState.chatPanelVisible && !currentUIState.chatPanelCollapsed
-      ? (currentUIState.chatPanelSide === 'right'
-          ? currentUIState.chatPanelWidth * 0.15
-          : -currentUIState.chatPanelWidth * 0.55)
-      : 0;
-
-    const executionHistoryOffset = currentUIState.executionHistoryVisible
-      ? currentUIState.executionHistoryHeight * 0.2
-      : 0;
-
-    const canvasCenterX = canvasArea.x + canvasArea.width / 2 + chatPanelOffset;
-    const canvasCenterY = canvasArea.y + canvasArea.height / 2 - executionHistoryOffset;
+    // Convert the usable screen area to ReactFlow's local viewport coordinates.
+    const bounds = document.querySelector('[data-crew-container] .react-flow')?.getBoundingClientRect();
+    const canvasCenterX = canvasArea.x + canvasArea.width / 2 - (bounds?.left || 0);
+    const canvasCenterY = canvasArea.y + canvasArea.height / 2 - (bounds?.top || 0);
 
     // Calculate center of nodes in flow coordinates
     const nodesCenterX = minX + nodesWidth / 2;
@@ -74,7 +67,29 @@ export function useUIFitView(params: {
       { x: viewportX, y: viewportY, zoom },
       { duration: 800 }
     );
-  }, [nodes, crewFlowInstanceRef]);
+  }, [crewFlowInstanceRef]);
+
+  const previousIds = React.useRef(new Set<string>());
+  const pendingFit = React.useRef(false);
+  React.useEffect(() => {
+    const ids = new Set(nodes.filter(node => !node.hidden).map(node => node.id));
+    if ([...ids].some(id => !previousIds.current.has(id))) pendingFit.current = true;
+    previousIds.current = ids;
+    if (!pendingFit.current || !ids.size) return;
+    let frame: number;
+    let attempts = 0;
+    const fitAfterMeasurement = () => {
+      const measured = crewFlowInstanceRef.current?.getNodes().filter(node => !node.hidden) || [];
+      const ready = measured.length === ids.size && measured.every(node => ids.has(node.id) && node.width && node.height);
+      if (ready || ++attempts >= 30) {
+        if (measured.length) { pendingFit.current = false; handleUIAwareFitView(); }
+      } else {
+        frame = requestAnimationFrame(fitAfterMeasurement);
+      }
+    };
+    frame = requestAnimationFrame(fitAfterMeasurement);
+    return () => cancelAnimationFrame(frame);
+  }, [nodes, crewFlowInstanceRef, handleUIAwareFitView]);
 
   // UI-aware fitView for flow canvas
   const handleFlowUIAwareFitView = React.useCallback(() => {
@@ -91,15 +106,8 @@ export function useUIFitView(params: {
     // Get available canvas area (calculated internally)
     layoutManager.getAvailableCanvasArea('flow');
 
-    // Calculate padding based on execution history visibility
-    const basePadding = 0.2;
-    const executionHistoryPadding = currentUIState.executionHistoryVisible
-      ? currentUIState.executionHistoryHeight / currentUIState.screenHeight
-      : 0;
-
-    // Adjust padding to account for execution history from bottom
     flowFlowInstanceRef.current.fitView({
-      padding: basePadding + executionHistoryPadding * 0.5,
+      padding: 0.2,
       includeHiddenNodes: false,
       duration: 800,
     });

@@ -106,7 +106,7 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
       position: 'relative',
       mt: 0, // No margin top since TabBar is above
       mb: 0, // Remove bottom margin
-        borderBottom: '1px solid',
+        borderBottom: 0,
         borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
         display: 'block',
         overflow: 'hidden', // Prevent any content from overflowing
@@ -147,7 +147,7 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
       position: 'relative', 
       mt: 0, // No margin top since TabBar is above
       mb: 0, // Remove bottom margin
-      borderBottom: '1px solid',
+      borderBottom: 0,
       borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
       display: 'block',
       overflow: 'hidden',

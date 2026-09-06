@@ -71,7 +71,7 @@ export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerN
         sourceHandle,
         targetHandle,
         type: 'default',
-        style: { stroke: '#2196f3', strokeWidth: 2 },
+        style: { stroke: '#77838D', strokeWidth: 2 },
         animated: false,
         label: '',
       };
@@ -129,7 +129,7 @@ export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerN
         sourceHandle,
         targetHandle,
         type: 'default',
-        style: { stroke: '#2196f3', strokeWidth: 2 },
+        style: { stroke: '#77838D', strokeWidth: 2 },
         animated: false,
         label: '',
       };
@@ -230,7 +230,7 @@ export const useManagerNode = ({ nodes, edges, setNodes, setEdges }: UseManagerN
           sourceHandle,
           targetHandle,
           type: 'default',
-          style: { stroke: '#2196f3', strokeWidth: 2 },
+          style: { stroke: '#77838D', strokeWidth: 2 },
           animated: false,
           label: '',
         };

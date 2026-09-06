@@ -1,4 +1,5 @@
 import React from 'react';
+import GroupSelector from '../../groups/components/GroupSelector';
 import { useAppStore } from '../store/appStore';
 
 /**
@@ -55,6 +56,7 @@ const CollapsedRail: React.FC<{ onNewChat: () => void }> = ({ onNewChat }) => {
           </svg>
         )}
       </button>
+      <GroupSelector />
     </aside>
   );
 };
