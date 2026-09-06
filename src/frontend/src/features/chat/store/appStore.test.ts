@@ -358,7 +358,7 @@ describe('appStore', () => {
       expect(JSON.parse(localStorage.getItem(CONFIG_STORAGE_KEY)!).groupId).toBe('w1');
     });
 
-    it('does not auto-select when a groupId is already set', async () => {
+    it('repairs a stored groupId that is absent from the authorized workspaces', async () => {
       const stored = { apiUrl: '/api/v1', email: 'a@b.com', groupId: 'existing', accessToken: '' };
       localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(stored));
       const store = await freshStore();
@@ -368,7 +368,15 @@ describe('appStore', () => {
       await store.getState().loadWorkspaces();
 
       expect(store.getState().workspaces).toBe(ws);
-      expect(store.getState().config.groupId).toBe('existing');
+      expect(store.getState().config.groupId).toBe('w1');
+    });
+
+    it('preserves a valid shared workspace selection', async () => {
+      localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify({ apiUrl: '/api/v1', email: 'a@b.com', groupId: 'team', accessToken: '' }));
+      const store = await freshStore();
+      fetchWorkspaces.mockResolvedValue([{ id: 'personal', name: 'Personal', user_role: null }, { id: 'team', name: 'Team', user_role: 'admin' }]);
+      await store.getState().loadWorkspaces();
+      expect(store.getState().config.groupId).toBe('team');
     });
 
     it('does not auto-select when workspace list is empty', async () => {

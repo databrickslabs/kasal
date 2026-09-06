@@ -28,11 +28,19 @@ export const useGroupStore = create<GroupState>()(
     },
 
     fetchMyGroups: async () => {
-      const currentUser = useUserStore.getState().currentUser;
+      let currentUser = useUserStore.getState().currentUser;
       if (!currentUser?.email) return;
 
       set({ isLoading: true });
       try {
+        if (!currentUser.personal_group_id) {
+          await useUserStore.getState().fetchCurrentUser();
+          currentUser = useUserStore.getState().currentUser;
+        }
+        const primaryGroupId = currentUser?.personal_group_id;
+        if (!primaryGroupId) {
+          throw new Error('Personal workspace allocation is unavailable');
+        }
         const groupService = GroupService.getInstance();
         let userGroups: GroupWithRole[] = [];
 
@@ -43,13 +51,7 @@ export const useGroupStore = create<GroupState>()(
           userGroups = [];
         }
 
-        // Create personal workspace
-        const currentUserEmail = currentUser.email;
-        const emailDomain = currentUserEmail.split('@')[1] || '';
-        const emailUser = currentUserEmail.split('@')[0] || '';
-        // Keep dots in domain to match backend format (e.g., user_jane.doe_databricks.com)
-        const primaryGroupId = `user_${emailUser.replace(/\./g, '_')}_${emailDomain.replace(/\./g, '_')}`;
-
+        // The authenticated user's allocated ID is the only personal scope.
         const personalGroup: GroupWithRole = {
           id: primaryGroupId,
           name: 'Personal Space',
@@ -87,6 +89,7 @@ export const useGroupStore = create<GroupState>()(
         // both "not set yet" and "stored group was stale/invalid → reset to personal".
         if (effectiveGroupId !== selectedFromStorage) {
           localStorage.setItem('selectedGroupId', effectiveGroupId);
+          window.dispatchEvent(new CustomEvent('group-changed', { detail: { groupId: effectiveGroupId } }));
         }
       } catch (error) {
         console.error('Failed to fetch user groups:', error);

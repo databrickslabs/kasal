@@ -19,39 +19,19 @@ interface GroupWithRoleResponse {
   user_role: string | null;
 }
 
-export function generatePersonalWorkspaceId(email: string): string {
-  const sanitized = email
-    .replace('@', '_')
-    .replace(/\./g, '_')
-    .replace(/-/g, '_')
-    .replace(/\+/g, '_');
-  return `user_${sanitized}`.toLowerCase();
-}
-
-export async function fetchWorkspaces(email: string): Promise<Workspace[]> {
-  const workspaces: Workspace[] = [];
-
-  // Always add personal workspace first
-  if (email) {
-    workspaces.push({
-      id: generatePersonalWorkspaceId(email),
-      name: 'Personal Space',
-      user_role: null,
-    });
-  }
-
-  try {
-    const response = await getClient().get<GroupWithRoleResponse[]>('/groups/my-groups');
-    for (const group of response.data) {
-      workspaces.push({
-        id: group.id,
-        name: group.name,
-        user_role: group.user_role,
-      });
-    }
-  } catch {
-    // Groups endpoint may not be available
-  }
-
-  return workspaces;
+/** Personal workspace IDs are allocated by the server, never inferred from email. */
+export async function fetchWorkspaces(_email: string): Promise<Workspace[]> {
+  const client = getClient();
+  const [identity, groups] = await Promise.all([
+    client.get<{ personal_group_id?: string | null }>('/users/me'),
+    client.get<GroupWithRoleResponse[]>('/groups/my-groups').catch(() => ({ data: [] })),
+  ]);
+  const personalId = identity.data.personal_group_id;
+  if (!personalId) throw new Error('Personal workspace allocation is unavailable');
+  return [
+    { id: personalId, name: 'Personal Space', user_role: null },
+    ...groups.data.filter(group => group.id !== personalId).map(group => ({
+      id: group.id, name: group.name, user_role: group.user_role,
+    })),
+  ];
 }

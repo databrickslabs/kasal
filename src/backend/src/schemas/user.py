@@ -77,6 +77,8 @@ class UserPermissionUpdate(BaseModel):
 # User with complete info
 class UserInDB(UserBase):
     id: str
+    # Read-only allocation; clients must never derive an authorization scope from email.
+    personal_group_id: Optional[str] = None
     display_name: Optional[str] = None  # Moved from UserProfile
     role: UserRole
     status: UserStatus

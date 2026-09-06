@@ -6,6 +6,7 @@ interface UserInfo {
   id: string;
   email: string;
   username: string;
+  personal_group_id?: string | null;
   displayName?: string;
   is_system_admin?: boolean;
   is_personal_workspace_manager?: boolean;
@@ -51,6 +52,7 @@ export const useUserStore = create<UserState>()(
               id: userInfo.id,
               email: userInfo.email,
               username: userInfo.username,
+              personal_group_id: userInfo.personal_group_id ?? null,
               displayName: userInfo.profile?.display_name || userInfo.username,
               is_system_admin: userInfo.is_system_admin || false,
               is_personal_workspace_manager: userInfo.is_personal_workspace_manager || false
@@ -80,8 +82,9 @@ export const useUserStore = create<UserState>()(
                 error: null
               });
             } else {
-              // Just update the loading state and timestamp if no change
+              // Allocation and permissions can change without the email changing.
               set({
+                currentUser: newUser,
                 isLoading: false,
                 lastFetched: Date.now()
               });

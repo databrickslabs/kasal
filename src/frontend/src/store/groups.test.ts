@@ -9,12 +9,12 @@ vi.mock('../api/groups/GroupService', () => ({
 
 vi.mock('./user', () => ({
   useUserStore: {
-    getState: () => ({ currentUser: { email: 'nehme.tohme@databricks.com' } }),
+    getState: () => ({ currentUser: { email: 'person@example.com', personal_group_id: 'user_0123456789abcdef0123456789abcdef' } }),
   },
 }));
 
-// Personal workspace id the store derives from the user's email.
-const PERSONAL = 'user_nehme_tohme_databricks_com';
+// Opaque ID supplied by the authenticated-user API.
+const PERSONAL = 'user_0123456789abcdef0123456789abcdef';
 
 async function freshStore() {
   vi.resetModules();
@@ -39,6 +39,20 @@ describe('useGroupStore.fetchMyGroups — stored-group validation', () => {
 
     expect(useGroupStore.getState().currentGroupId).toBe(PERSONAL);
     expect(localStorage.getItem('selectedGroupId')).toBe(PERSONAL);
+  });
+
+  it('repairs a cached email-derived ID and notifies execution-history listeners', async () => {
+    localStorage.setItem('selectedGroupId', 'user_person_example_com');
+    getMyGroups.mockResolvedValue([]);
+    const onChange = vi.fn();
+    window.addEventListener('group-changed', onChange);
+    try {
+      const store = await freshStore();
+      await store.getState().fetchMyGroups();
+      expect(store.getState().currentGroupId).toBe(PERSONAL);
+      expect(localStorage.getItem('selectedGroupId')).toBe(PERSONAL);
+      expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ detail: { groupId: PERSONAL } }));
+    } finally { window.removeEventListener('group-changed', onChange); }
   });
 
   it('keeps a valid stored group', async () => {

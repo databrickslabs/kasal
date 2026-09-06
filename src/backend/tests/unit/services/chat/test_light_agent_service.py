@@ -437,19 +437,32 @@ def test_resolve_group_id_falls_back_to_first_group_id():
     assert LightAgentService._resolve_group_id(config, ctx) == "g1"
 
 
-def test_resolve_group_id_derives_personal_group_from_email():
-    """Regression (chat answer mode): with no selected workspace — no config.group_id,
-    no primary_group_id, no group_ids — the personal workspace must be derived from
-    the user's email (the id MCP workspace overrides are stored under), NOT "default"
-    (which matches no MCP rows and silently drops workspace-enabled servers)."""
+def test_resolve_group_id_uses_allocated_personal_workspace():
+    """Personal scope is the allocated ID, including collision-safe IDs."""
     config = SimpleNamespace(group_id=None)
     ctx = SimpleNamespace(
-        primary_group_id=None, group_ids=[], group_email="nehme.tohme@databricks.com"
+        primary_group_id=None,
+        group_ids=[],
+        group_email="person@example.com",
+        current_user=SimpleNamespace(
+            personal_group_id="user_person_example_com_1234abcd"
+        ),
     )
     assert (
         LightAgentService._resolve_group_id(config, ctx)
-        == "user_nehme_tohme_databricks_com"
+        == "user_person_example_com_1234abcd"
     )
+
+
+def test_resolve_group_id_rejects_unallocated_personal_workspace():
+    config = SimpleNamespace(group_id=None)
+    ctx = SimpleNamespace(
+        primary_group_id=None,
+        group_ids=[],
+        group_email="person@example.com",
+    )
+    with pytest.raises(ValueError, match="personal workspace has not been allocated"):
+        LightAgentService._resolve_group_id(config, ctx)
 
 
 def test_resolve_group_id_defaults_when_no_group_or_email():

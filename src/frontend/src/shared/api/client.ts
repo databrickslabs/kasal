@@ -22,7 +22,12 @@ apiClient.interceptors.request.use(
     // Add group context headers if available
     const selectedGroupId = localStorage.getItem('selectedGroupId');
 
-    if (selectedGroupId) {
+    // Identity/membership discovery must work even when a saved selection is stale.
+    const identityDiscovery = (config.method ?? 'get').toLowerCase() === 'get'
+      && /\/(?:users\/me|groups\/my-groups)\/?(?:\?|$)/.test(config.url ?? '');
+    if (identityDiscovery) {
+      delete config.headers['group_id'];
+    } else if (selectedGroupId) {
       config.headers['group_id'] = selectedGroupId;  // Use 'group_id' to match database column name
     }
 
@@ -44,22 +49,16 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
-    // Recover from a stale selected workspace. The `group_id` header can point at
-    // a workspace the user can no longer access — most commonly right after a
-    // redeploy, when the DB is temporarily on local storage (SQLite) until the
-    // admin reconnects Lakebase, so the previously-selected workspace doesn't
-    // exist yet. The backend then 403s EVERY group-scoped call, including
-    // /users/me, which would otherwise leave the app stuck on a blank screen with
-    // no way to self-correct. Clear the stale selection and retry once WITHOUT the
-    // header so the request falls back to the personal workspace; the group store
-    // then re-validates and the user can re-select the workspace once it returns.
+    // Recover read requests from a workspace the user can no longer access.
+    // Writes must never be replayed silently in another workspace.
     const original = error.config;
     const detail = error.response?.data?.detail;
     const isGroupAccessDenied =
       error.response?.status === 403 &&
       typeof detail === 'string' &&
       detail.toLowerCase().includes('access to group');
-    if (isGroupAccessDenied && original && !original._groupAccessRetry) {
+    if (isGroupAccessDenied && original && !original._groupAccessRetry
+      && (original.method ?? 'get').toLowerCase() === 'get') {
       original._groupAccessRetry = true;
       try {
         localStorage.removeItem('selectedGroupId');

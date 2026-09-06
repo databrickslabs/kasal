@@ -191,6 +191,7 @@ class UserService:
                     )
             return stored
         import uuid
+
         from sqlalchemy.exc import IntegrityError
 
         for attempt in range(3):
@@ -244,7 +245,7 @@ class UserService:
         if not email or not re.match(
             r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", email
         ):
-            if email and "@localhost" not in email:
+            if not email or not email.endswith("@localhost"):
                 logger.warning(f"Rejecting invalid email for user creation: {email!r}")
                 return None
 

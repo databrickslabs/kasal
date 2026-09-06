@@ -252,6 +252,7 @@ class TestUserInDB:
         user_data = {
             "id": "user123",
             "username": "dbuser",
+            "personal_group_id": "user_0123456789abcdef0123456789abcdef",
             "email": "db@example.com",
             "role": UserRole.TECHNICAL,
             "status": UserStatus.ACTIVE,
@@ -263,6 +264,10 @@ class TestUserInDB:
 
         assert user.id == "user123"
         assert user.username == "dbuser"
+        assert (
+            user.model_dump()["personal_group_id"]
+            == "user_0123456789abcdef0123456789abcdef"
+        )
         assert user.role == UserRole.TECHNICAL
         assert user.status == UserStatus.ACTIVE
 

@@ -44,6 +44,32 @@ describe('shared API client', () => {
     expect(config.apiUrl.length).toBeGreaterThan(0);
   });
 
+  it.each(['/users/me', '/groups/my-groups'])('discovers identity without a stale workspace header: %s', async (url) => {
+    await import('./client');
+    localStorage.setItem('selectedGroupId', 'user_old_email');
+    const config = { url, method: 'get', headers: { group_id: 'user_old_email' } };
+    captured.requestOk!(config);
+    expect(config.headers.group_id).toBeUndefined();
+  });
+
+  it('keeps the selected workspace on execution-history requests', async () => {
+    await import('./client');
+    localStorage.setItem('selectedGroupId', 'user_allocated');
+    const config = { url: '/executions', headers: {} as Record<string, string> };
+    captured.requestOk!(config);
+    expect(config.headers.group_id).toBe('user_allocated');
+  });
+
+  it('never replays a denied write in another workspace', async () => {
+    await import('./client');
+    localStorage.setItem('selectedGroupId', 'stale');
+    const error = { response: { status: 403, data: { detail: 'No access to group stale' } },
+      config: { url: '/executions', method: 'post', headers: { group_id: 'stale' } } };
+    await expect(captured.responseErr!(error)).rejects.toBe(error);
+    expect(instance).not.toHaveBeenCalled();
+    expect(localStorage.getItem('selectedGroupId')).toBe('stale');
+  });
+
   describe('stale-workspace (group_id) recovery', () => {
     it('does not loop when the retried workspace request is denied again', async () => {
       await import('./client');

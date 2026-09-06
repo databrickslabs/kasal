@@ -481,9 +481,12 @@ class TestPersonalWorkspaceToolGuard:
 
     @pytest.fixture
     def personal_context(self):
-        # generate_individual_group_id("user@example.com") == "user_user_example_com"
+        # The scope comes from the authenticated user allocation.
         return GroupContext(
-            group_ids=["user_user_example_com"],
+            group_ids=["user_0123456789abcdef0123456789abcdef"],
+            current_user=SimpleNamespace(
+                personal_group_id="user_0123456789abcdef0123456789abcdef"
+            ),
             group_email="user@example.com",
             email_domain="example.com",
             user_id="user-1",

@@ -28,38 +28,14 @@ def service(mock_session):
 
 
 @pytest.mark.asyncio
-async def test_rejects_empty_email(service):
-    """Empty email falls through validation but find no user; returns None or raises.
-    For empty string: `not email` is True, but `email and ...` is False so it
-    falls through to get_by_email. With no user found, it tries to create."""
-    # Empty email passes the guard (falsy values don't trigger the 'return None')
-    # and proceeds to repo lookup. Mock to return None (no user found).
-    service.user_repo.get_by_email = AsyncMock(return_value=None)
-    service.user_repo.get_by_username = AsyncMock(return_value=None)
-    mock_user = MagicMock()
-    mock_user.id = "u1"
-    mock_user.email = ""
-    service.user_repo.create = AsyncMock(return_value=mock_user)
-    service.user_repo.count = AsyncMock(return_value=1)
-    service._handle_first_user_admin_setup = AsyncMock()
-
-    # Empty email is not blocked by the regex guard (falsy short-circuits)
-    result = await service.get_or_create_user_by_email("")
-    # It will attempt creation since the guard doesn't block empty strings
-    assert result is not None or result is None  # just verify no crash
-
-
-@pytest.mark.asyncio
-async def test_rejects_none_email(service):
-    """None email falls through validation guard (falsy) and hits repo.
-    When no user is found, it tries to create but None.split('@') raises."""
-    service.user_repo.get_by_email = AsyncMock(return_value=None)
-
-    # None passes the guard, hits get_by_email(None) -> None,
-    # then tries username_base = email.split("@") which raises AttributeError.
-    # The outer try/except catches it and re-raises.
-    with pytest.raises(AttributeError):
-        await service.get_or_create_user_by_email(None)
+@pytest.mark.parametrize("email", ["", None])
+async def test_rejects_empty_email(service, email):
+    """Missing identity never reaches user creation or workspace allocation."""
+    service.user_repo.get_by_email = AsyncMock()
+    service.user_repo.create = AsyncMock()
+    assert await service.get_or_create_user_by_email(email) is None
+    service.user_repo.get_by_email.assert_not_awaited()
+    service.user_repo.create.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -97,6 +73,7 @@ async def test_rejects_email_without_tld(service):
 async def test_accepts_normal_email(service):
     """Normal email triggers user lookup/creation."""
     mock_user = MagicMock()
+    mock_user.personal_group_id = "user_0123456789abcdef0123456789abcdef"
     mock_user.id = "123"
     mock_user.email = "user@example.com"
     mock_user.is_system_admin = False
@@ -114,6 +91,7 @@ async def test_accepts_normal_email(service):
 async def test_accepts_localhost_email(service):
     """Email with @localhost is allowed (dev environment)."""
     mock_user = MagicMock()
+    mock_user.personal_group_id = "user_0123456789abcdef0123456789abcdef"
     mock_user.id = "456"
     mock_user.email = "admin@localhost"
     mock_user.is_system_admin = False
@@ -128,6 +106,7 @@ async def test_accepts_localhost_email(service):
 async def test_accepts_email_with_plus(service):
     """Email with + addressing is accepted."""
     mock_user = MagicMock()
+    mock_user.personal_group_id = "user_0123456789abcdef0123456789abcdef"
     mock_user.id = "789"
     mock_user.email = "user+tag@example.com"
     mock_user.is_system_admin = False
@@ -145,6 +124,7 @@ async def test_creates_user_when_not_found(service):
     service.user_repo.get_by_username = AsyncMock(return_value=None)
 
     mock_new_user = MagicMock()
+    mock_new_user.personal_group_id = "user_0123456789abcdef0123456789abcdef"
     mock_new_user.id = "new-id"
     mock_new_user.email = "new@example.com"
     mock_new_user.username = "new"
@@ -165,6 +145,7 @@ async def test_username_generated_from_email(service):
     service.user_repo.get_by_username = AsyncMock(return_value=None)
 
     created_user = MagicMock()
+    created_user.personal_group_id = "user_0123456789abcdef0123456789abcdef"
     created_user.id = "gen-id"
     created_user.email = "john.doe@example.com"
     service.user_repo.create = AsyncMock(return_value=created_user)

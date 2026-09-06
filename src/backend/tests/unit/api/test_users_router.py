@@ -117,6 +117,7 @@ class TestCurrentUserEndpoints:
         user_with_profile = {
             "id": "current-user-123",
             "username": "currentuser",
+            "personal_group_id": "user_0123456789abcdef0123456789abcdef",
             "email": "current@example.com",
             "role": UserRole.REGULAR,
             "status": UserStatus.ACTIVE,
@@ -134,6 +135,10 @@ class TestCurrentUserEndpoints:
             response = client.get("/users/me")
 
         assert response.status_code == 200
+        assert (
+            response.json()["personal_group_id"]
+            == "user_0123456789abcdef0123456789abcdef"
+        )
         data = response.json()
         assert data["id"] == "current-user-123"
         assert data["username"] == "currentuser"

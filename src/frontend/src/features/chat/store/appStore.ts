@@ -175,8 +175,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
       if (!state.config.email) return;
       const ws = await fetchWorkspaces(state.config.email);
       set({ workspaces: ws });
-      // Auto-select personal workspace if none selected
-      if (ws.length > 0 && !state.config.groupId) {
+      // Repair old derived personal IDs and workspaces no longer accessible.
+      if (ws.length > 0 && !ws.some(workspace => workspace.id === state.config.groupId)) {
         const updated = { ...state.config, groupId: ws[0].id };
         saveConfig(updated);
         updateClient(updated);

@@ -88,7 +88,11 @@ def _service(txn, *, delay=0.0):
         # executes atomically and the interleave under test never happens —
         # which made these tests pass against the BROKEN code.
         await asyncio.sleep(0)
-        user = MagicMock(email=data["email"], is_system_admin=False)
+        user = MagicMock(
+            email=data["email"],
+            is_system_admin=False,
+            personal_group_id="user_0123456789abcdef0123456789abcdef",
+        )
         # FLUSH, not commit. base_repository.create flushes and explicitly does
         # NOT commit ("let the session dependency handle it"), which is the
         # condition that makes this unrecoverable: the row is visible to the
@@ -204,5 +208,5 @@ class TestTheLockItself:
         """It is rejected downstream; keying a lock on "" would collect one
         entry for every malformed request."""
         txn = _SharedTransaction()
-        await _service(txn).get_or_create_user_by_email("")
+        assert await _service(txn).get_or_create_user_by_email("") is None
         assert users_module._user_creation_locks == {}
