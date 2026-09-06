@@ -92,3 +92,61 @@ class TestTheStreamAllLogLine:
         )
         assert out == {"User-Agent": "Mozilla", "Last-Event-ID": "42"}
         assert "secret" not in str(out)
+
+
+class TestTheExecutionStreamNeedsAnOwner:
+    """R2-01. The per-job stream denied only a POSITIVE foreign match in
+    execution history, so an id with no row — a generation id handed to this
+    route, a job not yet persisted — streamed to anyone."""
+
+    async def _stream(self, job_id, row):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock, patch
+
+        from src.api.sse_router import stream_execution_updates
+
+        req = MagicMock()
+        req.headers.get = lambda key, default=None: None
+        ctx = SimpleNamespace(group_ids=["ws-a"], primary_group_id="ws-a")
+        repo = MagicMock()
+        repo.get_execution_by_job_id = AsyncMock(return_value=row)
+        with (
+            patch("src.api.sse_router.ExecutionHistoryRepository", return_value=repo),
+            patch("src.api.sse_router.event_stream_generator", return_value=iter([])),
+        ):
+            return await stream_execution_updates(
+                request=req, job_id=job_id, group_context=ctx, session=None
+            )
+
+    @pytest.mark.asyncio
+    async def test_a_foreign_generation_id_is_refused(self):
+        from src.core.exceptions import NotFoundError
+
+        sse_manager.register_job_owner("gen-b", "ws-b")
+        with pytest.raises(NotFoundError):
+            await self._stream("gen-b", row=None)
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_id_is_refused(self):
+        from src.core.exceptions import NotFoundError
+
+        with pytest.raises(NotFoundError):
+            await self._stream("nobody-knows", row=None)
+
+    @pytest.mark.asyncio
+    async def test_an_own_pending_job_streams(self):
+        sse_manager.register_job_owner("job-pending", "ws-a")
+        assert await self._stream("job-pending", row=None) is not None
+
+    @pytest.mark.asyncio
+    async def test_the_persisted_row_decides_when_there_is_one(self):
+        from types import SimpleNamespace
+
+        from src.core.exceptions import NotFoundError
+
+        assert (
+            await self._stream("job-a", row=SimpleNamespace(group_id="ws-a"))
+            is not None
+        )
+        with pytest.raises(NotFoundError):
+            await self._stream("job-b", row=SimpleNamespace(group_id="ws-b"))

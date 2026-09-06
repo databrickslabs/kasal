@@ -123,13 +123,15 @@ async def stream_execution_updates(
     execution = await ExecutionHistoryRepository(session).get_execution_by_job_id(
         job_id
     )
-    if (
-        execution
-        and getattr(execution, "group_id", None)
-        and execution.group_id not in group_ids
-    ):
+    # Affirmative ownership, from the persisted row when there is one and from
+    # the registered owner for a job or generation not yet persisted. This
+    # used to deny only a POSITIVE foreign match, so an id with no row — a
+    # generation id, a not-yet-persisted job — streamed to anyone (R2-01).
+    owner = getattr(execution, "group_id", None) if execution else None
+    owner = owner or sse_manager.job_owner(job_id)
+    if owner is None or owner not in group_ids:
         logger.warning(
-            f"[SSE_STREAM] cross-tenant access denied | job={job_id} | caller_groups={group_ids}"
+            f"[SSE_STREAM] access denied | job={job_id} | caller_groups={group_ids}"
         )
         raise NotFoundError(f"Execution {job_id} not found")
 

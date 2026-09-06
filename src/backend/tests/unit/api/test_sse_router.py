@@ -482,6 +482,7 @@ async def test_stream_execution_updates_returns_streaming_response():
     req = MagicMock()
     req.headers.get = lambda key, default=None: None
     ctx = Ctx()
+    _m.sse_manager.register_job_owner("job-1", ctx.group_ids[0])  # owned (R2-01)
 
     mock_generator = AsyncMock(return_value=iter([]))
 
@@ -526,6 +527,7 @@ async def test_stream_execution_updates_with_last_event_id():
         "5" if key == "last-event-id" else default
     )
     ctx = Ctx()
+    _m.sse_manager.register_job_owner("job-2", ctx.group_ids[0])  # owned (R2-01)
 
     mock_gen = AsyncMock(return_value=iter([]))
     with (
