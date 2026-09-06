@@ -117,7 +117,7 @@ class TestLocalDevAuthMiddlewareEdgeCases:
         async def mock_app(scope, receive, send):
             received_scopes.append(scope)
 
-        middleware = LocalDevAuthMiddleware(mock_app)
+        middleware = LocalDevAuthMiddleware(mock_app, enabled=True)
         # No 'headers' key at all
         scope = {"type": "http"}
 
@@ -135,7 +135,7 @@ class TestLocalDevAuthMiddlewareEdgeCases:
         async def mock_app(scope, receive, send):
             received.append(scope)
 
-        middleware = LocalDevAuthMiddleware(mock_app)
+        middleware = LocalDevAuthMiddleware(mock_app, enabled=True)
         scope = {"type": "http", "headers": []}
 
         original = settings.LOCAL_DEV_USER_EMAIL
@@ -157,7 +157,7 @@ class TestLocalDevAuthMiddlewareEdgeCases:
         async def mock_app(scope, receive, send):
             received.append(scope)
 
-        middleware = LocalDevAuthMiddleware(mock_app)
+        middleware = LocalDevAuthMiddleware(mock_app, enabled=True)
         scope = {"type": "http", "headers": []}
 
         original = settings.LOCAL_DEV_USER_EMAIL

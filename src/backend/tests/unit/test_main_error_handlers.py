@@ -24,7 +24,7 @@ class TestLocalDevAuthMiddleware:
         from src.main import LocalDevAuthMiddleware
 
         inner_app = AsyncMock()
-        return LocalDevAuthMiddleware(inner_app), inner_app
+        return LocalDevAuthMiddleware(inner_app, enabled=True), inner_app
 
     @pytest.mark.asyncio
     async def test_injects_email_when_not_present(self):
