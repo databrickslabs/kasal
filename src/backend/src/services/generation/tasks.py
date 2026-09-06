@@ -12,7 +12,6 @@ import traceback
 from typing import Any, Optional
 
 from src.repositories.log_repository import LLMLogRepository
-from src.schemas.task import TaskCreate
 from src.schemas.task_generation import TaskGenerationRequest, TaskGenerationResponse
 from src.services.catalog.templates import TemplateService
 from src.services.execution.logs.llm_log_service import LLMLogService
@@ -490,70 +489,3 @@ class TaskGenerationService:
 
         # Return the task config (logging already performed in generate_task)
         return generation_response.model_dump()
-
-    def convert_to_task_create(
-        self, generation_response: TaskGenerationResponse
-    ) -> TaskCreate:
-        """
-        Convert a TaskGenerationResponse to a TaskCreate schema.
-
-        This is a utility method that can be used by other services to convert
-        generated task data into the format needed for database persistence.
-
-        Args:
-            generation_response: Generated task data from LLM
-
-        Returns:
-            TaskCreate schema ready for database persistence
-        """
-        import json
-
-        from src.schemas.task import TaskConfig
-
-        # Convert output_json from dict to string if it exists
-        output_json_str = None
-        if generation_response.advanced_config.output_json:
-            output_json_str = json.dumps(
-                generation_response.advanced_config.output_json
-            )
-
-        # Create TaskConfig object from AdvancedConfig
-        task_config = TaskConfig(
-            output_json=output_json_str,
-            output_pydantic=generation_response.advanced_config.output_pydantic,
-            output_file=generation_response.advanced_config.output_file,
-            callback=generation_response.advanced_config.callback,
-            human_input=generation_response.advanced_config.human_input,
-            markdown=generation_response.advanced_config.markdown,
-            retry_on_fail=generation_response.advanced_config.retry_on_fail,
-            max_retries=generation_response.advanced_config.max_retries,
-            timeout=generation_response.advanced_config.timeout,
-            priority=generation_response.advanced_config.priority,
-            error_handling=generation_response.advanced_config.error_handling,
-            cache_response=generation_response.advanced_config.cache_response,
-            cache_ttl=generation_response.advanced_config.cache_ttl,
-        )
-
-        # Convert tools from List[Dict] to List[str]
-        tool_names = []
-        for tool in generation_response.tools:
-            if isinstance(tool, dict) and "name" in tool:
-                tool_names.append(tool["name"])
-            elif isinstance(tool, str):
-                tool_names.append(tool)
-
-        return TaskCreate(
-            name=generation_response.name,
-            description=generation_response.description,
-            expected_output=generation_response.expected_output,
-            tools=tool_names,
-            async_execution=generation_response.advanced_config.async_execution,
-            context=generation_response.advanced_config.context,
-            config=task_config,
-            output_json=output_json_str,
-            output_pydantic=generation_response.advanced_config.output_pydantic,
-            output_file=generation_response.advanced_config.output_file,
-            markdown=generation_response.advanced_config.markdown,
-            human_input=generation_response.advanced_config.human_input,
-            callback=generation_response.advanced_config.callback,
-        )

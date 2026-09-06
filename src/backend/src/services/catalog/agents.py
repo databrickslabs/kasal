@@ -110,19 +110,6 @@ class AgentService(BaseService[Agent, AgentCreate]):
                 raise
         return data
 
-    @classmethod
-    def create(cls, session: AsyncSession) -> "AgentService":
-        """
-        Factory method to create a properly configured AgentService instance.
-
-        Args:
-            session: Database session for operations
-
-        Returns:
-            An instance of AgentService
-        """
-        return cls(session=session)
-
     async def get(self, id: str) -> Optional[Agent]:
         """
         Get an agent by ID with decrypted tool_configs.

@@ -7,7 +7,6 @@ ARCHITECTURE:
 This module orchestrates flow building using several specialized sub-modules:
 - flow_config.py: MCP requirements collection from flow tasks
 - flow_processors.py: Processing of starting points, listeners, and routers
-- flow_state.py: State management and crew output parsing
 - flow_methods.py: Dynamic method creation for flow execution
 
 The FlowBuilder class coordinates these modules to construct complete CrewAI flows.
@@ -50,7 +49,6 @@ from src.services.flow_builder.modules.flow_methods import (
     get_model_context_limits,
 )
 from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
-from src.services.flow_builder.modules.flow_state import FlowStateManager
 from src.services.flow_builder.modules.task_adapter import TaskConfig
 from src.services.flow_builder.runtime import Flow as CrewAIFlow
 from src.services.flow_builder.runtime import and_, listen, or_, router, start
@@ -430,80 +428,6 @@ class FlowBuilder:
 
     # Removed: _collect_agent_mcp_requirements_from_flow
     # Now using FlowConfigManager.collect_agent_mcp_requirements from flow_config.py module
-
-    @staticmethod
-    def _apply_state_operations(flow_instance, state_operations):
-        """
-        Apply state operations (reads, writes, conditions) to the flow state.
-
-        Args:
-            flow_instance: The flow instance with state
-            state_operations: Dictionary containing reads, writes, and conditions
-        """
-        if not state_operations:
-            return
-
-        # Handle state reads (just log for now, actual reads happen in expressions)
-        reads = state_operations.get("reads", [])
-        if reads:
-            logger.info(f"Reading state variables: {reads}")
-            for var in reads:
-                value = (
-                    flow_instance.state.get(var)
-                    if hasattr(flow_instance.state, "get")
-                    else getattr(flow_instance.state, var, None)
-                )
-                logger.info(f"  {var} = {value}")
-
-        # Handle state writes
-        writes = state_operations.get("writes", [])
-        if writes:
-            logger.info(
-                f"Writing state variables: {[w.get('variable') for w in writes]}"
-            )
-            for write in writes:
-                variable = write.get("variable")
-                expression = write.get("expression")
-                value = write.get("value")
-
-                if expression:
-                    # Evaluate the expression
-                    try:
-                        # Create a safe evaluation context with the same
-                        # restricted helpers permitted in router conditions.
-                        eval_context = {
-                            "state": flow_instance.state,
-                            "int": int,
-                            "float": float,
-                            "str": str,
-                            "bool": bool,
-                            "len": len,
-                            "abs": abs,
-                            "min": min,
-                            "max": max,
-                        }
-                        computed_value = safe_eval(
-                            expression,
-                            eval_context,
-                            allowed_call_names=_FLOW_CONDITION_CALLS,
-                        )
-                        if hasattr(flow_instance.state, "get"):
-                            flow_instance.state[variable] = computed_value
-                        else:
-                            setattr(flow_instance.state, variable, computed_value)
-                        logger.info(
-                            f"  {variable} = {computed_value} (from expression: {expression})"
-                        )
-                    except Exception as e:
-                        logger.error(
-                            f"Failed to evaluate expression '{expression}': {e}"
-                        )
-                elif value is not None:
-                    if hasattr(flow_instance.state, "get"):
-                        flow_instance.state[variable] = value
-                    else:
-                        setattr(flow_instance.state, variable, value)
-                    logger.info(f"  {variable} = {value}")
 
     @staticmethod
     async def _create_dynamic_flow(

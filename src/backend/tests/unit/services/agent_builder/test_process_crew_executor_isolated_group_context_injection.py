@@ -6,7 +6,6 @@ Avoids spawning real child processes by mocking mp.Process and queues.
 """
 
 import asyncio
-import queue
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
@@ -179,12 +178,10 @@ class TestRunCrewIsolatedGroupContext:
 
         # Patch the relay task and the waiting logic
         with (
-            patch("src.services.agent_builder.process_executor.asyncio.create_task"),
+            patch("asyncio.create_task"),
+            patch("asyncio.get_event_loop") as mock_loop,
             patch(
-                "src.services.agent_builder.process_executor.asyncio.get_event_loop"
-            ) as mock_loop,
-            patch(
-                "src.services.agent_builder.process_executor.asyncio.sleep",
+                "asyncio.sleep",
                 new_callable=lambda: lambda *_: asyncio.coroutine(lambda: None)(),
             ),
         ):
@@ -197,7 +194,7 @@ class TestRunCrewIsolatedGroupContext:
             with patch("asyncio.sleep", new=AsyncMock()):
                 # Mock wait result
                 with patch(
-                    "src.services.agent_builder.process_executor.asyncio.create_task",
+                    "asyncio.create_task",
                     return_value=MagicMock(),
                 ):
                     # Patch process.is_alive to return False immediately
@@ -449,90 +446,4 @@ class TestRunCrewInProcessExtra:
 # ---------------------------------------------------------------------------
 
 
-class TestRelayTaskEventsEdgeCases:
-    @pytest.mark.asyncio
-    async def test_relay_task_events_task_completed_event(self):
-        """task_completed events should also be broadcast."""
-        from src.services.agent_builder.process_executor import ProcessCrewExecutor
-
-        with patch("src.services.agent_builder.process_executor.mp.get_context"):
-            ex = ProcessCrewExecutor()
-
-        q = queue.Queue()
-        q.put(
-            {
-                "event_type": "task_completed",
-                "event_source": "crewai",
-                "event_context": "Run analysis",
-                "output": "Analysis done",
-                "extra_data": {
-                    "task_name": "Run analysis",
-                    "task_id": "t-99",
-                    "agent_role": "Analyst",
-                    "crew_name": "crew-1",
-                    "frontend_task_id": "ft-99",
-                },
-                "created_at": "2025-06-01T10:00:00",
-            }
-        )
-
-        captured = []
-
-        async def fake_broadcast(job_id, event):
-            captured.append(event)
-            return 1
-
-        with patch(
-            "src.core.sse_manager.sse_manager.broadcast_to_job", new=fake_broadcast
-        ):
-            task = asyncio.ensure_future(ex._relay_task_events(q, "exec-comp"))
-            await asyncio.sleep(0.2)
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-
-        assert len(captured) == 1
-        assert captured[0].data["event_type"] == "task_completed"
-
-    @pytest.mark.asyncio
-    async def test_relay_task_events_broadcast_exception_is_swallowed(self):
-        """If broadcast raises, relay loop should continue."""
-        from src.services.agent_builder.process_executor import ProcessCrewExecutor
-
-        with patch("src.services.agent_builder.process_executor.mp.get_context"):
-            ex = ProcessCrewExecutor()
-
-        q = queue.Queue()
-        q.put(
-            {
-                "event_type": "task_started",
-                "event_source": "crewai",
-                "event_context": "ctx",
-                "output": None,
-                "extra_data": {
-                    "task_name": "T",
-                    "task_id": "t-x",
-                    "agent_role": "A",
-                    "crew_name": "c",
-                    "frontend_task_id": "ft-x",
-                },
-                "created_at": "2025-01-01T00:00:00",
-            }
-        )
-
-        async def failing_broadcast(job_id, event):
-            raise RuntimeError("SSE down")
-
-        with patch(
-            "src.core.sse_manager.sse_manager.broadcast_to_job", new=failing_broadcast
-        ):
-            task = asyncio.ensure_future(ex._relay_task_events(q, "exec-bcast-err"))
-            await asyncio.sleep(0.2)
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-        # Test passes if no unhandled exception propagated
+# Test passes if no unhandled exception propagated

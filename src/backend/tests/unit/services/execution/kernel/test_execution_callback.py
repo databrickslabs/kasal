@@ -10,11 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.services.execution.kernel.execution_callback import (
-    create_crew_callbacks,
-    create_execution_callbacks,
-    log_crew_initialization,
-)
+from src.services.execution.kernel.execution_callback import create_execution_callbacks
 
 
 @pytest.fixture
@@ -206,125 +202,6 @@ class TestCreateExecutionCallbacks:
             mock_step_output = MagicMock()
             mock_step_output.output = "Test output"
             step_callback(mock_step_output)  # Should not raise
-
-
-class TestCreateCrewCallbacks:
-    """Test cases for create_crew_callbacks function."""
-
-    def test_create_crew_callbacks_success(self, mock_group_context, sample_config):
-        """Test successful creation of crew callbacks."""
-        callbacks = create_crew_callbacks(
-            job_id="j1", config=sample_config, group_context=mock_group_context
-        )
-
-        assert "on_start" in callbacks
-        assert "on_complete" in callbacks
-        assert "on_error" in callbacks
-        assert callable(callbacks["on_start"])
-        assert callable(callbacks["on_complete"])
-        assert callable(callbacks["on_error"])
-
-    def test_on_start_callback(self, mock_group_context, sample_config):
-        """Test crew start callback creates execution log."""
-        with patch(
-            "src.services.execution.kernel.execution_callback.enqueue_log"
-        ) as mock_enqueue:
-            callbacks = create_crew_callbacks(
-                job_id="j1", config=sample_config, group_context=mock_group_context
-            )
-
-            callbacks["on_start"]()
-
-            mock_enqueue.assert_called_once()
-            kwargs = mock_enqueue.call_args[1]
-            assert kwargs["execution_id"] == "j1"
-            assert "CREW STARTED" in kwargs["content"]
-
-    def test_on_complete_callback(self, mock_group_context, sample_config):
-        """Test crew completion callback creates execution log."""
-        with patch(
-            "src.services.execution.kernel.execution_callback.enqueue_log"
-        ) as mock_enqueue:
-            callbacks = create_crew_callbacks(
-                job_id="j1", config=sample_config, group_context=mock_group_context
-            )
-
-            callbacks["on_complete"]("Test result")
-
-            mock_enqueue.assert_called_once()
-            kwargs = mock_enqueue.call_args[1]
-            assert "CREW COMPLETED" in kwargs["content"]
-
-    def test_on_error_callback(self, mock_group_context, sample_config):
-        """Test crew error callback."""
-        with patch(
-            "src.services.execution.kernel.execution_callback.enqueue_log"
-        ) as mock_enqueue:
-            callbacks = create_crew_callbacks(
-                job_id="j1", config=sample_config, group_context=mock_group_context
-            )
-
-            callbacks["on_error"](Exception("Test error"))
-
-            mock_enqueue.assert_called_once()
-            kwargs = mock_enqueue.call_args[1]
-            assert "CREW FAILED" in kwargs["content"]
-            assert "Test error" in kwargs["content"]
-
-
-class TestLogCrewInitialization:
-    """Test cases for log_crew_initialization function."""
-
-    def test_log_initialization_success(self, mock_group_context, sample_config):
-        """Test successful crew initialization logging."""
-        with patch(
-            "src.services.execution.kernel.execution_callback.enqueue_log"
-        ) as mock_enqueue:
-            log_crew_initialization(
-                job_id="j1", config=sample_config, group_context=mock_group_context
-            )
-
-            mock_enqueue.assert_called_once()
-            kwargs = mock_enqueue.call_args[1]
-            assert kwargs["execution_id"] == "j1"
-            assert "CREW INITIALIZED" in kwargs["content"]
-
-    def test_log_initialization_sanitizes_config(self, mock_group_context):
-        """Test that sensitive config data is sanitized."""
-        config_with_secrets = {
-            "model": "test-model",
-            "api_keys": {"secret": "hidden"},
-            "tokens": {"access_token": "secret"},
-            "passwords": {"db_pass": "secret"},
-            "normal_field": "visible",
-        }
-
-        with patch(
-            "src.services.execution.kernel.execution_callback.enqueue_log"
-        ) as mock_enqueue:
-            log_crew_initialization(
-                job_id="j1",
-                config=config_with_secrets,
-                group_context=mock_group_context,
-            )
-
-            content = mock_enqueue.call_args[1]["content"]
-            assert "test-model" in content
-            assert "visible" in content
-            assert "secret" not in content
-            assert "hidden" not in content
-
-    def test_log_initialization_error_handling(self, mock_group_context):
-        """Test error handling in crew initialization logging."""
-        with patch(
-            "src.services.execution.kernel.execution_callback.enqueue_log"
-        ) as mock_enqueue:
-            mock_enqueue.side_effect = Exception("Logging error")
-
-            # Should not raise
-            log_crew_initialization(
-                job_id="j1", config={}, group_context=mock_group_context
-            )
 
 
 class TestCallbackIsolation:

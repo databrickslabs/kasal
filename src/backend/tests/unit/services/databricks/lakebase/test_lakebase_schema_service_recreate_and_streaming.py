@@ -15,7 +15,6 @@ Targets uncovered lines:
   592-598 set_search_path_sync
 """
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
@@ -412,95 +411,6 @@ class TestCreateTablesSyncDetailed:
     def service(self):
         return LakebaseSchemaService()
 
-    def test_empty_tables_runs_without_error(self, service):
-        mock_engine = MagicMock()
-        with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
-            mock_base.metadata.sorted_tables = []
-            service.create_tables_sync(mock_engine)
-
-    def test_single_normal_table_small_wave(self, service):
-        """Single table goes through the <=2 branch (no threading)."""
-        mock_conn = MagicMock()
-        mock_table = MagicMock()
-        mock_table.name = "agents"
-        mock_table.foreign_keys = set()
-        mock_table.create = MagicMock()
-        engine = _sync_engine(mock_conn)
-
-        with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
-            mock_base.metadata.sorted_tables = [mock_table]
-            with patch.object(
-                service,
-                "_create_tables_batch_sync",
-                return_value=[("agents", True, None)],
-            ) as batch_mock:
-                service.create_tables_sync(engine)
-                batch_mock.assert_called_once()
-
-    def test_documentation_embeddings_special_case(self, service):
-        """documentation_embeddings table triggers _create_doc_embeddings_sync."""
-        mock_conn = MagicMock()
-        mock_table = MagicMock()
-        mock_table.name = "documentation_embeddings"
-        mock_table.foreign_keys = set()
-        engine = _sync_engine(mock_conn)
-
-        with (
-            patch("src.services.databricks.lakebase.schema.Base") as mock_base,
-            patch(
-                "src.services.databricks.lakebase.schema.vector_column_tables",
-                return_value={"documentation_embeddings"},
-            ),
-            patch.object(service, "_create_without_vector_sync") as doc_mock,
-        ):
-            mock_base.metadata.sorted_tables = [mock_table]
-            service.create_tables_sync(engine)
-            # Generic now: takes the table NAME, so it works for any vector table
-            # (workflow_recipes included) instead of documentation_embeddings only.
-            doc_mock.assert_called_once_with(engine, "documentation_embeddings")
-
-    def test_large_wave_uses_thread_pool(self, service):
-        """When wave has >2 normal tables, ThreadPoolExecutor is used."""
-        mock_conn = MagicMock()
-        engine = _sync_engine(mock_conn)
-
-        # Create 5 independent tables
-        tables = []
-        for i in range(5):
-            t = MagicMock()
-            t.name = f"table_{i}"
-            t.foreign_keys = set()
-            tables.append(t)
-
-        with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
-            mock_base.metadata.sorted_tables = tables
-            batch_results = [(t.name, True, None) for t in tables]
-            with patch.object(
-                service, "_create_tables_batch_sync", return_value=batch_results
-            ):
-                service.create_tables_sync(engine)
-
-    def test_batch_failure_is_logged_but_does_not_raise(self, service):
-        """Batch failure in large wave is logged; no exception propagates."""
-        mock_conn = MagicMock()
-        engine = _sync_engine(mock_conn)
-
-        tables = []
-        for i in range(5):
-            t = MagicMock()
-            t.name = f"table_{i}"
-            t.foreign_keys = set()
-            tables.append(t)
-
-        error_results = [(t.name, False, "some error") for t in tables]
-        with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
-            mock_base.metadata.sorted_tables = tables
-            with patch.object(
-                service, "_create_tables_batch_sync", return_value=error_results
-            ):
-                # Should not raise
-                service.create_tables_sync(engine)
-
     def test_batch_savepoint_isolates_one_failing_table(self, service):
         """A failing CREATE must not poison the rest of the batch.
 
@@ -582,125 +492,10 @@ class TestCreateTablesSyncDetailed:
             "public" in search_path_sql
         ), f"search_path must include public for pgvector; got: {search_path_sql}"
 
-    def test_overall_error_propagates(self, service):
-        """Error in _get_dependency_waves propagates."""
-        with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
-            # Make sorted_tables raise when iterated inside _get_dependency_waves
-            mock_base.metadata.sorted_tables = MagicMock()
-            with patch.object(
-                service, "_get_dependency_waves", side_effect=RuntimeError("meta error")
-            ):
-                with pytest.raises(RuntimeError, match="meta error"):
-                    service.create_tables_sync(MagicMock())
-
 
 # ---------------------------------------------------------------------------
 # create_tables_async_stream (lines 345-395)
 # ---------------------------------------------------------------------------
-
-
-class TestCreateTablesAsyncStream:
-
-    @pytest.fixture
-    def service(self):
-        return LakebaseSchemaService()
-
-    @pytest.mark.asyncio
-    async def test_yields_success_for_normal_table(self, service):
-        conn = AsyncMock()
-        conn.execute = AsyncMock()
-        conn.run_sync = AsyncMock()
-        engine = _async_engine(conn)
-
-        mock_table = MagicMock()
-        mock_table.name = "agents"
-
-        with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
-            mock_base.metadata.sorted_tables = [mock_table]
-            events = []
-            async for ev in service.create_tables_async_stream(engine):
-                events.append(ev)
-
-        types = [e["type"] for e in events]
-        assert "success" in types
-
-    @pytest.mark.asyncio
-    async def test_yields_info_for_documentation_embeddings(self, service):
-        conn = AsyncMock()
-        conn.execute = AsyncMock()
-        conn.run_sync = AsyncMock()
-        _sp = MagicMock()
-        _sp.__aenter__ = AsyncMock(return_value=None)
-        _sp.__aexit__ = AsyncMock(return_value=False)
-        conn.begin_nested = MagicMock(return_value=_sp)  # savepoint-isolated DDL
-        engine = _async_engine(conn)
-
-        mock_table = MagicMock()
-        mock_table.name = "documentation_embeddings"
-
-        with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
-            mock_base.metadata.sorted_tables = [mock_table]
-            events = []
-            async for ev in service.create_tables_async_stream(engine):
-                events.append(ev)
-
-        # info event for skipping + success event for creating without vector col
-        types = [e["type"] for e in events]
-        assert "info" in types or "success" in types
-
-    @pytest.mark.asyncio
-    async def test_yields_error_event_on_run_sync_failure(self, service):
-        conn = AsyncMock()
-        conn.execute = AsyncMock()
-        conn.run_sync = AsyncMock(side_effect=RuntimeError("table create failed"))
-        engine = _async_engine(conn)
-
-        mock_table = MagicMock()
-        mock_table.name = "agents"
-
-        with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
-            mock_base.metadata.sorted_tables = [mock_table]
-            events = []
-            with pytest.raises(RuntimeError):
-                async for ev in service.create_tables_async_stream(engine):
-                    events.append(ev)
-
-        error_events = [e for e in events if e["type"] == "error"]
-        assert len(error_events) >= 1
-
-    @pytest.mark.asyncio
-    async def test_cancelled_error_stops_iteration(self, service):
-        """asyncio.CancelledError causes clean return without raising."""
-        conn = AsyncMock()
-        conn.execute = AsyncMock()
-        conn.run_sync = AsyncMock(side_effect=asyncio.CancelledError())
-        engine = _async_engine(conn)
-
-        mock_table = MagicMock()
-        mock_table.name = "agents"
-
-        with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
-            mock_base.metadata.sorted_tables = [mock_table]
-            events = []
-            # CancelledError is caught internally and causes early return
-            async for ev in service.create_tables_async_stream(engine):
-                events.append(ev)
-            # No exception raised, just stopped
-
-    @pytest.mark.asyncio
-    async def test_empty_tables_yields_success(self, service):
-        conn = AsyncMock()
-        conn.execute = AsyncMock()
-        engine = _async_engine(conn)
-
-        with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
-            mock_base.metadata.sorted_tables = []
-            events = []
-            async for ev in service.create_tables_async_stream(engine):
-                events.append(ev)
-
-        # At minimum set_search_path event
-        assert len(events) >= 1
 
 
 # ---------------------------------------------------------------------------

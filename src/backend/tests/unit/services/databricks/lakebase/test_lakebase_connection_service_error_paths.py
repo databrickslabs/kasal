@@ -203,43 +203,6 @@ async def test_test_connection_failure():
 # ─── create_engine_with_token_refresh ─────────────────────────────────────────
 
 
-def test_create_engine_with_token_refresh_asyncpg():
-    svc = make_service()
-    token_holder = {"token": "initial-token", "refreshed_at": 0.0}
-    with patch(
-        "src.services.databricks.lakebase.connection.create_async_engine"
-    ) as mock_create:
-        mock_engine = MagicMock()
-        mock_engine.sync_engine = MagicMock()
-        mock_create.return_value = mock_engine
-        with patch("src.services.databricks.lakebase.connection.event") as mock_event:
-            result = svc.create_engine_with_token_refresh(
-                endpoint="endpoint.db",
-                username="my-user",
-                token_holder=token_holder,
-                driver="asyncpg",
-            )
-    assert result is mock_engine
-
-
-def test_create_engine_with_token_refresh_pg8000():
-    svc = make_service()
-    token_holder = {"token": "initial-token", "refreshed_at": 0.0}
-    with patch(
-        "src.services.databricks.lakebase.connection.create_engine"
-    ) as mock_create:
-        mock_engine = MagicMock()
-        mock_create.return_value = mock_engine
-        with patch("src.services.databricks.lakebase.connection.event") as mock_event:
-            result = svc.create_engine_with_token_refresh(
-                endpoint="endpoint.db",
-                username="my-user",
-                token_holder=token_holder,
-                driver="pg8000",
-            )
-    assert result is mock_engine
-
-
 # ─── create_lakebase_engine_async ─────────────────────────────────────────────
 
 
@@ -288,92 +251,7 @@ def test_create_lakebase_engine_sync_with_timeout():
 # ─── get_connected_engine_async ───────────────────────────────────────────────
 
 
-@pytest.mark.asyncio
-async def test_get_connected_engine_async_success():
-    svc = make_service(user_email="user@example.com")
-    mock_cred = MagicMock()
-    mock_cred.token = "tok"
-
-    mock_conn = MagicMock()
-    mock_scalar_result = MagicMock()
-    mock_scalar_result.scalar.return_value = "user@example.com"
-    mock_conn.execute = AsyncMock(return_value=mock_scalar_result)
-
-    mock_ctx = MagicMock()
-    mock_ctx.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_ctx.__aexit__ = AsyncMock(return_value=None)
-
-    mock_engine = MagicMock()
-    mock_engine.connect = MagicMock(return_value=mock_ctx)
-    mock_engine.dispose = AsyncMock()
-
-    with patch.dict("os.environ", {}, clear=True):
-        with patch.object(
-            svc, "generate_credentials", new=AsyncMock(return_value=mock_cred)
-        ):
-            with patch.object(
-                svc,
-                "create_lakebase_engine_async",
-                new=AsyncMock(return_value=mock_engine),
-            ):
-                username, engine = await svc.get_connected_engine_async(
-                    "my-instance", "ep.db"
-                )
-    assert username == "user@example.com"
-    assert engine is mock_engine
-
-
-@pytest.mark.asyncio
-async def test_get_connected_engine_async_connection_fails():
-    svc = make_service(user_email="user@example.com")
-    mock_cred = MagicMock()
-    mock_cred.token = "tok"
-
-    mock_ctx = MagicMock()
-    mock_ctx.__aenter__ = AsyncMock(side_effect=Exception("connect failed"))
-    mock_ctx.__aexit__ = AsyncMock(return_value=None)
-
-    mock_engine = MagicMock()
-    mock_engine.connect = MagicMock(return_value=mock_ctx)
-    mock_engine.dispose = AsyncMock()
-
-    with patch.dict("os.environ", {}, clear=True):
-        with patch.object(
-            svc, "generate_credentials", new=AsyncMock(return_value=mock_cred)
-        ):
-            with patch.object(
-                svc,
-                "create_lakebase_engine_async",
-                new=AsyncMock(return_value=mock_engine),
-            ):
-                with pytest.raises(Exception, match="Failed to connect to Lakebase"):
-                    await svc.get_connected_engine_async("my-instance", "ep.db")
-
-
 # ─── get_connected_engine_sync ────────────────────────────────────────────────
-
-
-def test_get_connected_engine_sync_success():
-    svc = make_service()
-    mock_engine = MagicMock()
-    mock_conn = MagicMock()
-    mock_conn.execute.return_value.scalar.return_value = "sync-user"
-    mock_engine.connect.return_value.__enter__ = MagicMock(return_value=mock_conn)
-    mock_engine.connect.return_value.__exit__ = MagicMock(return_value=None)
-    with patch.object(svc, "create_lakebase_engine_sync", return_value=mock_engine):
-        engine, user = svc.get_connected_engine_sync("ep.db", "user", "tok")
-    assert engine is mock_engine
-    assert user == "sync-user"
-
-
-def test_get_connected_engine_sync_fails():
-    svc = make_service()
-    mock_engine = MagicMock()
-    mock_engine.connect.side_effect = Exception("sync connect failed")
-    mock_engine.dispose = MagicMock()
-    with patch.object(svc, "create_lakebase_engine_sync", return_value=mock_engine):
-        with pytest.raises(Exception, match="Failed to connect"):
-            svc.get_connected_engine_sync("ep.db", "user", "tok")
 
 
 # ─── get_workspace_client ─────────────────────────────────────────────────────

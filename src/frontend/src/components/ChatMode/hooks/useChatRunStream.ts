@@ -134,9 +134,8 @@ export function useChatRunStream({ pendingActionsRef }: UseChatRunStreamArgs) {
     // session off screen.
     const alreadyStreamed = Boolean(jobId) && execState.hasStreamedTaskText(jobId!);
     // The run already finalized, so this trace's output has been superseded by
-    // the final answer that is already on screen. `_relay_task_events` broadcasts
-    // task_completed from its own queue with NO DB id, so it escapes the trace
-    // de-dupe and routinely lands after completion — which printed the answer a
+    // the final answer that is already on screen. A task_completed event without
+    // a DB id escapes trace de-dupe and can land after completion, printing a
     // second time, below the copy the reader had been reading.
     const runFinalized = Boolean(jobId) && execState.isRunFinalized(jobId!);
     if (chatBody !== null && !alreadyStreamed && !runFinalized) {

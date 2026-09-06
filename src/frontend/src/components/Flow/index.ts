@@ -7,7 +7,6 @@ import ConditionForm from './ConditionForm';
 import ConditionEditForm from './ConditionEditForm';
 import CrewNode from './CrewNode';
 import CrewEdge from './CrewEdge';
-import { handleCrewConnection } from './crewConnectionHelper';
 
 export {
   ConditionFlowNode,
@@ -18,7 +17,6 @@ export {
   ConditionEditForm,
   CrewNode,
   CrewEdge,
-  handleCrewConnection
 };
 
 export type {

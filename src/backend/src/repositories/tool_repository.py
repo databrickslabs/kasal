@@ -2,7 +2,6 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
 
 from src.core.base_repository import BaseRepository
 from src.models.tool import Tool
@@ -225,64 +224,3 @@ class ToolRepository(BaseRepository[Tool]):
             logging.error(f"Error in disable_all: {str(e)}")
             await self.session.rollback()
             raise
-
-
-class SyncToolRepository:
-    """
-    Synchronous repository for Tool model with custom query methods.
-    Used by services that require synchronous DB operations.
-    """
-
-    def __init__(self, db: Session):
-        """
-        Initialize the repository with session.
-
-        Args:
-            db: SQLAlchemy synchronous session
-        """
-        self.db = db
-
-    def find_by_id(self, tool_id: int) -> Optional[Tool]:
-        """
-        Find a tool by ID.
-
-        Args:
-            tool_id: ID of the tool to find
-
-        Returns:
-            Tool if found, else None
-        """
-        return self.db.query(Tool).filter(Tool.id == tool_id).first()
-
-    def find_by_title(self, title: str) -> Optional[Tool]:
-        """
-        Find a tool by title.
-
-        Args:
-            title: Title to search for
-
-        Returns:
-            Tool if found, else None
-        """
-        return self.db.query(Tool).filter(Tool.title == title).first()
-
-    def find_all(self) -> List[Tool]:
-        """
-        Find all tools.
-
-        Returns:
-            List of all tools
-        """
-        return self.db.query(Tool).all()
-
-    def find_by_ids(self, tool_ids: List[int]) -> List[Tool]:
-        """
-        Find tools by their IDs.
-
-        Args:
-            tool_ids: List of tool IDs to find
-
-        Returns:
-            List of tools with matching IDs
-        """
-        return self.db.query(Tool).filter(Tool.id.in_(tool_ids)).all()

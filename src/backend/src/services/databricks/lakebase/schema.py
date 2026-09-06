@@ -9,11 +9,10 @@ This service handles:
 - Special handling for tables with vector columns (documentation_embeddings)
 """
 
-import asyncio
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, AsyncGenerator, Dict, Generator, List, Optional, Tuple
+from typing import Any, Dict, Generator, List, Optional, Tuple
 
 from sqlalchemy import MetaData, text
 from sqlalchemy.engine import Engine
@@ -383,144 +382,6 @@ class LakebaseSchemaService(BaseService):
 
         except Exception as e:
             logger.error(f"Error creating tables: {e}")
-            raise
-
-    def create_tables_sync(self, engine: Engine) -> None:
-        """
-        Create all tables from SQLAlchemy metadata in kasal schema (sync version).
-
-        Uses parallel dependency waves for faster creation on remote Lakebase.
-
-        Args:
-            engine: Sync Engine for Lakebase connection
-
-        Raises:
-            Exception: If table creation fails
-        """
-        try:
-            tables_to_skip = vector_column_tables()
-            all_tables = Base.metadata.sorted_tables
-            waves, table_map = self._get_dependency_waves(all_tables)
-            max_parallel = 10
-
-            logger.info(f"Creating {len(all_tables)} tables in {len(waves)} waves")
-
-            for wave_table_names in waves:
-                normal = [n for n in wave_table_names if n not in tables_to_skip]
-                special = [n for n in wave_table_names if n in tables_to_skip]
-
-                if normal:
-                    if len(normal) <= 2:
-                        self._create_tables_batch_sync(engine, normal, table_map)
-                        for name in normal:
-                            logger.info(f"Created table {name}")
-                    else:
-                        n_workers = min(len(normal), max_parallel)
-                        chunks: List[List[str]] = [[] for _ in range(n_workers)]
-                        for i, name in enumerate(normal):
-                            chunks[i % n_workers].append(name)
-
-                        with ThreadPoolExecutor(max_workers=n_workers) as executor:
-                            futures = [
-                                executor.submit(
-                                    self._create_tables_batch_sync,
-                                    engine,
-                                    chunk,
-                                    table_map,
-                                )
-                                for chunk in chunks
-                                if chunk
-                            ]
-                            for future in as_completed(futures):
-                                results = future.result()
-                                for name, success, error in results:
-                                    if success:
-                                        logger.info(f"Created table {name}")
-                                    else:
-                                        logger.error(
-                                            f"Error creating table {name}: {error}"
-                                        )
-
-                for name in special:
-                    self._create_without_vector_sync(engine, name)
-
-            logger.info("Created table structure in Lakebase")
-
-        except Exception as e:
-            logger.error(f"Error creating tables: {e}")
-            raise
-
-    async def create_tables_async_stream(
-        self, engine: AsyncEngine
-    ) -> AsyncGenerator[Dict[str, Any], None]:
-        """
-        Create all tables from SQLAlchemy metadata with streaming progress (async version).
-
-        Yields progress events as tables are created.
-
-        Args:
-            engine: AsyncEngine for Lakebase connection
-
-        Yields:
-            Dict with event type and progress information
-        """
-        try:
-            async with engine.begin() as conn:
-                # Set kasal as the default schema for this connection
-                await conn.execute(text("SET search_path TO kasal, public"))
-                yield {
-                    "type": "success",
-                    "message": "Set kasal schema as default search path",
-                }
-
-                # Tables with vector columns that need special handling
-                tables_to_skip = vector_column_tables()
-
-                # Get all table objects from metadata
-                for table in Base.metadata.sorted_tables:
-                    if table.name in tables_to_skip:
-                        # Created WITHOUT the vector column, not skipped — see the
-                        # same branch in create_tables_async.
-                        create_sql = create_table_without_vector_sql(table.name)
-                        if not create_sql:
-                            yield {
-                                "type": "warning",
-                                "message": f"Skipped {table.name}: no metadata to "
-                                "build a vector-free CREATE from",
-                            }
-                            continue
-                        await conn.execute(text(create_sql))
-                        if table.name == "documentation_embeddings":
-                            await self._ensure_doc_embeddings_columns_async(conn)
-                        yield {
-                            "type": "success",
-                            "message": f"Created {table.name} without its vector "
-                            "column (pgvector needs a superuser to enable)",
-                        }
-                    else:
-                        # Create table normally
-                        await conn.run_sync(table.create, checkfirst=True)
-                        yield {
-                            "type": "success",
-                            "message": f"Created table {table.name}",
-                        }
-
-                yield {
-                    "type": "success",
-                    "message": "Created table structure in Lakebase",
-                }
-
-        except (asyncio.CancelledError, GeneratorExit):
-            logger.warning(
-                "Async table creation stream cancelled (client disconnected)"
-            )
-            return
-        except Exception as e:
-            logger.error(f"Error creating tables: {e}")
-            try:
-                yield {"type": "error", "message": f"Error creating tables: {e}"}
-            except (GeneratorExit, asyncio.CancelledError):
-                return
             raise
 
     @staticmethod

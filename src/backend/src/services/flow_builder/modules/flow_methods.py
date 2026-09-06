@@ -15,7 +15,6 @@ from src.services.execution.harnesses import active_harness
 from src.services.flow_builder.runtime import and_, listen, or_, router, start
 
 from .flow_conditions import state_snapshot
-from .flow_state import FlowStateManager
 
 # Initialize logger - use flow logger for flow execution
 logger = LoggerManager.get_instance().flow

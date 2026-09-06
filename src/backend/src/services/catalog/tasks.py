@@ -34,19 +34,6 @@ class TaskService(BaseService[Task, TaskCreate]):
         self.model_class = model_class
         self.repository = repository_class(session)
 
-    @classmethod
-    def create(cls, session: AsyncSession) -> "TaskService":
-        """
-        Factory method to create a properly configured TaskService instance.
-
-        Args:
-            session: Database session for operations
-
-        Returns:
-            An instance of TaskService
-        """
-        return cls(session=session)
-
     async def get(self, id: str) -> Optional[Task]:
         """
         Get a task by ID.

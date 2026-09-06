@@ -231,19 +231,6 @@ describe('initDb', () => {
   });
 });
 
-describe('createSession', () => {
-  it('creates and stores a session with generated id and timestamps', async () => {
-    const session = await sessionDb.createSession('My title');
-    expect(session.title).toBe('My title');
-    expect(session.id).toMatch(/^session-\d+-[a-z0-9]+$/);
-    expect(session.createdAt).toBeInstanceOf(Date);
-    expect(session.updatedAt).toBeInstanceOf(Date);
-
-    const stored = mockStores.get('sessions')!.records.get(session.id);
-    expect(stored).toMatchObject({ id: session.id, title: 'My title' });
-  });
-});
-
 describe('listSessions', () => {
   it('coerces dates and sorts by updatedAt descending', async () => {
     const sessions = mockStores.get('sessions');
@@ -277,91 +264,6 @@ describe('listSessions', () => {
   });
 });
 
-describe('deleteSession', () => {
-  it('removes session, preview, and all matching messages via cursor', async () => {
-    await sessionDb.initDb();
-    const sessions = mockStores.get('sessions')!;
-    const previews = mockStores.get('previews')!;
-    const messages = mockStores.get('messages')!;
-
-    sessions.records.set('s1', { id: 's1', title: 't' });
-    sessions.records.set('s2', { id: 's2', title: 't2' });
-    previews.records.set('s1', { sessionId: 's1', type: 'x', data: 'd' });
-    messages.records.set('m1', { id: 'm1', sessionId: 's1', content: 'a' });
-    messages.records.set('m2', { id: 'm2', sessionId: 's1', content: 'b' });
-    messages.records.set('m3', { id: 'm3', sessionId: 's2', content: 'c' });
-
-    await sessionDb.deleteSession('s1');
-
-    expect(sessions.records.has('s1')).toBe(false);
-    expect(sessions.records.has('s2')).toBe(true);
-    expect(previews.records.has('s1')).toBe(false);
-    expect(messages.records.has('m1')).toBe(false);
-    expect(messages.records.has('m2')).toBe(false);
-    expect(messages.records.has('m3')).toBe(true);
-  });
-
-  it('handles delete when no messages match (cursor null)', async () => {
-    await sessionDb.initDb();
-    mockStores.get('sessions')!.records.set('s1', { id: 's1' });
-    await expect(sessionDb.deleteSession('s1')).resolves.toBeUndefined();
-    expect(mockStores.get('sessions')!.records.has('s1')).toBe(false);
-  });
-});
-
-describe('renameSession', () => {
-  it('renames an existing session and bumps updatedAt', async () => {
-    await sessionDb.initDb();
-    const store = mockStores.get('sessions')!;
-    const old = new Date('2020-01-01T00:00:00Z');
-    store.records.set('s1', {
-      id: 's1',
-      title: 'old',
-      createdAt: old,
-      updatedAt: old,
-    });
-
-    await sessionDb.renameSession('s1', 'new title');
-    const updated = store.records.get('s1')!;
-    expect(updated.title).toBe('new title');
-    expect((updated.updatedAt as Date).getTime()).toBeGreaterThan(
-      old.getTime(),
-    );
-  });
-
-  it('does nothing when session not found', async () => {
-    await sessionDb.initDb();
-    await expect(
-      sessionDb.renameSession('missing', 'x'),
-    ).resolves.toBeUndefined();
-    expect(mockStores.get('sessions')!.records.has('missing')).toBe(false);
-  });
-});
-
-describe('touchSession', () => {
-  it('updates updatedAt for existing session', async () => {
-    await sessionDb.initDb();
-    const store = mockStores.get('sessions')!;
-    const old = new Date('2020-01-01T00:00:00Z');
-    store.records.set('s1', {
-      id: 's1',
-      title: 't',
-      createdAt: old,
-      updatedAt: old,
-    });
-
-    await sessionDb.touchSession('s1');
-    expect(
-      (store.records.get('s1')!.updatedAt as Date).getTime(),
-    ).toBeGreaterThan(old.getTime());
-  });
-
-  it('does nothing when session not found', async () => {
-    await sessionDb.initDb();
-    await expect(sessionDb.touchSession('missing')).resolves.toBeUndefined();
-  });
-});
-
 describe('getSessionMessages', () => {
   it('returns messages with coerced timestamps', async () => {
     await sessionDb.initDb();
@@ -383,110 +285,6 @@ describe('getSessionMessages', () => {
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe('m1');
     expect(result[0].timestamp).toBeInstanceOf(Date);
-  });
-});
-
-describe('addMessageToSession', () => {
-  it('stores message with sessionId and touches the session', async () => {
-    await sessionDb.initDb();
-    const sessions = mockStores.get('sessions')!;
-    const old = new Date('2020-01-01T00:00:00Z');
-    sessions.records.set('s1', {
-      id: 's1',
-      title: 't',
-      createdAt: old,
-      updatedAt: old,
-    });
-
-    await sessionDb.addMessageToSession('s1', makeMsg({ id: 'mx' }));
-
-    const stored = mockStores.get('messages')!.records.get('mx');
-    expect(stored).toMatchObject({ id: 'mx', sessionId: 's1' });
-    // touchSession ran and bumped updatedAt.
-    expect(
-      (sessions.records.get('s1')!.updatedAt as Date).getTime(),
-    ).toBeGreaterThan(old.getTime());
-  });
-});
-
-describe('updateMessageInSession', () => {
-  it('merges updates into existing message', async () => {
-    await sessionDb.initDb();
-    const messages = mockStores.get('messages')!;
-    messages.records.set('m1', {
-      id: 'm1',
-      sessionId: 's1',
-      content: 'old',
-      role: 'user',
-    });
-
-    await sessionDb.updateMessageInSession('s1', 'm1', { content: 'new' });
-
-    expect(messages.records.get('m1')).toMatchObject({
-      id: 'm1',
-      sessionId: 's1',
-      content: 'new',
-      role: 'user',
-    });
-  });
-
-  it('does nothing when message not found', async () => {
-    await sessionDb.initDb();
-    await expect(
-      sessionDb.updateMessageInSession('s1', 'missing', { content: 'x' }),
-    ).resolves.toBeUndefined();
-    expect(mockStores.get('messages')!.records.has('missing')).toBe(false);
-  });
-});
-
-describe('clearSessionMessages', () => {
-  it('deletes all messages for a session via cursor', async () => {
-    await sessionDb.initDb();
-    const messages = mockStores.get('messages')!;
-    messages.records.set('m1', { id: 'm1', sessionId: 's1' });
-    messages.records.set('m2', { id: 'm2', sessionId: 's1' });
-    messages.records.set('m3', { id: 'm3', sessionId: 's2' });
-
-    await sessionDb.clearSessionMessages('s1');
-
-    expect(messages.records.has('m1')).toBe(false);
-    expect(messages.records.has('m2')).toBe(false);
-    expect(messages.records.has('m3')).toBe(true);
-  });
-
-  it('handles no matching messages (cursor null)', async () => {
-    await sessionDb.initDb();
-    await expect(
-      sessionDb.clearSessionMessages('none'),
-    ).resolves.toBeUndefined();
-  });
-});
-
-describe('preview persistence', () => {
-  it('saves, gets, and deletes a session preview', async () => {
-    await sessionDb.initDb();
-
-    await sessionDb.saveSessionPreview('s1', {
-      type: 'ui',
-      data: '<p>hi</p>',
-      title: 'Preview',
-    });
-    let stored = await sessionDb.getSessionPreview('s1');
-    expect(stored).toMatchObject({
-      sessionId: 's1',
-      type: 'ui',
-      data: '<p>hi</p>',
-      title: 'Preview',
-    });
-
-    await sessionDb.deleteSessionPreview('s1');
-    stored = await sessionDb.getSessionPreview('s1');
-    expect(stored).toBeUndefined();
-  });
-
-  it('getSessionPreview returns undefined when absent', async () => {
-    await sessionDb.initDb();
-    expect(await sessionDb.getSessionPreview('nope')).toBeUndefined();
   });
 });
 
@@ -547,12 +345,7 @@ describe('initDb — recovery paths', () => {
   });
 });
 
-describe('createSession / listSessions — workspace scoping', () => {
-  it('createSession includes groupId when provided', async () => {
-    const s = await sessionDb.createSession('t', 'g9');
-    expect(s.groupId).toBe('g9');
-    expect(mockStores.get('sessions')!.records.get(s.id)).toMatchObject({ groupId: 'g9' });
-  });
+describe('listSessions — workspace scoping', () => {
 
   it('listSessions returns only the given workspace when groupId is provided', async () => {
     await sessionDb.initDb();
@@ -564,84 +357,13 @@ describe('createSession / listSessions — workspace scoping', () => {
   });
 });
 
-describe('assignUngroupedSessions', () => {
-  it('tags sessions without a groupId for the given workspace', async () => {
-    await sessionDb.initDb();
-    const store = mockStores.get('sessions')!;
-    store.records.set('a', { id: 'a', title: 'a' }); // ungrouped
-    store.records.set('b', { id: 'b', title: 'b', groupId: 'g1' }); // already tagged
-    await sessionDb.assignUngroupedSessions('g1');
-    expect(store.records.get('a')!.groupId).toBe('g1');
-    expect(store.records.get('b')!.groupId).toBe('g1');
-  });
-
-  it('is a no-op for an empty groupId or when nothing is ungrouped', async () => {
-    await sessionDb.initDb();
-    const store = mockStores.get('sessions')!;
-    store.records.set('a', { id: 'a', groupId: 'g1' });
-    await sessionDb.assignUngroupedSessions(''); // empty → early return
-    await sessionDb.assignUngroupedSessions('g2'); // all grouped → nothing ungrouped
-    expect(store.records.get('a')!.groupId).toBe('g1'); // unchanged
-  });
-});
-
 describe('session running-job marker', () => {
-  it('sets, reads and clears the in-flight job in a SEPARATE marker record', async () => {
-    await sessionDb.initDb();
-    const store = mockStores.get('sessions')!;
-    store.records.set('s1', { id: 's1', title: 't' });
-
-    expect(await sessionDb.getSessionRunningJob('s1')).toBeNull(); // none yet
-    await sessionDb.setSessionRunningJob('s1', 'job-1');
-    // The marker lives in its OWN record, NOT on the session record — so the
-    // frequent session-record rewrites (touchSession/rename) can't clobber it.
-    expect(store.records.get('s1')).not.toHaveProperty('runningJobId');
-    expect(store.records.get('running-job:s1')!.runningJobId).toBe('job-1');
-    expect(await sessionDb.getSessionRunningJob('s1')).toBe('job-1');
-
-    await sessionDb.clearSessionRunningJob('s1');
-    expect(store.records.has('running-job:s1')).toBe(false);
-    expect(await sessionDb.getSessionRunningJob('s1')).toBeNull();
-  });
-
-  it('survives a concurrent touchSession — no lost update (regression: refresh saw the run as done)', async () => {
-    await sessionDb.initDb();
-    const store = mockStores.get('sessions')!;
-    store.records.set('s1', { id: 's1', title: 't' });
-
-    // Reproduce the real race: the marker write and a session-record write
-    // (touchSession fires on every persisted trace) run concurrently. With the
-    // marker on the session record this dropped it; in its own record it can't.
-    await Promise.all([
-      sessionDb.setSessionRunningJob('s1', 'job-1'),
-      sessionDb.touchSession('s1'),
-    ]);
-
-    expect(await sessionDb.getSessionRunningJob('s1')).toBe('job-1'); // marker survived
-    expect(store.records.get('s1')).toHaveProperty('updatedAt'); // touch still applied
-  });
-
-  it('writes the marker even with NO local session record (sessions live server-side)', async () => {
-    await sessionDb.initDb();
-    const store = mockStores.get('sessions')!;
-    // No session record exists in this IndexedDB store (sessions are persisted via
-    // db/sessionApi). The marker MUST still be written, or refresh-reconnect breaks
-    // — this is the bug that silently disabled reconnect (a guard required the
-    // local session record, which no longer exists).
-    await sessionDb.setSessionRunningJob('s-remote', 'job-9');
-    expect(store.records.get('running-job:s-remote')!.runningJobId).toBe('job-9');
-    expect(await sessionDb.getSessionRunningJob('s-remote')).toBe('job-9');
-
-    await sessionDb.clearSessionRunningJob('s-remote');
-    expect(await sessionDb.getSessionRunningJob('s-remote')).toBeNull();
-    await sessionDb.clearSessionRunningJob('gone'); // missing marker → no-op, no throw
-  });
 
   it('marker records are excluded from the session list', async () => {
     await sessionDb.initDb();
     const store = mockStores.get('sessions')!;
     store.records.set('s1', { id: 's1', title: 't', groupId: 'g1', createdAt: new Date(), updatedAt: new Date() });
-    await sessionDb.setSessionRunningJob('s1', 'job-1'); // adds a running-job: record
+    store.records.set('running-job:s1', { id: 'running-job:s1', runningJobId: 'job-1' });
     const sessions = await sessionDb.listSessions('g1');
     expect(sessions.map((s) => s.id)).toEqual(['s1']); // no phantom marker row
   });

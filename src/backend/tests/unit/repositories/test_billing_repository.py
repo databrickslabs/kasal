@@ -5,12 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.models.billing import BillingAlert, BillingPeriod, LLMUsageBilling
-from src.repositories.billing_repository import (
-    BillingAlertRepository,
-    BillingPeriodRepository,
-    BillingRepository,
-)
+from src.models.billing import LLMUsageBilling
+from src.repositories.billing_repository import BillingRepository
 
 
 @pytest.fixture
@@ -108,104 +104,6 @@ class TestBillingRepository:
         result = await repo.get_monthly_cost_for_group("g-1", 2024, 12)
 
         assert result == 0.0
-
-
-class TestBillingPeriodRepository:
-
-    @pytest.fixture
-    def repo(self, mock_session):
-        return BillingPeriodRepository(mock_session)
-
-    @pytest.mark.asyncio
-    async def test_get_current_period(self, repo, mock_session):
-        period = MagicMock(spec=BillingPeriod, status="active")
-        mock_session.query.return_value.filter.return_value.first.return_value = period
-
-        result = await repo.get_current_period()
-
-        assert result == period
-
-    @pytest.mark.asyncio
-    async def test_get_current_period_with_group(self, repo, mock_session):
-        period = MagicMock(spec=BillingPeriod)
-        mock_session.query.return_value.filter.return_value.filter.return_value.first.return_value = (
-            period
-        )
-
-        result = await repo.get_current_period(group_id="g-1")
-
-        assert result == period
-
-    @pytest.mark.asyncio
-    async def test_get_current_period_none(self, repo, mock_session):
-        mock_session.query.return_value.filter.return_value.first.return_value = None
-
-        result = await repo.get_current_period()
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_create_monthly_period(self, repo, mock_session):
-        result = await repo.create_monthly_period(2024, 6)
-
-        mock_session.add.assert_called_once()
-        mock_session.flush.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_create_monthly_period_december(self, repo, mock_session):
-        result = await repo.create_monthly_period(2024, 12)
-
-        mock_session.add.assert_called_once()
-
-
-class TestBillingAlertRepository:
-
-    @pytest.fixture
-    def repo(self, mock_session):
-        return BillingAlertRepository(mock_session)
-
-    @pytest.mark.asyncio
-    async def test_get_active_alerts(self, repo, mock_session):
-        alerts = [MagicMock(spec=BillingAlert)]
-        mock_session.query.return_value.filter.return_value.all.return_value = alerts
-
-        result = await repo.get_active_alerts()
-
-        assert len(result) == 1
-
-    @pytest.mark.asyncio
-    async def test_get_active_alerts_with_group(self, repo, mock_session):
-        alerts = []
-        mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = (
-            alerts
-        )
-
-        result = await repo.get_active_alerts(group_id="g-1")
-
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_update_alert_current_value(self, repo, mock_session):
-        alert = MagicMock(spec=BillingAlert, current_value=0)
-        # Mock the base get() method
-        get_result = MagicMock()
-        get_result.scalars.return_value.first.return_value = alert
-        mock_session.execute.return_value = get_result
-
-        await repo.update_alert_current_value("alert-1", 75.5)
-
-        assert alert.current_value == 75.5
-
-    @pytest.mark.asyncio
-    async def test_trigger_alert(self, repo, mock_session):
-        alert = MagicMock(spec=BillingAlert, last_triggered=None)
-        get_result = MagicMock()
-        get_result.scalars.return_value.first.return_value = alert
-        mock_session.execute.return_value = get_result
-
-        await repo.trigger_alert("alert-1")
-
-        assert alert.last_triggered is not None
 
 
 # ============================================================================

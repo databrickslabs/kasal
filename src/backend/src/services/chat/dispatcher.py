@@ -23,26 +23,6 @@ except ImportError:
     _HAS_MLFLOW = False
 
 
-def _set_mlflow_tracing(enabled: bool) -> None:
-    """Hard-toggle MLflow tracing to match the setup outcome.
-
-    Importing mlflow (litellm/crewai integrations) can leave a trace exporter
-    armed even when our setup decides tracing is off — every dispatcher LLM
-    call then attempts a doomed export and logs
-    'INVALID_PARAMETER_VALUE: experiment_id is missing'. Disable explicitly
-    when setup is skipped/fails, re-enable on a successful setup.
-    """
-    if not _HAS_MLFLOW:
-        return
-    try:
-        if enabled:
-            _mlflow.tracing.enable()
-        else:
-            _mlflow.tracing.disable()
-    except Exception:
-        pass
-
-
 from src.core.cache import intent_cache
 from src.schemas.crew import (
     CrewGenerationRequest,

@@ -8,7 +8,6 @@ import pytest
 from sqlalchemy.orm import Session
 
 from src.utils.model_config import (
-    get_max_rpm_for_model,
     get_model_config,
     model_rejects_temperature,
     model_supports_reasoning_effort,
@@ -273,135 +272,11 @@ class TestGetModelConfig:
         assert result is None
 
 
-class TestGetMaxRpmForModel:
-    """Test get_max_rpm_for_model function."""
-
-    def test_get_max_rpm_for_known_openai_models(self):
-        """Test RPM limits for the current OpenAI models."""
-        assert get_max_rpm_for_model("gpt-5.6-sol") == 50
-        assert get_max_rpm_for_model("gpt-5.6-terra") == 100
-        assert get_max_rpm_for_model("gpt-5.6-luna") == 100
-        assert get_max_rpm_for_model("o3-mini") == 100
-        # Retired families still resolve through the generic patterns rather
-        # than dropping to the unknown-model floor of 3.
-        assert get_max_rpm_for_model("gpt-4") == 50
-        assert get_max_rpm_for_model("gpt-3.5-turbo") == 200
-
-    def test_get_max_rpm_for_known_anthropic_models(self):
-        """Test RPM limits for Anthropic Claude models (Claude 4.x; Claude 3 retired)."""
-        # Explicit dict entries.
-        assert get_max_rpm_for_model("claude-opus-5") == 5
-        assert get_max_rpm_for_model("claude-sonnet-5") == 10
-        assert get_max_rpm_for_model("claude-haiku-4-5") == 20
-        # Any other Claude model falls through to the generic Claude heuristic.
-        assert get_max_rpm_for_model("databricks-claude-opus-4-8") == 10
-        assert get_max_rpm_for_model("databricks-claude-sonnet-4-6") == 10
-
-    def test_get_max_rpm_for_known_ollama_models(self):
-        """Test RPM limits for known Ollama models."""
-        assert get_max_rpm_for_model("qwen2.5:32b") == 5
-        assert get_max_rpm_for_model("llama2") == 10
-        assert get_max_rpm_for_model("llama3.2:latest") == 5
-        assert get_max_rpm_for_model("mistral") == 10
-        assert get_max_rpm_for_model("mixtral") == 5
-        assert get_max_rpm_for_model("llama3.2:3b-text-q8_0") == 20
-        assert get_max_rpm_for_model("gemma2:27b") == 5
-        assert get_max_rpm_for_model("deepseek-r1:32b") == 5
-
-    def test_get_max_rpm_for_known_deepseek_models(self):
-        """Test RPM limits for known DeepSeek models."""
-        assert get_max_rpm_for_model("deepseek-v4-flash") == 5
-        assert get_max_rpm_for_model("deepseek-v4-pro") == 3
-
-    def test_get_max_rpm_for_known_databricks_models(self):
-        """Test RPM limits for known Databricks models."""
-        assert get_max_rpm_for_model("databricks-meta-llama-3-3-70b-instruct") == 5
-        assert get_max_rpm_for_model("databricks-meta-llama-3-1-405b-instruct") == 3
-        assert get_max_rpm_for_model("databricks-claude-3-7-sonnet") == 10
-
-    def test_get_max_rpm_for_known_google_models(self):
-        """Test RPM limits for known Google models."""
-        assert get_max_rpm_for_model("gemini-3.6-flash") == 10
-        assert get_max_rpm_for_model("gemini-3.5-flash") == 10
-        assert get_max_rpm_for_model("gemini-3.5-flash-lite") == 20
-        # Unlisted Gemini models fall through to the provider heuristic.
-        assert get_max_rpm_for_model("gemini-2.5-pro") == 10
-
-    def test_get_max_rpm_for_unknown_model_with_gpt4_pattern(self):
-        """Test RPM limits for unknown models with GPT-4 pattern."""
-        assert get_max_rpm_for_model("gpt-4-custom-model") == 50
-        assert get_max_rpm_for_model("gpt4-turbo-custom") == 50
-
-    def test_get_max_rpm_for_unknown_model_with_gpt35_pattern(self):
-        """Test RPM limits for unknown models with GPT-3.5 pattern."""
-        assert get_max_rpm_for_model("gpt-3.5-custom") == 200
-        assert get_max_rpm_for_model("gpt3-turbo") == 200
-
-    def test_get_max_rpm_for_unknown_model_with_claude_opus_pattern(self):
-        """Unknown Claude Opus models use the generic Claude heuristic (10)."""
-        assert get_max_rpm_for_model("claude-opus-custom") == 10
-
-    def test_get_max_rpm_for_unknown_model_with_claude_35_pattern(self):
-        """Any unknown Claude model uses the generic Claude heuristic (10)."""
-        assert get_max_rpm_for_model("claude-sonnet-custom") == 10
-        assert get_max_rpm_for_model("claude-haiku-custom") == 10
-
-    def test_get_max_rpm_for_unknown_model_with_claude_37_pattern(self):
-        """Test RPM limits for unknown models with Claude 3.7 pattern."""
-        assert get_max_rpm_for_model("claude-3-7-custom") == 10
-
-    def test_get_max_rpm_for_unknown_model_with_llama_3b_pattern(self):
-        """Test RPM limits for unknown models with small Llama pattern."""
-        assert get_max_rpm_for_model("llama-custom-3b") == 20
-
-    def test_get_max_rpm_for_unknown_model_with_llama_pattern(self):
-        """Test RPM limits for unknown models with Llama pattern."""
-        assert get_max_rpm_for_model("llama-custom-7b") == 5
-        assert get_max_rpm_for_model("llama2-custom") == 5
-
-    def test_get_max_rpm_for_unknown_model_with_mistral_pattern(self):
-        """Test RPM limits for unknown models with Mistral pattern."""
-        assert get_max_rpm_for_model("mistral-custom") == 5
-        assert get_max_rpm_for_model("mixtral-custom") == 5
-
-    def test_get_max_rpm_for_unknown_model_with_deepseek_pattern(self):
-        """Test RPM limits for unknown models with DeepSeek pattern."""
-        assert get_max_rpm_for_model("deepseek-custom") == 5
-
-    def test_get_max_rpm_for_unknown_model_with_databricks_pattern(self):
-        """Test RPM limits for unknown models with Databricks pattern."""
-        assert get_max_rpm_for_model("databricks-custom-model") == 5
-
-    def test_get_max_rpm_for_unknown_model_with_gemini_pattern(self):
-        """Test RPM limits for unknown models with Gemini pattern."""
-        assert get_max_rpm_for_model("gemini-custom") == 10
-
-    def test_get_max_rpm_for_completely_unknown_model(self):
-        """Test RPM limits for completely unknown models."""
-        assert get_max_rpm_for_model("completely-unknown-model") == 3
-        assert get_max_rpm_for_model("random-ai-model") == 3
-        assert get_max_rpm_for_model("custom-proprietary-model") == 3
-
-    def test_get_max_rpm_for_empty_string(self):
-        """Test RPM limits for empty string model key."""
-        assert get_max_rpm_for_model("") == 3
-
-    def test_get_max_rpm_for_none_model(self):
-        """Test RPM limits for None model key."""
-        # This might raise an exception in real usage, but test the current behavior
-        try:
-            result = get_max_rpm_for_model(None)
-            assert result == 3  # Conservative default
-        except (AttributeError, TypeError):
-            # Expected if the function doesn't handle None gracefully
-            pass
-
-
 class TestModelConfigIntegration:
     """Test integration scenarios for model_config."""
 
-    def test_model_config_with_database_and_rpm_retrieval(self):
-        """Test getting model config and corresponding RPM limit."""
+    def test_model_config_from_database(self):
+        """Test getting model config from the database."""
         mock_db = Mock(spec=Session)
         model_key = "gpt-4"
 
@@ -430,12 +305,8 @@ class TestModelConfigIntegration:
             assert config is not None
             assert config["key"] == "gpt-4"
 
-            # Get corresponding RPM limit
-            rpm_limit = get_max_rpm_for_model(model_key)
-            assert rpm_limit == 50  # Known GPT-4 limit
-
     def test_fallback_behavior_for_model_not_in_database(self):
-        """Test behavior when model is not found in database but has known RPM limit."""
+        """Test behavior when a model is not found in the database."""
         mock_db = Mock(spec=Session)
         model_key = "gpt-4-new-variant"
 
@@ -452,7 +323,3 @@ class TestModelConfigIntegration:
             # Model config not found in database
             config = get_model_config(model_key, mock_db)
             assert config is None
-
-            # But RPM limit can still be determined by pattern matching
-            rpm_limit = get_max_rpm_for_model(model_key)
-            assert rpm_limit == 50  # Should match GPT-4 pattern

@@ -12,7 +12,7 @@ import logging
 import os
 import time
 import uuid
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.useragent import with_product
@@ -285,85 +285,6 @@ class LakebaseConnectionService(BaseService):
         finally:
             await test_engine.dispose()
 
-    def create_engine_with_token_refresh(
-        self,
-        endpoint: str,
-        username: str,
-        token_holder: Dict[str, Any],
-        driver: str = "asyncpg",
-    ) -> Any:
-        """
-        Create a SQLAlchemy engine with do_connect event listener for token injection.
-
-        Per Databricks Apps Cookbook, uses do_connect to inject fresh tokens
-        from a mutable token_holder dict that a background refresh task updates.
-
-        Args:
-            endpoint: Lakebase endpoint (DNS name)
-            username: PG username (SPN client_id)
-            token_holder: Mutable dict with {"token": str, "refreshed_at": float}
-            driver: SQLAlchemy driver ("asyncpg" or "pg8000")
-
-        Returns:
-            Engine (async or sync depending on driver)
-        """
-        # Build URL with placeholder password — do_connect will inject the real token
-        if driver == "asyncpg":
-            connection_url = (
-                f"postgresql+asyncpg://{username}:placeholder@"
-                f"{endpoint}:5432/databricks_postgres"
-            )
-            engine = create_async_engine(
-                connection_url,
-                echo=False,
-                pool_pre_ping=False,  # Required: conflicts with do_connect token injection
-                pool_recycle=3600,  # Aligned with 1-hour token expiry
-                pool_size=5,
-                max_overflow=10,
-                connect_args={
-                    "ssl": "require",
-                    "server_settings": {
-                        "jit": "off",
-                        # 'public' MUST stay on the path: the pgvector 'vector'
-                        # type and the vector_cosine_ops opclass live in public.
-                        "search_path": "kasal, public",
-                    },
-                },
-            )
-
-            # Attach do_connect listener on the sync_engine (required by SQLAlchemy)
-            @event.listens_for(engine.sync_engine, "do_connect")
-            def inject_token(dialect, conn_rec, cargs, cparams):
-                cparams["password"] = token_holder["token"]
-
-            logger.info(
-                f"Created async engine with do_connect token injection for {endpoint}"
-            )
-            return engine
-
-        else:
-            # Sync engine (pg8000) for streaming operations
-            connection_url = (
-                f"postgresql+pg8000://{username}:placeholder@"
-                f"{endpoint}:5432/databricks_postgres"
-            )
-            engine = create_engine(
-                connection_url,
-                echo=False,
-                pool_pre_ping=False,
-                poolclass=NullPool,
-                connect_args={"ssl_context": True},
-            )
-
-            @event.listens_for(engine, "do_connect")
-            def inject_token_sync(dialect, conn_rec, cargs, cparams):
-                cparams["password"] = token_holder["token"]
-
-            logger.info(
-                f"Created sync engine with do_connect token injection for {endpoint}"
-            )
-            return engine
-
     async def create_lakebase_engine_async(
         self, endpoint: str, username: str, token: str
     ) -> AsyncEngine:
@@ -442,67 +363,3 @@ class LakebaseConnectionService(BaseService):
             logger.info(f"Created sync Lakebase engine for {endpoint}")
 
         return engine
-
-    async def get_connected_engine_async(
-        self, instance_name: str, endpoint: str
-    ) -> Tuple[str, AsyncEngine]:
-        """
-        Generate credentials and create a connected async engine using SPN username.
-
-        Args:
-            instance_name: Name of the Lakebase instance
-            endpoint: Lakebase endpoint (DNS name)
-
-        Returns:
-            Tuple of (username, async_engine)
-
-        Raises:
-            Exception: If connection fails
-        """
-        username = await self.get_username()
-        cred = await self.generate_credentials(instance_name)
-        engine = await self.create_lakebase_engine_async(endpoint, username, cred.token)
-
-        # Verify connection
-        try:
-            async with engine.connect() as conn:
-                result = await conn.execute(text("SELECT current_user"))
-                connected_user = result.scalar()
-                logger.info(f"Connected to Lakebase as: {connected_user}")
-        except Exception as e:
-            await engine.dispose()
-            raise Exception(f"Failed to connect to Lakebase as '{username}': {e}")
-
-        return username, engine
-
-    def get_connected_engine_sync(
-        self, endpoint: str, username: str, token: str
-    ) -> Tuple[Engine, str]:
-        """
-        Create and verify a sync engine connection using SPN username.
-
-        Args:
-            endpoint: Lakebase endpoint (DNS name)
-            username: PostgreSQL username (SPN client_id)
-            token: Database authentication token
-
-        Returns:
-            Tuple of (sync_engine, connected_user)
-
-        Raises:
-            Exception: If connection fails
-        """
-        engine = self.create_lakebase_engine_sync(endpoint, username, token)
-
-        try:
-            with engine.connect() as conn:
-                result = conn.execute(text("SELECT current_user"))
-                connected_user = result.scalar()
-                logger.info(f"[SYNC] Connected to Lakebase as: {connected_user}")
-        except Exception as e:
-            engine.dispose()
-            raise Exception(
-                f"[SYNC] Failed to connect to Lakebase as '{username}': {e}"
-            )
-
-        return engine, connected_user

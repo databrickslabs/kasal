@@ -211,11 +211,6 @@ class TestRunCrewIsolated:
                 return_value=False,
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch.object(
-                executor,
-                "_relay_task_events",
-                return_value=_coro_that_raises_cancelled(),
-            ),
         ):
             try:
                 await executor.run_crew_isolated("exec-2", crew_config, group_ctx)
@@ -244,11 +239,6 @@ class TestRunCrewIsolated:
                 return_value=False,
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch.object(
-                executor,
-                "_relay_task_events",
-                return_value=_coro_that_raises_cancelled(),
-            ),
         ):
             try:
                 await executor.run_crew_isolated("exec-no-tok", crew_config, group_ctx)
@@ -273,11 +263,6 @@ class TestRunCrewIsolated:
                 return_value=False,
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch.object(
-                executor,
-                "_relay_task_events",
-                return_value=_coro_that_raises_cancelled(),
-            ),
         ):
             try:
                 await executor.run_crew_isolated("exec-str", "not-a-dict", group_ctx)
@@ -302,11 +287,6 @@ class TestRunCrewIsolated:
                 return_value=False,
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch.object(
-                executor,
-                "_relay_task_events",
-                return_value=_coro_that_raises_cancelled(),
-            ),
         ):
             result = await executor.run_crew_isolated("exec-stop", {}, group_ctx)
 
@@ -328,11 +308,6 @@ class TestRunCrewIsolated:
                 return_value=False,
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch.object(
-                executor,
-                "_relay_task_events",
-                return_value=_coro_that_raises_cancelled(),
-            ),
         ):
             result = await executor.run_crew_isolated("exec-ok", {}, group_ctx)
 
@@ -354,11 +329,6 @@ class TestRunCrewIsolated:
                 return_value=False,
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch.object(
-                executor,
-                "_relay_task_events",
-                return_value=_coro_that_raises_cancelled(),
-            ),
         ):
             result = await executor.run_crew_isolated("exec-fail", {}, group_ctx)
 
@@ -383,11 +353,6 @@ class TestRunCrewIsolated:
                 return_value=False,
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch.object(
-                executor,
-                "_relay_task_events",
-                return_value=_coro_that_raises_cancelled(),
-            ),
         ):
             result = await executor.run_crew_isolated("exec-q", {}, group_ctx)
 
@@ -425,11 +390,6 @@ class TestRunCrewIsolated:
                 return_value=False,
             ),
             patch.object(executor, "terminate_execution", new_callable=AsyncMock),
-            patch.object(
-                executor,
-                "_relay_task_events",
-                return_value=_coro_that_raises_cancelled(),
-            ),
             patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()),
         ):
             result = await executor.run_crew_isolated(
@@ -455,11 +415,6 @@ class TestRunCrewIsolated:
                 return_value=False,
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch.object(
-                executor,
-                "_relay_task_events",
-                return_value=_coro_that_raises_cancelled(),
-            ),
         ):
             await executor.run_crew_isolated("exec-metrics", {}, group_ctx)
 
@@ -486,11 +441,6 @@ class TestRunCrewIsolated:
                 return_value={"instance_name": "my-inst"},
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch.object(
-                executor,
-                "_relay_task_events",
-                return_value=_coro_that_raises_cancelled(),
-            ),
         ):
             await executor.run_crew_isolated("exec-lb", {}, group_ctx)
 
@@ -920,71 +870,6 @@ class TestGlobalInstance:
 # ---------------------------------------------------------------------------
 # _relay_task_events
 # ---------------------------------------------------------------------------
-
-
-class TestRelayTaskEvents:
-
-    @pytest.mark.asyncio
-    async def test_relay_handles_cancelled_error(self):
-        """CancelledError breaks the relay loop cleanly."""
-        executor = _make_executor()
-        mock_queue = MagicMock()
-
-        # First call raises Empty, second raises CancelledError
-        from queue import Empty
-
-        call_count = {"n": 0}
-
-        def get_side_effect(block=True, timeout=0.5):
-            call_count["n"] += 1
-            if call_count["n"] == 1:
-                raise Empty()
-            raise asyncio.CancelledError()
-
-        mock_queue.get = MagicMock(side_effect=get_side_effect)
-
-        # Create the relay task and cancel it
-        task = asyncio.create_task(
-            executor._relay_task_events(mock_queue, "exec-relay")
-        )
-        await asyncio.sleep(0)
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass  # Expected
-
-    @pytest.mark.asyncio
-    async def test_relay_skips_non_task_events(self):
-        """Events that are not task_started/completed/failed are skipped."""
-        executor = _make_executor()
-        mock_queue = MagicMock()
-        from queue import Empty
-
-        events = [
-            {"event_type": "agent_started", "extra_data": {}},
-            None,  # None causes continue
-        ]
-        event_iter = iter(events)
-        raised_stop = {"did": False}
-
-        def get_side_effect(block=True, timeout=0.5):
-            try:
-                return next(event_iter)
-            except StopIteration:
-                if not raised_stop["did"]:
-                    raised_stop["did"] = True
-                raise Empty()
-
-        mock_queue.get = MagicMock(side_effect=get_side_effect)
-
-        task = asyncio.create_task(executor._relay_task_events(mock_queue, "exec-skip"))
-        await asyncio.sleep(0.05)
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
 
 
 # ---------------------------------------------------------------------------

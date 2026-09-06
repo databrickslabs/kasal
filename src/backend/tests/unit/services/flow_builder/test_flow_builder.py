@@ -5,7 +5,7 @@ Target: 80%+ coverage
 
 import uuid
 from typing import Any, Dict, List
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -187,11 +187,10 @@ class TestFlowBuilder:
         # Mock execution history lookup
         mock_execution = MagicMock()
         mock_execution.job_id = str(uuid.uuid4())
-        mock_repositories["execution_history"].get_execution_by_id = AsyncMock(
+        mock_execution.group_id = mock_group_context.primary_group_id
+        mock_execution.checkpoint_data = None
+        mock_repositories["execution_history"].get_run_by_job_id = AsyncMock(
             return_value=mock_execution
-        )
-        mock_repositories["execution_trace"].get_crew_outputs_for_resume = AsyncMock(
-            return_value={}
         )
 
         with (
@@ -220,93 +219,13 @@ class TestFlowBuilder:
                 resume_from_crew_sequence=1,
                 resume_from_execution_id=execution_id,
             )
+            mock_repositories[
+                "execution_history"
+            ].get_run_by_job_id.assert_awaited_once_with(
+                execution_id, group_ids=mock_group_context.group_ids
+            )
             # The flow class should be created even with empty processors result
             assert flow_cls is not None
-
-    def test_apply_state_operations_with_none(self):
-        """Test _apply_state_operations handles None input."""
-        from src.services.flow_builder.modules.flow_builder import FlowBuilder
-
-        mock_flow = MagicMock()
-        # Should not raise
-        FlowBuilder._apply_state_operations(mock_flow, None)
-
-    def test_apply_state_operations_with_reads(self):
-        """Test _apply_state_operations handles state reads."""
-        from src.services.flow_builder.modules.flow_builder import FlowBuilder
-
-        mock_flow = MagicMock()
-        mock_flow.state = {"test_var": "test_value"}
-
-        state_operations = {
-            "reads": ["test_var"],
-            "writes": [],
-        }
-
-        FlowBuilder._apply_state_operations(mock_flow, state_operations)
-
-    def test_apply_state_operations_with_writes_value(self):
-        """Test _apply_state_operations handles state writes with direct value."""
-        from src.services.flow_builder.modules.flow_builder import FlowBuilder
-
-        mock_flow = MagicMock()
-        mock_flow.state = {}
-
-        state_operations = {
-            "reads": [],
-            "writes": [{"variable": "new_var", "value": "new_value"}],
-        }
-
-        FlowBuilder._apply_state_operations(mock_flow, state_operations)
-
-    def test_apply_state_operations_with_writes_expression(self):
-        """Test _apply_state_operations handles state writes with expression."""
-        from src.services.flow_builder.modules.flow_builder import FlowBuilder
-
-        mock_flow = MagicMock()
-        mock_flow.state = {"x": 5}
-
-        state_operations = {
-            "reads": [],
-            "writes": [{"variable": "y", "expression": 'state["x"] + 1'}],
-        }
-
-        FlowBuilder._apply_state_operations(mock_flow, state_operations)
-
-    def test_apply_state_operations_with_object_state(self):
-        """Test _apply_state_operations handles object-based state."""
-        from src.services.flow_builder.modules.flow_builder import FlowBuilder
-
-        class MockState:
-            def __init__(self):
-                self.test_var = "initial"
-
-        mock_flow = MagicMock()
-        mock_flow.state = MockState()
-        # Make hasattr check fail for 'get' method
-        type(mock_flow.state).get = PropertyMock(side_effect=AttributeError)
-
-        state_operations = {
-            "reads": ["test_var"],
-            "writes": [{"variable": "new_var", "value": "new_value"}],
-        }
-
-        FlowBuilder._apply_state_operations(mock_flow, state_operations)
-
-    def test_apply_state_operations_expression_error(self):
-        """Test _apply_state_operations handles expression evaluation errors."""
-        from src.services.flow_builder.modules.flow_builder import FlowBuilder
-
-        mock_flow = MagicMock()
-        mock_flow.state = {}
-
-        state_operations = {
-            "reads": [],
-            "writes": [{"variable": "y", "expression": "invalid_syntax("}],
-        }
-
-        # Should not raise, just log error
-        FlowBuilder._apply_state_operations(mock_flow, state_operations)
 
 
 class TestCreateDynamicFlow:

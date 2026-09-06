@@ -15,11 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.mcp_server import MCPServer
 from src.models.mcp_settings import MCPSettings
-from src.repositories.mcp_repository import (
-    MCPServerRepository,
-    MCPSettingsRepository,
-    SyncMCPServerRepository,
-)
+from src.repositories.mcp_repository import MCPServerRepository, MCPSettingsRepository
 
 
 # Mock MCP server model
@@ -103,12 +99,6 @@ def mcp_server_repository(mock_async_session):
 def mcp_settings_repository(mock_async_session):
     """Create an MCP settings repository with async session."""
     return MCPSettingsRepository(session=mock_async_session)
-
-
-@pytest.fixture
-def sync_mcp_server_repository(mock_sync_session):
-    """Create a sync MCP server repository."""
-    return SyncMCPServerRepository(db=mock_sync_session)
 
 
 @pytest.fixture
@@ -444,157 +434,6 @@ class TestMCPSettingsRepositoryUpdateGlobalEnabled:
                 await mcp_settings_repository.update_global_enabled(True)
 
 
-class TestSyncMCPServerRepositoryInit:
-    """Test cases for SyncMCPServerRepository initialization."""
-
-    def test_init_success(self, mock_sync_session):
-        """Test successful initialization."""
-        repository = SyncMCPServerRepository(db=mock_sync_session)
-        assert repository.db == mock_sync_session
-
-
-class TestSyncMCPServerRepositoryFindById:
-    """Test cases for find_by_id method."""
-
-    def test_find_by_id_success(
-        self, sync_mcp_server_repository, mock_sync_session, sample_mcp_servers
-    ):
-        """Test successful find by ID."""
-        server = sample_mcp_servers[0]
-        mock_sync_session.first.return_value = server
-
-        result = sync_mcp_server_repository.find_by_id(1)
-
-        assert result == server
-        mock_sync_session.query.assert_called_once_with(MCPServer)
-        mock_sync_session.filter.assert_called_once()
-
-    def test_find_by_id_not_found(self, sync_mcp_server_repository, mock_sync_session):
-        """Test find by ID when server not found."""
-        mock_sync_session.first.return_value = None
-
-        result = sync_mcp_server_repository.find_by_id(999)
-
-        assert result is None
-        mock_sync_session.query.assert_called_once_with(MCPServer)
-
-    def test_find_by_id_database_error(
-        self, sync_mcp_server_repository, mock_sync_session
-    ):
-        """Test find by ID with database error."""
-        mock_sync_session.query.side_effect = Exception("Database error")
-
-        with pytest.raises(Exception, match="Database error"):
-            sync_mcp_server_repository.find_by_id(1)
-
-
-class TestSyncMCPServerRepositoryFindByName:
-    """Test cases for find_by_name method."""
-
-    def test_find_by_name_success(
-        self, sync_mcp_server_repository, mock_sync_session, sample_mcp_servers
-    ):
-        """Test successful find by name."""
-        server = sample_mcp_servers[0]
-        mock_sync_session.first.return_value = server
-
-        result = sync_mcp_server_repository.find_by_name("server1")
-
-        assert result == server
-        mock_sync_session.query.assert_called_once_with(MCPServer)
-        mock_sync_session.filter.assert_called_once()
-
-    def test_find_by_name_not_found(
-        self, sync_mcp_server_repository, mock_sync_session
-    ):
-        """Test find by name when server not found."""
-        mock_sync_session.first.return_value = None
-
-        result = sync_mcp_server_repository.find_by_name("nonexistent")
-
-        assert result is None
-        mock_sync_session.query.assert_called_once_with(MCPServer)
-
-    def test_find_by_name_database_error(
-        self, sync_mcp_server_repository, mock_sync_session
-    ):
-        """Test find by name with database error."""
-        mock_sync_session.filter.side_effect = Exception("Database error")
-
-        with pytest.raises(Exception, match="Database error"):
-            sync_mcp_server_repository.find_by_name("test")
-
-
-class TestSyncMCPServerRepositoryFindAll:
-    """Test cases for find_all method."""
-
-    def test_find_all_success(
-        self, sync_mcp_server_repository, mock_sync_session, sample_mcp_servers
-    ):
-        """Test successful find all."""
-        mock_sync_session.all.return_value = sample_mcp_servers
-
-        result = sync_mcp_server_repository.find_all()
-
-        assert result == sample_mcp_servers
-        mock_sync_session.query.assert_called_once_with(MCPServer)
-
-    def test_find_all_empty_result(self, sync_mcp_server_repository, mock_sync_session):
-        """Test find all with empty result."""
-        mock_sync_session.all.return_value = []
-
-        result = sync_mcp_server_repository.find_all()
-
-        assert result == []
-        mock_sync_session.query.assert_called_once_with(MCPServer)
-
-    def test_find_all_database_error(
-        self, sync_mcp_server_repository, mock_sync_session
-    ):
-        """Test find all with database error."""
-        mock_sync_session.all.side_effect = Exception("Database error")
-
-        with pytest.raises(Exception, match="Database error"):
-            sync_mcp_server_repository.find_all()
-
-
-class TestSyncMCPServerRepositoryFindEnabled:
-    """Test cases for find_enabled method."""
-
-    def test_find_enabled_success(
-        self, sync_mcp_server_repository, mock_sync_session, sample_mcp_servers
-    ):
-        """Test successful find enabled."""
-        enabled_servers = [server for server in sample_mcp_servers if server.enabled]
-        mock_sync_session.all.return_value = enabled_servers
-
-        result = sync_mcp_server_repository.find_enabled()
-
-        assert result == enabled_servers
-        mock_sync_session.query.assert_called_once_with(MCPServer)
-        mock_sync_session.filter.assert_called_once()
-
-    def test_find_enabled_no_enabled_servers(
-        self, sync_mcp_server_repository, mock_sync_session
-    ):
-        """Test find enabled when no servers are enabled."""
-        mock_sync_session.all.return_value = []
-
-        result = sync_mcp_server_repository.find_enabled()
-
-        assert result == []
-        mock_sync_session.query.assert_called_once_with(MCPServer)
-
-    def test_find_enabled_database_error(
-        self, sync_mcp_server_repository, mock_sync_session
-    ):
-        """Test find enabled with database error."""
-        mock_sync_session.filter.side_effect = Exception("Database error")
-
-        with pytest.raises(Exception, match="Database error"):
-            sync_mcp_server_repository.find_enabled()
-
-
 class TestMCPRepositoryIntegration:
     """Integration test cases testing method interactions."""
 
@@ -722,15 +561,6 @@ class TestMCPRepositoryErrorHandling:
             with pytest.raises(Exception, match="Flush failed"):
                 await mcp_settings_repository.get_settings()
 
-    def test_sync_repository_query_error(
-        self, sync_mcp_server_repository, mock_sync_session
-    ):
-        """Test sync repository with query error."""
-        mock_sync_session.query.side_effect = Exception("Query error")
-
-        with pytest.raises(Exception, match="Query error"):
-            sync_mcp_server_repository.find_all()
-
 
 class TestMCPRepositoryEdgeCases:
     """Test cases for edge cases and boundary conditions."""
@@ -771,21 +601,6 @@ class TestMCPRepositoryEdgeCases:
             # Test with falsy value
             result2 = await mcp_settings_repository.update_global_enabled(0)
             assert sample_mcp_settings.global_enabled == 0  # Should be set as-is
-
-    def test_sync_repository_filter_chaining(
-        self, sync_mcp_server_repository, mock_sync_session, sample_mcp_servers
-    ):
-        """Test that sync repository properly chains filter operations."""
-        enabled_servers = [server for server in sample_mcp_servers if server.enabled]
-        mock_sync_session.all.return_value = enabled_servers
-
-        result = sync_mcp_server_repository.find_enabled()
-
-        # Verify the query was chained correctly
-        mock_sync_session.query.assert_called_once_with(MCPServer)
-        mock_sync_session.filter.assert_called_once()
-        mock_sync_session.all.assert_called_once()
-        assert result == enabled_servers
 
     @pytest.mark.asyncio
     async def test_get_settings_empty_database(

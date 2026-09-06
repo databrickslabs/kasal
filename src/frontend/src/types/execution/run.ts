@@ -59,9 +59,4 @@ export interface RunsResponse {
   total: number;
   limit: number;
   offset: number;
-}
-
-export interface JobStatus {
-  status: string;
-  error?: string;
 } 

@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.utils.asyncio_utils import (
     create_and_run_loop,
-    create_task_lifecycle_callback,
     execute_db_operation_with_fresh_engine,
     run_in_thread_with_loop,
 )
@@ -151,86 +150,6 @@ class TestCreateAndRunLoop:
 
         assert result == "ok"
         disposed.assert_awaited_once()
-
-
-class TestCreateTaskLifecycleCallback:
-    """Test create_task_lifecycle_callback function."""
-
-    def test_callback_creation(self):
-        """Test creation of a task lifecycle callback."""
-        mock_callback = Mock()
-        mock_callback.on_task_start = AsyncMock()
-
-        callback_fn = create_task_lifecycle_callback(
-            "on_task_start", [mock_callback], "test_task"
-        )
-
-        assert callable(callback_fn)
-
-    @patch("src.utils.asyncio_utils.asyncio.new_event_loop")
-    @patch("src.utils.asyncio_utils.asyncio.set_event_loop")
-    def test_callback_execution_on_task_end(self, mock_set_loop, mock_new_loop):
-        """Test callback execution for on_task_end."""
-        mock_loop = Mock()
-        mock_new_loop.return_value = mock_loop
-
-        # Mock the loop's run_until_complete method
-        mock_loop.run_until_complete = Mock()
-
-        # Mock all_tasks to return empty list (no pending tasks)
-        with patch("src.utils.asyncio_utils.asyncio.all_tasks", return_value=[]):
-            mock_callback = Mock()
-            mock_callback.on_task_end = AsyncMock()
-
-            callback_fn = create_task_lifecycle_callback(
-                "on_task_end", [mock_callback], "test_task"
-            )
-
-            # Execute the callback
-            task_obj = Mock()
-            callback_fn(task_obj, success=True)
-
-            # Verify the handler was called
-            assert mock_loop.run_until_complete.call_count >= 1
-
-    def test_callback_execution_with_exception(self):
-        """Test callback execution when handler raises an exception."""
-        mock_callback = Mock()
-        mock_callback.on_task_start = Mock(side_effect=Exception("Handler error"))
-
-        # This should not raise an exception, but handle it gracefully
-        callback_fn = create_task_lifecycle_callback(
-            "on_task_start", [mock_callback], "test_task"
-        )
-
-        task_obj = Mock()
-        # Should not raise an exception
-        callback_fn(task_obj)
-
-    def test_callback_cleanup_with_exception(self):
-        """Test callback cleanup when exception occurs during cleanup."""
-        with (
-            patch("src.utils.asyncio_utils.asyncio.all_tasks") as mock_all_tasks,
-            patch("src.utils.asyncio_utils.asyncio.gather") as mock_gather,
-        ):
-
-            mock_callback = Mock()
-            mock_callback.on_task_start = AsyncMock()
-
-            # Mock pending tasks
-            mock_task = Mock()
-            mock_all_tasks.return_value = [mock_task]
-
-            # Mock gather to raise exception
-            mock_gather.side_effect = Exception("Cleanup error")
-
-            callback_fn = create_task_lifecycle_callback(
-                "on_task_start", [mock_callback], "test_task"
-            )
-
-            task_obj = Mock()
-            # Should not raise an exception despite cleanup error
-            callback_fn(task_obj)
 
 
 class TestRunInThreadWithLoop:

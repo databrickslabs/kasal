@@ -74,42 +74,6 @@ async def _resolve(group_id, query):
         return False, ""
 
 
-async def _note_skip(
-    execution_id: Optional[str], reason: str, group_context: Any = None
-) -> None:
-    """Record a head start that was WANTED but did not happen, in the TRACE.
-
-    The a2ui modules log through a plain ``logging.getLogger(__name__)``, which
-    on this deployment reaches the console and no log file — so two rounds of
-    "why is the outline still running after the answer?" had no evidence to read
-    anywhere. The trace is queryable and already scoped to the run, so a skipped
-    head start leaves a row that says why. Only written when the request really
-    was a deck and the answer really was long enough, so an ordinary prose turn
-    adds nothing.
-    """
-    if not execution_id:
-        return
-    try:
-        from src.services.trace.writer import write_rows
-
-        await write_rows(
-            execution_id,
-            [
-                (
-                    "a2ui_outline_skipped",
-                    "kasal.a2ui.outline_skipped",
-                    reason,
-                    {"reason": reason},
-                )
-            ],
-            fallback_source="A2UI",
-            fallback_context="a2ui outline head start",
-            group_context=group_context,
-        )
-    except Exception as err:  # noqa: BLE001
-        logger.debug(f"[a2ui] head-start skip not traced: {err}")
-
-
 async def _ship(on_delta: DeltaSink, messages: List[Dict[str, Any]]) -> bool:
     sent = False
     for msg in messages:

@@ -1,11 +1,11 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import and_, asc, delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
-from src.models.billing import BillingAlert, BillingPeriod, LLMUsageBilling
+from src.models.billing import LLMUsageBilling
 from src.models.execution_history import ExecutionHistory
 
 
@@ -235,81 +235,3 @@ class BillingRepository(BaseRepository[LLMUsageBilling]):
         )
 
         return float(result or 0)
-
-
-class BillingPeriodRepository(BaseRepository[BillingPeriod]):
-    """Repository for billing period operations"""
-
-    def __init__(self, session: AsyncSession):
-        super().__init__(BillingPeriod, session)
-
-    async def get_current_period(
-        self, group_id: Optional[str] = None
-    ) -> Optional[BillingPeriod]:
-        """Get the current active billing period"""
-        query = self.session.query(BillingPeriod).filter(
-            BillingPeriod.status == "active"
-        )
-
-        if group_id:
-            query = query.filter(BillingPeriod.group_id == group_id)
-
-        return query.first()
-
-    async def create_monthly_period(
-        self, year: int, month: int, group_id: Optional[str] = None
-    ) -> BillingPeriod:
-        """Create a new monthly billing period"""
-        start_date = datetime(year, month, 1)
-        if month == 12:
-            end_date = datetime(year + 1, 1, 1) - timedelta(seconds=1)
-        else:
-            end_date = datetime(year, month + 1, 1) - timedelta(seconds=1)
-
-        period = BillingPeriod(
-            period_start=start_date,
-            period_end=end_date,
-            period_type="monthly",
-            group_id=group_id,
-            status="active",
-        )
-
-        self.session.add(period)
-        await self.session.flush()
-        return period
-
-
-class BillingAlertRepository(BaseRepository[BillingAlert]):
-    """Repository for billing alert operations"""
-
-    def __init__(self, session: AsyncSession):
-        super().__init__(BillingAlert, session)
-
-    async def get_active_alerts(
-        self, group_id: Optional[str] = None
-    ) -> List[BillingAlert]:
-        """Get all active billing alerts"""
-        query = self.session.query(BillingAlert).filter(
-            BillingAlert.is_active == "true"
-        )
-
-        if group_id:
-            query = query.filter(BillingAlert.group_id == group_id)
-
-        return query.all()
-
-    async def update_alert_current_value(
-        self, alert_id: str, current_value: float
-    ) -> None:
-        """Update the current value for an alert"""
-        alert = await self.get(alert_id)
-        if alert:
-            alert.current_value = current_value
-            alert.updated_at = datetime.utcnow()
-
-    async def trigger_alert(self, alert_id: str) -> None:
-        """Mark an alert as triggered"""
-        alert = await self.get(alert_id)
-        if alert:
-            alert.last_triggered = datetime.utcnow()
-            alert.updated_at = datetime.utcnow()

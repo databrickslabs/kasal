@@ -25,53 +25,6 @@ export class AgentService {
     }
   }
 
-  static async findOrCreateAgent(agent: Omit<Agent, 'id' | 'created_at'>): Promise<Agent | null> {
-    try {
-      const defaultValues: Partial<Agent> = {
-        llm: getDefaultModel(),
-        tools: [],
-        max_iter: 25,
-        verbose: false,
-        allow_delegation: false,
-        cache: true,
-        allow_code_execution: false,
-        code_execution_mode: 'safe' as const,
-        max_retry_limit: 2,
-        use_system_prompt: true,
-        respect_context_window: true,
-        memory: true,
-        max_context_window_size: 8192, // Default context window size
-        max_rpm: 10, // Default RPM to prevent rate limiting
-      };
-
-      // If a model is specified, get its configuration
-      if (agent.llm) {
-        try {
-          // First try to get models from database via ModelService
-          const models = await this.modelService.getActiveModels();
-          if (models[agent.llm]) {
-            // Update max_context_window_size based on model configuration
-            const modelConfig = models[agent.llm];
-            if (modelConfig.context_window) {
-              defaultValues.max_context_window_size = modelConfig.context_window;
-            }
-
-          }
-        } catch (error) {
-          console.error('Error getting models from ModelService:', error);
-        }
-      }
-
-      const agentToSend = { ...defaultValues, ...agent };
-      
-      // Use find-or-create endpoint to prevent duplicates
-      const response = await apiClient.post<Agent>(`/agents/find-or-create`, agentToSend);
-      return response.data;
-    } catch (error) {
-      console.error('Error in find-or-create agent:', error);
-      return null;
-    }
-  }
 
   static async createAgent(agent: Omit<Agent, 'id' | 'created_at'>): Promise<Agent | null> {
     try {
@@ -264,18 +217,6 @@ export class AgentService {
     }
   }
 
-  static async updateAgent(
-    id: number | string, 
-    agent: Pick<Agent, 'name' | 'role' | 'goal' | 'backstory'>
-  ): Promise<Agent | null> {
-    try {
-      const response = await apiClient.put<Agent>(`/agents/${id}`, agent);
-      return response.data;
-    } catch (error) {
-      console.error('Error updating agent:', error);
-      return null;
-    }
-  }
 
   static async deleteAgent(id: number | string): Promise<boolean> {
     try {

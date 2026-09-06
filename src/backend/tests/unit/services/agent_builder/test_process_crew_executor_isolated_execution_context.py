@@ -479,7 +479,6 @@ class TestProcessCrewExecutorRunCrewIsolated:
                 return_value=False,
             ),
             patch.object(self.executor, "_process_log_queue", new_callable=AsyncMock),
-            patch.object(self.executor, "_relay_task_events", new_callable=AsyncMock),
         ):
             result = await self.executor.run_crew_isolated(
                 execution_id, crew_config, group_context
@@ -514,7 +513,6 @@ class TestProcessCrewExecutorRunCrewIsolated:
                 return_value=False,
             ),
             patch.object(self.executor, "_process_log_queue", new_callable=AsyncMock),
-            patch.object(self.executor, "_relay_task_events", new_callable=AsyncMock),
         ):
             result = await self.executor.run_crew_isolated(
                 execution_id, crew_config, group_context, inputs
@@ -548,7 +546,6 @@ class TestProcessCrewExecutorRunCrewIsolated:
                 return_value=False,
             ),
             patch.object(self.executor, "_process_log_queue", new_callable=AsyncMock),
-            patch.object(self.executor, "_relay_task_events", new_callable=AsyncMock),
         ):
             result = await self.executor.run_crew_isolated(
                 execution_id, crew_config, group_context, timeout=timeout

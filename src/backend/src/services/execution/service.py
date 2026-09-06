@@ -1116,22 +1116,6 @@ class ExecutionService:
             # CRITICAL: Re-raise the exception so we can see what's happening
             raise
 
-            # Check database configuration
-            from src.config.settings import settings
-
-            logger.error(f"Database URI: {settings.DATABASE_URI}")
-            logger.error(f"Database type: {settings.DATABASE_TYPE}")
-
-            # If database access fails, just return in-memory executions
-            memory_only_results = [
-                {**data, "execution_id": execution_id}
-                for execution_id, data in ExecutionService.executions.items()
-            ]
-            logger.info(
-                f"Falling back to {len(memory_only_results)} in-memory executions"
-            )
-            return memory_only_results
-
     @staticmethod
     def _execute_crew(
         execution_id: str, config: CrewConfig, execution_type: str

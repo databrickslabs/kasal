@@ -18,7 +18,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 )
 
 from src.services.memory.engine import Memory
-from src.services.memory.run.persist import register_task_output_persistence
+from src.services.memory.run.persist import make_memory_output_sink
 from src.services.memory.run.recall import inject_task_memory
 from src.services.memory.storage.adapter import EngineStorageAdapter
 from src.services.memory.storage.local import LocalStorageBackend
@@ -107,24 +107,14 @@ class TestPersistReachesTrace:
             description="Summarize findings",
             agent=SimpleNamespace(role="Writer"),
         )
-        crew = SimpleNamespace(memory=memory, tasks=[task])
         saved: list = []
         memory.add_save_hook(lambda records: saved.extend(records))
 
-        from src.core.events import TaskCompletedEvent, event_bus
-
-        unregister = register_task_output_persistence(crew)
-        try:
-            event_bus.emit(
-                task,
-                TaskCompletedEvent(
-                    output=SimpleNamespace(raw="Summary: growth 4%", agent="Writer"),
-                    task=task,
-                ),
-            )
-            completed = _wait_for_span(spans, "kasal.memory.save_completed")
-        finally:
-            unregister()
+        sink = make_memory_output_sink(memory)
+        sink(
+            task=task, output=SimpleNamespace(raw="Summary: growth 4%", agent="Writer")
+        )
+        completed = _wait_for_span(spans, "kasal.memory.save_completed")
 
         attrs = dict(completed[0].attributes)
         assert attrs["kasal.event_type"] == "memory_write"
@@ -142,7 +132,6 @@ class TestPersistReachesTrace:
         """The crew subprocess flushes after kickoff: once flush returns, the
         record is in storage and the Memory Write span is exported — nothing
         left to die with the interpreter."""
-        from src.core.events import TaskCompletedEvent, event_bus
         from src.services.memory.run.persist import flush_memory_writes
 
         backend = LocalStorageBackend(tmp_path / "m.db", embedder=_embedder)
@@ -153,20 +142,10 @@ class TestPersistReachesTrace:
             description="Wrap up",
             agent=SimpleNamespace(role="Closer"),
         )
-        crew = SimpleNamespace(memory=memory, tasks=[task])
 
-        unregister = register_task_output_persistence(crew)
-        try:
-            event_bus.emit(
-                task,
-                TaskCompletedEvent(
-                    output=SimpleNamespace(raw="done and dusted", agent="Closer"),
-                    task=task,
-                ),
-            )
-            assert flush_memory_writes(timeout=10.0) == 0
-        finally:
-            unregister()
+        sink = make_memory_output_sink(memory)
+        sink(task=task, output=SimpleNamespace(raw="done and dusted", agent="Closer"))
+        assert flush_memory_writes(timeout=10.0) == 0
 
         # No polling: flush IS the synchronization barrier.
         assert backend.count("/g1") == 1
@@ -178,7 +157,6 @@ class TestPersistReachesTrace:
         a task output persisted inside a run's execution context lands with
         that run's id in its metadata, and the same id-less rows a pruned trace
         would leave behind still say which run wrote them."""
-        from src.core.events import TaskCompletedEvent, event_bus
         from src.services.execution.logs.context import execution_logging_context
         from src.services.memory.run.persist import flush_memory_writes
 
@@ -192,21 +170,13 @@ class TestPersistReachesTrace:
             description="Prove the stamp",
             agent=SimpleNamespace(role="Writer"),
         )
-        crew = SimpleNamespace(memory=memory, tasks=[task])
 
-        unregister = register_task_output_persistence(crew)
-        try:
-            with execution_logging_context("job-e2e-1"):
-                event_bus.emit(
-                    task,
-                    TaskCompletedEvent(
-                        output=SimpleNamespace(raw="stamped output", agent="Writer"),
-                        task=task,
-                    ),
-                )
-            assert flush_memory_writes(timeout=10.0) == 0
-        finally:
-            unregister()
+        sink = make_memory_output_sink(memory)
+        with execution_logging_context("job-e2e-1"):
+            sink(
+                task=task, output=SimpleNamespace(raw="stamped output", agent="Writer")
+            )
+        assert flush_memory_writes(timeout=10.0) == 0
 
         assert len(saved) == 1
         assert saved[0].metadata["execution_id"] == "job-e2e-1"

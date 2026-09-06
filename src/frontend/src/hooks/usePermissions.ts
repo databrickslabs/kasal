@@ -76,33 +76,3 @@ export const usePermissions = () => {
     refreshPermissions: store.refreshPermissions,
   };
 };
-
-/**
- * Hook for menu/navigation visibility
- */
-export const useNavigationPermissions = () => {
-  const { getVisibleMenuItems, userRole } = usePermissionStore();
-
-  return {
-    visibleMenuItems: getVisibleMenuItems(),
-    userRole,
-    showAdminMenu: userRole === 'admin',
-    showEditorFeatures: userRole === 'admin' || userRole === 'editor',
-    showOperatorFeatures: true, // All roles can see operator features
-  };
-};
-
-/**
- * Hook for form/edit permissions
- */
-export const useEditPermissions = () => {
-  const { canEdit, canCreate, canDelete, userRole } = usePermissionStore();
-
-  return {
-    canEdit: canEdit(),
-    canCreate: canCreate(),
-    canDelete: canDelete(),
-    isReadOnly: userRole === 'operator',
-    userRole,
-  };
-};

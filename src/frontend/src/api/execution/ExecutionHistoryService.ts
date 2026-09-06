@@ -1,8 +1,8 @@
 import apiClient from '../../config/api/ApiConfig';
-import { Run, RunsResponse, JobStatus } from '../../types/execution/run';
+import { Run, RunsResponse } from '../../types/execution/run';
 import { Trace } from '../../store/runStatus';
 
-export type { Run, RunsResponse, JobStatus };
+export type { Run, RunsResponse };
 
 // Add cache control constants
 const CACHE_TTL = 5000; // 5 seconds cache time-to-live
@@ -163,19 +163,7 @@ function formatDuration(durationMs: number): string {
 }
 
 // Define more specific types to replace 'any'
-type InputDataType = Record<string, string | number | boolean | null | object>;
 type OutputDataType = Record<string, string | number | boolean | null | object>;
-
-// Interface for execution trace
-interface TraceItem {
-  id: number;
-  run_id: number;
-  timestamp: string;
-  agent_name?: string;
-  task_name?: string;
-  input_data?: Record<string, InputDataType>;
-  output_data?: Record<string, OutputDataType>;
-}
 
 // Interface for delete response
 interface DeleteResponse {
@@ -526,68 +514,6 @@ export class RunService {
     }
   }
 
-  public async getRunById(runId: string): Promise<Run | null> {
-    try {
-      if (await this.checkApiAvailability()) {
-        try {
-          // First try the direct endpoint
-          const response = await apiClient.get(`/executions/${runId}`);
-          return this.convertToRun(response.data);
-        } catch (directError) {
-          try {
-            // Try numeric ID endpoint if it might be a numeric ID
-            if (!isNaN(parseInt(runId, 10))) {
-              const numericResponse = await apiClient.get(`/executions/history/${runId}`);
-              return this.convertToRun(numericResponse.data);
-            }
-          } catch (numericError) {
-            // Numeric ID endpoint failed, continue with next approach
-          }
-          
-          // Last resort, try to find it in all runs
-          const runsResponse = await this.getRuns(100, 0);
-          const run = runsResponse.runs.find(r => r.id === runId || r.job_id === runId);
-          
-          if (run) {
-            // If the run doesn't have YAML data, try one more approach
-            if ((!run.agents_yaml || !run.tasks_yaml) && run.job_id) {
-              try {
-                const jobResponse = await apiClient.get(`/executions/history`, {
-                  params: { job_id: run.job_id }
-                });
-                
-                if (jobResponse.data && Array.isArray(jobResponse.data) && jobResponse.data.length > 0) {
-                  return this.convertToRun(jobResponse.data[0]);
-                }
-              } catch (jobError) {
-                // Job ID approach failed, continue with current run
-              }
-            }
-            
-            return run;
-          }
-          
-          return null;
-        }
-      }
-      return null;
-    } catch (error) {
-      return null;
-    }
-  }
-
-  public async getRunTraces(runId: string): Promise<TraceItem[]> {
-    try {
-      if (await this.checkApiAvailability()) {
-        // Using the execution traces endpoint
-        const response = await apiClient.get(`/executions/${runId}/traces`);
-        return response.data;
-      }
-      return [];
-    } catch (error) {
-      return [];
-    }
-  }
 
   public async deleteAllRuns(): Promise<DeleteResponse | null> {
     try {
@@ -681,52 +607,6 @@ export class RunService {
     }
   }
 
-  public async getJobStatus(jobId: string): Promise<JobStatus> {
-    try {
-      if (await this.checkApiAvailability()) {
-        // Since execution_history_router doesn't have a direct endpoint for getting status,
-        // we'll get the run by job_id and extract the status
-        const run = await this.getRunByJobId(jobId);
-        if (!run) {
-          return {
-            status: 'unknown',
-            error: `Job with ID ${jobId} not found`
-          };
-        }
-        
-        return {
-          status: run.status,
-          error: run.error
-        };
-      }
-      return {
-        status: 'unknown',
-        error: 'Execution history API not available'
-      };
-    } catch (error) {
-      return {
-        status: 'unknown',
-        error: error instanceof Error ? error.message : String(error)
-      };
-    }
-  }
-
-  public async executeJob(agentsYaml: string, tasksYaml: string): Promise<{ job_id: string } | null> {
-    try {
-      // This endpoint might have a different availability than the history endpoints
-      const response = await apiClient.post<{ job_id: string }>('/executions', {
-        agents_yaml: agentsYaml,
-        tasks_yaml: tasksYaml
-      });
-      
-      // Invalidate cache since we've added a new job
-      this.invalidateRunsCache();
-      
-      return response.data;
-    } catch (error) {
-      return null;
-    }
-  }
 
   // Add a method to invalidate the cache when we know data has changed
   public invalidateRunsCache(): void {
@@ -750,11 +630,6 @@ export class RunService {
     return response.data;
   }
 
-  // Public method to manually refresh API availability status
-  public resetApiAvailability(): void {
-    this.apiAvailable = null;
-    this.invalidateRunsCache(); // Also clear the cache
-  }
 }
 
-export const runService = RunService.getInstance(); 
+export const runService = RunService.getInstance();

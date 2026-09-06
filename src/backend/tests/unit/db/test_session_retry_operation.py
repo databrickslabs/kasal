@@ -8,7 +8,6 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
 
 import pytest
-from sqlalchemy.exc import OperationalError
 
 # ---------------------------------------------------------------------------
 # _SwappableSessionFactory
@@ -87,118 +86,6 @@ class TestSwappableSessionFactory:
 # ---------------------------------------------------------------------------
 
 
-class TestRetryDbOperation:
-    """Tests for the retry_db_operation decorator."""
-
-    @pytest.mark.asyncio
-    async def test_async_success_on_first_attempt(self):
-        from src.db.session import retry_db_operation
-
-        call_count = 0
-
-        @retry_db_operation(max_retries=3)
-        async def my_func():
-            nonlocal call_count
-            call_count += 1
-            return "ok"
-
-        result = await my_func()
-        assert result == "ok"
-        assert call_count == 1
-
-    @pytest.mark.asyncio
-    async def test_async_retries_on_locked_db(self):
-        from src.db.session import retry_db_operation
-
-        call_count = 0
-
-        @retry_db_operation(max_retries=3, delay=0.001)
-        async def my_func():
-            nonlocal call_count
-            call_count += 1
-            if call_count < 3:
-                raise OperationalError("database is locked", None, None)
-            return "success"
-
-        result = await my_func()
-        assert result == "success"
-        assert call_count == 3
-
-    @pytest.mark.asyncio
-    async def test_async_raises_after_max_retries(self):
-        from src.db.session import retry_db_operation
-
-        @retry_db_operation(max_retries=2, delay=0.001)
-        async def always_locked():
-            raise OperationalError("database is locked", None, None)
-
-        with pytest.raises(OperationalError):
-            await always_locked()
-
-    @pytest.mark.asyncio
-    async def test_async_does_not_retry_non_lock_error(self):
-        from src.db.session import retry_db_operation
-
-        call_count = 0
-
-        @retry_db_operation(max_retries=3)
-        async def fail_fast():
-            nonlocal call_count
-            call_count += 1
-            raise OperationalError("some other error", None, None)
-
-        with pytest.raises(OperationalError):
-            await fail_fast()
-        assert call_count == 1
-
-    def test_sync_success_on_first_attempt(self):
-        from src.db.session import retry_db_operation
-
-        call_count = 0
-
-        @retry_db_operation(max_retries=3)
-        def my_sync_func():
-            nonlocal call_count
-            call_count += 1
-            return "sync_ok"
-
-        result = my_sync_func()
-        assert result == "sync_ok"
-        assert call_count == 1
-
-    def test_sync_retries_on_locked_db(self):
-        from src.db.session import retry_db_operation
-
-        call_count = 0
-
-        @retry_db_operation(max_retries=3, delay=0.001)
-        def my_sync_func():
-            nonlocal call_count
-            call_count += 1
-            if call_count < 2:
-                raise OperationalError("database is locked", None, None)
-            return "sync_success"
-
-        with patch("time.sleep"):
-            result = my_sync_func()
-        assert result == "sync_success"
-
-    def test_sync_does_not_retry_non_lock_error(self):
-        from src.db.session import retry_db_operation
-
-        call_count = 0
-
-        @retry_db_operation(max_retries=3)
-        def fail_fast():
-            nonlocal call_count
-            call_count += 1
-            raise OperationalError("some other error", None, None)
-
-        with pytest.raises(OperationalError):
-            fail_fast()
-        assert call_count == 1
-
-
 # ---------------------------------------------------------------------------
 # routed_scoped_session
 # ---------------------------------------------------------------------------
@@ -253,64 +140,6 @@ class TestRoutedScopedSession:
 # ---------------------------------------------------------------------------
 # get_smart_engine
 # ---------------------------------------------------------------------------
-
-
-class TestGetSmartEngine:
-    """Tests for get_smart_engine function."""
-
-    def test_sqlite_always_returns_engine(self):
-        from src.db.session import engine, get_smart_engine
-
-        with patch("src.db.session.settings") as mock_settings:
-            mock_settings.DATABASE_URI = "sqlite:///test.db"
-            result = get_smart_engine()
-        assert result is engine
-
-    def test_postgres_returns_pooled_in_main_loop(self):
-        """In main loop context, returns pooled engine."""
-        from src.db.session import get_smart_engine
-
-        mock_loop = MagicMock()
-        with patch("src.db.session.settings") as mock_settings:
-            mock_settings.DATABASE_URI = "postgresql+asyncpg://u" ":p@h/db"
-            with patch("asyncio.get_running_loop", return_value=mock_loop):
-                with patch("src.db.session.main_event_loop", mock_loop):
-                    with patch("src.db.session.pooled_engine") as mock_pooled:
-                        result = get_smart_engine()
-            assert result is mock_pooled
-
-    def test_postgres_returns_nullpool_in_background_loop(self):
-        """In a different loop context, returns nullpool engine."""
-        from src.db.session import get_smart_engine
-
-        main_loop = MagicMock()
-        bg_loop = MagicMock()
-        with patch("src.db.session.settings") as mock_settings:
-            mock_settings.DATABASE_URI = "postgresql+asyncpg://u" ":p@h/db"
-            with patch("asyncio.get_running_loop", return_value=bg_loop):
-                with patch("src.db.session.main_event_loop", main_loop):
-                    with patch("src.db.session.nullpool_engine") as mock_null:
-                        result = get_smart_engine()
-            assert result is mock_null
-
-    def test_postgres_runtime_error_falls_back_to_nullpool(self):
-        from src.db.session import get_smart_engine
-
-        with patch("src.db.session.settings") as mock_settings:
-            mock_settings.DATABASE_URI = "postgresql+asyncpg://u" ":p@h/db"
-            with patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")):
-                with patch("src.db.session.nullpool_engine") as mock_null:
-                    result = get_smart_engine()
-            assert result is mock_null
-
-    def test_postgres_exception_falls_back_to_default_engine(self):
-        from src.db.session import engine, get_smart_engine
-
-        with patch("src.db.session.settings") as mock_settings:
-            mock_settings.DATABASE_URI = "postgresql+asyncpg://u" ":p@h/db"
-            with patch("asyncio.get_running_loop", side_effect=Exception("unexpected")):
-                result = get_smart_engine()
-            assert result is engine
 
 
 # ---------------------------------------------------------------------------

@@ -30,39 +30,12 @@ export class TaskService {
     }
   }
 
-  static async findOrCreateTask(task: Partial<Task>): Promise<Task> {
-    try {
-      // Use the same logic as createTask but with find-or-create endpoint
-      const taskData = { ...task };
-      
-      // Ensure required fields have defaults
-      if (!taskData.tools) taskData.tools = [];
-      if (!taskData.context) taskData.context = [];
-      if (!taskData.async_execution) taskData.async_execution = false;
-      
-      console.log('TaskService - find-or-create task data:', {
-        name: taskData.name,
-        config: taskData.config
-      });
-
-      // Use find-or-create endpoint to prevent duplicates
-      const response = await apiClient.post<Task>('/tasks/find-or-create', taskData);
-      
-      console.log('Task find-or-create successful:', response.data);
-      return response.data;
-    } catch (error) {
-      const axiosError = error as AxiosError<ErrorResponse>;
-      console.error('Error in find-or-create task:', axiosError.response?.data?.detail || axiosError.message);
-      throw axiosError;
-    }
-  }
 
   static async createTask(task: Partial<Task>): Promise<Task> {
     try {
       // Extract assigned_agent if it exists in the incoming task object
       const taskWithAgent = task as TaskWithAssignedAgent;
       const assignedAgent = taskWithAgent.assigned_agent;
-
 
 
       // Validate and format the task data
@@ -107,7 +80,6 @@ export class TaskService {
       } : taskData;
 
 
-
       const response = await apiClient.post<Task>('/tasks', finalTaskData);
       
       // Ensure task response has agent_id set
@@ -118,9 +90,8 @@ export class TaskService {
         console.log('TaskService - Adding missing agent_id to response:', finalTaskData.agent_id);
         responseData.agent_id = finalTaskData.agent_id;
       }
-      
 
-      
+
       return responseData;
     } catch (error) {
       console.error('Error creating task:', error);
@@ -209,27 +180,6 @@ export class TaskService {
     }
   }
 
-  static async updateTaskFull(id: string, task: Partial<Task>): Promise<Task> {
-    try {
-      // Format the task data to match the server's expected structure
-      const taskData = {
-        ...task,
-        config: {
-          ...task.config,
-          condition: task.config?.condition || undefined,
-          guardrail: task.config?.guardrail || undefined
-        }
-      };
-
-      const response = await apiClient.put<Task>(`/tasks/${id}/full`, taskData);
-      console.log('Updated task (full):', response.data);
-      return response.data;
-    } catch (error) {
-      console.error('Error updating task:', error);
-      const axiosError = error as AxiosError<ErrorResponse>;
-      throw new Error(axiosError.response?.data?.detail || 'Error updating task');
-    }
-  }
 
   static async deleteTask(id: string): Promise<void> {
     try {
@@ -260,32 +210,4 @@ export class TaskService {
     }
   }
 
-  static async generateTask(prompt: string): Promise<Task> {
-    try {
-      // Log the request payload for debugging
-      const payload = { text: prompt.trim() };
-      console.log('Sending generate task request with payload:', payload);
-
-      const response = await apiClient.post<Task>(
-        '/generate/generate-task', 
-        payload,
-        {
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-      
-      console.log('Generated task response:', response.data);
-      return response.data;
-    } catch (error) {
-      console.error('Error generating task:', error);
-      const axiosError = error as AxiosError<ErrorResponse>;
-      if (axiosError.response) {
-        console.error('Server response:', axiosError.response.data);
-        console.error('Status code:', axiosError.response.status);
-      }
-      throw new Error(axiosError.response?.data?.detail || 'Error generating task');
-    }
-  }
-} 
+}

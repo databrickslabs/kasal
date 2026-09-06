@@ -3,7 +3,6 @@
 import asyncio
 import os
 import sys
-from datetime import datetime
 from io import StringIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -879,53 +878,6 @@ class TestProcessLogQueue:
         with patch.dict(os.environ, env, clear=True):
             with patch("os.path.exists", return_value=False):
                 await ProcessFlowExecutor()._process_log_queue(None, "e1", None)
-
-
-class TestWriteLogsSqliteSync:
-    @pytest.mark.asyncio
-    async def test_ok(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        logs = [
-            {
-                "execution_id": "e",
-                "content": "l",
-                "timestamp": datetime(2024, 1, 1),
-                "group_id": "g",
-                "group_email": "e",
-            }
-        ]
-        mc = MagicMock()
-        mc.cursor.return_value = MagicMock()
-        with patch("sqlite3.connect", return_value=mc):
-            await ProcessFlowExecutor()._write_logs_sqlite_sync(logs, "/tmp/t.db")
-        mc.commit.assert_called_once()
-        mc.close.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_none_ts(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        logs = [
-            {
-                "execution_id": "e",
-                "content": "l",
-                "timestamp": None,
-                "group_id": None,
-                "group_email": None,
-            }
-        ]
-        mc = MagicMock()
-        mc.cursor.return_value = MagicMock()
-        with patch("sqlite3.connect", return_value=mc):
-            await ProcessFlowExecutor()._write_logs_sqlite_sync(logs, "/tmp/t.db")
-
-    @pytest.mark.asyncio
-    async def test_exc(self):
-        from src.services.flow_builder.process_executor import ProcessFlowExecutor
-
-        with patch("sqlite3.connect", side_effect=RuntimeError("e")):
-            await ProcessFlowExecutor()._write_logs_sqlite_sync([], "/tmp/t.db")
 
 
 class TestRunFlowInProcess:

@@ -201,39 +201,6 @@ def _browse_default_records(
 # ---------------------------------------------------------------------------
 
 
-def _row_to_record_dict(
-    row: List[Any],
-    columns: List[str],
-    positions: Dict[str, int],
-) -> Dict[str, Any]:
-    """Map a Databricks similarity-search row to a UI-friendly record dict."""
-
-    def at(col: str) -> Any:
-        idx = positions.get(col)
-        if idx is None or idx >= len(row):
-            return None
-        return row[idx]
-
-    metadata = _safe_json(at("metadata")) or {}
-    categories = _safe_json_list(at("categories"))
-    # Promote provenance fields into metadata so the UI can render them.
-    for key in ("crew_id", "agent_id", "session_id", "llm_model"):
-        metadata.setdefault(key, at(key))
-
-    return {
-        "id": at("id"),
-        "content": at("content"),
-        "scope": at("scope") or "/",
-        "categories": categories,
-        "importance": float(at("importance") or 0.5),
-        "source": at("source") or None,
-        "private": bool(at("private") or False),
-        "metadata": metadata,
-        "created_at": str(at("created_at")) if at("created_at") else None,
-        "last_accessed": str(at("last_accessed")) if at("last_accessed") else None,
-    }
-
-
 def _memory_record_to_dict(record: Any) -> Dict[str, Any]:
     """Map a ``crewai.memory.types.MemoryRecord`` into the UI payload."""
     if hasattr(record, "model_dump"):
@@ -268,20 +235,6 @@ def _safe_json(value: Any) -> Dict[str, Any]:
         return parsed if isinstance(parsed, dict) else {}
     except (TypeError, ValueError):
         return {}
-
-
-def _safe_json_list(value: Any) -> List[Any]:
-    import json as _json
-
-    if not value:
-        return []
-    if isinstance(value, list):
-        return list(value)
-    try:
-        parsed = _json.loads(value)
-        return parsed if isinstance(parsed, list) else []
-    except (TypeError, ValueError):
-        return []
 
 
 # ---------------------------------------------------------------------------

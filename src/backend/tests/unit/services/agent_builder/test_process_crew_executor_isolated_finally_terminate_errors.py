@@ -89,7 +89,6 @@ class TestRunCrewIsolatedFinallyTerminateError:
                 return_value=False,
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch.object(executor, "_relay_task_events", return_value=_always_cancel()),
             patch("psutil.Process", side_effect=psutil_process_side_effect),
             patch("psutil.process_iter", return_value=[]),
         ):
@@ -160,7 +159,6 @@ class TestRunCrewIsolatedFinallyTerminateError:
                 return_value=False,
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch.object(executor, "_relay_task_events", return_value=_always_cancel()),
             patch("psutil.process_iter", side_effect=mock_process_iter),
         ):
             result = await executor.run_crew_isolated(exec_id, {}, group_ctx)
@@ -217,7 +215,6 @@ class TestRunCrewIsolatedFinallyTerminateError:
                 return_value=False,
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch.object(executor, "_relay_task_events", return_value=_always_cancel()),
             patch("psutil.process_iter", side_effect=mock_process_iter),
         ):
             result = await executor.run_crew_isolated(exec_id, {}, group_ctx)
@@ -258,7 +255,6 @@ class TestRunCrewIsolatedFinallyTerminateError:
                 return_value=False,
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch.object(executor, "_relay_task_events", return_value=_always_cancel()),
             patch("psutil.process_iter", side_effect=ImportError("no psutil")),
             patch("subprocess.run", return_value=mock_subprocess_result),
         ):
@@ -305,7 +301,6 @@ class TestRunCrewIsolatedFinallyTerminateError:
                 return_value=False,
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch.object(executor, "_relay_task_events", return_value=_always_cancel()),
             patch("psutil.process_iter", side_effect=ImportError("no psutil")),
             patch("subprocess.run", return_value=mock_subprocess_result),
             patch("os.kill") as mock_os_kill,
@@ -344,7 +339,6 @@ class TestRunCrewIsolatedFinallyTerminateError:
                 return_value=False,
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch.object(executor, "_relay_task_events", return_value=_always_cancel()),
             patch("psutil.process_iter", side_effect=RuntimeError("psutil crashed")),
         ):
             result = await executor.run_crew_isolated("exec-cleanup-err", {}, group_ctx)

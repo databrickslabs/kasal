@@ -6,7 +6,7 @@
  */
 
 import { apiClient } from '../../config/api/ApiConfig';
-import { MemoryBackendConfig, DatabricksMemoryConfig, LakebaseMemoryConfig } from '../../types/config/memoryBackend';
+import { MemoryBackendConfig, LakebaseMemoryConfig } from '../../types/config/memoryBackend';
 import { AxiosError } from 'axios';
 
 export interface DatabricksIndex {
@@ -136,53 +136,6 @@ export class MemoryBackendService {
     }
   }
 
-  /**
-   * Get memory usage statistics for a crew
-   */
-  static async getMemoryStats(crewId: string): Promise<{
-    short_term_count?: number;
-    long_term_count?: number;
-    entity_count?: number;
-    total_size_mb?: number;
-  }> {
-    try {
-      const response = await apiClient.get<{
-        short_term_count?: number;
-        long_term_count?: number;
-        entity_count?: number;
-        total_size_mb?: number;
-      }>(`/memory-backend/stats/${crewId}`);
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching memory stats:', error);
-      return {};
-    }
-  }
-
-  /**
-   * Clear memory for a specific crew
-   */
-  static async clearMemory(
-    crewId: string,
-    memoryTypes: ('short_term' | 'long_term' | 'entity')[]
-  ): Promise<{ success: boolean; message: string }> {
-    try {
-      const response = await apiClient.post<{ success: boolean; message: string }>(
-        `/memory-backend/clear/${crewId}`,
-        { memory_types: memoryTypes }
-      );
-      return response.data;
-    } catch (error) {
-      console.error('Error clearing memory:', error);
-      const errorMessage = error instanceof AxiosError
-        ? error.response?.data?.detail
-        : 'Failed to clear memory';
-      return {
-        success: false,
-        message: errorMessage || 'Failed to clear memory',
-      };
-    }
-  }
 
   /**
    * Switch the workspace to the disabled memory mode.
@@ -255,76 +208,5 @@ export class MemoryBackendService {
     }
   }
 
-  /**
-   * Get rows from a Lakebase memory table
-   */
-  static async getLakebaseTableData(
-    tableName: string,
-    limit = 50,
-    instanceName?: string
-  ): Promise<{ success: boolean; documents: LakebaseDocument[]; total?: number; message?: string }> {
-    try {
-      const params: Record<string, string | number> = { table_name: tableName, limit };
-      if (instanceName) params.instance_name = instanceName;
-      const response = await apiClient.get<{ success: boolean; documents: LakebaseDocument[]; total?: number; message?: string }>(
-        '/memory-backend/lakebase/table-data',
-        { params }
-      );
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching Lakebase table data:', error);
-      return { success: false, documents: [], message: 'Failed to fetch table data' };
-    }
-  }
 
-  /**
-   * Get entity data from the unified Lakebase memory table for graph visualization.
-   *
-   * The Kasal engine stores every memory record in one unified table; entity-like
-   * records are identified by their category tags in ``metadata``.
-   */
-  static async getLakebaseEntityData(
-    memoryTable = 'crew_memory',
-    limit = 200,
-    instanceName?: string
-  ): Promise<{ entities: LakebaseEntity[]; relationships: LakebaseRelationship[] }> {
-    try {
-      const params: Record<string, string | number> = { memory_table: memoryTable, limit };
-      if (instanceName) params.instance_name = instanceName;
-      const response = await apiClient.get<{ entities: LakebaseEntity[]; relationships: LakebaseRelationship[] }>(
-        '/memory-backend/lakebase/entity-data',
-        { params }
-      );
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching Lakebase entity data:', error);
-      return { entities: [], relationships: [] };
-    }
-  }
-}
-
-export interface LakebaseDocument {
-  id: string;
-  crew_id: string;
-  group_id: string;
-  session_id: string;
-  agent: string;
-  text: string;
-  metadata: Record<string, unknown>;
-  score: number | null;
-  created_at: string | null;
-  updated_at: string | null;
-}
-
-export interface LakebaseEntity {
-  id: string;
-  name: string;
-  type: string;
-  attributes: Record<string, unknown>;
-}
-
-export interface LakebaseRelationship {
-  source: string;
-  target: string;
-  type: string;
 }

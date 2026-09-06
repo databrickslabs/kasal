@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.logger import LoggerManager
 from src.models.documentation_embedding import DocumentationEmbedding
 from src.schemas.documentation_embedding import DocumentationEmbeddingCreate
-from src.schemas.memory_backend import MemoryBackendType
 from src.services.knowledge.embedding_queue import embedding_queue
 
 # Configure logging
@@ -25,65 +24,6 @@ class DocumentationEmbeddingService:
         self.session = session
         self._memory_config = None
         self._checked_config = False
-
-    async def _check_databricks_config(self) -> bool:
-        """Check if Databricks is configured for documentation storage."""
-        # Return cached result if already checked
-        if self._checked_config:
-            return bool(
-                self._memory_config
-                and self._memory_config.backend_type == MemoryBackendType.DATABRICKS
-            )
-
-        self._checked_config = True
-
-        try:
-            # Documentation is global, so find ANY active Databricks configuration
-            from src.models.memory_backend import MemoryBackend
-            from src.schemas.memory_backend import MemoryBackendConfig
-
-            # Use the injected session or get a new one
-            # Memory backends are MemoryBackendService's domain.
-            from src.services.memory.config.backend_service import MemoryBackendService
-
-            if self.session:
-                all_backends = await MemoryBackendService(self.session).get_all()
-            else:
-                from src.db.session import routed_scoped_session
-
-                async with routed_scoped_session() as session:
-                    all_backends = await MemoryBackendService(session).get_all()
-
-            # Filter active Databricks backends and sort by created_at descending
-            databricks_backends = [
-                b
-                for b in all_backends
-                if b.is_active and b.backend_type == MemoryBackendType.DATABRICKS
-            ]
-
-            if databricks_backends:
-                # Sort by created_at descending and take the first (most recent)
-                databricks_backends.sort(key=lambda x: x.created_at, reverse=True)
-                backend = databricks_backends[0]
-
-                # Convert backend model to config schema
-                self._memory_config = MemoryBackendConfig(
-                    backend_type=backend.backend_type,
-                    databricks_config=backend.databricks_config,
-                    cognitive_config=backend.cognitive_config,
-                    custom_config=backend.custom_config,
-                )
-                logger.info(
-                    f"Found latest Databricks configuration for documentation storage (from group: {backend.group_id}, created: {backend.created_at})"
-                )
-                return True
-
-            self._memory_config = None
-            return False
-        except Exception as e:
-            logger.warning(f"Failed to check Databricks configuration: {e}")
-            self._memory_config = None
-            return False
 
     async def create_documentation_embedding(
         self,

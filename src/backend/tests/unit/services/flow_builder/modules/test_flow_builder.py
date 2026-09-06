@@ -82,7 +82,6 @@ def _patches():
         "BaseModel": MagicMock,
         "FlowConfigManager": MagicMock(),
         "FlowProcessorManager": MagicMock(),
-        "FlowStateManager": MagicMock(),
         "FlowMethodFactory": MagicMock(),
         "create_execution_callbacks": MagicMock(
             return_value=(MagicMock(), MagicMock())
@@ -477,95 +476,6 @@ class TestBuildFlowCheckpointResume:
 # ===================================================================
 # Tests for _apply_state_operations
 # ===================================================================
-class TestApplyStateOperations:
-
-    def test_none_operations(self):
-        from src.services.flow_builder.modules.flow_builder import FlowBuilder
-
-        FlowBuilder._apply_state_operations(MagicMock(), None)
-
-    def test_reads_dict_state(self):
-        from src.services.flow_builder.modules.flow_builder import FlowBuilder
-
-        flow = MagicMock()
-        flow.state = {"x": 42}
-        # dict has 'get' so the dict path should be taken
-        FlowBuilder._apply_state_operations(flow, {"reads": ["x"]})
-
-    def test_reads_object_state(self):
-        from src.services.flow_builder.modules.flow_builder import FlowBuilder
-
-        class ObjState:
-            x = 99
-
-        flow = MagicMock()
-        flow.state = ObjState()
-        FlowBuilder._apply_state_operations(flow, {"reads": ["x"]})
-
-    def test_writes_expression_dict_state(self):
-        from src.services.flow_builder.modules.flow_builder import FlowBuilder
-
-        flow = MagicMock()
-        flow.state = {"counter": 5}
-        ops = {
-            "writes": [
-                {
-                    "variable": "result",
-                    "expression": "state['counter'] + 1",
-                    "value": None,
-                }
-            ]
-        }
-        FlowBuilder._apply_state_operations(flow, ops)
-        assert flow.state["result"] == 6
-
-    def test_writes_expression_object_state(self):
-        from src.services.flow_builder.modules.flow_builder import FlowBuilder
-
-        class ObjState:
-            counter = 10
-
-        flow = MagicMock()
-        flow.state = ObjState()
-        ops = {
-            "writes": [
-                {"variable": "result", "expression": "state.counter + 1", "value": None}
-            ]
-        }
-        FlowBuilder._apply_state_operations(flow, ops)
-        assert flow.state.result == 11
-
-    def test_writes_expression_failure(self):
-        from src.services.flow_builder.modules.flow_builder import FlowBuilder
-
-        flow = MagicMock()
-        flow.state = {}
-        ops = {
-            "writes": [{"variable": "x", "expression": "undefined_var", "value": None}]
-        }
-        # Should not raise – logs error
-        FlowBuilder._apply_state_operations(flow, ops)
-
-    def test_writes_value_dict_state(self):
-        from src.services.flow_builder.modules.flow_builder import FlowBuilder
-
-        flow = MagicMock()
-        flow.state = {}
-        ops = {"writes": [{"variable": "k", "expression": None, "value": 99}]}
-        FlowBuilder._apply_state_operations(flow, ops)
-        assert flow.state["k"] == 99
-
-    def test_writes_value_object_state(self):
-        from src.services.flow_builder.modules.flow_builder import FlowBuilder
-
-        class ObjState:
-            pass
-
-        flow = MagicMock()
-        flow.state = ObjState()
-        ops = {"writes": [{"variable": "k", "expression": None, "value": 99}]}
-        FlowBuilder._apply_state_operations(flow, ops)
-        assert flow.state.k == 99
 
 
 # ===================================================================

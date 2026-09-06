@@ -33,38 +33,6 @@ class UCMetricsGenerator:
         # Aggregation builder
         self.aggregation_builder = UCMetricsAggregationBuilder(dialect=dialect)
 
-    def generate_uc_metric(
-        self, definition: KPIDefinition, kpi: KPI, yaml_metadata: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Generate UC metrics definition from a single KBI"""
-
-        # Extract basic information
-        measure_name = kpi.technical_name or "unnamed_measure"
-        description = kpi.description or f"UC metrics definition for {measure_name}"
-
-        # Build source table reference
-        source_table = self._build_source_reference(kpi.source_table, yaml_metadata)
-
-        # Build filter conditions
-        filter_conditions = self._build_filter_conditions(kpi, yaml_metadata)
-
-        # Build measure expression
-        measure_expr = self._build_measure_expression(kpi)
-
-        # Construct UC metrics format
-        uc_metrics = {
-            "version": "0.1",
-            "description": f'UC metrics store definition for "{kpi.description}" KBI',
-            "source": source_table,
-            "measures": [{"name": measure_name, "expr": measure_expr}],
-        }
-
-        # Add filter if we have conditions
-        if filter_conditions:
-            uc_metrics["filter"] = filter_conditions
-
-        return uc_metrics
-
     def _build_source_reference(
         self, source_table: str, yaml_metadata: Dict[str, Any]
     ) -> str:
@@ -79,49 +47,6 @@ class UCMetricsGenerator:
         else:
             # Default format - can be made configurabl
             return f"catalog.schema.{source_table}"
-
-    def _build_filter_conditions(
-        self, kpi: KPI, yaml_metadata: Dict[str, Any]
-    ) -> Optional[str]:
-        """Build combined filter conditions from KBI filters and variable substitution"""
-
-        if not kpi.filters:
-            return None
-
-        # Get variable definitions
-        variables = yaml_metadata.get("default_variables", {})
-        query_filters = yaml_metadata.get("filters", {}).get("query_filter", {})
-
-        all_conditions = []
-
-        for filter_condition in kpi.filters:
-            processed_condition = self._process_filter_condition(
-                filter_condition, variables, query_filters
-            )
-            if processed_condition:
-                all_conditions.append(processed_condition)
-
-        if all_conditions:
-            return " AND ".join(all_conditions)
-
-        return None
-
-    def _process_filter_condition(
-        self, condition: str, variables: Dict[str, Any], query_filters: Dict[str, str]
-    ) -> Optional[str]:
-        """Process a single filter condition with variable substitution"""
-
-        if condition == "$query_filter":
-            # Expand query filter
-            expanded_conditions = []
-            for filter_name, filter_expr in query_filters.items():
-                expanded = self._substitute_variables(filter_expr, variables)
-                if expanded:
-                    expanded_conditions.append(expanded)
-            return " AND ".join(expanded_conditions) if expanded_conditions else None
-        else:
-            # Direct condition - substitute variables
-            return self._substitute_variables(condition, variables)
 
     def _substitute_variables(self, expression: str, variables: Dict[str, Any]) -> str:
         """Substitute $var_* variables in expressions"""
@@ -143,10 +68,6 @@ class UCMetricsGenerator:
                 result = result.replace(var_placeholder, replacement)
 
         return result
-
-    def _build_measure_expression(self, kpi: KPI) -> str:
-        """Build the measure expression based on aggregation type and formula"""
-        return self.aggregation_builder.build_measure_expression(kpi)
 
     def _build_measure_expression_with_filter(
         self, kpi: KPI, specific_filters: Optional[str]
@@ -452,115 +373,6 @@ class UCMetricsGenerator:
             lines.append(f"    expr: {measure['expr']}")
 
         return "\n".join(lines)
-
-    def generate_uc_metric(
-        self, definition: KPIDefinition, kpi: KPI, yaml_metadata: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Build UC metrics for constant selection KBIs with dimensions and window configuration"""
-
-        # Extract basic information
-        measure_name = kpi.technical_name or "unnamed_measure"
-        description = kpi.description or f"UC metrics definition for {measure_name}"
-
-        # Build source table reference
-        source_table = self._build_source_reference(kpi.source_table, yaml_metadata)
-
-        # Get variable definitions
-        variables = yaml_metadata.get("default_variables", {})
-        query_filters = yaml_metadata.get("filters", {}).get("query_filter", {})
-
-        # Build common filter conditions (query filters only for global filter)
-        global_filters = []
-        if query_filters:
-            for filter_expr in query_filters.values():
-                expanded = self._substitute_variables(filter_expr, variables)
-                if expanded:
-                    global_filters.append(expanded)
-
-        # Build KBI-specific filters for FILTER clause
-        kbi_specific_filters = []
-        for filter_condition in kpi.filters:
-            if filter_condition == "$query_filter":
-                continue  # Skip query filters as they go in global filter
-            else:
-                expanded = self._substitute_variables(filter_condition, variables)
-                if expanded:
-                    kbi_specific_filters.append(expanded)
-
-        # Build dimensions from constant selection fields and filter fields
-        dimensions = []
-
-        # Add constant selection fields as dimensions
-        for field in kpi.fields_for_constant_selection:
-            dimensions.append({"name": field, "expr": field})
-
-        # Extract additional dimension fields from filters (fields that appear in equality conditions)
-        dimension_fields = self._extract_dimension_fields_from_filters(
-            kbi_specific_filters
-        )
-        for field in dimension_fields:
-            if field not in [d["name"] for d in dimensions]:  # Avoid duplicates
-                dimensions.append({"name": field, "expr": field})
-
-        # Build measure expression with FILTER clause for KBI-specific conditions
-        aggregation_type = (
-            kpi.aggregation_type.upper() if kpi.aggregation_type else "SUM"
-        )
-        formula = kpi.formula or "1"
-        display_sign = getattr(kpi, "display_sign", 1)
-
-        # Build base aggregation
-        if aggregation_type == "SUM":
-            base_expr = f"SUM({formula})"
-        elif aggregation_type == "COUNT":
-            base_expr = f"COUNT({formula})"
-        elif aggregation_type == "AVERAGE":
-            base_expr = f"AVG({formula})"
-        elif aggregation_type == "MIN":
-            base_expr = f"MIN({formula})"
-        elif aggregation_type == "MAX":
-            base_expr = f"MAX({formula})"
-        else:
-            base_expr = f"SUM({formula})"
-
-        # Add FILTER clause if there are KBI-specific filters
-        if kbi_specific_filters:
-            filter_conditions = " AND ".join(kbi_specific_filters)
-            measure_expr = f"{base_expr} FILTER (\n            WHERE {filter_conditions}\n          )"
-        else:
-            measure_expr = base_expr
-
-        # Apply display_sign if it's -1
-        if display_sign == -1:
-            measure_expr = f"(-1) * {measure_expr}"
-
-        # Build window configuration for constant selection fields
-        window_config = []
-        for field in kpi.fields_for_constant_selection:
-            window_entry = {"order": field, "semiadditive": "last", "range": "current"}
-            window_config.append(window_entry)
-
-        # Build the measure object
-        measure = {"name": measure_name, "expr": measure_expr}
-
-        # Add window configuration if we have constant selection fields
-        if window_config:
-            measure["window"] = window_config
-
-        # Construct constant selection UC metrics format
-        uc_metrics = {
-            "version": "1.0",
-            "source": source_table,
-            "description": f'UC metrics store definition for "{description}"',
-            "dimensions": dimensions,
-            "measures": [measure],
-        }
-
-        # Add global filter if we have common filters
-        if global_filters:
-            uc_metrics["filter"] = " AND ".join(global_filters)
-
-        return uc_metrics
 
     def _extract_dimension_fields_from_filters(self, filters: List[str]) -> List[str]:
         """Extract field names from filter conditions that can be used as dimensions"""

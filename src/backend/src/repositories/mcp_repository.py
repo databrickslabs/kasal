@@ -3,7 +3,6 @@ from typing import List, Optional
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
 
 from src.core.base_repository import BaseRepository
 from src.models.mcp_server import MCPServer
@@ -371,93 +370,3 @@ class MCPSettingsRepository(BaseRepository[MCPSettings]):
         await self.session.flush()
         await self.session.refresh(settings)
         return settings
-
-
-class SyncMCPServerRepository:
-    """
-    Synchronous repository for MCPServer model.
-    Used by services that require synchronous DB operations.
-    """
-
-    def __init__(self, db: Session):
-        """
-        Initialize the repository with session.
-
-        Args:
-            db: SQLAlchemy synchronous session
-        """
-        self.db = db
-
-    def find_by_id(self, server_id: int) -> Optional[MCPServer]:
-        """
-        Find a MCP server by ID.
-
-        Args:
-            server_id: ID of the server to find
-
-        Returns:
-            MCPServer if found, else None
-        """
-        return self.db.query(MCPServer).filter(MCPServer.id == server_id).first()
-
-    def find_by_name(self, name: str) -> Optional[MCPServer]:
-        """
-        Find a MCP server by name.
-
-        Args:
-            name: Name to search for
-
-        Returns:
-            MCPServer if found, else None
-        """
-        return self.db.query(MCPServer).filter(MCPServer.name == name).first()
-
-    def find_all(self) -> List[MCPServer]:
-        """
-        Find all MCP servers.
-
-        Returns:
-            List of all MCP servers
-        """
-        return self.db.query(MCPServer).all()
-
-    def find_enabled(self) -> List[MCPServer]:
-        """
-        Find all enabled MCP servers.
-
-        Returns:
-            List of enabled MCP servers
-        """
-        return self.db.query(MCPServer).filter(MCPServer.enabled == True).all()
-
-    def find_global_enabled(self) -> List[MCPServer]:
-        """
-        Find all globally enabled MCP servers.
-
-        Returns:
-            List of globally enabled MCP servers
-        """
-        return (
-            self.db.query(MCPServer)
-            .filter((MCPServer.enabled == True) & (MCPServer.global_enabled == True))
-            .all()
-        )
-
-    def find_by_names(self, names: List[str]) -> List[MCPServer]:
-        """
-        Find MCP servers by a list of names.
-
-        Args:
-            names: List of server names to search for
-
-        Returns:
-            List of MCP servers matching the names
-        """
-        if not names:
-            return []
-
-        return (
-            self.db.query(MCPServer)
-            .filter((MCPServer.name.in_(names)) & (MCPServer.enabled == True))
-            .all()
-        )

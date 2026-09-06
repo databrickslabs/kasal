@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
-import ChatMessage, { TraceGroupMessage } from './ChatMessage';
+import ChatMessage, { } from './ChatMessage';
 import { CrewNameConflictError } from '../../api/crews';
 import { useExecutionStore } from '../../store/executionStore';
 import type { ChatMessage as ChatMessageType } from '../../types/chat';
@@ -762,31 +762,6 @@ describe('ChatMessage — a2ui preview-pane note', () => {
     fireEvent.click(screen.getByLabelText('Open in preview pane'));
     expect(spy).toHaveBeenCalledWith(expect.anything(), 'm-expand');
     spy.mockRestore();
-  });
-});
-
-describe('TraceGroupMessage (collapsed run of same-tool traces)', () => {
-  it('summarizes a resolved run (check icon + total) and expands each call + detail', () => {
-    const traces = [
-      // resolved tool call: has sublabel (text=sublabel) + duration → header shows total + check icon
-      { label: 'PerplexityTool', sublabel: 'first query', durationMs: 1200, kind: 'tool_call', detail: 'answer one' },
-      // no sublabel (text falls back to label) and no duration (formatDurationMs → null);
-      // kind is not a still-running tool_call so the group stays "done" (no spinner)
-      { label: 'ScrapeTool', kind: 'memory' },
-    ] as never;
-    render(<TraceGroupMessage label="PerplexityTool" traces={traces} />);
-    fireEvent.click(screen.getByText('PerplexityTool').closest('button')!);
-    expect(screen.getByText('first query')).toBeInTheDocument();
-    expect(screen.getByText('ScrapeTool')).toBeInTheDocument(); // sublabel || label fallback
-    // expand the call that has a detail → its output renders
-    fireEvent.click(screen.getByText('first query').closest('button')!);
-    expect(screen.getByText('answer one')).toBeInTheDocument();
-  });
-
-  it('shows a spinner while any call is still pending (no duration yet)', () => {
-    const pending = [{ label: 'X', sublabel: 'q', kind: 'tool_call' }] as never; // no durationMs
-    render(<TraceGroupMessage label="X" traces={pending} />);
-    expect(screen.getByTestId('trace-group-spinner')).toBeInTheDocument();
   });
 });
 

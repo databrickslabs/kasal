@@ -14,7 +14,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.agent import Agent
-from src.repositories.agent_repository import AgentRepository, SyncAgentRepository
+from src.repositories.agent_repository import AgentRepository
 
 
 # Mock agent model
@@ -89,12 +89,6 @@ def mock_sync_session():
 def agent_repository(mock_async_session):
     """Create an agent repository with async session."""
     return AgentRepository(session=mock_async_session)
-
-
-@pytest.fixture
-def sync_agent_repository(mock_sync_session):
-    """Create a sync agent repository."""
-    return SyncAgentRepository(db=mock_sync_session)
 
 
 @pytest.fixture
@@ -366,90 +360,6 @@ class TestAgentRepositoryDeleteAll:
         assert isinstance(call_args, type(delete(Agent)))
 
 
-class TestSyncAgentRepositoryInit:
-    """Test cases for SyncAgentRepository initialization."""
-
-    def test_init_success(self, mock_sync_session):
-        """Test successful initialization."""
-        repository = SyncAgentRepository(db=mock_sync_session)
-
-        assert repository.db == mock_sync_session
-
-
-class TestSyncAgentRepositoryFindById:
-    """Test cases for find_by_id method."""
-
-    def test_find_by_id_success(self, sync_agent_repository, mock_sync_session):
-        """Test successful find by ID."""
-        agent = MockAgent(id=123)
-        mock_sync_session.first.return_value = agent
-
-        result = sync_agent_repository.find_by_id(123)
-
-        assert result == agent
-        mock_sync_session.query.assert_called_once_with(Agent)
-        mock_sync_session.filter.assert_called_once()
-        mock_sync_session.first.assert_called_once()
-
-    def test_find_by_id_not_found(self, sync_agent_repository, mock_sync_session):
-        """Test find by ID when agent not found."""
-        mock_sync_session.first.return_value = None
-
-        result = sync_agent_repository.find_by_id(999)
-
-        assert result is None
-        mock_sync_session.query.assert_called_once_with(Agent)
-
-
-class TestSyncAgentRepositoryFindByName:
-    """Test cases for sync find_by_name method."""
-
-    def test_find_by_name_success(self, sync_agent_repository, mock_sync_session):
-        """Test successful sync find by name."""
-        agent = MockAgent(name="Sync Agent", group_id="group-123")
-        mock_sync_session.first.return_value = agent
-
-        result = sync_agent_repository.find_by_name("Sync Agent")
-
-        assert result == agent
-        mock_sync_session.query.assert_called_once_with(Agent)
-        mock_sync_session.filter.assert_called_once()
-        mock_sync_session.first.assert_called_once()
-
-    def test_find_by_name_not_found(self, sync_agent_repository, mock_sync_session):
-        """Test sync find by name when agent not found."""
-        mock_sync_session.first.return_value = None
-
-        result = sync_agent_repository.find_by_name("Nonexistent")
-
-        assert result is None
-
-
-class TestSyncAgentRepositoryFindAll:
-    """Test cases for sync find_all method."""
-
-    def test_find_all_success(
-        self, sync_agent_repository, mock_sync_session, sample_agents
-    ):
-        """Test successful sync find all."""
-        mock_sync_session.all.return_value = sample_agents
-
-        result = sync_agent_repository.find_all()
-
-        assert result == sample_agents
-        assert len(result) == 3
-        mock_sync_session.query.assert_called_once_with(Agent)
-        mock_sync_session.all.assert_called_once()
-
-    def test_find_all_empty(self, sync_agent_repository, mock_sync_session):
-        """Test sync find all when no agents exist."""
-        mock_sync_session.all.return_value = []
-
-        result = sync_agent_repository.find_all()
-
-        assert result == []
-
-
 class TestAgentRepositoryIntegration:
     """Integration test cases testing method interactions."""
 
@@ -531,30 +441,3 @@ class TestAgentRepositoryErrorHandling:
 
         with pytest.raises(Exception, match="Session error"):
             await agent_repository.delete_all()
-
-    def test_sync_find_by_id_session_error(
-        self, sync_agent_repository, mock_sync_session
-    ):
-        """Test sync find by ID when session raises an error."""
-        mock_sync_session.query.side_effect = Exception("Sync session error")
-
-        with pytest.raises(Exception, match="Sync session error"):
-            sync_agent_repository.find_by_id(123)
-
-    def test_sync_find_by_name_session_error(
-        self, sync_agent_repository, mock_sync_session
-    ):
-        """Test sync find by name when session raises an error."""
-        mock_sync_session.query.side_effect = Exception("Sync session error")
-
-        with pytest.raises(Exception, match="Sync session error"):
-            sync_agent_repository.find_by_name("Error Agent")
-
-    def test_sync_find_all_session_error(
-        self, sync_agent_repository, mock_sync_session
-    ):
-        """Test sync find all when session raises an error."""
-        mock_sync_session.query.side_effect = Exception("Sync session error")
-
-        with pytest.raises(Exception, match="Sync session error"):
-            sync_agent_repository.find_all()

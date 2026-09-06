@@ -4425,31 +4425,6 @@ class TestToolCatalogDiet:
         assert "- T:" in catalog
 
 
-class TestMlflowTracingHardToggle:
-    """When setup decides tracing is off, mlflow's armed exporter must be
-    disabled too — otherwise every dispatcher LLM call attempts a doomed
-    export ('experiment_id is missing' warnings). Re-enabled on success."""
-
-    def test_toggle_calls_mlflow_tracing_api(self):
-        from src.services.chat import dispatcher as m
-
-        fake_mlflow = MagicMock()
-        with (
-            patch.object(m, "_mlflow", fake_mlflow),
-            patch.object(m, "_HAS_MLFLOW", True),
-        ):
-            m._set_mlflow_tracing(False)
-            fake_mlflow.tracing.disable.assert_called_once()
-            m._set_mlflow_tracing(True)
-            fake_mlflow.tracing.enable.assert_called_once()
-
-    def test_toggle_noop_without_mlflow(self):
-        from src.services.chat import dispatcher as m
-
-        with patch.object(m, "_HAS_MLFLOW", False):
-            m._set_mlflow_tracing(False)  # must not raise
-
-
 # ===================================================================
 # Tests for _explicit_creation_intent (deterministic intent guardrail)
 # ===================================================================

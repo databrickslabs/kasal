@@ -2,10 +2,8 @@ import asyncio
 import logging
 import os
 import re
-import time
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from functools import wraps
 from typing import AsyncGenerator, Optional
 
 from sqlalchemy import event, text
@@ -61,65 +59,6 @@ if SQL_DEBUG:
 
 
 # Database retry decorator for handling SQLite locks
-def retry_db_operation(max_retries: int = 3, delay: float = 0.1, backoff: float = 2.0):
-    """Decorator to retry database operations when SQLite is locked."""
-
-    def decorator(func):
-        @wraps(func)
-        async def async_wrapper(*args, **kwargs):
-            last_exception = None
-            for attempt in range(max_retries):
-                try:
-                    return await func(*args, **kwargs)
-                except OperationalError as e:
-                    last_exception = e
-                    if (
-                        "database is locked" in str(e).lower()
-                        and attempt < max_retries - 1
-                    ):
-                        wait_time = delay * (backoff**attempt)
-                        logger.warning(
-                            f"Database locked, retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_retries})"
-                        )
-                        await asyncio.sleep(wait_time)
-                        continue
-                    raise
-                except Exception as e:
-                    # For non-lock related errors, don't retry
-                    raise
-            raise last_exception
-
-        @wraps(func)
-        def sync_wrapper(*args, **kwargs):
-            last_exception = None
-            for attempt in range(max_retries):
-                try:
-                    return func(*args, **kwargs)
-                except OperationalError as e:
-                    last_exception = e
-                    if (
-                        "database is locked" in str(e).lower()
-                        and attempt < max_retries - 1
-                    ):
-                        wait_time = delay * (backoff**attempt)
-                        logger.warning(
-                            f"Database locked, retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_retries})"
-                        )
-                        time.sleep(wait_time)
-                        continue
-                    raise
-                except Exception as e:
-                    # For non-lock related errors, don't retry
-                    raise
-            raise last_exception
-
-        # Return the appropriate wrapper based on whether the function is async
-        if asyncio.iscoroutinefunction(func):
-            return async_wrapper
-        else:
-            return sync_wrapper
-
-    return decorator
 
 
 # Create a SQLAlchemy logger using the LoggerManager
@@ -1037,43 +976,6 @@ async def init_db() -> None:
 
         logger.error(traceback.format_exc())
         raise
-
-
-def get_smart_engine():
-    """
-    Intelligently select the right engine based on the current context.
-
-    Returns:
-        - Pooled engine for main FastAPI app (best performance)
-        - NullPool engine for background tasks/CrewAI (event loop isolation)
-    """
-    # If SQLite, always return the same engine
-    if str(settings.DATABASE_URI).startswith("sqlite"):
-        return engine
-
-    # For PostgreSQL, check if we can detect the context
-    try:
-        current_loop = asyncio.get_running_loop()
-
-        # Check if we're in a background task (different event loop)
-        if main_event_loop and current_loop != main_event_loop:
-            logger.debug(
-                f"Background task detected (loop {id(current_loop)} != main {id(main_event_loop)}) - using NullPool"
-            )
-            return nullpool_engine
-        else:
-            # We're in the main event loop - use pooled engine for performance
-            logger.debug(
-                f"Main app context detected (loop {id(current_loop)}) - using pooled engine"
-            )
-            return pooled_engine
-    except RuntimeError:
-        # No event loop running - probably sync context
-        logger.debug("No event loop detected - using NullPool for safety")
-        return nullpool_engine
-    except Exception as e:
-        logger.warning(f"Error detecting context: {e} - falling back to default engine")
-        return engine
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

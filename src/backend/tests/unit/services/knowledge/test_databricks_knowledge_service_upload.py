@@ -438,128 +438,6 @@ class TestUploadKnowledgeFile:
 # ---------------------------------------------------------------------------
 
 
-class TestReadKnowledgeFile:
-    @pytest.mark.asyncio
-    async def test_invalid_path_prefix_returns_error(self):
-        svc = make_svc()
-        result = await svc.read_knowledge_file(
-            file_path="/bad/path/file.txt", group_id="g1"
-        )
-        assert result["status"] == "error"
-        assert "Invalid volume path format" in result["message"]
-
-    @pytest.mark.asyncio
-    async def test_path_too_short_returns_error(self):
-        svc = make_svc()
-        result = await svc.read_knowledge_file(
-            file_path="/Volumes/catalog/schema", group_id="g1"
-        )
-        assert result["status"] == "error"
-
-    @pytest.mark.asyncio
-    async def test_reads_text_file_successfully(self):
-        svc = make_svc()
-        svc.volume_repository.download_file_from_volume = AsyncMock(
-            return_value={"success": True, "content": b"hello world"}
-        )
-        result = await svc.read_knowledge_file(
-            file_path="/Volumes/catalog/schema/volume/group/exec/file.txt",
-            group_id="g1",
-        )
-        assert result["status"] == "success"
-        assert "hello" in result["content"]
-
-    @pytest.mark.asyncio
-    async def test_download_failure_returns_error(self):
-        svc = make_svc()
-        svc.volume_repository.download_file_from_volume = AsyncMock(
-            return_value={"success": False, "error": "Not found"}
-        )
-        result = await svc.read_knowledge_file(
-            file_path="/Volumes/catalog/schema/volume/path/file.txt", group_id="g1"
-        )
-        assert result["status"] == "error"
-        assert "Not found" in result["message"]
-
-    @pytest.mark.asyncio
-    async def test_download_returns_none_content(self):
-        svc = make_svc()
-        svc.volume_repository.download_file_from_volume = AsyncMock(
-            return_value={"success": True, "content": None}
-        )
-        result = await svc.read_knowledge_file(
-            file_path="/Volumes/catalog/schema/volume/path/file.txt", group_id="g1"
-        )
-        assert result["status"] == "error"
-        assert "No content" in result["message"]
-
-    @pytest.mark.asyncio
-    async def test_reads_pdf_file(self):
-        svc = make_svc()
-        svc.volume_repository.download_file_from_volume = AsyncMock(
-            return_value={"success": True, "content": b"%PDF-1.4 fake pdf content"}
-        )
-        # pdfminer.six (MIT) is imported lazily; inject a fake module so the test
-        # is deterministic whether or not the package is installed in the env.
-        fake_high_level = MagicMock()
-        fake_high_level.extract_text = MagicMock(return_value="extracted text")
-        with patch.dict(
-            "sys.modules",
-            {"pdfminer": MagicMock(), "pdfminer.high_level": fake_high_level},
-        ):
-            result = await svc.read_knowledge_file(
-                file_path="/Volumes/catalog/schema/volume/path/file.pdf", group_id="g1"
-            )
-        assert result["status"] == "success"
-        assert result["content"] == "extracted text"
-
-    @pytest.mark.asyncio
-    async def test_pdf_missing_library_returns_error(self):
-        svc = make_svc()
-        svc.volume_repository.download_file_from_volume = AsyncMock(
-            return_value={"success": True, "content": b"some pdf bytes"}
-        )
-        # Force the import to fail (pdfminer absent) → loud error, no placeholder.
-        with patch.dict("sys.modules", {"pdfminer": None, "pdfminer.high_level": None}):
-            result = await svc.read_knowledge_file(
-                file_path="/Volumes/catalog/schema/volume/path/file.pdf", group_id="g1"
-            )
-        assert result["status"] == "error"
-        assert "pdfminer.six" in result["message"]
-
-    @pytest.mark.asyncio
-    async def test_pdf_with_no_extractable_text_returns_error(self):
-        svc = make_svc()
-        svc.volume_repository.download_file_from_volume = AsyncMock(
-            return_value={"success": True, "content": b"%PDF scanned image"}
-        )
-        fake_high_level = MagicMock()
-        fake_high_level.extract_text = MagicMock(
-            return_value="   \n  "
-        )  # whitespace only
-        with patch.dict(
-            "sys.modules",
-            {"pdfminer": MagicMock(), "pdfminer.high_level": fake_high_level},
-        ):
-            result = await svc.read_knowledge_file(
-                file_path="/Volumes/catalog/schema/volume/path/scan.pdf", group_id="g1"
-            )
-        assert result["status"] == "error"
-        assert "No extractable text" in result["message"]
-
-    @pytest.mark.asyncio
-    async def test_reads_bytes_decoding(self):
-        svc = make_svc()
-        svc.volume_repository.download_file_from_volume = AsyncMock(
-            return_value={"success": True, "content": b"text content as bytes"}
-        )
-        result = await svc.read_knowledge_file(
-            file_path="/Volumes/cat/sch/vol/path/file.txt", group_id="g1"
-        )
-        assert result["status"] == "success"
-        assert "text content" in result["content"]
-
-
 # ---------------------------------------------------------------------------
 # list_knowledge_files (if implemented)
 # ---------------------------------------------------------------------------
@@ -585,54 +463,6 @@ class TestListKnowledgeFiles:
 # ---------------------------------------------------------------------------
 # read_knowledge_file - additional paths
 # ---------------------------------------------------------------------------
-
-
-class TestReadKnowledgeFileExtra:
-    @pytest.mark.asyncio
-    async def test_pdf_extraction_error_gives_error_message(self):
-        svc = make_svc()
-        svc.volume_repository.download_file_from_volume = AsyncMock(
-            return_value={"success": True, "content": b"some pdf bytes"}
-        )
-        # extract_text raising a non-ImportError → loud error (no placeholder, no false success).
-        fake_high_level = MagicMock()
-        fake_high_level.extract_text = MagicMock(side_effect=ValueError("bad PDF"))
-        with patch.dict(
-            "sys.modules",
-            {"pdfminer": MagicMock(), "pdfminer.high_level": fake_high_level},
-        ):
-            result = await svc.read_knowledge_file(
-                file_path="/Volumes/cat/sch/vol/path/file.pdf", group_id="g1"
-            )
-        assert result["status"] == "error"
-        assert "Could not extract text" in result["message"]
-
-    @pytest.mark.asyncio
-    async def test_unicode_decode_error_falls_back(self):
-        svc = make_svc()
-        # Binary content that can't be decoded as UTF-8 strictly but can with errors=ignore
-        svc.volume_repository.download_file_from_volume = AsyncMock(
-            return_value={
-                "success": True,
-                "content": b"\xff\xfe binary data with \x80\x81 invalid bytes",
-            }
-        )
-        result = await svc.read_knowledge_file(
-            file_path="/Volumes/cat/sch/vol/path/file.bin", group_id="g1"
-        )
-        assert result["status"] == "success"
-
-    @pytest.mark.asyncio
-    async def test_exception_in_outer_try_returns_error(self):
-        svc = make_svc()
-        svc.volume_repository.download_file_from_volume = AsyncMock(
-            side_effect=Exception("network error")
-        )
-        result = await svc.read_knowledge_file(
-            file_path="/Volumes/cat/sch/vol/path/file.txt", group_id="g1"
-        )
-        assert result["status"] == "error"
-        assert "network error" in result["message"]
 
 
 # ---------------------------------------------------------------------------
@@ -727,14 +557,6 @@ class TestBrowseVolumeFiles:
 
 
 class TestOtherMethods:
-    @pytest.mark.asyncio
-    async def test_register_volume_file_success(self):
-        svc = make_svc()
-        result = await svc.register_volume_file(
-            "exec-1", "/Volumes/cat/sch/vol/file.txt", "g1"
-        )
-        assert result["status"] == "success"
-        assert result["filename"] == "file.txt"
 
     @pytest.mark.asyncio
     async def test_list_knowledge_files_returns_empty(self):
@@ -891,15 +713,6 @@ class TestAdditionalCoverage:
                 file=file, execution_id="exec-1", group_id="g1", volume_config={}
             )
         assert result["status"] == "success"
-
-    @pytest.mark.asyncio
-    async def test_register_volume_file_exception_reraises(self):
-        """Cover lines 586-588: exception in register_volume_file re-raises."""
-        svc = make_svc()
-        # os.path.basename should work normally but we can mock it to fail
-        with patch("os.path.basename", side_effect=Exception("os error")):
-            with pytest.raises(Exception, match="os error"):
-                await svc.register_volume_file("exec-1", "/path/file.txt", "g1")
 
     @pytest.mark.asyncio
     async def test_search_knowledge_delegates_with_user_isolation(self):

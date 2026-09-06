@@ -4,7 +4,6 @@ import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-libra
 import '@testing-library/jest-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { AxiosError } from 'axios';
-import { EMBEDDING_MODELS } from './constants';
 import { MemoryBackendType } from '../../types/config/memoryBackend';
 
 // ---------------------------------------------------------------------------
@@ -1145,55 +1144,6 @@ describe('MemoryConfiguration', () => {
     });
 
 
-  });
-
-  // =======================================================================
-  // Databricks Handlers via captured props
-  //
-  // IndexManagementTable callbacks operate on the unified memory store, so the
-  // index type is now 'memory' (saved-config key 'unified') or 'document'.
-  // =======================================================================
-
-
-  // =======================================================================
-  // handleSetup (auto-create)
-  // =======================================================================
-
-
-  // =======================================================================
-  // handleManualSave
-  //
-  // Manual config now requires a single `memory_index` plus a `document_index`
-  // (the legacy short_term/long_term/entity indexes were unified).
-  // =======================================================================
-
-
-  // =======================================================================
-  // Embedding dimension fallback (existing)
-  // =======================================================================
-
-  describe('embedding dimension fallback', () => {
-    it('EMBEDDING_MODELS default model has dimension 1024', () => {
-      const defaultModel = EMBEDDING_MODELS.find(m => m.value === 'databricks-gte-large-en');
-      expect(defaultModel).toBeDefined();
-      expect(defaultModel!.dimension).toBe(1024);
-    });
-
-    it('fallback lookup for default model resolves to 1024', () => {
-      const dim = EMBEDDING_MODELS.find(m => m.value === 'databricks-gte-large-en')?.dimension || 1024;
-      expect(dim).toBe(1024);
-    });
-
-    it('fallback dimension for unknown model is 1024', () => {
-      const dim = EMBEDDING_MODELS.find(m => m.value === 'unknown')?.dimension || 1024;
-      expect(dim).toBe(1024);
-    });
-
-    it('all EMBEDDING_MODELS have dimensions >= 1024', () => {
-      EMBEDDING_MODELS.forEach(model => {
-        expect(model.dimension).toBeGreaterThanOrEqual(1024);
-      });
-    });
   });
 
   // =======================================================================

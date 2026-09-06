@@ -144,7 +144,6 @@ class TestRunCrewIsolatedErrorPaths:
                 new_callable=AsyncMock,
                 return_value=False,
             ),
-            patch.object(executor, "_relay_task_events", return_value=_always_cancel()),
         ):
             try:
                 await executor.run_crew_isolated("exec-joinfail", {}, group_ctx)
@@ -181,7 +180,6 @@ class TestRunCrewIsolatedErrorPaths:
                 return_value=False,
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch.object(executor, "_relay_task_events", return_value=_always_cancel()),
         ):
             await executor.run_crew_isolated("exec-noctx", crew_config, None)
 
@@ -472,7 +470,6 @@ class TestRunCrewIsolatedFinallyCleanup:
                 return_value=False,
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch.object(executor, "_relay_task_events", return_value=_always_cancel()),
             patch("psutil.process_iter", return_value=[]),
         ):
             result = await executor.run_crew_isolated("exec-alive", {}, group_ctx)
@@ -513,7 +510,6 @@ class TestRunCrewIsolatedFinallyCleanup:
                 return_value=False,
             ),
             patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
-            patch.object(executor, "_relay_task_events", return_value=_always_cancel()),
             patch("psutil.process_iter", return_value=[]),
         ):
             await executor.run_crew_isolated("exec-clean", {}, group_ctx)

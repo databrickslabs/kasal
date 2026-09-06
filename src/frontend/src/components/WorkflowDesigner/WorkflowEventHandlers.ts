@@ -1,13 +1,9 @@
 import { useCallback, useState, useEffect, useRef } from 'react';
 import { Node, Edge, OnSelectionChangeParams, ReactFlowInstance } from 'reactflow';
-import { FlowConfiguration, FlowFormData } from '../../types/workflow/flow';
+import { FlowConfiguration } from '../../types/workflow/flow';
 import { CrewTask } from '../../types/workflow/crewPlan';
 import { v4 as uuidv4 } from 'uuid';
-import { createEdge } from '../../utils/edgeUtils';
-import { FlowService } from '../../api/workflow/FlowService';
-import { createUniqueEdges } from './WorkflowUtils';
 import { useFlowStateStore, DeclaredFlowState } from '../../store/flowState';
-import { _generateCrewPositions, validateNodePositions } from '../../utils/flowWizardUtils';
 import { useTabManagerStore } from '../../store/tabManager';
 import { CanvasLayoutManager } from '../../utils/CanvasLayoutManager';
 import { useUILayoutStore } from '../../store/uiLayout';
@@ -276,117 +272,6 @@ export const useFlowSelectHandler = (
   }, [setFlowNodes, setFlowEdges]);
 };
 
-// Flow addition handler
-export const useFlowAddHandler = (
-  setNodes: React.Dispatch<React.SetStateAction<Node[]>>,
-  setEdges: React.Dispatch<React.SetStateAction<Edge[]>>,
-  nodes: Node[],
-  edges: Edge[],
-  showErrorMessage: (message: string) => void
-) => {
-  return useCallback((flowData: FlowFormData, position: { x: number; y: number }) => {
-    const flowId = `flow-${Date.now()}`;
-    
-    // Create a standard crew node
-    const newNode = {
-      id: flowId,
-      type: 'crewNode',
-      position,
-      data: {
-        id: flowId,
-        label: flowData.name,
-        crewName: flowData.crewName,
-        crewId: flowData.crewRef || flowId,
-        type: flowData.type,
-      }
-    };
-    
-    // Add the new node to the canvas
-    setNodes((nds) => nds.concat(newNode));
-    
-    // Check if this is a start flow with target crews
-    const listenToArray = flowData.listenTo || [];
-    
-    if (flowData.type === 'start' && listenToArray.length > 0) {
-      
-      // Add target flow nodes and connect them with edges
-      const newNodes: Node[] = [];
-      const newEdges: Edge[] = [];
-      
-      // Calculate position offset for placing new nodes
-      const offsetY = position.y + 150; // Place target nodes below the current node
-      
-      listenToArray.forEach((targetCrewName, index) => {
-        // Check if a node with this crew name already exists
-        const existingNode = nodes.find(node => 
-          node.data?.crewName === targetCrewName && node.id !== flowId
-        );
-        
-        if (existingNode) {
-          const connection = {
-            source: flowId,
-            target: existingNode.id,
-            sourceHandle: null,
-            targetHandle: null
-          };
-          
-          // Check if this edge already exists
-          const existingEdge = edges.some(edge =>
-            edge.source === connection.source && edge.target === connection.target
-          );
-          
-          if (!existingEdge) {
-            newEdges.push(createEdge(connection, 'animated', true, { stroke: '#9c27b0' }));
-          }
-        } else {
-          // Create a new flow node for this target crew
-          const newNodeId = `flow-${Date.now()}-${index}`;
-          const offsetX = position.x + (index - (listenToArray.length - 1) / 2) * 200;
-          
-          newNodes.push({
-            id: newNodeId,
-            type: 'crewNode',
-            position: { x: offsetX, y: offsetY },
-            data: {
-              id: newNodeId,
-              label: targetCrewName,
-              crewName: targetCrewName,
-              crewId: newNodeId,
-              type: 'normal',
-            }
-          });
-          
-          // Create edge to new node
-          const connection = {
-            source: flowId,
-            target: newNodeId,
-            sourceHandle: null,
-            targetHandle: null
-          };
-          
-          // Check if this edge already exists
-          const existingEdge = edges.some(edge =>
-            edge.source === connection.source && edge.target === connection.target
-          );
-          
-          if (!existingEdge) {
-            newEdges.push(createEdge(connection, 'animated', true, { stroke: '#9c27b0' }));
-          }
-        }
-      });
-      
-      // Add new nodes and edges to the canvas
-      if (newNodes.length > 0) {
-        setNodes(nds => [...nds, ...newNodes]);
-      }
-      
-      // Add all edges at once
-      if (newEdges.length > 0) {
-        setEdges(edges => createUniqueEdges(newEdges, edges));
-      }
-    }
-  }, [setNodes, setEdges, nodes, edges]);
-};
 
 // Handle crew flow dialog interactions
 export const useCrewFlowDialogHandler = () => {
@@ -446,137 +331,6 @@ export const useFlowSelectionDialogHandler = () => {
   };
 };
 
-// Handle flow dialog for creating crews
-export const useFlowDialogHandler = (
-  setNodes: React.Dispatch<React.SetStateAction<Node[]>>,
-  setEdges: React.Dispatch<React.SetStateAction<Edge[]>>,
-  showErrorMessage: (message: string) => void
-) => {
-  // Define a proper type for the crew object
-  interface CrewObject {
-    id: number | string;
-    name: string;
-  }
-
-  // Define a type for the flow save data
-  interface FlowSaveData {
-    name: string;
-    crew_id: string;
-    nodes: Node[];
-    edges: Edge[];
-    flowConfig: FlowConfiguration;
-  }
-
-  return useCallback((selectedCrews: CrewObject[], positions: Record<string, {x: number, y: number}>, flowConfig?: FlowConfiguration, shouldSave = false) => {
-    // Create crew nodes all at once
-    const newNodes = selectedCrews.map(crew => {
-      const position = positions[crew.id.toString()];
-      const nodeId = `crew-${Date.now()}-${crew.id}`;
-      
-      return {
-        id: nodeId,
-        type: 'crewNode',
-        position,
-        data: {
-          id: crew.id.toString(),
-          label: crew.name,
-          crewName: crew.name,
-          crewId: crew.id,
-          // Store the flowConfig on the node for later retrieval if needed
-          flowConfig: flowConfig
-        }
-      };
-    });
-    
-    // Validate node positions
-    const validatedNodes = validateNodePositions(newNodes);
-    
-    // Add all nodes at once
-    setNodes(nodes => [...nodes, ...validatedNodes]);
-    
-    const newEdges: Edge[] = [];
-    
-    // If we have flow configuration, create the edges as well
-    if (flowConfig && flowConfig.listeners) {
-      // Create a map of crew IDs to node IDs for easy lookup
-      const crewNodeMap = validatedNodes.reduce<Record<string | number, string>>((map, node) => {
-        // Explicitly type the crewId value to handle both string and number
-        const crewId: string | number = node.data.crewId;
-        map[crewId.toString()] = node.id;
-        return map;
-      }, {});
-      
-      // Process listeners to create edges
-      flowConfig.listeners.forEach(listener => {
-        const sourceNodeId = crewNodeMap[listener.crewId.toString()];
-        
-        if (sourceNodeId && listener.tasks) {
-          // For each task in the listener, create an edge
-          listener.tasks.forEach(task => {
-            // Access the agent_id property with a type cast
-            interface TaskWithAgent { id: string; name: string; agent_id?: string }
-            const taskWithAgent = task as TaskWithAgent;
-            const targetCrewId = taskWithAgent.agent_id ? Number(taskWithAgent.agent_id) : null;
-            
-            if (targetCrewId && crewNodeMap[targetCrewId.toString()]) {
-              const targetNodeId = crewNodeMap[targetCrewId.toString()];
-              
-              // Create edge from source (listener) to target (task's crew)
-              const flowConnection = {
-                source: sourceNodeId,
-                target: targetNodeId,
-                sourceHandle: null,
-                targetHandle: null
-              };
-              
-              newEdges.push(createEdge(flowConnection, 'animated', true, { stroke: '#9c27b0' }));
-            }
-          });
-        }
-      });
-      
-      // Add all edges at once
-      if (newEdges.length > 0) {
-        setEdges(edges => createUniqueEdges(newEdges, edges));
-      }
-    }
-    
-    // Save the flow if shouldSave is true
-    if (shouldSave && flowConfig) {
-      // Get the first crew's ID from selectedCrews
-      const firstCrew = selectedCrews[0];
-      
-      if (!firstCrew || !firstCrew.id) {
-        showErrorMessage('No valid crew found to associate with the flow');
-        return;
-      }
-      
-      // Use crew ID as is - it will be validated and converted to UUID in the service
-      const crewId = firstCrew.id;
-      
-      // Save flow with associated nodes and edges
-      const flowSaveData: FlowSaveData = {
-        name: flowConfig.name,
-        crew_id: String(crewId), // Convert to string to ensure consistency
-        nodes: validatedNodes,
-        edges: newEdges,
-        flowConfig
-      };
-      
-      // Save the flow to the database
-      FlowService.saveFlow(flowSaveData)
-        .then(result => {
-          console.log('Flow saved successfully:', result);
-          // Show a success message if needed
-          showErrorMessage('Flow saved successfully');
-        })
-        .catch(error => {
-          console.error('Error saving flow:', error);
-          showErrorMessage(`Failed to save flow: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        });
-    }
-  }, [setNodes, setEdges, showErrorMessage]);
-};
 
 // Event binding handlers
 export const useEventBindings = (
@@ -801,4 +555,4 @@ export const useEventBindings = (
     handleRunClickWrapper,
     handleCrewSelectWrapper
   };
-}; 
+};

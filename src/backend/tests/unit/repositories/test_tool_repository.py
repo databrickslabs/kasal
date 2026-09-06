@@ -14,7 +14,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.tool import Tool
-from src.repositories.tool_repository import SyncToolRepository, ToolRepository
+from src.repositories.tool_repository import ToolRepository
 
 
 # Mock tool model
@@ -437,82 +437,6 @@ class TestToolRepositoryDisableAll:
             await tool_repository.disable_all()
 
         mock_async_session.rollback.assert_called_once()
-
-
-class TestSyncToolRepository:
-    """Test cases for SyncToolRepository."""
-
-    @pytest.fixture
-    def mock_sync_session(self):
-        """Create a mock sync database session."""
-        session = MagicMock()
-        session.query.return_value = session
-        session.filter.return_value = session
-        session.first.return_value = None
-        session.all.return_value = []
-        return session
-
-    @pytest.fixture
-    def sync_tool_repository(self, mock_sync_session):
-        """Create a sync tool repository."""
-        return SyncToolRepository(db=mock_sync_session)
-
-    def test_sync_init_success(self, mock_sync_session):
-        """Test successful sync repository initialization."""
-        repository = SyncToolRepository(db=mock_sync_session)
-        assert repository.db == mock_sync_session
-
-    def test_find_by_id_success(self, sync_tool_repository, mock_sync_session):
-        """Test successful find by ID in sync repository."""
-        tool = MockTool(id=1)
-        mock_sync_session.first.return_value = tool
-
-        result = sync_tool_repository.find_by_id(1)
-
-        assert result == tool
-        mock_sync_session.query.assert_called_once_with(Tool)
-        mock_sync_session.filter.assert_called_once()
-
-    def test_find_by_id_not_found(self, sync_tool_repository, mock_sync_session):
-        """Test find by ID when tool not found."""
-        mock_sync_session.first.return_value = None
-
-        result = sync_tool_repository.find_by_id(999)
-
-        assert result is None
-        mock_sync_session.query.assert_called_once_with(Tool)
-
-    def test_find_by_title_sync(self, sync_tool_repository, mock_sync_session):
-        """Test find by title in sync repository."""
-        tool = MockTool(title="test_tool")
-        mock_sync_session.first.return_value = tool
-
-        result = sync_tool_repository.find_by_title("test_tool")
-
-        assert result == tool
-        mock_sync_session.query.assert_called_once_with(Tool)
-        mock_sync_session.filter.assert_called_once()
-
-    def test_find_all_sync(self, sync_tool_repository, mock_sync_session):
-        """Test find all in sync repository."""
-        tools = [MockTool(id=1), MockTool(id=2)]
-        mock_sync_session.all.return_value = tools
-
-        result = sync_tool_repository.find_all()
-
-        assert result == tools
-        mock_sync_session.query.assert_called_once_with(Tool)
-
-    def test_find_by_ids_sync(self, sync_tool_repository, mock_sync_session):
-        """Test find by IDs in sync repository."""
-        tools = [MockTool(id=1), MockTool(id=3)]
-        mock_sync_session.all.return_value = tools
-
-        result = sync_tool_repository.find_by_ids([1, 3, 5])
-
-        assert result == tools
-        mock_sync_session.query.assert_called_once_with(Tool)
-        mock_sync_session.filter.assert_called_once()
 
 
 class TestToolRepositoryIntegration:

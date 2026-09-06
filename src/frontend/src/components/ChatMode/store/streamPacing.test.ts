@@ -258,9 +258,8 @@ describe('hasStreamedTaskText — the duplicate-answer guard', () => {
   });
 
   it('marks the run finalized so a late task_completed is dropped', () => {
-    // `_relay_task_events` broadcasts task_completed — carrying the task's full
-    // output — from its own queue-driven relay with no DB id, so the frontend's
-    // trace de-dupe cannot collapse it, and it routinely lands after the run has
+    // A task_completed event carrying the task's full output without a DB id
+    // escapes trace de-dupe and can arrive after the run has
     // completed. Completion clears both bubble maps, so a guard reading only
     // those said "nothing streamed" and posted the answer a SECOND time under
     // the copy the reader had been watching.

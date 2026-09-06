@@ -1,4 +1,3 @@
-import axios, { AxiosError } from 'axios';
 import { apiClient } from '../../config/api/ApiConfig';
 import { Schema, SchemaCreate, SchemaListResponse } from '../../types/workflow/schema';
 
@@ -14,7 +13,6 @@ export class SchemaService {
   
   // Cache for schemas
   private schemasCache: CacheEntry<Schema[]> | null = null;
-  private schemasByTypeCache: Record<string, CacheEntry<Schema[]>> = {};
 
   private constructor() {
     // Initialize service
@@ -53,7 +51,6 @@ export class SchemaService {
    */
   public clearCaches(): void {
     this.schemasCache = null;
-    this.schemasByTypeCache = {};
   }
 
   /**
@@ -100,75 +97,6 @@ export class SchemaService {
     }
   }
 
-  /**
-   * Get schemas by type
-   */
-  public async getSchemasByType(schemaType: string): Promise<Schema[]> {
-    // Check cache first
-    const typeCache = this.schemasByTypeCache[schemaType];
-    if (this.isCacheValid(typeCache)) {
-      return typeCache.data;
-    }
-
-    try {
-      const response = await apiClient.get<SchemaListResponse>(`/schemas/by-type/${schemaType}`);
-      
-      if (response.data && response.data.schemas) {
-        const schemas = response.data.schemas;
-        
-        // Update cache
-        this.schemasByTypeCache[schemaType] = this.setCache(typeCache, schemas);
-        
-        return schemas;
-      } else {
-        console.error('API response did not contain valid schemas data', response.data);
-        return [];
-      }
-    } catch (error) {
-      console.error(`Error fetching schemas of type ${schemaType}:`, error);
-      return [];
-    }
-  }
-
-  /**
-   * Get a specific schema by name
-   */
-  public async getSchema(schemaName: string): Promise<Schema | null> {
-    try {
-      const response = await apiClient.get<Schema>(`/schemas/${schemaName}`);
-      
-      if (response.data) {
-        let schema = response.data;
-        
-        // Process schema to ensure schema_definition is properly handled
-        try {
-          if (schema.schema_definition && typeof schema.schema_definition === 'string') {
-            schema = {
-              ...schema,
-              schema_definition: JSON.parse(schema.schema_definition as unknown as string)
-            };
-          }
-        } catch (error) {
-          console.error(`Error parsing schema_definition for ${schema.name}:`, error);
-        }
-        
-        return schema;
-      } else {
-        console.error('API response did not contain valid schema data', response.data);
-        return null;
-      }
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        const axiosError = error as AxiosError;
-        if (axiosError.response?.status === 404) {
-          console.warn(`Schema ${schemaName} not found`);
-          return null;
-        }
-      }
-      console.error(`Error fetching schema ${schemaName}:`, error);
-      return null;
-    }
-  }
 
   /**
    * Create a new schema
@@ -259,4 +187,4 @@ export class SchemaService {
       return false;
     }
   }
-} 
+}

@@ -274,12 +274,6 @@ class TestModuleLevelConfiguration:
 
         assert callable(set_main_event_loop)
 
-    def test_get_smart_engine_callable(self):
-        """Test that get_smart_engine is callable."""
-        from src.db.session import get_smart_engine
-
-        assert callable(get_smart_engine)
-
     def test_init_db_callable(self):
         """Test that init_db is callable."""
         from src.db.session import init_db

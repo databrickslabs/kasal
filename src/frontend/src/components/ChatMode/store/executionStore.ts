@@ -399,10 +399,9 @@ const lastStreamBubble = new Map<string, string>();
 
 // jobIds that reached a TERMINAL state (completed or failed).
 //
-// `_relay_task_events` (agent_builder's process executor) broadcasts
-// `task_completed` — carrying the task's full output — from its own queue-driven
-// relay, with no DB id, so the frontend's trace de-dupe (which keys on the DB id)
-// cannot collapse it. It routinely lands AFTER the run has completed, and a task
+// A `task_completed` event can carry the task's full output without a DB id,
+// so the frontend's trace de-dupe (which keys on the DB id) cannot collapse it.
+// Events may arrive after the run has completed, and a task
 // body arriving then is stale by definition: the final answer is already on
 // screen. Posting it printed the answer a second time under the copy the reader
 // had been watching.

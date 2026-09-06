@@ -19,7 +19,7 @@ import pytest
 
 from src.services.flow_builder.conversation.state_model import build_state_model
 from src.services.flow_builder.modules.flow_methods import crew_inputs_from_state
-from src.services.flow_builder.modules.flow_state import FlowStateManager
+from src.utils.safe_eval import safe_eval
 from src.services.flow_builder.runtime import Flow, start
 
 SCHEMA = {
@@ -115,16 +115,18 @@ class TestConditionsKeepWorking:
         state = build_state_model(SCHEMA)()
         state["has_results"] = True
 
-        assert FlowStateManager.evaluate_condition(state, condition) is True
+        assert (
+            safe_eval(
+                condition, {"state": state, "len": len}, allowed_call_names={"len"}
+            )
+            is True
+        )
 
     def test_a_false_condition_is_false_not_an_error(self):
         state = build_state_model(SCHEMA)()
 
         assert (
-            FlowStateManager.evaluate_condition(
-                state, 'state.get("has_results", "") == True'
-            )
-            is False
+            safe_eval('state.get("has_results", "") == True', {"state": state}) is False
         )
 
 

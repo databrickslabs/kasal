@@ -2084,49 +2084,6 @@ class ProcessFlowExecutor:
                 "[ProcessFlowExecutor] Logs are still available in flow.log file"
             )
 
-    async def _write_logs_sqlite_sync(self, logs_to_write: list, db_path: str):
-        """Write logs to SQLite using synchronous operations to avoid event loop issues."""
-        import sqlite3
-        from concurrent.futures import ThreadPoolExecutor
-
-        def sync_write():
-            try:
-                conn = sqlite3.connect(db_path)
-                cursor = conn.cursor()
-                for log_data in logs_to_write:
-                    cursor.execute(
-                        """
-                        INSERT INTO execution_logs (execution_id, content, timestamp, group_id, group_email)
-                        VALUES (?, ?, ?, ?, ?)
-                    """,
-                        (
-                            log_data["execution_id"],
-                            log_data["content"],
-                            (
-                                log_data["timestamp"].isoformat()
-                                if log_data["timestamp"]
-                                else None
-                            ),
-                            log_data["group_id"],
-                            log_data["group_email"],
-                        ),
-                    )
-                conn.commit()
-                conn.close()
-                return len(logs_to_write)
-            except Exception as e:
-                logger.warning(f"[ProcessFlowExecutor] SQLite sync write failed: {e}")
-                return 0
-
-        # Run in thread pool to avoid blocking
-        loop = asyncio.get_event_loop()
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            count = await loop.run_in_executor(executor, sync_write)
-            if count > 0:
-                logger.info(
-                    f"[ProcessFlowExecutor] Successfully wrote {count} logs to SQLite execution_logs table"
-                )
-
     def get_execution_info(self, execution_id: str) -> Optional[Dict[str, Any]]:
         """Get information about a running execution."""
         process = self._running_processes.get(execution_id)

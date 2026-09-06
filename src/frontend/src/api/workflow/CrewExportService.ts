@@ -4,11 +4,7 @@ import {
   AppDeploymentResponse,
   AppDeploymentStatusResponse,
   CrewExportRequest,
-  CrewExportResponse,
-  DeploymentRequest,
-  DeploymentResponse,
-  DeploymentStatusResponse,
-  ExportFormat,
+  CrewExportResponse, ExportFormat,
   LakebaseInstance,
   LakebaseInstancesResponse
 } from '../../types/workflow/crewExport';
@@ -69,24 +65,6 @@ export class CrewExportService {
     }
   }
 
-  /**
-   * Deploy crew to Databricks Model Serving endpoint
-   */
-  static async deployCrew(
-    crewId: string,
-    request: DeploymentRequest
-  ): Promise<DeploymentResponse> {
-    try {
-      const response = await API.post<DeploymentResponse>(
-        `/crews/${crewId}/deploy`,
-        request
-      );
-      return response.data;
-    } catch (error) {
-      console.error('Error deploying crew:', error);
-      throw error;
-    }
-  }
 
   /**
    * Deploy crew as a Databricks App directly from the UI (background job).
@@ -143,44 +121,6 @@ export class CrewExportService {
     }
   }
 
-  /**
-   * Get status of deployed endpoint
-   */
-  static async getDeploymentStatus(
-    crewId: string,
-    endpointName: string
-  ): Promise<DeploymentStatusResponse> {
-    try {
-      const response = await API.get<DeploymentStatusResponse>(
-        `/crews/${crewId}/deployment/status`,
-        {
-          params: { endpoint_name: endpointName }
-        }
-      );
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching deployment status:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Delete Model Serving endpoint
-   */
-  static async deleteDeployment(
-    crewId: string,
-    endpointName: string
-  ): Promise<{ message: string; endpoint_name: string }> {
-    try {
-      const response = await API.delete(
-        `/crews/${crewId}/deployment/${endpointName}`
-      );
-      return response.data;
-    } catch (error) {
-      console.error('Error deleting deployment:', error);
-      throw error;
-    }
-  }
 
   /**
    * Helper method to trigger browser download of a blob

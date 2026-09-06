@@ -7,15 +7,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
 
 from src.models.mcp_server import MCPServer
 from src.models.mcp_settings import MCPSettings
-from src.repositories.mcp_repository import (
-    MCPServerRepository,
-    MCPSettingsRepository,
-    SyncMCPServerRepository,
-)
+from src.repositories.mcp_repository import MCPServerRepository, MCPSettingsRepository
 
 
 class MockServer:
@@ -302,35 +297,3 @@ async def test_update_settings_both(settings_repo, async_session):
 
 
 # --- SyncMCPServerRepository: find_global_enabled and find_by_names ---
-
-
-def test_sync_find_global_enabled():
-    db = MagicMock(spec=Session)
-    query_chain = MagicMock()
-    db.query.return_value = query_chain
-    query_chain.filter.return_value = query_chain
-    servers = [MockServer()]
-    query_chain.all.return_value = servers
-    repo = SyncMCPServerRepository(db=db)
-    result = repo.find_global_enabled()
-    assert result == servers
-
-
-def test_sync_find_by_names_empty():
-    db = MagicMock(spec=Session)
-    repo = SyncMCPServerRepository(db=db)
-    result = repo.find_by_names([])
-    assert result == []
-    db.query.assert_not_called()
-
-
-def test_sync_find_by_names_with_names():
-    db = MagicMock(spec=Session)
-    query_chain = MagicMock()
-    db.query.return_value = query_chain
-    query_chain.filter.return_value = query_chain
-    servers = [MockServer(name="s1")]
-    query_chain.all.return_value = servers
-    repo = SyncMCPServerRepository(db=db)
-    result = repo.find_by_names(["s1"])
-    assert result == servers

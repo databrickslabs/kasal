@@ -4,7 +4,7 @@ Utilities for event loop management and handling asyncio operations across threa
 
 import asyncio
 import logging
-from typing import Any, Callable, Coroutine, List, TypeVar
+from typing import Any, Callable, Coroutine, TypeVar
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -214,57 +214,6 @@ def create_and_run_loop(coroutine: Any) -> Any:
             new_loop.close()
         except Exception as e:
             logger.error(f"Error cleaning up event loop: {str(e)}")
-
-
-def create_task_lifecycle_callback(
-    loop_handler: Callable, callbacks: List, task_key: str
-) -> Callable:
-    """Create a callback for task lifecycle events with proper event loop handling."""
-
-    def callback_function(task_obj, success=True):
-        logger.info(f"Task event for {task_key} (success: {success})")
-        # Create a new event loop for the callback
-        new_loop = asyncio.new_event_loop()
-        try:
-            asyncio.set_event_loop(new_loop)
-            for callback in callbacks:
-                try:
-                    if hasattr(callback, loop_handler):
-                        logger.info(
-                            f"Calling {loop_handler} for {callback.__class__.__name__}"
-                        )
-                        handler = getattr(callback, loop_handler)
-                        if loop_handler == "on_task_end":
-                            new_loop.run_until_complete(handler(task_obj, success))
-                        else:
-                            new_loop.run_until_complete(handler(task_obj))
-                except Exception as callback_error:
-                    logger.error(f"Error in {loop_handler}: {callback_error}")
-                    logger.error("Stack trace:", exc_info=True)
-                    # Continue with other callbacks even if one fails
-        finally:
-            # Properly clean up the event loop
-            try:
-                # Close all running event loop tasks
-                pending = (
-                    asyncio.all_tasks(new_loop) if hasattr(asyncio, "all_tasks") else []
-                )
-                for task in pending:
-                    task.cancel()
-                # Run the event loop until all tasks are canceled
-                if pending:
-                    new_loop.run_until_complete(
-                        asyncio.gather(*pending, return_exceptions=True)
-                    )
-                # Return a thread-local Lakebase connection before closing its loop.
-                _dispose_thread_local_lakebase(new_loop)
-                # Remove the loop from the current context and close it
-                asyncio.set_event_loop(None)
-                new_loop.close()
-            except Exception as e:
-                logger.error(f"Error cleaning up {loop_handler} event loop: {str(e)}")
-
-    return callback_function
 
 
 def run_in_thread_with_loop(func: Callable, *args, **kwargs) -> Any:

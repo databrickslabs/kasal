@@ -9,7 +9,7 @@ from src.services.memory.engine import MemoryRecord
 from src.services.memory.run.persist import (
     flush_memory_writes,
     format_turn_for_memory,
-    register_task_output_persistence,
+    make_memory_output_sink,
     remember_async,
 )
 from src.services.memory.run.recall import (
@@ -223,25 +223,17 @@ class TestTaskOutputPersistence:
         return SimpleNamespace(memory=memory, tasks=[task]), task
 
     def test_persists_completed_task_output(self):
-        from src.core.events import TaskCompletedEvent, event_bus
 
         done = threading.Event()
         memory = MagicMock()
         memory.remember.side_effect = lambda *a, **k: done.set()
-        crew, task = self._crew(memory)
+        _crew, task = self._crew(memory)
 
-        unregister = register_task_output_persistence(crew)
-        try:
-            event_bus.emit(
-                task,
-                TaskCompletedEvent(
-                    output=SimpleNamespace(raw="42 facts found", agent="Researcher"),
-                    task=task,
-                ),
-            )
-            assert done.wait(timeout=5), "task output never persisted"
-        finally:
-            unregister()
+        sink = make_memory_output_sink(memory)
+        sink(
+            task=task, output=SimpleNamespace(raw="42 facts found", agent="Researcher")
+        )
+        assert done.wait(timeout=5), "task output never persisted"
         # The record is the ANSWER, alone. It used to be
         # "[crew task: X] {description}\nResult: {answer}" — the retrieval key
         # inside the retrieved document, so a task matched its own prior answers
@@ -260,7 +252,7 @@ class TestTaskOutputPersistence:
         done = threading.Event()
         memory.remember.side_effect = lambda *a, **k: done.set()
         sink = make_memory_output_sink(memory, **sink_kwargs)
-        _crew, task = self._crew(memory)
+        __crew, task = self._crew(memory)
         sink(task=task, output=SimpleNamespace(raw="42 facts found", agent="R"))
         assert done.wait(timeout=5), "task output never persisted"
         return memory.remember.call_args.kwargs["metadata"]
@@ -284,30 +276,11 @@ class TestTaskOutputPersistence:
         assert "execution_id" not in metadata
         assert metadata["task_name"] == "research"
 
-    def test_foreign_task_is_ignored(self):
-        from src.core.events import TaskCompletedEvent, event_bus
 
-        memory = MagicMock()
-        crew, _task = self._crew(memory)
-        foreign = SimpleNamespace(id="other-task", name="other", description="")
-
-        unregister = register_task_output_persistence(crew)
-        try:
-            event_bus.emit(
-                foreign,
-                TaskCompletedEvent(
-                    output=SimpleNamespace(raw="leak", agent="X"), task=foreign
-                ),
-            )
-            time.sleep(0.05)
-        finally:
-            unregister()
-        memory.remember.assert_not_called()
-
-    def test_sentinel_memory_returns_noop_unregister(self):
-        crew = SimpleNamespace(memory=None, tasks=[])
-        unregister = register_task_output_persistence(crew)
-        unregister()  # no raise
+class TestMemoryOutputSinkDisabled:
+    def test_no_sink_without_memory(self):
+        assert make_memory_output_sink(None) is None
+        assert make_memory_output_sink(False) is None
 
 
 class TestRecallDefaultFloor:

@@ -178,77 +178,6 @@ class TestLogWriterTaskEventFiltering:
             assert calls[1][1]["execution_id"] == "execution_2"
 
 
-class TestCallbackCrewIntegration:
-    """Test cases for crew-level callback integration."""
-
-    def test_crew_callbacks_creation(self):
-        """Test that crew callbacks are created correctly."""
-        from src.services.execution.kernel.execution_callback import (
-            create_crew_callbacks,
-        )
-
-        callbacks = create_crew_callbacks("test_job", {"model": "test"}, None)
-
-        assert "on_start" in callbacks
-        assert "on_complete" in callbacks
-        assert "on_error" in callbacks
-        assert callable(callbacks["on_start"])
-        assert callable(callbacks["on_complete"])
-        assert callable(callbacks["on_error"])
-
-    def test_crew_start_callback_creates_log(self):
-        """Test crew start callback creates execution log."""
-        from src.services.execution.kernel.execution_callback import (
-            create_crew_callbacks,
-        )
-
-        with patch(
-            "src.services.execution.kernel.execution_callback.enqueue_log"
-        ) as mock_enqueue:
-            callbacks = create_crew_callbacks("test_job", {"model": "test"}, None)
-            callbacks["on_start"]()
-
-            mock_enqueue.assert_called_once()
-            kwargs = mock_enqueue.call_args[1]
-            assert kwargs["execution_id"] == "test_job"
-            assert "CREW STARTED" in kwargs["content"]
-
-    def test_crew_complete_callback_creates_log(self):
-        """Test crew completion callback creates execution log."""
-        from src.services.execution.kernel.execution_callback import (
-            create_crew_callbacks,
-        )
-
-        with patch(
-            "src.services.execution.kernel.execution_callback.enqueue_log"
-        ) as mock_enqueue:
-            callbacks = create_crew_callbacks("test_job", {"model": "test"}, None)
-            callbacks["on_complete"]("Test result")
-
-            mock_enqueue.assert_called_once()
-            kwargs = mock_enqueue.call_args[1]
-            assert kwargs["execution_id"] == "test_job"
-            assert "CREW COMPLETED" in kwargs["content"]
-
-    def test_crew_error_callback(self):
-        """Test crew error callback functionality."""
-        from src.services.execution.kernel.execution_callback import (
-            create_crew_callbacks,
-        )
-
-        with patch(
-            "src.services.execution.kernel.execution_callback.enqueue_log"
-        ) as mock_enqueue:
-            callbacks = create_crew_callbacks("test_job", {"model": "test"}, None)
-            callbacks["on_error"](Exception("Test error"))
-
-            mock_enqueue.assert_called_once()
-            kwargs = mock_enqueue.call_args[1]
-            assert kwargs["execution_id"] == "test_job"
-            assert "CREW FAILED" in kwargs["content"]
-            assert "Test error" in kwargs["content"]
-
-
 class TestTaskCallback:
     """Test cases for task callback functionality."""
 
@@ -274,53 +203,6 @@ class TestTaskCallback:
             kwargs = mock_enqueue.call_args[1]
             assert kwargs["execution_id"] == "test_job"
             assert "TASK COMPLETED" in kwargs["content"]
-
-
-class TestConfigSanitization:
-    """Test cases for configuration sanitization in logging."""
-
-    def test_config_sanitization(self):
-        """Test that sensitive config data is sanitized."""
-        from src.services.execution.kernel.execution_callback import (
-            log_crew_initialization,
-        )
-
-        config_with_secrets = {
-            "model": "test-model",
-            "api_keys": {"secret": "hidden"},
-            "tokens": {"access_token": "secret"},
-            "passwords": {"db_pass": "secret"},
-            "normal_field": "visible",
-        }
-
-        with patch(
-            "src.services.execution.kernel.execution_callback.enqueue_log"
-        ) as mock_enqueue:
-            log_crew_initialization("test_job", config_with_secrets, None)
-
-            mock_enqueue.assert_called_once()
-            content = mock_enqueue.call_args[1]["content"]
-            assert "test-model" in content
-            assert "visible" in content
-            assert "secret" not in content
-            assert "hidden" not in content
-
-    def test_empty_config_handling(self):
-        """Test handling of empty or None config."""
-        from src.services.execution.kernel.execution_callback import (
-            log_crew_initialization,
-        )
-
-        with patch(
-            "src.services.execution.kernel.execution_callback.enqueue_log"
-        ) as mock_enqueue:
-            log_crew_initialization("test_job", None, None)
-            mock_enqueue.assert_called_once()
-
-            mock_enqueue.reset_mock()
-            log_crew_initialization("test_job", {}, None)
-            mock_enqueue.assert_called_once()
-            assert mock_enqueue.call_args[1]["execution_id"] == "test_job"
 
 
 # ---------------------------------------------------------------------------

@@ -2,7 +2,6 @@ from typing import List, Optional, Type
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
 
 from src.core.base_repository import BaseRepository
 from src.models.agent import Agent
@@ -150,52 +149,3 @@ class AgentRepository(BaseRepository[Agent]):
             .order_by(self.model.created_at.desc())
         )
         return list(result.scalars().all())
-
-
-class SyncAgentRepository:
-    """
-    Synchronous repository for Agent model with custom query methods.
-    Used by services that require synchronous DB operations.
-    """
-
-    def __init__(self, db: Session):
-        """
-        Initialize the repository with session.
-
-        Args:
-            db: SQLAlchemy synchronous session
-        """
-        self.db = db
-
-    def find_by_id(self, agent_id: int) -> Optional[Agent]:
-        """
-        Find an agent by ID.
-
-        Args:
-            agent_id: ID of the agent to find
-
-        Returns:
-            Agent if found, else None
-        """
-        return self.db.query(Agent).filter(Agent.id == agent_id).first()
-
-    def find_by_name(self, name: str) -> Optional[Agent]:
-        """
-        Find an agent by name.
-
-        Args:
-            name: Name to search for
-
-        Returns:
-            Agent if found, else None
-        """
-        return self.db.query(Agent).filter(Agent.name == name).first()
-
-    def find_all(self) -> List[Agent]:
-        """
-        Find all agents.
-
-        Returns:
-            List of all agents
-        """
-        return self.db.query(Agent).all()

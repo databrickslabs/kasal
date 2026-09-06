@@ -73,7 +73,6 @@ try:
 except Exception:
     pass
 
-import asyncio
 import logging
 import multiprocessing as mp
 import os
@@ -2451,87 +2450,6 @@ class ProcessCrewExecutor:
             queue.join_thread()
         except Exception as e:
             logger.debug(f"[ProcessCrewExecutor] Error closing queue: {e}")
-
-    async def _relay_task_events(self, task_event_queue, execution_id: str):
-        """
-        Read task lifecycle events from the subprocess multiprocessing.Queue
-        and broadcast them via SSE for real-time frontend updates.
-
-        Runs concurrently with process.join() so events are relayed in real-time.
-        """
-        from queue import Empty
-
-        from src.core.sse_manager import SSEEvent, sse_manager
-
-        logger.info(
-            f"[ProcessCrewExecutor] Starting task event relay for {execution_id}"
-        )
-
-        while True:
-            try:
-                # Block with short timeout to allow cancellation checks
-                trace_data = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: task_event_queue.get(block=True, timeout=0.5)
-                )
-            except Empty:
-                continue
-            except asyncio.CancelledError:
-                logger.info(
-                    f"[ProcessCrewExecutor] Task event relay cancelled for {execution_id}"
-                )
-                break
-            except Exception as e:
-                logger.warning(
-                    f"[ProcessCrewExecutor] Error reading task event queue: {e}"
-                )
-                continue
-
-            if trace_data is None:
-                continue
-
-            event_type = trace_data.get("event_type", "")
-            if event_type not in ("task_started", "task_completed", "task_failed"):
-                continue
-
-            try:
-                extra_data = trace_data.get("extra_data", {})
-                trace_metadata = trace_data.get("trace_metadata", extra_data)
-
-                sse_trace_data = {
-                    "job_id": execution_id,
-                    "event_source": trace_data.get("event_source", ""),
-                    "event_type": event_type,
-                    "event_context": trace_data.get("event_context", ""),
-                    "output": trace_data.get("output"),
-                    "trace_metadata": {
-                        "task_name": extra_data.get("task_name")
-                        or trace_data.get("event_context"),
-                        "task_id": extra_data.get("task_id"),
-                        "agent_role": extra_data.get("agent_role"),
-                        "crew_name": extra_data.get("crew_name"),
-                        "frontend_task_id": extra_data.get("frontend_task_id"),
-                        **trace_metadata,
-                    },
-                    "created_at": (
-                        trace_data.get("created_at", datetime.now().isoformat())
-                        if isinstance(trace_data.get("created_at"), str)
-                        else datetime.now().isoformat()
-                    ),
-                }
-
-                event = SSEEvent(
-                    data=sse_trace_data,
-                    event="trace",
-                    id=f"{execution_id}_{event_type}_{datetime.now().timestamp()}",
-                )
-                sent_count = await sse_manager.broadcast_to_job(execution_id, event)
-                logger.info(
-                    f"[ProcessCrewExecutor] Relayed {event_type} SSE to {sent_count} clients for job {execution_id}"
-                )
-            except Exception as sse_err:
-                logger.warning(
-                    f"[ProcessCrewExecutor] Failed to broadcast relayed {event_type}: {sse_err}"
-                )
 
     async def _process_log_queue(
         self, log_queue, execution_id: str, group_context=None

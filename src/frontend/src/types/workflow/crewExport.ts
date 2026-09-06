@@ -73,42 +73,6 @@ export interface ModelServingConfig {
   tags?: Record<string, string>;
 }
 
-export interface DeploymentRequest {
-  config: ModelServingConfig;
-}
-
-export interface DeploymentResponse {
-  crew_id: string;
-  crew_name: string;
-  deployment_target: string;
-  model_name: string;
-  model_version: string;
-  model_uri: string;
-  endpoint_name: string;
-  endpoint_url: string;
-  endpoint_status: DeploymentStatus;
-  deployed_at: string;
-  metadata: {
-    agents_count: number;
-    tasks_count: number;
-    workload_size?: string;
-    scale_to_zero?: boolean;
-  };
-  usage_example: string;
-}
-
-export interface DeploymentStatusResponse {
-  endpoint_name: string;
-  state: string;
-  config_update: string | null;
-  pending_config: boolean;
-  ready_replicas: number;
-  target_replicas: number;
-  creator: string;
-  creation_timestamp: number;
-  last_updated_timestamp: number;
-}
-
 // ── Databricks Apps deployment (one-click from the UI) ──────────────────
 
 export type AppDeploymentStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';

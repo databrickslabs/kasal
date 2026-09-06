@@ -359,72 +359,6 @@ class TestDatabricksKnowledgeServiceSearchKnowledge:
         assert isinstance(result, list)
 
 
-class TestDatabricksKnowledgeServiceReadKnowledgeFile:
-    """Test DatabricksKnowledgeService read_knowledge_file method"""
-
-    def setup_method(self):
-        """Set up test fixtures"""
-        self.mock_session = AsyncMock()
-        self.group_id = "test-group-id"
-        self.service = DatabricksKnowledgeService(self.mock_session, self.group_id)
-
-    @pytest.mark.asyncio
-    async def test_read_file_basic(self):
-        """Test reading a file from Databricks volume"""
-        file_path = "/Volumes/catalog/schema/volume/test.txt"
-
-        with (
-            patch.object(
-                self.service.databricks_service, "get_databricks_config"
-            ) as mock_get_config,
-            patch.object(
-                self.service.volume_repository, "download_file_from_volume"
-            ) as mock_download,
-        ):
-
-            mock_get_config.return_value = {
-                "workspace_url": "https://test.databricks.com"
-            }
-            mock_download.return_value = {
-                "content": b"test file content",
-                "metadata": {"size": 17},
-            }
-
-            result = await self.service.read_knowledge_file(file_path, self.group_id)
-
-            assert isinstance(result, dict)
-            assert "status" in result
-
-    @pytest.mark.asyncio
-    async def test_read_file_with_user_token(self):
-        """Test reading file with user token"""
-        file_path = "/Volumes/catalog/schema/volume/test.txt"
-        user_token = "test-user-token"
-
-        with (
-            patch.object(
-                self.service.databricks_service, "get_databricks_config"
-            ) as mock_get_config,
-            patch.object(
-                self.service.volume_repository, "download_file_from_volume"
-            ) as mock_download,
-        ):
-
-            mock_get_config.return_value = {
-                "workspace_url": "https://test.databricks.com"
-            }
-            mock_download.return_value = {
-                "content": b"test file content",
-                "metadata": {"size": 17},
-            }
-
-            result = await self.service.read_knowledge_file(
-                file_path, self.group_id, user_token=user_token
-            )
-
-            assert isinstance(result, dict)
-
-
 class TestDatabricksKnowledgeServiceListKnowledgeFiles:
     """Test DatabricksKnowledgeService list_knowledge_files method"""
 
@@ -535,17 +469,16 @@ class TestDatabricksKnowledgeServiceBrowseVolumeFiles:
         volume_path = "/Volumes/catalog/schema/volume"
 
         with (
-            patch.object(
-                self.service.databricks_service, "get_databricks_config"
-            ) as mock_get_config,
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=Mock(workspace_url="https://test.databricks.com"),
+            ),
             patch.object(
                 self.service.volume_repository, "list_volume_contents"
             ) as mock_list,
         ):
 
-            mock_get_config.return_value = {
-                "workspace_url": "https://test.databricks.com"
-            }
             mock_list.return_value = {
                 "success": True,
                 "files": [
@@ -565,9 +498,9 @@ class TestDatabricksKnowledgeServiceBrowseVolumeFiles:
         volume_path = "/Volumes/catalog/schema/volume"
 
         with patch.object(
-            self.service.databricks_service, "get_databricks_config"
-        ) as mock_get_config:
-            mock_get_config.side_effect = Exception("Config error")
+            self.service.volume_repository, "list_volume_contents"
+        ) as mock_list:
+            mock_list.side_effect = Exception("Config error")
 
             result = await self.service.browse_volume_files(volume_path, self.group_id)
 
@@ -575,49 +508,6 @@ class TestDatabricksKnowledgeServiceBrowseVolumeFiles:
             assert isinstance(result, dict)
             assert result.get("success") == False
             assert "error" in result
-
-
-class TestDatabricksKnowledgeServiceRegisterVolumeFile:
-    """Test DatabricksKnowledgeService register_volume_file method"""
-
-    def setup_method(self):
-        """Set up test fixtures"""
-        self.mock_session = AsyncMock()
-        self.group_id = "test-group-id"
-        self.service = DatabricksKnowledgeService(self.mock_session, self.group_id)
-
-    @pytest.mark.asyncio
-    async def test_register_file_basic(self):
-        """Test registering a volume file for knowledge search"""
-        execution_id = "test-execution-id"
-        file_path = "/Volumes/catalog/schema/volume/test.txt"
-
-        # register_volume_file doesn't actually call any services - it just simulates registration
-        result = await self.service.register_volume_file(
-            execution_id, file_path, self.group_id
-        )
-
-        assert isinstance(result, dict)
-        assert result["status"] == "success"
-        assert result["path"] == file_path
-        assert result["filename"] == "test.txt"
-        assert result["execution_id"] == execution_id
-        assert result["group_id"] == self.group_id
-
-    @pytest.mark.asyncio
-    async def test_register_file_with_agent_ids(self):
-        """Test registering file with agent_ids filter"""
-        execution_id = "test-execution-id"
-        file_path = "/Volumes/catalog/schema/volume/test.txt"
-
-        # Note: register_volume_file doesn't accept agent_ids parameter
-        # It just simulates registration
-        result = await self.service.register_volume_file(
-            execution_id, file_path, self.group_id
-        )
-
-        assert isinstance(result, dict)
-        assert result["status"] == "success"
 
 
 class TestDatabricksKnowledgeServiceIntegration:
@@ -658,7 +548,6 @@ class TestDatabricksKnowledgeServiceIntegration:
             patch.object(
                 self.service.volume_repository, "upload_file_to_volume"
             ) as mock_upload,
-            patch.object(self.service, "read_knowledge_file") as mock_read,
         ):
 
             # Setup mocks
@@ -676,10 +565,6 @@ class TestDatabricksKnowledgeServiceIntegration:
             mock_upload.return_value = {
                 "success": True,
                 "path": "/test/path/knowledge.txt",
-            }
-            mock_read.return_value = {
-                "status": "success",
-                "content": "Important knowledge content",
             }
 
             # Mock embedding service
