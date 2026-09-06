@@ -22,6 +22,11 @@ class User(Base):
     id = Column(String, primary_key=True, default=generate_uuid)
     username = Column(String, unique=True, index=True, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
+    # The personal workspace's id — allocated ONCE and never derived at request
+    # time. The derivation collapsed '@', '.', '-' and '+' to '_', so
+    # alice.smith@ and alice-smith@ shared a workspace (audit F06 / R2-06).
+    # Unique; NULL only until the startup heal or the first login assigns it.
+    personal_group_id = Column(sa.String, unique=True, nullable=True, index=True)
     display_name = Column(String, nullable=True)  # Moved from UserProfile
     # hashed_password removed - using OAuth proxy authentication
     role = Column(

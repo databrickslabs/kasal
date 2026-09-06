@@ -172,6 +172,42 @@ class UserService:
         # Return updated user
         return await self.user_repo.get(user_id)
 
+    async def ensure_personal_workspace_id(self, user: User) -> str:
+        """Allocate the user's personal-workspace id once (audit F06 / R2-06).
+
+        The derived id if no other user holds it, else the disambiguated form.
+        The startup heal settles existing users in creation order; this is the
+        first-login path and the safety net. Best-effort: a failure leaves the
+        row NULL for the heal to settle, and this request runs on the derived
+        id as before.
+        """
+        stored = getattr(user, "personal_group_id", None)
+        if stored:
+            return stored
+        from src.utils.user_context import GroupContext
+
+        legacy = GroupContext.generate_individual_group_id(user.email)
+        chosen = legacy
+        try:
+            holder = await self.user_repo.get_by_personal_group_id(legacy)
+            if holder is not None and holder.id != user.id:
+                chosen = GroupContext.disambiguated_individual_group_id(user.email)
+                logger.warning(
+                    "Personal workspace collision: %s derives to %s, held by %s; "
+                    "assigned %s",
+                    user.email,
+                    legacy,
+                    holder.email,
+                    chosen,
+                )
+            await self.user_repo.update(user.id, {"personal_group_id": chosen})
+            user.personal_group_id = chosen
+        except Exception as exc:  # noqa: BLE001 — never fail a login on this
+            logger.warning(
+                f"Could not allocate a personal workspace id for {user.email}: {exc}"
+            )
+        return getattr(user, "personal_group_id", None) or legacy
+
     async def get_or_create_user_by_email(
         self, email: str, update_login: bool = False
     ) -> Optional[User]:
@@ -229,6 +265,7 @@ class UserService:
 
                 # Check if this existing user should be granted admin privileges (if no system admins exist)
                 await self._handle_first_user_admin_setup(user, is_new_user=False)
+                await self.ensure_personal_workspace_id(user)
                 return user
             # Create new user (OAuth proxy authentication - no password needed)
 
@@ -259,6 +296,8 @@ class UserService:
 
             try:
                 user = await self.user_repo.create(user_data)
+
+                await self.ensure_personal_workspace_id(user)
                 # No separate profile creation needed - display_name is now part of User
 
                 logger.info(f"Created new user via proxy auth: {email}")

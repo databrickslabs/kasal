@@ -204,3 +204,19 @@ async def _ensure_group_users_columns(conn) -> None:
             ("allow_flow_builder", "BOOLEAN", "BOOLEAN"),
         ],
     )
+
+
+async def _ensure_users_columns(conn) -> None:
+    """users.personal_group_id — the allocated personal-workspace id (see the
+    model). Unique, so two users can never be handed one workspace; a partial
+    unique index is what both dialects offer for a nullable column."""
+    await ensure_columns(
+        conn, "users", [("personal_group_id", "VARCHAR(255)", "VARCHAR(255)")]
+    )
+    try:
+        await conn.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_personal_group_id "
+            "ON users (personal_group_id)"
+        )
+    except Exception as e:  # noqa: BLE001 — the column is the requirement
+        logger.warning(f"Could not create the users.personal_group_id index: {e}")

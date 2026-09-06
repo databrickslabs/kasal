@@ -17,8 +17,10 @@ from src.db.self_heal.columns import (
     _ensure_modelconfig_columns,
     _ensure_publications_columns,
     _ensure_ui_config_columns,
+    _ensure_users_columns,
 )
 from src.db.self_heal.data import (
+    _assign_personal_workspace_ids,
     _disable_bi_specialist_crew_memory,
     _heal_engine_config_names,
     _heal_personal_group_names,
@@ -103,6 +105,7 @@ async def run_schema_self_heal(conn) -> None:
         _ensure_chat_sessions_table,
         _ensure_chat_sessions_columns,
         _ensure_publications_columns,
+        _ensure_users_columns,
         _ensure_workflow_recipes_table,
         _ensure_workflow_recipe_trials_table,
         _ensure_crew_publications_table,
@@ -124,6 +127,7 @@ async def run_schema_self_heal(conn) -> None:
         _ensure_modelconfig_columns,
         _ensure_hot_polling_indexes,
         _heal_personal_group_names,
+        _assign_personal_workspace_ids,
         _heal_engine_config_names,
         _disable_bi_specialist_crew_memory,
     )

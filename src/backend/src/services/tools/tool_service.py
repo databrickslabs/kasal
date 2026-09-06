@@ -37,9 +37,7 @@ def _is_personal_workspace(group_context: Optional[GroupContext]) -> bool:
     if not primary or not email:
         return False
     try:
-        return (
-            primary.lower() == GroupContext.generate_individual_group_id(email).lower()
-        )
+        return GroupContext.is_personal_workspace_of(primary, email)
     except Exception:
         return False
 

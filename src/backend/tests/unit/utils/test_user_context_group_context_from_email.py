@@ -227,16 +227,17 @@ class TestGroupContextFromEmail:
         assert ctx.highest_role == "admin"
 
     @pytest.mark.asyncio
-    async def test_fallback_on_lookup_error(self):
-        """from_email falls back to individual group on lookup failure."""
+    async def test_a_lookup_error_denies_instead_of_guessing(self):
+        """The derived personal id is not one-to-one (audit F06 / R2-06), so a
+        request whose user could not be resolved is denied rather than run
+        under an id another user may hold."""
         with patch.object(
             GroupContext,
             "_get_user_group_memberships_with_roles",
-            AsyncMock(side_effect=Exception("DB error")),
+            AsyncMock(side_effect=RuntimeError("db down")),
         ):
-            ctx = await GroupContext.from_email("fallback@test.com")
-        assert ctx.primary_group_id is not None
-        assert ctx.primary_group_id.startswith("user_")
+            with pytest.raises(ValueError, match="Access denied"):
+                await GroupContext.from_email("alice@example.com")
 
     @pytest.mark.asyncio
     async def test_security_error_propagates(self):

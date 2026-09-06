@@ -184,10 +184,11 @@ class GmailTool(BaseTool):
         try:
             from src.utils.user_context import GroupContext
 
-            personal = GroupContext.generate_individual_group_id(self._user_email)
+            return GroupContext.is_personal_workspace_of(
+                self._group_id, self._user_email
+            )
         except Exception:
             return False
-        return self._group_id.lower() == personal.lower()
 
     # ------------------------------------------------------------------
     # Auth + proxy plumbing

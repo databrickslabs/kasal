@@ -198,8 +198,7 @@ class GroupContext:
 
             if not user_groups_with_roles or len(user_groups_with_roles) == 0:
                 # User is NOT in any groups - they only have their individual workspace.
-                # Create a unique group ID based on the user's email (sanitized)
-                individual_group_id = cls.generate_individual_group_id(email)
+                individual_group_id = cls.personal_workspace_id_of(user, email)
                 # SECURITY: if a specific workspace was requested it must be the
                 # user's OWN personal workspace. Silently substituting the personal
                 # workspace for an unauthorized group_id would run the request (and
@@ -242,7 +241,7 @@ class GroupContext:
 
                 # Always generate the user's personal workspace ID for inclusion in queries
                 # This ensures users can always access their personal data regardless of selected workspace
-                personal_workspace_id = cls.generate_individual_group_id(email)
+                personal_workspace_id = cls.personal_workspace_id_of(user, email)
 
                 # If a specific group_id was provided, validate it
                 if group_id:
@@ -316,21 +315,15 @@ class GroupContext:
             # SECURITY: Re-raise authorization errors - do not fallback
             raise
         except Exception as e:
-            # Fallback to individual groups if group lookup fails (non-authorization errors)
-            logger.warning(
-                f"Failed to lookup user groups for {email}, falling back to individual groups: {e}"
+            # No fallback to a DERIVED personal workspace: the derived id is not
+            # one-to-one, so a request that could not resolve its user would be
+            # run under an id another user may hold (R2-06). Deny instead.
+            logger.error(
+                f"Failed to resolve the workspace for {email}; denying the request: {e}"
             )
-            individual_group_id = cls.generate_individual_group_id(email)
-            return cls(
-                group_ids=[individual_group_id],
-                group_email=email,
-                email_domain=email_domain,
-                user_id=user_id,
-                access_token=access_token,
-                user_role=None,
-                highest_role=None,
-                current_user=None,  # No user object in fallback case
-            )
+            raise ValueError(
+                "Access denied: the user's workspace could not be resolved"
+            ) from e
 
     @staticmethod
     def generate_group_id(email_domain: str) -> str:
@@ -342,6 +335,45 @@ class GroupContext:
         - tech.startup.io -> tech_startup_io
         """
         return email_domain.replace(".", "_").replace("-", "_").lower()
+
+    @staticmethod
+    def disambiguated_individual_group_id(email: str) -> str:
+        """The derived id plus a short digest of the exact email: one-to-one,
+        deterministic, and what a user gets when the derived id is already
+        another user's (audit F06 / R2-06)."""
+        import hashlib
+
+        digest = hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()[:8]
+        return f"{GroupContext.generate_individual_group_id(email)}_{digest}"
+
+    @staticmethod
+    def personal_workspace_candidates(email: str) -> tuple:
+        """The two ids a user's personal workspace can carry."""
+        return (
+            GroupContext.generate_individual_group_id(email),
+            GroupContext.disambiguated_individual_group_id(email),
+        )
+
+    @staticmethod
+    def is_personal_workspace_of(group_id: Optional[str], email: Optional[str]) -> bool:
+        """Whether ``group_id`` is this user's personal workspace, under either
+        form of its id. No lookup: both forms are functions of the email."""
+        if not group_id or not email:
+            return False
+        wanted = group_id.lower()
+        return any(
+            c.lower() == wanted
+            for c in GroupContext.personal_workspace_candidates(email)
+        )
+
+    @staticmethod
+    def personal_workspace_id_of(user: Any, email: str) -> str:
+        """The id the user's row carries; the derived id only for a row that
+        has none yet (the startup heal and the first login assign it)."""
+        stored = getattr(user, "personal_group_id", None) if user is not None else None
+        if isinstance(stored, str) and stored:
+            return stored
+        return GroupContext.generate_individual_group_id(email)
 
     @staticmethod
     def generate_individual_group_id(email: str) -> str:

@@ -16,6 +16,14 @@ class UserRepository(BaseRepository[User]):
         result = await self.session.execute(query)
         return result.scalars().first()
 
+    async def get_by_personal_group_id(self, personal_group_id: str) -> Optional[User]:
+        """The user whose personal workspace carries this id, if any."""
+        query = select(self.model).where(
+            self.model.personal_group_id == personal_group_id
+        )
+        result = await self.session.execute(query)
+        return result.scalars().first()
+
     async def get_by_username(self, username: str) -> Optional[User]:
         """Get a user by username"""
         query = select(self.model).where(self.model.username == username)

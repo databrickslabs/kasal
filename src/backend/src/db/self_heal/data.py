@@ -99,3 +99,66 @@ async def _heal_engine_config_names(conn) -> None:
             )
     except Exception as e:
         logger.warning(f"Could not heal engine_config engine names: {e}")
+
+
+async def _assign_personal_workspace_ids(conn) -> None:
+    """Give every user without one a personal-workspace id, in creation order.
+
+    The id used to be derived from the email at request time, and the
+    derivation was not one-to-one (audit F06 / R2-06). Existing users keep the
+    id their data already lives under — the first user to have produced a
+    given derived id keeps it — and any later user whose email derives to the
+    same id gets the disambiguated form and a fresh, empty workspace. Those
+    pairs are logged: whatever the second user wrote before this ran sits
+    under the first user's workspace and is theirs to sort out by hand.
+    Idempotent: only NULL rows are touched.
+    """
+    from src.db.self_heal.dialect import _conn_is_sqlite
+    from src.utils.user_context import GroupContext
+
+    try:
+        rows = (
+            await conn.exec_driver_sql(
+                "SELECT id, email FROM users WHERE personal_group_id IS NULL "
+                "ORDER BY created_at, id"
+            )
+        ).fetchall()
+        if not rows:
+            return
+        taken = {
+            r[0]
+            for r in (
+                await conn.exec_driver_sql(
+                    "SELECT personal_group_id FROM users WHERE personal_group_id IS NOT NULL"
+                )
+            ).fetchall()
+        }
+        placeholder = "?" if _conn_is_sqlite(conn) else "%s"
+        collisions = []
+        for user_id, email in rows:
+            legacy = GroupContext.generate_individual_group_id(email)
+            chosen = (
+                legacy
+                if legacy not in taken
+                else GroupContext.disambiguated_individual_group_id(email)
+            )
+            if chosen != legacy:
+                collisions.append((email, legacy, chosen))
+            taken.add(chosen)
+            await conn.exec_driver_sql(
+                f"UPDATE users SET personal_group_id = {placeholder} WHERE id = {placeholder}",
+                (chosen, user_id),
+            )
+        logger.info(f"Assigned personal workspace ids to {len(rows)} user(s)")
+        for email, legacy, chosen in collisions:
+            logger.warning(
+                "Personal workspace collision: %s derived to %s, already held by an "
+                "earlier user; assigned %s. Data this user wrote before now sits under "
+                "%s and needs a manual review.",
+                email,
+                legacy,
+                chosen,
+                legacy,
+            )
+    except Exception as e:  # noqa: BLE001 — a heal must never stop startup
+        logger.warning(f"Could not assign personal workspace ids: {e}")

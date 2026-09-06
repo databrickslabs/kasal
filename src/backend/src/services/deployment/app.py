@@ -214,11 +214,12 @@ class CrewAppDeploymentService:
             else []
         )
         if group_context and group_context.group_email:
-            personal_gid = GroupContext.generate_individual_group_id(
+            # Either form the personal workspace's id can take (R2-06).
+            for personal_gid in GroupContext.personal_workspace_candidates(
                 group_context.group_email
-            )
-            if personal_gid and personal_gid not in candidate_group_ids:
-                candidate_group_ids.append(personal_gid)
+            ):
+                if personal_gid and personal_gid not in candidate_group_ids:
+                    candidate_group_ids.append(personal_gid)
 
         # Resolve the PAT DIRECTLY from the DB on the request-scoped session.
         # We deliberately DO NOT use get_auth_context here: (1) deploy MUST use a
