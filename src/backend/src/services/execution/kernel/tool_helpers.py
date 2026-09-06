@@ -64,3 +64,32 @@ async def resolve_tool_ids_to_names(
             tool_names.append("")  # Add empty string for unresolved IDs
 
     return tool_names
+
+
+async def resolve_tools_for_agent(tool_ids, tool_service: ToolService):
+    """Fetch selected names and configs together, preserving input order/repeats."""
+    selected = []
+    for tool_id in tool_ids:
+        if tool_id == "DatabricksKnowledgeSearchTool":
+            selected.append(tool_id)
+        else:
+            try:
+                selected.append(int(tool_id))
+            except (ValueError, TypeError):
+                selected.append(None)
+    numeric = [value for value in selected if isinstance(value, int)]
+    records = await tool_service.get_tools_by_ids(numeric) if numeric else {}
+    custom_config = {}
+    if "DatabricksKnowledgeSearchTool" in selected:
+        custom_config = (
+            await tool_service.get_tool_config_by_name("DatabricksKnowledgeSearchTool")
+            or {}
+        )
+    resolved = []
+    for value in selected:
+        if value == "DatabricksKnowledgeSearchTool":
+            resolved.append((value, custom_config))
+        elif value in records:
+            tool = records[value]
+            resolved.append((tool.title, tool.config or {}))
+    return resolved

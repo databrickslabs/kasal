@@ -170,3 +170,19 @@ class TestRelevanceGateSql:
             relevance_threshold=0.6,
         )
         assert custom.relevance_threshold == 0.6
+
+
+@pytest.mark.asyncio
+async def test_save_batches_records_and_preserves_input_order(backend):
+    session = AsyncMock()
+    records = [
+        MemoryRecord(id=str(i), content=str(i), embedding=[0.1] * 4) for i in range(205)
+    ]
+    with patch.object(backend, "_session", return_value=_make_lakebase_ctx(session)):
+        await backend.asave(records)
+    calls = session.execute.await_args_list
+    assert [len(call.args[1]) for call in calls] == [100, 100, 5]
+    assert [row["id"] for call in calls for row in call.args[1]] == [
+        str(i) for i in range(205)
+    ]
+    assert all(row["group_id"] == "group_1" for call in calls for row in call.args[1])

@@ -105,9 +105,9 @@ class TestResolveAgentToolsCrewMode:
         factory = MagicMock()
         factory.create_tool.return_value = fake
         with patch(
-            "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+            "src.services.execution.kernel.tool_helpers.resolve_tools_for_agent",
             new_callable=AsyncMock,
-            return_value=["GenieTool"],
+            return_value=[("GenieTool", {"result_as_answer": True})],
         ):
             tools = await resolve_agent_tools(
                 ["35"],
@@ -128,9 +128,9 @@ class TestResolveAgentToolsCrewMode:
         factory = MagicMock()
         factory.create_tool.return_value = (True, [sub1, sub2])
         with patch(
-            "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+            "src.services.execution.kernel.tool_helpers.resolve_tools_for_agent",
             new_callable=AsyncMock,
-            return_value=["MCPTool"],
+            return_value=[("MCPTool", {})],
         ):
             tools = await resolve_agent_tools(["x"], factory, tool_service=svc)
         assert sub1 in tools and sub2 in tools
@@ -139,9 +139,9 @@ class TestResolveAgentToolsCrewMode:
     async def test_no_factory_falls_back_to_names(self):
         svc = MagicMock()
         with patch(
-            "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+            "src.services.execution.kernel.tool_helpers.resolve_tools_for_agent",
             new_callable=AsyncMock,
-            return_value=["SomeTool"],
+            return_value=[("SomeTool", {})],
         ):
             tools = await resolve_agent_tools(["id"], None, tool_service=svc)
         assert tools == ["SomeTool"]
@@ -151,7 +151,7 @@ class TestResolveAgentToolsCrewMode:
         svc = MagicMock()
         factory = MagicMock()
         with patch(
-            "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+            "src.services.execution.kernel.tool_helpers.resolve_tools_for_agent",
             new_callable=AsyncMock,
             side_effect=Exception("boom"),
         ):

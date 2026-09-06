@@ -415,3 +415,36 @@ def test_checkpoints_do_not_change_the_result():
     """They are redundancy, not content — the round trip must be unaffected."""
     _, sent = _stream(BIG_DECK, chunk=40)
     assert apply_messages(sent) == BIG_DECK
+
+
+@pytest.mark.parametrize("surface", [DECK, DASHBOARD_DATA, DASHBOARD_PROSE])
+@pytest.mark.parametrize("chunk_size", [1, 2, 17, 100000])
+def test_incremental_stream_matches_snapshot_messages(surface, chunk_size):
+    incremental, snapshots = [], []
+    delta = SurfaceStreamer("sid", incremental.append)
+    whole = SurfaceStreamer("sid", snapshots.append)
+    raw = "```json\n" + json.dumps(surface) + "\n```"
+    for start in range(0, len(raw), chunk_size):
+        delta.feed_chunk(raw[start : start + chunk_size])
+        whole.feed(raw[: start + chunk_size])
+    assert incremental == snapshots
+
+
+def test_incremental_parser_handles_long_escaped_values_once():
+    from src.services.a2ui.incremental_surface import IncrementalSurfaceParser
+    from unittest.mock import patch
+
+    surface = dict(DECK, dataModel={"escaped/key~": 'quote" slash\\ brace} ' * 10000})
+    raw = json.dumps(surface)
+    parser = IncrementalSurfaceParser()
+    real_loads = json.loads
+    with patch(
+        "src.services.a2ui.incremental_surface.json.loads", wraps=real_loads
+    ) as decode:
+        for start in range(0, len(raw), 31):
+            part = parser.feed(raw[start : start + 31])
+        # Number of decodes depends on completed keys/values, not chunk count.
+        assert decode.call_count < 20
+    assert part.complete
+    assert part.components == surface["components"]
+    assert part.data_model == surface["dataModel"]

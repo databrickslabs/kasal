@@ -1,3 +1,4 @@
+import { firstBy } from '../../utils/collectionIndexes';
 import React from 'react';
 import type { ReactFlowInstance, Node, Edge } from 'reactflow';
 import { CanvasLayoutManager } from '../../utils/CanvasLayoutManager';
@@ -155,9 +156,10 @@ export function useWorkflowLayoutEvents(params: {
       if (reason === 'layout-orientation-toggle') {
         const currentLayout = useUILayoutStore.getState().layoutOrientation;
 
+        const nodesById = firstBy(reorganizedNodes, node => node.id);
         currentSetEdges(prevEdges => prevEdges.map(e => {
-          const sourceNode = reorganizedNodes.find(n => n.id === e.source);
-          const targetNode = reorganizedNodes.find(n => n.id === e.target);
+          const sourceNode = nodesById.get(e.source);
+          const targetNode = nodesById.get(e.target);
 
           // Agent-to-task edges: change based on layout orientation
           if (sourceNode?.type === 'agentNode' && targetNode?.type === 'taskNode') {

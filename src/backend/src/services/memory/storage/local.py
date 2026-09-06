@@ -15,6 +15,7 @@ wraps all three uniformly.
 
 from __future__ import annotations
 
+import heapq
 import json
 import logging
 import sqlite3
@@ -211,6 +212,8 @@ class LocalStorageBackend:
         excluded, and the recency decay applies to EPISODIC records only — a
         current fact does not get less true with age.
         """
+        if limit == 0:
+            return []
         rows = self._fetch_rows(scope_prefix)
         if not rows:
             return []
@@ -222,13 +225,14 @@ class LocalStorageBackend:
         query_tokens = {
             token for token in (query_text or "").lower().split() if len(token) > 2
         }
+        wanted_categories = set(categories or [])
         now = datetime.now(timezone.utc)
         half_life_seconds = self.RECENCY_HALF_LIFE_DAYS * 86400.0
         for row in rows:
             record = self._row_to_record(row)
             if not record.is_current:
                 continue  # superseded — history, not context
-            if categories and not set(categories) & set(record.categories):
+            if wanted_categories and wanted_categories.isdisjoint(record.categories):
                 continue
             if metadata_filter and any(
                 record.metadata.get(k) != v for k, v in metadata_filter.items()
@@ -271,8 +275,13 @@ class LocalStorageBackend:
                 # consolidation can compare meaning rather than the blend.
                 record.metadata["semantic"] = round(float(semantic), 4)
                 scored.append((record, score))
-        scored.sort(key=lambda pair: (pair[1], pair[0].importance), reverse=True)
-        return scored[:limit]
+        def rank_key(pair):
+            return pair[1], pair[0].importance
+
+        if limit > 0:
+            return heapq.nlargest(limit, scored, key=rank_key)
+        # Preserve the existing negative-limit slicing behavior.
+        return sorted(scored, key=rank_key, reverse=True)[:limit]
 
     def list_records(
         self,

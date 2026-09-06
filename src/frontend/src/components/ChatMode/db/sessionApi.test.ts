@@ -554,6 +554,57 @@ describe('sessionApi - per-message write ordering', () => {
     resultType: 'trace', resultData: { kind: 'tool_call' },
   };
 
+  it('coalesces a streaming burst and flushes on a terminal transient update', async () => {
+    vi.useFakeTimers();
+    try {
+      mockPut.mockResolvedValue({ data: {} });
+      const writes = Array.from({ length: 200 }, (_, i) =>
+        api.updateMessageInSession('s1', 'burst', { content: String(i) }, true));
+      await vi.advanceTimersByTimeAsync(249);
+      expect(mockPut).not.toHaveBeenCalled();
+      await api.updateMessageInSession('s1', 'burst', { isStreaming: false });
+      await Promise.all(writes);
+      expect(mockPut).toHaveBeenCalledTimes(1);
+      expect(mockPut).toHaveBeenLastCalledWith('/chat-history/messages/burst', { content: '199' });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(mockPut).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('bounds slow writes and retains pending envelope fields with final content', async () => {
+    vi.useFakeTimers();
+    try {
+      const slow = deferred();
+      mockPut.mockReturnValueOnce(slow.promise).mockResolvedValue({ data: {} });
+      const initial = api.updateMessageInSession('s1', 'slow', { content: 'first' }, true);
+      await vi.advanceTimersByTimeAsync(250);
+      const writes = Array.from({ length: 200 }, (_, i) =>
+        api.updateMessageInSession('s1', 'slow', { content: String(i) }, true));
+      const card = api.updateMessageInSession('s1', 'slow', { resultType: 'ui', resultData: { a: 1 } });
+      const final = api.updateMessageInSession('s1', 'slow', { content: 'complete' });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(mockPut).toHaveBeenCalledTimes(1);
+      slow.resolve({ data: {} });
+      await Promise.all([initial, card, final, ...writes]);
+      expect(mockPut).toHaveBeenCalledTimes(2);
+      expect(mockPut).toHaveBeenLastCalledWith('/chat-history/messages/slow', {
+        content: 'complete', generation_result: { __chatmode: { resultType: 'ui', resultData: { a: 1 } } },
+      });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('sends the newest pending content after an earlier PUT fails', async () => {
+    const slow = deferred();
+    mockPut.mockReturnValueOnce(slow.promise).mockResolvedValue({ data: {} });
+    const initial = api.updateMessageInSession('s1', 'retry', { content: 'first' }).catch(() => undefined);
+    const next = api.updateMessageInSession('s1', 'retry', { content: 'final' });
+    await flush();
+    slow.reject(new Error('unavailable'));
+    await Promise.all([initial, next]);
+    expect(mockPut).toHaveBeenCalledTimes(2);
+    expect(mockPut).toHaveBeenLastCalledWith('/chat-history/messages/retry', { content: 'final' });
+  });
+
   it('an update PUT waits for the pending create POST of the same message', async () => {
     const create = deferred();
     mockPost.mockReturnValue(create.promise);

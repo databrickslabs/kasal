@@ -38,6 +38,8 @@ class ExecutionLogsRepository:
         timestamp=None,
         group_id: str = None,
         group_email: str = None,
+        *,
+        flush: bool = True,
     ) -> ExecutionLog:
         """
         Create a new execution log entry using injected session.
@@ -69,7 +71,8 @@ class ExecutionLogsRepository:
             self.session.add(log)
 
             # Just flush, don't commit - let the session manager handle commits
-            await self.session.flush()
+            if flush:
+                await self.session.flush()
 
             return log
         except Exception as e:

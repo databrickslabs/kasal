@@ -357,7 +357,7 @@ class TestGetTraceMethods:
         event filter into SQL — never fetch the run's whole trace set to derive
         a tiny state dict in Python."""
         mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = mock_traces
+        mock_result.all.return_value = mock_traces
         mock_session.execute = AsyncMock(return_value=mock_result)
 
         result = await repository.get_state_events_by_job_id(
@@ -371,6 +371,8 @@ class TestGetTraceMethods:
         assert "LOWER" in sql and " IN " in sql  # case-insensitive SQL filter
         assert "JOB_ID" in sql
         assert "ORDER BY" in sql
+        assert "CASE WHEN" in sql
+        assert "SPAN_ID" not in sql
 
     @pytest.mark.asyncio
     async def test_get_all_traces(self, repository, mock_session, mock_traces):

@@ -1,3 +1,4 @@
+import { uniqueBy } from '../../utils/collectionIndexes';
 import React, { useState, useRef, useEffect } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField } from '@mui/material';
 import { FlowService } from '../../api/workflow/FlowService';
@@ -62,12 +63,7 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
         const tabFlowEdges = tab.flowEdges || [];
 
         // Remove duplicate nodes before processing
-        const uniqueNodes = tabFlowNodes.reduce((acc: typeof tabFlowNodes, node) => {
-          if (!acc.some(n => n.id === node.id)) {
-            acc.push(node);
-          }
-          return acc;
-        }, []);
+        const uniqueNodes = uniqueBy(tabFlowNodes, node => node.id);
 
         console.log('SaveFlow: Deduplicated nodes for update:', {
           originalCount: tabFlowNodes.length,
@@ -76,13 +72,7 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
         });
 
         // Remove duplicate edges before saving
-        const uniqueEdges = tabFlowEdges.reduce((acc: Edge[], edge) => {
-          const edgeKey = `${edge.source}-${edge.target}`;
-          if (!acc.some(e => `${e.source}-${e.target}` === edgeKey)) {
-            acc.push(edge);
-          }
-          return acc;
-        }, []);
+        const uniqueEdges = uniqueBy(tabFlowEdges, edge => `${edge.source}-${edge.target}`);
 
         // Filter edges to only include those that reference existing nodes
         const nodeIds = new Set(uniqueNodes.map(n => n.id));
@@ -230,12 +220,7 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
       });
 
       // Remove duplicate nodes before processing
-      const uniqueNodes = nodes.reduce((acc: typeof nodes, node) => {
-        if (!acc.some(n => n.id === node.id)) {
-          acc.push(node);
-        }
-        return acc;
-      }, []);
+      const uniqueNodes = uniqueBy(nodes, node => node.id);
 
       console.log('SaveFlow: Deduplicated nodes:', {
         originalCount: nodes.length,
@@ -244,13 +229,7 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
       });
 
       // Remove duplicate edges before saving
-      const uniqueEdges = edges.reduce((acc: Edge[], edge) => {
-        const edgeKey = `${edge.source}-${edge.target}`;
-        if (!acc.some(e => `${e.source}-${e.target}` === edgeKey)) {
-          acc.push(edge);
-        }
-        return acc;
-      }, []);
+      const uniqueEdges = uniqueBy(edges, edge => `${edge.source}-${edge.target}`);
 
       // Filter edges to only include those that reference existing nodes
       const nodeIds = new Set(uniqueNodes.map(n => n.id));

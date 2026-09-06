@@ -350,6 +350,7 @@ async def logs_writer_loop(shutdown_event: asyncio.Event):
                                         timestamp=timestamp,
                                         group_id=group_id,
                                         group_email=group_email,
+                                        flush=False,
                                     )
                                 except Exception as e:
                                     logger.error(

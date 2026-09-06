@@ -788,7 +788,12 @@ class DatabricksAppExporter(BaseExporter):
         # for the presentation skeleton, and because the exported app streams its
         # surface the same way live chat does. Both are stdlib-only — the
         # portability tests enforce it.
-        for name in ("__init__.py", "compose.py", "stream.py"):
+        for name in (
+            "__init__.py",
+            "compose.py",
+            "stream.py",
+            "incremental_surface.py",
+        ):
             src = SHARED_A2UI_DIR / name
             try:
                 async with aiofiles.open(src, "r", encoding="utf-8") as f:

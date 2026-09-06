@@ -283,6 +283,9 @@ class TestPollForStatusChanges:
                 "src.services.execution.broadcast.get_smart_db_session"
             ) as mock_factory:
                 mock_session = AsyncMock()
+                mock_result = MagicMock()
+                mock_result.all.return_value = []
+                mock_session.execute.return_value = mock_result
 
                 async def _gen():
                     yield mock_session
@@ -309,6 +312,9 @@ class TestPollForStatusChanges:
                 "src.services.execution.broadcast.get_smart_db_session"
             ) as mock_factory:
                 mock_session = AsyncMock()
+                mock_result = MagicMock()
+                mock_result.all.return_value = []
+                mock_session.execute.return_value = mock_result
 
                 async def _gen():
                     yield mock_session
@@ -320,7 +326,9 @@ class TestPollForStatusChanges:
                 ) as mock_check:
                     await service._poll_for_status_changes()
 
-                assert mock_check.call_count == 2
+                # Empty batch results must not trigger per-job full-row reads.
+                assert mock_check.call_count == 0
+                mock_session.execute.assert_awaited_once()
 
 
 class TestCheckAndBroadcastStatus:
@@ -589,3 +597,44 @@ class TestServiceLifecycle:
 
         assert service._running is False
         assert service._task is None
+
+
+@pytest.mark.asyncio
+async def test_poll_batches_initial_and_unchanged_jobs_then_fetches_only_changes():
+    from types import SimpleNamespace
+
+    service = ExecutionBroadcastService()
+    session = AsyncMock()
+    snapshots = [
+        SimpleNamespace(job_id=f"job-{i}", status="running", completed_at=None)
+        for i in range(200)
+    ]
+    repo = AsyncMock()
+    repo.get_execution_statuses_by_job_ids.return_value = snapshots
+
+    async def sessions():
+        yield session
+
+    with (
+        patch.object(
+            service, "_get_active_job_ids", return_value={s.job_id for s in snapshots}
+        ),
+        patch(
+            "src.services.execution.broadcast.get_smart_db_session",
+            side_effect=sessions,
+        ),
+        patch(
+            "src.services.execution.broadcast.ExecutionHistoryRepository",
+            return_value=repo,
+        ),
+        patch.object(
+            service, "_check_and_broadcast_status", new_callable=AsyncMock
+        ) as changed,
+    ):
+        await service._poll_for_status_changes()
+        await service._poll_for_status_changes()
+        changed.assert_not_awaited()
+        snapshots[9].status = "completed"
+        await service._poll_for_status_changes()
+        changed.assert_awaited_once_with(session, "job-9")
+    assert repo.get_execution_statuses_by_job_ids.await_count == 3

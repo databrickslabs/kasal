@@ -97,3 +97,36 @@ def test_the_groups_of_a_closed_stream_are_forgotten():
     assert m._stream_groups["all_groups_a"] == frozenset({"a"})
     m.remove_event_queue("all_groups_a", q)
     assert "all_groups_a" not in m._stream_groups
+
+
+@pytest.mark.asyncio
+async def test_idle_retention_is_bounded_without_evicting_live_subscriptions():
+    m = SSEConnectionManager()
+    m._max_idle_jobs = 2
+    q = m.create_event_queue("live")
+    await m.broadcast_to_job("live", SSEEvent(data="live"), group_id="a")
+    for job in ["old", "recent", "new"]:
+        await m.broadcast_to_job(job, SSEEvent(data=job), group_id="a")
+    assert set(m._replay_buffer) == {"live", "recent", "new"}
+    assert m.job_owner("old") is None
+    m.remove_event_queue("live", q)
+    assert set(m._replay_buffer) == {"live", "new"}
+    assert m.get_replay_events("live", 0)
+
+
+@pytest.mark.asyncio
+async def test_idle_expiry_and_multigroup_index_cleanup():
+    from unittest.mock import patch
+
+    m = SSEConnectionManager()
+    q1 = m.create_event_queue("all_groups_both", ["a", "b"])
+    q2 = m.create_event_queue("all_groups_both", ["a", "b"])
+    m.remove_event_queue("all_groups_both", q1)
+    await m.broadcast_to_job("job", SSEEvent(data="x"), group_id="b")
+    assert q2.get_nowait().data == "x"
+    m.remove_event_queue("all_groups_both", q2)
+    assert m._streams_by_group == {}
+    expired_at = max(m._idle_jobs.values()) + m._idle_ttl_seconds + 1
+    with patch("src.core.sse_manager.time.monotonic", return_value=expired_at):
+        assert m.get_replay_events("job", 0) == []
+        assert m.job_owner("job") is None

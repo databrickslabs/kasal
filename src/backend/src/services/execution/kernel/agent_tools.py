@@ -153,7 +153,7 @@ async def resolve_agent_tools(
     """Create tool instances from ``tool_ids``.
 
     - Crew (``tool_service`` provided): ids are mapped to names via the service,
-      ``result_as_answer`` comes from ``tool_service.get_tool_config_by_name``,
+      ``result_as_answer`` comes from the same batched catalogue lookup,
       and the override comes from ``tool_configs[name]``.
     - Flow (``tool_service`` is None): ids are used directly and the override is
       resolved via ``resolve_tool_override`` (id → title fallback).
@@ -171,12 +171,12 @@ async def resolve_agent_tools(
     try:
         if tool_service is not None:
             from src.services.execution.kernel.tool_helpers import (
-                resolve_tool_ids_to_names,
+                resolve_tools_for_agent,
             )
 
-            names = await resolve_tool_ids_to_names(tool_ids, tool_service)
-            logger.info(f"Resolved tool names for agent {label}: {names}")
-            identifiers = [(n, n) for n in names if n]
+            resolved = await resolve_tools_for_agent(tool_ids, tool_service)
+            resolved_configs = {name: config for name, config in resolved}
+            identifiers = [(name, name) for name, _ in resolved if name]
         else:
             identifiers = [(tid, tid) for tid in tool_ids]
     except Exception as e:
@@ -201,9 +201,7 @@ async def resolve_agent_tools(
             if tool_service is not None and hasattr(
                 tool_service, "get_tool_config_by_name"
             ):
-                tool_config = (
-                    await tool_service.get_tool_config_by_name(config_key) or {}
-                )
+                tool_config = resolved_configs.get(config_key, {})
                 result_as_answer = tool_config.get("result_as_answer", False)
                 override = tool_configs.get(config_key, {})
             else:

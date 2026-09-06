@@ -9,7 +9,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import Text, and_, cast, delete, func, or_, update
+from sqlalchemy import Text, and_, case, cast, delete, func, or_, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -688,7 +688,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         job_id: str,
         event_types: List[str],
         limit: int = 15000,
-    ) -> List[ExecutionTrace]:
+    ) -> list:
         """Fetch ONLY the state-transition events (task/crew lifecycle) for a job.
 
         The crew-node-states / task-states endpoints derive a tiny state dict
@@ -702,12 +702,27 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             limit: Safety cap on returned rows
 
         Returns:
-            Matching ExecutionTrace rows in insertion (id) order
+            Scalar lifecycle rows in insertion (id) order
         """
         try:
             wanted = [e.lower() for e in event_types]
             stmt = (
-                select(ExecutionTrace)
+                select(
+                    ExecutionTrace.id,
+                    ExecutionTrace.event_type,
+                    ExecutionTrace.event_context,
+                    ExecutionTrace.created_at,
+                    ExecutionTrace.trace_metadata,
+                    # Successful lifecycle payloads can contain whole task
+                    # results. Only failed tasks need the legacy error fallback.
+                    case(
+                        (
+                            func.lower(ExecutionTrace.event_type) == "task_failed",
+                            ExecutionTrace.output,
+                        ),
+                        else_=None,
+                    ).label("output"),
+                )
                 .where(
                     ExecutionTrace.job_id == job_id,
                     func.lower(ExecutionTrace.event_type).in_(wanted),
@@ -716,7 +731,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
                 .limit(limit)
             )
             result = await self.session.execute(stmt)
-            return result.scalars().all()
+            return result.all()
         except SQLAlchemyError as e:
             logger.error(
                 f"Database error retrieving state events for job_id {job_id}: {str(e)}"

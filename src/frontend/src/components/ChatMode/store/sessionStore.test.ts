@@ -666,7 +666,7 @@ describe('appendToMessage', () => {
     expect(msgs[1].content).toBe('World');
     expect(db.updateMessageInSession).toHaveBeenCalledWith('sess', 'm1', {
       content: 'Hello there',
-    });
+    }, true);
   });
 
   it('does not persist when there is no active session', () => {

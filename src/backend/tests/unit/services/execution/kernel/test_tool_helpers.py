@@ -128,3 +128,20 @@ class TestResolveToolIdsToNames:
 
             assert result == ["", "", ""]
             assert mock_logger.error.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_agent_metadata_is_batched_and_keeps_order_duplicates_and_missing_ids():
+    from types import SimpleNamespace
+    from src.services.execution.kernel.tool_helpers import resolve_tools_for_agent
+
+    service = AsyncMock()
+    service.get_tools_by_ids.return_value = {
+        1: SimpleNamespace(title="one", config={"result_as_answer": True}),
+        2: SimpleNamespace(title="two", config={}),
+    }
+    result = await resolve_tools_for_agent(["2", 1, "bad", 999, "2"], service)
+    assert result == [("two", {}), ("one", {"result_as_answer": True}), ("two", {})]
+    service.get_tools_by_ids.assert_awaited_once_with([2, 1, 999, 2])
+    service.get_tool_by_id.assert_not_awaited()
+    service.get_tool_config_by_name.assert_not_awaited()

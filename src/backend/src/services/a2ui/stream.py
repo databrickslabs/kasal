@@ -30,7 +30,9 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
+
+from .incremental_surface import IncrementalSurfaceParser, PartialSurface
 
 #: The A2UI dialect version stamped on every streamed message.
 A2UI_VERSION = "v1.0"
@@ -183,19 +185,6 @@ class _Reader:
                     return out
             j += 1
         raise _Incomplete
-
-
-class PartialSurface:
-    """Whatever of a surface has been fully generated so far."""
-
-    __slots__ = ("surface_kind", "root", "components", "data_model", "complete")
-
-    def __init__(self) -> None:
-        self.surface_kind: Optional[str] = None
-        self.root: Optional[str] = None
-        self.components: List[Dict[str, Any]] = []
-        self.data_model: Dict[str, Any] = {}
-        self.complete: bool = False
 
 
 def _strip_preamble(text: str) -> str:
@@ -413,9 +402,9 @@ MessageSink = Callable[[Dict[str, Any]], None]
 class SurfaceStreamer:
     """Turns a growing composer buffer into A2UI messages, emitting each piece once.
 
-    Call ``feed(buffer)`` with the WHOLE text generated so far (not a delta) — the
-    scan is a cheap forward pass and re-reading is what keeps the parser stateless
-    and testable. Anything newly complete since the last call is emitted.
+    The live composer calls ``feed_chunk(delta)`` for incremental parsing.
+    ``feed(buffer)`` retains the stateless whole-buffer interface for callers
+    that already have snapshots. Each instance uses one interface per revision.
     """
 
     #: Emit a full snapshot every N components.
@@ -439,6 +428,8 @@ class SurfaceStreamer:
         self.surface_id = surface_id
         self.revision = revision
         self._sink = sink
+        self._parser = IncrementalSurfaceParser()
+        self._gate_checked = 0
         self._created = False
         self._sent_components = 0
         self._sent_keys: set = set()
@@ -473,10 +464,11 @@ class SurfaceStreamer:
         if part.surface_kind not in GATED_SURFACE_KINDS:
             self._gate_open = True
             return True
-        for comp in part.components:
+        for comp in part.components[self._gate_checked :]:
             if (comp.get("component") or comp.get("type")) in DATA_COMPONENTS:
                 self._gate_open = True
                 return True
+        self._gate_checked = len(part.components)
         return False
 
     def _emit(self, msg: Dict[str, Any]) -> None:
@@ -499,9 +491,18 @@ class SurfaceStreamer:
     # -- the pass ------------------------------------------------------------
     def feed(self, buffer: str) -> int:
         """Emit whatever became complete. Returns the number of messages emitted."""
+        return self._feed_part(scan_partial(buffer))
+
+    def feed_chunk(self, chunk: str) -> int:
+        """Consume only newly received characters on the live composer path."""
+        part = self._parser.feed(chunk)
+        # Before creation all completed keys must remain eligible for delivery.
+        keys = self._parser.new_keys if self._created else None
+        return self._feed_part(part, keys)
+
+    def _feed_part(self, part: PartialSurface, keys=None) -> int:
         before = len(self.messages)
         try:
-            part = scan_partial(buffer)
             # Check the gate FIRST so a surface that is allowed to stream never
             # spends a round in the hold buffer.
             self._gate_allows(part)
@@ -523,7 +524,8 @@ class SurfaceStreamer:
             if new:
                 self._sent_components = len(part.components)
                 self._emit(update_components_msg(self.surface_id, new))
-            for key, value in part.data_model.items():
+            for key in part.data_model if keys is None else keys:
+                value = part.data_model[key]
                 if key not in self._sent_keys:
                     self._sent_keys.add(key)
                     self._emit(

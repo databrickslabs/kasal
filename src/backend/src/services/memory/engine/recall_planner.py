@@ -192,7 +192,7 @@ def score_of(record: MemoryRecord) -> float | None:
 
 def merge_hits(into: list[MemoryRecord], new: list[MemoryRecord]) -> list[MemoryRecord]:
     """Union by id, keeping the copy with the higher score."""
-    by_id: dict[str, MemoryRecord] = {}
+    by_id: dict[str, int] = {}
     merged: list[MemoryRecord] = []
     for record in [*into, *new]:
         rid = getattr(record, "id", None)
@@ -201,11 +201,10 @@ def merge_hits(into: list[MemoryRecord], new: list[MemoryRecord]) -> list[Memory
             continue
         current = by_id.get(rid)
         if current is None:
-            by_id[rid] = record
+            by_id[rid] = len(merged)
             merged.append(record)
-        elif (score_of(record) or 0.0) > (score_of(current) or 0.0):
-            merged[merged.index(current)] = record
-            by_id[rid] = record
+        elif (score_of(record) or 0.0) > (score_of(merged[current]) or 0.0):
+            merged[current] = record
     return merged
 
 

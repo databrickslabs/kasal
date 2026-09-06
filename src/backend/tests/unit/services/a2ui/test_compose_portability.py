@@ -20,7 +20,7 @@ _A2UI = pathlib.Path(__file__).parents[4] / "src" / "services" / "a2ui"
 COMPOSER = _A2UI / "compose.py"
 #: ``stream.py`` is vendored alongside it (compose imports it for the skeleton),
 #: so it lives under exactly the same constraint.
-VENDORED = (COMPOSER, _A2UI / "stream.py")
+VENDORED = (COMPOSER, _A2UI / "stream.py", _A2UI / "incremental_surface.py")
 
 #: Everything the composer is allowed to import. Standard library only — the LLM
 #: is injected by the caller as an ``llm_call`` callable, never imported.

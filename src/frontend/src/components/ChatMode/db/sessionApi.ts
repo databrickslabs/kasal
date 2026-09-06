@@ -15,6 +15,7 @@
 
 import { ChatMessage, ChatSession } from '../types/chat';
 import { getClient } from '../api/client';
+import { createMessageUpdateQueue } from './messageUpdates';
 import {
   initDb as initLocalDb,
   listSessions as listLocalSessions,
@@ -264,10 +265,17 @@ export async function addMessageToSession(
   });
 }
 
+const messageUpdates = createMessageUpdateQueue((msgId, payload) =>
+  chainMessageWrite(msgId, async () => {
+    await getClient().put(`${BASE}/messages/${msgId}`, payload);
+  }),
+);
+
 export async function updateMessageInSession(
   _sessionId: string,
   msgId: string,
   updates: Partial<ChatMessage>,
+  defer = false,
 ): Promise<void> {
   const payload: Record<string, unknown> = {};
   // `!== undefined`, not truthiness: CLEARING content is a real update. The
@@ -281,10 +289,8 @@ export async function updateMessageInSession(
   const extras = packExtras(updates);
   if (extras) payload.generation_result = extras;
   // isStreaming flips and other transient-only updates need no round trip
-  if (Object.keys(payload).length === 0) return;
-  await chainMessageWrite(msgId, async () => {
-    await getClient().put(`${BASE}/messages/${msgId}`, payload);
-  });
+  if (Object.keys(payload).length === 0) return messageUpdates.flush(msgId);
+  await messageUpdates.enqueue(msgId, payload, defer);
 }
 
 /** Clearing keeps the session but drops its messages: delete + recreate id. */

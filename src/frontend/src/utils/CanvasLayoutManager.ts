@@ -1,3 +1,4 @@
+import { tasksByAgent } from './canvasGraphIndexes';
 import { Node } from 'reactflow';
 
 export interface CanvasArea {
@@ -1101,21 +1102,12 @@ export class CanvasLayoutManager {
     const flowDims = CanvasLayoutManager.NODE_DIMENSIONS.crewNode;
 
     const orientation = this.uiState.layoutOrientation || 'horizontal';
+    const agentTaskMap = tasksByAgent(taskNodes, edges);
 
     if (orientation === 'horizontal') {
       // Horizontal layout: agents left column, tasks right column (side by side)
       // Each agent aligns with its first connected task
 
-      // Build map of agent -> tasks from edges
-      const agentTaskMap = new Map<string, string[]>();
-      edges.forEach(edge => {
-        const isAgentToTask = edge.source?.startsWith('agent-') && edge.target?.startsWith('task-');
-        if (isAgentToTask) {
-          const tasks = agentTaskMap.get(edge.source) || [];
-          tasks.push(edge.target);
-          agentTaskMap.set(edge.source, tasks);
-        }
-      });
 
       const taskSpacing = Math.max(this.minNodeSpacing, 80);
       const taskStartX = availableArea.x + agentDims.width + this.minNodeSpacing * 2;
@@ -1125,8 +1117,7 @@ export class CanvasLayoutManager {
 
       // Process each agent and its tasks
       agentNodes.forEach((agentNode) => {
-        const connectedTaskIds = agentTaskMap.get(agentNode.id) || [];
-        const connectedTasks = taskNodes.filter(t => connectedTaskIds.includes(t.id));
+        const connectedTasks = agentTaskMap.get(agentNode.id) || [];
 
         if (connectedTasks.length > 0) {
           // Calculate the starting Y position for tasks
@@ -1188,7 +1179,7 @@ export class CanvasLayoutManager {
       });
 
       // Add any unconnected tasks at the end
-      const connectedTaskIds = new Set(Array.from(agentTaskMap.values()).flat());
+      const connectedTaskIds = new Set(Array.from(agentTaskMap.values()).flat().map(task => task.id));
       const unconnectedTasks = taskNodes.filter(t => !connectedTaskIds.has(t.id));
       unconnectedTasks.forEach((taskNode) => {
         reorganizedNodes.push({
@@ -1207,17 +1198,6 @@ export class CanvasLayoutManager {
       );
     } else {
       // Vertical layout: agents above their connected tasks, centered
-      // Build map of agent -> tasks from edges
-      const agentTaskMap = new Map<string, string[]>();
-
-      edges.forEach(edge => {
-        const isAgentToTask = edge.source?.startsWith('agent-') && edge.target?.startsWith('task-');
-        if (isAgentToTask) {
-          const tasks = agentTaskMap.get(edge.source) || [];
-          tasks.push(edge.target);
-          agentTaskMap.set(edge.source, tasks);
-        }
-      });
 
       const taskSpacing = Math.max(this.minNodeSpacing, 100);
       const agentRowY = availableArea.y;
@@ -1228,8 +1208,7 @@ export class CanvasLayoutManager {
 
       // Process each agent and its tasks
       agentNodes.forEach((agentNode) => {
-        const connectedTaskIds = agentTaskMap.get(agentNode.id) || [];
-        const connectedTasks = taskNodes.filter(t => connectedTaskIds.includes(t.id));
+        const connectedTasks = agentTaskMap.get(agentNode.id) || [];
 
         // Position this agent's tasks (left to right)
         const agentTaskStartX = currentTaskX;
@@ -1264,7 +1243,7 @@ export class CanvasLayoutManager {
       });
 
       // Add any unconnected tasks at the end
-      const connectedTaskIds = new Set(Array.from(agentTaskMap.values()).flat());
+      const connectedTaskIds = new Set(Array.from(agentTaskMap.values()).flat().map(task => task.id));
       const unconnectedTasks = taskNodes.filter(t => !connectedTaskIds.has(t.id));
       unconnectedTasks.forEach((taskNode) => {
         reorganizedNodes.push({
@@ -1334,8 +1313,8 @@ export class CanvasLayoutManager {
         queue.push(id);
       }
     });
-    while (queue.length) {
-      const n = queue.shift()!;
+    for (let head = 0; head < queue.length; head++) {
+      const n = queue[head];
       const nd = depth.get(n) || 0;
       for (const c of children.get(n) || []) {
         depth.set(c, Math.max(depth.get(c) ?? 0, nd + 1));

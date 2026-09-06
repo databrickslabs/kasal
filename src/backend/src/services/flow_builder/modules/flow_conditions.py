@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections import deque
 from collections.abc import Mapping
 from typing import Any, Dict, Final, Iterable, List, Tuple
 
@@ -342,12 +343,12 @@ def _walk(snapshot: Mapping) -> Iterable[Tuple[str, Any, int]]:
     Yields ``(path, value, depth)``. Cycle-safe by object identity, and bounded
     on both depth and node count.
     """
-    queue: List[Tuple[str, Any, int]] = [("", snapshot, 0)]
+    queue = deque([("", snapshot, 0)])
     seen = {id(snapshot)}
     visited = 0
 
     while queue and visited < _MAX_NODES:
-        prefix, container, depth = queue.pop(0)
+        prefix, container, depth = queue.popleft()
         if depth > _MAX_DEPTH:
             continue
 

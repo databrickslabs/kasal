@@ -437,12 +437,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       const updated = state.messages.map((m) =>
         m.id === id ? { ...m, content: m.content + additionalContent } : m,
       );
-      // Persist full content
+      // Render every frame, but persist only the newest pending snapshot.
       const sessionId = get().currentSessionId;
       if (sessionId) {
         const msg = updated.find((m) => m.id === id);
         if (msg) {
-          updateMessageInSession(sessionId, id, { content: msg.content });
+          void updateMessageInSession(sessionId, id, { content: msg.content }, true)
+            .catch(() => undefined);
         }
       }
       return { messages: updated };

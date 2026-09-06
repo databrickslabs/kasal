@@ -558,3 +558,13 @@ class TestDeleteOlderThan:
         await repo.delete_older_than(datetime(2025, 6, 1))
 
         mock_session.flush.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_buffered_logs_do_not_flush_each_row(repo, mock_session):
+    for i in range(100):
+        await repo.create_log("job", str(i), group_id="group", flush=False)
+    assert mock_session.add.call_count == 100
+    mock_session.flush.assert_not_awaited()
+    mock_session.commit.assert_not_awaited()
+    assert mock_session.add.call_args.args[0].group_id == "group"

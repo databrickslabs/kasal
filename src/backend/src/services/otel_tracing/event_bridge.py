@@ -13,7 +13,7 @@ the rows that carried them (see the migration that rewrites
 
 import logging
 import threading
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from typing import Any, Optional
 
 from opentelemetry.trace import (
@@ -486,7 +486,7 @@ class OTelEventBridge:
         # completion to the "current" task would misfile it (and hide the
         # originating task's write). We FIFO-correlate each ``save_completed``
         # back to the task that was active at its ``save_started``.
-        self._pending_save_task_ids: list = []
+        self._pending_save_task_ids: deque = deque()
         # When the agent invokes the ``save_to_memory`` wrapper tool, we
         # capture the args in-flight and hand them to the next
         # ``MemorySaveCompletedEvent`` so the trace shows *what* was written
@@ -675,7 +675,7 @@ class OTelEventBridge:
                 elif event_type in ("memory_write", "memory_write_failed"):
                     self._memory_save_threads.discard(threading.get_ident())
                     if self._pending_save_task_ids:
-                        started_task_id = self._pending_save_task_ids.pop(0)
+                        started_task_id = self._pending_save_task_ids.popleft()
                         if started_task_id:
                             event_task_id = started_task_id
 

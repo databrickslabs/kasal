@@ -5,7 +5,7 @@ Resolves measure dependencies and builds DAX formulas with proper nesting
 
 import re
 from collections import defaultdict, deque
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Set
 
 from ...base.models import KPI, KPIDefinition
 
@@ -113,6 +113,7 @@ class DependencyResolver:
         """
         # Kahn's algorithm for topological sorting
         in_degree = defaultdict(int)
+        dependents = defaultdict(list)
 
         # Calculate in-degrees
         for measure in self.measure_registry:
@@ -121,6 +122,7 @@ class DependencyResolver:
         for measure, deps in self.dependency_graph.items():
             for dep in deps:
                 in_degree[measure] += 1
+                dependents[dep].append(measure)
 
         # Start with measures that have no dependencies
         queue = deque([measure for measure, degree in in_degree.items() if degree == 0])
@@ -130,12 +132,12 @@ class DependencyResolver:
             measure = queue.popleft()
             result.append(measure)
 
-            # Reduce in-degree for dependent measures
-            for dependent, deps in self.dependency_graph.items():
-                if measure in deps:
-                    in_degree[dependent] -= 1
-                    if in_degree[dependent] == 0:
-                        queue.append(dependent)
+            # Registration deduplicates dependencies. Lists retain graph order
+            # so independent measures keep the same deterministic queue order.
+            for dependent in dependents.get(measure, []):
+                in_degree[dependent] -= 1
+                if in_degree[dependent] == 0:
+                    queue.append(dependent)
 
         # Check for circular dependencies
         if len(result) != len(self.measure_registry):

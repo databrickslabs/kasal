@@ -17,21 +17,14 @@ export const useCanvasHandlers = ({
   const handleEdgesChange = useCallback((changes: EdgeChange[]) => {
     
     // Filter out duplicate edge additions
-    const processedChanges = changes.filter((change, index) => {
-      if (change.type === 'add') {
-        // Check if this edge is already being added in an earlier change
-        const isDuplicate = changes.slice(0, index).some(
-          prevChange => prevChange.type === 'add' && 
-          prevChange.item?.id === change.item?.id
-        );
-        
-        if (isDuplicate) {
-          return false;
-        }
-      }
+    const addedIds = new Set<string>();
+    const processedChanges = changes.filter(change => {
+      if (change.type !== 'add') return true;
+      if (addedIds.has(change.item.id)) return false;
+      addedIds.add(change.item.id);
       return true;
     });
-    
+
     onEdgesChange(processedChanges);
   }, [onEdgesChange]);
 

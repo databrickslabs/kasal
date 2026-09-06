@@ -263,6 +263,20 @@ class ExecutionHistoryRepository:
         result = await session.execute(stmt)
         return result.scalars().first()
 
+    async def get_execution_statuses_by_job_ids(self, job_ids: List[str]):
+        """Scalar status snapshots for the internal poller; bounded IN clauses."""
+        rows = []
+        for start in range(0, len(job_ids), 500):
+            result = await self.session.execute(
+                select(
+                    ExecutionHistory.job_id,
+                    ExecutionHistory.status,
+                    ExecutionHistory.completed_at,
+                ).where(ExecutionHistory.job_id.in_(job_ids[start : start + 500]))
+            )
+            rows.extend(result.all())
+        return rows
+
     async def get_execution_summary_by_job_id(
         self, job_id: str, group_ids: List[str] = None
     ):

@@ -23,6 +23,17 @@ class ToolRepository(BaseRepository[Tool]):
         """
         super().__init__(Tool, session)
 
+    async def find_by_ids(self, tool_ids: List[int]) -> List[Tool]:
+        """Resolve an execution's already-selected catalogue IDs in batches."""
+        ids = list(dict.fromkeys(tool_ids))
+        tools = []
+        for start in range(0, len(ids), 500):
+            result = await self.session.execute(
+                select(self.model).where(self.model.id.in_(ids[start : start + 500]))
+            )
+            tools.extend(result.scalars().all())
+        return tools
+
     async def find_by_title(self, title: str) -> Optional[Tool]:
         """
         Find a tool by title.

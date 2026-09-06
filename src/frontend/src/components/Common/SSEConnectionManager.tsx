@@ -8,11 +8,12 @@
  * when SSE fails to deliver data (e.g. Databricks Apps HTTP/2 proxy).
  */
 
-import { useEffect, memo, useCallback } from 'react';
+import { useEffect, memo, useCallback, useMemo } from 'react';
 import { toast } from 'react-hot-toast';
 import { useRunStatusStore } from '../../store/runStatus';
 import { useGlobalExecutionSSE } from '../../hooks/global/useSSE';
 import { useTracePolling } from '../../hooks/global/useTracePolling';
+import { createTraceBatcher } from '../../utils/traceBatcher';
 
 /**
  * Generate user-friendly error message based on error type
@@ -52,7 +53,11 @@ const GlobalSSEConnection: React.FC = () => {
   const handleSSEUpdate = useRunStatusStore(state => state.handleSSEUpdate);
   const setSSEConnected = useRunStatusStore(state => state.setSSEConnected);
   const setSSEError = useRunStatusStore(state => state.setSSEError);
-  const addTrace = useRunStatusStore(state => state.addTrace);
+  const addTraces = useRunStatusStore(state => state.addTraces);
+  const traceBatcher = useMemo(() => createTraceBatcher(
+    addTraces, () => localStorage.getItem('selectedGroupId'),
+  ), [addTraces]);
+  useEffect(() => () => traceBatcher.flush(), [traceBatcher]);
 
   // CRITICAL: Wrap callbacks in useCallback to provide stable references
   const onMessage = useCallback((eventData: any) => {
@@ -70,6 +75,7 @@ const GlobalSSEConnection: React.FC = () => {
       }
 
       // Feed execution status updates to the store
+      traceBatcher.flush();
       handleSSEUpdate(eventData.data);
     } else if (eventData.event === 'trace' && eventData.data) {
       // CRITICAL: Add trace events to the Zustand store for ShowTraceTimeline
@@ -88,7 +94,7 @@ const GlobalSSEConnection: React.FC = () => {
           return;
         }
 
-        addTrace(jobId, eventData.data);
+        traceBatcher.add(jobId, eventData.data);
       }
     } else if (eventData.event === 'hitl_request' && eventData.data) {
       // Dispatch HITL request event
@@ -99,7 +105,7 @@ const GlobalSSEConnection: React.FC = () => {
         }));
       }
     }
-  }, [handleSSEUpdate, addTrace]);
+  }, [handleSSEUpdate, traceBatcher]);
 
   const onConnect = useCallback(() => {
     console.log('[GlobalSSE] Connected to global execution stream');
@@ -110,8 +116,9 @@ const GlobalSSEConnection: React.FC = () => {
 
   const onDisconnect = useCallback(() => {
     console.log('[GlobalSSE] Disconnected from global execution stream');
+    traceBatcher.flush();
     setSSEConnected(false);
-  }, [setSSEConnected]);
+  }, [setSSEConnected, traceBatcher]);
 
   const onError = useCallback((error: any) => {
     if (error.isFatal) {

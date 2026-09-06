@@ -270,6 +270,24 @@ class TestDependencyResolver:
 
     # ========== get_dependency_order Tests ==========
 
+    def test_dependency_order_preserves_ready_queue_order(self, resolver):
+        names = ["leaf_b", "leaf_a", "child_a", "child_b", "joined"]
+        resolver.measure_registry = dict.fromkeys(names)
+        resolver.dependency_graph = {
+            "leaf_b": [],
+            "leaf_a": [],
+            "child_a": ["leaf_a"],
+            "child_b": ["leaf_b"],
+            "joined": ["child_a", "child_b"],
+        }
+        assert resolver.get_dependency_order() == [
+            "leaf_b",
+            "leaf_a",
+            "child_b",
+            "child_a",
+            "joined",
+        ]
+
     def test_get_dependency_order_simple(self, resolver, simple_definition):
         """Test dependency ordering for simple definition"""
         resolver.register_measures(simple_definition)
@@ -401,7 +419,7 @@ class TestDependencyResolver:
         # First call should cache
         try:
             resolver.resolve_formula_inline("sales")
-        except:
+        except Exception:
             pass  # May fail due to DAX generation, but cache should be set
 
         # Check cache was used

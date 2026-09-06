@@ -9,7 +9,8 @@ import asyncio
 import json
 import os
 import threading
-from collections import deque
+import time
+from collections import OrderedDict, deque
 from datetime import datetime
 from typing import (
     Any,
@@ -152,14 +153,56 @@ class SSEConnectionManager:
         self._job_owner: Dict[str, str] = {}
         # stream key → the groups a "stream-all" subscription may see
         self._stream_groups: Dict[str, FrozenSet[str]] = {}
+        self._streams_by_group: Dict[str, Set[str]] = {}
+        # Live subscriptions are retained. Idle jobs keep a reconnect window,
+        # capped across jobs as well as within each job's event deque.
+        self._idle_jobs: OrderedDict[str, float] = OrderedDict()
+        self._max_idle_jobs = 1000
+        self._idle_ttl_seconds = 3600.0
+
+    def _touch_job(self, job_id: str) -> None:
+        now = time.monotonic()
+        self._idle_jobs.pop(job_id, None)
+        if job_id not in self.job_queues:
+            self._idle_jobs[job_id] = now
+        self._prune_idle_jobs(now)
+
+    def _prune_idle_jobs(self, now: Optional[float] = None) -> None:
+        if now is None:
+            now = time.monotonic()
+        while self._idle_jobs:
+            job_id, touched = next(iter(self._idle_jobs.items()))
+            if (
+                len(self._idle_jobs) <= self._max_idle_jobs
+                and now - touched < self._idle_ttl_seconds
+            ):
+                break
+            self._idle_jobs.popitem(last=False)
+            self._replay_buffer.pop(job_id, None)
+            self._job_owner.pop(job_id, None)
+
+    def _set_stream_groups(self, job_id: str, groups: FrozenSet[str]) -> None:
+        for group in self._stream_groups.get(job_id, ()):
+            streams = self._streams_by_group.get(group)
+            if streams is None:
+                continue
+            streams.discard(job_id)
+            if not streams:
+                del self._streams_by_group[group]
+        self._stream_groups[job_id] = groups
+        if job_id.startswith("all_groups_"):
+            for group in groups:
+                self._streams_by_group.setdefault(group, set()).add(job_id)
 
     def register_job_owner(self, job_id: str, group_id: Optional[str]) -> None:
         """Record which workspace a job or generation belongs to."""
         if job_id and group_id:
             self._job_owner[job_id] = str(group_id)
+            self._touch_job(job_id)
 
     def job_owner(self, job_id: str) -> Optional[str]:
         """The workspace a job belongs to, when known."""
+        self._prune_idle_jobs()
         return self._job_owner.get(job_id)
 
     def _stream_may_see(self, stream_key: str, owner: Optional[str]) -> bool:
@@ -185,7 +228,8 @@ class SSEConnectionManager:
         if group_ids is not None:
             # What this "stream-all" subscription may see. Without it the
             # stream sees nothing but its own connection events.
-            self._stream_groups[job_id] = frozenset(str(g) for g in group_ids if g)
+            self._set_stream_groups(job_id, frozenset(str(g) for g in group_ids if g))
+        self._touch_job(job_id)
         self.job_queues[job_id].add(queue)
         self.connection_count += 1
 
@@ -210,7 +254,9 @@ class SSEConnectionManager:
             # Clean up empty job subscriptions
             if not self.job_queues[job_id]:
                 del self.job_queues[job_id]
+                self._set_stream_groups(job_id, frozenset())
                 self._stream_groups.pop(job_id, None)
+                self._touch_job(job_id)
 
         if self.connection_count > 0:
             self.connection_count -= 1
@@ -241,6 +287,7 @@ class SSEConnectionManager:
         sent_count = 0
         if group_id:
             self.register_job_owner(job_id, group_id)
+        self._touch_job(job_id)
         owner = self._job_owner.get(job_id)
 
         # Assign a sequential event ID for replay-on-reconnect
@@ -275,12 +322,8 @@ class SSEConnectionManager:
 
         # Also broadcast to the "stream-all" subscribers of the workspace that
         # owns the job — cross-browser sync within a tenant, never across.
-        all_stream_keys = [
-            key
-            for key in self.job_queues.keys()
-            if key.startswith("all_groups_") and self._stream_may_see(key, owner)
-        ]
-        if owner is None and any(k.startswith("all_groups_") for k in self.job_queues):
+        all_stream_keys = self._streams_by_group.get(owner, ())
+        if owner is None and self._streams_by_group:
             logger.debug(
                 f"[SSE_STREAM] job {job_id} has no registered owner; "
                 "not fanned out to stream-all subscribers"
@@ -343,6 +386,7 @@ class SSEConnectionManager:
         search the global replay buffer; for per-job streams we search the
         job-specific buffer.
         """
+        self._prune_idle_jobs()
         if job_id.startswith("all_groups_"):
             return [
                 evt
@@ -370,6 +414,7 @@ class SSEConnectionManager:
         event (or any event whose ``status`` is completed/failed/stopped), or
         ``None`` if the generation is still in flight / unknown.
         """
+        self._prune_idle_jobs()
         if group_ids is not None:
             # The caller must be in the workspace the generation belongs to;
             # an unknown owner reads as still pending, never as someone else's.

@@ -108,6 +108,8 @@ class ExecutionBroadcastService:
         active_jobs = self._get_active_job_ids()
 
         if not active_jobs:
+            self._last_statuses.clear()
+            self._last_completed_at.clear()
             return
 
         # Router-aware, not the raw factory. `executionhistory` lives in Lakebase
@@ -127,9 +129,22 @@ class ExecutionBroadcastService:
                     f"[ExecutionBroadcastService] Stopped tracking job {job_id}"
                 )
 
-            # Check for status changes
-            for job_id in active_jobs:
-                await self._check_and_broadcast_status(session, job_id)
+            repo = ExecutionHistoryRepository(session)
+            snapshots = await repo.get_execution_statuses_by_job_ids(list(active_jobs))
+            for snapshot in snapshots:
+                job_id = snapshot.job_id
+                completed_at = (
+                    snapshot.completed_at.isoformat() if snapshot.completed_at else None
+                )
+                if job_id not in self._last_statuses:
+                    self._last_statuses[job_id] = snapshot.status
+                    self._last_completed_at[job_id] = completed_at
+                elif (
+                    self._last_statuses[job_id] != snapshot.status
+                    or self._last_completed_at.get(job_id) != completed_at
+                ):
+                    # Fetch large result JSON only when there is something to send.
+                    await self._check_and_broadcast_status(session, job_id)
 
     async def _check_and_broadcast_status(self, session: AsyncSession, job_id: str):
         """

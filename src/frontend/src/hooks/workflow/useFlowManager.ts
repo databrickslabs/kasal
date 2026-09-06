@@ -1,3 +1,4 @@
+import { firstBy } from '../../utils/collectionIndexes';
 import { useCallback, useEffect, useMemo } from 'react';
 import {
   Edge,
@@ -65,12 +66,12 @@ export const useFlowManager = ({ showErrorMessage }: UseFlowManagerProps) => {
       const newDraggedNodeIds = new Set(draggedNodeIds);
       const newManuallyPositionedNodes = new Set(manuallyPositionedNodes);
       
+      const positionsById = firstBy(positionChanges, change => change.id);
+
       // Update position directly for dragged nodes
       setNodes(nodes.map(node => {
         // Find if we have a position change for this node
-        const posChange = positionChanges.find(
-          change => change.id === node.id
-        );
+        const posChange = positionsById.get(node.id);
         
         if (posChange) {
           // Update dragging state for this node

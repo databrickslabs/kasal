@@ -186,6 +186,23 @@ class BaseTreeParsingGenerator(ABC, Generic[TMeasure]):
         """
         self.dependency_resolver.register_measures(definition)
 
+        # Compute shared subgraphs once for this definition. The report has
+        # historically tolerated cycles, so keep its path-sensitive fallback
+        # when there is no topological order.
+        depths = {}
+        try:
+            order = self.dependency_resolver.get_dependency_order()
+        except ValueError:
+            order = []
+        for name in order:
+            depths[name] = max(
+                (
+                    depths[dep] + 1
+                    for dep in self.dependency_resolver.dependency_graph.get(name, [])
+                ),
+                default=0,
+            )
+
         report = {
             "measures": {},
             "summary": {
@@ -201,7 +218,11 @@ class BaseTreeParsingGenerator(ABC, Generic[TMeasure]):
                 dependencies = self.dependency_resolver.get_all_dependencies(
                     kpi.technical_name
                 )
-                depth = self._calculate_dependency_depth(kpi.technical_name)
+                depth = (
+                    depths[kpi.technical_name]
+                    if kpi.technical_name in depths
+                    else self._calculate_dependency_depth(kpi.technical_name)
+                )
 
                 measure_info = {
                     "name": kpi.technical_name,

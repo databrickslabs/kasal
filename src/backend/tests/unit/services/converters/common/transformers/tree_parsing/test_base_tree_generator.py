@@ -37,6 +37,45 @@ class TestBaseTreeParsingGenerator:
         """Create MockTreeGenerator instance for testing"""
         return MockTreeGenerator()
 
+    def test_complexity_shared_graph_uses_depth_table(self, generator, monkeypatch):
+        kpis = [KPI(technical_name="base_metric", description="Base", formula="1")]
+        previous = ["base_metric"]
+        for level in range(30):
+            names = [f"metric_{level}_a", f"metric_{level}_b"]
+            kpis.extend(
+                KPI(technical_name=name, description=name, formula=" + ".join(previous))
+                for name in names
+            )
+            previous = names
+        definition = KPIDefinition(
+            technical_name="shared", description="Shared DAG", kpis=kpis
+        )
+
+        def no_recursive_walk(*args):
+            pytest.fail("An acyclic report must not expand shared dependency paths")
+
+        monkeypatch.setattr(generator, "_calculate_dependency_depth", no_recursive_walk)
+        report = generator.get_measure_complexity_report(definition)
+        assert report["summary"]["max_dependency_depth"] == 30
+        assert report["measures"]["metric_29_a"]["dependency_depth"] == 30
+        # A second definition on the same instance must not inherit old depths.
+        kpis[-2].formula = "1"
+        report = generator.get_measure_complexity_report(definition)
+        assert report["measures"]["metric_29_a"]["dependency_depth"] == 0
+
+    def test_cyclic_report_preserves_depth_fallback(
+        self, generator, circular_definition
+    ):
+        generator.dependency_resolver.register_measures(circular_definition)
+        expected = {
+            k.technical_name: generator._calculate_dependency_depth(k.technical_name)
+            for k in circular_definition.kpis
+        }
+        report = generator.get_measure_complexity_report(circular_definition)
+        assert {
+            name: item["dependency_depth"] for name, item in report["measures"].items()
+        } == expected
+
     @pytest.fixture
     def simple_definition(self):
         """Simple KPI definition with no dependencies"""

@@ -9,6 +9,8 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import { SSEConnectionManager } from './SSEConnectionManager';
+import { createTraceBatcher } from '../../utils/traceBatcher';
+import type { Trace } from '../../types/execution/trace';
 
 // Must use vi.hoisted for variables referenced in vi.mock
 const mocks = vi.hoisted(() => ({
@@ -36,6 +38,49 @@ vi.mock('react-hot-toast', () => ({
   toast: mocks.mockToast,
 }));
 
+describe('SSE trace batches', () => {
+  const trace = (id: number): Trace => ({
+    id, group_id: 'g1', event_source: 'agent', event_context: 'task',
+    event_type: 'task_started', output: null, created_at: String(id),
+  });
+
+  it('coalesces bursts by job and flushes the trailing batch', async () => {
+    vi.useFakeTimers();
+    try {
+      const write = vi.fn();
+      const batcher = createTraceBatcher(write, () => 'g1');
+      batcher.add('a', trace(1));
+      batcher.add('b', trace(2));
+      batcher.add('a', trace(3));
+      expect(write).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(50);
+      expect(write.mock.calls).toEqual([['a', [trace(1), trace(3)]], ['b', [trace(2)]]]);
+      batcher.add('a', trace(4));
+      batcher.flush(); // terminal event, disconnect, or unmount
+      await vi.advanceTimersByTimeAsync(100);
+      expect(write).toHaveBeenCalledTimes(3);
+      expect(write).toHaveBeenLastCalledWith('a', [trace(4)]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('drops stale workspace batches and rejects mismatched incoming traces', async () => {
+    vi.useFakeTimers();
+    try {
+      let group = 'g1';
+      const write = vi.fn();
+      const batcher = createTraceBatcher(write, () => group);
+      batcher.add('a', trace(1));
+      group = 'g2';
+      batcher.add('a', trace(2));
+      await vi.advanceTimersByTimeAsync(50);
+      expect(write).not.toHaveBeenCalled();
+      batcher.add('b', { ...trace(3), group_id: 'g2' });
+      batcher.flush();
+      expect(write).toHaveBeenCalledWith('b', [expect.objectContaining({ id: 3, group_id: 'g2' })]);
+    } finally { vi.useRealTimers(); }
+  });
+});
+
 describe('SSEConnectionManager', () => {
   const defaultStoreState = {
     activeRuns: {},
@@ -43,7 +88,7 @@ describe('SSEConnectionManager', () => {
     handleSSEUpdate: vi.fn(),
     setSSEConnected: vi.fn(),
     setSSEError: vi.fn(),
-    addTrace: vi.fn(),
+    addTraces: vi.fn(),
   };
 
   beforeEach(() => {
@@ -142,11 +187,11 @@ describe('SSEConnectionManager', () => {
       });
     });
 
-    it('handles trace events from global stream', () => {
-      const addTrace = vi.fn();
+    it('handles trace events from global stream', async () => {
+      const addTraces = vi.fn();
 
       mocks.mockUseRunStatusStore.mockImplementation((selector: (state: any) => any) => {
-        const state = { ...defaultStoreState, addTrace };
+        const state = { ...defaultStoreState, addTraces };
         if (typeof selector === 'function') {
           return selector(state);
         }
@@ -168,10 +213,10 @@ describe('SSEConnectionManager', () => {
         data: { job_id: 'job-123', id: 1, output: 'Test output', group_id: 'test-group-id' },
       });
 
-      expect(addTrace).toHaveBeenCalledWith('job-123', expect.objectContaining({
+      await waitFor(() => expect(addTraces).toHaveBeenCalledWith('job-123', [expect.objectContaining({
         id: 1,
         output: 'Test output',
-      }));
+      })]));
     });
 
     it('dispatches window event for HITL requests', () => {
@@ -292,11 +337,11 @@ describe('SSEConnectionManager', () => {
     });
 
     it('dispatches traceUpdate window event even for different group IDs', () => {
-      const addTrace = vi.fn();
+      const addTraces = vi.fn();
       const dispatchEventSpy = vi.spyOn(window, 'dispatchEvent').mockImplementation(() => true);
 
       mocks.mockUseRunStatusStore.mockImplementation((selector: (state: any) => any) => {
-        const state = { ...defaultStoreState, addTrace };
+        const state = { ...defaultStoreState, addTraces };
         if (typeof selector === 'function') {
           return selector(state);
         }
@@ -321,8 +366,8 @@ describe('SSEConnectionManager', () => {
         expect.objectContaining({ type: 'traceUpdate' })
       );
 
-      // But addTrace should NOT be called (store is group-filtered)
-      expect(addTrace).not.toHaveBeenCalled();
+      // But addTraces should NOT be called (store is group-filtered)
+      expect(addTraces).not.toHaveBeenCalled();
     });
 
     it('processes events from matching group ID', () => {
@@ -366,7 +411,7 @@ describe('getErrorMessage helper', () => {
           handleSSEUpdate: vi.fn(),
           setSSEConnected: vi.fn(),
           setSSEError: vi.fn(),
-          addTrace: vi.fn(),
+          addTraces: vi.fn(),
         },
       };
       if (typeof selector === 'function') {

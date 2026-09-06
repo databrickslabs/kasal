@@ -311,12 +311,7 @@ class _ComposeStreamBridge(ComposeStream):
     before. Nothing in this class may raise into the composer.
     """
 
-    #: Rescan cadence, seconds. The parser re-reads the whole buffer each pass
-    #: (that is what keeps it stateless and testable), so pacing it stops a long
-    #: deck from turning into quadratic work — at ~8 passes/second the cost is
-    #: invisible and the reader cannot perceive the difference. Configurable
-    #: because a test emitting a whole deck in microseconds would otherwise see
-    #: exactly one batch and prove nothing about incremental delivery.
+    #: Delta delivery cadence; parsing consumes each character once.
     @staticmethod
     def _interval() -> float:
         try:
@@ -337,6 +332,7 @@ class _ComposeStreamBridge(ComposeStream):
         self._last_feed = 0.0
         self.sent = 0
         self.chunks = 0
+        self._characters = 0
 
     # -- delivery ----------------------------------------------------------
     def _ship(self, msg: Dict[str, Any]) -> None:
@@ -359,18 +355,20 @@ class _ComposeStreamBridge(ComposeStream):
             with self._lock:
                 self._buf.append(chunk)
                 self.chunks += 1
+                self._characters += len(chunk)
                 now = time.monotonic()
                 if now - self._last_feed < self._interval():
                     return
                 self._last_feed = now
                 buf = "".join(self._buf)
-            self._feed(buf)
+                self._buf.clear()
+                self._feed(buf)
         except Exception as err:  # noqa: BLE001
             logger.debug(f"[a2ui] chunk not streamed: {err}")
 
     def _feed(self, buf: str) -> None:
         if self._streamer is not None:
-            self._streamer.feed(buf)
+            self._streamer.feed_chunk(buf)
 
     # -- ComposeStream protocol (called from the composer thread) -----------
     def attempt(self, n: int) -> None:
@@ -391,14 +389,14 @@ class _ComposeStreamBridge(ComposeStream):
             with self._lock:
                 self._active = False
                 buf = "".join(self._buf)
-            self._feed(buf)  # a last pass so a tail that arrived under the
-            #                  throttle is not lost
+                self._buf.clear()
+                self._feed(buf)  # Flush the tail inside the same ordering lock.
             # One line per composed surface, at INFO. "The deck composed but
             # streamed nothing" is invisible at debug level and costs a whole
             # 3-minute run to reproduce; this says which half failed.
             logger.info(
                 f"[a2ui] stream: {self.chunks} chunks -> {self.sent} messages "
-                f"({len(buf)} chars, revision {self._revision})"
+                f"({self._characters} chars, revision {self._revision})"
             )
         except Exception as err:  # noqa: BLE001
             logger.debug(f"[a2ui] final stream pass skipped: {err}")

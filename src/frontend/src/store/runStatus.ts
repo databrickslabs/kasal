@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { ExtendedRun } from '../types/execution/run';
 import { runService } from '../api/execution/ExecutionHistoryService';
 import { Trace } from '../types/execution/trace';
+import { appendTraceBatch } from './traceIndex';
 
 // Re-export Trace type to ensure consistency across the app
 export type { Trace };
@@ -560,32 +561,16 @@ export const useRunStatusStore = create<RunStatusState>((set, get) => {
       get().addTraces(jobId, [trace]);
     },
 
-    // Batch variant: ONE Map copy + Set-based dedup for a whole poll tick.
-    // The previous per-trace path copied the traces Map and .some()-scanned the
-    // job's full array for EVERY trace — O(n²) across a run, ×500 on the final
-    // fetch. Dedup matches the old composite key (created_at/type/source) and
-    // additionally the row id, so SSE/poller overlap still collapses.
+    // Poll and SSE batches share an incremental membership index. The array
+    // and outer Map are copied only once per batch to preserve subscriptions.
     addTraces: (jobId: string, traces: Trace[]) => {
       if (traces.length === 0) return;
       set((state) => {
         const existing = state.traces.get(jobId) || [];
-        const seen = new Set<string>();
-        for (const t of existing) {
-          seen.add(`${t.created_at}::${t.event_type}::${t.event_source}`);
-          if (t.id != null) seen.add(`id:${t.id}`);
-        }
-        const fresh: Trace[] = [];
-        for (const t of traces) {
-          const compositeKey = `${t.created_at}::${t.event_type}::${t.event_source}`;
-          const idKey = t.id != null ? `id:${t.id}` : null;
-          if (seen.has(compositeKey) || (idKey !== null && seen.has(idKey))) continue;
-          seen.add(compositeKey);
-          if (idKey !== null) seen.add(idKey);
-          fresh.push(t);
-        }
-        if (fresh.length === 0) return state;
+        const combined = appendTraceBatch(existing, traces);
+        if (combined === existing) return state;
         const newTraces = new Map(state.traces);
-        newTraces.set(jobId, [...existing, ...fresh]);
+        newTraces.set(jobId, combined);
         return { traces: newTraces };
       });
     },

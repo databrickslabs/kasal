@@ -255,6 +255,11 @@ class ToolService:
         """One tool ROW (ORM) by id, or None. See :meth:`list_tool_records`."""
         return await self.repository.get(tool_id)
 
+    async def get_tools_by_ids(self, tool_ids: List[int]) -> Dict[int, ToolResponse]:
+        """Batch counterpart of get_tool_by_id for execution setup."""
+        records = await self.repository.find_by_ids(tool_ids)
+        return {record.id: ToolResponse.model_validate(record) for record in records}
+
     async def get_tool_by_id(self, tool_id: int) -> ToolResponse:
         """
         Get a tool by ID.

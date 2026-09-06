@@ -165,6 +165,20 @@ describe('runStatus store', () => {
       expect(traces?.map((t) => t.id)).toEqual([1, 2, 3]);
     });
 
+    it('rebuilds membership when a previous trace snapshot is restored', () => {
+      const store = useRunStatusStore.getState();
+      store.addTraces('restore', [mkTrace(1)]);
+      const snapshot = store.getTracesForJob('restore');
+      store.addTraces('restore', [mkTrace(2)]);
+      store.setTracesForJob('restore', snapshot);
+      store.addTraces('restore', [mkTrace(2), mkTrace(1)]);
+      expect(store.getTracesForJob('restore').map(t => t.id)).toEqual([1, 2]);
+      expect(snapshot.map(t => t.id)).toEqual([1]);
+      store.clearTracesForJob('restore');
+      store.addTraces('restore', [mkTrace(2)]);
+      expect(store.getTracesForJob('restore').map(t => t.id)).toEqual([2]);
+    });
+
     it('dedups against existing traces by id AND by composite signature', () => {
       const store = useRunStatusStore.getState();
       store.addTraces('job-1', [mkTrace(1), mkTrace(2)]);

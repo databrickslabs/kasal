@@ -78,9 +78,10 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
     trace.event_context !== 'task_management'
   );
 
-  const sorted = [...filteredTraces].sort((a, b) =>
-    parseTraceTime(a.created_at).getTime() - parseTraceTime(b.created_at).getTime()
-  );
+  const timestamps = new Map(filteredTraces.map(trace =>
+    [trace, parseTraceTime(trace.created_at).getTime()] as const
+  ));
+  const sorted = filteredTraces.sort((a, b) => timestamps.get(a)! - timestamps.get(b)!);
 
   if (sorted.length === 0) {
     return { agents: [], globalEvents: { start: [], end: [] }, crewSections: [], timelineItems: [] };
@@ -155,22 +156,35 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
    * that had started by then" for spans outside our bridge's hierarchy (e.g. the
    * openinference instrumentor's own spans, which we don't parent).
    */
+  const resolvedSpans = new Map<string, number | undefined>();
+  const crewStartTimes = crewStarts.map(trace => timestamps.get(trace)!);
   const resolveCrewIdx = (trace: Trace): number | undefined => {
     let sid: string | undefined = trace.span_id;
     const seen = new Set<string>();
+    let crew: number | undefined;
     while (sid && !seen.has(sid)) {
+      if (resolvedSpans.has(sid)) {
+        crew = resolvedSpans.get(sid);
+        break;
+      }
       seen.add(sid);
-      const hit = crewSpanToIdx.get(sid);
-      if (hit !== undefined) return hit;
+      crew = crewSpanToIdx.get(sid);
+      if (crew !== undefined) break;
       sid = spanToParent.get(sid);
     }
+    seen.forEach(span => resolvedSpans.set(span, crew));
+    if (crew !== undefined) return crew;
     if (crewStarts.length === 0) return undefined;
-    const at = parseTraceTime(trace.created_at).getTime();
-    let fallback: number | undefined;
-    crewStarts.forEach((c, i) => {
-      if (parseTraceTime(c.created_at).getTime() <= at) fallback = i;
-    });
-    return fallback ?? 0;
+    // The fallback depends on the trace time, not just its span.
+    const at = timestamps.get(trace)!;
+    let low = 0;
+    let high = crewStartTimes.length;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if (crewStartTimes[mid] <= at) low = mid + 1;
+      else high = mid;
+    }
+    return Math.max(0, low - 1);
   };
 
   // Group by agent
@@ -477,27 +491,26 @@ export function processTraces(rawTraces: Trace[]): ProcessedTraces {
     // one headerless section so the timeline renders exactly as before.
     crewSections.push({ agentIdxs: agents.map((_, i) => i) });
   } else {
-    const claimed = new Set<number>();
+    const agentsByCrew = new Map<number | undefined, number[]>();
+    agentCrewIdx.forEach((crew, idx) => {
+      const indices = agentsByCrew.get(crew) ?? [];
+      indices.push(idx);
+      agentsByCrew.set(crew, indices);
+    });
+    let nextEnd = 0;
     crewStarts.forEach((start, i) => {
-      const startAt = new Date(start.created_at).getTime();
-      let end: Trace | undefined;
-      for (let e = 0; e < crewEnds.length; e++) {
-        if (claimed.has(e)) continue;
-        if (new Date(crewEnds[e].created_at).getTime() >= startAt) {
-          end = crewEnds[e];
-          claimed.add(e);
-          break;
-        }
+      const startAt = timestamps.get(start)!;
+      while (nextEnd < crewEnds.length && !(timestamps.get(crewEnds[nextEnd])! >= startAt)) {
+        nextEnd++;
       }
+      const end = crewEnds[nextEnd++];
       crewSections.push({
         crewName: start.trace_metadata && typeof start.trace_metadata === 'object'
           ? ((start.trace_metadata as Record<string, unknown>).crew_name as string | undefined)
           : undefined,
         start,
         end,
-        agentIdxs: agents
-          .map((_, idx) => idx)
-          .filter(idx => agentCrewIdx[idx] === i),
+        agentIdxs: agentsByCrew.get(i) ?? [],
       });
     });
     // Never drop an agent group: anything unattributed goes to the last section
@@ -736,6 +749,8 @@ export function useTraceData({
   const seenAgentIdxRef = useRef<Set<number>>(new Set());
   const seenTaskKeyRef = useRef<Set<string>>(new Set());
 
+  const lastProcessedRef = useRef<{ traces: Trace[]; data: ProcessedTraces } | null>(null);
+
   const fetchTraceData = useCallback(async (isInitialLoad = true) => {
     if (!runId) return;
 
@@ -744,23 +759,16 @@ export function useTraceData({
         setLoading(true);
       }
 
-      const runExists = await TraceService.checkRunExists(runId);
-      if (!runExists) {
-        setError(`Run ID ${runId} does not exist or is no longer available.`);
-        setLoading(false);
-        return;
-      }
-
-      // Try to get run details for the job_id, but don't block trace loading if it fails
-      let traceId = runId;
-      try {
-        const runData = await TraceService.getRunDetails(runId);
-        if (runData.job_id && runData.job_id.includes('-')) {
-          traceId = runData.job_id;
+      // The trace endpoint performs the existence/authorization check itself.
+      // Resolve numeric execution IDs only when a job ID was not supplied.
+      let traceId = jobId || runId;
+      if (!jobId && /^\d+$/.test(runId)) {
+        try {
+          const runData = await TraceService.getRunDetails(runId);
+          if (runData.job_id) traceId = runData.job_id;
+        } catch {
+          // The numeric trace endpoint remains a valid fallback.
         }
-      } catch {
-        // getRunDetails may fail with 404 due to session routing differences;
-        // fall back to using runId directly for trace fetch
       }
 
       const traces = await TraceService.getTraces(traceId);
@@ -778,6 +786,7 @@ export function useTraceData({
           setTracesForJob(jobId, traces);
         }
         const processed = processTraces(traces);
+        lastProcessedRef.current = { traces, data: processed };
         setProcessedData(processed);
 
         if (isInitialLoad) {
@@ -822,7 +831,9 @@ export function useTraceData({
         return;
       }
 
-      const processed = processTraces(_traces);
+      const processed = lastProcessedRef.current?.traces === _traces
+        ? lastProcessedRef.current.data : processTraces(_traces);
+      lastProcessedRef.current = { traces: _traces, data: processed };
       setProcessedData(processed);
       setError(null);
       setLoading(false);

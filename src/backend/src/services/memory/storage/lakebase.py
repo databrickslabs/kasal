@@ -16,6 +16,7 @@ single recall filters on ``valid_to`` and branches its recency decay on
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -345,76 +346,79 @@ class LakebaseStorageBackend:
     async def asave(self, records: list[MemoryRecord]) -> None:
         if not records:
             return
+        sql = text(f"""
+            INSERT INTO {self.table_name}
+                (id, crew_id, group_id, session_id, agent, content, metadata,
+                 score, embedding, kind, valid_from, valid_to, superseded_by,
+                 created_at, updated_at)
+            VALUES
+                (:id, :crew_id, :group_id, :session_id, :agent, :content,
+                 CAST(:metadata AS jsonb), :score, CAST(:embedding AS vector),
+                 :kind, :valid_from, :valid_to, :superseded_by,
+                 :created_at, :updated_at)
+            ON CONFLICT (id) DO UPDATE SET
+                content = EXCLUDED.content,
+                metadata = EXCLUDED.metadata,
+                score = EXCLUDED.score,
+                embedding = EXCLUDED.embedding,
+                kind = EXCLUDED.kind,
+                valid_from = EXCLUDED.valid_from,
+                -- Retiring a fact IS an update through this path
+                -- (``update`` upserts the whole record), so these must
+                -- be carried across or supersession would never persist.
+                valid_to = EXCLUDED.valid_to,
+                superseded_by = EXCLUDED.superseded_by,
+                updated_at = EXCLUDED.updated_at
+            """)
+        parameters = []
+        for record in records:
+            embedding = record.embedding
+            if embedding is None:
+                embedding = await asyncio.to_thread(self._embed_sync, record.content)
+            embedding_str = vector_to_pg(list(embedding))
+            metadata = dict(record.metadata or {})
+            metadata.update(
+                {
+                    "scope": record.scope,
+                    "categories": list(record.categories or []),
+                    "importance": float(record.importance),
+                    "source": record.source,
+                    "private": bool(record.private),
+                    "last_accessed": record.last_accessed.isoformat(),
+                }
+            )
+            parameters.append(
+                {
+                    "id": record.id or str(uuid.uuid4()),
+                    "crew_id": self.crew_id,
+                    "group_id": self.group_id,
+                    "session_id": self.session_id or "",
+                    "agent": record.source or "",
+                    "content": record.content,
+                    "metadata": json.dumps(metadata),
+                    "score": float(record.importance),
+                    "embedding": embedding_str,
+                    "kind": record.kind,
+                    "valid_from": to_aware_utc_or_none(record.valid_from),
+                    "valid_to": to_aware_utc_or_none(record.valid_to),
+                    "superseded_by": record.superseded_by,
+                    # MUST be offset-AWARE UTC. These bind to TIMESTAMPTZ
+                    # columns, and asyncpg's encoder does obj.astimezone(utc)
+                    # — which treats a NAIVE datetime as MACHINE-LOCAL time
+                    # and silently shifts it by the host's UTC offset. CrewAI
+                    # hands us naive datetime.utcnow() values, so without this
+                    # coercion every created_at lands hours off true UTC and
+                    # the Memory Browser's per-run time window (built
+                    # from the run's correctly-stored completed_at) rejects all
+                    # of a run's records.
+                    "created_at": to_aware_utc(record.created_at),
+                    "updated_at": to_aware_utc(record.last_accessed),
+                }
+            )
         async with self._session() as session:
-            for record in records:
-                embedding = record.embedding
-                if embedding is None:
-                    embedding = self._embed_sync(record.content)
-                embedding_str = vector_to_pg(list(embedding))
-                metadata = dict(record.metadata or {})
-                metadata.update(
-                    {
-                        "scope": record.scope,
-                        "categories": list(record.categories or []),
-                        "importance": float(record.importance),
-                        "source": record.source,
-                        "private": bool(record.private),
-                        "last_accessed": record.last_accessed.isoformat(),
-                    }
-                )
-                sql = text(f"""
-                    INSERT INTO {self.table_name}
-                        (id, crew_id, group_id, session_id, agent, content, metadata,
-                         score, embedding, kind, valid_from, valid_to, superseded_by,
-                         created_at, updated_at)
-                    VALUES
-                        (:id, :crew_id, :group_id, :session_id, :agent, :content,
-                         CAST(:metadata AS jsonb), :score, CAST(:embedding AS vector),
-                         :kind, :valid_from, :valid_to, :superseded_by,
-                         :created_at, :updated_at)
-                    ON CONFLICT (id) DO UPDATE SET
-                        content = EXCLUDED.content,
-                        metadata = EXCLUDED.metadata,
-                        score = EXCLUDED.score,
-                        embedding = EXCLUDED.embedding,
-                        kind = EXCLUDED.kind,
-                        valid_from = EXCLUDED.valid_from,
-                        -- Retiring a fact IS an update through this path
-                        -- (``update`` upserts the whole record), so these must
-                        -- be carried across or supersession would never persist.
-                        valid_to = EXCLUDED.valid_to,
-                        superseded_by = EXCLUDED.superseded_by,
-                        updated_at = EXCLUDED.updated_at
-                    """)
-                await session.execute(
-                    sql,
-                    {
-                        "id": record.id or str(uuid.uuid4()),
-                        "crew_id": self.crew_id,
-                        "group_id": self.group_id,
-                        "session_id": self.session_id or "",
-                        "agent": record.source or "",
-                        "content": record.content,
-                        "metadata": json.dumps(metadata),
-                        "score": float(record.importance),
-                        "embedding": embedding_str,
-                        "kind": record.kind,
-                        "valid_from": to_aware_utc_or_none(record.valid_from),
-                        "valid_to": to_aware_utc_or_none(record.valid_to),
-                        "superseded_by": record.superseded_by,
-                        # MUST be offset-AWARE UTC. These bind to TIMESTAMPTZ
-                        # columns, and asyncpg's encoder does obj.astimezone(utc)
-                        # — which treats a NAIVE datetime as MACHINE-LOCAL time
-                        # and silently shifts it by the host's UTC offset. CrewAI
-                        # hands us naive datetime.utcnow() values, so without this
-                        # coercion every created_at lands hours off true UTC and
-                        # the Memory Browser's per-run time window (built
-                        # from the run's correctly-stored completed_at) rejects all
-                        # of a run's records.
-                        "created_at": to_aware_utc(record.created_at),
-                        "updated_at": to_aware_utc(record.last_accessed),
-                    },
-                )
+            for start in range(0, len(parameters), 100):
+                batch = parameters[start : start + 100]
+                await session.execute(sql, batch[0] if len(batch) == 1 else batch)
 
     async def asearch(
         self,
