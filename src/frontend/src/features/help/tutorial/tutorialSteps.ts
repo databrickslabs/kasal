@@ -38,12 +38,12 @@ export function getTutorialSteps(mode: AppMode): Step[] {
       ? 'Each node represents a crew. Review its connections and the tasks that pass work between crews. Select a connection to configure its routing.'
       : 'Agents define who does the work; tasks define what to do and the expected result. Drag nodes to arrange them and double-click a node to edit it. Connect tasks to the agents that will perform them.', 'center'),
     step('[data-tour="workspace-panel-tabs"]', 'Conversation and execution history', isFlow
-      ? 'Available Crews, All Runs, and Conversation share this panel. All Runs opens execution history; Conversation shows the conversation. The input stays underneath each tab.'
-      : 'Conversation shows the conversation and generated plans. Runs opens execution history so you can inspect progress and results. The input stays underneath both tabs.'),
+      ? 'Available Crews, Execution history, and Conversation share this panel. Execution history shows past runs; Conversation shows the conversation. The input stays underneath each tab.'
+      : 'Conversation shows the conversation and generated plans. Execution history lets you inspect run progress and results. The input stays underneath both tabs.'),
     step('[aria-label^="Move workspace panel to"]', 'Give the canvas room', 'Swap the conversation panel and canvas between left and right. Drag the divider between them to adjust their widths.'),
     step('[data-tour="play-execution"]', isFlow ? 'Run the flow' : 'Run the crew', isFlow
-      ? 'Use Play after reviewing the flow and configuring its connections. Follow execution from All Runs.'
-      : 'Use Play when your crew is ready. The button becomes available when the canvas contains agents or tasks. Follow execution from Runs.'),
+      ? 'Use Play after reviewing the flow and configuring its connections. Follow execution from Execution history.'
+      : 'Use Play when your crew is ready. The button becomes available when the canvas contains agents or tasks. Follow execution from Execution history.'),
     step('[data-tour="save-context"]', isFlow ? 'Save your flow' : 'Save your crew', isFlow
       ? 'Save the flow for reuse. The catalog button below lets you open saved workflows.'
       : 'Save the crew so you can reuse it, share it in your teamspace, or use it in Flow Builder. Open Catalog to load saved crews, agents, and tasks.'),
