@@ -127,12 +127,19 @@ async def test_create_update_delete_and_toggles_permissions_and_success():
             group_context=Ctx(user_role="user"),
         )
 
-    # global toggle success using admin
+    # A workspace admin's effective role does not reach the GLOBAL row (R2-04)…
+    with pytest.raises(Exception):
+        await toggle_global_model(
+            "k", ModelToggleUpdate(enabled=True), service=svc, group_context=ctx_admin
+        )
+    # …a system admin's does.
+    ctx_system = Ctx(user_role="admin")
+    ctx_system.current_user.is_system_admin = True
     svc.toggle_global_enabled = AsyncMock(
         return_value=SimpleNamespace(key="k", enabled=True)
     )
     out3 = await toggle_global_model(
-        "k", ModelToggleUpdate(enabled=True), service=svc, group_context=ctx_admin
+        "k", ModelToggleUpdate(enabled=True), service=svc, group_context=ctx_system
     )
     assert out3.enabled is True
 

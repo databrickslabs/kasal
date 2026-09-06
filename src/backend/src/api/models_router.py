@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, status
 
 from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.exceptions import ForbiddenError, NotFoundError
-from src.core.permissions import check_role_in_context
+from src.core.permissions import check_role_in_context, is_system_admin
 from src.models.model_config import ModelConfig
 from src.schemas.model_config import (
     ModelConfigCreate,
@@ -131,21 +131,13 @@ async def toggle_global_model(
     Toggle enabled on a global (system-wide) model configuration.
     Requires admin permissions.
     """
-    # Check permissions - system admin or admin in any context
-    is_allowed = False
-    try:
-        from src.core.permissions import get_effective_role
-
-        role = get_effective_role(group_context) if group_context else None
-        is_allowed = (role and role.lower() == "admin") or (
-            hasattr(group_context, "current_user")
-            and getattr(group_context.current_user, "is_system_admin", False)
+    # A global row is every workspace's catalog. A workspace admin's effective
+    # role does not reach it (R2-04); their own workspace uses the group
+    # override toggle.
+    if not is_system_admin(group_context):
+        raise ForbiddenError(
+            "Only system admins can toggle global model configurations"
         )
-    except Exception:
-        is_allowed = False
-
-    if not is_allowed:
-        raise ForbiddenError("Only admins can toggle global model configurations")
 
     logger.info(
         f"API call: PATCH /models/global/{model_key}/toggle - enabled={toggle_data.enabled}"
