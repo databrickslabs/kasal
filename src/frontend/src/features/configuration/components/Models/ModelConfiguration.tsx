@@ -725,8 +725,8 @@ const ModelConfiguration: React.FC<{ mode?: 'system' | 'workspace' | 'auto' }> =
   return (
     <Box sx={{ p: 3 }}>
       <Stack spacing={3}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Typography variant="h4" component="h1">
+        <Box data-settings-toolbar sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Typography data-settings-page-title variant="h4" component="h1">
             {isSystemView
               ? t('configuration.models.globalTitle', { defaultValue: 'Global Models (System Admin)' })
               : t('configuration.models.workspaceTitle', { defaultValue: 'Teamspace Models' })}

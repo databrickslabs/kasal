@@ -744,12 +744,12 @@ const DatabaseManagement: React.FC = () => {
 
   return (
     <Box>
-      <Typography variant="h6" fontWeight={600} sx={{ mb: 0.5 }}>
+      <Typography data-settings-page-title variant="h6" fontWeight={600} sx={{ mb: 0.5 }}>
         Database Management
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
-        Status and maintenance, Databricks import/export, and the Lakebase
-        backend — one page, each in its own collapsible section.
+        Check database health, manage backups, and configure storage.
+        Open a section to view its settings and maintenance actions.
       </Typography>
 
       {/* General — open by default; the others fold away until needed. */}

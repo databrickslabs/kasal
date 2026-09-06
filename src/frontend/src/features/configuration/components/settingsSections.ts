@@ -24,7 +24,7 @@ export const settingsSections = [
   { id: 'access', title: 'Access', description: 'Manage people, teamspaces, and their permissions.', group: 'administration', scopes: ['system'], key: 'access.tab' },
   { id: 'engines', title: 'Engines', description: 'Manage execution engines and available features.', group: 'administration', scopes: ['system'], key: 'engines.tab' },
   { id: 'database', title: 'Database', description: 'Manage system data and database operations.', group: 'administration', scopes: ['system'], key: 'settings.database' },
-  { id: 'objects', title: 'Objects', description: 'Manage saved agents, tasks, and other teamspace objects.', group: 'administration', scopes: ['workspace'], key: 'settings.objects' },
+  { id: 'objects', title: 'Objects', description: 'Define reusable output schemas for consistent, structured task results.', group: 'administration', scopes: ['workspace'], key: 'settings.objects' },
 ] as const;
 export type SettingsSection = typeof settingsSections[number];
 export type SettingsSectionId = SettingsSection['id'];

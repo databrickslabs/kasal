@@ -160,7 +160,7 @@ const PromptConfiguration: React.FC<PromptConfigurationProps> = ({ onOptimize })
   return (
     <Box>
       {/* No panel title — the hosting Prompts tab already names this view. */}
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+      <Box data-settings-toolbar display="flex" justifyContent="space-between" alignItems="center" mb={2}>
         <Typography variant="body2" color="textSecondary">
           {t('configuration.prompts.description', { defaultValue: 'Edit the system prompt instructions used by Kasal agents.' })}
         </Typography>
@@ -174,7 +174,7 @@ const PromptConfiguration: React.FC<PromptConfigurationProps> = ({ onOptimize })
         </Button>
       </Box>
 
-      <Paper elevation={2} sx={{ mt: 2 }}>
+      <Paper elevation={0} sx={{ mt: 2, overflow: 'hidden' }}>
         <List>
           {prompts.map((prompt) => (
             <React.Fragment key={prompt.id}>

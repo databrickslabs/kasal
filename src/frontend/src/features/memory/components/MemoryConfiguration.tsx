@@ -655,7 +655,7 @@ export const MemoryConfiguration: React.FC = () => {
           justifyContent: 'space-between', 
           mb: 3 
         }}>
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <Box data-settings-page-title sx={{ display: 'flex', alignItems: 'center' }}>
             <MemoryIcon sx={{ mr: 1.5, color: 'primary.main', fontSize: '1.4rem' }} />
             <Typography variant="h6">
               Memory Configuration
@@ -694,7 +694,7 @@ export const MemoryConfiguration: React.FC = () => {
         justifyContent: 'space-between', 
         mb: 3 
       }}>
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+        <Box data-settings-page-title sx={{ display: 'flex', alignItems: 'center' }}>
           <MemoryIcon sx={{ mr: 1.5, color: 'primary.main', fontSize: '1.4rem' }} />
           <Typography variant="h6">
             Memory Configuration
@@ -1184,11 +1184,9 @@ export const MemoryConfiguration: React.FC = () => {
             </Button>
           }
         >
-          Kasal memory is stored locally in SQLite under
-          <code style={{ margin: '0 4px' }}>kasal_default_&lt;group&gt;/memory/</code>
-          relative to the backend working directory — one store per teamspace, no
-          external infrastructure required. Click &ldquo;Browse Memory&rdquo; to
-          inspect the records your crews have persisted.
+          Store memory locally in Kasal, separately for each teamspace.
+          No external database is required. Browse saved memories or adjust
+          how agents recall them below.
         </Alert>
 
         {/* Memory tuning (recall weights, memory LLM) applies to local

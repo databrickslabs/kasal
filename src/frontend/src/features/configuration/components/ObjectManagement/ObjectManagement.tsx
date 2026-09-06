@@ -134,10 +134,10 @@ function ObjectManagement(): JSX.Element {
   }
 
   return (
-    <Card sx={{ mt: 2 }}>
+    <Card sx={{ mt: 0 }}>
       <CardContent>
         {/* Header */}
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2, justifyContent: 'space-between' }}>
+        <Box data-settings-toolbar sx={{ display: 'flex', alignItems: 'center', mb: 2, justifyContent: 'space-between' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <CodeIcon />
             <Typography variant="h6">Schemas</Typography>
@@ -223,7 +223,7 @@ function ObjectManagement(): JSX.Element {
         </DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>{currentSchema?.description}</Typography>
-          <Paper variant="outlined" sx={{ p: 1.5, maxHeight: 250, overflow: 'auto', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', bgcolor: 'grey.50' }}>
+          <Paper variant="outlined" sx={{ p: 1.5, maxHeight: 250, overflow: 'auto', fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', bgcolor: 'background.default' }}>
             {currentSchema && formatJSON(currentSchema.schema_definition)}
           </Paper>
         </DialogContent>

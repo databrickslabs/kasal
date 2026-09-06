@@ -126,6 +126,7 @@ const RemoteAgents: React.FC<Props> = ({ mode = 'workspace' }) => {
   return (
     <Box>
       <Stack
+        data-settings-toolbar
         direction="row"
         justifyContent="space-between"
         alignItems="flex-start"
@@ -134,7 +135,7 @@ const RemoteAgents: React.FC<Props> = ({ mode = 'workspace' }) => {
       >
         {/* The text yields, the actions do not — see SkillsConfiguration. */}
         <Box sx={{ minWidth: 0 }}>
-          <Typography variant="h6">
+          <Typography data-settings-page-title variant="h6">
             {isSystem ? 'Remote Agents (Global)' : 'Remote Agents'}
           </Typography>
           <Typography variant="body2" color="text.secondary">

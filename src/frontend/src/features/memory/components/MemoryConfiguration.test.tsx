@@ -306,11 +306,11 @@ describe('MemoryConfiguration', () => {
     expect(screen.queryByText('Databricks Vector Search')).not.toBeInTheDocument();
   });
 
-  it('shows info alert about local SQLite storage when mode is disabled', async () => {
+  it('shows info alert about local memory storage when mode is disabled', async () => {
     await act(async () => renderComponent());
     await waitForLoaded();
     expect(
-      screen.getByText(/Kasal memory is stored locally in SQLite/),
+      screen.getByText(/Store memory locally in Kasal/),
     ).toBeInTheDocument();
   });
 
@@ -382,7 +382,7 @@ describe('MemoryConfiguration', () => {
 
       await act(async () => renderComponent());
       await waitForLoaded();
-      expect(screen.getByText(/Kasal memory is stored locally in SQLite/)).toBeInTheDocument();
+      expect(screen.getByText(/Store memory locally in Kasal/)).toBeInTheDocument();
     });
 
     it('handles 404 error with fallback to all configs that have data', async () => {
@@ -456,7 +456,7 @@ describe('MemoryConfiguration', () => {
 
       await act(async () => renderComponent());
       await waitForLoaded();
-      expect(screen.getByText(/Kasal memory is stored locally in SQLite/)).toBeInTheDocument();
+      expect(screen.getByText(/Store memory locally in Kasal/)).toBeInTheDocument();
     });
 
     it('detectWorkspaceUrl handles error gracefully', async () => {

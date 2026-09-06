@@ -28,9 +28,9 @@ export default function GeneralSettings() {
     finally { setSaving(false); }
   };
   const dirty = language !== savedLanguage;
-  return <Stack spacing={4} sx={{ maxWidth: 760 }}>
+  return <Stack spacing={2} sx={{ maxWidth: 880 }}>
     {error && <Alert severity="error">{error}</Alert>}
-    <Box sx={{ display: 'flex', gap: 3, alignItems: { sm: 'center' }, flexDirection: { xs: 'column', sm: 'row' } }}>
+    <Box data-settings-section sx={{ display: 'flex', gap: 3, alignItems: { sm: 'center' }, flexDirection: { xs: 'column', sm: 'row' } }}>
       <Box sx={{ flex: 1 }}><Typography fontWeight={600}>{t('configuration.language.title', { defaultValue: 'Language' })}</Typography><Typography variant="body2" color="text.secondary">Choose the language used throughout Kasal.</Typography></Box>
       <FormControl size="small" sx={{ width: { xs: '100%', sm: 220 } }} disabled={!savedLanguage || saving}>
         <InputLabel id="settings-language-label">Language</InputLabel>
@@ -39,7 +39,7 @@ export default function GeneralSettings() {
         </Select>
       </FormControl>
     </Box>
-    <Box sx={{ display: 'flex', gap: 3, alignItems: { sm: 'center' }, flexDirection: { xs: 'column', sm: 'row' } }}>
+    <Box data-settings-section sx={{ display: 'flex', gap: 3, alignItems: { sm: 'center' }, flexDirection: { xs: 'column', sm: 'row' } }}>
       <Box sx={{ flex: 1 }}><Typography fontWeight={600}>Appearance</Typography><Typography variant="body2" color="text.secondary">Use the same light or dark appearance across Kasal.</Typography></Box>
       <Button color="inherit" startIcon={<ThemeModeIcon dark={dark} />} onClick={() => { void useThemeStore.getState().toggleTheme(); }} sx={{ minWidth: 220, justifyContent: 'flex-start', bgcolor: 'action.hover' }}>Switch to {dark ? 'light' : 'dark'} mode</Button>
     </Box>

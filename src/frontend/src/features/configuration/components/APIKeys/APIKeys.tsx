@@ -421,8 +421,8 @@ function APIKeys(): JSX.Element {
   // of padding, which is the gap that showed above the heading.
   return (
     <Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+        <Box data-settings-toolbar sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
+          <Box data-settings-page-title sx={{ display: 'flex', alignItems: 'center' }}>
             <KeyIcon sx={{ mr: 1 }} />
             <Typography variant="h5">API Keys</Typography>
           </Box>
@@ -447,11 +447,11 @@ function APIKeys(): JSX.Element {
             return (
               <Alert severity="warning" sx={{ mb: 2 }}>
                 <Typography variant="subtitle2" gutterBottom>
-                  <strong>⚠️ Shared Teamspace Notice</strong>
+                  Shared credentials
                 </Typography>
                 <Typography variant="body2">
-                  You are currently in a shared teamspace. API keys added here will be accessible to all members of this teamspace.
-                  If you need private API keys, please switch to your Personal Space.
+                  Keys added here are available to members of this teamspace.
+                  Use your personal space for private credentials.
                 </Typography>
               </Alert>
             );

@@ -190,6 +190,7 @@ const SkillsConfiguration: React.FC = () => {
   return (
     <Box>
       <Stack
+        data-settings-toolbar
         direction="row"
         justifyContent="space-between"
         alignItems="flex-start"
@@ -199,11 +200,10 @@ const SkillsConfiguration: React.FC = () => {
         {/* The text yields, the actions do not: letting a two-line description
             compete for width is what wraps a button label onto two lines. */}
         <Box sx={{ minWidth: 0 }}>
-          <Typography variant="h6">Skills</Typography>
+          <Typography data-settings-page-title variant="h6">Skills</Typography>
           <Typography variant="body2" color="text.secondary">
-            Procedures your agents can follow — &quot;how we run a QBR&quot;, &quot;how we
-            price a deal&quot;. Knowledge is what an agent searches; a skill is how it
-            works. Attach them to an agent in its Skills section.
+            Create reusable procedures for your team, then attach them in an agent’s Skills section.
+            Import existing skills or share them through Unity Catalog.
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>

@@ -345,7 +345,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
         mb: 2
       }}>
         <Typography variant="subtitle1" fontWeight="medium">
-          {t('configuration.databricks.title')}
+          {t('configuration.databricks.connectionTitle', { defaultValue: 'Workspace connection' })}
         </Typography>
         <FormControlLabel
           control={
@@ -365,11 +365,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
         </Alert>
       )}
 
-      <Stack spacing={2} sx={{ mb: 3 }}>
-        <Divider sx={{ my: 2 }} />
-
-
-        <Divider sx={{ my: 2 }} />
+      <Stack data-settings-section spacing={2.5} sx={{ mb: 3 }}>
 
         <TextField
           label={t('configuration.databricks.workspaceUrl')}
@@ -423,7 +419,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
             </Typography>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', maxWidth: 460 }}>
               {t('configuration.databricks.aiGateway.description', {
-                defaultValue: 'Route all LLM and embedding traffic through the workspace AI Gateway (/ai-gateway/mlflow/v1) instead of per-model serving-endpoints invocations. Same models and tokens; centralized governance, rate limits, and usage tracking.'
+                defaultValue: 'Use AI Gateway for centralized model governance, rate limits, and usage tracking. Applies to language models and embeddings.'
               })}
             </Typography>
           </Box>
@@ -443,9 +439,8 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
       </Stack>
 
       {/* Volume Configuration Section */}
-      <Divider sx={{ my: 3 }} />
 
-      <Box sx={{ mb: 3 }}>
+      <Box data-settings-section sx={{ mb: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
           <StorageIcon sx={{ mr: 1, color: 'primary.main' }} />
           <Typography variant="subtitle1" fontWeight="medium">
@@ -556,9 +551,8 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
       </Box>
 
       {/* Knowledge Source Volume Configuration Section */}
-      <Divider sx={{ my: 3 }} />
 
-      <Box sx={{ mb: 3 }}>
+      <Box data-settings-section sx={{ mb: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
           <StorageIcon sx={{ mr: 1, color: 'secondary.main' }} />
           <Typography variant="subtitle1" fontWeight="medium">
@@ -649,7 +643,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
           />
 
           {config.knowledge_volume_enabled && config.enabled && (
-            <Paper elevation={0} sx={{ p: 2, bgcolor: 'grey.50' }}>
+            <Paper elevation={0} sx={{ p: 2, bgcolor: 'background.default' }}>
               <Typography variant="body2" sx={{ mb: 1 }}>
                 <strong>{t('configuration.databricks.knowledge.structure', { defaultValue: 'Knowledge files will be organized as:' })}</strong>
               </Typography>

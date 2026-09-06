@@ -120,14 +120,14 @@ const EnginesConfiguration: React.FC = () => {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+      <Box data-settings-page-title sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
         <EngineeringIcon sx={{ color: 'primary.main', fontSize: '1.2rem' }} />
         <Typography variant="h6" fontWeight={600}>
           Engines
         </Typography>
       </Box>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
-        Execution engines and their features — disabled features hide their UI.
+        Choose how crews run and which execution features are available. Changes apply to new runs.
       </Typography>
 
       {error && (
@@ -241,7 +241,7 @@ const EnginesConfiguration: React.FC = () => {
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
             A finished crew/flow can emit an event that triggers another.
             {eventTriggersEnabled
-              ? ' The background consumer is draining the queue.'
+              ? ' Queued events can start their connected workflows.'
               : ' Currently off — fired events stay queued until enabled.'}
           </Typography>
         </Paper>

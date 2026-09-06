@@ -262,15 +262,14 @@ const AccessManagement: React.FC = () => {
 
   return (
     <Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+      <Box data-settings-page-title sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
         <Typography variant="h5" sx={{ fontWeight: 600 }}>
           Access
         </Typography>
       </Box>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Who can do what — platform flags and per-teamspace roles in one place.
-        Operators are chat-only: they see neither the Agent Builder nor the Flow
-        Builder in that teamspace.
+        Set platform access and roles for each teamspace. Operators use Chat;
+        editors and admins can also work in the builders.
       </Typography>
 
       <Tabs

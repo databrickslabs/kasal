@@ -297,14 +297,13 @@ const UIConfigurator: React.FC = () => {
   const activeLabel = DELIVERABLE_TYPES.find((d) => d.key === activeType)?.label;
 
   return (
-    <Box sx={{ maxWidth: 680 }}>
-      <Typography variant="h6" gutterBottom>
-        UI Configurator
+    <Box sx={{ maxWidth: 880 }}>
+      <Typography data-settings-page-title variant="h6" gutterBottom>
+        Output design
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        When enabled, crews in this teamspace produce a structured, on-brand UI that renders
-        consistently in the chat preview — instead of arbitrary, ad-hoc HTML. Branding and
-        per-type settings are configured below. Disabled by default.
+        Give presentations, reports, and dashboards a consistent visual style.
+        Set your branding once, then customize the layout for each output type.
       </Typography>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
@@ -312,7 +311,7 @@ const UIConfigurator: React.FC = () => {
 
       <FormControlLabel
         control={<Switch checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />}
-        label="Enable predefined UI for this teamspace"
+        label="Use shared output styles"
       />
 
       {enabled && (

@@ -384,10 +384,10 @@ export default function ToolsConfiguration({ mode = 'auto' }: { mode?: 'system' 
         <Paper variant="outlined" sx={{ p: 2 }}>
           <Stack direction="row" alignItems="center" spacing={1} mb={1}>
             <BuildIcon color="primary" fontSize="small" />
-            <Typography variant="subtitle1">Global Tools (System Admin)</Typography>
+            <Typography variant="subtitle1">Tool availability</Typography>
           </Stack>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            These are the list of tools that will be allowed to be used within Kasal.
+            Choose which tools teamspaces can make available to their agents.
           </Typography>
 
           <Grid container spacing={2}>

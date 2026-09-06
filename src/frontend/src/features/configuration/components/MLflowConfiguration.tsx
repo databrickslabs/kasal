@@ -168,7 +168,7 @@ const MLflowConfiguration: React.FC = () => {
 
   return (
     <Box sx={{ p: 2, maxWidth: 720 }}>
-      <Typography variant="h6" sx={{ mb: 0.5 }}>
+      <Typography data-settings-page-title variant="h6" sx={{ mb: 0.5 }}>
         MLflow
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>

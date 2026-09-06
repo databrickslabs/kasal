@@ -9,6 +9,7 @@ import { useThemeStore } from '../../../store/theme';
 import { kasalStageSurface } from '../../../theme/kasalSurfaces';
 import { getSettingsSections, SettingsGroup, SettingsScope, SettingsSection, SettingsSectionId } from './settingsSections';
 import GeneralSettings from './GeneralSettings';
+import SettingsContent from './SettingsContent';
 import { readSettingsNavigation, clearSettingsNavigation, switchSettingsTeamspace } from '../lib/settingsNavigation';
 
 const ModelConfiguration = lazy(() => import('./Models'));
@@ -162,15 +163,15 @@ export default function Configuration({ onClose }: { onClose?: () => void }) {
         <FormControl size="small" fullWidth sx={{ display: { xs: 'flex', md: 'none' } }}><InputLabel id="settings-section-label">Section</InputLabel><Select labelId="settings-section-label" label="Section" value={active.id} onChange={event => setSelected(event.target.value as SettingsSectionId)}>{sections.map(section => <MenuItem key={section.id} value={section.id}>{label(section)}</MenuItem>)}</Select></FormControl>
       </Box>
       <Box component="main" ref={contentRef} aria-label={`${label(active)} settings`} sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto', px: { xs: 0, md: 2 }, pt: { xs: 2, md: 0.5 } }}>
-        <Box sx={{ maxWidth: 1180, mx: 'auto' }}>
+        <Box sx={{ maxWidth: ['general', 'databricks', 'mlflow', 'memory', 'engines', 'ui'].includes(active.id) ? 880 : 1180, mx: 'auto', pb: 3 }}>
           <Typography sx={{ fontSize: 11, color: 'text.secondary', mb: 0.75 }}>{scopeLabel}</Typography>
           <Typography component="h2" sx={{ fontSize: 26, fontWeight: 650, letterSpacing: '-0.025em' }}>{label(active)}</Typography>
           <Typography sx={{ fontSize: 14, color: 'text.secondary', mt: 0.75, mb: 4 }}>{active.description}</Typography>
-          <Box data-settings-content sx={{ '& > .MuiBox-root': { p: { xs: 0, md: 0 } }, '& .MuiPaper-elevation1': { boxShadow: 'none' }, '& .MuiOutlinedInput-root': { borderRadius: 2.5 }, '& .MuiButton-root': { borderRadius: 2.5, textTransform: 'none' }, '& .MuiTypography-h4, & .MuiTypography-h5': { fontSize: 19, fontWeight: 600 }, '& .MuiTableCell-head': { fontSize: 12, color: 'text.secondary' } }}>
+          <SettingsContent>
             <Suspense fallback={<Box role="status" sx={{ py: 5, display: 'flex', alignItems: 'center', gap: 1.5 }}><CircularProgress size={18} color="inherit" /><Typography variant="body2">Loading {label(active).toLocaleLowerCase()}…</Typography></Box>}>
               <SectionContent key={`${groupId}:${activeScope}:${active.id}`} id={active.id} scope={activeScope} onNavigate={setSelected} />
             </Suspense>
-          </Box>
+          </SettingsContent>
         </Box>
       </Box>
     </Box>}

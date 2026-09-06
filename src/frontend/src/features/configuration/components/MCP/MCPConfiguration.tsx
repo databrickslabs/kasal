@@ -694,15 +694,15 @@ const MCPConfiguration: React.FC<MCPConfigurationProps> = ({ mode = 'workspace' 
         mb: 3
       }}>
         <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <Box data-settings-page-title sx={{ display: 'flex', alignItems: 'center' }}>
             <CloudIcon sx={{ mr: 1.5, color: 'primary.main', fontSize: '1.4rem' }} />
-            <Typography variant="h6">
+            <Typography data-settings-page-title variant="h6">
               {isSystem
                 ? t('configuration.mcp.globalTitle', { defaultValue: 'Global MCP Servers' })
                 : t('configuration.mcp.title', { defaultValue: 'MCP Server Configuration' })}
             </Typography>
           </Box>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, ml: 4.5 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
             {isSystem
               ? t('configuration.mcp.globalSubtitle', {
                   defaultValue:
