@@ -35,12 +35,19 @@ interface ChatMessagesState {
 // the dead scan keeps the observable behavior and removes the quadratic cost.
 export const deduplicateMessages = (messages: ChatMessage[]): ChatMessage[] => {
   const seenIds = new Set<string>();
+  const resultJobs = new Set<string>();
 
   return messages.filter((message) => {
     if (seenIds.has(message.id)) {
       return false;
     }
     seenIds.add(message.id);
+    // A restored run result and its backend history row have different message
+    // ids. They still represent the same final deliverable for this execution.
+    if (message.type === 'result' && message.jobId && !message.isIntermediate) {
+      if (resultJobs.has(message.jobId)) return false;
+      resultJobs.add(message.jobId);
+    }
     return true;
   });
 };

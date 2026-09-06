@@ -17,6 +17,10 @@ import {
 import { Sparkles } from 'lucide-react';
 import { improveChatPrompt } from '../../chat/api/prompt';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
+import StopIcon from '@mui/icons-material/Stop';
+import { apiClient } from '../../../shared/api/client';
+import { toast } from 'react-hot-toast';
+import { useBuilderExecutionControls } from '../../../store/builderExecutionControls';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CloseIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -163,7 +167,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   // Use Zustand store for model configuration
   const { refreshKey } = useModelConfigStore();
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContentRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // Lets the composer's "+" menu open the knowledge-file picker, whose input
   // and chips live inside KnowledgeFileUpload.
@@ -175,12 +179,13 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const isUserNearBottomRef = useRef(true);
+  const previousScrollTopRef = useRef(0);
   const handleMessagesScroll = () => {
     const el = messagesContainerRef.current;
     if (!el) return;
-    const threshold = 80;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
-    isUserNearBottomRef.current = atBottom;
+    if (el.scrollTop < previousScrollTopRef.current - 1) isUserNearBottomRef.current = false;
+    else if (el.scrollHeight - el.scrollTop - el.clientHeight <= 4) isUserNearBottomRef.current = true;
+    previousScrollTopRef.current = el.scrollTop;
   };
 
 
@@ -262,8 +267,53 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     markPendingExecution,
   } = useExecutionMonitoring(sessionId, saveMessageToBackend, setMessages);
 
+  const stoppingJobs = useRef(new Set<string>());
+  const [stoppingJobId, setStoppingJobId] = useState<string | null>(null);
+  const isStopping = !!executingJobId && stoppingJobId === executingJobId;
+  const handleStopExecution = useCallback(async () => {
+    const jobId = executingJobId;
+    if (!jobId || stoppingJobs.current.has(jobId)) return;
+    stoppingJobs.current.add(jobId);
+    setStoppingJobId(jobId);
+    try {
+      const { data } = await apiClient.post(`/executions/${jobId}/stop`, {
+        stop_type: 'graceful',
+        reason: 'Stopped by user',
+        preserve_partial_results: true,
+      });
+      const status = String(data.status || '').toLowerCase();
+      const event = status === 'completed' ? 'jobCompleted'
+        : status === 'failed' ? 'jobFailed'
+        : ['stopped', 'cancelled'].includes(status) ? 'jobStopped' : null;
+      if (event) window.dispatchEvent(new CustomEvent(event, {
+        detail: { jobId, status, result: data.partial_results, partialResults: data.partial_results, error: data.message },
+      }));
+    } catch {
+      toast.error('Could not stop execution. Please try again.');
+    } finally {
+      stoppingJobs.current.delete(jobId);
+      setStoppingJobId(current => current === jobId ? null : current);
+    }
+  }, [executingJobId]);
+
+  useEffect(() => {
+    if (layout !== 'canvas') return;
+    const control = executingJobId ? { jobId: executingJobId, stopping: isStopping, stop: handleStopExecution } : null;
+    useBuilderExecutionControls.setState({ [builderMode]: control });
+    return () => {
+      if (useBuilderExecutionControls.getState()[builderMode] === control) {
+        useBuilderExecutionControls.setState({ [builderMode]: null });
+      }
+    };
+  }, [layout, builderMode, executingJobId, isStopping, handleStopExecution]);
+
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = messagesContainerRef.current;
+    if (!el || !isUserNearBottomRef.current) return;
+    // Move only this viewport. Smooth animations restarted on each token keep
+    // pulling the reader down even after they try to scroll up.
+    el.scrollTop = el.scrollHeight;
+    previousScrollTopRef.current = el.scrollTop;
   };
 
   // Extract variables from nodes
@@ -336,11 +386,20 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     }
   }, []);
 
+  useLayoutEffect(() => {
+    isUserNearBottomRef.current = true;
+    scrollToBottom();
+  }, [sessionId]);
+
+  useLayoutEffect(() => { scrollToBottom(); }, [messages]);
+
   useEffect(() => {
-    if (isUserNearBottomRef.current) {
-      scrollToBottom();
-    }
-  }, [messages]);
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => scrollToBottom());
+    if (messagesContentRef.current) observer.observe(messagesContentRef.current);
+    if (messagesContainerRef.current) observer.observe(messagesContainerRef.current);
+    return () => observer.disconnect();
+  }, [sessionId, layout]);
 
   // Notify parent of loading state changes
   useEffect(() => {
@@ -1172,8 +1231,6 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
       setMessages(prev => [...prev, assistantMessage]);
       saveMessageToBackend(assistantMessage);
-      // Force scroll after dispatch response so slash command results are visible
-      setTimeout(() => scrollToBottom(), 50);
 
       // Remove any temporary placeholders before rendering final nodes
       if (cleanupPlaceholders) {
@@ -1719,7 +1776,10 @@ showSessionList && (
   const responseContent = (
 <Box
         ref={messagesContainerRef}
+        data-testid="builder-conversation-scroll"
         onScroll={handleMessagesScroll}
+        onWheel={event => { if (event.deltaY < 0) isUserNearBottomRef.current = false; }}
+        onKeyDown={event => { if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) isUserNearBottomRef.current = false; }}
         sx={{
           flex: (messages.length === 0 && !executingJobId) ? '0 0 auto' : 1,
           mt: (messages.length === 0 && !executingJobId) ? 'auto' : 0,
@@ -1735,6 +1795,7 @@ showSessionList && (
           display: showSessionList ? 'none' : 'flex',
           flexDirection: 'column',
         }}>
+        <Box ref={messagesContentRef} sx={{ flexShrink: 0 }}>
         {(messages.length === 0 && !executingJobId) ? (
           layout === 'canvas' ? <Box sx={{ p: 2.5 }}><Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Ask Kasal to create or refine your workflow. Responses will appear here.</Typography></Box> : <BuilderAssistantWelcome dark={composerDark} hasNodes={nodes.length > 0} />
         ) : (
@@ -1749,7 +1810,7 @@ showSessionList && (
               : <ChatMessageItem key={item.message.id} message={item.message} onOpenLogs={onOpenLogs} appearance="assistant-panel" dark={composerDark} />)}
           </List>
         )}
-        <div ref={messagesEndRef} />
+        </Box>
       </Box>
   );
   const composerContent = (
@@ -2037,9 +2098,10 @@ showSessionList && (
             />
             {/* Send beside the settings menu */}
             <IconButton
-              aria-label="Send message"
-              onClick={handleSendMessage}
-              disabled={isActionDisabled}
+              aria-label={executingJobId ? (isStopping ? 'Stopping execution' : 'Stop execution') : 'Send message'}
+              title={executingJobId ? (isStopping ? 'Stopping execution…' : 'Stop execution') : 'Send message'}
+              onClick={executingJobId ? handleStopExecution : handleSendMessage}
+              disabled={executingJobId ? isStopping : isActionDisabled}
               size="small"
               sx={{
                 padding: '4px',
@@ -2058,7 +2120,9 @@ showSessionList && (
                 },
               }}
             >
-              {isLoading || executingJobId ? (
+              {executingJobId && !isStopping ? (
+                <StopIcon sx={{ fontSize: 18 }} />
+              ) : isLoading || isStopping ? (
                 <CircularProgress size={14} sx={{ color: 'inherit' }} />
               ) : (
                 <ArrowUpwardIcon sx={{ fontSize: 18 }} />

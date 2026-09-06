@@ -327,3 +327,12 @@ describe('deduplicateMessages', () => {
     });
   });
 });
+
+it('merges a recovered deliverable with backend history without duplicating it', () => {
+  const messages = [
+    createMessage({ id: 'backend-message', type: 'result', jobId: 'run-1', content: 'Report' }),
+    createMessage({ id: 'exec-result-run-1', type: 'result', jobId: 'run-1', content: 'Report' }),
+    createMessage({ id: 'other-run', type: 'result', jobId: 'run-2', content: 'Report' }),
+  ];
+  expect(deduplicateMessages(messages).map(message => message.id)).toEqual(['backend-message', 'other-run']);
+});

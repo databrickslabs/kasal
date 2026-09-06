@@ -3,31 +3,9 @@ import { ChatMessage } from '../types/index';
 import { streamExecution } from '../../../chat/api/streaming';
 
 import { runService } from '../../../../api/execution/ExecutionHistoryService';
-import { Run } from '../../../../types/execution/run';
 import { useTaskExecutionStore } from '../../../../store/taskExecutionStore';
 import { useChatMessagesStore } from '../store/chatMessagesStore';
 import { extractTaskId, extractTaskName, mapEventToStatus } from '../../../../utils/taskIdUtils';
-
-// Module-level storage for execution state per session
-// This persists execution state when switching tabs
-interface SessionExecutionState {
-  executingJobId: string | null;
-  lastExecutionJobId: string | null;
-  executionStartTime: Date | null;
-  processedTraceIds: Set<string>;
-}
-
-const sessionExecutionStates = new Map<string, SessionExecutionState>();
-
-// Helper function to clear execution state for a specific jobId across all sessions
-// This is called when a job completes to ensure no session is left blocked
-const clearExecutionStateForJob = (jobId: string) => {
-  sessionExecutionStates.forEach((_state, sessionId) => {
-    if (_state.executingJobId === jobId) {
-      sessionExecutionStates.delete(sessionId);
-    }
-  });
-};
 
 export const useExecutionMonitoring = (
   sessionId: string,
@@ -39,11 +17,9 @@ export const useExecutionMonitoring = (
   const [processedTraceIds, setProcessedTraceIds] = useState<Set<string>>(new Set());
   const [executionStartTime, setExecutionStartTime] = useState<Date | null>(null);
 
-  // Track the previous sessionId to detect tab switches
-  const prevSessionIdRef = useRef<string>(sessionId);
-
   // Track if this session is expecting a job to start (prevents other tabs from claiming the job)
   const pendingExecutionRef = useRef<boolean>(false);
+  const settledJobsRef = useRef(new Set<string>());
 
   // Refs to access current values without adding them as dependencies
   const executingJobIdRef = useRef<string | null>(executingJobId);
@@ -68,68 +44,29 @@ export const useExecutionMonitoring = (
     processedTraceIdsRef.current = processedTraceIds;
   }, [processedTraceIds]);
 
-  // Save and restore execution state when sessionId changes (tab switch)
-  // This ensures each tab maintains its own execution state
+  // Retain the last run across mode unmounts AND browser refreshes. The job
+  // endpoint remains authoritative: a restored id is reconciled below, so a
+  // run that finished while away restores its result instead of staying busy.
+  const recoveryKey = `kasal-builder-run:${localStorage.getItem('selectedGroupId') || 'default'}:${sessionId}`;
   useEffect(() => {
-    if (prevSessionIdRef.current !== sessionId) {
-      const prevSessionId = prevSessionIdRef.current;
+    let restoredJobId: string | null = null;
+    try { restoredJobId = sessionStorage.getItem(recoveryKey); } catch { /* Storage may be unavailable. */ }
+    const jobId = restoredJobId;
+    executingJobIdRef.current = jobId;
+    lastExecutionJobIdRef.current = restoredJobId;
+    executionStartTimeRef.current = null;
+    processedTraceIdsRef.current = new Set();
+    setExecutingJobId(jobId);
+    setLastExecutionJobId(lastExecutionJobIdRef.current);
+    setExecutionStartTime(executionStartTimeRef.current);
+    setProcessedTraceIds(processedTraceIdsRef.current);
+  }, [sessionId, recoveryKey]);
 
-      // Save current execution state for the previous session
-      if (prevSessionId && (executingJobIdRef.current || lastExecutionJobIdRef.current)) {
-        sessionExecutionStates.set(prevSessionId, {
-          executingJobId: executingJobIdRef.current,
-          lastExecutionJobId: lastExecutionJobIdRef.current,
-          executionStartTime: executionStartTimeRef.current,
-          processedTraceIds: new Set(processedTraceIdsRef.current),
-        });
-      }
-
-      // Restore execution state for the new session (if any)
-      const savedState = sessionExecutionStates.get(sessionId);
-      if (savedState && savedState.executingJobId) {
-        // Verify the job is still running before restoring blocked state
-        runService.getRuns(100).then(runs => {
-          const job = runs.runs.find((r: Run) => r.job_id === savedState.executingJobId);
-          const isStillRunning = job && job.status?.toLowerCase() === 'running';
-
-          if (isStillRunning) {
-            setExecutingJobId(savedState.executingJobId);
-            setLastExecutionJobId(savedState.lastExecutionJobId);
-            setExecutionStartTime(savedState.executionStartTime);
-            setProcessedTraceIds(savedState.processedTraceIds);
-          } else {
-            // Job completed while we were away, clear the saved state
-            sessionExecutionStates.delete(sessionId);
-            setExecutingJobId(null);
-            setLastExecutionJobId(savedState.lastExecutionJobId);
-            setExecutionStartTime(null);
-            setProcessedTraceIds(new Set());
-          }
-        }).catch(error => {
-          console.error('[ExecutionMonitoring] Error checking job status:', error);
-          // On error, restore state anyway to be safe (can manually refresh)
-          setExecutingJobId(savedState.executingJobId);
-          setLastExecutionJobId(savedState.lastExecutionJobId);
-          setExecutionStartTime(savedState.executionStartTime);
-          setProcessedTraceIds(savedState.processedTraceIds);
-        });
-      } else if (savedState) {
-        // Has saved state but no executingJobId, restore other state
-        setExecutingJobId(null);
-        setLastExecutionJobId(savedState.lastExecutionJobId);
-        setExecutionStartTime(null);
-        setProcessedTraceIds(savedState.processedTraceIds);
-      } else {
-        // No saved state, start fresh for this session
-        setExecutingJobId(null);
-        setLastExecutionJobId(null);
-        setExecutionStartTime(null);
-        setProcessedTraceIds(new Set());
-      }
-
-      prevSessionIdRef.current = sessionId;
+  useEffect(() => {
+    if (executingJobId && executingJobIdRef.current === executingJobId) {
+      try { sessionStorage.setItem(recoveryKey, executingJobId); } catch { /* Keep monitoring without browser storage. */ }
     }
-  }, [sessionId]);
+  }, [executingJobId, recoveryKey]);
 
   // Get Zustand store methods
   const { addMessage } = useChatMessagesStore();
@@ -138,6 +75,7 @@ export const useExecutionMonitoring = (
   useEffect(() => {
     const handleJobCreated = (event: CustomEvent) => {
       const { jobId, jobName } = event.detail;
+      settledJobsRef.current.delete(jobId);
 
       // Check if this session initiated the execution via markPendingExecution
       const isPendingForThisSession = pendingExecutionRef.current;
@@ -170,15 +108,15 @@ export const useExecutionMonitoring = (
 
     const handleJobCompleted = (event: CustomEvent) => {
       const { jobId } = event.detail;
+      if (settledJobsRef.current.has(jobId)) return;
       const currentExecutingJobId = executingJobIdRef.current;
       const currentLastExecutionJobId = lastExecutionJobIdRef.current;
 
-      // Clear saved state for this job across all sessions
-      clearExecutionStateForJob(jobId);
 
       const shouldClear = currentExecutingJobId === jobId || jobId === currentLastExecutionJobId;
 
       if (shouldClear) {
+        settledJobsRef.current.add(jobId);
         // Transition any remaining "running" or "planning" tasks to "completed"
         useTaskExecutionStore.getState().transitionAll(
           ['running', 'planning'],
@@ -195,14 +133,13 @@ export const useExecutionMonitoring = (
         setExecutingJobId(null);
         setExecutionStartTime(null);
         setProcessedTraceIds(new Set());
-        sessionExecutionStates.delete(sessionId);
         window.dispatchEvent(new CustomEvent('forceClearExecution'));
 
         // Fetch the run result after a delay
         setTimeout(() => {
-          runService.getRuns(100).then(runs => {
-            const run = runs.runs.find((r: Run) => r.job_id === jobId);
-
+          runService.getRunByJobId(jobId).then(run => {
+            const existing = useChatMessagesStore.getState().messagesBySession[sessionId] || [];
+            if (existing.some(message => message.jobId === jobId && message.type === 'result' && !message.isIntermediate)) return;
             if (run?.result?.output) {
               let formattedOutput = run.result.output;
               try {
@@ -213,7 +150,7 @@ export const useExecutionMonitoring = (
               }
 
               const resultMessage: ChatMessage = {
-                id: `exec-result-${Date.now()}`,
+                id: `exec-result-${jobId}`,
                 type: 'result',
                 content: formattedOutput,
                 timestamp: new Date(),
@@ -237,7 +174,7 @@ export const useExecutionMonitoring = (
               }
 
               const resultMessage: ChatMessage = {
-                id: `exec-result-${Date.now()}`,
+                id: `exec-result-${jobId}`,
                 type: 'result',
                 content: resultContent,
                 timestamp: new Date(),
@@ -258,12 +195,13 @@ export const useExecutionMonitoring = (
 
     const handleJobFailed = (event: CustomEvent) => {
       const { jobId, error } = event.detail;
+      if (settledJobsRef.current.has(jobId)) return;
       const currentExecutingJobId = executingJobIdRef.current;
       const currentLastExecutionJobId = lastExecutionJobIdRef.current;
 
-      clearExecutionStateForJob(jobId);
 
       if (currentExecutingJobId === jobId || jobId === currentLastExecutionJobId) {
+        settledJobsRef.current.add(jobId);
         // Transition all "running" or "planning" tasks to "failed"
         useTaskExecutionStore.getState().transitionAll(
           ['running', 'planning'],
@@ -291,7 +229,6 @@ export const useExecutionMonitoring = (
         setExecutingJobId(null);
         setExecutionStartTime(null);
         setProcessedTraceIds(new Set());
-        sessionExecutionStates.delete(sessionId);
         window.dispatchEvent(new CustomEvent('forceClearExecution'));
       }
     };
@@ -410,17 +347,17 @@ export const useExecutionMonitoring = (
       setExecutingJobId(null);
       setExecutionStartTime(null);
       setProcessedTraceIds(new Set());
-      sessionExecutionStates.delete(sessionId);
     };
 
     const handleJobStopped = (event: CustomEvent) => {
       const { jobId, partialResults } = event.detail;
+      if (settledJobsRef.current.has(jobId)) return;
       const currentExecutingJobId = executingJobIdRef.current;
       const currentLastExecutionJobId = lastExecutionJobIdRef.current;
 
-      clearExecutionStateForJob(jobId);
 
       if (currentExecutingJobId === jobId || jobId === currentLastExecutionJobId) {
+        settledJobsRef.current.add(jobId);
         const stoppedMessage: ChatMessage = {
           id: `exec-stopped-${Date.now()}`,
           type: 'execution',
@@ -439,7 +376,6 @@ export const useExecutionMonitoring = (
         setExecutingJobId(null);
         setExecutionStartTime(null);
         setProcessedTraceIds(new Set());
-        sessionExecutionStates.delete(sessionId);
 
         window.dispatchEvent(new CustomEvent('forceClearExecution'));
       }
@@ -471,13 +407,45 @@ export const useExecutionMonitoring = (
     pendingExecutionRef.current = true;
   }, []);
 
+  // The transcript's trace polling can show completion even when the global
+  // run-status event was missed. Reconcile the input against this exact job,
+  // independent of whether the Runs panel (or its stream) is mounted.
+  const reconcileStatus = useCallback((jobId: string, status: unknown, error?: unknown) => {
+    if (executingJobIdRef.current !== jobId) return;
+    const normalized = String(status || '').toLowerCase();
+    const event = normalized === 'completed' ? 'jobCompleted'
+      : normalized === 'failed' ? 'jobFailed'
+      : ['stopped', 'cancelled'].includes(normalized) ? 'jobStopped' : null;
+    if (event) window.dispatchEvent(new CustomEvent(event, {
+      detail: { jobId, status: normalized, error },
+    }));
+  }, []);
+
+  useEffect(() => {
+    if (!executingJobId) return;
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const check = async () => {
+      try {
+        const run = await runService.getRunByJobId(executingJobId);
+        if (!disposed && run) reconcileStatus(executingJobId, run.status, run.error);
+      } catch {
+        // A transient request failure must not end the run or stop reconciliation.
+      } finally {
+        if (!disposed && executingJobIdRef.current === executingJobId) timer = setTimeout(check, 3000);
+      }
+    };
+    void check();
+    return () => { disposed = true; clearTimeout(timer); };
+  }, [executingJobId, sessionId, reconcileStatus]);
+
   // ── Live token streaming into the chat ────────────────────────────────
   // While a job runs, llm_chunk frames (crew subprocess → event pipe → SSE)
   // append into ONE assistant bubble — the live view that replaced per-trace
   // chat rows (full trace detail lives in ShowTrace). SSE-gated: without SSE
   // the completion message still arrives via polling exactly as before. The
-  // bubble is transient — the terminal result message is authoritative, so
-  // the cleanup drops it when the run ends (or the session/tab switches).
+  // bubble is transient — the terminal result message is authoritative. Keep
+  // it across mode switches, then remove it when the run ends.
   //
   // Chunks are COALESCED per animation frame, never painted per SSE frame. A
   // hierarchical crew with large outputs emits llm_chunk at ~30/sec, and each
@@ -491,7 +459,7 @@ export const useExecutionMonitoring = (
     if (!executingJobId) return;
     const jobId = executingJobId;
     const bubbleId = `stream-${jobId}`;
-    streamBubbleRef.current = null;
+    streamBubbleRef.current = useChatMessagesStore.getState().messagesBySession?.[sessionId]?.some(message => message.id === bubbleId) ? bubbleId : null;
 
     let pending = '';
     let rafId: number | null = null;
@@ -522,6 +490,10 @@ export const useExecutionMonitoring = (
     };
 
     const close = streamExecution(jobId, (event) => {
+      if (event.event === 'execution_update') {
+        reconcileStatus(jobId, event.data.status, event.data.error || event.data.message);
+        return;
+      }
       if (event.event !== 'llm_chunk') return;
       const chunk = (event.data.chunk as string) || '';
       if (!chunk) return;
@@ -537,12 +509,12 @@ export const useExecutionMonitoring = (
         rafId = null;
       }
       pending = '';
-      if (streamBubbleRef.current) {
+      if (streamBubbleRef.current && executingJobIdRef.current !== jobId) {
         useChatMessagesStore.getState().removeMessage(sessionId, streamBubbleRef.current);
         streamBubbleRef.current = null;
       }
     };
-  }, [executingJobId, sessionId]);
+  }, [executingJobId, sessionId, reconcileStatus]);
 
   return {
     executingJobId,

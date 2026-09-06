@@ -48,18 +48,13 @@ vi.mock('../../../../store/taskExecutionStore', () => ({
   ),
 }));
 
-vi.mock('../store/chatMessagesStore', () => ({
-  useChatMessagesStore: () => ({
-    getState: () => ({
-      setMessages: vi.fn(),
-      addMessage: vi.fn(),
-      getMessagesForSession: vi.fn().mockReturnValue([]),
-    }),
-    setMessages: vi.fn(),
-    addMessage: vi.fn(),
-    getMessagesForSession: vi.fn().mockReturnValue([]),
-  }),
-}));
+vi.mock('../store/chatMessagesStore', () => {
+  const state = {
+    messagesBySession: {}, setMessages: vi.fn(), addMessage: vi.fn(),
+    removeMessage: vi.fn(), getMessagesForSession: vi.fn().mockReturnValue([]),
+  };
+  return { useChatMessagesStore: Object.assign(() => state, { getState: () => state }) };
+});
 
 describe('useExecutionMonitoring', () => {
   const mockSaveMessageToBackend = vi.fn().mockResolvedValue(undefined);
@@ -67,6 +62,7 @@ describe('useExecutionMonitoring', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionStorage.clear();
     vi.useFakeTimers({ shouldAdvanceTime: true });
   });
 

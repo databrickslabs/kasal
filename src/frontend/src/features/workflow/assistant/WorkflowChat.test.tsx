@@ -1353,3 +1353,88 @@ describe('Flow Builder conversation', () => {
     await waitFor(() => expect(generated).not.toHaveBeenCalled());
   });
 });
+
+describe('Stop execution from the composer', () => {
+  beforeEach(() => vi.clearAllMocks());
+  const props = { onNodesGenerated: vi.fn(), onLoadingStateChange: vi.fn() };
+  const execState = async () => ((await import('./hooks/useExecutionMonitoring')) as unknown as {
+    __execState: { executingJobId: string | null };
+  }).__execState;
+
+  afterEach(async () => {
+    (await execState()).executingJobId = null;
+    vi.restoreAllMocks();
+  });
+
+  it.each(['crew', 'flow'] as const)('stops the active %s run, preventing duplicate requests', async builderMode => {
+    const { apiClient } = await import('../../../shared/api/client');
+    let finish!: (value: unknown) => void;
+    const post = vi.spyOn(apiClient, 'post').mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    const stopped = vi.fn();
+    window.addEventListener('jobStopped', stopped);
+    (await execState()).executingJobId = 'job-stop';
+    render(<WorkflowChat {...props} builderMode={builderMode} />);
+    const stop = screen.getByRole('button', { name: 'Stop execution' });
+    expect(stop).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Send message' })).not.toBeInTheDocument();
+    fireEvent.click(stop);
+    fireEvent.click(stop);
+    expect(screen.getByRole('button', { name: 'Stopping execution' })).toBeDisabled();
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledWith('/executions/job-stop/stop', {
+      stop_type: 'graceful', reason: 'Stopped by user', preserve_partial_results: true,
+    });
+    finish({ data: { status: 'STOPPED', partial_results: 'partial report' } });
+    await waitFor(() => expect(stopped).toHaveBeenCalledOnce());
+    expect(stopped.mock.calls[0][0].detail).toMatchObject({ jobId: 'job-stop', partialResults: 'partial report' });
+    window.removeEventListener('jobStopped', stopped);
+  });
+
+  it('keeps the execution active and allows retry if stopping fails', async () => {
+    const { apiClient } = await import('../../../shared/api/client');
+    const { toast } = await import('react-hot-toast');
+    vi.spyOn(apiClient, 'post').mockRejectedValue(new Error('Network unavailable'));
+    const error = vi.spyOn(toast, 'error');
+    (await execState()).executingJobId = 'job-retry';
+    render(<WorkflowChat {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Stop execution' }));
+    await waitFor(() => expect(error).toHaveBeenCalledWith('Could not stop execution. Please try again.'));
+    expect(screen.getByRole('button', { name: 'Stop execution' })).toBeEnabled();
+    expect((await execState()).executingJobId).toBe('job-retry');
+  });
+});
+
+it('holds the reading position during streaming and resumes following only at the bottom', async () => {
+  const { __storeState: state } = await import('./store/chatMessagesStore') as unknown as {
+    __storeState: { messagesBySession: Record<string, unknown[]> };
+  };
+  const props = { onNodesGenerated: vi.fn(), onLoadingStateChange: vi.fn() };
+  const stream = (content: string) => { state.messagesBySession['test-session-123'] = [
+    { id: 'stream', type: 'assistant', content, timestamp: new Date(), isIntermediate: true },
+  ]; };
+  stream('Earlier output');
+  const { rerender } = render(<WorkflowChat {...props} />);
+  const viewport = screen.getByTestId('builder-conversation-scroll');
+  Object.defineProperties(viewport, { scrollHeight: { value: 2000, configurable: true }, clientHeight: { value: 500 } });
+  stream('Earlier output plus tokens');
+  rerender(<WorkflowChat {...props} />);
+  expect(viewport.scrollTop).toBe(2000);
+  fireEvent.wheel(viewport, { deltaY: -10 });
+  viewport.scrollTop = 1490; // Even a small upward scroll must pause following.
+  fireEvent.scroll(viewport);
+  stream('More tokens arriving');
+  rerender(<WorkflowChat {...props} />);
+  expect(viewport.scrollTop).toBe(1490);
+  viewport.scrollTop = 800;
+  fireEvent.scroll(viewport);
+  stream('Still producing output');
+  rerender(<WorkflowChat {...props} />);
+  expect(viewport.scrollTop).toBe(800);
+  viewport.scrollTop = 1500;
+  fireEvent.scroll(viewport);
+  Object.defineProperty(viewport, 'scrollHeight', { value: 2200 });
+  stream('Follow these new tokens');
+  rerender(<WorkflowChat {...props} />);
+  expect(viewport.scrollTop).toBe(2200);
+  state.messagesBySession = {};
+});

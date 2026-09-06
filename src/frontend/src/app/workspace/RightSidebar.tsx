@@ -5,6 +5,7 @@ import {
   Tooltip,
   Paper,
   GlobalStyles,
+  CircularProgress,
 } from '@mui/material';
 import {
   PersonAdd as PersonAddIcon,
@@ -15,11 +16,13 @@ import {
   Schedule as ScheduleIcon,
   Assessment as LogsIcon,
   PlayArrow as PlayArrowIcon,
+  Stop as StopIcon,
   FileDownload as FileDownloadIcon,
 } from '@mui/icons-material';
 import { Edge } from 'reactflow';
 import { usePermissionStore } from '../../store/permissions';
 import { useTabManagerStore } from '../../store/tabManager';
+import { useBuilderExecutionControls } from '../../store/builderExecutionControls';
 import { useEventTriggersStore } from '../../store/eventTriggers';
 import TutorialButton from '../../features/help/tutorial/TutorialButton';
 import ExportCrewDialog from '../../features/workflow/export/components/ExportCrewDialog';
@@ -86,6 +89,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   const [chatOpenedByClick, setChatOpenedByClick] = useState(false);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   const [pulsePlay, setPulsePlay] = useState(false);
+  const execution = useBuilderExecutionControls(state => areFlowsVisible ? state.flow : state.crew);
   // Event Triggers is a Preview feature toggled in Configuration → Engines.
   // Read from the shared Zustand store so flipping it in Configuration hides/
   // shows this sidebar action live, without a refresh. Default OFF.
@@ -198,10 +202,10 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
     // Play button at the top - context-aware
     {
       id: 'play-execution',
-      icon: <PlayArrowIcon />,
-      tooltip: playButtonTooltip,
-      onClick: handlePlayClick,
-      disabled: !canExecute
+      icon: execution ? (execution.stopping ? <CircularProgress size={18} color="inherit" /> : <StopIcon />) : <PlayArrowIcon />,
+      tooltip: execution ? (execution.stopping ? 'Stopping execution' : areFlowsVisible ? 'Stop Flow' : 'Stop Crew') : playButtonTooltip,
+      onClick: execution ? execution.stop : handlePlayClick,
+      disabled: execution ? execution.stopping : !canExecute
     },
     // Only show Add Agent, Add Task, and Save for non-operators AND when not on flow canvas
     ...(!isOperator && !areFlowsVisible ? [
