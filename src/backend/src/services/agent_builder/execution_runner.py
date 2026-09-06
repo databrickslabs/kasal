@@ -12,6 +12,10 @@ from typing import Any, Dict, Optional
 
 from src.models.execution_status import ExecutionStatus
 from src.services.agent_builder.process_executor import process_crew_executor
+from src.services.execution.finalization import (
+    ExecutionOutcome,
+    persist_execution_outcome,
+)
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -32,50 +36,10 @@ async def update_execution_status_with_retry(
     Returns:
         True if successful, False otherwise
     """
-    from src.services.execution.status import ExecutionStatusService
-
-    max_retries = 3
-    retry_count = 0
-    update_success = False
-
-    while retry_count < max_retries and not update_success:
-        try:
-            logger.info(
-                f"Attempting final status update for {execution_id} to {status} (attempt {retry_count + 1}/{max_retries})."
-            )
-            # update_status returns False on failure (record not found, DB
-            # error swallowed internally) — it must be honored, otherwise the
-            # retry loop is dead code and failed writes go unnoticed until the
-            # engine's safety net force-completes the run.
-            update_success = bool(
-                await ExecutionStatusService.update_status(
-                    job_id=execution_id, status=status, message=message, result=result
-                )
-            )
-            if update_success:
-                logger.info(f"Final status update call for {execution_id} successful.")
-                return True
-            retry_count += 1
-            logger.error(
-                f"Final status update for {execution_id} reported failure (attempt {retry_count}/{max_retries})."
-            )
-        except Exception as update_exc:
-            retry_count += 1
-            logger.error(
-                f"Error updating final status for {execution_id} (attempt {retry_count}/{max_retries}): {update_exc}"
-            )
-        if not update_success and retry_count < max_retries:
-            # Exponential backoff: 1s, 2s, 4s, etc.
-            backoff_time = 2 ** (retry_count - 1)
-            logger.info(f"Retrying in {backoff_time} seconds...")
-            await asyncio.sleep(backoff_time)
-
-    if not update_success:
-        logger.error(
-            f"Failed to update execution status for {execution_id} after {max_retries} attempts."
-        )
-
-    return update_success
+    outcome = await persist_execution_outcome(
+        execution_id, ExecutionOutcome(status, message, result), retry_delay=1.0
+    )
+    return outcome.persisted
 
 
 async def run_crew_in_process(
@@ -84,7 +48,7 @@ async def run_crew_in_process(
     running_jobs: Dict,
     group_context: Optional[GroupContext] = None,
     user_token: Optional[str] = None,
-) -> None:
+) -> ExecutionOutcome:
     """
     Run a crew in an isolated process that can be truly terminated.
 
@@ -139,6 +103,7 @@ async def run_crew_in_process(
     final_status = ExecutionStatus.FAILED.value  # Default to FAILED
     final_message = "An unexpected error occurred during crew execution."
     final_result = None
+    update_success = False
 
     try:
         # Debug: Write that we got into the function body
@@ -420,3 +385,5 @@ async def run_crew_in_process(
                         f"[run_crew_in_process] CancelledError recovery also failed: {rec_err}"
                     )
                 raise  # re-raise CancelledError so the task is properly marked cancelled
+
+    return ExecutionOutcome(final_status, final_message, final_result, update_success)

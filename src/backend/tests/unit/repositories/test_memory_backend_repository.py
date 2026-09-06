@@ -39,12 +39,11 @@ class TestGetByGroupId:
         assert len(result) == 2
 
     @pytest.mark.asyncio
-    async def test_returns_empty_list_on_error(self, repo, mock_session):
+    async def test_propagates_database_error(self, repo, mock_session):
         mock_session.execute.side_effect = Exception("DB error")
 
-        result = await repo.get_by_group_id("group-1")
-
-        assert result == []
+        with pytest.raises(Exception, match="DB error"):
+            await repo.get_by_group_id("group-1")
 
 
 class TestGetDefaultByGroupId:
@@ -71,12 +70,11 @@ class TestGetDefaultByGroupId:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_returns_none_on_error(self, repo, mock_session):
+    async def test_propagates_database_error(self, repo, mock_session):
         mock_session.execute.side_effect = Exception("DB error")
 
-        result = await repo.get_default_by_group_id("group-1")
-
-        assert result is None
+        with pytest.raises(Exception, match="DB error"):
+            await repo.get_default_by_group_id("group-1")
 
 
 class TestGetByName:
@@ -93,12 +91,11 @@ class TestGetByName:
         assert result == backend
 
     @pytest.mark.asyncio
-    async def test_returns_none_on_error(self, repo, mock_session):
+    async def test_propagates_database_error(self, repo, mock_session):
         mock_session.execute.side_effect = Exception("DB error")
 
-        result = await repo.get_by_name("group-1", "missing")
-
-        assert result is None
+        with pytest.raises(Exception, match="DB error"):
+            await repo.get_by_name("group-1", "missing")
 
 
 class TestSetDefault:
@@ -119,7 +116,7 @@ class TestSetDefault:
         get_result = MagicMock()
         get_result.scalars.return_value.first.return_value = new_backend
 
-        mock_session.execute.side_effect = [defaults_result, get_result]
+        mock_session.execute.side_effect = [get_result, defaults_result]
 
         result = await repo.set_default("group-1", "backend-2")
 
@@ -135,7 +132,7 @@ class TestSetDefault:
         get_result = MagicMock()
         get_result.scalars.return_value.first.return_value = None
 
-        mock_session.execute.side_effect = [defaults_result, get_result]
+        mock_session.execute.side_effect = [get_result, defaults_result]
 
         result = await repo.set_default("group-1", "missing")
 
@@ -150,19 +147,18 @@ class TestSetDefault:
         get_result = MagicMock()
         get_result.scalars.return_value.first.return_value = backend
 
-        mock_session.execute.side_effect = [defaults_result, get_result]
+        mock_session.execute.side_effect = [get_result, defaults_result]
 
         result = await repo.set_default("group-1", "backend-1")
 
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_returns_false_on_error(self, repo, mock_session):
+    async def test_propagates_database_error(self, repo, mock_session):
         mock_session.execute.side_effect = Exception("DB error")
 
-        result = await repo.set_default("group-1", "backend-1")
-
-        assert result is False
+        with pytest.raises(Exception, match="DB error"):
+            await repo.set_default("group-1", "backend-1")
 
 
 class TestGetByType:
@@ -179,12 +175,11 @@ class TestGetByType:
         assert len(result) == 1
 
     @pytest.mark.asyncio
-    async def test_returns_empty_on_error(self, repo, mock_session):
+    async def test_propagates_database_error(self, repo, mock_session):
         mock_session.execute.side_effect = Exception("DB error")
 
-        result = await repo.get_by_type("group-1", MemoryBackendTypeEnum.DATABRICKS)
-
-        assert result == []
+        with pytest.raises(Exception, match="DB error"):
+            await repo.get_by_type("group-1", MemoryBackendTypeEnum.DATABRICKS)
 
 
 class TestGetAll:
@@ -201,12 +196,11 @@ class TestGetAll:
         assert len(result) == 3
 
     @pytest.mark.asyncio
-    async def test_returns_empty_on_error(self, repo, mock_session):
+    async def test_propagates_database_error(self, repo, mock_session):
         mock_session.execute.side_effect = Exception("DB error")
 
-        result = await repo.get_all()
-
-        assert result == []
+        with pytest.raises(Exception, match="DB error"):
+            await repo.get_all()
 
 
 class TestDeleteAllByGroupId:
@@ -235,9 +229,8 @@ class TestDeleteAllByGroupId:
         assert result == 0
 
     @pytest.mark.asyncio
-    async def test_returns_zero_on_error(self, repo, mock_session):
+    async def test_propagates_database_error(self, repo, mock_session):
         mock_session.execute.side_effect = Exception("DB error")
 
-        result = await repo.delete_all_by_group_id("group-1")
-
-        assert result == 0
+        with pytest.raises(Exception, match="DB error"):
+            await repo.delete_all_by_group_id("group-1")

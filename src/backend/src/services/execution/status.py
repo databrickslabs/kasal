@@ -32,6 +32,7 @@ class ExecutionStatusService:
         result: Any = None,
         session: AsyncSession | None = None,
         only_if_changed: bool = False,
+        preserve_terminal: bool = False,
     ) -> bool:
         """
         Update the status of an execution in the database.
@@ -46,6 +47,8 @@ class ExecutionStatusService:
                 given). Used for idempotent transitions like the RUNNING
                 write at execution start, where API-created records are
                 already RUNNING but scheduler-created records start pending.
+            preserve_terminal: Finalization retries must not replace another
+                terminal outcome, a stop request, or a pending approval.
 
         Returns:
             True if successful, False otherwise
@@ -80,6 +83,27 @@ class ExecutionStatusService:
                 # reconciliation), and emitting on each write duplicates the
                 # downstream trigger — the "pending twice" symptom.
                 prior_status = (getattr(execution_record, "status", None) or "").upper()
+                if (
+                    preserve_terminal
+                    and prior_status != status.upper()
+                    and prior_status
+                    in {
+                        "COMPLETED",
+                        "FAILED",
+                        "CANCELLED",
+                        "STOPPED",
+                        "REJECTED",
+                        "STOPPING",
+                        "WAITING_FOR_APPROVAL",
+                    }
+                ):
+                    logger.info(
+                        "Execution %s already settled or paused at %s; ignoring finalization to %s",
+                        job_id,
+                        prior_status,
+                        status,
+                    )
+                    return True
                 logger.debug(
                     f"[ExecutionStatusService] Found record_id: {record_id} for job_id: {job_id}. Preparing update data."
                 )

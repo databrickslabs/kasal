@@ -351,80 +351,33 @@ class KasalEngineService(BaseEngineService):
                 f"[KasalEngineService] Starting process-based execution for {execution_id}"
             )
 
-            # Create a task for process-based crew execution with exception handler
+            # The runner reports the workload outcome separately from persistence.
+            # A normal return can mean FAILED; it must never imply COMPLETED.
             async def run_with_exception_handler():
-                run_succeeded = False
+                from src.services.execution.finalization import (
+                    ExecutionOutcome,
+                    persist_execution_outcome,
+                )
+
                 try:
-                    logger.info(
-                        f"[KasalEngineService] About to call run_crew_in_process for {execution_id}"
-                    )
-                    await run_crew_in_process(
+                    outcome = await run_crew_in_process(
                         execution_id=execution_id,
                         config=execution_config,
                         running_jobs=self._running_jobs,
                         group_context=group_context,
                         user_token=user_token,
                     )
-                    run_succeeded = True
-                    logger.info(
-                        f"[KasalEngineService] run_crew_in_process completed for {execution_id}"
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("Crew runner failed for %s", execution_id)
+                    outcome = ExecutionOutcome("FAILED", "Crew execution failed")
+                if isinstance(outcome, ExecutionOutcome) and not outcome.persisted:
+                    # One immediate recovery attempt; the periodic sweep retains
+                    # and retries the same outcome if the database remains down.
+                    await persist_execution_outcome(
+                        execution_id, outcome, max_attempts=1
                     )
-                except Exception as e:
-                    logger.error(
-                        f"[KasalEngineService] CRITICAL: Exception in run_crew_in_process for {execution_id}: {e}",
-                        exc_info=True,
-                    )
-                    # Write to file as backup
-                    import traceback
-
-                    with open(f"/tmp/task_error_{execution_id[:8]}.log", "w") as f:
-                        f.write(f"Exception in background task: {e}\n")
-                        f.write(traceback.format_exc())
-                finally:
-                    # SAFETY NET: if execution is still RUNNING after the task ends,
-                    # force-update to COMPLETED (run_crew_in_process already calls
-                    # update_execution_status_with_retry internally, but that can fail
-                    # silently in deployed environments like Databricks Apps).
-                    try:
-                        from src.repositories.execution_history_repository import (
-                            ExecutionHistoryRepository,
-                        )
-                        from src.services.execution.status import ExecutionStatusService
-
-                        # _smart, not _with_fresh_engine: this net reads
-                        # executionhistory, which lives in Lakebase when enabled.
-                        # _with_fresh_engine is pinned to the local engine, so the
-                        # lookup returned "not found", the net logged "no action
-                        # needed", and a genuinely stuck RUNNING execution was
-                        # never corrected — the exact failure this net exists to
-                        # catch.
-                        from src.utils.asyncio_utils import execute_db_operation_smart
-
-                        async def _check_and_fix(session):
-                            repo = ExecutionHistoryRepository(session)
-                            rec = await repo.get_execution_by_job_id(execution_id)
-                            if rec and rec.status and rec.status.upper() == "RUNNING":
-                                final = "COMPLETED" if run_succeeded else "FAILED"
-                                logger.warning(
-                                    f"[KasalEngineService] SAFETY NET: execution {execution_id} "
-                                    f"still RUNNING after task ended — forcing to {final}"
-                                )
-                                await ExecutionStatusService.update_status(
-                                    job_id=execution_id,
-                                    status=final,
-                                    message=f"Crew execution {final.lower()} (safety-net update)",
-                                )
-                            else:
-                                logger.info(
-                                    f"[KasalEngineService] SAFETY NET: execution {execution_id} "
-                                    f"already has terminal status ({rec.status if rec else 'not found'}), no action needed"
-                                )
-
-                        await execute_db_operation_smart(_check_and_fix)
-                    except Exception as safety_err:
-                        logger.error(
-                            f"[KasalEngineService] SAFETY NET failed for {execution_id}: {safety_err}"
-                        )
 
             execution_task = asyncio.create_task(run_with_exception_handler())
 

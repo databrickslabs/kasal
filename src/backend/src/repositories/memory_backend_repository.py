@@ -44,7 +44,7 @@ class MemoryBackendRepository(BaseRepository[MemoryBackend]):
             return result.scalars().all()
         except Exception as e:
             logger.error(f"Error getting memory backends for group {group_id}: {e}")
-            return []
+            raise
 
     async def get_default_by_group_id(self, group_id: str) -> Optional[MemoryBackend]:
         """
@@ -71,7 +71,7 @@ class MemoryBackendRepository(BaseRepository[MemoryBackend]):
             logger.error(
                 f"Error getting default memory backend for group {group_id}: {e}"
             )
-            return None
+            raise
 
     async def get_by_name(self, group_id: str, name: str) -> Optional[MemoryBackend]:
         """
@@ -93,7 +93,7 @@ class MemoryBackendRepository(BaseRepository[MemoryBackend]):
             return result.scalar_one_or_none()
         except Exception as e:
             logger.error(f"Error getting memory backend by name {name}: {e}")
-            return None
+            raise
 
     async def set_default(self, group_id: str, backend_id: str) -> bool:
         """
@@ -107,6 +107,10 @@ class MemoryBackendRepository(BaseRepository[MemoryBackend]):
             True if successful
         """
         try:
+            backend = await self.get(backend_id)
+            if backend is None or backend.group_id != group_id:
+                return False
+
             # First, unset any existing defaults
             query = select(self.model).where(
                 and_(self.model.group_id == group_id, self.model.is_default == True)
@@ -114,21 +118,17 @@ class MemoryBackendRepository(BaseRepository[MemoryBackend]):
             result = await self.session.execute(query)
             existing_defaults = result.scalars().all()
 
-            for backend in existing_defaults:
-                backend.is_default = False
+            for previous in existing_defaults:
+                previous.is_default = False
 
-            # Set the new default
-            backend = await self.get(backend_id)
-            if backend and backend.group_id == group_id:
-                backend.is_default = True
-                await self.session.flush()
-                return True
-
-            return False
+            # All ownership checks passed before mutating the existing default.
+            backend.is_default = True
+            await self.session.flush()
+            return True
         except Exception as e:
             logger.error(f"Error setting default memory backend: {e}")
             await self.session.rollback()
-            return False
+            raise
 
     async def get_by_type(
         self, group_id: str, backend_type: MemoryBackendTypeEnum
@@ -160,7 +160,7 @@ class MemoryBackendRepository(BaseRepository[MemoryBackend]):
             return result.scalars().all()
         except Exception as e:
             logger.error(f"Error getting memory backends by type {backend_type}: {e}")
-            return []
+            raise
 
     async def get_all(self) -> List[MemoryBackend]:
         """
@@ -175,7 +175,7 @@ class MemoryBackendRepository(BaseRepository[MemoryBackend]):
             return result.scalars().all()
         except Exception as e:
             logger.error(f"Error getting all memory backends: {e}")
-            return []
+            raise
 
     async def delete_all_by_group_id(self, group_id: str) -> int:
         """
@@ -206,4 +206,4 @@ class MemoryBackendRepository(BaseRepository[MemoryBackend]):
                 f"Error deleting all memory backends for group {group_id}: {e}"
             )
             await self.session.rollback()
-            return 0
+            raise

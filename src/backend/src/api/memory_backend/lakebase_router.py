@@ -197,7 +197,7 @@ async def save_lakebase_config(
     # whenever exactly one config exists, leaving the setup half-done (warning +
     # a stale leftover config). Creating first keeps the count > 0 so the
     # subsequent cleanup of the OLD configs never trips that guard.
-    from src.schemas.memory_backend import MemoryTuningConfig, LakebaseMemoryConfig
+    from src.schemas.memory_backend import LakebaseMemoryConfig, MemoryTuningConfig
 
     config = MemoryBackendCreate(
         name=f"Lakebase Setup {datetime.now().strftime('%Y-%m-%d %H:%M')}",
@@ -207,18 +207,7 @@ async def save_lakebase_config(
             MemoryTuningConfig(**cognitive_config) if cognitive_config else None
         ),
     )
-    backend = await service.create_memory_backend(group_id, config)
-
-    # Now remove the OLD configs (everything except the one we just created).
-    try:
-        existing = await service.get_memory_backends(group_id)
-        for old in existing:
-            if str(old.id) != str(backend.id):
-                await service.delete_memory_backend(group_id, str(old.id))
-    except Exception as e:
-        logger.warning(f"Error cleaning up existing configs: {e}")
-
-    await service.set_default_backend(group_id, str(backend.id))
+    backend = await service.replace_memory_backend(group_id, config)
 
     return {
         "success": True,

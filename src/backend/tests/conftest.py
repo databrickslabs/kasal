@@ -574,6 +574,14 @@ def _isolate_execution_registry():
         registry.update(before)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_pending_execution_outcomes():
+    yield
+    module = sys.modules.get("src.services.execution.finalization")
+    if module is not None:
+        module._pending.clear()
+
+
 def _tree_snapshot(root):
     """Every file under root, minus the directories tests are allowed to write."""
     import pathlib

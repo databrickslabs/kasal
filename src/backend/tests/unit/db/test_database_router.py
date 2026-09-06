@@ -488,10 +488,8 @@ class TestGetSmartDbSessionRegularPath:
             mock_request_session.reset.assert_called_once_with(mock_token)
 
     @pytest.mark.asyncio
-    async def test_commit_no_active_connection_is_swallowed(self):
-        """A 'no active connection' commit error (engine disposed by a backend
-        switch) must NOT propagate — the request should end cleanly instead of
-        surfacing a raw 500 to a concurrent poller."""
+    async def test_commit_no_active_connection_propagates(self):
+        """A failed commit must not turn a mutation into a successful response."""
         mock_session = AsyncMock()
         mock_session.commit.side_effect = Exception(
             "(sqlite3.OperationalError) no active connection"
@@ -517,12 +515,12 @@ class TestGetSmartDbSessionRegularPath:
             gen = get_smart_db_session()
             await gen.__anext__()
 
-            # Generator finishes cleanly despite the disposed-connection commit
-            with pytest.raises(StopAsyncIteration):
+            # Failed commits propagate even when the connection was disposed
+            with pytest.raises(Exception, match="no active connection"):
                 await gen.__anext__()
 
-            # Nothing to roll back on a disposed connection
-            mock_session.rollback.assert_not_awaited()
+            # Cleanup is attempted without hiding the failed commit
+            mock_session.rollback.assert_awaited_once()
             mock_session.close.assert_awaited_once()
             mock_request_session.reset.assert_called_once_with(mock_token)
 

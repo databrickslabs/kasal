@@ -10,14 +10,14 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from src.core.dependencies import SessionDep
+from src.core.dependencies import WriteSessionDep
 from src.core.logger import LoggerManager
 from src.services.memory.config.backend_service import MemoryBackendService
 
 logger = LoggerManager.get_instance().api
 
 
-def get_memory_backend_service(session: SessionDep) -> MemoryBackendService:
+def get_memory_backend_service(session: WriteSessionDep) -> MemoryBackendService:
     """Get MemoryBackendService instance with injected session."""
     return MemoryBackendService(session)
 

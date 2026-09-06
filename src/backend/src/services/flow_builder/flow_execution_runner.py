@@ -12,6 +12,10 @@ from typing import Any, Dict, Optional
 
 from src.core.logger import LoggerManager
 from src.models.execution_status import ExecutionStatus
+from src.services.execution.finalization import (
+    ExecutionOutcome,
+    persist_execution_outcome,
+)
 from src.services.flow_builder.process_executor import process_flow_executor
 from src.utils.user_context import GroupContext
 
@@ -50,31 +54,13 @@ async def update_execution_status_with_retry(
     Returns:
         True if update successful, False otherwise
     """
-    from src.services.execution.status import ExecutionStatusService
-
-    for attempt in range(max_retries):
-        try:
-            success = await ExecutionStatusService.update_status(
-                job_id=execution_id, status=status, message=message, result=result
-            )
-            if success:
-                return True
-            else:
-                logger.warning(
-                    f"Status update returned False for {execution_id}, attempt {attempt + 1}/{max_retries}"
-                )
-        except Exception as e:
-            logger.error(
-                f"Error updating status for {execution_id}, attempt {attempt + 1}/{max_retries}: {e}"
-            )
-
-        if attempt < max_retries - 1:
-            await asyncio.sleep(retry_delay * (attempt + 1))  # Exponential backoff
-
-    logger.error(
-        f"Failed to update status for {execution_id} after {max_retries} attempts"
+    outcome = await persist_execution_outcome(
+        execution_id,
+        ExecutionOutcome(status, message, result),
+        max_attempts=max_retries,
+        retry_delay=retry_delay,
     )
-    return False
+    return outcome.persisted
 
 
 async def run_flow_in_process(
@@ -83,7 +69,7 @@ async def run_flow_in_process(
     running_jobs: Dict,
     group_context: Optional[GroupContext] = None,
     user_token: Optional[str] = None,
-) -> None:
+) -> ExecutionOutcome:
     """
     Run a flow in an isolated process that can be truly terminated.
 
@@ -358,21 +344,23 @@ async def run_flow_in_process(
             pass
 
     finally:
+        update_success = False
         # Update execution status
         if final_status:
             logger.info(
                 f"[run_flow_in_process] Updating status to {final_status} for {execution_id}"
             )
             try:
-                await update_execution_status_with_retry(
+                update_success = await update_execution_status_with_retry(
                     execution_id=execution_id,
                     status=final_status,
                     message=final_message,
                     result=final_result,
                 )
-                logger.info(
-                    f"[run_flow_in_process] Successfully updated status to {final_status}"
-                )
+                if update_success:
+                    logger.info(
+                        f"[run_flow_in_process] Successfully updated status to {final_status}"
+                    )
             except Exception as status_error:
                 logger.error(
                     f"[run_flow_in_process] Failed to update status: {status_error}"
@@ -393,6 +381,8 @@ async def run_flow_in_process(
         logger.info(
             f"[run_flow_in_process] *** FUNCTION EXITING *** execution_id: {execution_id}, final_status: {final_status}"
         )
+
+    return ExecutionOutcome(final_status, final_message, final_result, update_success)
 
 
 async def run_flow(

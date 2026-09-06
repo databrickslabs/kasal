@@ -776,22 +776,15 @@ async def get_lakebase_session(
                 await session.commit()
             except GeneratorExit:
                 pass
-            except Exception as exc:
-                if _is_disposed_connection_error(exc):
-                    # Engine disposed underneath us (backend switch / token
-                    # refresh). There is nothing left to commit or roll back on a
-                    # closed connection, and the request itself succeeded — see
-                    # database_router._is_disposed_connection_error.
-                    logger.warning(
-                        f"[LAKEBASE SESSION] Connection disposed during commit; "
-                        f"ignoring: {exc}"
+            except Exception:
+                # Never swallow a failed transaction as a connection teardown race.
+                try:
+                    await session.rollback()
+                except Exception:
+                    logger.exception(
+                        "Rollback failed after Lakebase transaction failure"
                     )
-                else:
-                    try:
-                        await session.rollback()
-                    except Exception:
-                        pass
-                    raise
+                raise
             finally:
                 try:
                     await session.close()
@@ -819,21 +812,13 @@ async def get_lakebase_session(
             # Client disconnected — skip commit/rollback to avoid
             # asyncpg "another operation is in progress" errors.
             pass
-        except Exception as exc:
-            if _is_disposed_connection_error(exc):
-                # See the crew-thread branch above: a disposed connection is a
-                # teardown race, not a request failure. Surfacing it turned every
-                # backend switch into a 500 for whichever request was in flight.
-                logger.warning(
-                    f"[LAKEBASE SESSION] Connection disposed during commit; "
-                    f"ignoring: {exc}"
-                )
-            else:
-                try:
-                    await session.rollback()
-                except Exception:
-                    pass
-                raise
+        except Exception:
+            # Never swallow a failed transaction as a connection teardown race.
+            try:
+                await session.rollback()
+            except Exception:
+                logger.exception("Rollback failed after Lakebase transaction failure")
+            raise
         finally:
             try:
                 await session.close()

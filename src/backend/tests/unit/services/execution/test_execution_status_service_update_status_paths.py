@@ -443,3 +443,29 @@ async def test_default_behavior_still_writes_even_when_status_matches(monkeypatc
 
     assert ok is True
     assert "args" in calls  # default (only_if_changed=False) keeps writing
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "current",
+    ["STOPPED", "STOPPING", "CANCELLED", "REJECTED", "FAILED", "WAITING_FOR_APPROVAL"],
+)
+async def test_finalization_preserves_existing_outcome_or_approval(current):
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from src.services.execution import status as module
+
+    repo = MagicMock()
+    repo.get_execution_by_job_id = AsyncMock(
+        return_value=SimpleNamespace(id=42, status=current)
+    )
+    repo.update_execution = AsyncMock()
+    with patch.object(module, "ExecutionRepository", return_value=repo):
+        assert await Svc.update_status(
+            "run",
+            "COMPLETED",
+            "late recovery",
+            session=AsyncMock(),
+            preserve_terminal=True,
+        )
+    repo.update_execution.assert_not_awaited()

@@ -24,6 +24,10 @@ from typing import Any, Dict, Optional
 from src.core.logger import LoggerManager
 from src.models.execution_status import ExecutionStatus
 from src.services.chat.run_trace_writer import RunTraceWriter as _RunTraceWriter
+from src.services.execution.finalization import (
+    ExecutionOutcome,
+    persist_execution_outcome,
+)
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -83,7 +87,6 @@ class LightAgentService:
         from src.services.catalog.agents import AgentService
         from src.services.execution.kernel.agent_tools import build_agent_with_tools
         from src.services.execution.logs.queue import enqueue_log
-        from src.services.execution.status import ExecutionStatusService
         from src.utils.user_context import UserContext
 
         def _log(msg: str) -> None:
@@ -1379,11 +1382,11 @@ class LightAgentService:
             # wedges completion.
             await _flush_and_close_traces(timeout=10)
 
-            await ExecutionStatusService.update_status(
-                job_id=execution_id,
-                status=ExecutionStatus.COMPLETED.value,
-                message="Light agent execution completed",
-                result=result_payload,
+            outcome = await persist_execution_outcome(
+                execution_id,
+                ExecutionOutcome(
+                    "COMPLETED", "Light agent execution completed", result_payload
+                ),
             )
             _system_log.info(
                 f"[light_agent] Completed light agent execution {execution_id}"
@@ -1391,6 +1394,7 @@ class LightAgentService:
             return {
                 "execution_id": execution_id,
                 "status": ExecutionStatus.COMPLETED.value,
+                "status_persisted": outcome.persisted,
             }
 
         except Exception as e:  # noqa: BLE001
@@ -1409,20 +1413,14 @@ class LightAgentService:
                 logger.debug(
                     f"[light_agent] trace flush on failure skipped: {flush_err}"
                 )
-            try:
-                await ExecutionStatusService.update_status(
-                    job_id=execution_id,
-                    status=ExecutionStatus.FAILED.value,
-                    message=f"Light agent execution failed: {e}",
-                    result=None,
-                )
-            except Exception as status_err:  # noqa: BLE001
-                _system_log.error(
-                    f"[light_agent] Could not mark execution {execution_id} FAILED: {status_err}"
-                )
+            outcome = await persist_execution_outcome(
+                execution_id,
+                ExecutionOutcome("FAILED", f"Light agent execution failed: {e}"),
+            )
             return {
                 "execution_id": execution_id,
                 "status": ExecutionStatus.FAILED.value,
+                "status_persisted": outcome.persisted,
                 "error": str(e),
             }
         finally:

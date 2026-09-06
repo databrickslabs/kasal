@@ -584,3 +584,75 @@ class TestRunCrewInProcess:
 
         call_args = mock_update.call_args
         assert call_args[0][1] == ExecutionStatus.COMPLETED.value
+
+
+@pytest.mark.asyncio
+async def test_failed_crew_stays_failed_when_engine_recovers_status_write():
+    """The real runner's normal return must not mean the workload succeeded."""
+    from contextlib import asynccontextmanager
+
+    from src.services.agent_builder import execution_runner as runner
+    from src.services.execution import engine_service as engine
+    from src.services.execution.status import ExecutionStatusService
+
+    @asynccontextmanager
+    async def session_context(*args, **kwargs):
+        yield AsyncMock()
+
+    attempts = []
+
+    async def write_status(**kwargs):
+        attempts.append(kwargs["status"])
+        return kwargs["status"] == "RUNNING" or len(attempts) > 4
+
+    service = engine.KasalEngineService()
+    with (
+        patch.object(engine, "dispatch_session", session_context),
+        patch.object(engine, "harness_for_execution", AsyncMock(return_value="kasal")),
+        patch.object(engine, "stamp_on_config"),
+        patch.object(engine, "subprocess_env", return_value={}),
+        patch.object(engine.LogWriterTask, "ensure_writer_started", AsyncMock()),
+        patch.object(
+            runner.process_crew_executor,
+            "run_crew_isolated",
+            AsyncMock(return_value={"status": "FAILED", "error": "workload failed"}),
+        ),
+        patch.object(
+            ExecutionStatusService, "update_status", AsyncMock(side_effect=write_status)
+        ),
+        patch("asyncio.sleep", AsyncMock()),
+    ):
+        await service.run_execution(
+            "failed-crew", {"agents": [], "tasks": []}, session=AsyncMock()
+        )
+        await service._running_jobs["failed-crew"]["task"]
+    assert attempts == ["RUNNING", "FAILED", "FAILED", "FAILED", "FAILED"]
+
+
+@pytest.mark.asyncio
+async def test_exhausted_status_write_is_retried_with_original_failure():
+    from src.services.execution.finalization import (
+        ExecutionOutcome,
+        pending_execution_ids,
+        persist_execution_outcome,
+        retry_pending_outcomes,
+    )
+    from src.services.execution.status import ExecutionStatusService
+
+    with patch.object(
+        ExecutionStatusService, "update_status", AsyncMock(return_value=False)
+    ):
+        outcome = await persist_execution_outcome(
+            "pending-failure",
+            ExecutionOutcome("FAILED", "original reason"),
+            max_attempts=1,
+        )
+    assert not outcome.persisted
+    assert "pending-failure" in pending_execution_ids()
+    with patch.object(
+        ExecutionStatusService, "update_status", AsyncMock(return_value=True)
+    ) as update:
+        assert await retry_pending_outcomes() == 1
+    assert update.call_args.kwargs["status"] == "FAILED"
+    assert update.call_args.kwargs["message"] == "original reason"
+    assert "pending-failure" not in pending_execution_ids()

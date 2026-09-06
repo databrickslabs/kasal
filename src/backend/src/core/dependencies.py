@@ -16,6 +16,11 @@ logger = logging.getLogger(__name__)
 # Type definitions for dependencies
 # Use smart session that automatically selects between regular DB and Lakebase
 SessionDep = Annotated[AsyncSession, Depends(get_smart_db_session)]
+# Ordinary mutation endpoints must commit before their response is sent. Keep
+# SessionDep for streams and consumers that need a session during response work.
+WriteSessionDep = Annotated[
+    AsyncSession, Depends(get_smart_db_session, scope="function")
+]
 # Keep legacy session dependency for backward compatibility if needed
 LegacySessionDep = Annotated[AsyncSession, Depends(get_db)]
 # Always use the LOCAL database (SQLite/PG), bypassing Lakebase swap.

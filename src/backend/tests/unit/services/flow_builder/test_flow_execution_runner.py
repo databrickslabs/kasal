@@ -19,6 +19,17 @@ from src.services.flow_builder.flow_execution_runner import (
 )
 
 
+@pytest.fixture(autouse=True)
+def isolate_flow_status_lookup():
+    # Failure/logging tests must not open a real database to inspect run status.
+    # Tests for STOPPED/RUNNING override this default with their own records.
+    with patch(
+        "src.services.execution.status.ExecutionStatusService.get_status",
+        AsyncMock(return_value=None),
+    ):
+        yield
+
+
 class TestUpdateExecutionStatusWithRetry:
     """Tests for update_execution_status_with_retry function."""
 
@@ -41,6 +52,7 @@ class TestUpdateExecutionStatusWithRetry:
                 status="COMPLETED",
                 message="Test message",
                 result=None,
+                preserve_terminal=True,
             )
 
     @pytest.mark.asyncio

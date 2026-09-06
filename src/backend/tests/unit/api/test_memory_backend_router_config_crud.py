@@ -410,3 +410,97 @@ async def test_set_default_bulk_delete_and_cleanup_refuse_an_operator():
         )
     svc.set_default_backend.assert_not_awaited()
     svc.delete_memory_backend.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend_type", ["default", "lakebase"])
+@pytest.mark.parametrize(
+    "failure", [None, "cleanup", "default", "commit", "closed_commit"]
+)
+async def test_memory_replacement_response_matches_committed_state(
+    backend_type, failure
+):
+    """Real router, service and request transaction: success implies a saved default."""
+    from contextlib import nullcontext
+
+    import httpx
+    from fastapi import FastAPI
+    from sqlalchemy import select
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from src.core.dependencies import get_group_context
+    from src.db import database_router as db
+    from src.main import app as production_app
+    from src.models.memory_backend import MemoryBackend
+    from src.repositories.memory_backend_repository import MemoryBackendRepository
+    from src.utils.user_context import GroupContext
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(MemoryBackend.__table__.create)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with factory() as seed:
+            seed.add(
+                MemoryBackend(id="old", name="Old", group_id="group", is_default=True)
+            )
+            await seed.commit()
+
+        app = FastAPI(exception_handlers=dict(production_app.exception_handlers))
+        app.include_router(configs_router.router)
+        app.include_router(lakebase_router.router)
+        app.dependency_overrides[get_group_context] = lambda: GroupContext(
+            group_ids=["group"], group_email="audit@example.com", user_role="admin"
+        )
+        session = factory()
+        fault = nullcontext()
+        if failure == "cleanup":
+            fault = patch.object(
+                MemoryBackendRepository,
+                "delete",
+                AsyncMock(side_effect=RuntimeError("SENTINEL")),
+            )
+        elif failure == "default":
+            fault = patch.object(
+                MemoryBackendRepository, "set_default", AsyncMock(return_value=False)
+            )
+        elif failure in {"commit", "closed_commit"}:
+            error = (
+                IntegrityError("INSERT SENTINEL", {}, Exception("SENTINEL"))
+                if failure == "commit"
+                else RuntimeError("connection is closed")
+            )
+            fault = patch.object(session, "commit", AsyncMock(side_effect=error))
+        with (
+            patch.object(db, "is_lakebase_enabled", AsyncMock(return_value=False)),
+            patch.object(db, "async_session_factory", return_value=session),
+            fault,
+        ):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+                base_url="http://example.com",
+            ) as client:
+                body = (
+                    {"lakebase_config": {"instance_name": "audit"}}
+                    if backend_type == "lakebase"
+                    else {}
+                )
+                response = await client.post(f"/{backend_type}/save-config", json=body)
+        assert (
+            response.status_code
+            == {
+                None: 200,
+                "cleanup": 500,
+                "default": 409,
+                "commit": 409,
+                "closed_commit": 500,
+            }[failure]
+        )
+        assert "SENTINEL" not in response.text
+        async with factory() as verify:
+            rows = (await verify.execute(select(MemoryBackend))).scalars().all()
+            assert len(rows) == 1 and rows[0].is_default
+            assert rows[0].id == ("old" if failure else response.json()["backend_id"])
+    finally:
+        await engine.dispose()

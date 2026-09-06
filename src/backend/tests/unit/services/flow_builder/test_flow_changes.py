@@ -298,7 +298,11 @@ class TestFlowExecutionRunnerResultPropagation:
             )
 
             mock_service.update_status.assert_called_once_with(
-                job_id=execution_id, status=status, message=message, result=result
+                job_id=execution_id,
+                status=status,
+                message=message,
+                result=result,
+                preserve_terminal=True,
             )
             assert success is True
 

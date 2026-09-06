@@ -1,28 +1,12 @@
-"""Committing on a connection that was disposed underneath us is not a failure.
+"""Connection-disposal diagnostics must not hide failed transactions.
 
-Enabling or migrating Lakebase calls ``dispose_engines()`` to switch backends.
-That closes connections held by any CONCURRENT request, so when such a request
-reaches its commit there is nothing left to commit — and nothing to roll back
-either. The work either landed before the switch or was never going to.
-
-The router already tolerated SQLAlchemy's wording for this ("no active
-connection"). It did not tolerate asyncpg's, so the deployed app answered a
-polling client with a raw 500 seven times in one 14ms burst::
-
-    InterfaceError: cannot call Transaction.commit():
-                    the underlying connection is closed
-
-The Lakebase session path had no guard at all and re-raised both.
-
-The match is phrase-based on purpose: the drivers share no exception type for
-this, and asyncpg's ``InterfaceError`` also covers genuine protocol misuse
-("another operation is in progress") which MUST still surface — swallowing that
-would hide real concurrency bugs.
+A closed connection can mean an uncommitted write was lost. Both Lakebase
+session paths must propagate that primary failure, even if rollback also fails.
 """
 
 import pytest
 
-from src.db.database_router import _is_disposed_connection_error
+from src.db.lakebase_session import _is_disposed_connection_error
 
 
 class TestWhatCountsAsADisposedConnection:
@@ -74,32 +58,37 @@ class TestWhatCountsAsADisposedConnection:
         assert _is_disposed_connection_error(Exception()) is False
 
 
-class TestBothSessionPathsUseIt:
-    """The router and the Lakebase session must agree.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("crew_thread", [False, True])
+@pytest.mark.parametrize("rollback_fails", [False, True])
+async def test_lakebase_commit_failure_is_not_suppressed(crew_thread, rollback_fails):
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
 
-    The helper lives in ``lakebase_session`` because the router imports THAT
-    module, not the reverse — putting it in the router would have made the import
-    circular.
-    """
+    from src.db import lakebase_session as module
 
-    def test_the_lakebase_session_path_guards_its_commits(self):
-        import inspect
+    primary = RuntimeError("connection is closed")
+    session = AsyncMock()
+    session.commit.side_effect = primary
+    if rollback_fails:
+        session.rollback.side_effect = RuntimeError("rollback also failed")
 
-        import src.db.lakebase_session as lakebase_session
+    @asynccontextmanager
+    async def session_context():
+        yield session
 
-        source = inspect.getsource(lakebase_session)
-        # Both branches: the crew-thread factory and the main event loop.
-        assert source.count("_is_disposed_connection_error(exc)") == 2, (
-            "a commit site in lakebase_session lost its disposed-connection "
-            "guard; a backend switch there 500s the in-flight request"
-        )
-
-    def test_the_router_guards_its_commit(self):
-        import inspect
-
-        import src.db.database_router as database_router
-
-        source = inspect.getsource(database_router)
-        assert "_is_disposed_connection_error(e)" in source
-        # The old narrow literal must not come back.
-        assert '"no active connection" in str(e).lower()' not in source
+    factory = SimpleNamespace(
+        instance_name="audit", user_email=None, get_session=session_context
+    )
+    with (
+        patch.object(module, "_is_crew_thread", return_value=crew_thread),
+        patch.object(module, "_lakebase_factory", factory),
+        patch.object(module, "_thread_local", SimpleNamespace(factory=factory)),
+        pytest.raises(RuntimeError) as caught,
+    ):
+        async with module.get_lakebase_session(instance_name="audit") as actual:
+            assert actual is session
+    assert caught.value is primary
+    session.rollback.assert_awaited_once()
+    session.close.assert_awaited_once()

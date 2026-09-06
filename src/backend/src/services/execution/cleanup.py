@@ -27,6 +27,10 @@ from src.models.execution_status import ExecutionStatus
 from src.repositories.execution_history_repository import ExecutionHistoryRepository
 from src.repositories.execution_repository import ExecutionRepository
 from src.repositories.execution_trace_repository import ExecutionTraceRepository
+from src.services.execution.finalization import (
+    pending_execution_ids,
+    retry_pending_outcomes,
+)
 from src.services.execution.status import ExecutionStatusService
 
 logger = logging.getLogger(__name__)
@@ -110,7 +114,8 @@ class ExecutionCleanupService:
 
         Returns number of jobs recovered.
         """
-        recovered = 0
+        known_outcomes = pending_execution_ids()
+        recovered = await retry_pending_outcomes()
         try:
             async for db in get_smart_db_session():
                 history_repo = ExecutionHistoryRepository(db)
@@ -119,6 +124,8 @@ class ExecutionCleanupService:
                 )
 
             for job_id in running_job_ids:
+                if job_id in known_outcomes:
+                    continue  # Never replace a known failed outcome with a trace inference.
                 # Check whether the crew actually completed
                 message = "CrewAI execution completed successfully"
                 async for db in get_smart_db_session():
@@ -149,14 +156,17 @@ class ExecutionCleanupService:
                         except Exception:
                             final_result = str(raw)
 
-                await ExecutionStatusService.update_status(
+                updated = await ExecutionStatusService.update_status(
                     job_id=job_id,
                     status=ExecutionStatus.COMPLETED.value,
                     message=message,
                     result=final_result,
                 )
-                logger.info(f"[ZombieCleanup] Recovered stale job {job_id} → COMPLETED")
-                recovered += 1
+                if updated:
+                    logger.info(
+                        f"[ZombieCleanup] Recovered stale job {job_id} → COMPLETED"
+                    )
+                    recovered += 1
 
         except Exception as e:
             logger.error(f"[ZombieCleanup] Error: {e}", exc_info=True)

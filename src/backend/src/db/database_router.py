@@ -16,10 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import LakebaseUnavailableError
 from src.core.logger import LoggerManager
-from src.db.lakebase_session import (
-    _is_disposed_connection_error,
-    get_lakebase_session,
-)
+from src.db.lakebase_session import get_lakebase_session
 from src.db.lakebase_state import is_fallback_allowed, record_successful_connection
 from src.db.session import (
     _enter_request_session,
@@ -350,25 +347,14 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
         try:
             yield session
             await session.commit()
-        except Exception as e:
-            # A Lakebase migrate/enable disposes the shared SQLite/PG engine
-            # mid-flight (dispose_engines(), to switch backends). That closes the
-            # connection underneath any CONCURRENT request still holding this
-            # session, so this commit then raises "no active connection". Nothing
-            # remains to commit or roll back on a disposed connection, so treat
-            # that specific teardown race as non-fatal instead of surfacing a raw
-            # 500 to the (usually polling) client.
-            if _is_disposed_connection_error(e):
-                logger.warning(
-                    f"[DB ROUTER] Session {id(session)} connection disposed "
-                    f"(backend switch in progress); ignoring: {e}"
-                )
-            else:
-                logger.error(
-                    f"[DB ROUTER] Rolling back session {id(session)} due to exception: {e}"
-                )
+        except Exception:
+            # A disposed connection can also mean a failed write/commit. It is
+            # not evidence that the request succeeded; preserve the primary error.
+            try:
                 await session.rollback()
-                raise
+            except Exception:
+                logger.exception("Rollback failed after database operation failure")
+            raise
         finally:
             _exit_request_session(tokens)
             await session.close()

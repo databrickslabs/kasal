@@ -53,6 +53,28 @@ class MemoryBackendService:
         """Create a new memory backend configuration."""
         return await self._base_service.create_memory_backend(group_id, config)
 
+    async def replace_memory_backend(
+        self, group_id: str, config: MemoryBackendCreate
+    ) -> MemoryBackend:
+        """Replace the group's configuration within the injected transaction.
+
+        Cleanup is part of the write: a rollback must abort the entire operation.
+        The request session commits only after all three steps succeed.
+        """
+        from src.core.exceptions import ConflictError
+
+        backend = await self.create_memory_backend(group_id, config)
+        backend_id = str(backend.id)
+        for old in await self.get_memory_backends(group_id):
+            if str(old.id) != backend_id:
+                if not await self.delete_memory_backend(group_id, str(old.id)):
+                    raise ConflictError(
+                        "Memory configuration changed during replacement"
+                    )
+        if not await self.set_default_backend(group_id, backend_id):
+            raise ConflictError("Could not select the new memory configuration")
+        return backend
+
     async def get_memory_backends(self, group_id: str) -> List[MemoryBackend]:
         """Get all memory backend configurations for a group."""
         return await self._base_service.get_memory_backends(group_id)

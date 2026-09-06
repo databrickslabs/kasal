@@ -628,7 +628,7 @@ class TestSaveLakbaseConfig:
 
         svc = AsyncMock()
         svc.get_memory_backends = AsyncMock(return_value=[])
-        svc.create_memory_backend = AsyncMock(return_value=mock_backend)
+        svc.replace_memory_backend = AsyncMock(return_value=mock_backend)
         svc.set_default_backend = AsyncMock()
 
         with _patch_admin(True):
@@ -676,7 +676,7 @@ class TestSaveDefaultConfig:
 
         svc = AsyncMock()
         svc.get_memory_backends = AsyncMock(return_value=[])
-        svc.create_memory_backend = AsyncMock(return_value=mock_backend)
+        svc.replace_memory_backend = AsyncMock(return_value=mock_backend)
         svc.set_default_backend = AsyncMock()
 
         cognitive = {
@@ -692,9 +692,9 @@ class TestSaveDefaultConfig:
             )
 
         assert result["success"] is True
-        # The config handed to create_memory_backend is a DEFAULT backend that
+        # The config handed to replace_memory_backend is a DEFAULT backend that
         # carries the cognitive tuning (so get_active_config later loads it).
-        created = svc.create_memory_backend.await_args.args[1]
+        created = svc.replace_memory_backend.await_args.args[1]
         assert created.backend_type == MemoryBackendType.DEFAULT
         assert created.cognitive_config is not None
         assert (
@@ -702,7 +702,7 @@ class TestSaveDefaultConfig:
         )
         assert created.cognitive_config.query_analysis_threshold == 99977
         assert created.cognitive_config.exploration_budget == 0
-        svc.set_default_backend.assert_awaited_once()
+        svc.replace_memory_backend.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_creates_config_without_cognitive_tuning(self):
@@ -715,7 +715,7 @@ class TestSaveDefaultConfig:
         mock_backend.id = uuid4()
         svc = AsyncMock()
         svc.get_memory_backends = AsyncMock(return_value=[])
-        svc.create_memory_backend = AsyncMock(return_value=mock_backend)
+        svc.replace_memory_backend = AsyncMock(return_value=mock_backend)
         svc.set_default_backend = AsyncMock()
 
         with _patch_admin(True):
@@ -726,7 +726,7 @@ class TestSaveDefaultConfig:
             )
 
         assert result["success"] is True
-        created = svc.create_memory_backend.await_args.args[1]
+        created = svc.replace_memory_backend.await_args.args[1]
         assert created.cognitive_config is None
 
 

@@ -63,17 +63,7 @@ async def save_default_config(
             MemoryTuningConfig(**cognitive_config) if cognitive_config else None
         ),
     )
-    backend = await service.create_memory_backend(group_id, config)
-
-    try:
-        existing = await service.get_memory_backends(group_id)
-        for old in existing:
-            if str(old.id) != str(backend.id):
-                await service.delete_memory_backend(group_id, str(old.id))
-    except Exception as e:
-        logger.warning(f"Error cleaning up existing configs: {e}")
-
-    await service.set_default_backend(group_id, str(backend.id))
+    backend = await service.replace_memory_backend(group_id, config)
 
     return {
         "success": True,
