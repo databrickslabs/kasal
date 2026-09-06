@@ -350,5 +350,9 @@ echo -e "${YELLOW}Press Ctrl+C to stop the server${NC}\n"
 # changes... Reloading..." simply hung until something force-killed it. Five
 # seconds is longer than any real request here and turns reload back into a
 # second-or-two operation.
+# A local run without the platform proxy: requests carry no identity header,
+# so opt in to the development identity (see main.LocalDevAuthMiddleware).
+# Production refuses this regardless of the value.
+export LOCAL_DEV_AUTH="${LOCAL_DEV_AUTH:-true}"
 exec .venv/bin/uvicorn src.main:app --reload --reload-dir src --host 0.0.0.0 --port 8000 \
     --timeout-graceful-shutdown 5

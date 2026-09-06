@@ -1,5 +1,6 @@
 import os
 import sys
+from typing import Optional
 
 # CRITICAL: Set USE_NULLPOOL BEFORE any database imports to prevent asyncpg connection pool issues
 # This must be done before importing any modules that might create database connections
@@ -702,18 +703,57 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 
 
+def _local_dev_auth_enabled() -> bool:
+    """Whether requests that carry no identity header run as the development user.
+
+    This used to be unconditional: any request that reached the backend without
+    the proxy's identity headers became ``dev@localhost`` — in production too,
+    if the backend was reachable past the proxy (audit F07). Now:
+
+    - inside Databricks Apps (``DATABRICKS_APP_NAME`` is set by the platform)
+      or with ``ENVIRONMENT=production`` it is OFF and cannot be turned on;
+      identity comes from the proxy only;
+    - elsewhere it is an explicit opt-in: ``LOCAL_DEV_AUTH=true``, which
+      ``run.sh`` sets for a local run. Absent, a request without an identity
+      header is unauthenticated (R2-07).
+    """
+    explicit = os.getenv("LOCAL_DEV_AUTH", "").strip().lower()
+    wanted = explicit in ("1", "true", "yes", "on")
+    production = bool(os.getenv("DATABRICKS_APP_NAME")) or os.getenv(
+        "ENVIRONMENT", ""
+    ).strip().lower() in ("production", "prod")
+    if production:
+        if wanted:
+            logger.error(
+                "[LOCAL_DEV_AUTH] LOCAL_DEV_AUTH is set in a production environment "
+                "and is ignored: identity comes from the platform proxy only"
+            )
+        return False
+    return wanted
+
+
 class LocalDevAuthMiddleware:
     """Pure ASGI middleware to inject auth headers for local development.
 
     When running locally (not in Databricks Apps), this adds default headers
-    so developers can use the app without OAuth/OBO authentication.
+    so developers can use the app without OAuth/OBO authentication. Whether it
+    does anything at all is ``_local_dev_auth_enabled()``: an explicit opt-in
+    outside production, refused inside it.
     """
 
-    def __init__(self, app):
+    def __init__(self, app, enabled: Optional[bool] = None):
         self.app = app
+        self.enabled = _local_dev_auth_enabled() if enabled is None else enabled
+        if self.enabled:
+            logger.warning(
+                "[LOCAL_DEV_AUTH] Development identity fallback is ACTIVE: a "
+                "request without an identity header runs as %s. Unset "
+                "LOCAL_DEV_AUTH to disable it.",
+                settings.LOCAL_DEV_USER_EMAIL or "dev@localhost",
+            )
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] == "http":
+        if self.enabled and scope["type"] == "http":
             headers = dict(scope.get("headers", []))
             if (
                 b"x-forwarded-email" not in headers
@@ -746,38 +786,10 @@ from src.utils.user_context import UserContextMiddleware  # noqa: E402
 app.add_middleware(UserContextMiddleware)
 
 
-def _local_dev_auth_enabled() -> bool:
-    """Whether requests that carry no identity header run as the development user.
-
-    This used to be unconditional: any request that reached the backend without
-    the proxy's identity headers became ``dev@localhost`` — in production too,
-    if the backend was reachable past the proxy (audit F07). Now:
-
-    - inside Databricks Apps (``DATABRICKS_APP_NAME`` is set by the platform)
-      it is OFF and cannot be turned on; identity comes from the proxy only;
-    - elsewhere ``LOCAL_DEV_AUTH=false`` turns it off, and a plain local run
-      keeps it on, with a startup warning that says so.
-    """
-    explicit = os.getenv("LOCAL_DEV_AUTH", "").strip().lower()
-    if os.getenv("DATABRICKS_APP_NAME"):
-        if explicit in ("1", "true", "yes", "on"):
-            logger.error(
-                "[LOCAL_DEV_AUTH] LOCAL_DEV_AUTH is set inside Databricks Apps and "
-                "is ignored: identity comes from the platform proxy only"
-            )
-        return False
-    return explicit not in ("0", "false", "no", "off")
-
-
 # Add LAST of these two so it is OUTERMOST and runs BEFORE UserContextMiddleware.
-if _local_dev_auth_enabled():
-    app.add_middleware(LocalDevAuthMiddleware)
-    logger.warning(
-        "[LOCAL_DEV_AUTH] Development identity fallback is ACTIVE: a request "
-        "without an identity header runs as %s. Set LOCAL_DEV_AUTH=false to "
-        "disable it.",
-        settings.LOCAL_DEV_USER_EMAIL or "dev@localhost",
-    )
+# Always registered; whether it injects anything is decided once, at
+# construction, by _local_dev_auth_enabled().
+app.add_middleware(LocalDevAuthMiddleware)
 
 # API rate limiting (pure-ASGI, SSE-safe). No-op if the `limits` package is
 # unavailable or RATE_LIMIT_ENABLED is false, so this never breaks a running

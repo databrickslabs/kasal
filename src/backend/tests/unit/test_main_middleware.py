@@ -134,7 +134,7 @@ class TestLocalDevAuthMiddleware:
         async def mock_app(scope, receive, send):
             received_scopes.append(scope)
 
-        middleware = LocalDevAuthMiddleware(mock_app)
+        middleware = LocalDevAuthMiddleware(mock_app, enabled=True)
 
         scope = {
             "type": "http",
@@ -155,7 +155,7 @@ class TestLocalDevAuthMiddleware:
         async def mock_app(scope, receive, send):
             received_scopes.append(scope)
 
-        middleware = LocalDevAuthMiddleware(mock_app)
+        middleware = LocalDevAuthMiddleware(mock_app, enabled=True)
 
         scope = {
             "type": "http",
@@ -177,7 +177,7 @@ class TestLocalDevAuthMiddleware:
         async def mock_app(scope, receive, send):
             received_scopes.append(scope)
 
-        middleware = LocalDevAuthMiddleware(mock_app)
+        middleware = LocalDevAuthMiddleware(mock_app, enabled=True)
 
         scope = {
             "type": "http",
@@ -198,7 +198,7 @@ class TestLocalDevAuthMiddleware:
         async def mock_app(scope, receive, send):
             called.append(scope["type"])
 
-        middleware = LocalDevAuthMiddleware(mock_app)
+        middleware = LocalDevAuthMiddleware(mock_app, enabled=True)
         scope = {"type": "websocket", "headers": []}
 
         await middleware(scope, None, None)
@@ -372,11 +372,37 @@ class TestLocalDevAuthGate:
         monkeypatch.setenv("LOCAL_DEV_AUTH", "true")
         assert _local_dev_auth_enabled() is False
 
-    def test_on_for_a_plain_local_run_and_off_on_request(self, monkeypatch):
+    def test_an_explicit_opt_in_outside_production(self, monkeypatch):
         from src.main import _local_dev_auth_enabled
 
         monkeypatch.delenv("DATABRICKS_APP_NAME", raising=False)
+        monkeypatch.delenv("ENVIRONMENT", raising=False)
         monkeypatch.delenv("LOCAL_DEV_AUTH", raising=False)
+        assert _local_dev_auth_enabled() is False  # absent: unauthenticated
+        monkeypatch.setenv("LOCAL_DEV_AUTH", "true")
         assert _local_dev_auth_enabled() is True
         monkeypatch.setenv("LOCAL_DEV_AUTH", "false")
         assert _local_dev_auth_enabled() is False
+
+    def test_refused_when_the_environment_says_production(self, monkeypatch):
+        from src.main import _local_dev_auth_enabled
+
+        monkeypatch.delenv("DATABRICKS_APP_NAME", raising=False)
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.setenv("LOCAL_DEV_AUTH", "true")
+        assert _local_dev_auth_enabled() is False
+
+
+class TestLocalDevAuthDisabled:
+    @pytest.mark.asyncio
+    async def test_nothing_is_injected_when_disabled(self):
+        from src.main import LocalDevAuthMiddleware
+
+        received = []
+
+        async def mock_app(scope, receive, send):
+            received.append(scope)
+
+        scope = {"type": "http", "headers": []}
+        await LocalDevAuthMiddleware(mock_app, enabled=False)(scope, None, None)
+        assert dict(received[0]["headers"]) == {}
