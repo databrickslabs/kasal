@@ -1950,3 +1950,30 @@ class TestTheRunListSaysWhichHarnessRanEach:
             rows = await svc.list_executions(group_ids=["g1"])
 
         assert rows and rows[0]["harness"] is None
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["crew", "flow"])
+async def test_completed_run_details_preserve_catalog_identity_and_configuration(kind):
+    """Run actions must resolve the saved crew/flow from the details endpoint."""
+    from src.schemas.execution import ExecutionResponse
+
+    definition_id = uuid.uuid4()
+    config = {"nodes": [{"type": "crewNode", "data": {"crewId": str(definition_id)}}]} if kind == "flow" else {"agents_yaml": {"researcher": {"memory": True}}}
+    summary = SimpleNamespace(
+        status="COMPLETED", created_at=datetime(2026, 9, 6), completed_at=None,
+        run_name="Saved research", error=None, execution_type=kind,
+        mlflow_trace_id=None, mlflow_experiment_name=None, mlflow_evaluation_run_id=None,
+    )
+    row = SimpleNamespace(result={"output": "done"}, inputs=config,
+                          crew_id=definition_id if kind == "crew" else None,
+                          flow_id=definition_id if kind == "flow" else None)
+    repo = AsyncMock()
+    repo.get_execution_summary_by_job_id.return_value = summary
+    repo.get_execution_by_job_id.return_value = row
+    service = make_service(session=AsyncMock())
+    with patch("src.repositories.execution_history_repository.ExecutionHistoryRepository", return_value=repo):
+        result = await service.get_execution_status("run-1", group_ids=["workspace-1"])
+    response = ExecutionResponse(**result)
+    assert getattr(response, f"{kind}_id") == str(definition_id)
+    assert response.inputs == config
+    repo.get_execution_by_job_id.assert_awaited_once_with("run-1", group_ids=["workspace-1"])

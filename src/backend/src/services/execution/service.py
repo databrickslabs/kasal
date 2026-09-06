@@ -1027,6 +1027,7 @@ class ExecutionService:
                                 masked_inputs.get("flow_id") if masked_inputs else None
                             )
                         ),
+                        "crew_id": str(e.crew_id) if getattr(e, "crew_id", None) else None,
                     }
 
                     # Also extract agents_yaml and tasks_yaml from masked inputs for direct access
@@ -1283,6 +1284,7 @@ class ExecutionService:
                 "STOPPING",
             }
             result_value = None
+            full_row = None
             if (execution.status or "").upper() not in in_flight:
                 full_row = await repository.get_execution_by_job_id(
                     execution_id, group_ids=group_ids
@@ -1296,6 +1298,12 @@ class ExecutionService:
                 "created_at": execution.created_at,
                 "completed_at": execution.completed_at,
                 "result": result_value,
+                # Completed-run actions need the saved definition and exact
+                # configuration. The terminal lookup already loaded this row;
+                # keep running-status polls free of configuration blobs.
+                "crew_id": str(full_row.crew_id) if getattr(full_row, "crew_id", None) else None,
+                "flow_id": str(full_row.flow_id) if getattr(full_row, "flow_id", None) else None,
+                "inputs": self._mask_inputs_sensitive_data(full_row.inputs) if getattr(full_row, "inputs", None) else None,
                 "run_name": execution.run_name,
                 "error": execution.error,
                 # Lets the trace poller skip requests that don't apply to this
