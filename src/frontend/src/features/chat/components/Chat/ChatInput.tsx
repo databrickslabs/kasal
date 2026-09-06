@@ -157,6 +157,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   sessionId,
   isExecuting = false,
   isGenerating = false,
+  onStopExecution,
   memoryEnabled = false,
   onMemoryEnabledChange,
   pendingRunLabel,
@@ -166,6 +167,16 @@ const ChatInput: React.FC<ChatInputProps> = ({
   onOpenMcpConfig,
   isLanding = false,
 }) => {
+  const [isStopping, setIsStopping] = useState(false);
+  const stopPending = useRef(false);
+  const stopMode = isExecuting && Boolean(onStopExecution);
+  const handleStop = async () => {
+    if (!onStopExecution || stopPending.current) return;
+    stopPending.current = true;
+    setIsStopping(true);
+    try { await onStopExecution(); }
+    finally { stopPending.current = false; setIsStopping(false); }
+  };
   // Entrance animation for the pop-up menus, matching the open direction. The
   // menus are positioned with `position: fixed` (see useAnchoredFixedStyle) so
   // they escape the chat's overflow-hidden containers; this class only drives the
@@ -812,28 +823,28 @@ const ChatInput: React.FC<ChatInputProps> = ({
               onOpenMcpConfig={onOpenMcpConfig}
             />
 
-            {/* Send — submit only. Stop lives in the run-activity container above.
+            {/* The active execution replaces Send with Stop in every mode.
                 When a catalog crew/flow is loaded and the input is empty, the
                 submit button RUNS it (play icon) instead of sending a message. */}
             {(() => {
               const runMode = !value.trim() && !!pendingRunLabel && !isExecuting && !isGenerating && !disabled && !isUploading;
               return (
             <button
-              onClick={runMode ? onRunPending : handleSend}
-              disabled={disabled || isUploading || isGenerating || isExecuting || (!value.trim() && !pendingRunLabel)}
+              onClick={stopMode ? handleStop : runMode ? onRunPending : handleSend}
+              disabled={stopMode ? isStopping : disabled || isUploading || isGenerating || isExecuting || (!value.trim() && !pendingRunLabel)}
               title={
-                isUploading
+                stopMode ? (isStopping ? 'Stopping execution…' : 'Stop execution') : isUploading
                   ? 'Waiting for attachments to finish uploading…'
                   : runMode
                     ? `Run “${pendingRunLabel}”`
                     : undefined
               }
-              aria-label={runMode ? `Run ${pendingRunLabel}` : 'Send message'}
+              aria-label={stopMode ? (isStopping ? 'Stopping execution' : 'Stop execution') : runMode ? `Run ${pendingRunLabel}` : 'Send message'}
               className="flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-all hover:opacity-80 disabled:cursor-not-allowed"
               style={{
                 backgroundColor: 'var(--bg-secondary)',
                 color:
-                  disabled || isUploading || isGenerating || isExecuting
+                  stopMode ? 'var(--text-secondary)' : disabled || isUploading || isGenerating || isExecuting
                     ? 'var(--text-muted)'
                     : runMode || value.trim()
                       ? 'var(--text-secondary)'
@@ -841,7 +852,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 border: '1px solid var(--border-color)',
               }}
             >
-              {disabled || isUploading || isGenerating ? (
+              {stopMode && !isStopping ? (
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
+              ) : isStopping || disabled || isUploading || isGenerating ? (
                 <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />

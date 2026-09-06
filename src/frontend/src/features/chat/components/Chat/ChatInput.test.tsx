@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within, act } from '@testing-library/react';
+import { render, screen, fireEvent, within, act, waitFor } from '@testing-library/react';
 import ChatInput from './ChatInput';
 import type { ModelConfigResponse } from '../../types/dispatcher';
 import { uploadKnowledgeFile } from '../../api/knowledge';
@@ -581,12 +581,19 @@ describe('ChatInput — attachment persistence (per session)', () => {
 });
 
 describe('ChatInput — run / generation status (inline, replaces top banner)', () => {
-  it('has no Stop button while executing (Stop lives in the run-activity container); Send stays but is disabled', () => {
-    render(<ChatInput {...baseProps} isExecuting onStopExecution={vi.fn()} />);
-    // Stop moved out of the input — only the run-activity container has it now.
-    expect(screen.queryByRole('button', { name: 'Stop execution' })).not.toBeInTheDocument();
-    // Send is still present (submit kept) but disabled while a run is active.
-    expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled();
+  it('replaces Send with Stop while executing, even while the input is disabled', async () => {
+    let finish!: () => void;
+    const onStop = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+    render(<ChatInput {...baseProps} disabled isExecuting onStopExecution={onStop} />);
+    const stop = screen.getByRole('button', { name: 'Stop execution' });
+    expect(stop).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Send message' })).not.toBeInTheDocument();
+    fireEvent.click(stop);
+    fireEvent.click(stop);
+    expect(onStop).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: 'Stopping execution' })).toBeDisabled();
+    finish();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Stop execution' })).toBeEnabled());
   });
 
   it('shows a disabled (busy) send button while generating — no Stop, no text', () => {

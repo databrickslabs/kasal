@@ -92,7 +92,7 @@ interface ChatContainerProps {
   executionContext?: ExecutionContext | null;
   /** While the live run is monitored in the RIGHT preview pane (the clickable
    *  step timeline), suppress THIS chat's in-conversation live timeline so the
-   *  steps aren't shown twice. The status row + Stop control stay; only the
+   *  steps aren't shown twice. The status row stays; only the
    *  expandable timeline of the live segment is hidden. Completed (historical)
    *  segments keep their timeline. */
   hideLiveTimeline?: boolean;
@@ -402,7 +402,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
               const live = running && s === lastSeg;
               // 'preview' placement: the LATEST run's activity lives in the RIGHT
               // preview pane — don't duplicate it here. While live we keep a compact
-              // status row + Stop; once done there's nothing left to show, so skip.
+              // status row; once done there's nothing left to show, so skip.
               const inPreviewPane = Boolean(hideLiveTimeline) && s === lastSeg;
               if (inPreviewPane && !live) return null;
               const msgs = inPreviewPane ? [] : (segTraces.get(s) ?? []);
@@ -418,7 +418,6 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
                   latestStep={msgs[msgs.length - 1]?.resultData as TraceEntryData | undefined}
                   running={live}
                   generating={live && Boolean(isGenerating)}
-                  onStop={live && isExecuting && onStopExecution ? onStopExecution : undefined}
                   jobId={jobForSeg}
                   // Pane icon on every run card — opens THIS run's deliverable +
                   // activity in the side pane. Opt-in: nothing opens until clicked

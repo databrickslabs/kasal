@@ -29,7 +29,7 @@ vi.mock('./ChatInput', () => ({
       {props.isExecuting && <span data-testid="input-executing">running</span>}
       {props.isGenerating && <span data-testid="input-generating">generating</span>}
       {props.isExecuting && props.onStopExecution && (
-        <button data-testid="input-stop" onClick={props.onStopExecution}>
+        <button data-testid="input-stop" aria-label="Stop execution" onClick={props.onStopExecution}>
           stop
         </button>
       )}
@@ -294,6 +294,8 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
     // The header tracks the LATEST step (no static "Working…" once traces exist).
     expect(screen.queryByText('Working…')).toBeNull();
     fireEvent.click(screen.getByLabelText('Stop execution'));
+    expect(screen.getByLabelText('Stop execution')).toHaveAttribute('data-testid', 'input-stop');
+    expect(screen.getAllByLabelText('Stop execution')).toHaveLength(1);
     expect(onStop).toHaveBeenCalledTimes(1);
     // collapsed by default → the timeline is hidden.
     expect(screen.queryByText('postgres_execute_sql (output)')).toBeNull();
@@ -448,7 +450,7 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
     expect(screen.queryByLabelText('Stop execution')).toBeNull();
   });
 
-  it('shows a transient "Stopping…" state when Stop is pressed, then clears it when the run ends', () => {
+  it('keeps activity readable when Stop is pressed in the composer', () => {
     const onStop = vi.fn();
     const stillRunning = [msg('u', 'q'), traceMsg('t1', 'PerplexityTool')];
     const { rerender } = render(
@@ -457,12 +459,9 @@ describe('ChatContainer — run-activity container (RunProgress)', () => {
     expect(screen.getByText('PerplexityTool')).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Stop execution'));
     expect(onStop).toHaveBeenCalledTimes(1);
-    // immediate feedback: "Stopping…" replaces the live line + the control
-    // becomes a disabled spinner
-    expect(screen.getByText('Stopping…')).toBeInTheDocument();
-    expect(screen.queryByText('Working…')).toBeNull();
-    expect(screen.queryByText('PerplexityTool')).toBeNull();
-    expect(screen.getByLabelText('Stopping…')).toBeDisabled();
+    // Stop is owned by the composer; the activity remains readable while it stops.
+    expect(screen.getByLabelText('Stop execution')).toHaveAttribute('data-testid', 'input-stop');
+    expect(screen.getByText('PerplexityTool')).toBeInTheDocument();
     // run actually ends → state clears, container settles into the done view
     rerender(<ChatContainer {...baseProps} messages={stillRunning} />); // isExecuting now false
     expect(screen.queryByText('Stopping…')).toBeNull();
