@@ -62,13 +62,22 @@ class SkillUcSyncService:
     # ── auth/host, borrowed from the databricks domain ──────────────────────
 
     async def _auth(self) -> Tuple[Dict[str, str], str]:
-        """(headers, workspace_url) for the UC + Files APIs, OBO-first."""
+        """(headers, workspace_url) for the UC + Files APIs — app SP, NOT OBO.
+
+        The UC Skills beta API requires the coarse ``unity-catalog`` OAuth scope,
+        which the Databricks Apps user-authorization consent never issues (it
+        offers only granular ``catalog.*`` scopes), so a signed-in user's OBO
+        token always 403s with "does not have required scopes: unity-catalog".
+        The app service principal's token is not bound to that consent list and
+        carries the scope, so we deliberately DON'T forward ``user_token`` here:
+        with it None the auth chain skips OBO and uses PAT/SPN. Grant the app SP
+        UC access on the target catalog/schema. ``user_token`` stays on the
+        constructor for callers, but only this method decides the UC identity.
+        """
         from src.services.databricks.workspace.service import DatabricksService
 
         group_id = self._group_context.primary_group_id if self._group_context else None
-        svc = DatabricksService(
-            self._session, group_id=group_id, user_token=self._user_token
-        )
+        svc = DatabricksService(self._session, group_id=group_id)
         headers, host = await svc.get_workspace_auth()
         headers = {**headers, **get_user_agent_header(KasalProduct.SKILL)}
         return headers, host
