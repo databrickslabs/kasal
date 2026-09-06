@@ -157,9 +157,15 @@ class TestRunFlow:
         mock_engine = MagicMock()
         mock_engine.run_flow = AsyncMock(return_value="exec-123")
 
-        with patch(
-            "src.services.execution.engine_factory.EngineFactory"
-        ) as mock_factory:
+        with (
+            patch(
+                "src.services.execution.engine_factory.EngineFactory"
+            ) as mock_factory,
+            patch(
+                "src.services.flow_builder.resume_authorization.get_owned_resume_source",
+                new=AsyncMock(),
+            ) as authorize,
+        ):
             mock_factory.get_engine = AsyncMock(return_value=mock_engine)
 
             result = await service.run_flow(
@@ -169,8 +175,10 @@ class TestRunFlow:
                 resume_from_flow_uuid=resume_flow_uuid,
                 resume_from_execution_id=resume_execution_id,
                 resume_from_crew_sequence=resume_crew_sequence,
+                group_context=MagicMock(group_ids=["g"]),
             )
 
+            authorize.assert_awaited_once()
             assert result["success"] is True
             assert "resumed from checkpoint" in result["message"].lower()
             assert result["resumed_from"] == resume_execution_id

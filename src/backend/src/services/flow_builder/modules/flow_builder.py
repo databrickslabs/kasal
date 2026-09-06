@@ -365,6 +365,10 @@ class FlowBuilder:
                 resume_from_execution_id,
                 repositories,
                 from_unit=resume_from_crew_sequence,
+                group_ids=(
+                    getattr(group_context, "group_ids", None)
+                    or ([group_id] if group_id else [])
+                ),
             )
 
             # Pass the processed listener_methods (with crew grouping) instead of raw listeners

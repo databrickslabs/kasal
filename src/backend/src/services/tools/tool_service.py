@@ -29,7 +29,8 @@ PERSONAL_WORKSPACE_ONLY_TOOLS = {"Gmail"}
 
 def _is_personal_workspace(group_context: Optional[GroupContext]) -> bool:
     """True only when the active (primary) group IS the caller's personal
-    workspace, i.e. the group derived from their own email."""
+    workspace, as allocated to their authenticated user."""
+
     if not group_context:
         return False
     primary = getattr(group_context, "primary_group_id", None)
@@ -37,7 +38,9 @@ def _is_personal_workspace(group_context: Optional[GroupContext]) -> bool:
     if not primary or not email:
         return False
     try:
-        return GroupContext.is_personal_workspace_of(primary, email)
+        return primary == GroupContext.personal_workspace_id_of(
+            getattr(group_context, "current_user", None), email
+        )
     except Exception:
         return False
 

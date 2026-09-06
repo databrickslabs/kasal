@@ -315,7 +315,7 @@ async def get_app_deployment_status(
     if not group_context or not group_context.is_valid():
         raise BadRequestError("No valid group context provided")
 
-    result = service.get_status(deployment_id)
+    result = service.get_owned_status(deployment_id, crew_id, group_context)
     if result is None:
         raise NotFoundError(f"Deployment {deployment_id} not found")
     return result

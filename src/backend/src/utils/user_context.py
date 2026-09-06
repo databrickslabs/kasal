@@ -368,12 +368,12 @@ class GroupContext:
 
     @staticmethod
     def personal_workspace_id_of(user: Any, email: str) -> str:
-        """The id the user's row carries; the derived id only for a row that
-        has none yet (the startup heal and the first login assign it)."""
+        """Return the allocated identity; an unresolved allocation grants no scope."""
+
         stored = getattr(user, "personal_group_id", None) if user is not None else None
         if isinstance(stored, str) and stored:
             return stored
-        return GroupContext.generate_individual_group_id(email)
+        raise ValueError("Access denied: personal workspace has not been allocated")
 
     @staticmethod
     def generate_individual_group_id(email: str) -> str:

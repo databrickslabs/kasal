@@ -1907,6 +1907,14 @@ class ToolFactory:
                 # refuses to run without the per-user OBO token.
                 tool_id = tool_config.get("tool_id", None)
                 gmail_config = {**tool_config, **(tool_config_override or {})}
+                from src.utils.user_context import UserContext
+
+                gmail_context = UserContext.get_group_context()
+                personal_group_id = getattr(
+                    getattr(gmail_context, "current_user", None),
+                    "personal_group_id",
+                    None,
+                )
 
                 user_token = tool_config.get("user_token") or self.user_token
                 group_id = (
@@ -1936,6 +1944,7 @@ class ToolFactory:
                 try:
                     return tool_class(
                         tool_config=gmail_config,
+                        personal_group_id=personal_group_id,
                         tool_id=tool_id,
                         user_token=user_token,
                         group_id=group_id,

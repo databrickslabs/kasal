@@ -349,8 +349,8 @@ class TestBuildFlowCheckpointResume:
 
         # Mock repositories
         exec_hist_repo = AsyncMock()
-        exec_hist_repo.get_execution_by_job_id = AsyncMock(
-            return_value=MagicMock(job_id="job-123")
+        exec_hist_repo.get_run_by_job_id = AsyncMock(
+            return_value=MagicMock(job_id="job-123", group_id="g", checkpoint_data=None)
         )
         exec_trace_repo = AsyncMock()
         exec_trace_repo.get_crew_outputs_for_resume = AsyncMock(
@@ -368,6 +368,7 @@ class TestBuildFlowCheckpointResume:
                 fd,
                 repositories=repos,
                 resume_from_execution_id="exec-1",
+                group_id="g",
                 resume_from_crew_sequence=1,
             )
             assert flow is not None
@@ -388,7 +389,7 @@ class TestBuildFlowCheckpointResume:
         p["FlowProcessorManager"].process_routers = AsyncMock(return_value=[])
 
         exec_hist_repo = AsyncMock()
-        exec_hist_repo.get_execution_by_job_id = AsyncMock(return_value=None)
+        exec_hist_repo.get_run_by_job_id = AsyncMock(return_value=None)
         exec_trace_repo = AsyncMock()
         repos = {
             "execution_history": exec_hist_repo,
@@ -398,10 +399,13 @@ class TestBuildFlowCheckpointResume:
         fd = _make_flow_data()
 
         with patch.multiple(MODULE, **p):
-            flow = await FlowBuilder.build_flow(
-                fd, repositories=repos, resume_from_execution_id="no-such"
-            )
-            assert flow is not None
+            with pytest.raises(ValueError, match="Resume execution not found"):
+                await FlowBuilder.build_flow(
+                    fd,
+                    repositories=repos,
+                    resume_from_execution_id="no-such",
+                    group_id="g",
+                )
 
     @pytest.mark.asyncio
     async def test_resume_missing_repos(self):
@@ -442,16 +446,14 @@ class TestBuildFlowCheckpointResume:
         p["FlowProcessorManager"].process_routers = AsyncMock(return_value=[])
 
         exec_hist_repo = AsyncMock()
-        exec_hist_repo.get_execution_by_job_id = AsyncMock(
-            side_effect=RuntimeError("db err")
-        )
+        exec_hist_repo.get_run_by_job_id = AsyncMock(side_effect=RuntimeError("db err"))
         repos = {"execution_history": exec_hist_repo, "execution_trace": AsyncMock()}
 
         fd = _make_flow_data()
 
         with patch.multiple(MODULE, **p):
             flow = await FlowBuilder.build_flow(
-                fd, repositories=repos, resume_from_execution_id="exec-1"
+                fd, repositories=repos, resume_from_execution_id="exec-1", group_id="g"
             )
             assert flow is not None
 
@@ -3051,13 +3053,22 @@ class TestBuildFlowMissingRepos:
         p["FlowProcessorManager"].process_listeners = AsyncMock(return_value=[])
         p["FlowProcessorManager"].process_routers = AsyncMock(return_value=[])
 
-        repos = {"execution_history": AsyncMock(), "execution_trace": None}
+        repos = {
+            "execution_history": AsyncMock(
+                get_run_by_job_id=AsyncMock(
+                    return_value=MagicMock(
+                        job_id="job", group_id="g", checkpoint_data=None
+                    )
+                )
+            ),
+            "execution_trace": None,
+        }
 
         fd = _make_flow_data()
 
         with patch.multiple(MODULE, **p):
             flow = await FlowBuilder.build_flow(
-                fd, repositories=repos, resume_from_execution_id="exec-1"
+                fd, repositories=repos, resume_from_execution_id="exec-1", group_id="g"
             )
             assert flow is not None
 

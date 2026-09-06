@@ -351,6 +351,17 @@ class FlowRunnerService:
 
                 exec_service = ExecutionService(self.db)
 
+                from src.services.flow_builder.resume_authorization import (
+                    get_owned_resume_source,
+                    require_run_owner,
+                )
+
+                caller_groups = getattr(config.get("group_context"), "group_ids", None)
+                caller_groups = caller_groups or ([group_id] if group_id else [])
+                source = await get_owned_resume_source(
+                    exec_service, resume_from_execution_id, caller_groups
+                )
+
                 # A record may ALREADY exist for THIS job_id, because a
                 # checkpoint resume deliberately creates a NEW execution seeded
                 # from an old one before handing over. When it does, that is
@@ -361,6 +372,7 @@ class FlowRunnerService:
                 # back to RUNNING and never reached a terminal status again.
                 own_execution = await exec_service.get_run_by_job_id(str(job_id))
                 if own_execution is not None:
+                    require_run_owner(own_execution, caller_groups)
                     execution = own_execution
                     execution.status = FlowExecutionStatus.RUNNING.value
                     await self.db.commit()
@@ -380,16 +392,7 @@ class FlowRunnerService:
                         f"🔄 RESUME: Reusing existing execution for execution_id={resume_from_execution_id}"
                     )
 
-                    existing_execution = await exec_service.get_run_by_job_id(
-                        str(resume_from_execution_id)
-                    )
-                    if not existing_execution:
-                        try:
-                            existing_execution = await exec_service.get_run_by_id(
-                                int(resume_from_execution_id)
-                            )
-                        except (TypeError, ValueError):
-                            existing_execution = None
+                    existing_execution = source
 
                     if not existing_execution:
                         logger.error(

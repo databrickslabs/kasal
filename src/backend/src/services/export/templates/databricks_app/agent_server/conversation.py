@@ -44,7 +44,10 @@ def get_history(conversation_id: Optional[str]) -> List[dict]:
     stored = state_store.get_json(conversation_id, _HISTORY_KEY)
     if isinstance(stored, list):
         return [m for m in stored if isinstance(m, dict)]
-    return list(_HISTORY.get(conversation_id, []))
+    # Durable absence/expiry also invalidates the process cache. Reusing that
+    # cache after a new ownership claim would expose the previous user's turn.
+    _HISTORY.pop(conversation_id, None)
+    return []
 
 
 def _save_history(conversation_id: str, history: List[dict]) -> None:

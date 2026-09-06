@@ -15,7 +15,7 @@ from src.services.deployment.app import (
     CrewAppDeploymentService,
 )
 from src.utils.user_context import GroupContext
-
+from types import SimpleNamespace
 
 @pytest.fixture(autouse=True)
 def clear_registry():
@@ -140,9 +140,12 @@ class TestStartDeployment:
     ):
         """With strict isolation, a request scoped to a shared workspace carries
         ONLY that group_id. A PAT under the user's PERSONAL workspace must still be
-        found — deploy adds the personal workspace id (derived from the email)."""
+        found — deploy adds the allocated personal workspace ID."""
         ctx = GroupContext(
-            group_ids=["shared_ws"], group_email="alice@acme.com", access_token=None
+            group_ids=["shared_ws"],
+            group_email="alice@acme.com",
+            access_token=None,
+            current_user=SimpleNamespace(personal_group_id="user_alice_acme_com"),
         )
         personal_gid = "user_alice_acme_com"
         service.export_service.export_crew = AsyncMock(return_value=_export_result())

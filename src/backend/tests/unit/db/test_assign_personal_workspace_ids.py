@@ -20,7 +20,7 @@ async def _rows(conn):
 
 
 @pytest.mark.asyncio
-async def test_first_come_keeps_the_derived_id_and_a_collision_is_disambiguated():
+async def test_colliding_legacy_scope_is_not_granted_to_either_account():
     engine = create_async_engine("sqlite+aiosqlite://")
     try:
         async with engine.begin() as conn:
@@ -35,8 +35,8 @@ async def test_first_come_keeps_the_derived_id_and_a_collision_is_disambiguated(
             )
             await heal._assign_personal_workspace_ids(conn)
             rows = await _rows(conn)
-            assert rows[A] == GroupContext.generate_individual_group_id(A)
-            assert rows[B] == GroupContext.disambiguated_individual_group_id(B)
+            assert rows[A] != GroupContext.generate_individual_group_id(A)
+            assert rows[B] != GroupContext.generate_individual_group_id(B)
             assert rows["carol@example.com"] == "user_carol_example_com"
             assert len(set(rows.values())) == 3
             # Idempotent: a second run changes nothing.
@@ -62,17 +62,39 @@ async def test_an_already_assigned_id_is_respected_by_later_users():
             )
             await heal._assign_personal_workspace_ids(conn)
             rows = await _rows(conn)
-            assert rows[A] == legacy
-            assert rows[B] == GroupContext.disambiguated_individual_group_id(B)
+            assert rows[A] != legacy
+            assert rows[B] != GroupContext.generate_individual_group_id(B)
     finally:
         await engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_a_missing_table_does_not_raise():
+async def test_a_missing_table_propagates_to_the_savepoint_runner():
+    engine = create_async_engine("sqlite+aiosqlite://")
+    try:
+        from sqlalchemy.exc import SQLAlchemyError
+
+        async with engine.begin() as conn:
+            with pytest.raises(SQLAlchemyError):
+                await heal._assign_personal_workspace_ids(conn)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_new_opaque_account_does_not_evict_legacy_owner():
     engine = create_async_engine("sqlite+aiosqlite://")
     try:
         async with engine.begin() as conn:
+            await conn.exec_driver_sql(
+                "CREATE TABLE users (id TEXT, email TEXT, created_at TEXT, personal_group_id TEXT)"
+            )
+            legacy = GroupContext.generate_individual_group_id(A)
+            await conn.exec_driver_sql(
+                "INSERT INTO users VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
+                ("a", A, "2026-01-01", legacy, "b", B, "2026-09-06", "user_opaque_new"),
+            )
             await heal._assign_personal_workspace_ids(conn)
+            assert await _rows(conn) == {A: legacy, B: "user_opaque_new"}
     finally:
         await engine.dispose()

@@ -175,38 +175,38 @@ class UserService:
     async def ensure_personal_workspace_id(self, user: User) -> str:
         """Allocate the user's personal-workspace id once (audit F06 / R2-06).
 
-        The derived id if no other user holds it, else the disambiguated form.
-        The startup heal settles existing users in creation order; this is the
-        first-login path and the safety net. Best-effort: a failure leaves the
-        row NULL for the heal to settle, and this request runs on the derived
-        id as before.
+        The startup migration preserves unambiguous existing IDs. New or
+        unresolved accounts get an opaque ID, never a potentially shared legacy
+        scope. An allocation failure must deny access.
         """
-        stored = getattr(user, "personal_group_id", None)
-        if stored:
-            return stored
-        from src.utils.user_context import GroupContext
 
-        legacy = GroupContext.generate_individual_group_id(user.email)
-        chosen = legacy
-        try:
-            holder = await self.user_repo.get_by_personal_group_id(legacy)
-            if holder is not None and holder.id != user.id:
-                chosen = GroupContext.disambiguated_individual_group_id(user.email)
-                logger.warning(
-                    "Personal workspace collision: %s derives to %s, held by %s; "
-                    "assigned %s",
-                    user.email,
-                    legacy,
-                    holder.email,
-                    chosen,
-                )
-            await self.user_repo.update(user.id, {"personal_group_id": chosen})
-            user.personal_group_id = chosen
-        except Exception as exc:  # noqa: BLE001 — never fail a login on this
-            logger.warning(
-                f"Could not allocate a personal workspace id for {user.email}: {exc}"
-            )
-        return getattr(user, "personal_group_id", None) or legacy
+        stored = getattr(user, "personal_group_id", None)
+        if isinstance(stored, str) and stored:
+            from src.utils.user_context import GroupContext
+
+            if stored == GroupContext.generate_individual_group_id(user.email):
+                if await self.user_repo.has_legacy_personal_collision(user.id, stored):
+                    raise ValueError(
+                        "Ambiguous personal workspace requires ownership review"
+                    )
+            return stored
+        import uuid
+        from sqlalchemy.exc import IntegrityError
+
+        for attempt in range(3):
+            try:
+                async with self.session.begin_nested():
+                    assigned = await self.user_repo.allocate_personal_group_id(
+                        user.id, f"user_{uuid.uuid4().hex}"
+                    )
+                    if not isinstance(assigned, str) or not assigned:
+                        raise ValueError("Personal workspace allocation failed")
+                user.personal_group_id = assigned
+                return assigned
+            except IntegrityError:
+                if attempt == 2:
+                    raise
+        raise ValueError("Personal workspace allocation failed")
 
     async def get_or_create_user_by_email(
         self, email: str, update_login: bool = False

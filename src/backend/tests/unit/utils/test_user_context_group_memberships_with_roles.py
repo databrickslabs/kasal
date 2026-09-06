@@ -826,7 +826,12 @@ class TestFromEmailUsesSmartSession:
         """When user selects a shared group, primary_group_id should be that group."""
         mock_group = Mock(id="energy_0380b619")
         groups_with_roles = [(mock_group, "operator")]
-        mock_user = Mock(id="user-1", email="ada@databricks.com", is_system_admin=False)
+        mock_user = Mock(
+            id="user-1",
+            email="ada@databricks.com",
+            personal_group_id="user_ada_databricks_com",
+            is_system_admin=False,
+        )
 
         with patch.object(
             GroupContext,
@@ -851,7 +856,12 @@ class TestFromEmailUsesSmartSession:
         """When user selects personal workspace, primary_group_id should be personal."""
         mock_group = Mock(id="energy_0380b619")
         groups_with_roles = [(mock_group, "operator")]
-        mock_user = Mock(id="user-1", email="ada@databricks.com", is_system_admin=False)
+        mock_user = Mock(
+            id="user-1",
+            email="ada@databricks.com",
+            personal_group_id="user_ada_databricks_com",
+            is_system_admin=False,
+        )
         personal = GroupContext.generate_individual_group_id("ada@databricks.com")
 
         with patch.object(
@@ -871,7 +881,12 @@ class TestFromEmailUsesSmartSession:
         requested, falls back to their individual group ID. (Requesting an
         unauthorized group now raises — see test_no_groups_explicit_other_group_id_rejected.)
         """
-        mock_user = Mock(id="user-1", email="solo@example.com", is_system_admin=False)
+        mock_user = Mock(
+            id="user-1",
+            email="solo@example.com",
+            personal_group_id="user_solo_example_com",
+            is_system_admin=False,
+        )
 
         with patch.object(
             GroupContext,

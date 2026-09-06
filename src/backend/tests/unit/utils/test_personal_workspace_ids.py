@@ -37,9 +37,9 @@ class TestTheDisambiguatedForm:
     def test_the_stored_id_wins_over_the_derivation(self):
         row = SimpleNamespace(personal_group_id=STORED)
         assert GroupContext.personal_workspace_id_of(row, A) == STORED
-        legacy = GroupContext.generate_individual_group_id(A)
-        assert GroupContext.personal_workspace_id_of(SimpleNamespace(), A) == legacy
-        assert GroupContext.personal_workspace_id_of(None, A) == legacy
+        for user in (SimpleNamespace(), None):
+            with pytest.raises(ValueError, match="Access denied"):
+                GroupContext.personal_workspace_id_of(user, A)
 
 
 def _user():
@@ -83,36 +83,12 @@ class TestTheContextUsesTheStoredId:
 
 
 class TestAllocation:
-    def _service(self, holder):
-        from src.services.groups.users import UserService
-
-        with patch("src.services.groups.users.UserRepository") as Repo:
-            repo = AsyncMock()
-            repo.get_by_personal_group_id = AsyncMock(return_value=holder)
-            repo.update = AsyncMock()
-            Repo.return_value = repo
-            svc = UserService(AsyncMock())
-        return svc, repo
-
-    @pytest.mark.asyncio
-    async def test_the_first_user_keeps_the_derived_id(self):
-        svc, repo = self._service(holder=None)
-        user = SimpleNamespace(id="u-a", email=A, personal_group_id=None)
-        legacy = GroupContext.generate_individual_group_id(A)
-        assert await svc.ensure_personal_workspace_id(user) == legacy
-        repo.update.assert_awaited_once_with("u-a", {"personal_group_id": legacy})
-
-    @pytest.mark.asyncio
-    async def test_a_colliding_user_gets_the_disambiguated_form(self):
-        svc, repo = self._service(holder=SimpleNamespace(id="u-a", email=A))
-        user = SimpleNamespace(id="u-b", email=B, personal_group_id=None)
-        assert await svc.ensure_personal_workspace_id(
-            user
-        ) == GroupContext.disambiguated_individual_group_id(B)
-
     @pytest.mark.asyncio
     async def test_an_allocated_row_is_left_alone(self):
-        svc, repo = self._service(holder=None)
-        user = SimpleNamespace(id="u-a", email=A, personal_group_id="user_x")
-        assert await svc.ensure_personal_workspace_id(user) == "user_x"
-        repo.update.assert_not_awaited()
+        from src.services.groups.users import UserService
+
+        svc = UserService.__new__(UserService)
+        svc.user_repo = AsyncMock()
+        user = SimpleNamespace(id="u-a", email=A, personal_group_id="user_allocated")
+        assert await svc.ensure_personal_workspace_id(user) == "user_allocated"
+        svc.user_repo.allocate_personal_group_id.assert_not_awaited()

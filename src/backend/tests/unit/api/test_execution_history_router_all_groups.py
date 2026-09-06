@@ -84,7 +84,7 @@ class TestDebugExecutionGroups:
         mock_svc = AsyncMock()
         mock_svc.get_execution_groups_with_counts = AsyncMock(return_value=[("g1", 3)])
 
-        mock_user = SimpleNamespace(id="u1")
+        mock_user = SimpleNamespace(id="u1", personal_group_id="user_allocated")
         mock_user_svc = AsyncMock()
         mock_user_svc.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
 
@@ -160,7 +160,7 @@ class TestGetAllGroupsExecutionHistory:
         """Returns executions from all user groups."""
         session = MagicMock()
 
-        mock_user = SimpleNamespace(id="u1")
+        mock_user = SimpleNamespace(id="u1", personal_group_id="user_allocated")
         mock_user_svc = AsyncMock()
         mock_user_svc.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
 
@@ -196,7 +196,7 @@ class TestGetAllGroupsExecutionHistory:
     async def test_adds_personal_workspace_to_groups(self):
         """Adds personal workspace ID to group list for data access."""
         session = MagicMock()
-        mock_user = SimpleNamespace(id="u1")
+        mock_user = SimpleNamespace(id="u1", personal_group_id="user_allocated")
         mock_user_svc = AsyncMock()
         mock_user_svc.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
 

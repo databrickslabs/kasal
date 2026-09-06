@@ -28,6 +28,7 @@ from src.services.execution.history import (
 )
 from src.services.groups.groups import GroupService
 from src.services.groups.users import UserService
+from src.utils.user_context import GroupContext
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().system
@@ -125,15 +126,9 @@ async def get_all_groups_execution_history(
     for group in user_groups:
         logger.info(f"  - Group: {group.id} ({group.name})")
 
-    # Also add the user's personal workspace
-    email_parts = user_email.split("@")
-    if len(email_parts) == 2:
-        email_user = email_parts[0]
-        email_domain = email_parts[1].replace(".", "_")
-        personal_group_id = f"user_{email_user}_{email_domain}"
-        if personal_group_id not in group_ids:
-            group_ids.append(personal_group_id)
-            logger.info(f"  - Added personal workspace: {personal_group_id}")
+    personal_group_id = GroupContext.personal_workspace_id_of(user, user_email)
+    if personal_group_id not in group_ids:
+        group_ids.append(personal_group_id)
 
     logger.info(
         f"Fetching executions for user {user_email} from {len(group_ids)} total groups: {group_ids}"
@@ -150,7 +145,7 @@ async def get_all_groups_execution_history(
         # Log first few execution group_ids to debug
         for i, exec in enumerate(result.executions[:5]):
             logger.info(
-                f"  - Execution {i+1}: job_id={exec.job_id}, group_id={exec.group_id}, status={exec.status}"
+                f"  - Execution {i+1}: job_id={exec.job_id}, status={exec.status}"
             )
 
     return result

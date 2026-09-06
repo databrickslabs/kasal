@@ -18,6 +18,9 @@ file is well over the size ceiling, and this is a self-contained seam.
 import logging
 from typing import Any, Dict, Optional, Tuple
 
+from fastapi import HTTPException
+from src.services.flow_builder.resume_authorization import get_owned_resume_source
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,6 +28,7 @@ async def load_resume_outputs(
     resume_from_execution_id: Optional[str],
     repositories: Optional[Dict[str, Any]],
     from_unit: Optional[Any] = None,
+    group_ids=None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Load ``{crew_name: output}`` for a flow resuming from an earlier run.
 
@@ -59,18 +63,9 @@ async def load_resume_outputs(
         # this module has always looked up by job_id. Resolving only one of
         # them meant the other quietly found nothing and the flow re-ran in
         # full while reporting a successful resume.
-        execution = None
-        if isinstance(resume_from_execution_id, int) or (
-            isinstance(resume_from_execution_id, str)
-            and resume_from_execution_id.isdigit()
-        ):
-            execution = await execution_service.get_run_by_id(
-                int(resume_from_execution_id)
-            )
-        if execution is None:
-            execution = await execution_service.get_run_by_job_id(
-                str(resume_from_execution_id)
-            )
+        execution = await get_owned_resume_source(
+            execution_service, resume_from_execution_id, group_ids
+        )
 
         if not execution or not execution.job_id:
             logger.warning(f"No execution found for ID: {resume_from_execution_id}")
@@ -101,6 +96,8 @@ async def load_resume_outputs(
         _log_outputs(outputs, job_id)
         return outputs, identities
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to load checkpoint outputs: {e}", exc_info=True)
         return {}, {}

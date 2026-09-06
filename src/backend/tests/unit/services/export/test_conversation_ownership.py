@@ -11,6 +11,28 @@ from fastapi import HTTPException
 from tests.unit.services.export.conftest import purge_agent_server_modules
 
 
+@pytest.mark.asyncio
+async def test_expired_conversation_cannot_restore_previous_owners_cache(
+    app_bundle, monkeypatch
+):
+    from agent_server import ownership, state_store, conversation
+
+    state_store._backend = state_store._MemoryBackend()
+    state_store._writes_since_prune = 0
+    monkeypatch.setattr(state_store.time, "time", lambda: 1000)
+    ownership.ensure_owner("expired", "alice")
+    conversation._save_history("expired", [{"role": "user", "content": "private"}])
+    monkeypatch.setattr(
+        state_store.time, "time", lambda: 1001 + state_store._ROW_TTL_SECONDS
+    )
+    state_store._writes_since_prune = state_store._PRUNE_EVERY_WRITES - 1
+    state_store.set_json("other", "progress", {})
+    ownership.ensure_owner("expired", "bob")
+    ownership.require_owner("expired", {"x-forwarded-user": "bob"})
+    assert conversation.get_history("expired") == []
+    assert "expired" not in conversation._HISTORY
+
+
 @pytest.fixture(autouse=True)
 def _fresh_modules():
     purge_agent_server_modules()

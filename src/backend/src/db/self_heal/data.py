@@ -102,63 +102,59 @@ async def _heal_engine_config_names(conn) -> None:
 
 
 async def _assign_personal_workspace_ids(conn) -> None:
-    """Give every user without one a personal-workspace id, in creation order.
+    """Preserve unambiguous IDs; stop granting ambiguous historical scopes.
 
-    The id used to be derived from the email at request time, and the
-    derivation was not one-to-one (audit F06 / R2-06). Existing users keep the
-    id their data already lives under — the first user to have produced a
-    given derived id keeps it — and any later user whose email derives to the
-    same id gets the disambiguated form and a fresh, empty workspace. Those
-    pairs are logged: whatever the second user wrote before this ran sits
-    under the first user's workspace and is theirs to sort out by hand.
-    Idempotent: only NULL rows are touched.
+    No application data is moved or deleted. A legacy scope derived by multiple
+    existing accounts is left for explicit administrator reconciliation, while
+    affected accounts receive empty personal workspaces. Repeated runs preserve
+    those allocations. SQLAlchemy binds work on SQLite and asyncpg alike.
     """
-    from src.db.self_heal.dialect import _conn_is_sqlite
-    from src.utils.user_context import GroupContext
 
-    try:
-        rows = (
-            await conn.exec_driver_sql(
-                "SELECT id, email FROM users WHERE personal_group_id IS NULL "
-                "ORDER BY created_at, id"
+    from collections import Counter
+    from uuid import uuid4
+    from sqlalchemy import text
+    from src.utils.user_context import GroupContext, clear_membership_cache
+
+    rows = (
+        await conn.execute(
+            text(
+                "SELECT id, email, personal_group_id FROM users ORDER BY created_at, id"
             )
-        ).fetchall()
-        if not rows:
-            return
-        taken = {
-            r[0]
-            for r in (
-                await conn.exec_driver_sql(
-                    "SELECT personal_group_id FROM users WHERE personal_group_id IS NOT NULL"
-                )
-            ).fetchall()
-        }
-        placeholder = "?" if _conn_is_sqlite(conn) else "%s"
-        collisions = []
-        for user_id, email in rows:
-            legacy = GroupContext.generate_individual_group_id(email)
-            chosen = (
-                legacy
-                if legacy not in taken
-                else GroupContext.disambiguated_individual_group_id(email)
-            )
-            if chosen != legacy:
-                collisions.append((email, legacy, chosen))
-            taken.add(chosen)
-            await conn.exec_driver_sql(
-                f"UPDATE users SET personal_group_id = {placeholder} WHERE id = {placeholder}",
-                (chosen, user_id),
-            )
-        logger.info(f"Assigned personal workspace ids to {len(rows)} user(s)")
-        for email, legacy, chosen in collisions:
-            logger.warning(
-                "Personal workspace collision: %s derived to %s, already held by an "
-                "earlier user; assigned %s. Data this user wrote before now sits under "
-                "%s and needs a manual review.",
-                email,
-                legacy,
-                chosen,
-                legacy,
-            )
-    except Exception as e:  # noqa: BLE001 — a heal must never stop startup
-        logger.warning(f"Could not assign personal workspace ids: {e}")
+        )
+    ).fetchall()
+    legacy_by_user = {
+        row[0]: GroupContext.generate_individual_group_id(row[1]) for row in rows
+    }
+    # Opaque allocations have never used the email-derived scope. A new
+    # account with a colliding email must not evict an established owner.
+    counts = Counter(
+        legacy_by_user[user_id]
+        for user_id, email, stored in rows
+        if not stored
+        or stored == legacy_by_user[user_id]
+        or stored.startswith(legacy_by_user[user_id] + "_")
+    )
+    ambiguous = {gid for gid, count in counts.items() if count > 1}
+    taken = {row[2] for row in rows if row[2]}
+    for user_id, email, stored in rows:
+        legacy = legacy_by_user[user_id]
+        if stored and stored not in ambiguous:
+            continue
+        if not stored and legacy not in ambiguous and legacy not in taken:
+            chosen = legacy
+        else:
+            chosen = f"user_{uuid4().hex}"
+            while chosen in taken:
+                chosen = f"user_{uuid4().hex}"
+        await conn.execute(
+            text("UPDATE users SET personal_group_id = :chosen WHERE id = :user_id"),
+            {"chosen": chosen, "user_id": user_id},
+        )
+        taken.add(chosen)
+        clear_membership_cache(email)
+    for legacy in sorted(ambiguous):
+        logger.warning(
+            "Ambiguous personal workspace %s is no longer assigned to a user. "
+            "Historical data is retained and requires administrator ownership review.",
+            legacy,
+        )

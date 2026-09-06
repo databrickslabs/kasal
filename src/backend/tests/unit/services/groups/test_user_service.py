@@ -30,6 +30,7 @@ def make_user(id="u1", email="user@example.com", is_system_admin=False):
     user.display_name = "User"
     user.is_system_admin = is_system_admin
     user.is_personal_workspace_manager = False
+    user.personal_group_id = "user_allocated"
     return user
 
 
@@ -450,7 +451,9 @@ async def test_get_or_create_user_by_email_existing_user_no_update_login():
     session = AsyncMock()
     with patch("src.services.groups.users.UserRepository") as Repo:
         repo = AsyncMock()
-        existing = SimpleNamespace(id="u1", email="e@x.com")
+        existing = SimpleNamespace(
+            id="u1", email="e@x.com", personal_group_id="user_existing"
+        )
         repo.get_by_email = AsyncMock(return_value=existing)
         Repo.return_value = repo
 
@@ -471,7 +474,9 @@ async def test_get_or_create_user_by_email_create_new_and_first_user_admin():
         repo = AsyncMock()
         repo.get_by_email = AsyncMock(return_value=None)
         repo.get_by_username = AsyncMock(side_effect=[None, None])
-        created = SimpleNamespace(id="u2", email="new@x.com")
+        created = SimpleNamespace(
+            id="u2", email="new@x.com", personal_group_id="user_new"
+        )
         repo.create = AsyncMock(return_value=created)
         repo.count = AsyncMock(return_value=1)  # first user
         repo.update = AsyncMock()

@@ -167,6 +167,23 @@ class KasalFlowService:
                 logger.warning(f"Failed to generate execution name for flow: {e}")
 
         try:
+            # Public requests authorize the source before queuing work. The
+            # runner repeats this check for internal/subprocess entry points.
+            if resume_from_flow_uuid and not resume_from_execution_id:
+                raise HTTPException(
+                    status_code=400, detail="A resume source execution is required"
+                )
+            if resume_from_execution_id and self.session is not None:
+                from src.services.execution.service import ExecutionService
+                from src.services.flow_builder.resume_authorization import (
+                    get_owned_resume_source,
+                )
+
+                await get_owned_resume_source(
+                    ExecutionService(self.session),
+                    resume_from_execution_id,
+                    getattr(group_context, "group_ids", None),
+                )
             # Create a UUID for job_id if not provided
             if not job_id:
                 job_id = str(uuid.uuid4())
@@ -249,6 +266,8 @@ class KasalFlowService:
                 ),
             }
 
+        except HTTPException:
+            raise
         except Exception as e:
             error_msg = f"Error executing flow: {str(e)}"
             logger.error(error_msg, exc_info=True)

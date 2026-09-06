@@ -81,6 +81,7 @@ def _tool(
         user_token=user_token,
         group_id=group_id,
         user_email=user_email,
+        personal_group_id="user_alice_x_com",
     )
 
 
@@ -114,9 +115,9 @@ class TestPersonalWorkspaceEnforcement:
         assert "Switch to your Personal Space to use Gmail" in result
 
     @pytest.mark.asyncio
-    async def test_personal_workspace_check_is_case_insensitive(self):
+    async def test_personal_workspace_id_must_match_allocation_exactly(self):
         tool = _tool(group_id="USER_Alice_X_Com", user_email="Alice@X.com")
-        assert tool._is_personal_workspace() is True
+        assert tool._is_personal_workspace() is False
 
     @pytest.mark.asyncio
     async def test_shared_workspace_check_blocks_before_network(self):

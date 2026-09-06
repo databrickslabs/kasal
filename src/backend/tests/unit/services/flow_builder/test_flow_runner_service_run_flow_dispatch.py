@@ -281,11 +281,12 @@ class TestRunFlow:
             repo_instance = MagicMock()
             existing = MagicMock()
             existing.id = 42
+            existing.group_id = "g"
             job_uuid = "e089f9fd-d6ea-4565-96ee-f039d5925992"
 
             # Only the SOURCE has a record; this job_id has none, which is what
             # puts the call on the legacy in-place path.
-            async def by_job_id(value):
+            async def by_job_id(value, group_ids=None):
                 return existing if value == job_uuid else None
 
             repo_instance.get_run_by_job_id = AsyncMock(side_effect=by_job_id)
@@ -302,6 +303,7 @@ class TestRunFlow:
                     "nodes": [{"id": "n1"}],
                     "edges": [],
                     "resume_from_execution_id": job_uuid,
+                    "group_id": "g",
                 },
             )
 
@@ -309,7 +311,12 @@ class TestRunFlow:
             # Two lookups now: this job_id (no record -> legacy path), then
             # the source by job_id.
             assert repo_instance.get_run_by_job_id.await_count == 2
-            assert repo_instance.get_run_by_job_id.await_args.args[0] == job_uuid
+            assert (
+                repo_instance.get_run_by_job_id.await_args_list[0].args[0] == job_uuid
+            )
+            assert repo_instance.get_run_by_job_id.await_args_list[0].kwargs == {
+                "group_ids": ["g"]
+            }
             repo_instance.get_run_by_id.assert_not_awaited()
             assert result["status"] == FlowExecutionStatus.COMPLETED
 
@@ -437,12 +444,14 @@ class TestRunFlow:
 
             own = MagicMock()
             own.id = 99
+            own.group_id = "g"
             own.status = "RUNNING"
             source = MagicMock()
             source.id = 42
+            source.group_id = "g"
             source.status = "COMPLETED"
 
-            async def by_job_id(value):
+            async def by_job_id(value, group_ids=None):
                 return own if value == "new-job" else source
 
             repo_instance.get_run_by_job_id = AsyncMock(side_effect=by_job_id)
@@ -460,6 +469,7 @@ class TestRunFlow:
                     "nodes": [{"id": "n1"}],
                     "edges": [],
                     "resume_from_execution_id": "source-job",
+                    "group_id": "g",
                 },
             )
 

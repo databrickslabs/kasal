@@ -36,7 +36,9 @@ def _make_subprocess_logger():
     return mock_logger
 
 
-def _call_run_crew_in_process_with_mocks(config, exec_id="test-exec-1234-5678"):
+def _call_run_crew_in_process_with_mocks(
+    config, exec_id="test-exec-1234-5678", group_context=None
+):
     """Helper to call run_crew_in_process with common mocked dependencies."""
     from src.services.agent_builder.process_executor import run_crew_in_process
 
@@ -61,7 +63,7 @@ def _call_run_crew_in_process_with_mocks(config, exec_id="test-exec-1234-5678"):
     ):
         mock_psutil.return_value.children.return_value = []
         mock_psutil.return_value.is_running.return_value = False
-        result = run_crew_in_process(exec_id, config)
+        result = run_crew_in_process(exec_id, config, group_context=group_context)
     return result
 
 
@@ -421,3 +423,23 @@ class TestRunCrewInProcessErrorPaths:
         exec_id = "test-execution-uuid-1234"
         result = run_crew_in_process(exec_id, {"agents": [], "tasks": []})
         assert result["execution_id"] == exec_id
+
+
+def test_worker_context_retains_authenticated_personal_workspace_identity():
+    from types import SimpleNamespace
+    from src.utils.user_context import GroupContext
+
+    user = SimpleNamespace(personal_group_id="user_allocated")
+    context = GroupContext(group_ids=["user_allocated"], current_user=user)
+    with patch(
+        "src.utils.user_context.GroupContext", wraps=GroupContext
+    ) as constructor:
+        _call_run_crew_in_process_with_mocks(
+            {"agents": [], "tasks": [], "group_id": "user_allocated"},
+            group_context=context,
+        )
+    assert constructor.call_count >= 2
+    assert all(
+        context_call.kwargs["current_user"] is user
+        for context_call in constructor.call_args_list[:2]
+    )

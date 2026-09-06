@@ -129,6 +129,7 @@ class TestGroupContextFromEmail:
         mock_user = SimpleNamespace(
             id="u1",
             email="solo@example.com",
+            personal_group_id="user_solo_example_com",
             is_system_admin=False,
             is_personal_workspace_manager=False,
         )
@@ -149,6 +150,7 @@ class TestGroupContextFromEmail:
         mock_user = SimpleNamespace(
             id="u1",
             email="solo@example.com",
+            personal_group_id="user_solo_example_com",
             is_system_admin=False,
             is_personal_workspace_manager=False,
         )
@@ -168,6 +170,7 @@ class TestGroupContextFromEmail:
         mock_user = SimpleNamespace(
             id="u1",
             email="solo@example.com",
+            personal_group_id="user_solo_example_com",
             is_system_admin=False,
             is_personal_workspace_manager=False,
         )
@@ -189,6 +192,7 @@ class TestGroupContextFromEmail:
         mock_user = SimpleNamespace(
             id="u1",
             email="member@corp.com",
+            personal_group_id="user_member_corp_com",
             is_system_admin=False,
             is_personal_workspace_manager=False,
         )
@@ -208,6 +212,7 @@ class TestGroupContextFromEmail:
         mock_user = SimpleNamespace(
             id="u1",
             email="admin@corp.com",
+            personal_group_id="user_admin_corp_com",
             is_system_admin=False,
             is_personal_workspace_manager=False,
         )
@@ -256,6 +261,7 @@ class TestGroupContextFromEmail:
         mock_user = SimpleNamespace(
             id="u1",
             email="member@corp.com",
+            personal_group_id="user_member_corp_com",
             is_system_admin=False,
             is_personal_workspace_manager=False,
         )
@@ -284,6 +290,7 @@ class TestGroupContextFromEmail:
         mock_user = SimpleNamespace(
             id="u1",
             email="member@corp.com",
+            personal_group_id="user_member_corp_com",
             is_system_admin=False,
             is_personal_workspace_manager=False,
         )
@@ -306,6 +313,7 @@ class TestGroupContextFromEmail:
         mock_user = SimpleNamespace(
             id="u1",
             email="member@corp.com",
+            personal_group_id="user_member_corp_com",
             is_system_admin=False,
             is_personal_workspace_manager=False,
         )

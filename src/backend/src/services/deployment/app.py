@@ -142,6 +142,7 @@ class CrewAppDeploymentService:
 
         deployment_id = str(uuid.uuid4())
         self._deployments[deployment_id] = {
+            "group_id": group_context.primary_group_id if group_context else None,
             "deployment_id": deployment_id,
             "crew_id": str(crew_id),
             "app_name": app_name,
@@ -206,20 +207,22 @@ class CrewAppDeploymentService:
         # Candidate groups to look the PAT up under: the request's groups PLUS the
         # user's PERSONAL workspace. With strict workspace isolation a request
         # scoped to a shared workspace carries ONLY that group_id (personal is
-        # dropped — see UserContext), but the PAT is commonly stored under the
-        # personal workspace, so we always add it (derived from the email).
+        # dropped — see UserContext). Only the allocated personal ID is owned;
+        # email-derived candidates can belong to a different user.
         candidate_group_ids: List[str] = (
             list(group_context.group_ids)
             if group_context and group_context.group_ids
             else []
         )
-        if group_context and group_context.group_email:
-            # Either form the personal workspace's id can take (R2-06).
-            for personal_gid in GroupContext.personal_workspace_candidates(
-                group_context.group_email
-            ):
-                if personal_gid and personal_gid not in candidate_group_ids:
-                    candidate_group_ids.append(personal_gid)
+        personal_gid = getattr(
+            getattr(group_context, "current_user", None), "personal_group_id", None
+        )
+        if (
+            isinstance(personal_gid, str)
+            and personal_gid
+            and personal_gid not in candidate_group_ids
+        ):
+            candidate_group_ids.append(personal_gid)
 
         # Resolve the PAT DIRECTLY from the DB on the request-scoped session.
         # We deliberately DO NOT use get_auth_context here: (1) deploy MUST use a
@@ -280,6 +283,20 @@ class CrewAppDeploymentService:
         if not record:
             return None
         return AppDeploymentStatusResponse(**record)
+
+    def get_owned_status(
+        self, deployment_id: str, crew_id: str, group_context: GroupContext
+    ) -> Optional[AppDeploymentStatusResponse]:
+        """Authorize the transient record before returning deployment details."""
+        record = self._deployments.get(deployment_id)
+        if (
+            not record
+            or record.get("crew_id") != str(crew_id)
+            or not record.get("group_id")
+            or record["group_id"] not in (group_context.group_ids or [])
+        ):
+            return None
+        return self.get_status(deployment_id)
 
     async def list_lakebase_instances(
         self, group_context: Optional[GroupContext] = None

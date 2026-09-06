@@ -529,6 +529,7 @@ class TestRunFlowResumeScenario:
 
         existing_execution = MagicMock()
         existing_execution.id = 42
+        existing_execution.group_id = "g"
         existing_execution.status = "RUNNING"
 
         svc.db = MagicMock(spec=AsyncSession)
@@ -558,6 +559,7 @@ class TestRunFlowResumeScenario:
                     "nodes": [{"id": "n1"}],
                     "edges": [],
                     "resume_from_execution_id": 115,
+                    "group_id": "g",
                 },
             )
 

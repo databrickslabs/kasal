@@ -17,7 +17,7 @@ to the requesting user.
    mailbox. So this tool uses the request's OBO token and nothing else.
 
 2. The tool runs ONLY in the caller's PERSONAL workspace (the group whose id
-   is generate_individual_group_id(user_email)). In a SHARED workspace a crew
+   is the authenticated user's allocated personal workspace ID). In a SHARED workspace a crew
    — and its emitted email content — is visible to other members, so reading
    one member's inbox there would leak personal mail to the group. Outside the
    personal workspace the tool refuses to run.
@@ -143,6 +143,7 @@ class GmailTool(BaseTool):
     _user_token: Optional[str] = PrivateAttr(default=None)
     _group_id: Optional[str] = PrivateAttr(default=None)
     _user_email: Optional[str] = PrivateAttr(default=None)
+    _personal_group_id: Optional[str] = PrivateAttr(default=None)
 
     def __init__(
         self,
@@ -152,6 +153,7 @@ class GmailTool(BaseTool):
         group_id: Optional[str] = None,
         user_email: Optional[str] = None,
         result_as_answer: bool = False,
+        personal_group_id: Optional[str] = None,
     ):
         super().__init__(result_as_answer=result_as_answer)
         tool_config = tool_config or {}
@@ -163,6 +165,7 @@ class GmailTool(BaseTool):
             self._group_id = group_id
         if user_email:
             self._user_email = user_email
+        self._personal_group_id = personal_group_id
         if tool_config.get("connection_name"):
             self._connection_name = str(tool_config["connection_name"])
         if tool_config.get("timeout"):
@@ -181,14 +184,9 @@ class GmailTool(BaseTool):
         """
         if not self._group_id or not self._user_email:
             return False
-        try:
-            from src.utils.user_context import GroupContext
-
-            return GroupContext.is_personal_workspace_of(
-                self._group_id, self._user_email
-            )
-        except Exception:
-            return False
+        return bool(
+            self._personal_group_id and self._group_id == self._personal_group_id
+        )
 
     # ------------------------------------------------------------------
     # Auth + proxy plumbing

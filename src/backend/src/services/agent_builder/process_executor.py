@@ -399,6 +399,7 @@ def run_crew_in_process(
 
                 # Create a GroupContext for the subprocess
                 group_context_obj = GroupContext(
+                    current_user=getattr(group_context, "current_user", None),
                     group_ids=[group_id],
                     group_email=crew_config.get(
                         "group_email", f"{group_id}@subprocess"
@@ -523,6 +524,7 @@ def run_crew_in_process(
 
                     # Re-create GroupContext in async context
                     group_context_obj = GroupContext(
+                        current_user=getattr(group_context, "current_user", None),
                         group_ids=[group_id],
                         group_email=crew_config.get(
                             "group_email", f"{group_id}@subprocess"

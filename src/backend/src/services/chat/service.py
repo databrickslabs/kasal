@@ -1510,7 +1510,9 @@ class LightAgentService:
         # matches no MCP rows, so workspace-enabled servers resolve to 0.
         email = getattr(group_context, "group_email", None)
         if email and "@" in email:
-            return GroupContext.generate_individual_group_id(email)
+            return GroupContext.personal_workspace_id_of(
+                getattr(group_context, "current_user", None), email
+            )
         return "default"
 
     @staticmethod

@@ -24,6 +24,42 @@ class UserRepository(BaseRepository[User]):
         result = await self.session.execute(query)
         return result.scalars().first()
 
+    async def allocate_personal_group_id(
+        self, user_id: str, candidate: str
+    ) -> Optional[str]:
+        """Only the first allocation wins, including across application workers."""
+        await self.session.execute(
+            update(self.model)
+            .where(self.model.id == user_id, self.model.personal_group_id.is_(None))
+            .values(personal_group_id=candidate)
+        )
+        await self.session.flush()
+        result = await self.session.execute(
+            select(self.model.personal_group_id).where(self.model.id == user_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def has_legacy_personal_collision(self, user_id: str, legacy: str) -> bool:
+        normalized = self.model.email
+        for separator in ("@", ".", "-", "+"):
+            normalized = func.replace(normalized, separator, "_")
+        result = await self.session.execute(
+            select(self.model.id)
+            .where(
+                self.model.id != user_id,
+                func.lower(normalized) == legacy.removeprefix("user_"),
+                or_(
+                    self.model.personal_group_id.is_(None),
+                    self.model.personal_group_id == legacy,
+                    self.model.personal_group_id.startswith(
+                        legacy + "_", autoescape=True
+                    ),
+                ),
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
     async def get_by_username(self, username: str) -> Optional[User]:
         """Get a user by username"""
         query = select(self.model).where(self.model.username == username)

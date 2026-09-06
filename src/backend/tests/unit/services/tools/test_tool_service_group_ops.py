@@ -538,6 +538,7 @@ async def test_gmail_visible_in_personal_workspace():
         primary_group_id="user_alice_x_com",
         group_email="alice@x.com",
     )
+    ctx.current_user.personal_group_id = "user_alice_x_com"
     result = await svc.get_all_tools_for_group(ctx)
     titles = {t.title for t in result.tools}
     assert "Gmail" in titles
