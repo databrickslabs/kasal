@@ -1,4 +1,4 @@
-import { apiClient as API } from '../../config/api/ApiConfig';
+import { apiClient as API } from '../../shared/api/client';
 import {
   PublicationRequest,
   PublicationResponse,

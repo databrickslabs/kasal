@@ -10,9 +10,9 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
-from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.exceptions import BadRequestError, KasalError
 from src.core.logger import LoggerManager
 
 # SessionLocal removed - use async_session_factory instead
@@ -187,9 +187,7 @@ class KasalFlowService:
             # Public requests authorize the source before queuing work. The
             # runner repeats this check for internal/subprocess entry points.
             if resume_from_flow_uuid and not resume_from_execution_id:
-                raise HTTPException(
-                    status_code=400, detail="A resume source execution is required"
-                )
+                raise BadRequestError(detail="A resume source execution is required")
             if resume_from_execution_id and self.session is not None:
                 from src.services.execution.service import ExecutionService
                 from src.services.flow_builder.resume_authorization import (
@@ -283,14 +281,12 @@ class KasalFlowService:
                 ),
             }
 
-        except HTTPException:
+        except KasalError:
             raise
         except Exception as e:
             error_msg = f"Error executing flow: {str(e)}"
             logger.error(error_msg, exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_msg
-            )
+            raise KasalError(detail=error_msg)
 
     async def get_flow_execution(
         self, execution_id: int, group_ids: Optional[List[str]] = None
@@ -315,9 +311,7 @@ class KasalFlowService:
         except Exception as e:
             error_msg = f"Error getting flow execution: {str(e)}"
             logger.error(error_msg, exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_msg
-            )
+            raise KasalError(detail=error_msg)
 
     async def get_flow_executions_by_flow(
         self, flow_id: Union[uuid.UUID, str], group_ids: Optional[List[str]] = None
@@ -339,8 +333,7 @@ class KasalFlowService:
                 try:
                     flow_id = uuid.UUID(flow_id)
                 except ValueError:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
+                    raise BadRequestError(
                         detail=f"Invalid flow_id format: {flow_id}",
                     )
 
@@ -348,12 +341,10 @@ class KasalFlowService:
             return await flow_runner.get_flow_executions_by_flow(
                 flow_id, group_ids=group_ids
             )
-        except HTTPException:
-            # Re-raise HTTP exceptions
+        except KasalError:
+            # Re-raise application errors
             raise
         except Exception as e:
             error_msg = f"Error getting flow executions: {str(e)}"
             logger.error(error_msg, exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_msg
-            )
+            raise KasalError(detail=error_msg)

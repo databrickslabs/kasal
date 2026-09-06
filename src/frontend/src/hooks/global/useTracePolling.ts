@@ -23,7 +23,7 @@
  */
 
 import { useEffect, useRef, useCallback } from 'react';
-import { apiClient } from '../../config/api/ApiConfig';
+import { apiClient } from '../../shared/api/client';
 import { SSE_ENABLED } from '../../utils/sseTransport';
 import { HITLService } from '../../api/execution/HITLService';
 import { useRunStatusStore } from '../../store/runStatus';

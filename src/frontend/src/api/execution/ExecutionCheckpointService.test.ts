@@ -1,8 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import ExecutionCheckpointService from './ExecutionCheckpointService';
-import { apiClient } from '../../config/api/ApiConfig';
+import { apiClient } from '../../shared/api/client';
 
-vi.mock('../../config/api/ApiConfig', () => ({
+vi.mock('../../shared/api/client', () => ({
   apiClient: {
     get: vi.fn(),
     post: vi.fn(),

@@ -302,7 +302,7 @@ class TestTheFourSetupOptions:
         import pathlib
 
         src_root = pathlib.Path(__file__).resolve().parents[6]  # .../src
-        path = src_root / "frontend/src/components/Configuration/DatabaseManagement.tsx"
+        path = src_root / "frontend/src/features/configuration/components/DatabaseManagement.tsx"
         assert path.exists(), path
         return path.read_text()
 

@@ -8,9 +8,9 @@
 
 import { describe, it, expect, vi, beforeEach, Mock } from 'vitest';
 import { PromptOptimizationService } from './PromptOptimizationService';
-import apiClient from '../../config/api/ApiConfig';
+import apiClient from '../../shared/api/client';
 
-vi.mock('../../config/api/ApiConfig', () => ({
+vi.mock('../../shared/api/client', () => ({
   default: {
     get: vi.fn(),
     post: vi.fn(),

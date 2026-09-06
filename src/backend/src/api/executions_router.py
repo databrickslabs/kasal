@@ -21,7 +21,7 @@ from fastapi import (
 )
 
 from src.config.settings import settings
-from src.core.dependencies import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import ForbiddenError, NotFoundError
 from src.core.logger import LoggerManager
 from src.core.permissions import check_role_in_context

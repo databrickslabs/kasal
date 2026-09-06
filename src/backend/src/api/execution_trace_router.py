@@ -9,7 +9,7 @@ from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, Query, status
 
-from src.core.dependencies import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import NotFoundError
 from src.core.logger import LoggerManager
 from src.schemas.execution_trace import (

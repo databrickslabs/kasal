@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.group_router import router
-from src.core.dependencies import get_db
+from src.dependencies.providers import get_db
 from src.dependencies.admin_auth import (
     get_admin_user,
     get_authenticated_user,
@@ -93,7 +93,7 @@ def app(mock_db_session, mock_current_user, mock_group_context):
     ):
         return mock_group_context
 
-    from src.core.dependencies import get_group_context
+    from src.dependencies.providers import get_group_context
 
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[require_authenticated_user] = override_auth

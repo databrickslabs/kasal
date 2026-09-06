@@ -4,7 +4,7 @@ import logging
 
 from fastapi import APIRouter
 
-from src.core.dependencies import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import BadRequestError
 from src.schemas.deck import SlideRefineRequest, SlideRefineResponse
 from src.services.decks.slide_refine import SlideRefineService

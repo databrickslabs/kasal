@@ -6,6 +6,7 @@ history tracking, job management, and saved configuration endpoints.
 """
 
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -13,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.converter_router import get_converter_service, router
+from src.services.powerbi.conversions import ConverterService
 
 
 # Mock responses
@@ -121,8 +123,12 @@ def mock_converter_service():
 @pytest.fixture
 def app(mock_converter_service):
     """Create a FastAPI app with mocked dependencies."""
+    from src.core.exceptions import KasalError
+    from src.main import kasal_error_handler
+
     app = FastAPI()
     app.include_router(router)
+    app.add_exception_handler(KasalError, kasal_error_handler)
 
     # Override dependency
     app.dependency_overrides[get_converter_service] = lambda: mock_converter_service
@@ -134,6 +140,64 @@ def app(mock_converter_service):
 def client(app):
     """Create a test client."""
     return TestClient(app)
+
+
+@pytest.mark.parametrize(
+    "method, path, body, expected_status, detail",
+    [
+        ("GET", "/history/999", None, 404, "Conversion history 999 not found"),
+        (
+            "POST",
+            "/jobs/job-123/cancel",
+            None,
+            400,
+            "Job job-123 not found or cannot be cancelled",
+        ),
+        (
+            "POST",
+            "/configs",
+            {
+                "name": "Config",
+                "source_format": "powerbi",
+                "target_format": "dax",
+                "configuration": {},
+            },
+            401,
+            "Authentication required to save configurations",
+        ),
+        (
+            "PATCH",
+            "/configs/1",
+            {"name": "Changed"},
+            403,
+            "Not authorized to update this configuration",
+        ),
+    ],
+)
+def test_service_errors_reach_http_boundary(
+    app, method, path, body, expected_status, detail
+):
+    service = ConverterService(
+        AsyncMock(),
+        group_context=SimpleNamespace(primary_group_id="group-1", group_email=None),
+    )
+    service.history_repo = AsyncMock()
+    service.history_repo.get.return_value = None
+    service.job_repo = AsyncMock()
+    service.job_repo.cancel_job.return_value = None
+    service.config_repo = AsyncMock()
+    service.config_repo.get.return_value = SimpleNamespace(
+        created_by_email="another@example.com"
+    )
+    app.dependency_overrides[get_converter_service] = lambda: service
+
+    response = TestClient(app).request(method, "/api/converters" + path, json=body)
+
+    assert response.status_code == expected_status
+    assert response.json() == {"detail": detail}
+    assert "www-authenticate" not in response.headers
+    service.config_repo.create.assert_not_awaited()
+    service.config_repo.update.assert_not_awaited()
 
 
 # ===== Conversion History Endpoint Tests =====
@@ -174,9 +238,9 @@ class TestConversionHistoryEndpoints:
 
     def test_get_history_not_found(self, client, mock_converter_service):
         """Test history retrieval when not found."""
-        from fastapi import HTTPException
+        from src.core.exceptions import KasalError
 
-        mock_converter_service.get_history.side_effect = HTTPException(
+        mock_converter_service.get_history.side_effect = KasalError(
             status_code=404, detail="Conversion history 999 not found"
         )
 
@@ -309,9 +373,9 @@ class TestConversionJobEndpoints:
 
     def test_get_job_not_found(self, client, mock_converter_service):
         """Test job retrieval when not found."""
-        from fastapi import HTTPException
+        from src.core.exceptions import KasalError
 
-        mock_converter_service.get_job.side_effect = HTTPException(
+        mock_converter_service.get_job.side_effect = KasalError(
             status_code=404, detail="Conversion job nonexistent not found"
         )
 
@@ -430,9 +494,9 @@ class TestSavedConfigurationEndpoints:
 
     def test_get_config_not_found(self, client, mock_converter_service):
         """Test configuration retrieval when not found."""
-        from fastapi import HTTPException
+        from src.core.exceptions import KasalError
 
-        mock_converter_service.get_saved_config.side_effect = HTTPException(
+        mock_converter_service.get_saved_config.side_effect = KasalError(
             status_code=404, detail="Configuration 999 not found"
         )
 

@@ -9,7 +9,7 @@ import logging
 
 from fastapi import APIRouter
 
-from src.core.dependencies import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.prompt_improvement import (
     PromptImprovementRequest,
     PromptImprovementResponse,

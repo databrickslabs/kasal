@@ -488,7 +488,7 @@ class TestChatHistoryIntegration:
 
     @pytest.fixture
     def client(self, mock_service):
-        from src.core.dependencies import get_group_context
+        from src.dependencies.providers import get_group_context
 
         app = FastAPI()
         register_exception_handlers(app)
@@ -501,7 +501,7 @@ class TestChatHistoryIntegration:
 
     @pytest.fixture
     def client_invalid_gc(self, mock_service):
-        from src.core.dependencies import get_group_context
+        from src.dependencies.providers import get_group_context
 
         app = FastAPI()
         register_exception_handlers(app)

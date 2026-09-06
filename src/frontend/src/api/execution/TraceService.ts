@@ -1,4 +1,4 @@
-import apiClient from '../../config/api/ApiConfig';
+import apiClient from '../../shared/api/client';
 import { Trace } from '../../store/runStatus';
 import { TaskDetails } from '../../types/execution/trace';
 

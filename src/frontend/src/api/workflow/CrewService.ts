@@ -1,7 +1,7 @@
 import axios from 'axios';
-import { apiClient as API } from '../../config/api/ApiConfig';
+import { apiClient as API } from '../../shared/api/client';
 
-import { CrewResponse, CrewCreate, Crew, CrewSaveData } from '../../types/workflow/crews';
+import { CrewResponse, CrewCreate, Crew, CrewSaveData } from '../../types/workflow/crew';
 import { CrewTask } from '../../types/workflow/crewPlan';
 
 interface TaskNode {

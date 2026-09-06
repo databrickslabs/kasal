@@ -5,7 +5,7 @@
  * including validation, testing connections, and retrieving available indexes.
  */
 
-import { apiClient } from '../../config/api/ApiConfig';
+import { apiClient } from '../../shared/api/client';
 import { MemoryBackendConfig, LakebaseMemoryConfig } from '../../types/config/memoryBackend';
 import { AxiosError } from 'axios';
 

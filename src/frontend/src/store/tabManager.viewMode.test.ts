@@ -39,7 +39,7 @@ describe('crew load forces crew view (wiring)', () => {
     const { readFileSync } = await import('fs');
     const { resolve } = await import('path');
     const src = readFileSync(
-      resolve(__dirname, '../components/WorkflowDesigner/WorkflowEventHandlers.ts'),
+      resolve(__dirname, '../app/workspace/WorkflowEventHandlers.ts'),
       'utf-8',
     );
     // Loading a crew must override the inherited canvas so it always lands on crew.

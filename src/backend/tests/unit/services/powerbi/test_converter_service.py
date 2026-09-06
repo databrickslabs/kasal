@@ -9,7 +9,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import HTTPException
+from src.core.exceptions import KasalError
 
 from src.schemas.conversion import (
     ConversionHistoryCreate,
@@ -111,7 +111,7 @@ def mock_group_context():
     """Create a mock group context."""
     context = MagicMock(spec=GroupContext)
     context.primary_group_id = "group-1"
-    context.user_email = "user@example.com"
+    context.group_email = "user@example.com"
     return context
 
 
@@ -189,7 +189,7 @@ class TestConverterServiceHistory:
         """Test history retrieval when not found."""
         converter_service.history_repo.get.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await converter_service.get_history(999)
 
         assert exc_info.value.status_code == 404
@@ -217,7 +217,7 @@ class TestConverterServiceHistory:
 
         update_data = ConversionHistoryUpdate(status="failed")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await converter_service.update_history(999, update_data)
 
         assert exc_info.value.status_code == 404
@@ -335,7 +335,7 @@ class TestConverterServiceJobs:
         """Test job retrieval when not found."""
         converter_service.job_repo.get.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await converter_service.get_job("nonexistent")
 
         assert exc_info.value.status_code == 404
@@ -373,7 +373,7 @@ class TestConverterServiceJobs:
 
         status_update = ConversionJobStatusUpdate(status="running")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await converter_service.update_job_status("nonexistent", status_update)
 
         assert exc_info.value.status_code == 404
@@ -416,7 +416,7 @@ class TestConverterServiceJobs:
         """Test job cancellation when not found."""
         converter_service.job_repo.cancel_job.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await converter_service.cancel_job("nonexistent")
 
         assert exc_info.value.status_code == 400
@@ -463,10 +463,12 @@ class TestConverterServiceConfigurations:
             configuration={},
         )
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await service.create_saved_config(config_data)
 
         assert exc_info.value.status_code == 401
+        assert exc_info.value.detail == "Authentication required to save configurations"
+        assert not exc_info.value.headers
 
     @pytest.mark.asyncio
     async def test_get_saved_config_success(self, converter_service):
@@ -483,7 +485,7 @@ class TestConverterServiceConfigurations:
         """Test configuration retrieval when not found."""
         converter_service.config_repo.get.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await converter_service.get_saved_config(999)
 
         assert exc_info.value.status_code == 404
@@ -514,7 +516,7 @@ class TestConverterServiceConfigurations:
 
         update_data = SavedConfigurationUpdate(name="Updated")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await converter_service.update_saved_config(123, update_data)
 
         assert exc_info.value.status_code == 403
@@ -540,7 +542,7 @@ class TestConverterServiceConfigurations:
         )
         converter_service.config_repo.get.return_value = existing_config
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await converter_service.delete_saved_config(123)
 
         assert exc_info.value.status_code == 403
@@ -611,7 +613,7 @@ class TestConverterServiceConfigurations:
         """Test marking non-existent configuration as used."""
         converter_service.config_repo.increment_use_count.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await converter_service.use_saved_config(999)
 
         assert exc_info.value.status_code == 404

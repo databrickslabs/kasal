@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
 from src.config.settings import settings
-from src.core.dependencies import GroupContextDep, LocalSessionDep, SessionDep
+from src.dependencies.providers import GroupContextDep, LocalSessionDep, SessionDep
 from src.core.exceptions import BadRequestError, ForbiddenError, KasalError
 from src.core.logger import LoggerManager
 from src.core.permissions import check_role_in_context

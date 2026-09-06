@@ -3,7 +3,7 @@ from typing import Annotated, List
 
 from fastapi import APIRouter, Depends, status
 
-from src.core.dependencies import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.dependencies.admin_auth import SystemAdminUserDep
 from src.schemas.schema import (
     SchemaCreate,

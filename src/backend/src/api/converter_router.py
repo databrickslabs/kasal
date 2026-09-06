@@ -9,7 +9,7 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.dependencies import GroupContextDep
+from src.dependencies.providers import GroupContextDep
 from src.db.session import get_db
 from src.schemas.conversion import (  # History; Jobs; Saved Configs
     ConversionHistoryCreate,

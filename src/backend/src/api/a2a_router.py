@@ -17,7 +17,7 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, Header, Query, Request
 
 from src.schemas.a2a import PushConfigRequest
-from src.core.dependencies import SessionDep
+from src.dependencies.providers import SessionDep
 from src.core.exceptions import KasalError, NotFoundError, UnprocessableEntityError
 from src.schemas.a2a import AgentCard, SendMessageRequest, Task
 from src.services.a2a.a2a_server import card as a2a_card

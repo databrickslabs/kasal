@@ -36,7 +36,7 @@ def get_forbidden_response_test(
         expected_message: The expected error message
         json_data: Optional JSON data for the request
     """
-    from src.core.dependencies import get_group_context
+    from src.dependencies.providers import get_group_context
 
     # Override group context
     async def override_get_group_context():

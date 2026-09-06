@@ -1,6 +1,6 @@
 import { AxiosInstance } from 'axios';
 import { AppConfig } from '../types/chat';
-import apiClient, { config as kasalApiConfig } from '../../../config/api/ApiConfig';
+import apiClient, { config as kasalApiConfig } from '../../../shared/api/client';
 
 /*
  * The embedded Chat workspace reuses Kasal's shared axios client so it inherits

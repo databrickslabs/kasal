@@ -87,7 +87,7 @@ async def lifespan(app: FastAPI):
         import logging as _logging
 
         _logging.getLogger("src.utils.user_context").setLevel(_logging.WARNING)
-        _logging.getLogger("src.core.dependencies").setLevel(_logging.WARNING)
+        _logging.getLogger("src.dependencies.providers").setLevel(_logging.WARNING)
         _logging.getLogger("src.services.groups.users").setLevel(_logging.WARNING)
     except Exception as _e:
         system_logger.warning(f"Failed to adjust module log levels: {_e}")

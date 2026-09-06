@@ -1,12 +1,12 @@
 import { vi, Mock, beforeEach, afterEach, describe, it, expect } from 'vitest';
 import { JobExecutionService, JobResponse } from './JobExecutionService';
-import { apiClient } from '../../config/api/ApiConfig';
+import { apiClient } from '../../shared/api/client';
 import { ModelService } from '../config/ModelService';
 import { Node, Edge } from 'reactflow';
-import { AgentYaml } from '../../types/workflow/crew';
+import { AgentYaml } from '../../types/workflow/crewPayload';
 
 // Mock dependencies
-vi.mock('../../config/api/ApiConfig', () => ({
+vi.mock('../../shared/api/client', () => ({
   apiClient: {
     get: vi.fn(),
     post: vi.fn(),

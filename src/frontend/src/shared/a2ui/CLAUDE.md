@@ -34,7 +34,7 @@ The surface **is** the canonical rendering, so the raw text must NOT also show:
   / `_DATA_COMPONENTS`). This stops prose-only surfaces from double-rendering **but** means
   any new deliverable component MUST be added to `_DATA_COMPONENTS` or its surface gets
   dropped back to plain text (this is the "Album rendered as markdown, not a carousel" bug).
-- Frontend drop — `components/ChatMode/store/executionStore.ts::completeExecution` posts an
+- Frontend drop — `features/chat/store/executionStore.ts::completeExecution` posts an
   empty message body when a surface exists **and the reader never saw the text**
   (`const body = surface && !readerSawText ? '' : resultText`). The condition matters: a
   composed surface can take tens of seconds, and Kasal chat streams the answer meanwhile
@@ -74,20 +74,20 @@ Do ALL that apply. Frontend paths are under `src/frontend/src`; backend under
 6. **Prose gate** — `backend/src/services/a2ui/runner.py`: add the component to
    `_DATA_COMPONENTS` if it's a genuine deliverable (chart/table/diagram/gallery/map), or its
    `dashboard`/`document` surface will be dropped as "prose-only".
-7. **Legacy adapter** — `components/ChatMode/utils/surfaceAdapter.ts`: add to `UiComponentType`
+7. **Legacy adapter** — `features/chat/utils/surfaceAdapter.ts`: add to `UiComponentType`
    + `VALID_TYPES`. If it's a deliverable, add to `DELIVERABLE_BY_COMPONENT` +
    `DELIVERABLE_TO_SURFACE_KIND`.
 8. **UIConfigurator (if it should be brandable / configurable)** — this is the step most
    often missed:
-   - `components/Configuration/uiConfigShared.ts` — add to `DELIVERABLE_TYPES` (the list shown
+   - `features/configuration/components/uiConfigShared.ts` — add to `DELIVERABLE_TYPES` (the list shown
      in "Branding & per-type settings") and `TYPE_OPTIONS` (per-type controls; each carries a
      `phrase()` that becomes the composer directive).
-   - `components/ChatMode/components/Chat/A2uiSurface.tsx` — add to `ROOT_COMPONENT_TO_DELIVERABLE`
+   - `features/chat/components/Chat/A2uiSurface.tsx` — add to `ROOT_COMPONENT_TO_DELIVERABLE`
      so a surface whose ROOT is this component resolves its per-type palette (otherwise it
      inherits the dashboard/document palette).
 9. **New surfaceKind ONLY** (skip if it's a component): `catalog.json` `surfaceKinds`,
    `A2uiSurface.tsx` `SURFACE_TO_DELIVERABLE` (+ token-vs-deck theming set), the export
-   `App.tsx` `RICH` set (`test_a2ui_rich_surface_kinds_cover_live_renderer` guards it), and
+   `app/App.tsx` `RICH` set (`test_a2ui_rich_surface_kinds_cover_live_renderer` guards it), and
    `surfaceAdapter.ts` maps.
 10. **Exported app — RE-VENDOR (do not forget):** the exported Databricks App ships its OWN
     byte-identical copy of the renderer.
@@ -96,11 +96,11 @@ Do ALL that apply. Frontend paths are under `src/frontend/src`; backend under
       `test_vendor_in_sync_with_frontend_source` fails until you do.
     - `catalog.json` and `compose.py` are copied **live** at export time — no vendoring.
     - Export parity (kept in sync with Kasal chat — preserve when editing the template):
-      the double-render dedup (`App.tsx` shows the surface XOR the text bubble — the
+      the double-render dedup (`app/App.tsx` shows the surface XOR the text bubble — the
       exported app does NOT stream, so the reader never sees the text first and the plain
       XOR stays correct there; this is the one place the two intentionally differ), the prose
       gate (`agent.py::_schedule_a2ui` drops prose-only dashboard/document surfaces via
-      `_a2ui_has_data_component`), and palette-by-root-component (`App.tsx`
+      `_a2ui_has_data_component`), and palette-by-root-component (`app/App.tsx`
       `ROOT_COMPONENT_TO_DELIVERABLE` / `deliverableForSurface`).
     - See memory `a2ui-renderer-vendored-copy`.
 11. **Tests:**
@@ -120,9 +120,9 @@ Do ALL that apply. Frontend paths are under `src/frontend/src`; backend under
 | Composer + prompt + intent + deliverable keywords | `backend/src/services/a2ui/compose.py` |
 | Catalog (what the model may emit) | `backend/src/services/a2ui/catalog.json` |
 | Prose gate / `{text,a2ui}` envelope build | `backend/src/services/a2ui/runner.py` |
-| Legacy parse + component/deliverable maps | `frontend/src/components/ChatMode/utils/surfaceAdapter.ts` |
-| Per-type branding list + settings | `frontend/src/components/Configuration/uiConfigShared.ts` |
-| Palette resolution + root→deliverable | `frontend/src/components/ChatMode/components/Chat/A2uiSurface.tsx` |
-| Text/surface dedup on completion | `frontend/src/components/ChatMode/store/executionStore.ts` |
+| Legacy parse + component/deliverable maps | `frontend/src/features/chat/utils/surfaceAdapter.ts` |
+| Per-type branding list + settings | `frontend/src/features/configuration/components/uiConfigShared.ts` |
+| Palette resolution + root→deliverable | `frontend/src/features/chat/components/Chat/A2uiSurface.tsx` |
+| Text/surface dedup on completion | `frontend/src/features/chat/store/executionStore.ts` |
 | Exported-app vendored renderer | `backend/src/engines/kasal/exporters/templates/databricks_app/frontend/src/a2ui/` |
-| Exported-app composition / rendering | `…/templates/databricks_app/agent_server/agent.py`, `…/frontend/src/App.tsx` |
+| Exported-app composition / rendering | `…/templates/databricks_app/agent_server/agent.py`, `…/frontend/src/app/App.tsx` |

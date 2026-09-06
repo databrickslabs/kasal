@@ -115,7 +115,7 @@ const shouldAnimate2 = shouldEdgeBeAnimated('crew-123', 'crew-456');
 The default edge component that uses centralized configuration:
 
 ```typescript
-// src/frontend/src/components/Common/AnimatedEdge.tsx
+// src/frontend/src/features/workflow/canvas/components/AnimatedEdge.tsx
 import { getEdgeStyle, getEdgeLabel, edgeColors } from '../../config/edgeConfig';
 
 // Automatically applies correct styling based on source/target
@@ -128,7 +128,7 @@ const label = getEdgeLabel(source, target);
 Specialized edge for crew-to-crew connections:
 
 ```typescript
-// src/frontend/src/components/Flow/CrewEdge.tsx
+// src/frontend/src/features/workflow/flows/components/CrewEdge.tsx
 import { edgeColors, EdgeCategory, getEdgeStyleConfig } from '../../config/edgeConfig';
 
 // Uses crew-specific styling
@@ -290,7 +290,7 @@ const edge = createEdge(
 ## Related Files
 
 - `src/frontend/src/utils/edgeUtils.ts` - Edge creation utilities
-- `src/frontend/src/components/Common/AnimatedEdge.tsx` - Default edge component
-- `src/frontend/src/components/Flow/CrewEdge.tsx` - Crew edge component
+- `src/frontend/src/features/workflow/canvas/components/AnimatedEdge.tsx` - Default edge component
+- `src/frontend/src/features/workflow/flows/components/CrewEdge.tsx` - Crew edge component
 - `src/frontend/src/store/workflow.ts` - Edge state management
 

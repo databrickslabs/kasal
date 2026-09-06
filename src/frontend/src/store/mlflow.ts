@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { apiClient } from '../config/api/ApiConfig';
+import { apiClient } from '../shared/api/client';
 
 /**
  * Whether MLflow is switched on, shared across every surface that gates on it.

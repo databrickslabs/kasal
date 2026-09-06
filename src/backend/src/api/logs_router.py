@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query
 
-from src.core.dependencies import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.repositories.log_repository import LLMLogRepository
 from src.schemas.log import LLMLogResponse
 from src.services.execution.logs.llm_log_service import LLMLogService

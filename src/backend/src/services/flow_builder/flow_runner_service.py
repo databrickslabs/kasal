@@ -13,10 +13,9 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, Union
 
-from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.exceptions import KasalError
+from src.core.exceptions import BadRequestError, KasalError, NotFoundError
 from src.core.logger import LoggerManager
 from src.db.database_router import get_smart_db_session
 from src.repositories.agent_repository import AgentRepository
@@ -242,8 +241,7 @@ class FlowRunnerService:
                     logger.info(f"Converted string flow_id to UUID: {flow_id}")
                 except ValueError as e:
                     logger.error(f"Invalid UUID format for flow_id: {flow_id}")
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
+                    raise BadRequestError(
                         detail=f"Invalid UUID format: {str(e)}",
                     )
 
@@ -282,8 +280,7 @@ class FlowRunnerService:
                         flow, config.get("group_context")
                     )
                 elif not nodes:
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
+                    raise NotFoundError(
                         detail="Flow not found",
                     )
 
@@ -297,8 +294,7 @@ class FlowRunnerService:
                 logger.error(
                     f"No valid nodes provided for dynamic flow. Got: {type(nodes)}"
                 )
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
+                raise BadRequestError(
                     detail="No valid nodes provided for dynamic flow. Nodes must be a non-empty array.",
                 )
 
@@ -368,8 +364,7 @@ class FlowRunnerService:
                         logger.error(
                             f"🔄 RESUME: Could not find execution for execution_id={resume_from_execution_id}"
                         )
-                        raise HTTPException(
-                            status_code=status.HTTP_404_NOT_FOUND,
+                        raise NotFoundError(
                             detail=f"Execution not found for resume: {resume_from_execution_id}",
                         )
 
@@ -449,15 +444,12 @@ class FlowRunnerService:
                     "error": error_msg,
                     "message": f"Flow execution failed: {error_msg}",
                 }
-        except KasalError as e:
-            raise HTTPException(status_code=e.status_code, detail=e.detail) from e
-        except HTTPException:
-            # Re-raise HTTPException as-is to preserve status codes (404, 400, etc.)
+        except KasalError:
+            # Preserve application errors for the API exception handler.
             raise
         except Exception as e:
             logger.error(f"Error running flow execution: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            raise KasalError(
                 detail=f"Error running flow execution: {str(e)}",
             )
 

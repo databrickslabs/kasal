@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query, Request
 
-from src.core.dependencies import GroupContextDep
+from src.dependencies.providers import GroupContextDep
 from src.core.exceptions import BadRequestError
 from src.utils.databricks_auth import extract_user_token_from_request
 

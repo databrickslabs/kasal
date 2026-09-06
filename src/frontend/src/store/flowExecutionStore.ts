@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { apiClient } from '../config/api/ApiConfig';
+import { apiClient } from '../shared/api/client';
 
 interface CrewNodeState {
   status: 'pending' | 'running' | 'completed' | 'failed';

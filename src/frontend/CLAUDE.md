@@ -25,18 +25,19 @@ Frontend-specific instructions for Claude Code when working in the frontend dire
 ### Directory Structure
 ```
 src/
-├── components/      # UI components by feature
-├── store/           # Zustand state management
-├── api/             # API service layer
-├── types/           # TypeScript definitions
-└── config/
-    └── api/         # API configuration
+├── app/             # Routes, startup and cross-feature workspace composition
+├── features/        # Domain views, feature-local state, hooks and contracts
+├── shared/          # HTTP transport, presentation helpers and portable A2UI
+├── store/           # Existing shared Zustand state
+├── api/             # Domain API clients
+├── types/           # Shared contracts, split by representation
+└── config/          # Application defaults and i18n
 ```
 
 ## Development Patterns
 
 ### API Configuration
-- **ALWAYS use `apiClient`** from `src/config/api/ApiConfig.ts` for backend communication
+- **ALWAYS use `apiClient`** from `src/shared/api/client.ts` for backend communication
 - Frontend services should use static methods and `apiClient` for HTTP requests
 - Do NOT use the legacy `ApiService`
 
@@ -47,7 +48,7 @@ src/
 
 ### State Management
 - Use Zustand stores for global state
-- Store files in `store/` directory
+- Keep feature-owned state with its feature; shared state remains in `store/`
 - Follow existing store patterns
 
 ### Component Guidelines
@@ -58,11 +59,11 @@ src/
 
 ## Documentation Management
 
-User-facing docs live in `src/docs/` (project-wide rule). The copy to
-`public/docs/` is **automated by `src/build.py`** at build time (it recursively
-copies `.md` + image assets), so you do not copy files by hand. When adding a doc
+User-facing docs live in `src/docs/` (project-wide rule). Vite stages these docs with
+public assets in the ignored `.generated/public/` directory through
+`src/scripts/build-tasks.cjs`, so you do not copy files by hand. When adding a doc
 that should appear in the in-app Documentation viewer, update the `docSections`
-array in `src/components/Documentation/Documentation.tsx`.
+array in `src/features/help/documentation/Documentation.tsx`.
 
 ## Testing Strategy (Vitest)
 
@@ -81,7 +82,7 @@ array in `src/components/Documentation/Documentation.tsx`.
 
 ### ReactFlow Integration
 - Visual workflow designer component
-- Located in `components/Workflow/`
+- Canvas views live in `features/workflow/canvas/`; workspace composition lives in `app/workspace/`
 - Handles node creation, connection, and editing
 - Integrates with Zustand store for state management
 
@@ -90,7 +91,7 @@ array in `src/components/Documentation/Documentation.tsx`.
 ### Production Build
 - Run `npm run build` (`tsc -b && vite build`) to create an optimized build
 - Output goes to the **`dist/`** directory (Vite default)
-- `src/build.py` copies `dist/` to `../../frontend_static/` for deployment
+- The shared build lifecycle publishes `dist/` to `src/frontend_static/` for deployment
 
 ## Critical Rules
 

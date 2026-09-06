@@ -919,7 +919,7 @@ class ExecutionHistoryService:
             raise
 
 
-from src.core.dependencies import SessionDep
+from src.dependencies.providers import SessionDep
 
 
 def get_execution_history_service(session: SessionDep) -> ExecutionHistoryService:

@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.a2a_router import router, well_known_router
-from src.core.dependencies import get_smart_db_session
+from src.dependencies.providers import get_smart_db_session
 from src.core.exceptions import KasalError
 from src.services.external.identity import ExternalAuthError, ExternalCaller
 

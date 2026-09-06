@@ -19,12 +19,12 @@ interface RunHistoryItem {
   error?: string;
 }
 
-// Reasoning controls (the model's native thinking budget). Defined in types/crews
+// Reasoning controls (the model's native thinking budget). Defined in types/workflow/crew
 // (a leaf module) and re-exported here so existing imports keep working without an
 // import cycle (tabManager <-> crewExecution). Sent to the backend as
 // `reasoning_config` only when reasoning is enabled.
-export type { ReasoningConfig } from '../types/workflow/crews';
-import type { ReasoningConfig } from '../types/workflow/crews';
+export type { ReasoningConfig } from '../types/workflow/crew';
+import type { ReasoningConfig } from '../types/workflow/crew';
 
 type ToolConfigs = Record<string, unknown>;
 

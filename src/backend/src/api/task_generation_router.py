@@ -10,7 +10,7 @@ import logging
 
 from fastapi import APIRouter
 
-from src.core.dependencies import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import KasalError
 from src.schemas.task_generation import (
     GuardrailSuggestionRequest,

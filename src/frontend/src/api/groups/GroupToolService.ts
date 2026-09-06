@@ -1,5 +1,5 @@
 import { AxiosError } from 'axios';
-import { apiClient } from '../../config/api/ApiConfig';
+import { apiClient } from '../../shared/api/client';
 import type { Tool } from '../tools/ToolService';
 
 export interface GroupToolMapping {

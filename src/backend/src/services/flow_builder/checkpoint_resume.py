@@ -18,7 +18,7 @@ file is well over the size ceiling, and this is a self-contained seam.
 import logging
 from typing import Any, Dict, Optional, Tuple
 
-from fastapi import HTTPException
+from src.core.exceptions import KasalError
 from src.services.flow_builder.resume_authorization import get_owned_resume_source
 
 logger = logging.getLogger(__name__)
@@ -96,7 +96,7 @@ async def load_resume_outputs(
         _log_outputs(outputs, job_id)
         return outputs, identities
 
-    except HTTPException:
+    except KasalError:
         raise
     except Exception as e:
         logger.error(f"Failed to load checkpoint outputs: {e}", exc_info=True)

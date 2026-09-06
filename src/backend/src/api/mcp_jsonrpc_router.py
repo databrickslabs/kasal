@@ -28,7 +28,7 @@ from typing import Annotated, Any, Dict, Optional
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from src.core.dependencies import SessionDep
+from src.dependencies.providers import SessionDep
 from src.services.external.identity import (
     ExternalAuthError,
     ExternalCaller,

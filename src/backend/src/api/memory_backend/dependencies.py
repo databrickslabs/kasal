@@ -10,7 +10,7 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from src.core.dependencies import WriteSessionDep
+from src.dependencies.providers import WriteSessionDep
 from src.core.logger import LoggerManager
 from src.services.memory.config.backend_service import MemoryBackendService
 

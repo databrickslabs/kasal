@@ -28,8 +28,8 @@ To prepare `src/frontend_static/` for deployment or wheel packaging, run
 frontend and publishes the complete `dist/` snapshot. `src/build.py` uses the
 same lifecycle.
 
-Code remains organized under `src/components`, `src/api`, `src/store` and
-related folders, with feature extraction underway. Execution trace processing
-lives in `src/features/executions/trace`; shared contracts live in `src/types`.
+Views live under `src/features`, while `src/app` owns routes and cross-feature
+workspace composition. `src/shared/api` owns the single HTTP transport; domain
+clients remain under `src/api`, and shared contracts under `src/types`.
 Tests stay beside their source. See the [code structure guide](../docs/CODE_STRUCTURE_GUIDE.md)
 for backend ownership and import conventions.

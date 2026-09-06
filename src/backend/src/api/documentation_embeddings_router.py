@@ -8,7 +8,7 @@ from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, Header, Query
 
-from src.core.dependencies import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import ForbiddenError, NotFoundError
 from src.core.logger import LoggerManager
 from src.core.permissions import check_role_in_context

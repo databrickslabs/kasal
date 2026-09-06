@@ -5,7 +5,7 @@ import { renderHook, act } from '@testing-library/react';
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../config/api/ApiConfig', () => ({
+vi.mock('../../shared/api/client', () => ({
   config: { apiUrl: 'http://test-api' },
 }));
 

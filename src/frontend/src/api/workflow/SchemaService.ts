@@ -1,4 +1,4 @@
-import { apiClient } from '../../config/api/ApiConfig';
+import { apiClient } from '../../shared/api/client';
 import { Schema, SchemaCreate, SchemaListResponse } from '../../types/workflow/schema';
 
 interface CacheEntry<T> {

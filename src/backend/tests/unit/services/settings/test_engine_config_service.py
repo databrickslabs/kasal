@@ -9,6 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.services.settings.engine import EngineConfigService
+from src.core.exceptions import BadRequestError
+from src.services.execution.harnesses import HarnessUnavailableError
 
 
 def make_service():
@@ -28,6 +30,34 @@ def make_config(id=1, engine_name="kasal", config_key="llm", config_value="gpt4"
     cfg.config_key = config_key
     cfg.config_value = config_value
     return cfg
+
+
+@pytest.mark.asyncio
+async def test_unknown_harness_does_not_change_settings():
+    service = make_service()
+    with pytest.raises(BadRequestError, match="Unknown harness: 'unknown'"):
+        await service.set_harness("unknown")
+    service.repository.set_harness.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure, expected",
+    [
+        (HarnessUnavailableError("CrewAI is not installed"), "CrewAI is not installed"),
+        (
+            RuntimeError("broken binding"),
+            "Harness 'crewai' cannot run here: broken binding",
+        ),
+    ],
+)
+async def test_unavailable_harness_does_not_change_settings(failure, expected):
+    service = make_service()
+    with patch("src.services.execution.harnesses.binding_for", side_effect=failure):
+        with pytest.raises(BadRequestError) as error:
+            await service.set_harness("crewai")
+    assert error.value.detail == expected
+    service.repository.set_harness.assert_not_awaited()
 
 
 # ---- find_all ----

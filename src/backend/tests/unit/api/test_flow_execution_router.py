@@ -8,7 +8,8 @@ import uuid
 from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
+from src.core.exceptions import KasalError
 from fastapi.testclient import TestClient
 
 from src.api.flow_execution_router import router
@@ -165,12 +166,12 @@ class TestFlowExecutionRouter:
 
     @patch("src.api.flow_execution_router.KasalFlowService")
     def test_execute_flow_http_exception_passthrough(self, mock_service_class, client):
-        """Test that HTTPExceptions are passed through unchanged."""
+        """Test that KasalErrors are passed through unchanged."""
         mock_service = AsyncMock()
         mock_service_class.return_value = mock_service
         flow_id = str(uuid.uuid4())
 
-        mock_service.run_flow.side_effect = HTTPException(
+        mock_service.run_flow.side_effect = KasalError(
             status_code=404, detail="Not found"
         )
 
@@ -276,11 +277,11 @@ class TestFlowExecutionRouter:
     def test_get_flow_execution_http_exception_passthrough(
         self, mock_service_class, client
     ):
-        """Test that HTTPExceptions are passed through unchanged in get_flow_execution."""
+        """Test that KasalErrors are passed through unchanged in get_flow_execution."""
         mock_service = AsyncMock()
         mock_service_class.return_value = mock_service
 
-        mock_service.get_flow_execution.side_effect = HTTPException(
+        mock_service.get_flow_execution.side_effect = KasalError(
             status_code=403, detail="Forbidden"
         )
 
@@ -398,11 +399,11 @@ class TestFlowExecutionRouter:
     def test_get_flow_executions_by_flow_http_exception_passthrough(
         self, mock_service_class, client
     ):
-        """Test that HTTPExceptions are passed through unchanged in get_flow_executions_by_flow."""
+        """Test that KasalErrors are passed through unchanged in get_flow_executions_by_flow."""
         mock_service = AsyncMock()
         mock_service_class.return_value = mock_service
 
-        mock_service.get_flow_executions_by_flow.side_effect = HTTPException(
+        mock_service.get_flow_executions_by_flow.side_effect = KasalError(
             status_code=401, detail="Unauthorized"
         )
 

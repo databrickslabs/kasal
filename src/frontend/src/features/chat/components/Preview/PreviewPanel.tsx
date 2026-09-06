@@ -1,0 +1,485 @@
+import type { PreviewContent } from '../../types/preview';
+import { stripTaskTitlePrefix } from '../../utils/preview';
+import React, { useEffect, useMemo, useState } from 'react';
+import { PanelLeft } from 'lucide-react';
+import { DELIVERABLE_LABELS } from '../../../configuration/components/uiConfigShared';
+import { toSurface } from '../../utils/surfaceAdapter';
+import type { Surface } from '../../../../shared/a2ui/index';
+import type { Theme } from '../../../configuration/components/uiConfigShared';
+import { downloadSurfacePdf } from '../../utils/surfacePdf';
+import { useA2uiThemes } from '../../hooks/useA2uiThemes';
+import A2uiSurface from '../Chat/A2uiSurface';
+import MessageContent from '../Chat/MessageContent';
+import { type RunStep } from './traceEventStep';
+import MemoryPane from './MemoryPane';
+import StepContent from './StepContent';
+import RefinePanel from './RefinePanel';
+
+/** A surface carrying a per-surface "Look" restyle (see A2uiSurface). */
+type ThemedSurface = Surface & { theme?: Theme };
+
+// A2UI surfaceKind → UIConfigurator deliverable key (drives the "Customize" panel
+// title + per-type controls). 'document' maps to the closest configurable type.
+const SURFACE_TO_DELIVERABLE: Record<string, string> = {
+  presentation: 'presentation',
+  dashboard: 'dashboard',
+  mindmap: 'mindmap',
+  quiz: 'quiz',
+  flashcards: 'flashcards',
+  map: 'map',
+  document: 'report',
+  conversation: 'default',
+};
+
+interface PreviewPanelProps {
+  content: PreviewContent;
+  onClose: () => void;
+  chatCollapsed: boolean;
+  /** Toggle the adjacent chat column. Omitted when there's no chat beside the pane
+   *  (e.g. the Jobs "Show result" dialog) — then no toggle button shows. */
+  onToggleChat?: () => void;
+  /** Refine the current artifact with a natural-language instruction (AI). */
+  onRefine?: (instruction: string) => void;
+  /** Replace the current artifact's document in place (deterministic restyle, no AI). */
+  onStyleChange?: (updatedData: string) => void;
+  /** All previewable task outputs of the run, oldest → newest. */
+  history?: PreviewContent[];
+  /** Index into `history` currently shown. */
+  index?: number;
+  /** Switch the displayed preview to another history entry. */
+  onNavigate?: (index: number) => void;
+  /** The run's step timeline (from the persistent chat trace), shown collapsed
+   *  above the result so the activity is never lost once the deliverable lands. */
+  /** Open the pane directly on THIS step's content (master→detail pre-selected)
+   *  — set when the user clicks a step ROW in the chat's activity dropdown. */
+  focusStep?: RunStep | null;
+  /** Dock the activity into the chat's "Working…" bar instead of this pane. */
+  onMoveActivityToChat?: () => void;
+  /** Embedded in a host shell that already provides fullscreen + close (e.g. the
+   *  Jobs "Show result" dialog). Hides this pane's own fullscreen/close so they're
+   *  not duplicated; the title + download menu + Customize stay. */
+  embedded?: boolean;
+}
+
+const PreviewPanel: React.FC<PreviewPanelProps> = ({ content, onClose, chatCollapsed, onToggleChat, onRefine, onStyleChange, history, index, onNavigate, focusStep, onMoveActivityToChat, embedded }) => {
+  const [refineOpen, setRefineOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  // The single top-toolbar download is a menu: PDF.
+  const [downloadAnchor, setDownloadAnchor] = useState<HTMLElement | null>(null);
+  const a2uiThemes = useA2uiThemes();
+  // The run's timeline lives in the CHAT, on the left. The pane is where a
+  // clicked step's content opens — showing the timeline here as well put the
+  // same list on both halves of the screen.
+  const [activeStep, setActiveStep] = useState<RunStep | null>(null);
+  // NEW content shown in the pane dismisses a step view left over from the
+  // previous content — e.g. clicking "Memory graph" while a step page was
+  // open used to load the memory pane BEHIND the step view. Declared before
+  // the focusStep effect so a step-row click (which changes content and
+  // focusStep in the same commit) still lands on its step.
+  useEffect(() => {
+    setActiveStep(null);
+  }, [content.type, content.data]);
+  // A step ROW clicked in the chat's activity dropdown lands the pane directly
+  // on that step's content; "Back" returns to the deliverable.
+  useEffect(() => {
+    if (focusStep) setActiveStep(focusStep);
+  }, [focusStep]);
+
+  // Heal already-stored previews that include the chat layer's bold-title prefix.
+  const displayData = useMemo(() => stripTaskTitlePrefix(content.data), [content]);
+
+  // A plain-text / markdown deliverable (chat-mode answer). It renders as markdown
+  // and has none of the A2UI machinery (no Surface, theme, Customize, or export) —
+  // every A2UI-only control below additionally gates on `uiSurface`, which is null
+  // here, so they hide automatically.
+  const isText = content.type === 'text';
+  const isMemory = content.type === 'memory';
+
+  // Coerce the stored content into the shared Surface (handles the new envelope,
+  // a bare surface, or an older legacy doc — adapted). A2uiSurface re-resolves the
+  // workspace branding (and any per-surface "Look" restyle) at render time.
+  // 'memory' data is a job id, not a document — never try to parse it.
+  const uiSurface = useMemo(
+    () => (isMemory ? null : toSurface(displayData)),
+    [displayData, isMemory],
+  ) as ThemedSurface | null;
+  // A deck is fit to the available HEIGHT (letterboxed, no scroll) so the whole
+  // slide shows. Other surfaces (documents, dashboards) are tall content — they
+  // keep the natural width + vertical scroll. Detect a deck by an actual SlideDeck
+  // component, not just surfaceKind: messages-format / legacy results can carry a
+  // SlideDeck while their surfaceKind was inferred to 'document'.
+  const isDeck =
+    uiSurface?.surfaceKind === 'presentation' ||
+    !!uiSurface?.components?.some((c) => c.component === 'SlideDeck');
+  // Fit-to-height (letterbox) only makes sense when the host gives the pane a
+  // FIXED height to fill — i.e. the chat side pane. When `embedded` (the Jobs
+  // "Show result" dialog) the host shrink-wraps its content, so a fitted deck
+  // would just leave a tall empty band below it; there we render the deck
+  // WIDTH-driven (natural 16:9 height) and let the dialog size to it.
+  const fitDeck = isDeck && !embedded;
+  // The pane's Download lives in the header, which `embedded` hides (the host
+  // dialog — Jobs "Show result" — provides its own title bar). So when embedded,
+  // let the SURFACE show its own download menu instead; suppressing both is what
+  // left the embedded viewer with no way to export a deck at all.
+  const hideSurfaceDownloads = !embedded;
+
+  // What this deliverable is (presentation, dashboard, …) drives the "Customize"
+  // panel: a friendly title + the matching per-type content controls.
+  const deliverable = uiSurface
+    ? SURFACE_TO_DELIVERABLE[uiSurface.surfaceKind] || 'default'
+    : 'default';
+  const deliverableLabel = DELIVERABLE_LABELS[deliverable];
+  const currentTheme = uiSurface?.theme;
+
+  // Apply a deterministic Look change: stamp the picked palette onto the surface
+  // and hand it back to the owner to swap in place + persist. The renderer reads
+  // surface.theme as the override, so the preview restyles INSTANTLY — no AI run.
+  const applyStyle = (theme: Theme) => {
+    if (!onStyleChange || !uiSurface) return;
+    const restyled: ThemedSurface = {
+      ...uiSurface,
+      theme: { ...uiSurface.theme, ...theme },
+    };
+    onStyleChange(JSON.stringify(restyled));
+  };
+
+  // The single top-toolbar download offers PDF (replacing the old icon-only
+  // PDF button; the surface's own menu is suppressed in the pane via
+  // `hideDownloads`). Deliverables land as one content-sized page.
+  // Name the file after the deliverable's title; fall back to its kind
+  // (dashboard, quiz, document, …) so a downloaded dashboard isn't "kasal-app".
+  const baseName = content.title || uiSurface?.surfaceKind || 'kasal-app';
+  const runDownload = async (kind: 'pdf') => {
+    setDownloadAnchor(null);
+    if (!uiSurface || downloading) return;
+    setDownloading(true);
+    try {
+      await downloadSurfacePdf(uiSurface, baseName);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  return (
+    <aside
+      className="flex flex-col h-full"
+      style={{
+        flex: chatCollapsed ? '1 1 100%' : '1 1 50%',
+        minWidth: '300px',
+        // Transparent over the chat root's fixed vignette — the pane is part of
+        // the same surface, not a second panel bolted beside it.
+        backgroundColor: 'transparent',
+        borderLeft: 'none',
+      }}
+    >
+      {/* Header — hidden entirely in full screen for a chrome-free view (exit with
+          Esc), and when embedded: the host dialog (Jobs "Show result") already
+          provides its own title bar + controls, so a second header would just
+          stack and steal vertical height (forcing a scroll). */}
+      {!embedded && (
+      <div
+        className="flex items-center justify-between px-4 py-3 flex-shrink-0"
+        style={{ borderBottom: '1px solid var(--bg-rail-hover)' }}
+      >
+        <div className="flex items-center gap-2">
+          {/* Toggle chat button — only when there's a chat column beside the pane */}
+          {onToggleChat && (
+          <button
+            onClick={onToggleChat}
+            className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:opacity-70"
+            style={{ color: 'var(--text-muted)' }}
+            title={chatCollapsed ? 'Show chat' : 'Hide chat'}
+          >
+            {/* The preview sits to the RIGHT of the chat, so expanding it to
+                full width grows LEFTWARD: "hide chat" points left (◀◀), and
+                restoring the chat points right (▶▶). */}
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              {chatCollapsed ? (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 4.5l7.5 7.5-7.5 7.5m-6-15l7.5 7.5-7.5 7.5" />
+              ) : (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M18.75 19.5l-7.5-7.5 7.5-7.5m-6 15L5.25 12l7.5-7.5" />
+              )}
+            </svg>
+          </button>
+          )}
+          <svg
+            className="w-4 h-4"
+            style={{ color: 'var(--accent)' }}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 01-1.125-1.125M3.375 19.5h7.5c.621 0 1.125-.504 1.125-1.125m-9.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-7.5A1.125 1.125 0 0112 18.375m9.75-12.75c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125m19.5 0v1.5c0 .621-.504 1.125-1.125 1.125M2.25 5.625v1.5c0 .621.504 1.125 1.125 1.125m0 0h17.25m-17.25 0h7.5c.621 0 1.125.504 1.125 1.125M3.375 8.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125m17.25-3.75h-7.5c-.621 0-1.125.504-1.125 1.125m8.625-1.125c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125M12 10.875v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 10.875c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125M13.125 12h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125M20.625 12c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5M12 14.625v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 14.625c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125m0 0v1.5c0 .621-.504 1.125-1.125 1.125"
+            />
+          </svg>
+          <span
+            className="text-sm font-medium"
+            style={{ color: 'var(--text-primary)' }}
+          >
+            {content.title || 'App'}
+          </span>
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded font-mono"
+            style={{
+              color: 'var(--text-muted)',
+              backgroundColor: 'var(--bg-secondary)',
+            }}
+          >
+            {content.type.toUpperCase()}
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
+          {history && history.length > 1 && onNavigate && (() => {
+            const current = index ?? history.length - 1;
+            return (
+              <div
+                className="flex items-center gap-0.5 mr-1 rounded-lg"
+                style={{ backgroundColor: 'var(--bg-secondary)' }}
+              >
+                <button
+                  onClick={() => onNavigate(current - 1)}
+                  disabled={current <= 0}
+                  className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
+                  style={{ color: 'var(--text-muted)' }}
+                  title="Previous output"
+                  aria-label="Previous output"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                  </svg>
+                </button>
+                <span
+                  className="text-[11px] font-mono tabular-nums px-1 select-none"
+                  style={{ color: 'var(--text-muted)' }}
+                  title="Task output (latest shown first)"
+                >
+                  {current + 1}/{history.length}
+                </span>
+                <button
+                  onClick={() => onNavigate(current + 1)}
+                  disabled={current >= history.length - 1}
+                  className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:opacity-70 disabled:opacity-30 disabled:cursor-not-allowed"
+                  style={{ color: 'var(--text-muted)' }}
+                  title="Next output"
+                  aria-label="Next output"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                  </svg>
+                </button>
+              </div>
+            );
+          })()}
+          {onRefine && uiSurface && (
+            <button
+              onClick={() => setRefineOpen((v) => !v)}
+              className="flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
+              style={{
+                color: refineOpen ? 'var(--accent)' : 'var(--text-secondary)',
+                backgroundColor: 'var(--bg-secondary)',
+              }}
+              title="Customize the look and content of this result"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+              </svg>
+              Customize
+            </button>
+          )}
+          {/* The download is a small menu (PDF) anchored under its
+              button. `downloadAnchor` doubles as the open flag; a transparent
+              backdrop catches the click-away to close. A2UI-only — a plain-text
+              answer has no surface to export, so the menu hides for text. */}
+          {uiSurface && (
+          <div className="relative">
+            <button
+              onClick={(e: React.MouseEvent<HTMLButtonElement>) => setDownloadAnchor(e.currentTarget)}
+              disabled={downloading}
+              className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:opacity-70 disabled:opacity-40 disabled:cursor-wait"
+              style={{ color: 'var(--text-muted)' }}
+              title="Download"
+              aria-label="Download"
+              aria-haspopup="menu"
+            >
+              <svg
+                className={`w-4 h-4 ${downloading ? 'animate-pulse' : ''}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+              </svg>
+            </button>
+            {Boolean(downloadAnchor) && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setDownloadAnchor(null)} />
+                <div
+                  role="menu"
+                  className="kasal-popover absolute right-0 top-full mt-1 z-50 min-w-[8rem] rounded-lg py-1"
+                  style={{ backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => runDownload('pdf')}
+                    className="block w-full text-left px-3 py-1.5 text-sm transition-colors hover:bg-[var(--bg-rail-hover)]"
+                    style={{ color: 'var(--text-primary)' }}
+                  >
+                    PDF
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+          )}
+          {!embedded && (
+          <button
+            onClick={onClose}
+            className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:opacity-70"
+            style={{ color: 'var(--text-muted)' }}
+            title="Close preview"
+          >
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </button>
+          )}
+        </div>
+      </div>
+      )}
+
+      {/* Customize panel — instant "Look" (deterministic) + AI "Content" refine */}
+      {onRefine && refineOpen && (
+        <RefinePanel
+          deliverable={deliverable}
+          deliverableLabel={deliverableLabel}
+          currentTheme={currentTheme}
+          onApplyStyle={applyStyle}
+          onRefine={onRefine}
+          onClose={() => setRefineOpen(false)}
+        />
+      )}
+
+      {/* Content — A2UI only; non-UI documents are never previewable. The deck-fit
+          layout (overflow-hidden flex column, so the deck letterboxes to height)
+          applies ONLY when the deck DELIVERABLE is actually shown. While the run
+          a step's context (StepContent, minHeight:100%) is open it
+          REPLACES the deliverable, and those need the natural scrolling box —
+          otherwise the fit container collapses/clips them to an empty pane. */}
+      <div
+        data-testid="preview-body"
+        className={`flex-1 min-h-0 ${
+          fitDeck && !activeStep
+            ? 'overflow-hidden flex flex-col'
+            : 'overflow-auto'
+        }`}
+      >
+        {/* Run activity — collapsed above the result so it's never lost. The list
+            shows plain-English steps; clicking one opens its context full-page. */}
+        {activeStep && (
+          <div style={{ borderBottom: '1px solid var(--border-color)' }}>
+            <div className="flex items-center">
+              <button
+                type="button"
+                onClick={() => setActiveStep(null)}
+                className="flex items-center gap-1.5 flex-1 px-4 py-2 text-left text-[11px] font-medium transition-colors hover:opacity-80"
+                style={{ color: 'var(--text-muted)' }}
+                aria-label="Back to the run activity"
+              >
+                <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                </svg>
+                Back · {activeStep.label}
+              </button>
+              {onMoveActivityToChat && (
+                <button
+                  type="button"
+                  onClick={onMoveActivityToChat}
+                  aria-label="Show in chat"
+                  className="w-7 h-7 mr-2 rounded-md flex items-center justify-center flex-shrink-0 transition-colors hover:opacity-80"
+                  style={{ color: 'var(--text-muted)' }}
+                  title="Show the activity in the chat instead"
+                >
+                  <PanelLeft size={14} aria-hidden="true" />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+        {/* A chosen step's context, on its own full page (replaces the deliverable
+            and fills the pane). */}
+        {activeStep && (
+          <div data-testid="run-step-context" style={{ minHeight: '100%' }}>
+            <StepContent step={activeStep} />
+          </div>
+        )}
+        {/* When the activity is open (list or detail) it REPLACES the deliverable
+            — the pane shows one or the other, never stacked. */}
+        {!activeStep && uiSurface && (
+          // Key on the displayed content so a refine (or history navigation)
+          // REMOUNTS the renderer instead of reusing the instance. The refined
+          // deck reuses the same component ids (root/slide1…), so without a key
+          // React keeps the old instance — and its internal useState (slide
+          // index) — leaving the preview on the stale version. Index + content
+          // length changes whenever the artifact does.
+          // A deck gets a flex-fill wrapper + `fit` so it letterboxes to the height;
+          // other surfaces render naturally inside the scrolling content area.
+          fitDeck ? (
+            <div className="flex-1 min-h-0 flex p-3">
+              <A2uiSurface
+                blendWithHost
+                key={`ui-${index ?? 0}-${displayData.length}`}
+                surface={uiSurface}
+                hideDownloads={hideSurfaceDownloads}
+                onDownloadPdf={() => void runDownload('pdf')}
+                fit
+              />
+            </div>
+          ) : (
+            // Non-deck surfaces (dashboard, document, quiz) scroll naturally. Center
+            // them in a padded, max-width column so they don't glue to the top-left
+            // edge and leave a vast empty band when the pane is wide (fullscreen).
+            <div className="mx-auto w-full max-w-6xl p-4 sm:p-6">
+              <A2uiSurface
+                blendWithHost
+                key={`ui-${index ?? 0}-${displayData.length}`}
+                surface={uiSurface}
+                hideDownloads={hideSurfaceDownloads}
+                onDownloadPdf={() => void runDownload('pdf')}
+              />
+            </div>
+          )
+        )}
+        {/* Plain-text / markdown answer (chat-mode deliverable). Rendered with the
+            same markdown renderer the chat uses, in a roomy, scrollable column. */}
+        {!activeStep && !uiSurface && isText && (
+          <div
+            className="mx-auto w-full max-w-3xl p-4 sm:p-6 text-[15px] leading-[1.7]"
+            style={{ color: 'var(--text-primary)' }}
+          >
+            <MessageContent content={displayData} />
+          </div>
+        )}
+        {/* A run's memory — chat-styled graph/record views (see MemoryPane). */}
+        {!activeStep && !uiSurface && isMemory && <MemoryPane runId={content.data} />}
+      </div>
+    </aside>
+  );
+};
+
+export default PreviewPanel;

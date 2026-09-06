@@ -77,7 +77,7 @@ def app(mock_powerbi_service, mock_db_session, mock_group_context):
     from fastapi import FastAPI
 
     from src.api.powerbi_router import get_powerbi_service, router
-    from src.core.dependencies import get_db, get_group_context
+    from src.dependencies.providers import get_db, get_group_context
     from tests.unit.api.conftest import register_exception_handlers
 
     app = FastAPI()

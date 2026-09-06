@@ -1,4 +1,4 @@
-import { apiClient } from '../../config/api/ApiConfig';
+import { apiClient } from '../../shared/api/client';
 
 /**
  * Remote agents this workspace can delegate to over A2A.

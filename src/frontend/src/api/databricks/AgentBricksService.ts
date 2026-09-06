@@ -5,7 +5,7 @@
  * Handles fetching AgentBricks endpoints and related operations.
  */
 
-import { apiClient } from '../../config/api/ApiConfig';
+import { apiClient } from '../../shared/api/client';
 
 /**
  * Represents an AgentBricks endpoint

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { CrewResponse } from '../types/workflow/crews';
+import { CrewResponse } from '../types/workflow/crew';
 import { CrewTask } from '../types/workflow/crewPlan';
 import { Action, Listener, StartingPoint as _FlowStartingPoint, WizardStep, FlowEdgeFormData } from '../types/workflow/flow';
 import { CrewService } from '../api/workflow/CrewService';

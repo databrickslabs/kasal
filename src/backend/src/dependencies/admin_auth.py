@@ -2,111 +2,22 @@
 Authentication and authorization dependencies for admin-only endpoints.
 """
 
-import os
 from typing import Annotated, Optional
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.dependencies import GroupContextDep, SessionDep
-from src.models.enums import UserRole, UserStatus
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.models.user import User
-from src.repositories.user_repository import UserRepository
-from src.utils.user_context import GroupContext
 
 
 async def _create_user_from_forwarded_email(
     session: AsyncSession, email: str
 ) -> Optional[User]:
-    """
-    Create a user from X-Forwarded-Email header and track the source.
+    """Compatibility entry point for fallback forwarded-identity provisioning."""
+    from src.services.groups.forwarded_identity import get_or_create_forwarded_user
 
-    This function works in both development and production modes.
-
-    Args:
-        session: Database session
-        email: User email from X-Forwarded-Email header
-
-    Returns:
-        Created User object or None
-    """
-    import logging
-    import re
-    from datetime import datetime
-
-    from sqlalchemy import select
-
-    logger = logging.getLogger(__name__)
-    is_local_dev = os.getenv("ENVIRONMENT", "development").lower() in (
-        "development",
-        "dev",
-        "local",
-    )
-
-    try:
-        # Check if user already exists
-        result = await session.execute(select(User).filter(User.email == email))
-        existing_user = result.scalars().first()
-
-        if existing_user:
-            logger.info(f"User {email} already exists from X-Forwarded-Email")
-            # Update last login
-            existing_user.last_login = datetime.utcnow()
-            await session.commit()
-            return existing_user
-
-        # Extract username from email and sanitize it
-        base_username = email.split("@")[0]
-        # Replace invalid characters with underscores (only allow letters, numbers, underscores, hyphens)
-        sanitized_username = re.sub(r"[^a-zA-Z0-9_-]", "_", base_username)
-        username = sanitized_username
-
-        # Check if username already exists and make it unique
-        result = await session.execute(select(User).filter(User.username == username))
-        existing_username = result.scalars().first()
-
-        if existing_username:
-            # Create unique username by appending part of email domain
-            domain_part = re.sub(
-                r"[^a-zA-Z0-9_-]", "_", email.split("@")[1].split(".")[0]
-            )
-            username = f"{sanitized_username}_{domain_part}"
-            logger.info(f"Username {sanitized_username} exists, using {username}")
-
-        # Determine user role based on configuration
-        default_role = UserRole.REGULAR  # Default for production
-        if is_local_dev:
-            # In development, check if this is a known admin email
-            admin_emails = os.getenv("ADMIN_EMAILS", "").split(",")
-            admin_patterns = ["admin@localhost", "admin@", "testadmin@"]
-
-            if email in admin_emails or any(
-                pattern in email for pattern in admin_patterns
-            ):
-                default_role = UserRole.ADMIN
-                logger.info(f"Assigning admin role to {email} in development")
-
-        # Create user
-        user = User(
-            username=username, email=email, role=default_role, status=UserStatus.ACTIVE
-        )
-
-        session.add(user)
-        await session.commit()
-        await session.refresh(user)
-
-        logger.info(
-            f"Successfully created user {email} from X-Forwarded-Email with username {username}"
-        )
-        return user
-
-    except Exception as e:
-        await session.rollback()
-        logger.error(f"Failed to create user from X-Forwarded-Email {email}: {e}")
-        import traceback
-
-        logger.error(traceback.format_exc())
-        return None
+    return await get_or_create_forwarded_user(session, email)
 
 
 async def get_current_user_from_email(

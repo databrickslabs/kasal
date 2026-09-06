@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Query
 
-from src.core.dependencies import GroupContextDep
+from src.dependencies.providers import GroupContextDep
 from src.core.exceptions import ForbiddenError
 from src.core.permissions import is_workspace_admin
 from src.schemas.memory_backend import (

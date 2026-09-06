@@ -2,7 +2,7 @@ import { getDefaultModel } from '../../config/defaultModel';
 import axios from 'axios';
 import { Agent } from './AgentService';
 import { Task } from './TaskService';
-import apiClient from '../../config/api/ApiConfig';
+import apiClient from '../../shared/api/client';
 
 export interface GenerationPrompt {
   prompt: string;

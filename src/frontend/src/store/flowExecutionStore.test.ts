@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { useFlowExecutionStore } from './flowExecutionStore';
 
 // Mock apiClient used by loadCrewStates
-vi.mock('../config/api/ApiConfig', () => ({
+vi.mock('../shared/api/client', () => ({
   apiClient: {
     get: vi.fn(),
   },
@@ -20,7 +20,7 @@ vi.mock('../config/api/ApiConfig', () => ({
   },
 }));
 
-import { apiClient } from '../config/api/ApiConfig';
+import { apiClient } from '../shared/api/client';
 
 describe('flowExecutionStore', () => {
   beforeEach(() => {

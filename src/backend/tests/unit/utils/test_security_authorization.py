@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from fastapi import HTTPException, Request
 
-from src.core.dependencies import get_group_context
+from src.dependencies.providers import get_group_context
 from src.utils.user_context import GroupContext
 
 

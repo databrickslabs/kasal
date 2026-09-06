@@ -16,9 +16,9 @@ import {
   HITLApproveRequest,
   HITLRejectRequest,
 } from './HITLService';
-import { apiClient } from '../../config/api/ApiConfig';
+import { apiClient } from '../../shared/api/client';
 
-vi.mock('../../config/api/ApiConfig', () => ({
+vi.mock('../../shared/api/client', () => ({
   apiClient: {
     get: vi.fn(),
     post: vi.fn(),

@@ -9,7 +9,7 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import HTTPException
+from src.core.exceptions import KasalError
 
 from src.services.flow_builder.kasal_flow_service import KasalFlowService
 
@@ -295,7 +295,7 @@ class TestRunFlow:
         ) as mock_factory:
             mock_factory.get_engine = AsyncMock(return_value=None)
 
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(KasalError) as exc_info:
                 await service.run_flow(flow_id=flow_id, config=mock_config)
 
             assert exc_info.value.status_code == 500
@@ -315,7 +315,7 @@ class TestRunFlow:
         ) as mock_factory:
             mock_factory.get_engine = AsyncMock(return_value=mock_engine)
 
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(KasalError) as exc_info:
                 await service.run_flow(flow_id=flow_id, config=mock_config)
 
             assert exc_info.value.status_code == 500
@@ -378,7 +378,7 @@ class TestGetFlowExecution:
         mock_flow_runner.get_flow_execution.side_effect = ValueError("Not found")
 
         with patch.object(service, "_get_flow_runner", return_value=mock_flow_runner):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(KasalError) as exc_info:
                 await service.get_flow_execution(execution_id)
 
             assert exc_info.value.status_code == 500
@@ -435,7 +435,7 @@ class TestGetFlowExecutionsByFlow:
         """Test that invalid string flow_id raises HTTP exception."""
         flow_id = "not-a-valid-uuid"
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await service.get_flow_executions_by_flow(flow_id)
 
         assert exc_info.value.status_code == 400
@@ -454,7 +454,7 @@ class TestGetFlowExecutionsByFlow:
         )
 
         with patch.object(service, "_get_flow_runner", return_value=mock_flow_runner):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(KasalError) as exc_info:
                 await service.get_flow_executions_by_flow(flow_id)
 
             assert exc_info.value.status_code == 500

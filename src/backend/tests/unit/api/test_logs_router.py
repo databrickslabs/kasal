@@ -61,7 +61,7 @@ def app(mock_log_service, mock_group_context, mock_current_user):
     from fastapi import FastAPI
 
     from src.api.logs_router import get_log_service, router
-    from src.core.dependencies import get_group_context
+    from src.dependencies.providers import get_group_context
 
     app = FastAPI()
     app.include_router(router)

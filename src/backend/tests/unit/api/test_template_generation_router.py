@@ -16,7 +16,7 @@ from src.api.template_generation_router import (
     get_template_generation_service,
     router,
 )
-from src.core.dependencies import get_group_context
+from src.dependencies.providers import get_group_context
 from src.db.database_router import get_smart_db_session
 from src.schemas.template_generation import (
     TemplateGenerationResponse,

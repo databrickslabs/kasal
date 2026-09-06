@@ -1,4 +1,4 @@
-import { apiClient } from '../../config/api/ApiConfig';
+import { apiClient } from '../../shared/api/client';
 
 /**
  * One completed unit of work inside a checkpoint.

@@ -10,10 +10,10 @@
 
 import { describe, it, expect, vi, beforeEach, Mock } from 'vitest';
 import { calculateDuration, calculateDurationFromTraces, Run } from './ExecutionHistoryService';
-import apiClient from '../../config/api/ApiConfig';
+import apiClient from '../../shared/api/client';
 
 // Mock the API client
-vi.mock('../../config/api/ApiConfig', () => ({
+vi.mock('../../shared/api/client', () => ({
   default: {
     get: vi.fn(),
   },

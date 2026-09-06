@@ -1,4 +1,4 @@
-import apiClient from '../../config/api/ApiConfig';
+import apiClient from '../../shared/api/client';
 
 /*
  * Prompt optimization (GEPA via managed MLflow). A run mines training

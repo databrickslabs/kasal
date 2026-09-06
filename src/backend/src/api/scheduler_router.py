@@ -4,7 +4,7 @@ from typing import Annotated, Dict, List
 from fastapi import APIRouter, BackgroundTasks, Depends, Path, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.dependencies import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.schedule import (
     ScheduleCreate,
     ScheduleCreateFromExecution,

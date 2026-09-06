@@ -11,7 +11,7 @@ from typing import Any, Dict
 from fastapi import APIRouter
 
 from src.schemas.agent import AgentPrompt
-from src.core.dependencies import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.services.generation.agents import AgentGenerationService
 
 # Configure logging

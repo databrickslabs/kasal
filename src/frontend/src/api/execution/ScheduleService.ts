@@ -1,5 +1,5 @@
-import { apiClient } from '../../config/api/ApiConfig';
-import { AgentYaml, TaskYaml } from '../../types/workflow/crew';
+import { apiClient } from '../../shared/api/client';
+import { AgentYaml, TaskYaml } from '../../types/workflow/crewPayload';
 
 // Flow node/edge types for scheduling
 export interface FlowNode {

@@ -1,5 +1,5 @@
 import { Models, ModelConfig } from '../../types/config/models';
-import { apiClient } from '../../config/api/ApiConfig';
+import { apiClient } from '../../shared/api/client';
 import axios, { AxiosError, AxiosResponse } from 'axios';
 import { models as defaultModels } from '../../config/models/models';
 import { getDefaultModel, setServerDefaultModel } from '../../config/defaultModel';

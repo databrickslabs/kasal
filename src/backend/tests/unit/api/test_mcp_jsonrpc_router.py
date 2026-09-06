@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.mcp_jsonrpc_router import SUPPORTED_PROTOCOL_VERSIONS, router
-from src.core.dependencies import get_smart_db_session
+from src.dependencies.providers import get_smart_db_session
 from src.services.external.identity import ExternalAuthError, ExternalCaller
 
 

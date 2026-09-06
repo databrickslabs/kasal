@@ -1,6 +1,6 @@
 import { AxiosError } from 'axios';
 import { ConfigValue } from '../../types/workflow/tool';
-import { apiClient } from '../../config/api/ApiConfig';
+import { apiClient } from '../../shared/api/client';
 
 export interface Tool {
   id: number;

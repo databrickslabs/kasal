@@ -31,10 +31,9 @@ export default tseslint.config(
     files: [
       'src/api/**/*.ts',
       'src/types/**/*.ts',
-      'src/components/ChatMode/types/**/*.ts',
-      'src/components/ChatMode/store/**/*.ts',
-      'src/components/ChatMode/utils/preview.ts',
       'src/features/chat/types/**/*.ts',
+      'src/features/chat/store/**/*.ts',
+      'src/features/chat/utils/preview.ts',
       'src/features/chat/api/**/*.ts',
       'src/features/chat/persistence/**/*.ts',
     ],
@@ -52,6 +51,7 @@ export default tseslint.config(
       'src/features/executions/trace/lib/**/*.ts',
       'src/features/workflow/canvas/lib/**/*.ts',
       'src/shared/lib/collections.ts',
+      'src/shared/api/**/*.ts',
       'src/features/chat/api/**/*.ts',
       'src/features/chat/persistence/**/*.ts',
     ],
@@ -59,14 +59,14 @@ export default tseslint.config(
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{
-          group: ['react', 'react-dom', 'react-dom/*', '@mui/*', '**/components/**', '**/hooks/**', '**/store/**'],
+          group: ['react', 'react-dom', 'react-dom/*', 'react-hot-toast', '@mui/*', '**/components/**', '**/hooks/**', '**/store/**'],
           message: 'Feature processing and shared helpers must stay independent of UI, React hooks and stores.',
         }],
       }],
     },
   },
   {
-    files: ['src/components/ChatMode/utils/skillSelection.ts'],
+    files: ['src/features/chat/utils/skillSelection.ts'],
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../../config/api/ApiConfig', () => ({
+vi.mock('../../shared/api/client', () => ({
   apiClient: {
     get: vi.fn(),
     post: vi.fn(),
@@ -10,7 +10,7 @@ vi.mock('../../config/api/ApiConfig', () => ({
   },
 }));
 
-import { apiClient } from '../../config/api/ApiConfig';
+import { apiClient } from '../../shared/api/client';
 import { SkillService } from './SkillService';
 
 const client = apiClient as unknown as {

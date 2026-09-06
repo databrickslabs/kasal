@@ -9,7 +9,7 @@ from typing import Annotated, Any, Dict, List
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse
 
-from src.core.dependencies import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import BadRequestError
 from src.services.knowledge.databricks_service import DatabricksKnowledgeService
 

@@ -1,4 +1,4 @@
-import { apiClient as API } from '../../config/api/ApiConfig';
+import { apiClient as API } from '../../shared/api/client';
 
 /**
  * Workflow recipes — completed crews kept so the next equivalent request can

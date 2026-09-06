@@ -3,7 +3,7 @@ from typing import Annotated, Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
-from src.core.dependencies import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.permissions import check_role_in_context
 from src.models.task import Task
 from src.schemas.task import Task as TaskSchema

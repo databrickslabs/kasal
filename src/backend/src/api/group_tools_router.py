@@ -12,7 +12,7 @@ from typing import Annotated, Any, Dict
 
 from fastapi import APIRouter, Depends, status
 
-from src.core.dependencies import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import BadRequestError, NotFoundError
 from src.core.permissions import require_admin
 from src.schemas.group_tool import GroupToolListResponse, GroupToolResponse

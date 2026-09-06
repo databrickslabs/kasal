@@ -6,7 +6,8 @@ from types import SimpleNamespace as NS
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi import BackgroundTasks, HTTPException
+from fastapi import BackgroundTasks
+from src.core.exceptions import KasalError
 
 from src.core.exceptions import BadRequestError, ForbiddenError
 from src.schemas.execution import CrewConfig
@@ -99,7 +100,7 @@ async def test_foreign_or_unowned_saved_flow_rejected_even_with_inline_nodes(
     runner = FlowRunnerService.__new__(FlowRunnerService)
     runner.flow_repo = NS(get=AsyncMock(return_value=NS(group_id=owner)))
     runner.flow_execution_service = NS(create_execution=AsyncMock())
-    with pytest.raises(HTTPException) as error:
+    with pytest.raises(KasalError) as error:
         await runner.run_flow(
             uuid.uuid4(),
             "new-job",

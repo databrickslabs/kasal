@@ -13,7 +13,7 @@ from fastapi import (
     Query,
 )
 
-from src.core.dependencies import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.logger import LoggerManager
 from src.schemas.execution_logs import ExecutionLogResponse, ExecutionLogsResponse
 from src.services.execution.logs.writer import ExecutionLogsService

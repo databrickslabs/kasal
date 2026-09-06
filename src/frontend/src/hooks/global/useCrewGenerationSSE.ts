@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { config } from '../../config/api/ApiConfig';
+import { config } from '../../shared/api/client';
 
 /* ------------------------------------------------------------------ */
 /*  Public types                                                       */

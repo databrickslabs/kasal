@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock the shared Kasal API config so we control apiClient.defaults.baseURL
 // and the fallback config.apiUrl without touching real axios/network.
-vi.mock('../../../config/api/ApiConfig', () => {
+vi.mock('../../../shared/api/client', () => {
   const apiClient = {
     defaults: {
       baseURL: 'https://example.com/api/v1',
@@ -19,7 +19,7 @@ vi.mock('../../../config/api/ApiConfig', () => {
 });
 
 import { updateClient, getClient, getBaseUrl } from './client';
-import apiClient, { config as kasalApiConfig } from '../../../config/api/ApiConfig';
+import apiClient, { config as kasalApiConfig } from '../../../shared/api/client';
 
 describe('ChatMode api/client', () => {
   beforeEach(() => {

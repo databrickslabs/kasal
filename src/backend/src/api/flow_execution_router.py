@@ -6,7 +6,7 @@ API endpoints for flow executions.
 from fastapi import APIRouter, Depends, status
 
 from src.schemas.flow_execution import FlowExecutionRequest
-from src.core.dependencies import GroupContextDep, get_db
+from src.dependencies.providers import GroupContextDep, get_db
 from src.core.exceptions import BadRequestError, NotFoundError
 from src.services.flow_builder.kasal_flow_service import KasalFlowService
 

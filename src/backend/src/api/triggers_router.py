@@ -12,7 +12,7 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.exc import IntegrityError
 
-from src.core.dependencies import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import ConflictError, ForbiddenError
 from src.core.permissions import check_role_in_context
 from src.schemas.triggers import (

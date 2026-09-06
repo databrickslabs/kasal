@@ -7,7 +7,6 @@ from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.schemas.flow_execution import FlowExecutionStatus
@@ -53,7 +52,6 @@ async def _smart_ctx():
 
 
 class TestRunFlowExecutionAdditional:
-
     @pytest.mark.asyncio
     async def test_run_flow_no_nodes_loads_from_db(self):
         """Tests DB loading path when no nodes in config (line 831-881)."""
@@ -87,7 +85,6 @@ class TestRunFlowExecutionAdditional:
             patch("src.services.settings.models.ModelConfigService") as MockModelSvc,
             patch.object(svc, "_emit_error_span", new=AsyncMock()),
         ):
-
             flow_svc = MagicMock()
             flow_svc.update_execution_status = AsyncMock()
             MockFlowSvc.return_value = flow_svc
@@ -163,7 +160,6 @@ class TestRunFlowExecutionAdditional:
             patch("src.services.settings.models.ModelConfigService") as MockModelSvc,
             patch.object(svc, "_emit_error_span", new=AsyncMock()),
         ):
-
             flow_svc = MagicMock()
             flow_svc.update_execution_status = AsyncMock()
             MockFlowSvc.return_value = flow_svc
@@ -221,7 +217,6 @@ class TestRunFlowExecutionAdditional:
             patch("src.services.settings.models.ModelConfigService") as MockModelSvc,
             patch.object(svc, "_emit_error_span", new=AsyncMock()),
         ):
-
             # Make update_execution_status raise to trigger outer handler
             flow_svc = MagicMock()
             flow_svc.update_execution_status = AsyncMock(
@@ -281,7 +276,6 @@ class TestRunFlowExecutionAdditional:
             patch("src.services.settings.models.ModelConfigService") as MockModelSvc,
             patch.object(svc, "_emit_error_span", new=AsyncMock()),
         ):
-
             flow_svc = MagicMock()
             flow_svc.update_execution_status = AsyncMock()
             MockFlowSvc.return_value = flow_svc
@@ -344,7 +338,6 @@ class TestRunFlowExecutionAdditional:
             patch("src.services.execution.history.ExecutionHistoryService") as MockHist,
             patch.object(svc, "_emit_error_span", new=AsyncMock()),
         ):
-
             flow_svc = MagicMock()
             flow_svc.update_execution_status = AsyncMock()
             MockFlowSvc.return_value = flow_svc
@@ -388,7 +381,6 @@ class TestRunFlowExecutionAdditional:
 
 
 class TestRunDynamicFlowOuter:
-
     @pytest.mark.asyncio
     async def test_dynamic_flow_outer_exception(self):
         """Outer exception in _run_dynamic_flow (line 646-660)."""
@@ -418,7 +410,6 @@ class TestRunDynamicFlowOuter:
             ),
             patch.object(svc, "_emit_error_span", new=AsyncMock()),
         ):
-
             flow_svc = MagicMock()
             # Outer exception: update_execution_status raises on PREPARING
             flow_svc.update_execution_status = AsyncMock(
@@ -467,7 +458,6 @@ class TestRunDynamicFlowOuter:
             ) as mock_smart,
             patch.object(svc, "_emit_error_span", new=AsyncMock()),
         ):
-
             # Primary session fails on PREPARING
             flow_svc = MagicMock()
             flow_svc.update_execution_status = AsyncMock(
@@ -503,7 +493,6 @@ class TestRunDynamicFlowOuter:
 
 
 class TestRunFlowResumeScenario:
-
     @pytest.mark.asyncio
     async def test_run_flow_resume_existing_execution_found(self):
         """Resume scenario where existing execution is found (lines 311-322)."""
@@ -545,7 +534,6 @@ class TestRunFlowResumeScenario:
                 svc, "_run_dynamic_flow", new=AsyncMock(return_value=flow_result)
             ),
         ):
-
             repo_inst = MagicMock()
             # Integer PK passed: job_id lookup misses, int-PK fallback finds it.
             repo_inst.get_run_by_job_id = AsyncMock(return_value=None)
@@ -577,7 +565,6 @@ from src.services.flow_builder.modules.flow_methods import (
 
 
 class TestFlowMethodsSupplemental:
-
     def test_extract_final_answer_list_dict_with_final_answer(self):
         """Test list of dicts where each dict has content with Final Answer."""
         items = [
@@ -694,7 +681,6 @@ from src.services.flow_builder.modules.task_adapter import TaskConfig
 
 
 class TestTaskConfigSupplemental:
-
     @pytest.mark.asyncio
     async def test_resolve_agent_from_flow_edges(self):
         """Test agent inference from flow edges (lines 267-311)."""
@@ -702,7 +688,10 @@ class TestTaskConfigSupplemental:
         task_id = str(uuid.uuid4())
 
         task_data = SimpleNamespace(
-            name="Task", description="desc", agent_id=None, id=task_id  # No agent_id
+            name="Task",
+            description="desc",
+            agent_id=None,
+            id=task_id,  # No agent_id
         )
 
         # Flow data with edges connecting agent to task

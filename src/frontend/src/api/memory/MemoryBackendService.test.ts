@@ -1,10 +1,10 @@
 import { vi, Mock, beforeEach, afterEach, describe, it, expect } from 'vitest';
 import { MemoryBackendService, TestConnectionResult, AvailableIndexesResponse } from './MemoryBackendService';
-import { apiClient } from '../../config/api/ApiConfig';
+import { apiClient } from '../../shared/api/client';
 import { MemoryBackendConfig, DatabricksMemoryConfig, MemoryBackendType } from '../../types/config/memoryBackend';
 import { AxiosError } from 'axios';
 
-vi.mock('../../config/api/ApiConfig', () => ({
+vi.mock('../../shared/api/client', () => ({
   apiClient: {
     get: vi.fn(),
     post: vi.fn(),

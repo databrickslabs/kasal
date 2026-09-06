@@ -1,8 +1,7 @@
 import logging
 from typing import Dict, List, Optional
 
-from fastapi import HTTPException
-
+from src.core.exceptions import ConflictError, KasalError, NotFoundError
 from src.repositories.powerbi_context_config_repository import (
     PowerBIBusinessMappingRepository,
     PowerBIFieldSynonymRepository,
@@ -54,7 +53,7 @@ class PowerBIContextConfigService:
             Created business mapping
 
         Raises:
-            HTTPException: If mapping already exists or creation fails
+            KasalError: If mapping already exists or creation fails
         """
         try:
             # Check if mapping already exists
@@ -64,8 +63,7 @@ class PowerBIContextConfigService:
                 natural_term=mapping_data.natural_term,
             )
             if existing:
-                raise HTTPException(
-                    status_code=409,
+                raise ConflictError(
                     detail=f"Business mapping for term '{mapping_data.natural_term}' already exists",
                 )
 
@@ -86,13 +84,11 @@ class PowerBIContextConfigService:
 
             return PowerBIBusinessMappingResponse.model_validate(mapping)
 
-        except HTTPException:
+        except KasalError:
             raise
         except Exception as e:
             logger.error(f"Error creating business mapping: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=500, detail=f"Failed to create business mapping: {str(e)}"
-            )
+            raise KasalError(detail=f"Failed to create business mapping: {str(e)}")
 
     async def update_business_mapping(
         self, mapping_id: int, mapping_data: PowerBIBusinessMappingUpdate
@@ -108,35 +104,29 @@ class PowerBIContextConfigService:
             Updated business mapping
 
         Raises:
-            HTTPException: If mapping not found or update fails
+            KasalError: If mapping not found or update fails
         """
         try:
             # Verify mapping exists and belongs to group
             existing = await self.business_mapping_repo.get(mapping_id)
             if not existing or existing.group_id != self.group_id:
-                raise HTTPException(
-                    status_code=404, detail="Business mapping not found"
-                )
+                raise NotFoundError(detail="Business mapping not found")
 
             # Update mapping
             update_dict = mapping_data.model_dump(exclude_unset=True)
             updated = await self.business_mapping_repo.update(mapping_id, update_dict)
 
             if not updated:
-                raise HTTPException(
-                    status_code=404, detail="Business mapping not found"
-                )
+                raise NotFoundError(detail="Business mapping not found")
 
             logger.info(f"Updated business mapping ID {mapping_id}")
             return PowerBIBusinessMappingResponse.model_validate(updated)
 
-        except HTTPException:
+        except KasalError:
             raise
         except Exception as e:
             logger.error(f"Error updating business mapping: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=500, detail=f"Failed to update business mapping: {str(e)}"
-            )
+            raise KasalError(detail=f"Failed to update business mapping: {str(e)}")
 
     async def delete_business_mapping(self, mapping_id: int) -> bool:
         """
@@ -149,33 +139,27 @@ class PowerBIContextConfigService:
             True if deleted successfully
 
         Raises:
-            HTTPException: If mapping not found or deletion fails
+            KasalError: If mapping not found or deletion fails
         """
         try:
             # Verify mapping exists and belongs to group
             existing = await self.business_mapping_repo.get(mapping_id)
             if not existing or existing.group_id != self.group_id:
-                raise HTTPException(
-                    status_code=404, detail="Business mapping not found"
-                )
+                raise NotFoundError(detail="Business mapping not found")
 
             # Delete mapping
             deleted = await self.business_mapping_repo.delete(mapping_id)
             if not deleted:
-                raise HTTPException(
-                    status_code=404, detail="Business mapping not found"
-                )
+                raise NotFoundError(detail="Business mapping not found")
 
             logger.info(f"Deleted business mapping ID {mapping_id}")
             return True
 
-        except HTTPException:
+        except KasalError:
             raise
         except Exception as e:
             logger.error(f"Error deleting business mapping: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=500, detail=f"Failed to delete business mapping: {str(e)}"
-            )
+            raise KasalError(detail=f"Failed to delete business mapping: {str(e)}")
 
     async def get_business_mappings(
         self, semantic_model_id: str
@@ -197,8 +181,7 @@ class PowerBIContextConfigService:
 
         except Exception as e:
             logger.error(f"Error retrieving business mappings: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=500,
+            raise KasalError(
                 detail=f"Failed to retrieve business mappings: {str(e)}",
             )
 
@@ -218,7 +201,7 @@ class PowerBIContextConfigService:
             Created field synonym
 
         Raises:
-            HTTPException: If synonym already exists or creation fails
+            KasalError: If synonym already exists or creation fails
         """
         try:
             # Check if synonym already exists
@@ -228,8 +211,7 @@ class PowerBIContextConfigService:
                 field_name=synonym_data.field_name,
             )
             if existing:
-                raise HTTPException(
-                    status_code=409,
+                raise ConflictError(
                     detail=f"Field synonym for field '{synonym_data.field_name}' already exists",
                 )
 
@@ -250,13 +232,11 @@ class PowerBIContextConfigService:
 
             return PowerBIFieldSynonymResponse.model_validate(synonym)
 
-        except HTTPException:
+        except KasalError:
             raise
         except Exception as e:
             logger.error(f"Error creating field synonym: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=500, detail=f"Failed to create field synonym: {str(e)}"
-            )
+            raise KasalError(detail=f"Failed to create field synonym: {str(e)}")
 
     async def update_field_synonym(
         self, synonym_id: int, synonym_data: PowerBIFieldSynonymUpdate
@@ -272,31 +252,29 @@ class PowerBIContextConfigService:
             Updated field synonym
 
         Raises:
-            HTTPException: If synonym not found or update fails
+            KasalError: If synonym not found or update fails
         """
         try:
             # Verify synonym exists and belongs to group
             existing = await self.field_synonym_repo.get(synonym_id)
             if not existing or existing.group_id != self.group_id:
-                raise HTTPException(status_code=404, detail="Field synonym not found")
+                raise NotFoundError(detail="Field synonym not found")
 
             # Update synonym
             update_dict = synonym_data.model_dump(exclude_unset=True)
             updated = await self.field_synonym_repo.update(synonym_id, update_dict)
 
             if not updated:
-                raise HTTPException(status_code=404, detail="Field synonym not found")
+                raise NotFoundError(detail="Field synonym not found")
 
             logger.info(f"Updated field synonym ID {synonym_id}")
             return PowerBIFieldSynonymResponse.model_validate(updated)
 
-        except HTTPException:
+        except KasalError:
             raise
         except Exception as e:
             logger.error(f"Error updating field synonym: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=500, detail=f"Failed to update field synonym: {str(e)}"
-            )
+            raise KasalError(detail=f"Failed to update field synonym: {str(e)}")
 
     async def delete_field_synonym(self, synonym_id: int) -> bool:
         """
@@ -309,29 +287,27 @@ class PowerBIContextConfigService:
             True if deleted successfully
 
         Raises:
-            HTTPException: If synonym not found or deletion fails
+            KasalError: If synonym not found or deletion fails
         """
         try:
             # Verify synonym exists and belongs to group
             existing = await self.field_synonym_repo.get(synonym_id)
             if not existing or existing.group_id != self.group_id:
-                raise HTTPException(status_code=404, detail="Field synonym not found")
+                raise NotFoundError(detail="Field synonym not found")
 
             # Delete synonym
             deleted = await self.field_synonym_repo.delete(synonym_id)
             if not deleted:
-                raise HTTPException(status_code=404, detail="Field synonym not found")
+                raise NotFoundError(detail="Field synonym not found")
 
             logger.info(f"Deleted field synonym ID {synonym_id}")
             return True
 
-        except HTTPException:
+        except KasalError:
             raise
         except Exception as e:
             logger.error(f"Error deleting field synonym: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=500, detail=f"Failed to delete field synonym: {str(e)}"
-            )
+            raise KasalError(detail=f"Failed to delete field synonym: {str(e)}")
 
     async def get_field_synonyms(
         self, semantic_model_id: str
@@ -353,9 +329,7 @@ class PowerBIContextConfigService:
 
         except Exception as e:
             logger.error(f"Error retrieving field synonyms: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=500, detail=f"Failed to retrieve field synonyms: {str(e)}"
-            )
+            raise KasalError(detail=f"Failed to retrieve field synonyms: {str(e)}")
 
     # ===== Bulk Operations =====
 
@@ -381,8 +355,7 @@ class PowerBIContextConfigService:
 
         except Exception as e:
             logger.error(f"Error retrieving context configuration: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=500,
+            raise KasalError(
                 detail=f"Failed to retrieve context configuration: {str(e)}",
             )
 
@@ -415,7 +388,6 @@ class PowerBIContextConfigService:
             logger.error(
                 f"Error retrieving context configuration dict: {e}", exc_info=True
             )
-            raise HTTPException(
-                status_code=500,
+            raise KasalError(
                 detail=f"Failed to retrieve context configuration: {str(e)}",
             )

@@ -1978,101 +1978,16 @@ class ProcessFlowExecutor:
         )
 
         try:
-            import os
-            from datetime import datetime
+            from pathlib import Path
+            from src.services.execution.logs.file_ingestion import ingest_execution_log
 
-            # Get the flow.log path
-            log_dir = os.environ.get("LOG_DIR")
-            if not log_dir:
-                import pathlib
-
-                backend_root = pathlib.Path(__file__).parent.parent.parent
-                log_dir = backend_root / "logs"
-
-            flow_log_path = os.path.join(log_dir, "flow.log")
-
-            if not os.path.exists(flow_log_path):
-                logger.warning(f"flow.log file not found at {flow_log_path}")
-                return
-
-            # Extract logs for our execution ID
-            logs_to_write = []
-            exec_id_short = execution_id[:8]  # Use short ID for matching
-
-            # First, add a header log entry to mark the start
-            logs_to_write.append(
-                {
-                    "execution_id": execution_id,
-                    "content": f"[EXECUTION_START] ========== Execution {execution_id} Started ==========",
-                    "timestamp": datetime.utcnow(),  # Use timezone-naive UTC datetime for database consistency
-                    "group_id": (
-                        getattr(group_context, "primary_group_id", None)
-                        if group_context
-                        else None
-                    ),
-                    "group_email": (
-                        getattr(group_context, "group_email", None)
-                        if group_context
-                        else None
-                    ),
-                }
-            )
-
-            # Read flow.log and extract relevant logs
-            with open(flow_log_path, "r") as f:
-                for line in f:
-                    if exec_id_short in line:
-                        # This log belongs to our execution
-                        logs_to_write.append(
-                            {
-                                "execution_id": execution_id,
-                                "content": line.strip(),
-                                "timestamp": datetime.utcnow(),  # Use timezone-naive UTC datetime for database consistency
-                                "group_id": (
-                                    getattr(group_context, "primary_group_id", None)
-                                    if group_context
-                                    else None
-                                ),
-                                "group_email": (
-                                    getattr(group_context, "group_email", None)
-                                    if group_context
-                                    else None
-                                ),
-                            }
-                        )
-
-            if len(logs_to_write) <= 1:  # Only has header
-                logger.info(f"No logs found for execution {exec_id_short} in flow.log")
-                # Still write the header log
-            else:
-                logger.info(
-                    f"Found {len(logs_to_write) - 1} logs for execution {exec_id_short} in flow.log"
-                )
-
-            # Route through get_smart_db_session so logs land in
-            # Lakebase when enabled (same path as API endpoints).
-            from src.db.database_router import get_smart_db_session
-            from src.services.execution.logs.writer import ExecutionLogsService
-
-            logger.info(
-                f"[ProcessFlowExecutor] Writing {len(logs_to_write)} logs via smart DB session"
-            )
-            async for session in get_smart_db_session():
-                # Logs are ExecutionService's domain — via its service, not its
-                # repository.
-                logs_service = ExecutionLogsService(session)
-                for log_data in logs_to_write:
-                    await logs_service.write_log(
-                        execution_id=log_data["execution_id"],
-                        content=log_data["content"],
-                        timestamp=log_data["timestamp"],
-                        group_id=log_data.get("group_id"),
-                        group_email=log_data.get("group_email"),
-                    )
-                await session.commit()
-
-            logger.info(
-                f"[ProcessFlowExecutor] Successfully wrote {len(logs_to_write)} logs to execution_logs table"
+            await ingest_execution_log(
+                execution_id,
+                filename="flow.log",
+                default_log_dir=Path(__file__).parent.parent.parent / "logs",
+                group_context=group_context,
+                logger=logger,
+                executor_name="ProcessFlowExecutor",
             )
 
         except Exception as e:

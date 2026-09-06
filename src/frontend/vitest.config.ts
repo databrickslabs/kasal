@@ -22,10 +22,9 @@ export default defineConfig({
         '**/*.test.{ts,tsx}',
         '**/index.ts',
         // type-only modules compile to no runtime code
-        'src/components/ChatMode/types/**',
         'src/features/chat/types/**',
         // pure CSS/asset module
-        'src/components/ChatMode/chat.css',
+        'src/features/chat/chat.css',
       ],
       // Enforced coverage floors for the app-modes / Chat workspace work.
       // The whole embedded Chat tree and the new mode-switcher state must stay
@@ -36,25 +35,25 @@ export default defineConfig({
       // than 100. Thresholds are checked when coverage runs (e.g. `vitest run
       // --coverage`); a regression below these floors fails the run.
       thresholds: {
-        'src/components/ChatMode/{api,utils,hooks,store,components}/**/*.{ts,tsx}': {
+        'src/features/chat/{api,utils,hooks,store,components}/**/*.{ts,tsx}': {
           statements: 100,
           branches: 100,
           functions: 100,
           lines: 100,
         },
-        'src/features/chat/{api,persistence}/**/*.{ts,tsx}': {
+        'src/features/chat/{api/client.ts,persistence/**/*.{ts,tsx}}': {
           statements: 100,
           branches: 100,
           functions: 100,
           lines: 100,
         },
-        'src/components/ChatMode/ChatModeHeaderSlot.tsx': {
+        'src/features/chat/ChatModeHeaderSlot.tsx': {
           statements: 100,
           branches: 100,
           functions: 100,
           lines: 100,
         },
-        'src/components/ChatMode/ChatWorkspace.tsx': {
+        'src/features/chat/ChatWorkspace.tsx': {
           statements: 100,
           branches: 100,
           functions: 100,
@@ -66,7 +65,7 @@ export default defineConfig({
           functions: 100,
           lines: 100,
         },
-        'src/components/WorkflowDesigner/ModeSwitcher.tsx': {
+        'src/app/workspace/ModeSwitcher.tsx': {
           statements: 100,
           branches: 100,
           functions: 100,

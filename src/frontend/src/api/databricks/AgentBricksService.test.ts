@@ -3,7 +3,7 @@ import { AgentBricksService, AgentBricksEndpoint } from './AgentBricksService';
 
 // The module imports `apiClient` at load time; mock it so importing the module
 // (and exercising the pure static helpers) needs no real network client.
-vi.mock('../../config/api/ApiConfig', () => ({
+vi.mock('../../shared/api/client', () => ({
   apiClient: {
     get: vi.fn(),
     post: vi.fn(),

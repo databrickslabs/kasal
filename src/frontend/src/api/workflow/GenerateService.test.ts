@@ -10,10 +10,10 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach, Mock } from 'vitest';
 import { GenerateService } from './GenerateService';
-import apiClient from '../../config/api/ApiConfig';
+import apiClient from '../../shared/api/client';
 
 // Mock the shared API client (default export, matching GenerateService's import)
-vi.mock('../../config/api/ApiConfig', () => ({
+vi.mock('../../shared/api/client', () => ({
   default: {
     post: vi.fn(),
   },

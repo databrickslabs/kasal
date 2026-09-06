@@ -251,7 +251,7 @@ class TestQueryParameterValidation:
             get_execution_logs_service,
             logs_router,
         )
-        from src.core.dependencies import get_group_context
+        from src.dependencies.providers import get_group_context
 
         app = FastAPI()
         app.include_router(logs_router)

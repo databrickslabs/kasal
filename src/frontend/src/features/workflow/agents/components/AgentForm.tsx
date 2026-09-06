@@ -1,0 +1,1758 @@
+import { getDefaultModel } from '../../../../config/defaultModel';
+import React, { useState, useEffect } from 'react';
+import {
+  TextField,
+  Button,
+  Box,
+  FormControl,
+  InputLabel,
+  Select,
+  Card,
+  Typography,
+  MenuItem,
+  Switch,
+  FormControlLabel,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Grid,
+  Chip,
+  SelectChangeEvent,
+  Divider,
+  CircularProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  IconButton,
+  InputAdornment,
+  Alert,
+  Tooltip,
+} from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
+import OpenInFullIcon from '@mui/icons-material/OpenInFull';
+import CloseIcon from '@mui/icons-material/Close';
+import DeleteIcon from '@mui/icons-material/Delete';
+import { AgentService } from '../../../../api/workflow/AgentService';
+import SkillSelector from '../../../tools/components/configuration/SkillSelector';
+import { Agent, AgentFormProps, KnowledgeSource } from '../../../../types/workflow/agent';
+import { ModelService } from '../../../../api/config/ModelService';
+import { Models } from '../../../../types/config/models';
+import ModelOverrideFields from './ModelOverrideFields';
+import { PerplexityConfig, SerperConfig } from '../../../../types/workflow/config';
+
+import { GenerateService } from '../../../../api/workflow/GenerateService';
+import { DefaultMemoryBackendService } from '../../../../api/memory/DefaultMemoryBackendService';
+import { DatabricksService } from '../../../../api/databricks/DatabricksService';
+import { useAgentStore } from '../../../../store/agent';
+import { GenieSpaceSelector } from '../../../tools/components/configuration/GenieSpaceSelector';
+import { PerplexityConfigSelector } from '../../../tools/components/configuration/PerplexityConfigSelector';
+import { SerperConfigSelector } from '../../../tools/components/configuration/SerperConfigSelector';
+import RemoteAgentConfigSelector, { RemoteAgentToolConfig } from '../../../tools/components/configuration/RemoteAgentConfigSelector';
+import { MCPServerSelector } from '../../../tools/components/configuration/MCPServerSelector';
+import AgentBestPractices from '../../../help/best-practices/AgentBestPractices';
+// TODO: Re-enable when knowledge sources are restored
+// import { KnowledgeSourcesSection } from './KnowledgeSourcesSection';
+
+// Default fallback model when API is down
+const DEFAULT_FALLBACK_MODEL = {
+  [getDefaultModel()]: {
+    name: getDefaultModel(),
+    temperature: 0.7,
+    context_window: 128000,
+    max_output_tokens: 4096,
+    enabled: true
+  }
+};
+
+type AgentFormData = Omit<Agent, 'id' | 'created_at'> & {
+  id?: string;
+  /**
+   * Per-agent thinking overrides. Blank inherits the model's workspace default,
+   * the same contract as `temperature` above. Which one is settable depends on
+   * the selected model (`thinking_mode`): a token budget for Claude 4.1–4.6, an
+   * effort level for 4.7+/5/Fable and for the GPT-5 and Gemini families.
+   */
+  thinking_budget_tokens?: number;
+  thinking_effort?: string;
+};
+
+const AgentForm: React.FC<AgentFormProps> = ({ initialData, onCancel, onAgentSaved, tools, isCreateMode }) => {
+  const { updateAgent } = useAgentStore();
+  const [models, setModels] = useState<Models>(DEFAULT_FALLBACK_MODEL);
+  const [loadingModels, setLoadingModels] = useState(true);
+  const [expandedGoal, setExpandedGoal] = useState<boolean>(false);
+  const [expandedBackstory, setExpandedBackstory] = useState<boolean>(false);
+  const [expandedSystemTemplate, setExpandedSystemTemplate] = useState<boolean>(false);
+  const [expandedPromptTemplate, setExpandedPromptTemplate] = useState<boolean>(false);
+  const [expandedResponseTemplate, setExpandedResponseTemplate] = useState<boolean>(false);
+  const [selectedGenieSpace, setSelectedGenieSpace] = useState<{ id: string; name: string } | null>(null);
+  const [perplexityConfig, setPerplexityConfig] = useState<PerplexityConfig>({});
+  const [serperConfig, setSerperConfig] = useState<SerperConfig>({});
+  const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>([]);
+  const [toolConfigs, setToolConfigs] = useState<Record<string, unknown>>(initialData?.tool_configs || {});
+  
+  const [formData, setFormData] = useState<AgentFormData>(() => {
+    // Get default memory backend config if not editing an existing agent
+    const defaultMemoryBackend = !initialData?.id 
+      ? DefaultMemoryBackendService.getInstance().getDefaultConfig() 
+      : undefined;
+      
+    const data = {
+      name: initialData?.name || '',
+      role: initialData?.role || '',
+      goal: initialData?.goal || '',
+      backstory: initialData?.backstory || '',
+      llm: initialData?.llm || getDefaultModel(),
+      temperature: initialData?.temperature || undefined,
+      max_tokens: initialData?.max_tokens ?? undefined,
+      tools: initialData?.tools ? initialData.tools.map(id => String(id)) : [],
+      skills: initialData?.skills ?? [],
+      function_calling_llm: initialData?.function_calling_llm || undefined,
+      max_iter: initialData?.max_iter || 25,
+      max_rpm: initialData?.max_rpm ?? 10,
+      max_execution_time: initialData?.max_execution_time || 300,
+      memory: initialData?.memory ?? true,
+      verbose: initialData?.verbose ?? false,
+      allow_delegation: initialData?.allow_delegation || false,
+      cache: initialData?.cache ?? true,
+      system_template: initialData?.system_template || undefined,
+      prompt_template: initialData?.prompt_template || undefined,
+      response_template: initialData?.response_template || undefined,
+      allow_code_execution: initialData?.allow_code_execution || false,
+      code_execution_mode: initialData?.code_execution_mode || 'safe',
+      max_retry_limit: initialData?.max_retry_limit || 3,
+      use_system_prompt: initialData?.use_system_prompt || true,
+      respect_context_window: initialData?.respect_context_window || true,
+      embedder_config: initialData?.embedder_config || {
+        provider: 'databricks',
+        config: {
+          model: 'databricks-gte-large-en'
+        }
+      },
+      knowledge_sources: initialData?.knowledge_sources || [],
+      memory_backend_config: initialData?.memory_backend_config || defaultMemoryBackend || undefined,
+      inject_date: initialData?.inject_date ?? true,  // Default to true for date awareness
+      date_format: initialData?.date_format || undefined,
+    };
+    
+    if (initialData?.id) {
+      return { ...data, id: initialData.id };
+    }
+    
+    return data;
+  });
+  
+  // Load tool_configs and set Genie space and Perplexity config if they exist
+  useEffect(() => {
+    if (initialData?.tool_configs) {
+      setToolConfigs(initialData.tool_configs);
+      
+      // Check for GenieTool config - try both spaceId and space_id for compatibility
+      const genieConfig = initialData.tool_configs.GenieTool as Record<string, unknown>;
+      if (genieConfig) {
+        const spaceId = genieConfig.spaceId || genieConfig.space_id;
+        const spaceName = genieConfig.spaceName || genieConfig.space_name || spaceId; // Fallback to ID if name not stored
+        if (spaceId && typeof spaceId === 'string') {
+          setSelectedGenieSpace({
+            id: spaceId as string,
+            name: spaceName as string
+          });
+        }
+      }
+      
+      if (initialData.tool_configs.PerplexityTool) {
+        setPerplexityConfig(initialData.tool_configs.PerplexityTool);
+      }
+      
+      if (initialData.tool_configs.SerperDevTool) {
+        setSerperConfig(initialData.tool_configs.SerperDevTool);
+      }
+      
+      // Check for MCP_SERVERS config
+      if (initialData.tool_configs.MCP_SERVERS) {
+        const mcpConfig = initialData.tool_configs.MCP_SERVERS as Record<string, unknown>;
+        const mcpServers = Array.isArray(mcpConfig.servers) 
+          ? mcpConfig.servers 
+          : Array.isArray(initialData.tool_configs.MCP_SERVERS)
+          ? initialData.tool_configs.MCP_SERVERS  // Fallback for old format
+          : [];
+        setSelectedMcpServers(mcpServers);
+      }
+    }
+  }, [initialData?.tool_configs]);
+
+
+  // Load models from ModelService - moved after formData is defined
+  useEffect(() => {
+    const fetchModels = async () => {
+      try {
+        setLoadingModels(true);
+        const modelService = ModelService.getInstance();
+        const fetchedModels = await modelService.getActiveModels();
+        
+        if (Object.keys(fetchedModels).length > 0) {
+          setModels(fetchedModels);
+          
+          // Check if the current model is valid in the fetched models
+          const currentModelKey = formData.llm;
+          if (currentModelKey && !fetchedModels[currentModelKey]) {
+            // If current model is invalid, select the first available one
+            const firstModelKey = Object.keys(fetchedModels)[0];
+            
+            // Update the form data with the new model
+            setFormData(prev => ({
+              ...prev,
+              llm: firstModelKey
+            }));
+          }
+        } else {
+          // No models were fetched - keep the default model but log a warning
+          console.warn('No models were fetched from the API, using default model as fallback');
+        }
+      } catch (error) {
+        console.error('Error fetching models:', error);
+        // In case of error, show a fallback message but don't change the form data
+        console.warn('Using default model due to error fetching models');
+      } finally {
+        setLoadingModels(false);
+      }
+    };
+    
+    fetchModels();
+  // We intentionally don't add formData.llm as a dependency to avoid infinite loops
+  // since we're updating it inside the effect
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const [isGeneratingTemplates, setIsGeneratingTemplates] = useState(false);
+  const [showBestPractices, setShowBestPractices] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!formData) return;
+    
+    // Make a deep copy of the formData to avoid modifying the original
+    const agentToSave = JSON.parse(JSON.stringify(formData));
+    // Blank means "inherit the model's max_output_tokens", and that has to reach
+    // the database: JSON drops undefined, so clearing the field would otherwise
+    // leave the old override in place. null is what the API clears on.
+    agentToSave.max_tokens = formData.max_tokens ?? null;
+    
+    // Build tool_configs for tools that need configuration
+    let updatedToolConfigs = { ...toolConfigs };
+    
+    // Handle GenieTool config
+    if (selectedGenieSpace && agentToSave.tools.some((toolId: string) => {
+      const tool = tools.find(t => String(t.id) === String(toolId));
+      return tool?.title === 'GenieTool';
+    })) {
+      updatedToolConfigs = {
+        ...updatedToolConfigs,
+        GenieTool: {
+          spaceId: selectedGenieSpace.id,
+          spaceName: selectedGenieSpace.name
+        }
+      };
+    } else if (!selectedGenieSpace) {
+      // Remove GenieTool config if no space selected
+      delete updatedToolConfigs.GenieTool;
+    }
+    
+    // Handle PerplexityTool config
+    if (perplexityConfig && Object.keys(perplexityConfig).length > 0 && agentToSave.tools.some((toolId: string) => {
+      const tool = tools.find(t => String(t.id) === String(toolId));
+      return tool?.title === 'PerplexityTool';
+    })) {
+      updatedToolConfigs = {
+        ...updatedToolConfigs,
+        PerplexityTool: perplexityConfig
+      };
+    } else if (!agentToSave.tools.some((toolId: string) => {
+      const tool = tools.find(t => String(t.id) === String(toolId));
+      return tool?.title === 'PerplexityTool';
+    })) {
+      // Remove PerplexityTool config if tool not selected
+      delete updatedToolConfigs.PerplexityTool;
+    }
+    
+    // Handle SerperDevTool config
+    if (serperConfig && Object.keys(serperConfig).length > 0 && agentToSave.tools.some((toolId: string) => {
+      const tool = tools.find(t => String(t.id) === String(toolId));
+      return tool?.title === 'SerperDevTool';
+    })) {
+      updatedToolConfigs = {
+        ...updatedToolConfigs,
+        SerperDevTool: serperConfig
+      };
+    } else if (!agentToSave.tools.some((toolId: string) => {
+      const tool = tools.find(t => String(t.id) === String(toolId));
+      return tool?.title === 'SerperDevTool';
+    })) {
+      // Remove SerperDevTool config if tool not selected
+      delete updatedToolConfigs.SerperDevTool;
+    }
+    
+    // Handle MCP_SERVERS config - use dict format to match schema
+    if (selectedMcpServers && selectedMcpServers.length > 0) {
+      updatedToolConfigs = {
+        ...updatedToolConfigs,
+        MCP_SERVERS: {
+          servers: selectedMcpServers
+        }
+      };
+    } else {
+      // Remove MCP_SERVERS config if none selected
+      delete updatedToolConfigs.MCP_SERVERS;
+    }
+    
+    // Add tool_configs to the agent if we have any
+    if (Object.keys(updatedToolConfigs).length > 0) {
+      agentToSave.tool_configs = updatedToolConfigs;
+    }
+    
+    // If memory is disabled, remove embedder_config and memory_backend_config
+    if (!agentToSave.memory) {
+      delete agentToSave.embedder_config;
+      delete agentToSave.memory_backend_config;
+    }
+    
+    // Preserve file information in knowledge sources
+    if (agentToSave.knowledge_sources && agentToSave.knowledge_sources.length > 0) {
+      // Ensure each file source has its fileInfo preserved
+      agentToSave.knowledge_sources = agentToSave.knowledge_sources.map((source: KnowledgeSource) => {
+        // Skip non-file sources
+        if (source.type === 'text' || source.type === 'url' || !source.source) {
+          return source;
+        }
+        
+        // Ensure fileInfo is preserved
+        return {
+          ...source,
+          // If fileInfo doesn't exist but we have a source, add a placeholder
+          fileInfo: source.fileInfo || {
+            filename: source.source.split('/').pop() || '',
+            path: source.source,
+            exists: false,
+            is_uploaded: true
+          }
+        };
+      });
+    }
+    
+    setIsGeneratingTemplates(true);
+    try {
+      let savedAgent: Agent | null;
+      
+      if (initialData?.id) {
+        // Update existing agent
+        savedAgent = await AgentService.updateAgentFull(initialData.id, agentToSave as Agent);
+      } else {
+        // Create new agent
+        savedAgent = await AgentService.createAgent(agentToSave);
+      }
+
+      if (savedAgent && onAgentSaved) {
+        // Update the Zustand store to ensure consistency
+        if (savedAgent.id) {
+          updateAgent(savedAgent.id, savedAgent);
+        }
+        onAgentSaved(savedAgent);
+      }
+    } catch (error) {
+      console.error('Error saving agent:', error);
+    } finally {
+      setIsGeneratingTemplates(false);
+    }
+  };
+
+  const handleInputChange = (
+    field: keyof AgentFormData,
+    value: string | number | boolean | string[] | undefined | Record<string, unknown> | KnowledgeSource[]
+  ) => {
+    setFormData((prev) => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  /**
+   * The catalogue row for the model this agent is set to use.
+   *
+   * Every model-specific control below is gated on it, because what an endpoint
+   * accepts varies per model and does not follow families — claude-sonnet-4-5
+   * takes `temperature` while claude-opus-5 rejects it, and the two Anthropic
+   * thinking shapes (token budget vs effort level) are mutually exclusive.
+   * Offering the wrong control means a 400 at run time, so the capability fields
+   * (`refused_params`, `thinking_mode`, `allowed_efforts`) are derived
+   * server-side from the same registry that builds the request.
+   */
+  const selectedModel = formData.llm ? models[formData.llm] : undefined;
+
+  /**
+   * Whether the selected model accepts a sampling parameter. Defaults to true so
+   * a model that declares nothing behaves exactly as it did before this existed.
+   */
+  const selectedModelAcceptsParam = (param: string): boolean =>
+    !(selectedModel?.refused_params ?? []).includes(param);
+
+
+  const handleToolsChange = (event: SelectChangeEvent<string[]>) => {
+    // Get the selected values from the event
+    const selectedValues = Array.isArray(event.target.value)
+      ? event.target.value
+      : [event.target.value];
+    
+    
+    // Create a new set of tools, ensuring all IDs are strings
+    const newTools = selectedValues.map(id => String(id));
+
+    // NOTE: Knowledge sources are now managed at task level, not agent level
+    // Previously, we tracked DatabricksKnowledgeSearchTool changes here
+
+    // Check if any tools appear to be duplicated (different format but same ID)
+    // This helps detect potential issues
+    const toolCounts = new Map<string, number>();
+    newTools.forEach(id => {
+      const count = toolCounts.get(id) || 0;
+      toolCounts.set(id, count + 1);
+    });
+    
+    // Log any duplicates found
+    const duplicates = Array.from(toolCounts.entries())
+      .filter(([_, count]) => count > 1)
+      .map(([id]) => id);
+    
+    if (duplicates.length > 0) {
+      console.warn('Duplicate tool IDs detected:', duplicates);
+    }
+    
+    // Ensure uniqueness
+    const uniqueTools = Array.from(new Set(newTools));
+
+    // Update the form data
+    handleInputChange('tools', uniqueTools);
+
+    // Sync with Zustand store if editing existing agent
+    // This ensures the AgentNode displays the correct attachment icon
+    if (initialData?.id) {
+      updateAgent(initialData.id, { tools: uniqueTools });
+    }
+  };
+
+  const handleGenerateTemplates = async () => {
+    if (!formData.role || !formData.goal || !formData.backstory) return;
+
+    setIsGeneratingTemplates(true);
+    try {
+      const templates = await GenerateService.generateTemplates({
+        role: formData.role,
+        goal: formData.goal,
+        backstory: formData.backstory,
+        model: formData.llm
+      });
+
+      if (templates) {
+        handleInputChange('system_template', templates.system_template);
+        handleInputChange('prompt_template', templates.prompt_template);
+        handleInputChange('response_template', templates.response_template);
+      }
+    } catch (error) {
+      console.error('Error generating templates:', error);
+    } finally {
+      setIsGeneratingTemplates(false);
+    }
+  };
+
+  const canGenerateTemplates = Boolean(formData.role && formData.goal && formData.backstory);
+
+  const handleRemoveTool = (toolIdToRemove: string) => {
+    // Create a new array without the removed tool
+    const newTools = formData.tools.filter(id => String(id) !== String(toolIdToRemove));
+
+    // Use the existing handleToolsChange to ensure all logic is applied
+    // including checking for DatabricksKnowledgeSearchTool removal
+    handleToolsChange({ target: { value: newTools } } as SelectChangeEvent<string[]>);
+  };
+
+
+
+  const handleOpenGoalDialog = () => {
+    setExpandedGoal(true);
+  };
+
+  const handleCloseGoalDialog = () => {
+    setExpandedGoal(false);
+  };
+
+  const handleOpenBackstoryDialog = () => {
+    setExpandedBackstory(true);
+  };
+
+  const handleCloseBackstoryDialog = () => {
+    setExpandedBackstory(false);
+  };
+
+  const handleOpenSystemTemplateDialog = () => {
+    setExpandedSystemTemplate(true);
+  };
+
+  const handleCloseSystemTemplateDialog = () => {
+    setExpandedSystemTemplate(false);
+  };
+
+  const handleOpenPromptTemplateDialog = () => {
+    setExpandedPromptTemplate(true);
+  };
+
+  const handleClosePromptTemplateDialog = () => {
+    setExpandedPromptTemplate(false);
+  };
+
+  const handleOpenResponseTemplateDialog = () => {
+    setExpandedResponseTemplate(true);
+  };
+
+  const handleCloseResponseTemplateDialog = () => {
+    setExpandedResponseTemplate(false);
+  };
+
+  const handleGenieSpaceClick = async (event: React.MouseEvent) => {
+    // Prevent any bubbling that might interfere
+    event.stopPropagation();
+
+    if (!selectedGenieSpace) {
+      console.warn('No Genie space selected');
+      return;
+    }
+
+    try {
+      console.log('Fetching Databricks configuration...');
+      const databricksService = DatabricksService.getInstance();
+      const config = await databricksService.getDatabricksConfig();
+      console.log('Databricks config:', config);
+
+      if (config && config.workspace_url) {
+        // Ensure the URL has https:// and remove trailing slash if present
+        let workspaceUrl = config.workspace_url.startsWith('https://')
+          ? config.workspace_url
+          : `https://${config.workspace_url}`;
+
+        // Remove trailing slash to avoid double slashes
+        workspaceUrl = workspaceUrl.replace(/\/$/, '');
+
+        // Construct the Genie room URL
+        // Format: https://{workspace}/genie/rooms/{space_id}/monitoring
+        const genieUrl = `${workspaceUrl}/genie/rooms/${selectedGenieSpace.id}/monitoring`;
+
+        console.log('Opening Genie URL:', genieUrl);
+        // Open in new tab
+        window.open(genieUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        console.warn('Databricks workspace URL not configured');
+        alert('Databricks workspace URL is not configured. Please configure it in Settings > Configuration > Databricks.');
+      }
+    } catch (error) {
+      console.error('Error opening Genie space:', error);
+      alert('Error opening Genie space. Please check the console for details.');
+    }
+  };
+
+  return (
+    <>
+      <Card sx={{ 
+        display: 'flex', 
+        flexDirection: 'column', 
+        height: '70vh',
+        position: 'relative',
+        overflow: 'hidden'
+      }}>
+        {!isCreateMode && (
+          <Box sx={{ p: 3, pb: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+              <Typography variant="h6">
+                {initialData?.id ? 'Edit Agent' : 'Create New Agent'}
+              </Typography>
+              <Button
+                startIcon={<HelpOutlineIcon />}
+                onClick={() => setShowBestPractices(true)}
+                variant="outlined"
+                size="small"
+                sx={{ ml: 2 }}
+              >
+                Best Practices
+              </Button>
+            </Box>
+            <Divider />
+          </Box>
+        )}
+
+        <Box sx={{ 
+          flex: '1 1 auto', 
+          overflow: 'auto',
+          px: 3, 
+          pb: 2,
+          pt: isCreateMode ? 3 : 0,
+          height: isCreateMode ? 'calc(90vh - 120px)' : 'calc(90vh - 170px)',
+        }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {/* Basic Information */}
+            <TextField
+              fullWidth
+              label="Name"
+              value={formData.name}
+              onChange={(e) => handleInputChange('name', e.target.value)}
+              required
+              margin="normal"
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  '& fieldset': {
+                    borderColor: 'rgba(0, 0, 0, 0.23)',
+                  },
+                },
+                '& .MuiInputLabel-root': {
+                  backgroundColor: 'white',
+                  padding: '0 4px',
+                },
+              }}
+            />
+            <TextField
+              fullWidth
+              label="Role"
+              value={formData.role}
+              onChange={(e) => handleInputChange('role', e.target.value)}
+              required
+            />
+            <TextField
+              fullWidth
+              label="Goal"
+              value={formData.goal}
+              onChange={(e) => handleInputChange('goal', e.target.value)}
+              multiline
+              rows={2}
+              required
+              InputProps={{
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton
+                      edge="end"
+                      onClick={handleOpenGoalDialog}
+                      size="small"
+                      sx={{ opacity: 0.7 }}
+                      title="Expand goal"
+                    >
+                      <OpenInFullIcon fontSize="small" />
+                    </IconButton>
+                  </InputAdornment>
+                )
+              }}
+            />
+            <TextField
+              fullWidth
+              label="Backstory"
+              value={formData.backstory}
+              onChange={(e) => handleInputChange('backstory', e.target.value)}
+              multiline
+              rows={3}
+              required
+              InputProps={{
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton
+                      edge="end"
+                      onClick={handleOpenBackstoryDialog}
+                      size="small"
+                      sx={{ opacity: 0.7 }}
+                      title="Expand backstory"
+                    >
+                      <OpenInFullIcon fontSize="small" />
+                    </IconButton>
+                  </InputAdornment>
+                )
+              }}
+            />
+
+            {/* Skills — procedural know-how the agent can load on demand.
+                Its own section rather than buried in Execution Settings: a
+                skill changes HOW the agent works, which is the same kind of
+                decision as its backstory, not a tuning knob. */}
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography>Skills</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <SkillSelector
+                  value={formData.skills || []}
+                  onChange={(names) => handleInputChange('skills', names)}
+                />
+              </AccordionDetails>
+            </Accordion>
+
+            {/* Templates Section */}
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography>Templates</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
+                    <Button
+                      variant="contained"
+                      onClick={handleGenerateTemplates}
+                      disabled={!canGenerateTemplates || isGeneratingTemplates}
+                    >
+                      {isGeneratingTemplates ? 'Generating...' : 'Generate Templates'}
+                    </Button>
+                  </Box>
+                  <TextField
+                    fullWidth
+                    label="System Template"
+                    value={formData.system_template || ''}
+                    onChange={(e) => handleInputChange('system_template', e.target.value)}
+                    multiline
+                    rows={4}
+                    InputProps={{
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <IconButton
+                            edge="end"
+                            onClick={handleOpenSystemTemplateDialog}
+                            size="small"
+                            sx={{ opacity: 0.7 }}
+                            title="Expand system template"
+                          >
+                            <OpenInFullIcon fontSize="small" />
+                          </IconButton>
+                        </InputAdornment>
+                      )
+                    }}
+                  />
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, mb: 1 }}>
+                    Defines the agent&apos;s core identity and fundamental instructions. Controls how the agent understands its {'{role}'}, {'{goal}'}, and {'{backstory}'}. Use this to establish expertise boundaries, ethical guidelines, and overall behavior patterns.
+                  </Typography>
+                  <TextField
+                    fullWidth
+                    label="Prompt Template"
+                    value={formData.prompt_template || ''}
+                    onChange={(e) => handleInputChange('prompt_template', e.target.value)}
+                    multiline
+                    rows={4}
+                    InputProps={{
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <IconButton
+                            edge="end"
+                            onClick={handleOpenPromptTemplateDialog}
+                            size="small"
+                            sx={{ opacity: 0.7 }}
+                            title="Expand prompt template"
+                          >
+                            <OpenInFullIcon fontSize="small" />
+                          </IconButton>
+                        </InputAdornment>
+                      )
+                    }}
+                  />
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, mb: 1 }}>
+                    Structures how tasks are presented to the agent. Controls the format and flow of task instructions. Include placeholders for dynamic content like {'{input}'}, {'{context}'}, and task-specific variables to ensure consistent task processing.
+                  </Typography>
+                  <TextField
+                    fullWidth
+                    label="Response Template"
+                    value={formData.response_template || ''}
+                    onChange={(e) => handleInputChange('response_template', e.target.value)}
+                    multiline
+                    rows={4}
+                    InputProps={{
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <IconButton
+                            edge="end"
+                            onClick={handleOpenResponseTemplateDialog}
+                            size="small"
+                            sx={{ opacity: 0.7 }}
+                            title="Expand response template"
+                          >
+                            <OpenInFullIcon fontSize="small" />
+                          </IconButton>
+                        </InputAdornment>
+                      )
+                    }}
+                  />
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, mb: 1 }}>
+                    Guides how the agent formats its responses and output structure. Enforces consistency in deliverables by defining sections like THOUGHTS, ACTION, and RESULT. Use this to ensure structured, actionable, and predictable agent outputs.
+                  </Typography>
+                </Box>
+              </AccordionDetails>
+            </Accordion>
+
+            {/* Tools Selection */}
+            <FormControl fullWidth>
+              <InputLabel id="tools-label">Tools</InputLabel>
+              <Select
+                labelId="tools-label"
+                multiple
+                value={formData.tools}
+                onChange={handleToolsChange}
+                label="Tools"
+                renderValue={(selected) => (
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                    {(selected as string[]).map((toolId, index) => {
+                      // Ensure tool ID comparison works with both string and numeric IDs
+                      const tool = tools.find(t => String(t.id) === String(toolId));
+                      // If it's DatabricksKnowledgeSearchTool (not in DB), show friendly name
+                      const label = tool ? tool.title :
+                                   (String(toolId) === 'DatabricksKnowledgeSearchTool' ? 'Databricks Knowledge Search Tool' : String(toolId));
+                      return (
+                        <Chip
+                          key={`selected-tool-${toolId}-${index}`}
+                          label={label}
+                          size="small"
+                          onDelete={() => {
+                            handleRemoveTool(toolId);
+                          }}
+                          onMouseDown={(event: React.MouseEvent) => {
+                            event.stopPropagation(); // Prevent dropdown from opening when clicking delete icon
+                          }}
+                          deleteIcon={
+                            <DeleteIcon
+                              fontSize="small"
+                              sx={{ fontSize: '16px !important' }}
+                            />
+                          }
+                        />
+                      );
+                    })}
+                  </Box>
+                )}
+              >
+                {tools.map((tool) => (
+                    <MenuItem key={`tool-${tool.id}`} value={String(tool.id)}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                        <Typography>{tool.title}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {tool.description}
+                        </Typography>
+                      </Box>
+                    </MenuItem>
+                  ))}
+              </Select>
+            </FormControl>
+
+            {/* Genie Space Display - Show only when GenieTool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t => String(t.id) === String(toolId));
+              return tool?.title === 'GenieTool';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>Genie Space</Typography>
+                {selectedGenieSpace ? (
+                  <Tooltip title={`Space ID: ${selectedGenieSpace.id} - Click to open in Databricks`} arrow>
+                    <Chip
+                      label={selectedGenieSpace.name}
+                      size="medium"
+                      color="primary"
+                      variant="outlined"
+                      onClick={handleGenieSpaceClick}
+                      onDelete={() => {
+                        setSelectedGenieSpace(null);
+                        // Remove GenieTool config when space is removed
+                        setToolConfigs(prev => {
+                          const newConfigs = { ...prev };
+                          delete newConfigs.GenieTool;
+                          return newConfigs;
+                        });
+                      }}
+                      deleteIcon={<DeleteIcon fontSize="small" />}
+                      sx={{
+                        cursor: 'pointer',
+                        '&:hover': {
+                          backgroundColor: 'rgba(25, 118, 210, 0.08)',
+                        }
+                      }}
+                    />
+                  </Tooltip>
+                ) : (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <GenieSpaceSelector
+                      value=""
+                      onChange={(value, spaceName) => {
+                        if (value) {
+                          setSelectedGenieSpace({
+                            id: value as string,
+                            name: spaceName || value as string  // Use the name if provided, otherwise fallback to ID
+                          });
+                          // Update tool configs when space is selected
+                          setToolConfigs(prev => ({
+                            ...prev,
+                            GenieTool: {
+                              spaceId: value as string,
+                              spaceName: spaceName || value as string
+                            }
+                          }));
+                        }
+                      }}
+                      label=""
+                      placeholder="Select a Genie space..."
+                      helperText=""
+                      fullWidth
+                    />
+                  </Box>
+                )}
+              </Box>
+            )}
+
+            {/* Perplexity Configuration - Show only when PerplexityTool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t => String(t.id) === String(toolId));
+              return tool?.title === 'PerplexityTool';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <PerplexityConfigSelector
+                  value={perplexityConfig}
+                  onChange={(config) => {
+                    setPerplexityConfig(config);
+                    // Update tool configs when configuration changes
+                    setToolConfigs(prev => ({
+                      ...prev,
+                      PerplexityTool: config
+                    }));
+                  }}
+                  label="Perplexity Configuration"
+                  helperText="Configure Perplexity AI search parameters for this agent"
+                  fullWidth
+                />
+              </Box>
+            )}
+
+            {/* Serper Configuration - Show only when SerperDevTool is selected */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t => String(t.id) === String(toolId));
+              return tool?.title === 'SerperDevTool';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <SerperConfigSelector
+                  value={serperConfig}
+                  onChange={(config) => {
+                    setSerperConfig(config);
+                    // Update tool configs when configuration changes
+                    setToolConfigs(prev => ({
+                      ...prev,
+                      SerperDevTool: config
+                    }));
+                  }}
+                  label="Serper Configuration"
+                  helperText="Configure Serper.dev search parameters for this agent"
+                  fullWidth
+                />
+              </Box>
+            )}
+
+
+            {/* Remote Agent (A2A) configuration — which remotes this agent may
+                delegate to. One delegation tool is built per remote, so an
+                unselected workspace with many remotes buries every other tool. */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t => String(t.id) === String(toolId));
+              return tool?.title === 'Remote Agent';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <RemoteAgentConfigSelector
+                  value={(toolConfigs['Remote Agent'] as RemoteAgentToolConfig) || {}}
+                  onChange={(config) => {
+                    setToolConfigs(prev => ({
+                      ...prev,
+                      'Remote Agent': config
+                    }));
+                  }}
+                />
+              </Box>
+            )}
+
+            {/* MCP Server Configuration - Always show as it's independent of regular tools */}
+            <Box sx={{ mt: 2 }}>
+              {/* Show selected MCP servers visually */}
+              {selectedMcpServers.length > 0 && (
+                <Box sx={{ 
+                  mb: 2, 
+                  p: 2, 
+                  backgroundColor: 'rgba(25, 118, 210, 0.04)', 
+                  borderRadius: 1,
+                  border: '1px solid rgba(25, 118, 210, 0.12)'
+                }}>
+                  <Typography 
+                    variant="subtitle2" 
+                    color="primary" 
+                    sx={{ 
+                      mb: 1, 
+                      fontWeight: 600,
+                      fontSize: '0.875rem'
+                    }}
+                  >
+                    Selected MCP Servers ({selectedMcpServers.length})
+                  </Typography>
+                  <Box sx={{ 
+                    display: 'flex', 
+                    flexWrap: 'wrap', 
+                    gap: 1
+                  }}>
+                    {selectedMcpServers.map((server) => (
+                      <Chip
+                        key={server}
+                        label={server}
+                        size="medium"
+                        color="primary"
+                        variant="filled"
+                        onDelete={() => {
+                          const newServers = selectedMcpServers.filter(s => s !== server);
+                          setSelectedMcpServers(newServers);
+                          setToolConfigs(prev => ({
+                            ...prev,
+                            MCP_SERVERS: newServers
+                          }));
+                        }}
+                        sx={{ 
+                          '& .MuiChip-deleteIcon': { 
+                            fontSize: '18px',
+                            '&:hover': {
+                              color: 'error.main'
+                            }
+                          },
+                          fontWeight: 500
+                        }}
+                      />
+                    ))}
+                  </Box>
+                </Box>
+              )}
+              
+              <MCPServerSelector
+                value={selectedMcpServers}
+                onChange={(servers) => {
+                  const serverArray = Array.isArray(servers) ? servers : (servers ? [servers] : []);
+                  setSelectedMcpServers(serverArray);
+                  // Update tool configs when MCP servers change
+                  setToolConfigs(prev => ({
+                    ...prev,
+                    MCP_SERVERS: serverArray
+                  }));
+                }}
+                label="MCP Servers"
+                placeholder="Select MCP servers for this agent..."
+                helperText="Choose which MCP (Model Context Protocol) servers this agent should have access to"
+                multiple={true}
+                fullWidth
+              />
+            </Box>
+
+            {/* Knowledge Sources section removed - now managed at task level */}
+
+            {/* LLM Configuration */}
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography>LLM Configuration</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Grid container spacing={2}>
+                  <Grid item xs={12}>
+                    <FormControl fullWidth>
+                      <InputLabel>LLM Model</InputLabel>
+                      <Select
+                        value={loadingModels ? '' : formData.llm}
+                        onChange={(e) => handleInputChange('llm', e.target.value)}
+                        label="LLM Model"
+                        disabled={loadingModels}
+                      >
+                        {loadingModels ? (
+                          <MenuItem key="loading-models" value="" disabled>
+                            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                              <CircularProgress size={20} sx={{ mr: 1 }} />
+                              Loading models...
+                            </Box>
+                          </MenuItem>
+                        ) : Object.keys(models).length > 0 ? (
+                          Object.entries(models).map(([key, model]) => (
+                            <MenuItem key={`llm-model-${key}`} value={key}>
+                              {model.name}
+                              {model.provider && (
+                                <Typography variant="caption" sx={{ ml: 1, color: 'text.secondary' }}>
+                                  ({model.provider})
+                                </Typography>
+                              )}
+                            </MenuItem>
+                          ))
+                        ) : (
+                          // Fallback option when no models are available
+                          <MenuItem key="no-models" value={formData.llm}>
+                            {formData.llm || 'Default Model'} (No models available)
+                          </MenuItem>
+                        )}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  {/* Per-agent overrides of the model row (temperature, max
+                      output tokens, thinking). Blank inherits the model's
+                      workspace default; which controls appear follows the
+                      SELECTED model's measured capability. */}
+                  <ModelOverrideFields
+                    acceptsTemperature={selectedModelAcceptsParam('temperature')}
+                    temperature={formData.temperature}
+                    maxTokens={formData.max_tokens}
+                    modelMaxOutputTokens={selectedModel?.max_output_tokens}
+                    thinkingMode={selectedModel?.thinking_mode}
+                    allowedEfforts={selectedModel?.allowed_efforts}
+                    returnsThinkingText={selectedModel?.returns_thinking_text}
+                    thinkingBudgetTokens={formData.thinking_budget_tokens}
+                    thinkingEffort={formData.thinking_effort}
+                    onChange={handleInputChange}
+                  />
+                  {/* "Function Calling LLM" was removed here. It was a CrewAI-era
+                      field that survived the move to Kasal's own runtime and did
+                      NOTHING: runtime/agent.py declares it
+                      "Deprecated; accepted for compatibility and unused", no
+                      execution path reads it, and its only reader
+                      (core/llm/transport/instructor.py) is not invoked by any of
+                      the three paths. Selecting a model there changed nothing
+                      about the run, which is worse than offering no control at
+                      all. The field is still accepted on the API and stored, so
+                      existing agents are untouched. */}
+                </Grid>
+              </AccordionDetails>
+            </Accordion>
+
+            {/* Execution Settings */}
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography>Execution Settings</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} md={4}>
+                    <TextField
+                      fullWidth
+                      type="number"
+                      label="Max Iterations"
+                      value={formData.max_iter}
+                      onChange={(e) => handleInputChange('max_iter', parseInt(e.target.value))}
+                    />
+                  </Grid>
+                  <Grid item xs={12} md={4}>
+                    <TextField
+                      fullWidth
+                      type="number"
+                      label="Max RPM"
+                      value={formData.max_rpm ?? 10}
+                      onChange={(e) => handleInputChange('max_rpm', e.target.value ? parseInt(e.target.value) : 10)}
+                      helperText="Maximum requests per minute (default: 10)"
+                    />
+                  </Grid>
+                  <Grid item xs={12} md={4}>
+                    <TextField
+                      fullWidth
+                      type="number"
+                      label="Max Execution Time (s)"
+                      value={formData.max_execution_time || ''}
+                      onChange={(e) => handleInputChange('max_execution_time', e.target.value ? parseInt(e.target.value) : undefined)}
+                    />
+                  </Grid>
+                  <Grid item xs={12} md={4}>
+                    <TextField
+                      fullWidth
+                      type="number"
+                      label="Max Retry Limit"
+                      value={formData.max_retry_limit}
+                      onChange={(e) => handleInputChange('max_retry_limit', parseInt(e.target.value))}
+                    />
+                  </Grid>
+                </Grid>
+              </AccordionDetails>
+            </Accordion>
+
+            {/* Behavior Settings */}
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography>Behavior Settings</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} md={6}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={formData.memory}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            handleInputChange('memory', !formData.memory);
+                          }}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                          }}
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                          }}
+                          onTouchStart={(e) => {
+                            e.stopPropagation();
+                          }}
+                        />
+                      }
+                      label="Enable Memory"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                      }}
+                    />
+                  </Grid>
+                  <Grid item xs={12} md={6}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={formData.verbose}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            handleInputChange('verbose', !formData.verbose);
+                          }}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                          }}
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                          }}
+                          onTouchStart={(e) => {
+                            e.stopPropagation();
+                          }}
+                        />
+                      }
+                      label="Verbose Mode"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                      }}
+                    />
+                  </Grid>
+                  <Grid item xs={12} md={6}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={formData.allow_delegation}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            handleInputChange('allow_delegation', !formData.allow_delegation);
+                          }}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                          }}
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                          }}
+                          onTouchStart={(e) => {
+                            e.stopPropagation();
+                          }}
+                        />
+                      }
+                      label="Allow Delegation"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                      }}
+                    />
+                  </Grid>
+                  {/* "Enable Cache" was here. It set agent.cache, which reaches
+                      the runtime Agent and is read by NOBODY — there is no tool
+                      cache in the engine, so the switch promised a saving it
+                      could not make. The column and the field stay (a cache is
+                      designed, not built); the control comes back when there is
+                      something behind it. */}
+                  {/* TODO: Re-enable code execution in the future */}
+                  {/* <Grid item xs={12} md={6}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={formData.allow_code_execution}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            handleInputChange('allow_code_execution', !formData.allow_code_execution);
+                          }}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                          }}
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                          }}
+                          onTouchStart={(e) => {
+                            e.stopPropagation();
+                          }}
+                        />
+                      }
+                      label="Allow Code Execution"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                      }}
+                    />
+                  </Grid> */}
+                  <Grid item xs={12} md={6}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={formData.use_system_prompt}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            handleInputChange('use_system_prompt', !formData.use_system_prompt);
+                          }}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                          }}
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                          }}
+                          onTouchStart={(e) => {
+                            e.stopPropagation();
+                          }}
+                        />
+                      }
+                      label="Use System Prompt"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                      }}
+                    />
+                  </Grid>
+                  <Grid item xs={12} md={6}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={formData.respect_context_window}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            handleInputChange('respect_context_window', !formData.respect_context_window);
+                          }}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                          }}
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                          }}
+                          onTouchStart={(e) => {
+                            e.stopPropagation();
+                          }}
+                        />
+                      }
+                      label="Respect Context Window"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                      }}
+                    />
+                  </Grid>
+                  <Grid item xs={12} md={6}>
+                    <Tooltip title="When enabled, the agent will know the current date. This helps with time-sensitive tasks and prevents the agent from thinking past dates are in the future." arrow>
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={formData.inject_date ?? true}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              handleInputChange('inject_date', !(formData.inject_date ?? true));
+                            }}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                            }}
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                            }}
+                            onTouchStart={(e) => {
+                              e.stopPropagation();
+                            }}
+                          />
+                        }
+                        label="Inject Current Date"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                        }}
+                      />
+                    </Tooltip>
+                  </Grid>
+                  {(formData.inject_date ?? true) && (
+                    <Grid item xs={12} md={6}>
+                      <TextField
+                        fullWidth
+                        label="Date Format (Optional)"
+                        value={formData.date_format || ''}
+                        onChange={(e) => handleInputChange('date_format', e.target.value || undefined)}
+                        placeholder="%B %d, %Y"
+                        helperText="Custom date format (e.g., %B %d, %Y for 'February 05, 2026'). Leave empty for ISO format."
+                        size="small"
+                      />
+                    </Grid>
+                  )}
+                </Grid>
+              </AccordionDetails>
+            </Accordion>
+
+            {/* Memory Configuration - NEW SECTION */}
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography>Memory Configuration</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Grid container spacing={2}>
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                      Memory provides agents with the ability to remember past interactions and context
+                    </Typography>
+                  </Grid>
+                  
+                  {/* Memory Embedding Provider */}
+                  <Grid item xs={12} md={6}>
+                    <FormControl fullWidth disabled={!formData.memory}>
+                      <InputLabel>Embedding Provider</InputLabel>
+                      <Select
+                        value={formData.embedder_config?.provider || 'databricks'}
+                        onChange={(e) => {
+                          const currentConfig = formData.embedder_config || {};
+                          const newProvider = e.target.value;
+                          
+                          // Set default model based on provider
+                          let defaultModel = 'text-embedding-3-small';
+                          if (newProvider === 'databricks') {
+                            defaultModel = 'databricks-gte-large-en';
+                          } else if (newProvider === 'ollama') {
+                            defaultModel = 'nomic-embed-text';
+                          } else if (newProvider === 'google') {
+                            defaultModel = 'text-embedding-004';
+                          }
+                          
+                          handleInputChange('embedder_config', {
+                            ...currentConfig,
+                            provider: newProvider,
+                            config: {
+                              ...((currentConfig as { config?: Record<string, unknown> }).config || {}),
+                              model: defaultModel
+                            }
+                          });
+                        }}
+                        label="Embedding Provider"
+                      >
+                        <MenuItem value="databricks">Databricks (Default)</MenuItem>
+                        <MenuItem value="openai">OpenAI</MenuItem>
+                        <MenuItem value="ollama">Ollama</MenuItem>
+                        <MenuItem value="google">Google AI</MenuItem>
+                        <MenuItem value="azure">Azure OpenAI</MenuItem>
+                        <MenuItem value="vertex">Vertex AI</MenuItem>
+                        <MenuItem value="cohere">Cohere</MenuItem>
+                        <MenuItem value="voyage">VoyageAI</MenuItem>
+                        <MenuItem value="huggingface">HuggingFace</MenuItem>
+                        <MenuItem value="watson">Watson</MenuItem>
+                        <MenuItem value="bedrock">Amazon Bedrock</MenuItem>
+                      </Select>
+                    </FormControl>
+                  </Grid>
+
+                  {/* Embedding Model */}
+                  <Grid item xs={12} md={6}>
+                    <TextField
+                      fullWidth
+                      label="Embedding Model"
+                      value={(formData.embedder_config?.config as Record<string, unknown>)?.model || 'databricks-gte-large-en'}
+                      onChange={(e) => {
+                        const currentConfig = formData.embedder_config || { provider: 'databricks', config: { model: 'databricks-gte-large-en' } };
+                        const currentInnerConfig = currentConfig.config || {};
+                        handleInputChange('embedder_config', {
+                          ...currentConfig,
+                          config: {
+                            ...currentInnerConfig,
+                            model: e.target.value
+                          }
+                        });
+                      }}
+                      disabled={!formData.memory}
+                      helperText="Model to use for text embeddings (e.g., databricks-gte-large-en for Databricks, text-embedding-3-small for OpenAI)"
+                    />
+                  </Grid>
+
+                  {/* Ollama server URL — backend falls back to OLLAMA_API_BASE when empty */}
+                  {formData.embedder_config?.provider === 'ollama' && (
+                    <Grid item xs={12} md={6}>
+                      <TextField
+                        fullWidth
+                        label="Ollama URL"
+                        value={(formData.embedder_config?.config as Record<string, unknown>)?.url || ''}
+                        onChange={(e) => {
+                          const currentConfig = formData.embedder_config || { provider: 'ollama', config: { model: 'nomic-embed-text' } };
+                          const currentInnerConfig = currentConfig.config || {};
+                          handleInputChange('embedder_config', {
+                            ...currentConfig,
+                            config: {
+                              ...currentInnerConfig,
+                              url: e.target.value
+                            }
+                          });
+                        }}
+                        disabled={!formData.memory}
+                        placeholder="http://localhost:11434"
+                        helperText="Ollama server for embeddings; leave empty to use the backend's OLLAMA_API_BASE"
+                      />
+                    </Grid>
+                  )}
+
+                  {/* Memory Storage Backend Info.
+                      The per-type breakdown that used to sit here (Short-Term /
+                      Long-Term / Entity) described the LEGACY architecture and was
+                      removed: memory is now a single unified store behind one
+                      StorageBackend (see backend services/memory/backend_factory.py),
+                      so naming three types described something that no longer
+                      exists. The "Databricks Vector Search" backend label went with
+                      it — that memory backend was retired and a `databricks` memory
+                      config now degrades to the local store. Vector Search itself is
+                      still used, but for knowledge and documentation, not memory. */}
+                  <Grid item xs={12}>
+                    <Divider sx={{ my: 2 }} />
+                    <Alert severity="info" sx={{ mt: 2 }}>
+                      <Typography variant="body2">
+                        Memory storage is configured globally in the Configuration
+                        settings, and shared by every agent.
+                      </Typography>
+                    </Alert>
+                  </Grid>
+                </Grid>
+              </AccordionDetails>
+            </Accordion>
+
+            {/* TODO: Re-enable code execution mode in the future */}
+            {/* Code Execution Mode */}
+            {/* <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography>Code Execution Mode</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} md={6}>
+                    <FormControl fullWidth>
+                      <InputLabel>Code Execution Mode</InputLabel>
+                      <Select
+                        value={formData.code_execution_mode}
+                        onChange={(e) => handleInputChange('code_execution_mode', e.target.value)}
+                        label="Code Execution Mode"
+                        disabled={!formData.allow_code_execution}
+                      >
+                        <MenuItem key="safe-mode" value="safe">Safe (Docker)</MenuItem>
+                        <MenuItem key="unsafe-mode" value="unsafe">Unsafe (Direct)</MenuItem>
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                </Grid>
+              </AccordionDetails>
+            </Accordion> */}
+          </Box>
+        </Box>
+
+        <Box 
+          sx={{ 
+            display: 'flex', 
+            gap: 2, 
+            justifyContent: 'flex-end', 
+            p: 2,
+            backgroundColor: 'white',
+            borderTop: '1px solid rgba(0, 0, 0, 0.12)',
+            position: 'static',
+            width: '100%',
+            zIndex: 1100
+          }}
+        >
+          {onCancel && (
+            <Button onClick={onCancel} variant="outlined">
+              Cancel
+            </Button>
+          )}
+          <Button 
+            onClick={handleSubmit} 
+            variant="contained" 
+            color="primary"
+          >
+            Save
+          </Button>
+        </Box>
+      </Card>
+
+      {/* Goal Dialog */}
+      <Dialog 
+        open={expandedGoal} 
+        onClose={handleCloseGoalDialog}
+        fullWidth
+        maxWidth="md"
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            Agent Goal
+            <IconButton onClick={handleCloseGoalDialog}>
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            fullWidth
+            multiline
+            rows={15}
+            value={formData.goal}
+            onChange={(e) => handleInputChange('goal', e.target.value)}
+            variant="outlined"
+            sx={{ mt: 2 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseGoalDialog} variant="contained">
+            Done
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Backstory Dialog */}
+      <Dialog 
+        open={expandedBackstory} 
+        onClose={handleCloseBackstoryDialog}
+        fullWidth
+        maxWidth="md"
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            Agent Backstory
+            <IconButton onClick={handleCloseBackstoryDialog}>
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            fullWidth
+            multiline
+            rows={15}
+            value={formData.backstory}
+            onChange={(e) => handleInputChange('backstory', e.target.value)}
+            variant="outlined"
+            sx={{ mt: 2 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseBackstoryDialog} variant="contained">
+            Done
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* System Template Dialog */}
+      <Dialog 
+        open={expandedSystemTemplate} 
+        onClose={handleCloseSystemTemplateDialog}
+        fullWidth
+        maxWidth="md"
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            System Template
+            <IconButton onClick={handleCloseSystemTemplateDialog}>
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            fullWidth
+            multiline
+            rows={15}
+            value={formData.system_template || ''}
+            onChange={(e) => handleInputChange('system_template', e.target.value)}
+            variant="outlined"
+            sx={{ mt: 2 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseSystemTemplateDialog} variant="contained">
+            Done
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Prompt Template Dialog */}
+      <Dialog 
+        open={expandedPromptTemplate} 
+        onClose={handleClosePromptTemplateDialog}
+        fullWidth
+        maxWidth="md"
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            Prompt Template
+            <IconButton onClick={handleClosePromptTemplateDialog}>
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            fullWidth
+            multiline
+            rows={15}
+            value={formData.prompt_template || ''}
+            onChange={(e) => handleInputChange('prompt_template', e.target.value)}
+            variant="outlined"
+            sx={{ mt: 2 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleClosePromptTemplateDialog} variant="contained">
+            Done
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Response Template Dialog */}
+      <Dialog 
+        open={expandedResponseTemplate} 
+        onClose={handleCloseResponseTemplateDialog}
+        fullWidth
+        maxWidth="md"
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            Response Template
+            <IconButton onClick={handleCloseResponseTemplateDialog}>
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            fullWidth
+            multiline
+            rows={15}
+            value={formData.response_template || ''}
+            onChange={(e) => handleInputChange('response_template', e.target.value)}
+            variant="outlined"
+            sx={{ mt: 2 }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseResponseTemplateDialog} variant="contained">
+            Done
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Best Practices Dialog */}
+      <AgentBestPractices
+        open={showBestPractices}
+        onClose={() => setShowBestPractices(false)}
+      />
+
+    </>
+  );
+};
+
+export default AgentForm; 

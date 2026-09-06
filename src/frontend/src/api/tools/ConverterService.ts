@@ -3,7 +3,7 @@
  * API service for measure conversion operations
  */
 
-import { apiClient } from '../../config/api/ApiConfig';
+import { apiClient } from '../../shared/api/client';
 import type {
   ConversionHistory,
   ConversionHistoryCreate,

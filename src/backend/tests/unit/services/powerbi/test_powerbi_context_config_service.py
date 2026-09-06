@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import HTTPException
+from src.core.exceptions import KasalError
 
 from src.schemas.powerbi_context_config import (
     PowerBIBusinessMappingCreate,
@@ -139,7 +139,7 @@ class TestCreateBusinessMapping:
             semantic_model_id="m1",
         )
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await service.create_business_mapping("m1", data)
 
         assert exc_info.value.status_code == 409
@@ -154,7 +154,7 @@ class TestCreateBusinessMapping:
             semantic_model_id="m1",
         )
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await service.create_business_mapping("m1", data)
 
         assert exc_info.value.status_code == 500
@@ -179,7 +179,7 @@ class TestUpdateBusinessMapping:
 
         data = PowerBIBusinessMappingUpdate(dax_expression="[X]")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await service.update_business_mapping(99, data)
 
         assert exc_info.value.status_code == 404
@@ -191,7 +191,7 @@ class TestUpdateBusinessMapping:
 
         data = PowerBIBusinessMappingUpdate(dax_expression="[X]")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await service.update_business_mapping(1, data)
 
         assert exc_info.value.status_code == 404
@@ -212,7 +212,7 @@ class TestDeleteBusinessMapping:
     async def test_raises_404_when_not_found(self, service, mock_business_repo):
         mock_business_repo.get.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await service.delete_business_mapping(99)
 
         assert exc_info.value.status_code == 404
@@ -225,7 +225,7 @@ class TestDeleteBusinessMapping:
         mock_business_repo.get.return_value = existing
         mock_business_repo.delete.return_value = False
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await service.delete_business_mapping(1)
 
         assert exc_info.value.status_code == 404
@@ -283,7 +283,7 @@ class TestCreateFieldSynonym:
             semantic_model_id="m1",
         )
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await service.create_field_synonym("m1", data)
 
         assert exc_info.value.status_code == 409
@@ -298,7 +298,7 @@ class TestCreateFieldSynonym:
             semantic_model_id="m1",
         )
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await service.create_field_synonym("m1", data)
 
         assert exc_info.value.status_code == 500
@@ -323,7 +323,7 @@ class TestUpdateFieldSynonym:
 
         data = PowerBIFieldSynonymUpdate(synonyms=["x"])
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await service.update_field_synonym(99, data)
 
         assert exc_info.value.status_code == 404
@@ -344,7 +344,7 @@ class TestDeleteFieldSynonym:
     async def test_raises_404_when_not_found(self, service, mock_synonym_repo):
         mock_synonym_repo.get.return_value = None
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await service.delete_field_synonym(99)
 
         assert exc_info.value.status_code == 404
@@ -427,7 +427,7 @@ class TestGetContextConfigDict:
     ):
         mock_business_repo.get_as_dict.side_effect = RuntimeError("boom")
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await service.get_context_config_dict("m1")
 
         assert exc_info.value.status_code == 500

@@ -18,7 +18,7 @@ from typing import Annotated, Any, Dict
 
 from fastapi import APIRouter, Body, Depends, status
 
-from src.core.dependencies import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.core.permissions import check_role_in_context, get_effective_role
 from src.schemas.a2a_agent import (

@@ -4,7 +4,7 @@
  * This service provides API methods for managing HITL approvals and webhooks.
  */
 
-import { apiClient } from '../../config/api/ApiConfig';
+import { apiClient } from '../../shared/api/client';
 
 // =============================================================================
 // Enums

@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Request
 
-from src.core.dependencies import GroupContextDep
+from src.dependencies.providers import GroupContextDep
 from src.core.exceptions import ForbiddenError, KasalError, NotFoundError
 from src.core.permissions import is_workspace_admin
 from src.schemas.memory_backend import (

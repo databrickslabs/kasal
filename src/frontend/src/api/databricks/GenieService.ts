@@ -5,7 +5,7 @@
  * Handles fetching Genie spaces and related operations.
  */
 
-import { apiClient } from '../../config/api/ApiConfig';
+import { apiClient } from '../../shared/api/client';
 
 /**
  * Represents a Genie space

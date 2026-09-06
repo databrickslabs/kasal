@@ -16,7 +16,7 @@ import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 vi.mock('../../utils/sseTransport', () => ({ SSE_ENABLED: false }));
 
 const apiGet = vi.fn();
-vi.mock('../../config/api/ApiConfig', () => ({
+vi.mock('../../shared/api/client', () => ({
   apiClient: { get: (...args: unknown[]) => apiGet(...args) },
 }));
 

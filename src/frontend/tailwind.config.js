@@ -1,5 +1,5 @@
 /**
- * Tailwind is used ONLY by the embedded Chat workspace (src/components/ChatMode)
+ * Tailwind is used ONLY by the embedded Chat workspace (src/features/chat)
  * and the shared A2UI renderer it hosts (src/shared/a2ui — the SAME renderer the
  * exported Databricks app bundles).
  *
@@ -24,7 +24,7 @@ const a2 = (name) => `hsl(var(--a2-${name}) / <alpha-value>)`;
 
 export default {
   content: [
-    './src/components/ChatMode/**/*.{js,ts,jsx,tsx}',
+    './src/features/chat/**/*.{js,ts,jsx,tsx}',
     './src/shared/a2ui/**/*.{js,ts,jsx,tsx}',
   ],
   darkMode: ['class', '[data-theme="dark"]'],

@@ -43,53 +43,12 @@ def _make_user(email="user@example.com", is_system_admin=False, role="regular"):
 # ============================================================================
 
 
-class TestCreateUserFromForwardedEmail:
-
-    @pytest.mark.asyncio
-    async def test_handles_exception_and_returns_none(self):
-        from src.dependencies.admin_auth import _create_user_from_forwarded_email
-
-        mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(side_effect=Exception("DB error"))
-        mock_session.rollback = AsyncMock()
-
-        result = await _create_user_from_forwarded_email(
-            mock_session, "bad@example.com"
-        )
-
-        assert result is None
-        assert mock_session.rollback.called
-
-    @pytest.mark.asyncio
-    async def test_returns_existing_user_when_found(self):
-        """Test that existing user is returned directly with updated last_login."""
-        from src.dependencies.admin_auth import _create_user_from_forwarded_email
-        from src.models.user import User
-
-        # Use a real User instance (no hashed_password needed since it's not in the model)
-        mock_session = AsyncMock()
-        existing = MagicMock(spec=User)
-        existing.email = "exist@example.com"
-
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.first.return_value = existing
-        mock_session.execute = AsyncMock(return_value=mock_result)
-        mock_session.commit = AsyncMock()
-
-        result = await _create_user_from_forwarded_email(
-            mock_session, "exist@example.com"
-        )
-
-        assert result is existing
-
-
 # ============================================================================
 # get_current_user_from_email
 # ============================================================================
 
 
 class TestGetCurrentUserFromEmail:
-
     @pytest.mark.asyncio
     async def test_returns_none_when_no_email(self):
         from src.dependencies.admin_auth import get_current_user_from_email
@@ -122,7 +81,6 @@ class TestGetCurrentUserFromEmail:
 
 
 class TestRequireAuthenticatedUser:
-
     @pytest.mark.asyncio
     async def test_raises_401_when_no_email(self):
         from src.dependencies.admin_auth import require_authenticated_user
@@ -201,7 +159,6 @@ class TestRequireAuthenticatedUser:
 
 
 class TestGetAuthenticatedUser:
-
     @pytest.mark.asyncio
     async def test_delegates_to_require_authenticated_user(self):
         from src.dependencies.admin_auth import get_authenticated_user
@@ -225,7 +182,6 @@ class TestGetAuthenticatedUser:
 
 
 class TestGetAdminUser:
-
     @pytest.mark.asyncio
     async def test_system_admin_passes(self):
         from src.dependencies.admin_auth import get_admin_user
@@ -449,129 +405,12 @@ def _make_session():
     return session
 
 
-class TestCreateUserFromForwardedEmailBranches:
-
-    @pytest.mark.asyncio
-    async def test_create_user_existing_user(self):
-        """Test returning existing user from X-Forwarded-Email."""
-        from src.dependencies.admin_auth import _create_user_from_forwarded_email
-
-        session = _make_session()
-        existing_user = _make_user("test@example.com")
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.first.return_value = existing_user
-        session.execute = AsyncMock(return_value=mock_result)
-
-        result = await _create_user_from_forwarded_email(session, "test@example.com")
-        assert result is existing_user
-        session.commit.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_create_user_new_unique_username(self):
-        """Test creating path when user doesn't exist.
-
-        Note: select(User) fails with a Mock User, so the exception handler
-        is triggered returning None. This test verifies the code path runs.
-        """
-        from src.dependencies.admin_auth import _create_user_from_forwarded_email
-
-        session = _make_session()
-        mock_result_none = MagicMock()
-        mock_result_none.scalars.return_value.first.return_value = None
-        session.execute = AsyncMock(return_value=mock_result_none)
-        new_user = _make_user("newuser@example.com")
-        session.refresh = AsyncMock(side_effect=lambda u: None)
-
-        import src.dependencies.admin_auth as admin_auth_mod
-
-        orig_user = admin_auth_mod.User
-        admin_auth_mod.User = MagicMock(return_value=new_user)
-        try:
-            result = await _create_user_from_forwarded_email(
-                session, "newuser@example.com"
-            )
-            # Either succeeds or returns None (select(User) may fail with mock)
-            assert result is new_user or result is None
-        finally:
-            admin_auth_mod.User = orig_user
-
-    @pytest.mark.asyncio
-    async def test_create_user_duplicate_username(self):
-        """Test creating user when username already exists."""
-        from src.dependencies.admin_auth import _create_user_from_forwarded_email
-
-        session = _make_session()
-        none_result = MagicMock()
-        none_result.scalars.return_value.first.return_value = None
-
-        user_with_same_username = MagicMock()
-        username_conflict_result = MagicMock()
-        username_conflict_result.scalars.return_value.first.return_value = (
-            user_with_same_username
-        )
-
-        session.execute = AsyncMock(side_effect=[none_result, username_conflict_result])
-        new_user = _make_user("newuser@mycompany.com")
-        session.refresh = AsyncMock(side_effect=lambda u: None)
-
-        import src.dependencies.admin_auth as admin_auth_mod
-
-        orig_user = admin_auth_mod.User
-        admin_auth_mod.User = MagicMock(return_value=new_user)
-        try:
-            result = await _create_user_from_forwarded_email(
-                session, "newuser@mycompany.com"
-            )
-            assert result is new_user or result is None
-        finally:
-            admin_auth_mod.User = orig_user
-
-    @pytest.mark.asyncio
-    async def test_create_user_admin_email_in_dev(self):
-        """Test admin email detection in development env."""
-        from src.dependencies.admin_auth import _create_user_from_forwarded_email
-
-        session = _make_session()
-        none_result = MagicMock()
-        none_result.scalars.return_value.first.return_value = None
-        session.execute = AsyncMock(return_value=none_result)
-
-        new_user = _make_user("admin@localhost")
-        session.refresh = AsyncMock(side_effect=lambda u: None)
-
-        import src.dependencies.admin_auth as admin_auth_mod
-
-        orig_user = admin_auth_mod.User
-        admin_auth_mod.User = MagicMock(return_value=new_user)
-        try:
-            with patch.dict(os.environ, {"ENVIRONMENT": "development"}):
-                result = await _create_user_from_forwarded_email(
-                    session, "admin@localhost"
-                )
-            assert result is new_user or result is None
-        finally:
-            admin_auth_mod.User = orig_user
-
-    @pytest.mark.asyncio
-    async def test_create_user_exception_returns_none(self):
-        """Test exception handling returns None."""
-        from src.dependencies.admin_auth import _create_user_from_forwarded_email
-
-        session = _make_session()
-        session.execute = AsyncMock(side_effect=Exception("DB error"))
-
-        result = await _create_user_from_forwarded_email(session, "user@example.com")
-        assert result is None
-        session.rollback.assert_called_once()
-
-
 # ============================================================================
 # get_current_user_from_email — additional branch coverage
 # ============================================================================
 
 
 class TestGetCurrentUserFromEmailBranches:
-
     @pytest.mark.asyncio
     async def test_get_current_user_no_email(self):
         """Test no user returned when no email in context."""
@@ -611,7 +450,6 @@ class TestGetCurrentUserFromEmailBranches:
 
 
 class TestRequireAuthenticatedUserBranches:
-
     @pytest.mark.asyncio
     async def test_require_auth_no_email_raises_401(self):
         """Test 401 raised when no email."""
@@ -688,7 +526,6 @@ class TestRequireAuthenticatedUserBranches:
 
 
 class TestGetAdminUserRoleChecks:
-
     @pytest.mark.asyncio
     async def test_get_admin_user_system_admin(self):
         """Test system admin has access."""

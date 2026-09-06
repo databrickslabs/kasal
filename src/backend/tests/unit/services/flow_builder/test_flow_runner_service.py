@@ -17,7 +17,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
-from fastapi import HTTPException
+from src.core.exceptions import KasalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.schemas.flow_execution import FlowExecutionStatus
@@ -320,7 +320,7 @@ class TestRunFlow:
         flow_id = uuid.uuid4()
         service.flow_repo.get = AsyncMock(return_value=None)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await service.run_flow(flow_id=flow_id, job_id="job-123", config={})
 
         assert exc_info.value.status_code == 404
@@ -328,7 +328,7 @@ class TestRunFlow:
     @pytest.mark.asyncio
     async def test_run_flow_invalid_uuid(self, service):
         """Test handling of invalid UUID format."""
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await service.run_flow(
                 flow_id="not-a-valid-uuid", job_id="job-123", config={}
             )
@@ -338,7 +338,7 @@ class TestRunFlow:
     @pytest.mark.asyncio
     async def test_run_flow_dynamic_no_nodes(self, service):
         """Test dynamic flow with no nodes raises error."""
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await service.run_flow(flow_id=None, job_id="job-123", config={"nodes": []})
 
         assert exc_info.value.status_code == 400

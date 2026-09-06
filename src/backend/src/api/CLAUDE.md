@@ -25,7 +25,7 @@ Router → Service → Repository → DB
 
   AgentServiceDep = Annotated[AgentService, Depends(get_agent_service)]
   ```
-- Inject `session: SessionDep` (from `src.core.dependencies`) — this is
+- Inject `session: SessionDep` (from `src.dependencies.providers`) — this is
   `get_smart_db_session`, which routes SQLite/PostgreSQL/Lakebase automatically.
   Do not import engines or session factories directly.
 - Use `response_model=<Schema>` and explicit `status_code=status.HTTP_*`. Return

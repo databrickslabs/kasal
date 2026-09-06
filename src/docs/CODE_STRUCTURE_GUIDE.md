@@ -1,8 +1,7 @@
 # Code structure
 
 Use this map to find the owner of a change. Backend domain packages and the
-frontend's existing component folders remain in place; frontend features are
-being extracted incrementally.
+frontend feature packages identify the owner of each view and its supporting code.
 
 ## Repository and build ownership
 
@@ -37,6 +36,7 @@ Paths in this section are relative to `src/backend/src/`.
 | --- | --- |
 | `main.py`, `api/__init__.py` | Application lifecycle, middleware and router composition |
 | `api/` | HTTP routing, request validation and response translation |
+| `dependencies/providers.py`, `dependencies/admin_auth.py` | Request/session injection and authentication checks; `core/dependencies.py` retains compatibility imports |
 | `services/` | Domain operations and orchestration, grouped by domain |
 | `repositories/` | Database and external storage access |
 | `models/`, `schemas/` | SQLAlchemy entities and Pydantic contracts |
@@ -60,6 +60,9 @@ Selected execution and integration entry points:
 - `services/execution/service.py`: execution lifecycle facade.
 - `services/execution/engine_service.py`: engine dispatch.
 - `services/execution/finalization.py`: terminal outcomes and persistence retries.
+- `services/execution/serialization.py`, `flow_name_inputs.py`: payload serialization and flow naming inputs behind the execution facade.
+- `services/execution/logs/file_ingestion.py`: shared crew/flow file-log persistence; each executor retains its own failure policy.
+- `services/groups/forwarded_identity.py`: fallback identity provisioning through the user repository, with transaction scope owned by the service.
 - `services/execution/runtime/`: Kasal agent runtime.
 - `services/execution/harnesses/`: runtime bindings, including CrewAI.
 - `services/execution/kernel/`: shared agent/task construction and tooling.
@@ -79,9 +82,12 @@ Selected execution and integration entry points:
 ## Boundaries and transactions
 
 Follow routers → services → repositories → models. Keep request assembly at
-the API boundary, orchestration in services and I/O in repositories. Existing
-HTTP-coupled services still need gradual cleanup; translate domain errors in
-routers when establishing new reusable service boundaries.
+the API boundary, orchestration in services and I/O in repositories. Services
+raise the application errors in `core/exceptions.py`; the global handler in
+`main.py` translates their status, detail and headers into HTTP responses.
+Catch `KasalError` before broad exception recovery when access failures must
+propagate, especially during checkpoint resume. Exported app templates have
+their own HTTP boundary and do not depend on the main application's services.
 
 Services own transaction scope and use the injected session inside a request.
 Background work uses `routed_scoped_session()`. Repositories neither acquire
@@ -118,14 +124,24 @@ Paths in this section are relative to `src/frontend/src/`.
 
 | Path | Responsibility |
 | --- | --- |
-| `components/` | Existing views, forms and UI composition |
-| `components/ChatMode/` | Chat workspace, state, hooks and views |
+| `app/App.tsx` | Routes, lazy screen imports, providers and application startup |
+| `app/workspace/` | Cross-feature workspace layout, tabs, panels and dialogs |
+| `app/connections/`, `app/approvals/`, `app/notifications/` | Application-wide streaming, approval listening and error notification policy |
+| `features/chat/` | Chat workspace, state, hooks and views |
 | `features/chat/persistence/` | Server session storage, queued writes, message mapping and legacy IndexedDB migration |
 | `features/chat/api/`, `features/chat/types/` | Shared chat HTTP client and chat/dispatcher contracts |
 | `features/executions/trace/lib/` | UI-independent trace processing, indexing and batching |
 | `features/executions/trace/hooks/` | Trace fetching and React view state |
 | `features/executions/trace/components/` | Trace event icons |
 | `features/workflow/canvas/lib/` | Canvas layout calculations and graph indexing |
+| `features/workflow/canvas/components/` | Crew/flow canvases, node/edge registry and controls |
+| `features/workflow/{agents,tasks,crews,flows,planning,scheduling,export}/` | Workflow editing, selection and export views |
+| `features/workflow/assistant/` | Workflow conversation views, contracts, hooks and message state |
+| `features/executions/`, `features/approvals/`, `features/triggers/` | Run history/results, approvals and event triggers |
+| `features/configuration/`, `features/tools/`, `features/memory/`, `features/groups/` | Domain settings, tool configuration selectors, memory and workspace selection |
+| `features/conversion/`, `features/help/` | Conversion tools, documentation, tutorials and best practices |
+| `shared/api/` | Single Axios transport, workspace-header recovery and error publication |
+| `shared/ui/` | Domain-independent presentation shared across features |
 | `shared/lib/collections.ts` | Generic first-occurrence indexing and deduplication |
 | `types/ui/layout.ts` | Application-wide workspace panel/layout state contract |
 | `api/` | API clients grouped by domain |
@@ -134,14 +150,21 @@ Paths in this section are relative to `src/frontend/src/`.
 | `shared/` | Shared libraries and A2UI rendering |
 | `utils/`, `theme/` | Existing utilities and app theme |
 
-Preview parsing belongs to `components/ChatMode/utils/preview.ts`, with its
-contracts in `components/ChatMode/types/preview.ts`. Skill selection lookup is
+Preview parsing belongs to `features/chat/utils/preview.ts`, with its
+contracts in `features/chat/types/preview.ts`. Skill selection lookup is
 independent of state; reconciliation actions live under the chat store folder.
 API clients, contracts and pure processing libraries must not import UI views.
 The flat ESLint configuration enforces the boundaries already established.
 
-`config/api/ApiConfig.ts` reads `VITE_API_URL`, defaulting to
+`shared/api/client.ts` reads `VITE_API_URL`, defaulting to
 `http://localhost:8000/api/v1` in development and `/api/v1` in production.
+`config/api/ApiConfig.ts` is a compatibility re-export. App startup registers the
+deduplicated database-outage toast; the transport does not import UI libraries.
+
+Crew representations are separate: `types/workflow/crew.ts` holds API contracts,
+`crewPayload.ts` serialized inputs, `crewSummary.ts` execution summaries and
+`canvas.ts` canvas data. UI props live with the canvas and crew features.
+
 Chat view models retain `Date` values and camelCase fields; persistence wire
 contracts keep backend timestamp strings and snake_case fields. `messageCodec.ts`
 owns their conversion. `legacySessionDb.ts` exists only for migration; server

@@ -4,7 +4,7 @@ import logging
 
 from fastapi import APIRouter, File, Form, Response, UploadFile
 
-from src.core.dependencies import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import BadRequestError, NotFoundError
 from src.schemas.chat_asset import ChatAssetOut
 from src.services.assets.service import (

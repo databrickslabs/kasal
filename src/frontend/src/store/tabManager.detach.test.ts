@@ -38,7 +38,7 @@ describe('WorkflowChat - generation detaches tab from saved crew (wiring)', () =
     const { readFileSync } = await import('fs');
     const { resolve } = await import('path');
     const src = readFileSync(
-      resolve(__dirname, '../components/Chat/WorkflowChatRefactored.tsx'),
+      resolve(__dirname, '../features/workflow/assistant/WorkflowChat.tsx'),
       'utf-8'
     );
     expect(src).toContain('clearTabCrewInfo(activeTabId)');

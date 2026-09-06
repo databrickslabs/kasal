@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import { apiClient } from '../config/api/ApiConfig';
+import { apiClient } from '../shared/api/client';
 
 interface UserInfo {
   id: string;

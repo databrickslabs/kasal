@@ -98,7 +98,7 @@ class TrackableMockEventSource extends MockEventSource {
 }
 
 // Mock config
-vi.mock('../../config/api/ApiConfig', () => ({
+vi.mock('../../shared/api/client', () => ({
   config: {
     apiUrl: 'http://localhost:8000/api/v1',
   },

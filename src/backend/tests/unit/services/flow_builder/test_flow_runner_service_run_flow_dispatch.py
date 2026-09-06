@@ -12,7 +12,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 
 import pytest
-from fastapi import HTTPException
+from src.core.exceptions import KasalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.schemas.flow_execution import FlowExecutionStatus
@@ -173,7 +173,7 @@ class TestRunFlow:
     @pytest.mark.asyncio
     async def test_run_flow_invalid_uuid_string(self):
         svc = self._service_with_mocks()
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await svc.run_flow(flow_id="not-valid-uuid", job_id="job-1")
         assert exc_info.value.status_code == 400
 
@@ -184,7 +184,7 @@ class TestRunFlow:
         fid = uuid.uuid4()
         svc.flow_repo.get = AsyncMock(return_value=None)
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await svc.run_flow(
                 flow_id=None,
                 job_id="job-2",
@@ -198,7 +198,7 @@ class TestRunFlow:
         """flow_id in config is invalid UUID – should be ignored (warning logged)."""
         svc = self._service_with_mocks()
         # No valid nodes and no valid flow_id → 400
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await svc.run_flow(
                 flow_id=None,
                 job_id="job-3",
@@ -211,7 +211,7 @@ class TestRunFlow:
         svc = self._service_with_mocks()
         svc.flow_repo.get = AsyncMock(return_value=None)
         fid = uuid.uuid4()
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await svc.run_flow(flow_id=fid, job_id="job-4", config={})
         assert exc_info.value.status_code == 404
 
@@ -229,7 +229,7 @@ class TestRunFlow:
         group_ctx.group_ids = ["group-A"]
 
         fid = uuid.uuid4()
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await svc.run_flow(
                 flow_id=fid,
                 job_id="job-5",
@@ -242,7 +242,7 @@ class TestRunFlow:
         svc = self._service_with_mocks()
         svc.flow_repo.get = AsyncMock(side_effect=RuntimeError("db error"))
         fid = uuid.uuid4()
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await svc.run_flow(flow_id=fid, job_id="job-6", config={})
         assert exc_info.value.status_code == 500
 
@@ -260,7 +260,7 @@ class TestRunFlow:
             MockRepo.return_value = repo_instance
 
             fid = uuid.uuid4()
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(KasalError) as exc_info:
                 await svc.run_flow(
                     flow_id=None,
                     job_id="job-7",
@@ -416,7 +416,7 @@ class TestRunFlow:
         svc.flow_execution_service.create_execution = AsyncMock(
             side_effect=RuntimeError("boom")
         )
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(KasalError) as exc_info:
             await svc.run_flow(
                 flow_id=None,
                 job_id="job-13",

@@ -1,8 +1,8 @@
 import { vi, beforeEach, describe, it, expect } from 'vitest';
 import { ModelService } from './ModelService';
-import { apiClient } from '../../config/api/ApiConfig';
+import { apiClient } from '../../shared/api/client';
 
-vi.mock('../../config/api/ApiConfig', () => ({
+vi.mock('../../shared/api/client', () => ({
   apiClient: {
     get: vi.fn(),
     post: vi.fn(),

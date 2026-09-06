@@ -1,5 +1,5 @@
-import { config } from '../../config/api/ApiConfig';
-import apiClient from '../../config/api/ApiConfig';
+import { config } from '../../shared/api/client';
+import apiClient from '../../shared/api/client';
 import { LLMLog } from '../../types/common';
 
 interface LogParams {

@@ -362,7 +362,7 @@ class TestCatalogMutationsAreSystemAdminOnly:
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
 
-        from src.core.dependencies import get_group_context, get_smart_db_session
+        from src.dependencies.providers import get_group_context, get_smart_db_session
         from tests.unit.api.conftest import register_exception_handlers
 
         app = FastAPI()

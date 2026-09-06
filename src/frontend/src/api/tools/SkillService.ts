@@ -1,4 +1,4 @@
-import { apiClient } from '../../config/api/ApiConfig';
+import { apiClient } from '../../shared/api/client';
 
 /**
  * Agent Skills — packaged procedural know-how an agent can load on demand.

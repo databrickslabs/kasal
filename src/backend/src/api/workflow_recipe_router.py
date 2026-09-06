@@ -15,7 +15,7 @@ from typing import Annotated, List
 
 from fastapi import APIRouter, Depends, Query, status
 
-from src.core.dependencies import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.core.permissions import check_role_in_context
 from src.schemas.workflow_recipe import (

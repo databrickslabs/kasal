@@ -3,8 +3,8 @@
 Kasal chat renders any assistant message that contains a fenced ` ```html ` (or
 ` ```svg `) block as a **live diagram** inside a sandboxed iframe, with a
 **Copy %md-sandbox cell** button that yields a Databricks `%md-sandbox` notebook
-cell (see `components/ChatMode/components/Chat/HtmlDiagramBlock.tsx` and
-`components/ChatMode/utils/mdSandboxDiagram.ts`).
+cell (see `features/chat/components/Chat/HtmlDiagramBlock.tsx` and
+`features/chat/utils/mdSandboxDiagram.ts`).
 
 Rendering is automatic — the trigger is purely the ` ```html ` / ` ```svg `
 fence in the assistant text. What makes an agent *produce* that fence is its

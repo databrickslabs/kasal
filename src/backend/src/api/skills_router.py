@@ -13,7 +13,7 @@ from typing import Annotated, Any, Dict, Optional, Set
 from fastapi import APIRouter, Body, Depends, File, Query, UploadFile, status
 from fastapi.responses import Response
 
-from src.core.dependencies import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.core.permissions import check_role_in_context
 from src.schemas.skill import (

@@ -8,7 +8,7 @@ including retrieving and managing engine configurations.
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import HTTPException
+from src.core.exceptions import BadRequestError
 
 from src.core.logger import LoggerManager
 from src.models.engine_config import EngineConfig
@@ -371,7 +371,7 @@ class EngineConfigService:
         resolved = coerce(stored)
         if resolved is None:
             logger.warning(
-                "Configured harness %r is not a known harness; " "falling back to %s",
+                "Configured harness %r is not a known harness; falling back to %s",
                 stored,
                 DEFAULT_HARNESS.value,
             )
@@ -394,17 +394,15 @@ class EngineConfigService:
 
         resolved = coerce(harness)
         if resolved is None:
-            raise HTTPException(
-                status_code=400,
+            raise BadRequestError(
                 detail=f"Unknown harness: {harness!r}",
             )
         try:
             binding_for(resolved)
         except HarnessUnavailableError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            raise BadRequestError(detail=str(e))
         except Exception as e:  # noqa: BLE001 — surface the real reason
-            raise HTTPException(
-                status_code=400,
+            raise BadRequestError(
                 detail=f"Harness {resolved.value!r} cannot run here: {e}",
             )
 

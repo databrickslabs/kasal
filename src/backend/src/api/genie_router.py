@@ -9,7 +9,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Request
 
-from src.core.dependencies import GroupContextDep
+from src.dependencies.providers import GroupContextDep
 from src.core.exceptions import KasalError, NotFoundError
 from src.schemas.genie import (
     GenieAuthConfig,

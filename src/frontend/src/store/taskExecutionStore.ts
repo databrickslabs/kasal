@@ -1,6 +1,6 @@
 import type { TaskStatus, TaskState } from '../types/execution/task';
 import { create } from 'zustand';
-import { apiClient } from '../config/api/ApiConfig';
+import { apiClient } from '../shared/api/client';
 import { extractTaskId, extractTaskName, mapEventToStatus } from '../utils/taskIdUtils';
 
 /**

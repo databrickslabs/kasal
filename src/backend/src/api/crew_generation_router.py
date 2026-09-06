@@ -11,7 +11,7 @@ import uuid
 
 from fastapi import APIRouter
 
-from src.core.dependencies import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import BadRequestError
 from src.schemas.crew import (
     CrewCreationResponse,

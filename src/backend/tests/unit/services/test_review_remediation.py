@@ -6,7 +6,7 @@ from types import SimpleNamespace as NS
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi import HTTPException
+from src.core.exceptions import KasalError
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from src.utils.user_context import GroupContext
@@ -173,7 +173,7 @@ async def test_resume_rejects_foreign_source_before_commit(source_id):
     runner._run_dynamic_flow = AsyncMock()
     with patch("src.services.execution.service.ExecutionService") as Service:
         Service.return_value.get_run_by_job_id = AsyncMock(return_value=victim)
-        with pytest.raises(HTTPException) as denied:
+        with pytest.raises(KasalError) as denied:
             await runner.run_flow(
                 None,
                 "new-job",
@@ -199,7 +199,7 @@ async def test_resume_rejects_foreign_requested_job_even_with_owned_source():
     runner.db = NS(commit=AsyncMock())
     with patch("src.services.execution.service.ExecutionService") as Service:
         Service.return_value.get_run_by_job_id = AsyncMock(side_effect=[own, foreign])
-        with pytest.raises(HTTPException):
+        with pytest.raises(KasalError):
             await runner.run_flow(
                 None,
                 "foreign-job",
@@ -221,7 +221,7 @@ async def test_checkpoint_loader_denies_foreign_or_unresolved_scope(owner, group
     from src.services.flow_builder.checkpoint_resume import load_resume_outputs
 
     service = NS(get_run_by_job_id=AsyncMock(return_value=NS(group_id=owner)))
-    with pytest.raises(HTTPException):
+    with pytest.raises(KasalError):
         await load_resume_outputs(
             "source", {"execution_history": service}, group_ids=groups
         )
@@ -268,7 +268,7 @@ async def test_public_flow_service_denies_foreign_source_before_engine(source_id
         ) as engine,
     ):
         Runs.return_value.get_run_by_job_id = AsyncMock(return_value=foreign)
-        with pytest.raises(HTTPException) as denied:
+        with pytest.raises(KasalError) as denied:
             await service.run_flow(
                 run_name="resume",
                 group_context=caller(),

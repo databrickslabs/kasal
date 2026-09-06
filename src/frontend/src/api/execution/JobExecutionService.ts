@@ -1,7 +1,7 @@
 import axios from 'axios';
-import { apiClient } from '../../config/api/ApiConfig';
+import { apiClient } from '../../shared/api/client';
 import { Node, Edge } from 'reactflow';
-import { AgentYaml, TaskYaml } from '../../types/workflow/crew';
+import { AgentYaml, TaskYaml } from '../../types/workflow/crewPayload';
 import { Task } from '../../types/workflow/task';
 import { JobResult } from '../../types/common';
 import { ModelService } from '../config/ModelService';

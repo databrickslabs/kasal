@@ -9,7 +9,7 @@ from typing import Any, Dict
 
 from fastapi import APIRouter
 
-from src.core.dependencies import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.dispatcher import DispatcherRequest, DispatcherResponse
 from src.services.chat.dispatcher import DEFAULT_DISPATCHER_MODEL, DispatcherService
 from src.services.tools.tool_service import ToolService

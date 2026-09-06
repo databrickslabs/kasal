@@ -20,7 +20,7 @@ from src.api.crews_router import router as crews_router
 from src.api.crews_router import (
     update_crew,
 )
-from src.core.dependencies import get_group_context
+from src.dependencies.providers import get_group_context
 from src.db.database_router import get_smart_db_session
 from src.schemas.crew import CrewCreate, CrewUpdate
 from src.utils.user_context import GroupContext

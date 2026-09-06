@@ -3,7 +3,7 @@ from typing import Annotated, Any, Dict, List
 
 from fastapi import APIRouter, Depends, status
 
-from src.core.dependencies import GroupContextDep, SessionDep
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import NotFoundError
 from src.models.template import PromptTemplate
 from src.schemas.template import (

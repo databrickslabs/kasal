@@ -1,4 +1,4 @@
-import { apiClient } from '../../config/api/ApiConfig';
+import { apiClient } from '../../shared/api/client';
 import { FlowResponse, Flow, FlowSaveData } from '../../types/workflow/flow';
 import { Node } from 'reactflow';
 import { v4 as uuidv4 } from 'uuid';

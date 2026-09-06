@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.sse_router import router
-from src.core.dependencies import get_group_context, get_smart_db_session
+from src.dependencies.providers import get_group_context, get_smart_db_session
 from src.core.sse_manager import SSEEvent, sse_manager
 
 

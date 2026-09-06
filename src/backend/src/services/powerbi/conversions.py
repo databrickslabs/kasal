@@ -9,8 +9,12 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import HTTPException, status
-
+from src.core.exceptions import (
+    BadRequestError,
+    ForbiddenError,
+    NotFoundError,
+    UnauthorizedError,
+)
 from src.repositories.conversion_repository import (
     ConversionHistoryRepository,
     ConversionJobRepository,
@@ -97,12 +101,11 @@ class ConverterService:
             Conversion history entry
 
         Raises:
-            HTTPException: If not found
+            NotFoundError: If not found
         """
         history = await self.history_repo.get(history_id)
         if not history:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+            raise NotFoundError(
                 detail=f"Conversion history {history_id} not found",
             )
         return ConversionHistoryResponse.model_validate(history)
@@ -121,12 +124,11 @@ class ConverterService:
             Updated conversion history
 
         Raises:
-            HTTPException: If not found
+            NotFoundError: If not found
         """
         history = await self.history_repo.get(history_id)
         if not history:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+            raise NotFoundError(
                 detail=f"Conversion history {history_id} not found",
             )
 
@@ -238,12 +240,11 @@ class ConverterService:
             Conversion job
 
         Raises:
-            HTTPException: If not found
+            NotFoundError: If not found
         """
         job = await self.job_repo.get(job_id)
         if not job:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+            raise NotFoundError(
                 detail=f"Conversion job {job_id} not found",
             )
         return ConversionJobResponse.model_validate(job)
@@ -262,12 +263,11 @@ class ConverterService:
             Updated conversion job
 
         Raises:
-            HTTPException: If not found
+            NotFoundError: If not found
         """
         job = await self.job_repo.get(job_id)
         if not job:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+            raise NotFoundError(
                 detail=f"Conversion job {job_id} not found",
             )
 
@@ -290,7 +290,7 @@ class ConverterService:
             Updated conversion job
 
         Raises:
-            HTTPException: If not found
+            NotFoundError: If not found
         """
         updated = await self.job_repo.update_status(
             job_id,
@@ -300,8 +300,7 @@ class ConverterService:
         )
 
         if not updated:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+            raise NotFoundError(
                 detail=f"Conversion job {job_id} not found",
             )
 
@@ -346,13 +345,12 @@ class ConverterService:
             Cancelled job
 
         Raises:
-            HTTPException: If not found or not cancellable
+            BadRequestError: If not found or not cancellable
         """
         cancelled = await self.job_repo.cancel_job(job_id)
 
         if not cancelled:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+            raise BadRequestError(
                 detail=f"Job {job_id} not found or cannot be cancelled",
             )
 
@@ -373,11 +371,11 @@ class ConverterService:
             Created configuration
 
         Raises:
-            HTTPException: If user not authenticated
+            UnauthorizedError: If user not authenticated
         """
         if not self.group_context or not self.group_context.group_email:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
+            raise UnauthorizedError(
+                headers={},
                 detail="Authentication required to save configurations",
             )
 
@@ -401,12 +399,11 @@ class ConverterService:
             Saved configuration
 
         Raises:
-            HTTPException: If not found
+            NotFoundError: If not found
         """
         config = await self.config_repo.get(config_id)
         if not config:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+            raise NotFoundError(
                 detail=f"Configuration {config_id} not found",
             )
         return SavedConfigurationResponse.model_validate(config)
@@ -425,12 +422,12 @@ class ConverterService:
             Updated configuration
 
         Raises:
-            HTTPException: If not found or not authorized
+            NotFoundError: If not found
+            ForbiddenError: If not authorized
         """
         config = await self.config_repo.get(config_id)
         if not config:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+            raise NotFoundError(
                 detail=f"Configuration {config_id} not found",
             )
 
@@ -439,8 +436,7 @@ class ConverterService:
             self.group_context
             and config.created_by_email != self.group_context.group_email
         ):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise ForbiddenError(
                 detail="Not authorized to update this configuration",
             )
 
@@ -460,12 +456,12 @@ class ConverterService:
             Success message
 
         Raises:
-            HTTPException: If not found or not authorized
+            NotFoundError: If not found
+            ForbiddenError: If not authorized
         """
         config = await self.config_repo.get(config_id)
         if not config:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+            raise NotFoundError(
                 detail=f"Configuration {config_id} not found",
             )
 
@@ -474,8 +470,7 @@ class ConverterService:
             self.group_context
             and config.created_by_email != self.group_context.group_email
         ):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+            raise ForbiddenError(
                 detail="Not authorized to delete this configuration",
             )
 
@@ -546,13 +541,12 @@ class ConverterService:
             Updated configuration
 
         Raises:
-            HTTPException: If not found
+            NotFoundError: If not found
         """
         updated = await self.config_repo.increment_use_count(config_id)
 
         if not updated:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+            raise NotFoundError(
                 detail=f"Configuration {config_id} not found",
             )
 

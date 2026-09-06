@@ -15,9 +15,9 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { FlowService } from './FlowService';
-import { apiClient } from '../../config/api/ApiConfig';
+import { apiClient } from '../../shared/api/client';
 
-vi.mock('../../config/api/ApiConfig', () => ({
+vi.mock('../../shared/api/client', () => ({
   apiClient: { post: vi.fn(), put: vi.fn() },
 }));
 

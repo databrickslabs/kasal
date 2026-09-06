@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { config } from '../../config/api/ApiConfig';
+import { config } from '../../shared/api/client';
 import { SSE_ENABLED } from '../../utils/sseTransport';
 
 export interface SSEOptions {
