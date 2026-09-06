@@ -13,6 +13,7 @@ from src.api.engine_config_router import (
     set_otel_app_telemetry_enabled,
     toggle_engine_config,
     update_config_value,
+    update_engine_config,
 )
 from src.core.exceptions import NotFoundError
 from src.schemas.engine_config import (
@@ -78,7 +79,8 @@ async def test_get_engine_config_found_and_not_found():
 
 @pytest.mark.asyncio
 async def test_create_toggle_update_value_permission_and_404s(monkeypatch):
-    group_ctx = Ctx(user_role="admin")
+    # Global engine configuration changes for a SYSTEM admin only (R2-03).
+    group_ctx = Ctx(user_role="admin", is_system_admin=True)
 
     svc = AsyncMock()
     # Create
@@ -246,3 +248,54 @@ async def test_otel_app_telemetry_set_forbidden():
             service=svc,
             group_context=group_ctx,
         )
+
+
+@pytest.mark.asyncio
+async def test_generic_mutators_refuse_a_workspace_admin():
+    """R2-03: the dedicated setters required a system admin while the generic
+    create/update/toggle/value routes accepted an effective workspace admin —
+    and reached the same global rows."""
+    from src.core.exceptions import ForbiddenError
+    from src.schemas.engine_config import (
+        EngineConfigCreate,
+        EngineConfigToggleUpdate,
+        EngineConfigUpdate,
+    )
+
+    svc = AsyncMock()
+    workspace_admin = Ctx(user_role="admin", is_system_admin=False)
+    with pytest.raises(ForbiddenError):
+        await create_engine_config(
+            EngineConfigCreate(
+                engine_name="kasal",
+                engine_type="kasal",
+                config_key="k",
+                config_value="v",
+            ),
+            service=svc,
+            group_context=workspace_admin,
+        )
+    with pytest.raises(ForbiddenError):
+        await update_engine_config(
+            "kasal",
+            EngineConfigUpdate(config_value="v"),
+            service=svc,
+            group_context=workspace_admin,
+        )
+    with pytest.raises(ForbiddenError):
+        await toggle_engine_config(
+            "kasal",
+            EngineConfigToggleUpdate(enabled=True),
+            service=svc,
+            group_context=workspace_admin,
+        )
+    with pytest.raises(ForbiddenError):
+        await update_config_value(
+            "kasal",
+            "event_triggers_enabled",
+            "true",
+            service=svc,
+            group_context=workspace_admin,
+        )
+    svc.create_engine_config.assert_not_awaited()
+    svc.update_engine_config.assert_not_awaited()

@@ -88,7 +88,7 @@ async def test_get_engine_config_by_key_not_found_raises():
 
     with pytest.raises(NotFoundError):
         await get_engine_config_by_key(
-            "engine1", "config_key", service=svc, group_context=make_ctx()
+            "engine1", "config_key", service=svc, group_context=make_ctx(is_system=True)
         )
 
 
@@ -100,7 +100,7 @@ async def test_get_engine_config_by_key_found():
     svc.find_by_engine_and_key = AsyncMock(return_value=config)
 
     out = await get_engine_config_by_key(
-        "kasal", "key1", service=svc, group_context=make_ctx()
+        "kasal", "key1", service=svc, group_context=make_ctx(is_system=True)
     )
     assert out == config
 
@@ -115,7 +115,7 @@ async def test_get_engine_configs_by_type_returns_list():
     svc.find_by_engine_type = AsyncMock(return_value=[make_config_obj()])
 
     out = await get_engine_configs_by_type(
-        "crew", service=svc, group_context=make_ctx()
+        "crew", service=svc, group_context=make_ctx(is_system=True)
     )
     assert out.count == 1
 
@@ -127,7 +127,7 @@ async def test_get_engine_configs_by_type_empty():
     svc.find_by_engine_type = AsyncMock(return_value=[])
 
     out = await get_engine_configs_by_type(
-        "crew", service=svc, group_context=make_ctx()
+        "crew", service=svc, group_context=make_ctx(is_system=True)
     )
     assert out.count == 0
 
@@ -146,7 +146,7 @@ async def test_update_engine_config_not_found():
             "missing",
             EngineConfigUpdate(config_value="new"),
             service=svc,
-            group_context=make_ctx(user_role="admin"),
+            group_context=make_ctx(user_role="admin", is_system=True),
         )
 
 
@@ -161,7 +161,7 @@ async def test_update_engine_config_success():
         "kasal",
         EngineConfigUpdate(config_value="updated"),
         service=svc,
-        group_context=make_ctx(user_role="admin"),
+        group_context=make_ctx(user_role="admin", is_system=True),
     )
     assert out == config
 
@@ -180,7 +180,7 @@ async def test_toggle_engine_config_not_found():
             "missing",
             EngineConfigToggleUpdate(enabled=True),
             service=svc,
-            group_context=make_ctx(user_role="admin"),
+            group_context=make_ctx(user_role="admin", is_system=True),
         )
 
 
@@ -195,7 +195,7 @@ async def test_toggle_engine_config_success():
         "kasal",
         EngineConfigToggleUpdate(enabled=False),
         service=svc,
-        group_context=make_ctx(user_role="admin"),
+        group_context=make_ctx(user_role="admin", is_system=True),
     )
     assert out == config
 
@@ -215,7 +215,7 @@ async def test_update_config_value_not_found():
             "key1",
             EngineConfigValueUpdate(config_value="v"),
             service=svc,
-            group_context=make_ctx(user_role="admin"),
+            group_context=make_ctx(user_role="admin", is_system=True),
         )
 
 
@@ -231,7 +231,7 @@ async def test_update_config_value_success():
         "key1",
         EngineConfigValueUpdate(config_value="new_value"),
         service=svc,
-        group_context=make_ctx(user_role="admin"),
+        group_context=make_ctx(user_role="admin", is_system=True),
     )
     assert out == config
 
@@ -247,7 +247,9 @@ async def test_delete_engine_config_not_found():
 
     with pytest.raises(NotFoundError):
         await delete_engine_config(
-            "missing", service=svc, group_context=make_ctx(user_role="admin")
+            "missing",
+            service=svc,
+            group_context=make_ctx(user_role="admin", is_system=True),
         )
 
 
@@ -258,7 +260,7 @@ async def test_delete_engine_config_success():
     svc.delete_engine_config = AsyncMock(return_value=True)
 
     await delete_engine_config(
-        "kasal", service=svc, group_context=make_ctx(user_role="admin")
+        "kasal", service=svc, group_context=make_ctx(user_role="admin", is_system=True)
     )
     svc.delete_engine_config.assert_called_once_with("kasal")
 
@@ -282,6 +284,6 @@ async def test_create_engine_config_success():
             is_enabled=True,
         ),
         service=svc,
-        group_context=make_ctx(user_role="admin"),
+        group_context=make_ctx(user_role="admin", is_system=True),
     )
     assert out == config

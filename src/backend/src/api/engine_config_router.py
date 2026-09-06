@@ -14,9 +14,9 @@ from src.schemas.engine_config import (
     EngineConfigToggleUpdate,
     EngineConfigUpdate,
     EngineConfigValueUpdate,
+    EventTriggersConfigUpdate,
     HarnessResponse,
     HarnessUpdate,
-    EventTriggersConfigUpdate,
     KasalFlowConfigUpdate,
     OtelAppTelemetryConfigUpdate,
 )
@@ -212,8 +212,12 @@ async def create_engine_config(
         HTTPException: If engine configuration with the same name already exists
     """
     # Check permissions - only admins can create engine configurations
-    if not check_role_in_context(group_context, ["admin"]):
-        raise ForbiddenError("Only admins can create engine configurations")
+    # Engine configuration is GLOBAL: rows carry no workspace, and the
+    # dedicated setters below already require a system admin. The generic
+    # routes accepted an effective workspace-admin role and reached the same
+    # rows (R2-03).
+    if not is_system_admin(group_context):
+        raise ForbiddenError("Only system admins can create engine configurations")
 
     logger.info(
         f"API call: POST /engine-config - Creating engine config {config.engine_name}"
@@ -248,8 +252,12 @@ async def update_engine_config(
         HTTPException: If engine configuration not found
     """
     # Check permissions - only admins can update engine configurations
-    if not check_role_in_context(group_context, ["admin"]):
-        raise ForbiddenError("Only admins can update engine configurations")
+    # Engine configuration is GLOBAL: rows carry no workspace, and the
+    # dedicated setters below already require a system admin. The generic
+    # routes accepted an effective workspace-admin role and reached the same
+    # rows (R2-03).
+    if not is_system_admin(group_context):
+        raise ForbiddenError("Only system admins can update engine configurations")
 
     logger.info(f"API call: PUT /engine-config/engine/{engine_name}")
 
@@ -287,8 +295,12 @@ async def toggle_engine_config(
         HTTPException: If engine configuration not found
     """
     # Check permissions - only admins can toggle engine configurations
-    if not check_role_in_context(group_context, ["admin"]):
-        raise ForbiddenError("Only admins can toggle engine configurations")
+    # Engine configuration is GLOBAL: rows carry no workspace, and the
+    # dedicated setters below already require a system admin. The generic
+    # routes accepted an effective workspace-admin role and reached the same
+    # rows (R2-03).
+    if not is_system_admin(group_context):
+        raise ForbiddenError("Only system admins can toggle engine configurations")
 
     logger.info(
         f"API call: PATCH /engine-config/engine/{engine_name}/toggle - enabled={toggle_data.enabled}"
@@ -335,8 +347,14 @@ async def update_config_value(
         HTTPException: If engine configuration not found
     """
     # Check permissions - only admins can update engine configuration values
-    if not check_role_in_context(group_context, ["admin"]):
-        raise ForbiddenError("Only admins can update engine configuration values")
+    # Engine configuration is GLOBAL: rows carry no workspace, and the
+    # dedicated setters below already require a system admin. The generic
+    # routes accepted an effective workspace-admin role and reached the same
+    # rows (R2-03).
+    if not is_system_admin(group_context):
+        raise ForbiddenError(
+            "Only system admins can update engine configuration values"
+        )
 
     logger.info(
         f"API call: PATCH /engine-config/engine/{engine_name}/config/{config_key}/value"
