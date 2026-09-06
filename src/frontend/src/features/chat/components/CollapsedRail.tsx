@@ -1,8 +1,5 @@
 import React from 'react';
-import SettingsIcon from '@mui/icons-material/Settings';
-import ThemeModeIcon from '../../../components/ThemeModeIcon';
-import GroupSelector from '../../groups/components/GroupSelector';
-import { useAppStore } from '../store/appStore';
+import SidebarAccountActions from '../../../components/SidebarAccountActions';
 
 /**
  * The chat sidebar when it is CLOSED: a slim vertical icon rail instead of
@@ -12,16 +9,13 @@ import { useAppStore } from '../store/appStore';
  * control for both directions.)
  */
 const CollapsedRail: React.FC<{ onNewChat: () => void; onOpenSettings?: () => void }> = ({ onNewChat, onOpenSettings }) => {
-  const isDark = useAppStore((s) => s.theme) === 'dark';
-  const toggleTheme = useAppStore((s) => s.toggleTheme);
-
   const iconButton =
     'w-9 h-9 rounded-xl flex items-center justify-center transition-colors hover:bg-[var(--bg-rail-hover)]';
 
   return (
     <aside
       data-testid="collapsed-rail"
-      className="w-12 flex flex-col items-center flex-shrink-0 py-3"
+      className="w-12 flex flex-col items-center flex-shrink-0 pt-3"
       style={{ backgroundColor: 'var(--bg-rail)' }}
     >
       <button
@@ -36,22 +30,7 @@ const CollapsedRail: React.FC<{ onNewChat: () => void; onOpenSettings?: () => vo
         </svg>
       </button>
 
-      <div className="flex-1" />
-      {onOpenSettings && <button type="button" aria-label="Settings" title="Settings" onClick={onOpenSettings}
-        className={iconButton} style={{ color: 'var(--text-secondary)', width: 40, height: 40 }}>
-        <SettingsIcon sx={{ fontSize: 20 }} />
-      </button>}
-
-      <button
-        type="button"
-        onClick={toggleTheme}
-        className={iconButton}
-        style={{ color: 'var(--text-secondary)', width: 40, height: 40 }}
-        aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-      >
-        <ThemeModeIcon dark={isDark} />
-      </button>
-      <GroupSelector />
+      <SidebarAccountActions onOpenSettings={onOpenSettings} />
     </aside>
   );
 };

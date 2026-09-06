@@ -17,11 +17,9 @@ import ScheduleLibrary from './components/ScheduleLibrary';
 import CollapsedRail from './components/CollapsedRail';
 import PreviewPanel from './components/Preview/PreviewPanel';
 import PreviewSkeleton, { shouldShowPreviewSkeleton } from './components/Preview/PreviewSkeleton';
-import GroupSelector from '../groups/components/GroupSelector';
-import ThemeModeIcon from '../../components/ThemeModeIcon';
+import SidebarAccountActions from '../../components/SidebarAccountActions';
 import { useThemeStore } from '../../store/theme';
 import ChatMcpDialog from './components/Chat/ChatMcpDialog';
-import SettingsIcon from '@mui/icons-material/Settings';
 import './chat.css';
 
 
@@ -568,27 +566,7 @@ const ChatWorkspace: React.FC<{ onOpenSettings?: () => void }> = ({ onOpenSettin
             })}
           </div>
 
-          {/* Keep teamspace directly below the theme toggle, matching the collapsed rail. */}
-          <div
-            className="flex-shrink-0 flex flex-col items-start gap-1 px-2 pt-2 pb-3 mt-1"
-          >
-            {onOpenSettings && <button
-              type="button" aria-label="Settings" onClick={onOpenSettings}
-              className="w-full flex items-center gap-2.5 rounded-lg text-[13px] font-medium transition-colors hover:bg-[var(--bg-rail-hover)]"
-              style={{ color: 'var(--text-secondary)', padding: '8px 10px' }}
-            ><SettingsIcon sx={{ fontSize: 20 }} />Settings</button>}
-            <button
-              onClick={() => { void useThemeStore.getState().toggleTheme(); }}
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors hover:bg-[var(--bg-rail-hover)]"
-              style={{ color: 'var(--text-secondary)', padding: '8px 10px' }}
-              title={chatThemeIsDark ? 'Switch to light mode' : 'Switch to dark mode'}
-              aria-label={chatThemeIsDark ? 'Switch to light mode' : 'Switch to dark mode'}
-            >
-              <ThemeModeIcon dark={chatThemeIsDark} />
-              {chatThemeIsDark ? 'Light mode' : 'Dark mode'}
-            </button>
-            <GroupSelector showLabel />
-          </div>
+          <SidebarAccountActions onOpenSettings={onOpenSettings} showLabel />
 
           {/* Context menu */}
           {contextMenu && (

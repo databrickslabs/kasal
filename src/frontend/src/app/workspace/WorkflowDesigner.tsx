@@ -1667,7 +1667,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         {/* Right Sidebar — hidden in chat mode */}
         {!isChatMode && (
         <RightSidebar
-            showWorkspaceActions
+            onOpenTutorial={() => dialogManager.setIsTutorialOpen(true)}
             onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
             onToggleChat={() => setChatPanelVisible(!showChatPanel)}
             isChatOpen={showChatPanel}
@@ -1775,10 +1775,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             showRunHistory={showRunHistory}
             onToggleExecutionHistory={toggleExecutionHistory}
             executionHistoryHeight={executionHistoryHeight}
-            onOpenTutorial={() => {
-              console.log('[WorkflowDesigner] Opening tutorial from LeftSidebar');
-              dialogManager.setIsTutorialOpen(true);
-            }}
           />
         )}
 

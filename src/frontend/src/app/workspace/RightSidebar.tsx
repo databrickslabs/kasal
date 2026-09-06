@@ -5,6 +5,7 @@ import {
   Tooltip,
   Paper,
   GlobalStyles,
+  Badge,
 } from '@mui/material';
 import {
   PersonAdd as PersonAddIcon,
@@ -16,13 +17,13 @@ import {
   Assessment as LogsIcon,
   PlayArrow as PlayArrowIcon,
   FileDownload as FileDownloadIcon,
+  HelpOutline as HelpOutlineIcon,
 } from '@mui/icons-material';
 import { Edge } from 'reactflow';
 import { usePermissionStore } from '../../store/permissions';
 import { useTabManagerStore } from '../../store/tabManager';
 import { useEventTriggersStore } from '../../store/eventTriggers';
-import { History, MessageSquare } from 'lucide-react';
-import { useUILayoutStore } from '../../store/uiLayout';
+import { useWorkflowStore } from '../../store/workflow';
 import ExportCrewDialog from '../../features/workflow/export/components/ExportCrewDialog';
 
 interface SidebarItem {
@@ -36,7 +37,7 @@ interface SidebarItem {
 }
 
 interface RightSidebarProps {
-  showWorkspaceActions?: boolean;
+  onOpenTutorial?: () => void;
   onOpenLogsDialog: () => void;
   onToggleChat: () => void;
   isChatOpen: boolean;
@@ -61,7 +62,7 @@ interface RightSidebarProps {
 }
 
 const RightSidebar: React.FC<RightSidebarProps> = ({
-  showWorkspaceActions = false,
+  onOpenTutorial,
   onOpenLogsDialog,
   onToggleChat,
   isChatOpen,
@@ -83,9 +84,7 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
   onPlayFlow,
   edges = [],
 }) => {
-  const { assistantPanelVisible, executionHistoryVisible, setAssistantPanelVisible, setExecutionHistoryVisible } = useUILayoutStore();
-  const flowPanelTab = useUILayoutStore(state => state.flowPanelTab);
-  const historySelected = executionHistoryVisible && !assistantPanelVisible && (!areFlowsVisible || flowPanelTab === 'runs');
+  const hasSeenTutorial = useWorkflowStore(state => state.hasSeenTutorial);
   const [animateAIAssistant, setAnimateAIAssistant] = useState(true);
   const [chatOpenedByClick, setChatOpenedByClick] = useState(false);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
@@ -408,10 +407,18 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
               )}
             </React.Fragment>
           ))}
-          {showWorkspaceActions && <Box sx={{ mt: 'auto', pt: 1, pb: { xs: 9, sm: 0 }, flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <Tooltip title="Execution history" placement="left"><IconButton aria-label="Execution history" aria-pressed={historySelected} onClick={() => setExecutionHistoryVisible(!historySelected)} sx={{ width: 40, height: 40, mb: 1, borderRadius: 2.5, color: 'text.secondary', bgcolor: historySelected ? 'action.selected' : 'transparent' }}><History size={20} strokeWidth={1.7} /></IconButton></Tooltip>
-            <Tooltip title="Assistant responses" placement="left"><IconButton aria-label="Assistant responses" aria-pressed={assistantPanelVisible} onClick={() => setAssistantPanelVisible(!assistantPanelVisible)} sx={{ width: 40, height: 40, mb: 1, borderRadius: 2.5, color: 'text.secondary', bgcolor: assistantPanelVisible ? 'action.selected' : 'transparent' }}><MessageSquare size={19} strokeWidth={1.7} /></IconButton></Tooltip>
-          </Box>}
+          {onOpenTutorial && (
+            <Box sx={{ mt: 'auto', pt: 1, pb: { xs: 9, sm: 0.5 }, flexShrink: 0 }}>
+              <Tooltip title="Start Tutorial / Help" placement="left">
+                <IconButton aria-label="Start Tutorial / Help" data-tour="help-button" onClick={onOpenTutorial}
+                  sx={{ width: 40, height: 40, borderRadius: 2, color: 'text.secondary' }}>
+                  <Badge variant="dot" color="primary" invisible={hasSeenTutorial}>
+                    <HelpOutlineIcon sx={{ fontSize: 20 }} />
+                  </Badge>
+                </IconButton>
+              </Tooltip>
+            </Box>
+          )}
         </Paper>
       </Box>
 

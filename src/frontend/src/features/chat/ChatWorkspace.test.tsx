@@ -753,7 +753,7 @@ describe('ChatWorkspace component', () => {
     expect(document.getElementById('kasal-chat-root')).toBeInTheDocument();
     expect(screen.getByTestId('chat-container')).toBeInTheDocument();
     expect(h.app.init).toHaveBeenCalled();
-    expect(h.app.setTheme).toHaveBeenCalledWith('light');
+    expect(document.getElementById('kasal-chat-root')).toHaveAttribute('data-theme', 'light');
     expect(h.session.init).toHaveBeenCalled();
   });
 
@@ -1645,7 +1645,7 @@ describe('ChatWorkspace component', () => {
   it('applies the dark theme when Kasal is in dark mode', () => {
     h.theme.isDarkMode = true;
     render(<ChatWorkspace />);
-    expect(h.app.setTheme).toHaveBeenCalledWith('dark');
+    expect(document.getElementById('kasal-chat-root')).toHaveAttribute('data-theme', 'dark');
   });
 
   it('onTaskOutput persists a preview but does not set the live one when viewing another session', () => {
