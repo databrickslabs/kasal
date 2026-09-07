@@ -132,6 +132,14 @@ class CrewPublicationResponse(CrewPublicationBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
+    @field_validator("conversational", mode="before")
+    @classmethod
+    def legacy_conversational_default(cls, value: Any) -> Any:
+        # Older publications have NULL in this nullable column. Their original
+        # behavior was one-shot; keep the response boolean without changing the
+        # stricter create contract or opting them into conversation routing.
+        return False if value is None else value
+
     model_config = {"from_attributes": True}
 
 

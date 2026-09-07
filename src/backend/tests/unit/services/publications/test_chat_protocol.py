@@ -155,3 +155,26 @@ class TestInputSchemaSurvives:
 
         [capability] = await service.list_capabilities_for_group([ACME], "chat")
         assert capability.input_schema["required"] == ["region"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entity_type", ["crew", "flow"])
+@pytest.mark.parametrize("conversational", [None, False, True])
+async def test_publication_list_accepts_legacy_null_conversational(
+    session, entity_type, conversational
+):
+    from src.api.publications_router import list_publications
+
+    service = PublicationService(session)
+    row = await _publish(
+        service, "legacy", "legacy_publication", ["chat"], entity_type=entity_type
+    )
+    row.conversational = conversational
+    await session.commit()
+    session.expire_all()
+
+    results = await list_publications(service, _Ctx([ACME]), protocol="chat")
+
+    assert len(results) == 1
+    assert results[0].entity_type == entity_type
+    assert results[0].model_dump()["conversational"] is bool(conversational)
