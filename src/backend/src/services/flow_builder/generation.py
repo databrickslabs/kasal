@@ -11,20 +11,53 @@ from src.schemas.flow_generation import (
     FlowGenerationRequest,
     FlowGenerationResponse,
 )
+from src.services.flow_builder.generation_context import (
+    FlowPlanningStep,
+    compact_catalog,
+)
+from src.services.flow_builder.generation_intent import (
+    analyze_flow_intent,
+    validate_stage_assignments,
+)
 from src.services.llm.manager import LLMManager
 
 SYSTEM_PROMPT = """Design a flow using ONLY the saved crews in the supplied catalog.
-Return JSON: {name, explanation, crew_ids, links, missing_capabilities}.
+Return JSON: {name, explanation, crew_ids, links, missing_capabilities, detail_crew_ids, stage_assignments}.
+requested_stages fixes the stages the user asked for, before looking at this catalog.
+stage_assignments maps EVERY requested stage ID to a DIFFERENT saved crew ID.
+crew_ids must contain exactly those assigned crews. Inspect the whole catalog for
+each stage, not just the first broad crew that covers the overall request.
+These assignments are validated: two requested stages cannot become one crew.
 crew_ids is an ordered array of actual catalog IDs, each used at most once.
 links is an array of {source: crew ID, target: crew ID, join: "ALL"|"ANY",
 condition: null|{field, operator, value}, otherwise: false|true}.
 Use sequencing, parallel branches, and ALL/ANY joins as needed by the request.
-Every selected crew must be connected in one acyclic graph (a single crew is valid).
+Preserve the user's distinct requested stages as separate crew nodes when the
+catalog supports them. Prefer a focused crew for each stage over a broad crew
+that happens to contain all stages internally. For example, news research followed
+by a presentation should use a news crew -> a presentation crew when both exist.
+Respect explicitly named crews and requested crew counts; do not silently replace
+two requested crews with one. Avoid adding stages or deliverables not requested.
+Independent requests are independent starting nodes: select both crews with links: [].
+Do not add dependencies or an extra combining/presentation crew just to connect them.
+Connect crews only when the request needs sequencing or one consumes another's output.
+The graph must be acyclic; separate branches and a single crew are valid.
+Never link a crew to itself. Use a single crew with links: [] only for one requested
+stage. If a separate crew is genuinely unavailable for a requested stage, report
+that missing capability instead of silently collapsing the stages.
 A conditional source must have only conditional or otherwise outgoing links, with
 exactly one otherwise fallback. Mutually exclusive branches must rejoin with ANY, never ALL.
 Conditional routes and unconditional joins must
 not share a target. Use conditions ONLY on a field explicitly present in the
 source crew's final task expected_output; do not invent fields or alter crews.
+The catalog contains compact previews. For ordinary selection, independent crews,
+or straightforward sequencing, return the final plan immediately with detail_crew_ids: [].
+If previews leave capabilities unclear, or conditions require exact output fields,
+request detail_crew_ids containing only the relevant catalog IDs (up to 24).
+In that case return empty crew_ids, links and missing_capabilities, with a brief
+explanation of what needs checking. Details can be requested once and appear in
+crew_details on the next turn; then return the final plan without another detail request.
+Do not claim a capability is missing solely because a preview is abbreviated.
 Supported operators: ==, !=, >, >=, <, <=, contains. Values are string/number/bool.
 Do not emit Python or arbitrary code. Never invent crew IDs, tasks, tools, or capabilities.
 If the catalog cannot satisfy the request or a routing field is unavailable, return
@@ -88,7 +121,7 @@ def build_flow(plan: CrewFlowPlan, catalog: dict) -> FlowGenerationResponse:
             raise ValueError(
                 "Route each conditional branch to its own crew before joining"
             )
-    # Topological layers give branches space; reject cycles and disconnected plans.
+    # Independent roots share a layer; only genuine dependencies move a crew right.
     pending = {cid: len(incoming[cid]) for cid in ids}
     levels, ready = {}, [cid for cid in ids if not pending[cid]]
     while ready:
@@ -102,16 +135,6 @@ def build_flow(plan: CrewFlowPlan, catalog: dict) -> FlowGenerationResponse:
                 ready.append(link.target)
     if len(levels) != len(ids):
         raise ValueError("Flow contains a cycle")
-    visited, stack = set(), [ids[0]]
-    while stack:
-        cid = stack.pop()
-        if cid in visited:
-            continue
-        visited.add(cid)
-        stack.extend(link.target for link in outgoing[cid])
-        stack.extend(link.source for link in incoming[cid])
-    if len(visited) != len(ids):
-        raise ValueError("Connect all selected crews into one flow")
     layers = defaultdict(list)
     for cid in ids:
         layers[levels[cid]].append(cid)
@@ -149,14 +172,18 @@ def build_flow(plan: CrewFlowPlan, catalog: dict) -> FlowGenerationResponse:
         ]
         data = {
             "configured": True,
-            "logicType": "ROUTER"
-            if routed
-            else ("AND" if link.join == "ALL" else "OR")
-            if len(parents) > 1
-            else "NONE",
-            "listenToTaskIds": [t["id"] for t in source_tasks]
-            if routed
-            else listen_ids,
+            "logicType": (
+                "ROUTER"
+                if routed
+                else (
+                    ("AND" if link.join == "ALL" else "OR")
+                    if len(parents) > 1
+                    else "NONE"
+                )
+            ),
+            "listenToTaskIds": (
+                [t["id"] for t in source_tasks] if routed else listen_ids
+            ),
             "targetTaskIds": [t["id"] for t in target_tasks],
             "isDefaultRoute": link.otherwise,
         }
@@ -236,37 +263,72 @@ class FlowGenerationService:
                 message="There are no saved crews with available tasks in this teamspace. Save a crew in Agent Builder, then describe your flow here.",
                 missing_capabilities=["A saved crew with tasks"],
             )
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+        context = {
+            "prompt": request.prompt,
+            "current_crew_ids": [
+                cid for cid in request.current_crew_ids if cid in catalog
+            ],
+            "catalog": compact_catalog(catalog),
+        }
+        intent = await analyze_flow_intent(
+            request.prompt,
+            request.model,
             {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "prompt": request.prompt,
-                        "current_crew_ids": [
-                            cid for cid in request.current_crew_ids if cid in catalog
-                        ],
-                        "catalog": catalog,
-                    }
-                ),
+                cid: {
+                    "name": catalog[cid]["name"],
+                    "tasks": [task["name"] for task in catalog[cid]["tasks"]],
+                }
+                for cid in context["current_crew_ids"]
             },
-        ]
-        for attempt in range(2):
+        )
+        context["requested_stages"] = {
+            f"stage_{index + 1}": stage for index, stage in enumerate(intent.stages)
+        }
+        repaired = False
+        # At most one detail fetch and one validation repair. Rebuild the prompt
+        # each time instead of retaining verbose answers and repeated catalogs.
+        for _ in range(3):
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": json.dumps(context, separators=(",", ":"))},
+            ]
             content = await LLMManager.completion(
-                messages=messages, model=request.model, temperature=0.2, max_tokens=6000
+                messages=messages,
+                model=request.model,
+                temperature=0.2,
+                response_format=FlowPlanningStep,
+                # Inherit the selected model's output budget: reasoning shares
+                # it with JSON, so a fixed 6000 cap can leave no answer at all.
             )
             try:
-                plan = CrewFlowPlan.model_validate(robust_json_parser(content or ""))
+                plan = FlowPlanningStep.model_validate(
+                    robust_json_parser(content or "")
+                )
+                if plan.detail_crew_ids:
+                    if "crew_details" in context:
+                        raise ValueError(
+                            "Use the supplied crew details and return the final plan"
+                        )
+                    if any(cid not in catalog for cid in plan.detail_crew_ids):
+                        raise ValueError(
+                            "Request details only for IDs in the supplied catalog"
+                        )
+                    context["crew_details"] = {
+                        cid: catalog[cid] for cid in plan.detail_crew_ids
+                    }
+                    continue
+                if not plan.missing_capabilities:
+                    validate_stage_assignments(plan, intent)
                 return build_flow(plan, catalog)
             except (ValueError, TypeError) as exc:
-                if attempt:
+                if repaired:
                     raise ValueError(
                         "Could not generate a valid flow. Try describing the sequence or branches more explicitly."
                     ) from exc
-                messages.append({"role": "assistant", "content": content or "{}"})
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": f"Correct the plan: {exc}. Return only the corrected JSON; if the catalog cannot support this request, explain the missing capabilities.",
-                    }
-                )
+                repaired = True
+                context["correction"] = {
+                    "error": str(exc),
+                    "previous_plan": (content or "")[:6000],
+                    "instruction": "Return corrected JSON using the original request and catalog.",
+                }
+        raise ValueError("Could not finish the flow plan after checking crew details")
