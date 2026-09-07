@@ -214,12 +214,6 @@ def _apply_reasoning_effort_unsafe(llm: Any, spec: Dict[str, Any], label: str) -
     rc = spec.get("reasoning_config") or {}
     effort = rc.get("reasoning_effort") or DEFAULT_REASONING_EFFORT
     effort = str(effort).strip().lower()
-    if effort not in VALID_REASONING_EFFORTS:
-        logger.debug(
-            f"Ignoring unknown reasoning effort {effort!r} for agent {label}; "
-            f"expected one of {VALID_REASONING_EFFORTS}"
-        )
-        return
 
     # Prefer the RESOLVED provider model on the built LLM (e.g. 'databricks/gpt-5-2',
     # 'openai/gpt-5.2') and fall back to the spec's model key.
@@ -227,6 +221,17 @@ def _apply_reasoning_effort_unsafe(llm: Any, spec: Dict[str, Any], label: str) -
     if not isinstance(model_name, str) or not model_name:
         spec_llm = spec.get("llm")
         model_name = spec_llm.get("model") if isinstance(spec_llm, dict) else spec_llm
+
+    from src.core.llm.model_capabilities import allowed_efforts
+
+    accepted = allowed_efforts(model_name)
+    valid = accepted or VALID_REASONING_EFFORTS
+    if effort not in valid:
+        logger.info(
+            f"Ignoring reasoning effort {effort!r} for agent {label}; "
+            f"model {model_name!r} accepts {valid}"
+        )
+        return
 
     if not model_supports_reasoning_effort(model_name):
         # INFO, not debug: the user explicitly asked for a reasoning budget and

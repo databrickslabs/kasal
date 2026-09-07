@@ -254,6 +254,24 @@ class TestReasoningEffortReachesTheLLM:
         assert not hasattr(llm, "reasoning_effort")
 
     @pytest.mark.asyncio
+    async def test_model_specific_max_effort_reaches_gpt6(self):
+        llm = await self._build(
+            "databricks-gpt-6-astra",
+            reasoning=True,
+            reasoning_config={"reasoning_effort": "max"},
+        )
+        assert llm.reasoning_effort == "max"
+
+    @pytest.mark.asyncio
+    async def test_model_specific_invalid_effort_is_ignored(self):
+        llm = await self._build(
+            "databricks-gemini-3-8-flash",
+            reasoning=True,
+            reasoning_config={"reasoning_effort": "max"},
+        )
+        assert not hasattr(llm, "reasoning_effort")
+
+    @pytest.mark.asyncio
     async def test_string_fallback_llm_is_never_mutated(self):
         """A configuration failure yields a bare model-name string — applying the
         budget must not raise."""

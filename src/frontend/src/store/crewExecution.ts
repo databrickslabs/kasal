@@ -9,6 +9,7 @@ import { Tool } from '../types/workflow/tool';
 import { assessTrifecta, TrifectaAssessment } from '../utils/toolCapabilityManifest';
 import { ToolService } from '../api/tools/ToolService';
 import { placeholdersInFlowNodes } from '../utils/flowInputs';
+import { getDefaultModel } from '../config/defaultModel';
 
 interface RunHistoryItem {
   id: string;
@@ -229,7 +230,7 @@ interface CrewExecutionState {
 export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
   // Initial state
   isExecuting: false,
-  selectedModel: 'databricks-gpt-5-3-codex',
+  selectedModel: getDefaultModel(),
   // Empty means "whatever Configuration -> Engines says". Persisted like the
   // process type so a choice survives a reload.
   reasoningEnabled: false,

@@ -5,11 +5,12 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.schemas.flow import Edge, Node
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
 
 class FlowGenerationRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=12000, pattern=r"\S")
-    model: str = Field(default="databricks-gpt-5-3-codex", min_length=1, max_length=255)
+    model: str = Field(default=DEFAULT_ENGINE_MODEL, min_length=1, max_length=255)
     current_crew_ids: list[str] = Field(default_factory=list, max_length=24)
 
 

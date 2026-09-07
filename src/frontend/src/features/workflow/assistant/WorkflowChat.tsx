@@ -92,7 +92,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   onFlowGenerated,
   onNodesGenerated,
   onLoadingStateChange,
-  selectedModel = 'databricks-gpt-5-3-codex',
+  selectedModel = getDefaultModel(),
   selectedTools = [],
   isVisible = true,
   setSelectedModel,

@@ -906,9 +906,11 @@ class LLMManager:
                 )
 
             prefixed_model = f"databricks/{model_name_value}"
-            is_gpt5 = (
+            is_openai_reasoning = (
                 "gpt-5" in model_name_value.lower()
                 or "gpt5" in model_name_value.lower()
+                or "gpt-6" in model_name_value.lower()
+                or "gpt6" in model_name_value.lower()
             )
             # Newer frontier models (GPT-5, Claude Opus 4.7+) reject `temperature`.
             from src.utils.model_config import model_rejects_temperature
@@ -920,7 +922,7 @@ class LLMManager:
             # Standard Databricks models: 240s (server-side limit is 297s)
             llm_params = {
                 "model": prefixed_model,
-                "timeout": 300 if is_gpt5 else 297,
+                "timeout": 300 if is_openai_reasoning else 297,
             }
 
             # `additional_drop_params` used to be set here for GPT-5 (stop,
@@ -933,9 +935,9 @@ class LLMManager:
             #     is False for gpt-5 and the o-series;
             #   - presence_penalty / frequency_penalty / logit_bias: never set by
             #     kasal, and the engine only forwards params that are not None.
-            if is_gpt5:
+            if is_openai_reasoning:
                 logger.info(
-                    f"Databricks GPT-5 model: {model_name_value} — 300s timeout set"
+                    f"Databricks OpenAI reasoning model: {model_name_value} — 300s timeout set"
                 )
             elif rejects_temperature:
                 logger.info(
@@ -966,14 +968,14 @@ class LLMManager:
                 "max_output_tokens" in model_config_dict
                 and model_config_dict["max_output_tokens"]
             ):
-                if is_gpt5:
-                    # GPT-5 requires max_completion_tokens (litellm Databricks transformer
-                    # rewrites it to max_tokens which GPT-5 rejects — litellm#13719)
+                if is_openai_reasoning:
+                    # Current OpenAI reasoning models require max_completion_tokens
+                    # on the chat-compatible path.
                     llm_params["max_completion_tokens"] = model_config_dict[
                         "max_output_tokens"
                     ]
                     logger.info(
-                        f"Setting max_completion_tokens to {model_config_dict['max_output_tokens']} for Databricks GPT-5 model {prefixed_model}"
+                        f"Setting max_completion_tokens to {model_config_dict['max_output_tokens']} for Databricks OpenAI reasoning model {prefixed_model}"
                     )
                 else:
                     llm_params["max_tokens"] = model_config_dict["max_output_tokens"]
@@ -985,12 +987,16 @@ class LLMManager:
                 f"Creating CrewAI LLM with model: {prefixed_model}, has_api_key: {bool(api_key)}, api_base: {api_base}"
             )
 
-            # gpt-5-3-codex ONLY supports the Responses API on Databricks.
+            # Codex and GPT-5.5 only support the Responses API on Databricks.
             # DatabricksResponsesLLM extends OpenAICompletion with:
             #  - phase preservation (prevents early stopping / skipped tool calls)
             #  - stop-word suppression (GPT-5 reasoning rejects 'stop')
             #  - diagnostic logging for tool-calling debugging
-            if "gpt-5-3-codex" in model_name_value.lower():
+            responses_api_model = any(
+                fragment in model_name_value.lower()
+                for fragment in ("gpt-5-3-codex", "gpt-5-5", "gpt-5.5")
+            )
+            if responses_api_model:
                 from src.services.llm.handlers.databricks_responses_llm import (
                     DatabricksResponsesLLM,
                 )

@@ -197,14 +197,18 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
   llm_call: (trace: Trace): ProcessedEvent => {
     const metadata = parseTraceMetadata(trace);
 
-    const modelName = (metadata?.model as string) || '';
-    const messageCount = metadata?.message_count as number | undefined;
+    // OTel rows put the served model in output.extra_data.model, while older
+    // rows put it in trace_metadata. Read both so the timeline names the model
+    // that handled each individual request, including fallback requests.
+    const modelName = String(getField(trace, 'model') || '');
+    const messageCount = getField(trace, 'message_count') as number | undefined;
     // `prompt_chars` is the TRUE length, recorded when the list response trimmed
     // the copy it shipped. Reading length off the trimmed string would report
     // the preview size — "(2,000 chars)" for a 34,000-char prompt is not a
     // smaller truth, it is a wrong one.
-    const promptLen = (metadata?.prompt_chars as number)
-      ?? ((metadata?.prompt as string)?.length || 0);
+    const promptLen = (getField(trace, 'prompt_chars') as number)
+      ?? (getField(trace, 'prompt_length') as number)
+      ?? ((getField(trace, 'prompt') as string)?.length || 0);
 
     // Whose call this is. Both of these fire AFTER the task finished, so an
     // unlabelled row reads as the agent still working: the memory layer tagging
@@ -509,6 +513,7 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
   // LLM Request
   llm_request: (trace: Trace): ProcessedEvent => {
     const extra = extractExtraData(trace);
+    const modelName = String(getField(trace, 'model') || '');
 
     let promptLength = 0;
     if (typeof extra?.prompt_length === 'number') {
@@ -520,7 +525,16 @@ export const EVENT_PROCESSORS: Record<string, EventProcessor> = {
       promptLength = outputStr.length;
     }
 
-    return { type: 'llm_request', description: `LLM Request (${promptLength.toLocaleString()} chars)` };
+    let description = 'LLM Request';
+    if (modelName) {
+      const modelParts = modelName.split('/');
+      description += ` — ${modelParts[modelParts.length - 1]}`;
+    }
+    if (promptLength > 0) {
+      description += ` (${promptLength.toLocaleString()} chars)`;
+    }
+
+    return { type: 'llm_request', description };
   },
 
   // Knowledge Retrieval Started - skip

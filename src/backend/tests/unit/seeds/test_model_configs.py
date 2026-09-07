@@ -53,6 +53,7 @@ class TestDefaultModelsDataStructure:
         """
         from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
+        assert DEFAULT_ENGINE_MODEL == "databricks-gemini-3-8-flash"
         assert DEFAULT_ENGINE_MODEL in DEFAULT_MODELS
         assert DEFAULT_ENGINE_MODEL not in REMOVED_MODEL_KEYS
 
@@ -524,8 +525,6 @@ class TestAuditedDatabricksModels:
         "databricks-gemini-3-pro",
         "databricks-gpt-5-1-codex-max",
         "databricks-gpt-5-1-codex-mini",
-        "databricks-gpt-5-5-pro",
-        "databricks-gpt-5-5",
         "databricks-gemini-2-5-pro",
         "databricks-meta-llama-3-1-405b-instruct",
         # Reasoning model: emits a "thinking" preamble instead of pure JSON, so
@@ -542,6 +541,20 @@ class TestAuditedDatabricksModels:
         "databricks-gpt-5-4-mini",
         "databricks-gpt-5-4-nano",
     )
+    CURRENT_ADDED = (
+        "databricks-claude-fable-5-1",
+        "databricks-deepseek-v4-flash-0731",
+        "databricks-deepseek-v4-pro-0813",
+        "databricks-gemini-3-7-flash",
+        "databricks-gemini-3-8-flash",
+        "databricks-glm-5-3",
+        "databricks-glm-5-3-flash",
+        "databricks-gpt-5-5",
+        "databricks-gpt-5-5-pro",
+        "databricks-gpt-6-astra",
+        "databricks-grok-4-6",
+        "databricks-kimi-k3",
+    )
 
     def test_broken_models_pruned(self):
         """Each broken endpoint is gone from DEFAULT_MODELS and listed for pruning."""
@@ -556,6 +569,15 @@ class TestAuditedDatabricksModels:
         for key in self.AUDIT_ADDED:
             assert key in DEFAULT_MODELS, f"{key} should be added to DEFAULT_MODELS"
             assert DEFAULT_MODELS[key]["provider"] == "databricks"
+
+    def test_current_databricks_chat_models_have_complete_seed_config(self):
+        for key in self.CURRENT_ADDED:
+            config = DEFAULT_MODELS[key]
+            assert config["name"] == key
+            assert config["provider"] == "databricks"
+            assert config["context_window"] > 0
+            assert config["max_output_tokens"] > 0
+            assert key not in REMOVED_MODEL_KEYS
 
     def test_gemini_3_1_flash_lite_no_longer_pruned(self):
         """It used to be (wrongly) in REMOVED_MODEL_KEYS; the workspace now serves

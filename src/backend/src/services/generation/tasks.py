@@ -17,14 +17,14 @@ from src.services.catalog.templates import TemplateService
 from src.services.execution.logs.llm_log_service import LLMLogService
 from src.services.llm.manager import LLMManager
 from src.core.llm.robust_json import robust_json_parser
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 from src.utils.user_context import GroupContext
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Default model for task generation (gpt-5.3-codex fallback; llama-4-maverick can
-# hit the Supervisor API beta gate on some workspaces)
-DEFAULT_TASK_MODEL = os.getenv("DEFAULT_TASK_MODEL", "databricks-gpt-5-3-codex")
+# Per-feature override with the shared engine default as its fallback.
+DEFAULT_TASK_MODEL = os.getenv("DEFAULT_TASK_MODEL", DEFAULT_ENGINE_MODEL)
 
 
 class TaskGenerationService:

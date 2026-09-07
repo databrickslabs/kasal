@@ -9,13 +9,10 @@ import { fetchWorkspaces, Workspace } from '../api/workspaces';
 import { listSavedCrews, listSavedFlows, CatalogItem } from '../api/crews';
 import { PublicationService } from '../../../api/workflow/PublicationService';
 import { ScheduleService, Schedule } from '../../../api/execution/ScheduleService';
+import { getDefaultModel } from '../../../config/defaultModel';
 
 const CONFIG_STORAGE_KEY = 'kasal-chat-config';
 const MODEL_STORAGE_KEY = 'kasal-chat-model';
-// Preferred default model for chat mode when the user hasn't picked one yet.
-// Falls back to the first enabled model if this endpoint isn't available.
-const PREFERRED_DEFAULT_MODEL = 'databricks-gpt-5-3-codex';
-
 export type Theme = 'light' | 'dark';
 
 function applyTheme(theme: Theme): void {
@@ -140,10 +137,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const state = get();
       set({ models: m });
       if (m.length > 0 && !state.selectedModel) {
-        // Default to GPT 5.3 Codex when it's enabled; otherwise fall back to the
-        // first enabled model. Only applies when the user hasn't already chosen one.
-        const key = m.some((x) => x.key === PREFERRED_DEFAULT_MODEL)
-          ? PREFERRED_DEFAULT_MODEL
+        // Prefer the server-owned default; use the first enabled model only when
+        // that endpoint is not available in this workspace.
+        const preferred = getDefaultModel();
+        const key = m.some((x) => x.key === preferred)
+          ? preferred
           : m[0].key;
         set({ selectedModel: key });
         try {

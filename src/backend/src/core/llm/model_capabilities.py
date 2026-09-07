@@ -58,10 +58,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-#: Verified 2026-08-05 against a live Databricks workspace, and against provider
-#: docs of the same date. Kept on every record so a stale entry is legible as
+#: Verified 2026-09-07 against current Databricks and provider documentation;
+#: existing measured entries retain their live-endpoint evidence. Kept on every
+#: record so a stale entry is legible as
 #: stale rather than authoritative.
-VERIFIED = "2026-08-05"
+VERIFIED = "2026-09-07"
 
 ANTHROPIC_THINKING_DOC = (
     "https://platform.claude.com/docs/en/build-with-claude/thinking"
@@ -277,24 +278,141 @@ _GPT5_XHIGH = ModelCapability(
     ),
 )
 
+#: gpt-5.5 uses the Responses API and accepts none through xhigh.
+_GPT55 = ModelCapability(
+    style=ReasoningStyle.REASONING_EFFORT,
+    efforts=("none", "low", "medium", "high", "xhigh"),
+    returns_text=False,
+    text_requires="reasoning summaries are exposed only through the Responses API",
+    refuses=(
+        "temperature",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+    ),
+    evidence="documented",
+    source=OPENAI_REASONING_DOC,
+    note="GPT-5.5 defaults to medium reasoning effort and is served through Responses API.",
+)
+
+#: The Pro variant deliberately exposes a narrower, higher-effort scale.
+_GPT55_PRO = ModelCapability(
+    style=ReasoningStyle.REASONING_EFFORT,
+    efforts=("medium", "high", "xhigh"),
+    returns_text=False,
+    text_requires="reasoning summaries are exposed only through the Responses API",
+    refuses=(
+        "temperature",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+    ),
+    evidence="documented",
+    source=OPENAI_REASONING_DOC,
+    note="GPT-5.5 Pro defaults to high reasoning effort and is served through Responses API.",
+)
+
+#: GPT-6 Astra always reasons and explicitly rejects none/minimal.
+_GPT6_ASTRA = ModelCapability(
+    style=ReasoningStyle.REASONING_EFFORT,
+    efforts=("low", "medium", "high", "xhigh", "max"),
+    returns_text=False,
+    text_requires="reasoning tokens are internal",
+    refuses=(
+        "temperature",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+    ),
+    evidence="documented",
+    source=DATABRICKS_REASON_DOC,
+    note="GPT-6 Astra always reasons; none and minimal are rejected.",
+)
+
 # ── Gemini 3.x on Databricks ────────────────────────────────────────────────
 
-#: Rejects "none", "minimal", "xhigh" and "max" — only the three levels.
-#: Crucially it needs the parameter to return anything: WITHOUT reasoning_effort
-#: the response is text-only, WITH it a populated reasoning block comes back.
-_GEMINI = ModelCapability(
+#: Gemini 3.7 rejects "none", "minimal", "xhigh" and "max".
+_GEMINI_37 = ModelCapability(
     style=ReasoningStyle.REASONING_EFFORT,
     efforts=("low", "medium", "high"),
     returns_text=True,
     text_requires="reasoning_effort must be set",
     evidence="measured",
     source=f"{DATABRICKS_REASON_DOC} + live endpoint",
+    note="Gemini 3.7 defaults to medium and exposes low, medium, and high.",
+)
+
+#: Gemini 3.8 has the same effort scale, but its Databricks endpoint rejects
+#: temperature entirely. Measured on 2026-09-07: sending the catalogue default
+#: returned ``BAD_REQUEST: Model gemini-3.8-flash does not support the
+#: temperature parameter.`` before generation began.
+_GEMINI_38 = ModelCapability(
+    style=ReasoningStyle.REASONING_EFFORT,
+    efforts=("low", "medium", "high"),
+    returns_text=True,
+    text_requires="reasoning_effort must be set",
+    refuses=("temperature",),
+    evidence="measured",
+    source=f"{DATABRICKS_REASON_DOC} + live endpoint",
     note=(
-        "Measured with reasoning_effort set: gemini-3-1-flash-lite 2,226 chars, "
-        "3-5-flash 2,104, 3-1-pro 1,648. The native Gemini `thinking` shape is "
-        "rejected here (400 Invalid JSON payload), so reasoning_effort is the "
-        "only lever. 3-5-flash-lite and 3-6-flash accept it but return no text."
+        "Gemini 3.8 defaults to medium, exposes low/medium/high, and rejects "
+        "the temperature parameter."
     ),
+)
+
+#: Earlier Gemini 3 endpoints now document minimal as their no-reasoning mode.
+_GEMINI_3 = ModelCapability(
+    style=ReasoningStyle.REASONING_EFFORT,
+    efforts=("minimal", "low", "medium", "high"),
+    returns_text=True,
+    text_requires="reasoning_effort must be set above minimal",
+    evidence="documented",
+    source=DATABRICKS_REASON_DOC,
+    note="Gemini 3 defaults to low; minimal skips reasoning and returns no reasoning tokens.",
+)
+
+# ── Other Databricks reasoning models ──────────────────────────────────────
+
+_GROK = ModelCapability(
+    style=ReasoningStyle.REASONING_EFFORT,
+    efforts=("low", "medium", "high", "xhigh"),
+    returns_text=False,
+    text_requires="reasoning tokens are internal",
+    evidence="documented",
+    source=DATABRICKS_REASON_DOC,
+    note="Grok 4.6 always reasons and exposes four effort levels.",
+)
+
+_HYBRID_LOW_HIGH_MAX = ModelCapability(
+    style=ReasoningStyle.REASONING_EFFORT,
+    efforts=("none", "low", "high", "max"),
+    returns_text=False,
+    text_requires="reasoning-text availability is not documented",
+    evidence="documented",
+    source=DATABRICKS_REASON_DOC,
+    note="Defaults to max; none selects the fast non-reasoning mode.",
+)
+
+_ALWAYS_LOW_HIGH_MAX = ModelCapability(
+    style=ReasoningStyle.REASONING_EFFORT,
+    efforts=("low", "high", "max"),
+    returns_text=False,
+    text_requires="reasoning-text availability is not documented",
+    evidence="documented",
+    source=DATABRICKS_REASON_DOC,
+    note="Reasoning cannot be disabled; unsupported effort aliases fall back to max.",
+)
+
+_INKLING = ModelCapability(
+    style=ReasoningStyle.REASONING_EFFORT,
+    efforts=("minimal", "low", "medium", "high", "xhigh", "max"),
+    returns_text=True,
+    evidence="documented",
+    source=DATABRICKS_REASON_DOC,
+    note="Always reasons; none maps to the lowest tier rather than disabling reasoning.",
 )
 
 # ── Models that just tell you ───────────────────────────────────────────────
@@ -333,7 +451,12 @@ _CAPABILITIES: tuple[tuple[str, ModelCapability], ...] = (
     ("claude-sonnet-4-5", _MANUAL),
     ("claude-sonnet-4-6", _MANUAL),
     ("claude-haiku-4-5", _MANUAL),
-    # GPT-5 line, longest fragment first.
+    # OpenAI reasoning models, longest fragment first.
+    ("gpt-6-astra", _GPT6_ASTRA),
+    ("gpt-5-5-pro", _GPT55_PRO),
+    ("gpt-5.5-pro", _GPT55_PRO),
+    ("gpt-5-5", _GPT55),
+    ("gpt-5.5", _GPT55),
     ("gpt-5-6", _GPT5_XHIGH),
     ("gpt-5.6", _GPT5_XHIGH),
     ("gpt-5-4", _GPT5_XHIGH),
@@ -345,10 +468,20 @@ _CAPABILITIES: tuple[tuple[str, ModelCapability], ...] = (
     ("gpt-5-mini", _GPT5_MINIMAL),
     ("gpt-5-nano", _GPT5_MINIMAL),
     ("gpt-5", _GPT5_MINIMAL),
-    # Gemini 3.x (2.5 exposes nothing and is deliberately absent).
-    ("gemini-3", _GEMINI),
-    # Unprompted.
-    ("inkling", _UNPROMPTED),
+    # Gemini 3.7/3.8 reject minimal; earlier Gemini 3 endpoints accept it.
+    ("gemini-3-8", _GEMINI_38),
+    ("gemini-3-7", _GEMINI_37),
+    ("gemini-3", _GEMINI_3),
+    # Other documented Databricks reasoning endpoints.
+    ("deepseek-v4-pro-0813", _HYBRID_LOW_HIGH_MAX),
+    ("deepseek-v4-flash-0731", _HYBRID_LOW_HIGH_MAX),
+    ("kimi-k3", _HYBRID_LOW_HIGH_MAX),
+    ("glm-5-3-flash", _ALWAYS_LOW_HIGH_MAX),
+    ("glm-5-3", _ALWAYS_LOW_HIGH_MAX),
+    ("glm-5-2", _HYBRID_LOW_HIGH_MAX),
+    ("grok-4-6", _GROK),
+    ("inkling", _INKLING),
+    # Legacy unprompted model.
     ("kimi-k2-7", _UNPROMPTED),
 )
 

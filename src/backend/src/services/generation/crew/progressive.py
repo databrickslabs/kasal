@@ -33,6 +33,7 @@ from src.services.generation.tasks import TaskGenerationService
 from src.services.llm.manager import LLMManager
 from src.services.tools.tool_service import ToolService
 from src.core.llm.robust_json import robust_json_parser
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -117,9 +118,7 @@ class ProgressiveGenerationMixin:
                     )
                     return
 
-                model = request.model or os.getenv(
-                    "CREW_MODEL", "databricks-gpt-5-3-codex"
-                )
+                model = request.model or os.getenv("CREW_MODEL", DEFAULT_ENGINE_MODEL)
 
                 # ── Compute caps BEFORE planning so the LLM knows the limits ──
                 # Caps are UPPER BOUNDS, not predictions: the PLAN LLM decides the

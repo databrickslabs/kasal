@@ -18,12 +18,13 @@ from src.services.catalog.templates import TemplateService
 from src.services.execution.logs.llm_log_service import LLMLogService
 from src.services.llm.manager import LLMManager
 from src.core.llm.robust_json import robust_json_parser
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
 
 # Default model for prompt improvement (same fallback as task generation)
-DEFAULT_IMPROVE_MODEL = os.getenv("DEFAULT_IMPROVE_MODEL", "databricks-gpt-5-3-codex")
+DEFAULT_IMPROVE_MODEL = os.getenv("DEFAULT_IMPROVE_MODEL", DEFAULT_ENGINE_MODEL)
 
 
 class PromptImprovementService:

@@ -300,6 +300,13 @@ DEFAULT_MODELS = {
         "context_window": 1000000,
         "max_output_tokens": 64000,
     },
+    "databricks-claude-fable-5-1": {
+        "name": "databricks-claude-fable-5-1",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+    },
     "databricks-claude-haiku-4-5": {
         "name": "databricks-claude-haiku-4-5",
         "temperature": 0.7,
@@ -370,6 +377,20 @@ DEFAULT_MODELS = {
         "context_window": 1000000,
         "max_output_tokens": 64000,
     },
+    "databricks-deepseek-v4-flash-0731": {
+        "name": "databricks-deepseek-v4-flash-0731",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1048576,
+        "max_output_tokens": 393216,
+    },
+    "databricks-deepseek-v4-pro-0813": {
+        "name": "databricks-deepseek-v4-pro-0813",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1048576,
+        "max_output_tokens": 393216,
+    },
     "databricks-gemini-2-5-flash": {
         "name": "databricks-gemini-2-5-flash",
         "temperature": 0.7,
@@ -412,6 +433,21 @@ DEFAULT_MODELS = {
         "context_window": 1048576,
         "max_output_tokens": 65536,
     },
+    "databricks-gemini-3-7-flash": {
+        "name": "databricks-gemini-3-7-flash",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
+    },
+    "databricks-gemini-3-8-flash": {
+        # Global endpoint: the workspace must have cross-geography routing enabled.
+        "name": "databricks-gemini-3-8-flash",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
+    },
     "databricks-gemma-3-12b": {
         "name": "databricks-gemma-3-12b",
         "temperature": 0.7,
@@ -428,6 +464,20 @@ DEFAULT_MODELS = {
         "provider": "databricks",
         "context_window": 200000,
         "max_output_tokens": 25000,
+    },
+    "databricks-glm-5-3": {
+        "name": "databricks-glm-5-3",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
+    },
+    "databricks-glm-5-3-flash": {
+        "name": "databricks-glm-5-3-flash",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1048576,
+        "max_output_tokens": 65536,
     },
     "databricks-gpt-5": {
         "name": "databricks-gpt-5",
@@ -478,6 +528,22 @@ DEFAULT_MODELS = {
         "context_window": 400000,
         "max_output_tokens": 32000,
     },
+    "databricks-gpt-5-5": {
+        # Responses API only; LLMManager routes this through DatabricksResponsesLLM.
+        "name": "databricks-gpt-5-5",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+    },
+    "databricks-gpt-5-5-pro": {
+        # Responses API only; optimized for the highest-accuracy workloads.
+        "name": "databricks-gpt-5-5-pro",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+    },
     "databricks-gpt-5-6-luna": {
         "name": "databricks-gpt-5-6-luna",
         "temperature": 0.7,
@@ -513,6 +579,20 @@ DEFAULT_MODELS = {
         "context_window": 128000,
         "max_output_tokens": 32000,
     },
+    "databricks-gpt-6-astra": {
+        "name": "databricks-gpt-6-astra",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1050000,
+        "max_output_tokens": 128000,
+    },
+    "databricks-grok-4-6": {
+        "name": "databricks-grok-4-6",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 500000,
+        "max_output_tokens": 128000,
+    },
     "databricks-inkling": {
         "name": "databricks-inkling",
         "temperature": 0.7,
@@ -526,6 +606,13 @@ DEFAULT_MODELS = {
         "provider": "databricks",
         "context_window": 262144,
         "max_output_tokens": 32768,
+    },
+    "databricks-kimi-k3": {
+        "name": "databricks-kimi-k3",
+        "temperature": 0.7,
+        "provider": "databricks",
+        "context_window": 1048576,
+        "max_output_tokens": 131072,
     },
     "databricks-llama-4-maverick": {
         "name": "databricks-llama-4-maverick",
@@ -636,8 +723,6 @@ REMOVED_MODEL_KEYS = [
     "databricks-gemini-3-pro",  # endpoint removed
     "databricks-gpt-5-1-codex-max",  # endpoint removed
     "databricks-gpt-5-1-codex-mini",  # endpoint removed
-    "databricks-gpt-5-5-pro",  # Responses-API-only (unsupported via chat completions)
-    "databricks-gpt-5-5",  # function tools unsupported via chat completions (Responses API only) — breaks tool crews
     "databricks-gemini-2-5-pro",  # removed per request (superseded by gemini-3-5-flash / gemini-3-1-flash-lite)
     "databricks-meta-llama-3-1-405b-instruct",  # NOT_FOUND (pay-per-token disabled)
     # Reasoning model: answers the JSON-only planning prompt with a "thinking"

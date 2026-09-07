@@ -18,7 +18,7 @@
  * unreachable. It is deliberately the sole hardcoded model name in the app.
  */
 
-const BOOTSTRAP_DEFAULT_MODEL = 'databricks-claude-sonnet-4-6';
+const BOOTSTRAP_DEFAULT_MODEL = 'databricks-gemini-3-8-flash';
 
 let serverDefaultModel: string | null = null;
 

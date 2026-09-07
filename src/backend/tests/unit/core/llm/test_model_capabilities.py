@@ -47,8 +47,15 @@ class TestReasoningStyle:
             # reasoning_effort, no thinking block.
             ("databricks-gpt-5", ReasoningStyle.REASONING_EFFORT),
             ("databricks-gemini-3-1-pro", ReasoningStyle.REASONING_EFFORT),
+            ("databricks-gpt-6-astra", ReasoningStyle.REASONING_EFFORT),
+            ("databricks-gpt-5-5-pro", ReasoningStyle.REASONING_EFFORT),
+            ("databricks-gemini-3-8-flash", ReasoningStyle.REASONING_EFFORT),
+            ("databricks-grok-4-6", ReasoningStyle.REASONING_EFFORT),
+            ("databricks-glm-5-3", ReasoningStyle.REASONING_EFFORT),
+            ("databricks-kimi-k3", ReasoningStyle.REASONING_EFFORT),
+            ("databricks-deepseek-v4-pro-0813", ReasoningStyle.REASONING_EFFORT),
             # Thinking arrives with nothing requested.
-            ("databricks-inkling", ReasoningStyle.UNPROMPTED),
+            ("databricks-inkling", ReasoningStyle.REASONING_EFFORT),
             ("databricks-kimi-k2-7-code", ReasoningStyle.UNPROMPTED),
         ],
     )
@@ -74,7 +81,7 @@ class TestReasoningStyle:
 
 
 class TestAllowedEfforts:
-    """FIVE distinct scales. Any single list is wrong for most of the catalogue."""
+    """Effort scales are model-specific; one global list cannot represent them."""
 
     @pytest.mark.parametrize(
         "model,expected",
@@ -92,8 +99,15 @@ class TestAllowedEfforts:
             ("databricks-gpt-5-2", ("none", "low", "medium", "high", "xhigh")),
             ("databricks-gpt-5-4-mini", ("none", "low", "medium", "high", "xhigh")),
             ("databricks-gpt-5-6-sol", ("none", "low", "medium", "high", "xhigh")),
-            # Gemini rejects none/minimal/xhigh/max.
-            ("databricks-gemini-3-1-pro", ("low", "medium", "high")),
+            ("databricks-gpt-5-5", ("none", "low", "medium", "high", "xhigh")),
+            ("databricks-gpt-5-5-pro", ("medium", "high", "xhigh")),
+            ("databricks-gpt-6-astra", ("low", "medium", "high", "xhigh", "max")),
+            ("databricks-gemini-3-8-flash", ("low", "medium", "high")),
+            ("databricks-gemini-3-1-pro", ("minimal", "low", "medium", "high")),
+            ("databricks-grok-4-6", ("low", "medium", "high", "xhigh")),
+            ("databricks-glm-5-3", ("low", "high", "max")),
+            ("databricks-kimi-k3", ("none", "low", "high", "max")),
+            ("databricks-inkling", ("minimal", "low", "medium", "high", "xhigh", "max")),
         ],
     )
     def test_scale(self, model, expected):
@@ -116,7 +130,7 @@ class TestAllowedEfforts:
                 "databricks-gemini-3-1-pro",
             )
         }
-        assert len(scales) == 5
+        assert len(scales) == 4
 
     def test_supports_effort_is_case_and_space_tolerant(self):
         capability = model_capability("databricks-claude-opus-5")
@@ -191,6 +205,9 @@ class TestEveryEntryIsSourced:
             "databricks-gpt-5",
             "databricks-gemini-3-1-pro",
             "databricks-inkling",
+            "databricks-gpt-6-astra",
+            "databricks-gemini-3-8-flash",
+            "databricks-glm-5-3",
         ):
             capability = model_capability(model)
             assert capability is not None

@@ -17,6 +17,7 @@ from src.schemas.crew import (
 from src.services.llm.manager import LLMManager
 from src.services.tools.tool_service import ToolService
 from src.core.llm.robust_json import robust_json_parser
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -135,7 +136,7 @@ class CompleteGenerationMixin:
             logger.info(f"Tool name to ID mapping: {tool_name_to_id_map}")
 
             # Generate the crew using the LLM
-            model = request.model or os.getenv("CREW_MODEL", "databricks-gpt-5-3-codex")
+            model = request.model or os.getenv("CREW_MODEL", DEFAULT_ENGINE_MODEL)
 
             # Get and prepare the prompt template with tool descriptions (incl. group/user overrides)
             system_message = await self._prepare_prompt_template(

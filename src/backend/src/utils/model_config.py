@@ -26,12 +26,11 @@ logger = logging.getLogger(__name__)
 # not exist. The model/schema layers (models/agent.py, schemas/agent.py,
 # schemas/crew.py) point here too, so a default can no longer diverge per path.
 #
-# Sonnet 4.6 rather than llama-4-maverick: maverick is 128k context / 8k output,
-# and that 8k output cap is a real ceiling for a fallback. Sonnet 4.6 is the
-# current balanced tier at 200k/64k and — unlike the gpt-5* and claude-opus-4-7/
-# 4-8 families — accepts `temperature`, so it carries no request-surface quirk
-# for a model that has to work without any per-agent configuration.
-DEFAULT_ENGINE_MODEL = os.getenv("DEFAULT_LLM_MODEL", "databricks-claude-sonnet-4-6")
+# Gemini 3.8 Flash is the current quality/speed default: it combines strong
+# reasoning and tool use with much higher throughput than frontier-only models.
+# It is a global endpoint, so deployments using this default must enable
+# cross-geography routing in the Databricks workspace.
+DEFAULT_ENGINE_MODEL = os.getenv("DEFAULT_LLM_MODEL", "databricks-gemini-3-8-flash")
 
 
 # Models whose request surface accepts a native reasoning budget:
@@ -99,11 +98,19 @@ DEFAULT_ENGINE_MODEL = os.getenv("DEFAULT_LLM_MODEL", "databricks-claude-sonnet-
 # thinking through the extended-thinking BUDGET instead (see the Anthropic bullet
 # above), while Claude 5 / Fable return a redacted block. So this allow-list
 # governs one of two mechanisms, and neither one promises visible reasoning.
-_REASONING_EFFORT_SUBSTRINGS = ("gpt-5", "gpt5", "gpt-oss", "gemini-3")
+_REASONING_EFFORT_SUBSTRINGS = ("gpt-oss",)
 # o3 / o4 families (o3, o3-mini, o4-mini, ...) do accept `reasoning_effort`.
 _REASONING_EFFORT_PREFIX_RE = re.compile(r"^o[34](\b|[-_.]|$)")
 
-VALID_REASONING_EFFORTS = ("low", "medium", "high")
+VALID_REASONING_EFFORTS = (
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+)
 
 
 def model_supports_reasoning_effort(model_name: Optional[str]) -> bool:
@@ -143,6 +150,15 @@ def model_supports_reasoning_effort(model_name: Optional[str]) -> bool:
 
     if "deep-research" in m:
         return False
+    # The per-model registry is the source of truth for current Databricks and
+    # OpenAI endpoints. This keeps the API capability flag aligned with the
+    # exact effort values exposed to the UI and accepted by the transport.
+    from src.core.llm.model_capabilities import ReasoningStyle, reasoning_style
+
+    if reasoning_style(m) is ReasoningStyle.REASONING_EFFORT:
+        return True
+    # Legacy GPT-OSS and o3/o4 compatibility for models that are not seeded in
+    # the current Databricks catalogue.
     if any(s in m for s in _REASONING_EFFORT_SUBSTRINGS):
         return True
     if _REASONING_EFFORT_PREFIX_RE.match(m):

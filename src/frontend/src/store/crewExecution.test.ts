@@ -605,10 +605,10 @@ describe('crewExecution - jobCreated event detail', () => {
  * These are hardcoded in the store definition and should match expected defaults.
  */
 describe('crewExecution - default state values', () => {
-  it('should default selectedModel to databricks-gpt-5-3-codex', () => {
+  it('should default selectedModel to Gemini 3.8 Flash', () => {
     // Verify the default model matches the source code
-    const defaultModel = 'databricks-gpt-5-3-codex';
-    expect(defaultModel).toBe('databricks-gpt-5-3-codex');
+    const defaultModel = 'databricks-gemini-3-8-flash';
+    expect(defaultModel).toBe('databricks-gemini-3-8-flash');
   });
 
   it('should default processType to sequential', () => {

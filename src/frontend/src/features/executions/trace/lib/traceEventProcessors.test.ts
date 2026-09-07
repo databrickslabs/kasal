@@ -486,6 +486,41 @@ describe('memory-labelling LLM rows', () => {
     expect(request?.description).toBe('LLM Request — some-model (2,549 chars)');
     expect(response?.description).toBe('LLM Response (1,398 chars)');
   });
+
+  it('shows the served model from the OTel output shape', () => {
+    const request = EVENT_PROCESSORS.llm_call(makeTrace({
+      event_type: 'llm_call',
+      output: {
+        tool_name: 'LLM',
+        input: 'databricks-gpt-5-5',
+        extra_data: {
+          model: 'databricks-gpt-5-5',
+          prompt_length: 8388,
+        },
+      },
+      trace_metadata: { agent_role: 'Assistant', tool_name: 'LLM' },
+    }));
+
+    expect(request?.description).toBe(
+      'LLM Request — databricks-gpt-5-5 (8,388 chars)',
+    );
+  });
+
+  it('shows the model on legacy llm_request rows', () => {
+    const request = EVENT_PROCESSORS.llm_request(makeTrace({
+      event_type: 'llm_request',
+      output: {
+        extra_data: {
+          model: 'databricks/databricks-claude-sonnet-5',
+          prompt_length: 1234,
+        },
+      },
+    }));
+
+    expect(request?.description).toBe(
+      'LLM Request — databricks-claude-sonnet-5 (1,234 chars)',
+    );
+  });
 });
 
 // ============================================================================

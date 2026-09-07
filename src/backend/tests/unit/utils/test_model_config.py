@@ -43,6 +43,11 @@ class TestModelRejectsTemperature:
             "global.anthropic.claude-sonnet-5",
             "gpt-5",
             "databricks-gpt-5-1",
+            "databricks-gpt-6-astra",
+            "databricks-gpt-5-5-pro",
+            # Live endpoint regression: the catalogue's 0.7 default made every
+            # Gemini 3.8 request fail before generation.
+            "databricks-gemini-3-8-flash",
         ],
     )
     def test_rejecting_models(self, model):
@@ -124,6 +129,12 @@ class TestModelSupportsReasoningEffort:
             "databricks-gemini-3-1-pro",
             "databricks-gemini-3-5-flash",
             "databricks-gemini-3-1-flash-lite",
+            "databricks-gemini-3-8-flash",
+            "databricks-grok-4-6",
+            "databricks-glm-5-3",
+            "databricks-kimi-k3",
+            "databricks-deepseek-v4-flash-0731",
+            "databricks-inkling",
         ],
     )
     def test_supported_models(self, model):

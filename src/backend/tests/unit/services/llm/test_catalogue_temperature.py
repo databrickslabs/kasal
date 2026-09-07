@@ -13,7 +13,7 @@ setting nobody chose, and the "Setting temperature ..." log line that would
 have given it away was absent rather than wrong.
 """
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -51,6 +51,11 @@ def _patch_lookup(model_config_dict):
 async def _built_kwargs(model_config, temperature):
     """The kwargs the LLM was actually constructed with."""
     p_session, p_service = _patch_lookup(model_config)
+    mock_auth = MagicMock(
+        token="db-token",
+        workspace_url="https://example.com",
+        auth_method="PAT",
+    )
     with (
         p_session,
         p_service,
@@ -59,12 +64,26 @@ async def _built_kwargs(model_config, temperature):
             new_callable=AsyncMock,
             return_value="sk-key",
         ),
+        patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new_callable=AsyncMock,
+            return_value=mock_auth,
+        ),
+        patch("src.utils.user_context.UserContext.get_user_token", return_value=None),
         patch("src.services.llm.manager.LLM") as MockLLM,
+        patch(
+            "src.services.llm.manager.DatabricksRetryLLM"
+        ) as MockDatabricksRetryLLM,
     ):
         await LLMManager.configure_kasal_llm(
             model_config["name"], "group-1", temperature
         )
-        return MockLLM.call_args[1]
+        constructor = (
+            MockDatabricksRetryLLM
+            if model_config["provider"] == "databricks"
+            else MockLLM
+        )
+        return constructor.call_args[1]
 
 
 class TestCatalogueTemperatureFillsTheGap:
@@ -109,6 +128,21 @@ class TestRejectingEndpointsAreStillProtected:
         path, so what is set IS sent."""
         kwargs = await _built_kwargs(
             _config("gpt-5", "openai", 0.7, extra={"max_output_tokens": 128000}), None
+        )
+
+        assert "temperature" not in kwargs
+
+    @pytest.mark.asyncio
+    async def test_a_gemini_38_row_temperature_is_not_sent(self):
+        """Gemini 3.8 rejects temperature, including the seeded default 0.7."""
+        kwargs = await _built_kwargs(
+            _config(
+                "databricks-gemini-3-8-flash",
+                "databricks",
+                0.7,
+                extra={"max_output_tokens": 65536},
+            ),
+            None,
         )
 
         assert "temperature" not in kwargs

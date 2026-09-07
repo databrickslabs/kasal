@@ -2,9 +2,9 @@
 Databricks Responses API
 
 The LLM for Databricks-served models that speak the Responses API rather than
-chat completions. gpt-5.3-codex is the only such model today and every quirk
-below was found on it, but the class is named for the API because that is what
-decides which models land here.
+chat completions. The adapter serves gpt-5.3-codex and the GPT-5.5 family. The
+phase-preservation behavior was discovered on Codex and is harmless for response
+items that do not carry a phase.
 
 The Responses API base path differs from chat/embeddings:
 - AI Gateway on:  /ai-gateway/openai/v1  (→ /ai-gateway/openai/v1/responses)
@@ -48,7 +48,7 @@ logger = logging.getLogger("crew")
 
 
 class DatabricksResponsesLLM(OpenAICompletion):
-    """OpenAICompletion subclass tailored for Databricks-hosted gpt-5.3-codex.
+    """OpenAICompletion subclass for Databricks-hosted Responses API models.
 
     Preserves the ``phase`` field on assistant output items across
     multi-turn conversations so the model does not degrade into early
@@ -143,11 +143,17 @@ class DatabricksResponsesLLM(OpenAICompletion):
         # (max_output_tokens=128000), which used to flow into every request —
         # ~30x the largest response ever observed (p99 well under 4k tokens)
         # and an open invitation for a runaway generation to bill 128k output
-        # tokens. Override via KASAL_CODEX_MAX_OUTPUT_TOKENS when a workload
-        # genuinely needs more.
+        # tokens. Override via KASAL_RESPONSES_MAX_OUTPUT_TOKENS when a workload
+        # genuinely needs more. Keep the older Codex setting as a compatibility
+        # fallback for existing deployments.
         import os as _os
 
-        cap = int(_os.environ.get("KASAL_CODEX_MAX_OUTPUT_TOKENS", "16000"))
+        cap = int(
+            _os.environ.get(
+                "KASAL_RESPONSES_MAX_OUTPUT_TOKENS",
+                _os.environ.get("KASAL_CODEX_MAX_OUTPUT_TOKENS", "16000"),
+            )
+        )
         current = params.get("max_output_tokens")
         if current is None:
             explicit = getattr(self, "max_completion_tokens", None) or getattr(
