@@ -8,6 +8,7 @@
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { config } from '../../shared/api/client';
+import { withLocalSseContext } from '../../shared/api/sseContext';
 
 /* ------------------------------------------------------------------ */
 /*  Public types                                                       */
@@ -128,7 +129,9 @@ export function useCrewGenerationSSE(
     disconnect();
     setStatus('connecting');
 
-    const url = `${config.apiUrl}/sse/generations/${generationId}/stream`;
+    const url = withLocalSseContext(
+      `${config.apiUrl}/sse/generations/${generationId}/stream`,
+    );
     console.log(`[CrewGenSSE] Connecting to ${url}`);
 
     const es = new EventSource(url);

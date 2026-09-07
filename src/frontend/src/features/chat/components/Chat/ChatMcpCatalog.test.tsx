@@ -2,12 +2,16 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import ChatMcpCatalog from './ChatMcpCatalog';
+import { useExecutionStore } from '../../store/executionStore';
 
 const api = {
   getDatabricksCatalog: vi.fn(),
   listGenieSpaces: vi.fn(),
   listAiSearchIndexes: vi.fn(),
   ensureDatabricksServer: vi.fn(),
+  getBaseServers: vi.fn(),
+  getMcpServers: vi.fn(),
+  enableForWorkspace: vi.fn(),
 };
 vi.mock('../../../../api/tools/MCPService', () => ({
   MCPService: { getInstance: () => api },
@@ -33,6 +37,10 @@ beforeEach(() => {
     { id: 'i1', kind: 'ai-search', name: 'docs_index', server_url: 'https://ws/mcp/ais/i1' },
   ]);
   api.ensureDatabricksServer.mockResolvedValue('my-uc-mcp');
+  api.getBaseServers.mockResolvedValue({ servers: [{ id: 7, name: 'my-uc-mcp' }] });
+  api.getMcpServers.mockResolvedValue({ servers: [{ id: 7, name: 'my-uc-mcp' }] });
+  api.enableForWorkspace.mockResolvedValue({});
+  useExecutionStore.getState().setSelectedMcpServers([]);
 });
 
 describe('ChatMcpCatalog', () => {
@@ -60,6 +68,17 @@ describe('ChatMcpCatalog', () => {
     expect(onRegistered).toHaveBeenCalled();
     // The row flips to "Added".
     expect(await screen.findByText('Added')).toBeInTheDocument();
+  });
+
+  it('auto-enables the added server for the teamspace and selects it (one-action add)', async () => {
+    render(<ChatMcpCatalog scope="global" onRegistered={vi.fn()} />);
+    const name = await screen.findByText('my-uc-mcp');
+    const row = name.closest('div.rounded-lg') as HTMLElement;
+    fireEvent.click(within(row).getByRole('button', { name: 'Add' }));
+    // Turned on for this teamspace (by the matched server id)…
+    await waitFor(() => expect(api.enableForWorkspace).toHaveBeenCalledWith(7));
+    // …and selected for the next run, so no extra clicks are needed.
+    expect(useExecutionStore.getState().selectedMcpServers).toContain('my-uc-mcp');
   });
 
   it('drills into Genie spaces and registers one', async () => {

@@ -165,3 +165,51 @@ class TestGetGroupContextExceptionHandling:
 
         # Should return cached value without calling from_email
         assert result is mock_context
+
+
+class TestLocalSseQueryContext:
+    @pytest.mark.asyncio
+    async def test_loopback_sse_uses_query_identity_and_workspace(self, monkeypatch):
+        monkeypatch.delenv("DATABRICKS_APP_NAME", raising=False)
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        request = _make_request()
+        request.url = type("URL", (), {"path": "/api/v1/sse/executions/job/stream"})()
+        request.client = type("Client", (), {"host": "127.0.0.1"})()
+        request.query_params = {
+            "_sse_email": "dev@localhost",
+            "_sse_group_id": "user_dev_localhost",
+        }
+        expected = GroupContext(group_ids=["user_dev_localhost"])
+
+        with patch.object(
+            GroupContext, "from_email", new_callable=AsyncMock, return_value=expected
+        ) as from_email:
+            result = await get_group_context(
+                request=request, x_forwarded_email=None,
+                x_forwarded_access_token=None, x_auth_request_email=None,
+                x_auth_request_user=None, x_auth_request_access_token=None,
+                x_group_id=None, x_group_domain=None,
+            )
+
+        assert result is expected
+        from_email.assert_awaited_once_with(
+            email="dev@localhost", access_token=None, group_id="user_dev_localhost"
+        )
+
+    @pytest.mark.asyncio
+    async def test_non_loopback_request_ignores_sse_query_identity(self, monkeypatch):
+        monkeypatch.delenv("DATABRICKS_APP_NAME", raising=False)
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        request = _make_request()
+        request.url = type("URL", (), {"path": "/api/v1/sse/executions/job/stream"})()
+        request.client = type("Client", (), {"host": "10.0.0.8"})()
+        request.query_params = {"_sse_email": "spoof@example.com"}
+
+        result = await get_group_context(
+            request=request, x_forwarded_email=None,
+            x_forwarded_access_token=None, x_auth_request_email=None,
+            x_auth_request_user=None, x_auth_request_access_token=None,
+            x_group_id=None, x_group_domain=None,
+        )
+
+        assert result.group_ids is None

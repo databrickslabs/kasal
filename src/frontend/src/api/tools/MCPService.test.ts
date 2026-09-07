@@ -127,7 +127,16 @@ describe('listAiSearchIndexes', () => {
 describe('ensureDatabricksServer', () => {
   it('reuses an exact lowercase registration without any writes', async () => {
     client.get.mockResolvedValue({
-      data: { servers: [{ id: 7, name: 'databricks genie: sales space', enabled: true }] },
+      data: {
+        servers: [
+          {
+            id: 7,
+            name: 'databricks genie: sales space',
+            enabled: true,
+            server_url: genieOption.server_url,
+          },
+        ],
+      },
     });
 
     const name = await service.ensureDatabricksServer(genieOption);
@@ -140,7 +149,16 @@ describe('ensureDatabricksServer', () => {
 
   it('renames legacy mixed-case registrations to the lowercase name', async () => {
     client.get.mockResolvedValue({
-      data: { servers: [{ id: 7, name: 'Databricks Genie: Sales Space', enabled: true }] },
+      data: {
+        servers: [
+          {
+            id: 7,
+            name: 'Databricks Genie: Sales Space',
+            enabled: true,
+            server_url: genieOption.server_url,
+          },
+        ],
+      },
     });
     client.put.mockResolvedValue({ data: {} });
 
@@ -155,7 +173,16 @@ describe('ensureDatabricksServer', () => {
 
   it('falls back to the stored name when the rename is not permitted', async () => {
     client.get.mockResolvedValue({
-      data: { servers: [{ id: 7, name: 'Databricks Genie: Sales Space', enabled: true }] },
+      data: {
+        servers: [
+          {
+            id: 7,
+            name: 'Databricks Genie: Sales Space',
+            enabled: true,
+            server_url: genieOption.server_url,
+          },
+        ],
+      },
     });
     client.put.mockRejectedValue({ response: { status: 403 } });
 
@@ -163,6 +190,31 @@ describe('ensureDatabricksServer', () => {
 
     // Crews resolve by the REGISTERED name, so the stored casing wins.
     expect(name).toBe('Databricks Genie: Sales Space');
+  });
+
+  it('heals a stale server_url on a name match (e.g. proxy → AI-Gateway)', async () => {
+    client.get.mockResolvedValue({
+      data: {
+        servers: [
+          {
+            id: 7,
+            name: 'databricks genie: sales space',
+            enabled: true,
+            server_url: 'https://ws.example.com/api/2.0/mcp/external/old_connection',
+          },
+        ],
+      },
+    });
+    client.put.mockResolvedValue({ data: {} });
+
+    const name = await service.ensureDatabricksServer(genieOption);
+
+    expect(name).toBe('databricks genie: sales space');
+    // The stored URL is re-homed to the catalog's current URL; no re-create.
+    expect(client.put).toHaveBeenCalledWith('/mcp/servers/7', {
+      server_url: genieOption.server_url,
+    });
+    expect(client.post).not.toHaveBeenCalled();
   });
 
   it('re-enables an existing registration matched by URL and normalizes its name', async () => {

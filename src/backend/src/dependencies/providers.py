@@ -1,6 +1,7 @@
 """FastAPI session, request-context and generic dependency providers."""
 
 import logging
+import os
 from typing import Annotated, Callable, Optional, Type
 
 from fastapi import Depends, Header, Request
@@ -75,8 +76,29 @@ async def get_group_context(
 
     logger = logging.getLogger("src.core.dependencies")
 
-    # Prefer OAuth2-Proxy headers over direct headers
-    user_email = x_auth_request_email or x_forwarded_email
+    # Native EventSource cannot attach the local-development headers used by
+    # the Axios client. Direct loopback SSE URLs therefore carry the same email
+    # and selected workspace as query parameters. Never honor those parameters
+    # in Databricks Apps, production, non-SSE routes, or non-loopback requests.
+    path = getattr(getattr(request, "url", None), "path", "")
+    client_host = getattr(getattr(request, "client", None), "host", "")
+    production = bool(os.getenv("DATABRICKS_APP_NAME")) or os.getenv(
+        "ENVIRONMENT", ""
+    ).strip().lower() in ("production", "prod")
+    local_sse = (
+        not production
+        and isinstance(path, str)
+        and "/sse/" in path
+        and client_host in ("127.0.0.1", "::1", "localhost")
+    )
+    query = request.query_params if local_sse else {}
+    sse_email = query.get("_sse_email") if local_sse else None
+    sse_group_id = query.get("_sse_group_id") if local_sse else None
+
+    # Prefer OAuth2-Proxy headers over direct headers. Query values are local
+    # SSE fallbacks only; real proxy/header identity always wins.
+    user_email = x_auth_request_email or x_forwarded_email or sse_email
+    x_group_id = x_group_id or sse_group_id
     access_token = x_auth_request_access_token or x_forwarded_access_token
 
     # =========================================================================

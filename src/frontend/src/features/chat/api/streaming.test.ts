@@ -95,7 +95,7 @@ describe('streaming buildSseUrl resolution', () => {
     getBaseUrl.mockReturnValue('');
     const cleanup = streamGeneration('gen-1', vi.fn());
     expect(FakeEventSource.instances[0].url).toBe(
-      'http://localhost:8000/api/v1/sse/generations/gen-1/stream'
+      'http://localhost:8000/api/v1/sse/generations/gen-1/stream?_sse_email=dev%40localhost'
     );
     cleanup();
   });

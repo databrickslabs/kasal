@@ -5,6 +5,7 @@ import {
   type DatabricksManagedMcpType,
   type DatabricksMcpCatalog as Catalog,
 } from '../../../../api/tools/MCPService';
+import { useExecutionStore } from '../../store/executionStore';
 
 /**
  * Chat-native Databricks MCP catalog picker (the "Add server" → Databricks tab in
@@ -138,7 +139,24 @@ const ChatMcpCatalog: React.FC<ChatMcpCatalogProps> = ({ scope, onRegistered, re
     setBusyId(option.id);
     setError(null);
     try {
-      await MCPService.getInstance().ensureDatabricksServer(option, scope);
+      const svc = MCPService.getInstance();
+      const name = await svc.ensureDatabricksServer(option, scope);
+      // One-action add: adding from chat should also turn the server on for THIS
+      // teamspace AND select it for the next run, so the user doesn't repeat the
+      // enable + pick in two other places. Enabling is best-effort — if it fails
+      // the server is still registered and the manual teamspace toggle remains.
+      try {
+        const { servers } =
+          scope === 'global' ? await svc.getBaseServers() : await svc.getMcpServers();
+        const match = servers.find((s) => s.name.toLowerCase() === name.toLowerCase());
+        if (match) await svc.enableForWorkspace(match.id);
+      } catch {
+        /* leave it registered; the teamspace toggle is the manual fallback */
+      }
+      const store = useExecutionStore.getState();
+      if (!store.selectedMcpServers.includes(name)) {
+        store.setSelectedMcpServers([...store.selectedMcpServers, name]);
+      }
       setDone((d) => new Set(d).add(option.id));
       await onRegistered();
     } catch (e) {

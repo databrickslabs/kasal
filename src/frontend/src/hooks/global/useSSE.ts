@@ -7,6 +7,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { config } from '../../shared/api/client';
 import { SSE_ENABLED } from '../../utils/sseTransport';
+import { withLocalSseContext } from '../../shared/api/sseContext';
 
 export interface SSEOptions {
   /**
@@ -102,7 +103,8 @@ export const useSSE = <T = any>(
       eventSourceRef.current.close();
     }
 
-    const url = endpoint.startsWith('http') ? endpoint : `${config.apiUrl}${endpoint}`;
+    const rawUrl = endpoint.startsWith('http') ? endpoint : `${config.apiUrl}${endpoint}`;
+    const url = withLocalSseContext(rawUrl);
     const t0 = Date.now();
 
     console.log(`[SSE] ${new Date().toISOString()} | CONNECT  | ${endpoint} | url=${url}`);

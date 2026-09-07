@@ -8,7 +8,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.api.mcp_router import (
+    _heal_external_mcp_urls,
     _list_external_mcp_options,
+    _mcp_service_parent,
     get_databricks_mcp_options,
     list_ai_search_mcp_indexes,
     list_function_mcp_schemas,
@@ -642,7 +644,10 @@ async def test_external_options_only_include_mcp_flagged_http_connections():
             },
         ]
     }
-    session_cm, session = _aiohttp_session([(200, payload)])
+    # Second GET is the MCP-Services listing (empty here — covered on its own below).
+    session_cm, session = _aiohttp_session(
+        [(200, payload), (200, {"mcp_services": []})]
+    )
 
     with (
         patch(
@@ -662,8 +667,108 @@ async def test_external_options_only_include_mcp_flagged_http_connections():
             "server_url": "https://ws.example.com/api/2.0/mcp/external/jira",
         }
     ]
-    called_url = session.get.call_args.args[0]
-    assert called_url == "https://ws.example.com/api/2.1/unity-catalog/connections"
+    first_url = session.get.call_args_list[0].args[0]
+    assert first_url == "https://ws.example.com/api/2.1/unity-catalog/connections"
+
+
+@pytest.mark.asyncio
+async def test_external_options_include_uc_mcp_services():
+    """External MCP registered the NEW way is an MCP_SERVICE securable, not an
+    is_mcp_connection HTTP connection. We list them and expose each at its
+    AI-Gateway SSE endpoint (/ai-gateway/mcp-services/{full_name}). The built-in
+    system.ai.* services stay out of the picker."""
+    connections = {"connections": []}  # nothing flagged the old way
+    first_page = {
+        "mcp_services": [
+            {"name": "mcp-services/kasal.agents.websearch", "comment": "You.com MCP"},
+        ],
+        "next_page_token": "page-2",
+    }
+    second_page = {
+        "mcp_services": [
+            {"name": "mcp-services/system.ai.gmail"},  # built-in → skipped
+        ]
+    }
+    session_cm, session = _aiohttp_session(
+        [(200, connections), (200, first_page), (200, second_page)]
+    )
+
+    with (
+        patch(
+            "src.utils.databricks_auth.get_auth_context",
+            AsyncMock(return_value=_auth()),
+        ),
+        patch("aiohttp.ClientSession", MagicMock(return_value=session_cm)),
+    ):
+        options = await _list_external_mcp_options(
+            "https://ws.example.com", "tok", ["schemas/kasal.agents"]
+        )
+
+    assert options == [
+        {
+            "id": "external:kasal.agents.websearch",
+            "kind": "external",
+            "name": "kasal.agents.websearch",
+            "description": "You.com MCP",
+            "server_url": "https://ws.example.com/ai-gateway/mcp-services/kasal.agents.websearch",
+        }
+    ]
+    assert session.get.call_count == 3
+    first_service_call = session.get.call_args_list[1]
+    assert (
+        first_service_call.args[0]
+        == "https://ws.example.com/api/2.1/unity-catalog/mcp-services"
+    )
+    assert first_service_call.kwargs["params"] == {
+        "parent": "schemas/kasal.agents",
+        "max_results": 100,
+    }
+    assert session.get.call_args_list[2].kwargs["params"]["page_token"] == "page-2"
+
+
+def test_mcp_service_parent_requires_a_three_part_name():
+    assert _mcp_service_parent("kasal.agents.websearch") == "schemas/kasal.agents"
+    assert _mcp_service_parent("websearch_connection") is None
+
+
+@pytest.mark.asyncio
+async def test_heal_external_mcp_urls_updates_only_confirmed_rows_in_scope():
+    rows = [
+        SimpleNamespace(
+            id=1, name="kasal.agents.websearch", group_id=None,
+            server_url="https://ws/api/2.0/mcp/external/websearch_connection",
+        ),
+        SimpleNamespace(
+            id=2, name="kasal.agents.websearch", group_id="team-1",
+            server_url="https://ws/api/2.0/mcp/external/websearch_connection",
+        ),
+        SimpleNamespace(
+            id=3, name="kasal.agents.websearch", group_id="team-2",
+            server_url="https://ws/api/2.0/mcp/external/websearch_connection",
+        ),
+        SimpleNamespace(
+            id=4, name="kasal.agents.websearch", group_id="team-1",
+            server_url="https://custom.example.com/mcp",
+        ),
+    ]
+    repository = MagicMock()
+    repository.list = AsyncMock(return_value=rows)
+    repository.update = AsyncMock()
+    option = {
+        "name": "kasal.agents.websearch",
+        "server_url": "https://ws/ai-gateway/mcp-services/kasal.agents.websearch",
+    }
+
+    with patch(
+        "src.repositories.mcp_repository.MCPServerRepository",
+        MagicMock(return_value=repository),
+    ):
+        changed = await _heal_external_mcp_urls(
+            AsyncMock(), [option], "team-1", include_base=True
+        )
+
+    assert changed == 2
+    assert [call.args[0] for call in repository.update.await_args_list] == [1, 2]
 
 
 @pytest.mark.asyncio

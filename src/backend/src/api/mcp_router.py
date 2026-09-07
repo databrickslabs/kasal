@@ -96,7 +96,9 @@ async def get_mcp_servers(
 
 
 async def _list_external_mcp_options(
-    workspace_url: str, user_token: Optional[str]
+    workspace_url: str,
+    user_token: Optional[str],
+    service_parents: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """
     External MCP servers registered IN DATABRICKS that the caller can use.
@@ -119,14 +121,15 @@ async def _list_external_mcp_options(
     headers.update(get_user_agent_header(KasalProduct.MCP))
 
     url = f"{workspace_url}/api/2.1/unity-catalog/connections"
+    payload: Dict[str, Any] = {}
     async with aiohttp.ClientSession() as http:
         async with http.get(url, headers=headers) as resp:
             if resp.status != 200:
                 logger.warning(
                     f"Could not list UC connections for external MCPs: HTTP {resp.status}"
                 )
-                return []
-            payload = await resp.json()
+            else:
+                payload = await resp.json()
 
     options: List[Dict[str, Any]] = []
     for conn in payload.get("connections") or []:
@@ -162,7 +165,114 @@ async def _list_external_mcp_options(
                 "server_url": f"{workspace_url}/api/2.0/mcp/external/{name}",
             }
         )
+
+    # Unity Catalog MCP Services are schema-scoped securables. The list API
+    # requires ``parent=schemas/{catalog}.{schema}``; a parameterless request is
+    # rejected, which previously made this feature silently return no options.
+    # Call every known parent and follow each parent's pagination token.
+    try:
+        seen_urls = {o["server_url"] for o in options}
+        svc_root = f"{workspace_url}/api/2.1/unity-catalog/mcp-services"
+        services: List[Dict[str, Any]] = []
+        async with aiohttp.ClientSession() as http:
+            for parent in dict.fromkeys(service_parents or []):
+                page_token: Optional[str] = None
+                while True:
+                    params = {"parent": parent, "max_results": 100}
+                    if page_token:
+                        params["page_token"] = page_token
+                    async with http.get(
+                        svc_root, headers=headers, params=params
+                    ) as resp:
+                        if resp.status != 200:
+                            logger.warning(
+                                "Could not list UC MCP Services for %s: HTTP %s",
+                                parent,
+                                resp.status,
+                            )
+                            break
+                        page = await resp.json()
+                    services.extend(page.get("mcp_services") or [])
+                    page_token = page.get("next_page_token")
+                    if not page_token:
+                        break
+
+        for svc in services:
+            # Responses have used both the full name and the resource-name form
+            # ``mcp-services/{catalog}.{schema}.{name}``.
+            full_name = str(svc.get("name", "")).split("/", 1)[-1]
+            if not full_name or full_name.startswith("system."):
+                continue
+            server_url = f"{workspace_url}/ai-gateway/mcp-services/{full_name}"
+            if server_url in seen_urls:
+                continue
+            seen_urls.add(server_url)
+            options.append(
+                {
+                    "id": f"external:{full_name}",
+                    "kind": "external",
+                    "name": full_name,
+                    "description": svc.get("comment"),
+                    "server_url": server_url,
+                }
+            )
+    except Exception as e:  # never let MCP-service discovery break the catalog
+        logger.warning(f"Could not list UC MCP Services for external MCPs: {e}")
+
     return options
+
+
+def _mcp_service_parent(name: str) -> Optional[str]:
+    """Return the schema parent for a three-part UC securable name."""
+    parts = [part.strip() for part in str(name).split(".")]
+    if len(parts) != 3 or not all(parts):
+        return None
+    return f"schemas/{parts[0]}.{parts[1]}"
+
+
+async def _heal_external_mcp_urls(
+    session,
+    options: List[Dict[str, Any]],
+    group_id: Optional[str],
+    include_base: bool,
+) -> int:
+    """Migrate confirmed MCP services off the legacy external proxy.
+
+    Only rows in the caller's workspace are changed. A system administrator may
+    additionally heal the base row. Custom endpoints are never rewritten: the
+    old URL must be a Databricks ``/api/2.0/mcp/external/`` proxy and the new
+    service must have been returned by the schema-scoped UC API.
+    """
+    from src.repositories.mcp_repository import MCPServerRepository
+
+    replacements = {
+        str(option.get("name", "")).lower(): option.get("server_url")
+        for option in options
+        if "/ai-gateway/mcp-services/" in str(option.get("server_url", ""))
+    }
+    if not replacements:
+        return 0
+
+    repository = MCPServerRepository(session)
+    changed = 0
+    for server in await repository.list():
+        in_scope = (
+            (group_id is not None and server.group_id == group_id)
+            or (include_base and server.group_id is None)
+        )
+        new_url = replacements.get(str(server.name).lower())
+        if (
+            not in_scope
+            or not new_url
+            or "/api/2.0/mcp/external/" not in str(server.server_url)
+            or server.server_url == new_url
+        ):
+            continue
+        await repository.update(server.id, {"server_url": new_url})
+        changed += 1
+    if changed:
+        logger.info("Migrated %s MCP registration(s) to AI Gateway", changed)
+    return changed
 
 
 @router.get("/databricks/available")
@@ -219,10 +329,50 @@ async def get_databricks_mcp_options(
     external: List[Dict[str, Any]] = []
     managed: List[Dict[str, Any]] = []
     if workspace_url:
-        # External (connection-based) MCP servers, permission-filtered by
-        # listing with the caller's own credentials.
+        group_id = (
+            getattr(group_context, "primary_group_id", None) if group_context else None
+        )
+        service_parents: List[str] = []
+
+        # The list API is schema-scoped. Seed it from the configured schema and
+        # from existing three-part registrations so a service can be re-homed
+        # even when it lives outside the app's default catalog/schema.
         try:
-            external = await _list_external_mcp_options(workspace_url, user_token)
+            from src.repositories.databricks_config_repository import (
+                DatabricksConfigRepository,
+            )
+
+            config = await DatabricksConfigRepository(session).get_active_config(
+                group_id=group_id
+            )
+            catalog = getattr(config, "catalog", None) if config else None
+            schema = getattr(config, "schema", None) if config else None
+            if isinstance(catalog, str) and isinstance(schema, str):
+                service_parents.append(f"schemas/{catalog}.{schema}")
+        except Exception as e:
+            logger.warning(f"Could not resolve configured MCP Service schema: {e}")
+
+        try:
+            from src.repositories.mcp_repository import MCPServerRepository
+
+            registered = await MCPServerRepository(session).list_for_group_scope(group_id)
+            for server in registered:
+                parent = _mcp_service_parent(server.name)
+                if parent:
+                    service_parents.append(parent)
+        except Exception as e:
+            logger.warning(f"Could not resolve registered MCP Service schemas: {e}")
+
+        try:
+            external = await _list_external_mcp_options(
+                workspace_url, user_token, list(dict.fromkeys(service_parents))
+            )
+            await _heal_external_mcp_urls(
+                session,
+                external,
+                group_id,
+                include_base=_is_global_admin(group_context),
+            )
         except Exception as e:
             logger.warning(f"Could not enumerate external Databricks MCP servers: {e}")
 

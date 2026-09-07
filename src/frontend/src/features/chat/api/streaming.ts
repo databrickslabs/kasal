@@ -1,5 +1,6 @@
 import { getBaseUrl, getClient } from './client';
 import { SSE_ENABLED } from '../../../utils/sseTransport';
+import { withLocalSseContext } from '../../../shared/api/sseContext';
 
 export interface StreamEvent {
   event: string;
@@ -23,12 +24,12 @@ function buildSseUrl(path: string): string {
 
   // If the base URL is already absolute, use it directly
   if (url.startsWith('http')) {
-    return url;
+    return withLocalSseContext(url);
   }
 
   // In dev mode, connect directly to the backend to avoid proxy issues with SSE
   if (import.meta.env.DEV) {
-    return `http://localhost:8000/api/v1${path}`;
+    return withLocalSseContext(`http://localhost:8000/api/v1${path}`);
   }
 
   // In production, resolve against the current origin

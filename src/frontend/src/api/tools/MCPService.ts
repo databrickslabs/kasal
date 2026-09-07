@@ -482,6 +482,19 @@ export class MCPService {
           /* cosmetic — the server still works without the preset settings */
         }
       }
+      // Heal a stale endpoint: a server matched BY NAME may carry an older URL
+      // (e.g. an external MCP re-homed from the /api/2.0/mcp/external proxy to
+      // the AI-Gateway MCP-Services endpoint). Point it at the catalog's current
+      // URL so re-adding fixes it without a delete + re-create.
+      if (option.server_url && match.server_url !== option.server_url) {
+        try {
+          await this.updateMcpServer(match.id, {
+            server_url: option.server_url,
+          } as Partial<MCPServerConfig>);
+        } catch {
+          /* keep the stored URL if the update is rejected */
+        }
+      }
       if (!match.enabled) {
         if (scope === 'global') await this.setGlobalAvailability(match.id, true);
         else await this.setWorkspaceEnabled(match.id, true);

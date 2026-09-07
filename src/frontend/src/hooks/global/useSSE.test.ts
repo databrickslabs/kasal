@@ -130,7 +130,7 @@ describe('useSSE', () => {
 
       expect(mockEventSourceInstances.length).toBe(1);
       expect(getLatestMockInstance()?.url).toBe(
-        'http://localhost:8000/api/v1/test/endpoint'
+        'http://localhost:8000/api/v1/test/endpoint?_sse_email=dev%40localhost'
       );
     });
 
@@ -511,7 +511,7 @@ describe('useExecutionSSE', () => {
 
     expect(mockEventSourceInstances.length).toBe(1);
     expect(getLatestMockInstance()?.url).toBe(
-      'http://localhost:8000/api/v1/sse/executions/job-123/stream'
+      'http://localhost:8000/api/v1/sse/executions/job-123/stream?_sse_email=dev%40localhost'
     );
   });
 
@@ -570,7 +570,7 @@ describe('useGlobalExecutionSSE', () => {
 
     expect(mockEventSourceInstances.length).toBe(1);
     expect(getLatestMockInstance()?.url).toBe(
-      'http://localhost:8000/api/v1/sse/executions/stream-all'
+      'http://localhost:8000/api/v1/sse/executions/stream-all?_sse_email=dev%40localhost'
     );
   });
 
