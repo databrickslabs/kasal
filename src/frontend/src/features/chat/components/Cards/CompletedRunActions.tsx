@@ -35,7 +35,7 @@ const CompletedRunActions: React.FC<CompletedRunActionsProps> = ({ executionId, 
             title={scheduledName ? `Scheduled — ${scheduledName}` : 'Run this on a schedule'}
             className={ICON_BTN}
             style={{
-              color: scheduledName ? 'var(--accent)' : 'var(--text-secondary)',
+              color: scheduledName ? 'var(--text-primary)' : 'var(--text-secondary)',
               backgroundColor: 'transparent',
               border: 'none',
             }}

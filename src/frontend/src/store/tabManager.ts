@@ -12,6 +12,7 @@ export interface TabExecutionConfig {
   reasoningLLM?: string;
   reasoningConfig?: ReasoningConfig;  // Model reasoning/thinking budget
   managerLLM?: string;
+  selectedModel?: string;
 }
 
 export interface TabData {
@@ -26,6 +27,7 @@ export interface TabData {
   viewMode: 'crew' | 'flow';
   isActive: boolean;
   isDirty: boolean; // Track if tab has unsaved changes
+  isSessionDraft?: boolean; // An empty session is listed only after work starts
   createdAt: Date;
   lastModified: Date;
   group_id: string; // Workspace/group this tab belongs to
@@ -38,6 +40,8 @@ export interface TabData {
   savedFlowName?: string; // Name of the saved flow
   // Chat session
   chatSessionId?: string; // ID of the chat session for this tab
+  // All runs belong to the session, even after editing or rerunning its canvas.
+  executionJobIds?: string[];
   // Execution status
   executionStatus?: 'running' | 'completed' | 'failed';
   lastExecutionTime?: Date;
@@ -50,7 +54,8 @@ interface TabManagerState {
   activeTabId: string | null;
 
   // Actions
-  createTab: (name?: string, viewMode?: 'crew' | 'flow') => string;
+  createTab: (name?: string, viewMode?: 'crew' | 'flow', options?: { sessionDraft?: boolean }) => string;
+  nameSessionFromPrompt: (sessionId: string, prompt: string) => void;
   closeTab: (tabId: string) => void;
   setActiveTab: (tabId: string) => void;
   updateTabName: (tabId: string, name: string) => void;
@@ -154,7 +159,7 @@ export const useTabManagerStore = create<TabManagerState>()(
       tabs: [],
       activeTabId: null,
 
-      createTab: (name?: string, viewMode?: 'crew' | 'flow') => {
+      createTab: (name?: string, viewMode?: 'crew' | 'flow', options?: { sessionDraft?: boolean }) => {
         const newTabId = uuidv4();
         // Get current group ID from localStorage
         const currentGroupId = localStorage.getItem('selectedGroupId') || '';
@@ -179,6 +184,7 @@ export const useTabManagerStore = create<TabManagerState>()(
           viewMode: resolvedViewMode,
           isActive: true,
           isDirty: false,
+          isSessionDraft: options?.sessionDraft,
           createdAt: new Date(),
           lastModified: new Date(),
           group_id: currentGroupId,
@@ -201,6 +207,16 @@ export const useTabManagerStore = create<TabManagerState>()(
         }, 0);
 
         return newTabId;
+      },
+
+      nameSessionFromPrompt: (sessionId, prompt) => {
+        const title = prompt.trim().replace(/\s+/g, ' ').slice(0, 60);
+        if (!title) return;
+        set(state => ({ tabs: state.tabs.map(tab =>
+          tab.chatSessionId === sessionId && tab.isSessionDraft
+            ? { ...tab, name: title, isSessionDraft: false, lastModified: new Date() }
+            : tab
+        ) }));
       },
 
       closeTab: (tabId: string) => {
@@ -277,7 +293,7 @@ export const useTabManagerStore = create<TabManagerState>()(
         set(state => ({
           tabs: state.tabs.map(tab =>
             tab.id === tabId
-              ? { ...tab, name, lastModified: new Date() }
+              ? { ...tab, name, isSessionDraft: false, lastModified: new Date() }
               : tab
           )
         }));
@@ -289,6 +305,7 @@ export const useTabManagerStore = create<TabManagerState>()(
           if (!tab) return state;
           
           const nodesChanged = nodesHaveActuallyChanged(tab.nodes, nodes);
+          if (!nodesChanged) return state;
           const shouldMarkDirty = nodesChanged && (!tab.savedCrewId || tab.isDirty);
           
           // Clear execution status when nodes are meaningfully changed
@@ -322,6 +339,7 @@ export const useTabManagerStore = create<TabManagerState>()(
           if (!tab) return state;
 
           const edgesChanged = edgesHaveActuallyChanged(tab.edges, edges);
+          if (!edgesChanged) return state;
           const shouldMarkDirty = edgesChanged && (!tab.savedCrewId || tab.isDirty);
 
           // Clear execution status when edges are meaningfully changed
@@ -469,6 +487,7 @@ export const useTabManagerStore = create<TabManagerState>()(
           savedCrewId: undefined,
           savedCrewName: undefined,
           lastSavedAt: undefined,
+          executionJobIds: [],
           chatSessionId: uuidv4() // New chat session for duplicated tab
         };
 

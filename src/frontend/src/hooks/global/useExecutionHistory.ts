@@ -5,6 +5,7 @@ import { toast } from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import { runService } from '../../api/execution/ExecutionHistoryService';
 import { logger } from '../../utils/logger';
+import { useScopedRuns } from '../../features/executions/components/useScopedRuns';
 import { useGroupStore } from '../../store/groups';
 
 // Create a specialized logger for this module
@@ -12,7 +13,9 @@ const historyLogger = logger.createChild('ExecutionHistory');
 
 type SortField = 'status' | 'duration' | 'created_at';
 
-export const useRunHistory = () => {
+export const useRunHistory = (jobIds?: string[]) => {
+  const scoped = useScopedRuns(jobIds);
+  const isScoped = jobIds !== undefined;
   const { t } = useTranslation();
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
@@ -22,12 +25,16 @@ export const useRunHistory = () => {
   const jobsPerPage = 200;
 
   const {
-    runHistory,
-    isLoading,
-    error,
+    runHistory: workspaceRuns,
+    isLoading: workspaceLoading,
+    error: workspaceError,
     fetchInitialRunHistory,
     setError
   } = useRunStatusStore();
+
+  const runHistory = isScoped ? scoped.runs : workspaceRuns;
+  const isLoading = isScoped ? scoped.loading : workspaceLoading;
+  const error = isScoped ? scoped.error : workspaceError;
 
   // Get the current group ID from the store (reactive)
   const currentGroupId = useGroupStore(state => state.currentGroupId);
@@ -52,6 +59,10 @@ export const useRunHistory = () => {
 
   // Memoize fetchRuns to prevent unnecessary re-renders
   const fetchRuns = useCallback(async () => {
+    if (isScoped) {
+      await scoped.refresh();
+      return { runs: [], total: 0, limit: 50, offset: 0 };
+    }
     try {
       historyLogger.debug('fetchRuns called, updating via store...');
       // Use the store's built-in fetchInitialRunHistory method
@@ -83,7 +94,7 @@ export const useRunHistory = () => {
         offset: 0
       };
     }
-  }, [fetchInitialRunHistory, t]);
+  }, [fetchInitialRunHistory, t, isScoped, scoped.refresh]);
 
   const handlePageChange = (_event: React.ChangeEvent<unknown>, value: number) => {
     setPage(value);
@@ -114,7 +125,8 @@ export const useRunHistory = () => {
       });
       
       // Then fetch from scratch to ensure we have the latest data
-      await fetchInitialRunHistory();
+      if (isScoped) await scoped.refresh();
+      else await fetchInitialRunHistory();
     } catch (err) {
       historyLogger.error('Error deleting run:', err);
       toast.error(t('runHistory.deleteRunError'));
@@ -123,6 +135,7 @@ export const useRunHistory = () => {
   };
 
   const handleDeleteAllRuns = async () => {
+    if (isScoped) return;
     try {
       historyLogger.info('Deleting all runs');
       const result = await runService.deleteAllRuns();
@@ -270,6 +283,7 @@ export const useRunHistory = () => {
 
   // Clear orphan runs and fetch fresh data when group changes
   useEffect(() => {
+    if (isScoped) return;
     if (!currentGroupId) {
       historyLogger.info('No group selected yet, skipping fetch');
       return;
@@ -307,7 +321,7 @@ export const useRunHistory = () => {
 
     // Fetch fresh data
     fetchRuns();
-  }, [currentGroupId, fetchRuns]);
+  }, [currentGroupId, fetchRuns, isScoped]);
 
   return {
     runs: sortedRuns,

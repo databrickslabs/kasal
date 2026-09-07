@@ -119,7 +119,7 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
   },
   // Actions
   setAppMode: (mode: AppMode) => {
-    // The ONE funnel every mode entrance calls (ModeSwitcher, the empty-state
+    // The ONE funnel every mode entrance calls (NewSessionButton, the empty-state
     // bridge links, OpenOnCanvasButtons, FlowBackLink). Guarding here means a
     // chat-only user (operator) cannot reach a builder canvas through ANY
     // entrance, current or future — the visible affordances are additionally
@@ -162,7 +162,7 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
   },
 
   setExecutionHistoryVisible: (visible: boolean) => {
-    set({ executionHistoryVisible: visible, assistantPanelVisible: false, ...(visible && get().areFlowsVisible ? { flowPanelTab: 'runs' as const } : {}) });
+    set({ executionHistoryVisible: visible, assistantPanelVisible: visible, ...(visible && get().areFlowsVisible ? { flowPanelTab: 'responses' as const } : {}) });
     saveToLocalStorage({ executionHistoryVisible: visible });
   },
 

@@ -133,12 +133,13 @@ const McpPicker: React.FC<{
       aria-hidden="true"
       className="w-3.5 h-3.5 rounded flex-shrink-0 flex items-center justify-center"
       style={{
-        border: `1px solid ${isSelected ? 'var(--accent)' : 'var(--border-color)'}`,
-        backgroundColor: isSelected ? 'var(--accent)' : 'transparent',
+        border: `1px solid ${isSelected ? 'var(--text-secondary)' : 'var(--border-color)'}`,
+        backgroundColor: isSelected ? 'var(--bg-active-chip)' : 'transparent',
+        color: 'var(--text-primary)',
       }}
     >
       {isSelected && (
-        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="#fff" strokeWidth={3}>
+        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
         </svg>
       )}
@@ -199,7 +200,7 @@ const McpPicker: React.FC<{
         {totalSelected > 0 && (
           <span
             className="absolute -top-1 -right-1 text-[9px] tabular-nums rounded-full min-w-[14px] h-[14px] flex items-center justify-center px-0.5"
-            style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
+            style={{ backgroundColor: 'var(--bg-active-chip)', color: 'var(--text-primary)' }}
           >
             {totalSelected}
           </span>

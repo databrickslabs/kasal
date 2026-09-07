@@ -9,9 +9,9 @@ describe('SidebarToggle (top-bar slot)', () => {
 
   it('collapses and expands the sidebar from one fixed control', () => {
     render(<SidebarToggle />);
-    fireEvent.click(screen.getByLabelText('Hide chat history'));
+    fireEvent.click(screen.getByLabelText('Hide sessions'));
     expect(useAppStore.getState().sidebarOpen).toBe(false);
-    fireEvent.click(screen.getByLabelText('Show chat history'));
+    fireEvent.click(screen.getByLabelText('Show sessions'));
     expect(useAppStore.getState().sidebarOpen).toBe(true);
   });
 });

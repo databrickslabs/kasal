@@ -13,6 +13,7 @@ import { getDefaultModel } from '../../../config/defaultModel';
 
 const CONFIG_STORAGE_KEY = 'kasal-chat-config';
 const MODEL_STORAGE_KEY = 'kasal-chat-model';
+let catalogRequestVersion = 0;
 export type Theme = 'light' | 'dark';
 
 function applyTheme(theme: Theme): void {
@@ -68,6 +69,7 @@ interface AppState {
    * user their published work does not exist, for as long as the fetch takes.
    */
   catalogLoaded: boolean;
+  catalogError: string | null;
   selectedModel: string;
   sidebarOpen: boolean;
   settingsOpen: boolean;
@@ -111,6 +113,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   savedCrews: [],
   savedFlows: [],
   catalogLoaded: false,
+  catalogError: null,
   selectedModel: (() => {
     try {
       return localStorage.getItem(MODEL_STORAGE_KEY) || '';
@@ -186,26 +189,25 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   loadCatalog: async () => {
+    const version = ++catalogRequestVersion;
+    const groupId = localStorage.getItem('selectedGroupId') || get().config.groupId;
+    // Clear the previous teamspace's data while checking what Chat can reach.
+    set({ savedCrews: [], savedFlows: [], catalogLoaded: false, catalogError: null });
     const [crews, flows, chatPublished] = await Promise.all([
       listSavedCrews().catch(() => [] as CatalogItem[]),
       listSavedFlows().catch(() => [] as CatalogItem[]),
-      // What the chat can actually reach. The rail sits beside a composer whose
-      // "Use existing" control routes to exactly this set; listing every saved
-      // crew would advertise things no prompt can select.
       PublicationService.listChatPublished().catch(() => null),
     ]);
-    // A FAILED publications read leaves the list unfiltered rather than empty.
-    // Showing everything is a smaller lie than showing nothing — an empty rail
-    // reads as "you have no saved work", which is never true and not recoverable
-    // by the user.
-    const published = chatPublished === null ? null : new Set(chatPublished);
-    const visible = (items: CatalogItem[]) =>
-      published === null ? items : items.filter((i) => published.has(String(i.id)));
-    set({
-      savedCrews: visible(crews),
-      savedFlows: visible(flows),
-      catalogLoaded: true,
-    });
+    if (version !== catalogRequestVersion || groupId !== (localStorage.getItem('selectedGroupId') || get().config.groupId)) return;
+    // Publication is required for Chat visibility. A failed lookup must never
+    // turn the saved builder catalog into the Chat catalog.
+    if (chatPublished === null) {
+      set({ savedCrews: [], savedFlows: [], catalogLoaded: true, catalogError: 'The published catalog could not be loaded.' });
+      return;
+    }
+    const published = new Set(chatPublished);
+    const visible = (items: CatalogItem[]) => items.filter(item => published.has(String(item.id)));
+    set({ savedCrews: visible(crews), savedFlows: visible(flows), catalogLoaded: true, catalogError: null });
   },
 
   updateConfig: (field, value) => {

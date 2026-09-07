@@ -11,10 +11,7 @@ import {
   PersonAdd as PersonAddIcon,
   AddTask as AddTaskIcon,
   Save as SaveIcon,
-  MenuBook as MenuBookIcon,
   Webhook as WebhookIcon,
-  Schedule as ScheduleIcon,
-  Assessment as LogsIcon,
   PlayArrow as PlayArrowIcon,
   Stop as StopIcon,
   FileDownload as FileDownloadIcon,
@@ -39,17 +36,14 @@ interface SidebarItem {
 
 interface RightSidebarProps {
   onOpenTutorial?: () => void;
-  onOpenLogsDialog: () => void;
   onToggleChat: () => void;
   isChatOpen: boolean;
   setIsAgentDialogOpen: (open: boolean) => void;
   setIsTaskDialogOpen: (open: boolean) => void;
-  setIsCrewDialogOpen?: (open: boolean) => void;
   onSaveCrewClick?: () => void;
   onSaveFlowClick?: () => void;
   showRunHistory?: boolean;
   executionHistoryHeight?: number;
-  onOpenSchedulesDialog?: () => void;
   onOpenTriggersDialog?: () => void;
   onToggleExecutionHistory?: () => void;
   areFlowsVisible?: boolean;
@@ -64,17 +58,14 @@ interface RightSidebarProps {
 
 const RightSidebar: React.FC<RightSidebarProps> = ({
   onOpenTutorial,
-  onOpenLogsDialog,
   onToggleChat,
   isChatOpen,
   setIsAgentDialogOpen,
   setIsTaskDialogOpen,
-  setIsCrewDialogOpen,
   onSaveCrewClick,
   onSaveFlowClick,
   showRunHistory = false,
   executionHistoryHeight = 200,
-  onOpenSchedulesDialog,
   onOpenTriggersDialog,
   onToggleExecutionHistory,
   areFlowsVisible = false,
@@ -267,40 +258,6 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
         disabled: !savedCrewId
       }
     ] : []),
-    {
-      id: 'separator-catalog',
-      isSeparator: true
-    },
-    {
-      id: 'open-catalog',
-      icon: <MenuBookIcon />,
-      tooltip: areFlowsVisible ? 'Open Workflow Catalog' : 'Open Catalog',
-      onClick: () => setIsCrewDialogOpen?.(true),
-      disabled: false
-    },
-    // The "Show Workflow Panel" toggle was moved out of this sidebar — Flow is
-    // now a top-level mode reachable via the grid mode switcher in the TabBar.
-    // Only show View Assistant Logs when NOT on flow canvas
-    ...(!areFlowsVisible ? [
-      {
-        id: 'separator4',
-        isSeparator: true
-      },
-      {
-        id: 'view-logs',
-        icon: <LogsIcon />,
-        tooltip: 'View Assistant Logs',
-        onClick: onOpenLogsDialog,
-        disabled: false
-      }
-    ] : []),
-    {
-      id: 'schedules',
-      icon: <ScheduleIcon />,
-      tooltip: 'Schedules',
-      onClick: onOpenSchedulesDialog,
-      disabled: !onOpenSchedulesDialog
-    },
     ...(eventTriggersEnabled ? [{
       id: 'triggers',
       icon: <WebhookIcon />,
@@ -330,9 +287,9 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
       <Box
         sx={{
           position: 'absolute',
-          top: '48px', // Account for TabBar height
+          top: 0,
           right: 0,
-          height: showRunHistory ? `calc(100% - 48px - ${executionHistoryHeight}px)` : 'calc(100% - 48px)', // Account for TabBar and execution history
+          height: showRunHistory ? `calc(100% - ${executionHistoryHeight}px)` : '100%', // Account for TabBar and execution history
           zIndex: 5,
           display: 'flex',
           flexDirection: 'row'
@@ -345,10 +302,10 @@ const RightSidebar: React.FC<RightSidebarProps> = ({
           elevation={0}
           sx={{
             position: 'fixed',
-            top: 48,
+            top: 0,
             right: 0,
             width: 48,
-            height: showRunHistory ? `calc(100% - 48px - ${executionHistoryHeight}px)` : 'calc(100% - 48px)',
+            height: showRunHistory ? `calc(100% - ${executionHistoryHeight}px)` : '100%',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',

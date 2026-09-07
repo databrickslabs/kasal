@@ -22,11 +22,13 @@ export const useTabExecutionSync = () => {
     reasoningLLM,
     reasoningConfig,
     managerLLM,
+    selectedModel,
     setProcessType,
     setReasoningEnabled,
     setReasoningLLM,
     setReasoningConfig,
     setManagerLLM,
+    setSelectedModel,
     isLoadingCrew
   } = useCrewExecutionStore();
 
@@ -50,7 +52,8 @@ export const useTabExecutionSync = () => {
       reasoningEnabled,
       reasoningLLM,
       reasoningConfig,
-      managerLLM
+      managerLLM,
+      selectedModel
     };
 
     console.log('[useTabExecutionSync] Saving config to tab:', activeTabId, config);
@@ -62,6 +65,7 @@ export const useTabExecutionSync = () => {
     reasoningLLM,
     reasoningConfig,
     managerLLM,
+    selectedModel,
     updateTabExecutionConfig,
     isLoadingCrew
   ]);
@@ -80,6 +84,8 @@ export const useTabExecutionSync = () => {
     console.log('[useTabExecutionSync] Restoring config from tab:', tabId, config);
 
     isRestoringRef.current = true;
+
+    if (config.selectedModel !== undefined) setSelectedModel(config.selectedModel);
 
     // Restore all config values
     if (config.processType !== undefined) {
@@ -108,7 +114,8 @@ export const useTabExecutionSync = () => {
     setReasoningEnabled,
     setReasoningLLM,
     setReasoningConfig,
-    setManagerLLM
+    setManagerLLM,
+    setSelectedModel
   ]);
 
   /**
@@ -133,7 +140,8 @@ export const useTabExecutionSync = () => {
           reasoningEnabled,
           reasoningLLM,
           reasoningConfig,
-          managerLLM
+          managerLLM,
+          selectedModel
         };
         console.log('[useTabExecutionSync] Saving config to previous tab:', lastActiveTabIdRef.current, oldConfig);
         updateTabExecutionConfig(lastActiveTabIdRef.current, oldConfig);
@@ -155,6 +163,7 @@ export const useTabExecutionSync = () => {
     reasoningLLM,
     reasoningConfig,
     managerLLM,
+    selectedModel,
     updateTabExecutionConfig,
     restoreConfigFromTab,
     isLoadingCrew
@@ -178,6 +187,7 @@ export const useTabExecutionSync = () => {
     reasoningLLM,
     reasoningConfig,
     managerLLM,
+    selectedModel,
     saveConfigToTab,
     isLoadingCrew
   ]);

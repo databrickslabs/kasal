@@ -38,9 +38,8 @@ const THEME_STORAGE_KEY = 'APP_THEME';
 // Helper: import a fresh copy of the store module so module-level state
 // (loadConfig / getStoredTheme / selectedModel IIFE) is recomputed.
 async function freshStore() {
-  // Default: the publications read fails, which leaves the catalog unfiltered.
-  // Tests that care about the filter set their own resolution.
-  listChatPublished.mockRejectedValue(new Error('not mocked'));
+  // Default fixtures are explicitly published; failure never exposes saved drafts.
+  listChatPublished.mockResolvedValue(['c1', 'f1']);
   vi.resetModules();
   const mod = await import('./appStore');
   const { useThemeStore } = await import('../../../store/theme');
@@ -415,8 +414,8 @@ describe('appStore', () => {
 
       await store.getState().loadCatalog();
 
-      expect(store.getState().savedCrews).toBe(crews);
-      expect(store.getState().savedFlows).toBe(flows);
+      expect(store.getState().savedCrews).toEqual(crews);
+      expect(store.getState().savedFlows).toEqual(flows);
     });
 
     it('falls back to [] for crews when listSavedCrews rejects', async () => {
@@ -606,20 +605,39 @@ describe('the rail catalog lists only what chat can reach', () => {
     expect(store.getState().savedCrews).toEqual([]);
   });
 
-  it('leaves the list UNFILTERED when the publications read fails', async () => {
-    // Showing everything is a smaller lie than showing nothing: an empty rail
-    // reads as "you have no saved work", which is never true and which the user
-    // cannot act on.
+  it('hides every unverified item on publication failure and recovers on retry', async () => {
     const store = await freshStore();
-    const crews = [{ id: 'c1', name: 'Crew One' }];
+    const crews = [{ id: 'c1', name: 'Crew One' }, { id: 'draft', name: 'Unpublished crew' }];
     listSavedCrews.mockResolvedValue(crews);
-    listSavedFlows.mockResolvedValue([]);
-    listChatPublished.mockRejectedValue(new Error('endpoint down'));
-
+    listSavedFlows.mockResolvedValue([{ id: 'f1', name: 'Flow One' }]);
     await store.getState().loadCatalog();
-
-    expect(store.getState().savedCrews).toEqual(crews);
+    expect(store.getState().savedCrews).toEqual([crews[0]]);
+    listChatPublished.mockRejectedValueOnce(new Error('endpoint down'));
+    await store.getState().loadCatalog();
+    expect(store.getState().savedCrews).toEqual([]);
+    expect(store.getState().savedFlows).toEqual([]);
+    expect(store.getState().catalogError).toBe('The published catalog could not be loaded.');
+    await store.getState().loadCatalog();
+    expect(store.getState().savedCrews).toEqual([crews[0]]);
+    expect(store.getState().catalogError).toBeNull();
   });
+
+  it('does not overwrite a newer teamspace catalog with a slow earlier response', async () => {
+    const store = await freshStore();
+    let resolve!: (ids: string[]) => void;
+    listSavedCrews.mockResolvedValue([{ id: 'c1', name: 'Earlier teamspace' }]);
+    listSavedFlows.mockResolvedValue([]);
+    listChatPublished.mockImplementationOnce(() => new Promise<string[]>(done => { resolve = done; }));
+    const earlier = store.getState().loadCatalog();
+    localStorage.setItem('selectedGroupId', 'new-teamspace');
+    listSavedCrews.mockResolvedValue([{ id: 'c2', name: 'New teamspace' }]);
+    listChatPublished.mockResolvedValue(['c2']);
+    await store.getState().loadCatalog();
+    resolve(['c1']);
+    await earlier;
+    expect(store.getState().savedCrews).toEqual([{ id: 'c2', name: 'New teamspace' }]);
+  });
+
 });
 
 describe('the catalog distinguishes "loading" from "nothing published"', () => {

@@ -57,10 +57,10 @@ describe('RightSidebar — flow-toggle removal', () => {
     expect(screen.queryByRole('button', { name: /Hide Workflow Panel/i })).toBeNull();
   });
 
-  it('still renders core actions (catalog, schedules)', () => {
+  it('leaves catalogs, logs and schedules in the shared left sidebar', () => {
     render(<RightSidebar {...baseProps} areFlowsVisible={false} />);
-    // Catalog button is always present
-    expect(screen.getByRole('button', { name: /Open Catalog/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Open Catalog/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /View Assistant Logs|Schedules/i })).not.toBeInTheDocument();
   });
 
   it('ignores a passed toggleFlowsVisibility prop (no flow toggle wired)', () => {

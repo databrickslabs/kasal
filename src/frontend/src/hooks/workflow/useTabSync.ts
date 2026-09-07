@@ -95,6 +95,8 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
 
   // Sync tab data to flow manager when active tab changes
   useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const later = (callback: () => void, delay: number) => timers.push(setTimeout(callback, delay));
     if (activeTabId !== lastActiveTabIdRef.current) {
       // Don't interfere if we're currently loading a crew
       if (isLoadingCrewRef.current) {
@@ -138,7 +140,7 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
           // For new empty tabs, ensure the canvas is cleared
           if (restoredNodes.length === 0 && restoredEdges.length === 0) {
             // Force clear the canvas for empty tabs
-            setTimeout(() => {
+            later(() => {
               setNodes([]);
               setEdges([]);
               lastNodesRef.current = [];
@@ -147,14 +149,14 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
           }
           
           // Trigger fitView after nodes are restored to ensure proper viewport
-          setTimeout(() => {
+          later(() => {
             if (restoredNodes.length > 0) {
               window.dispatchEvent(new CustomEvent('fitViewToNodes', { bubbles: true }));
             }
           }, 300);
           
           // Also trigger a ReactFlow instance update to ensure proper synchronization
-          setTimeout(() => {
+          later(() => {
             window.dispatchEvent(new CustomEvent('updateReactFlowInstance', { 
               detail: { nodes: restoredNodes, edges: restoredEdges }
             }));
@@ -162,7 +164,7 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
         }
         
         // Reset the switching flag after a delay to allow ReactFlow to process
-        setTimeout(() => {
+        later(() => {
           isSwitchingTabsRef.current = false;
         }, 500);
       }
@@ -170,6 +172,7 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
       // Update the last active tab reference
       lastActiveTabIdRef.current = activeTabId;
     }
+    return () => timers.forEach(clearTimeout);
   }, [activeTabId, getActiveTab, setNodes, setEdges, saveStateForTab]);
 
   // Save current state before tab switch

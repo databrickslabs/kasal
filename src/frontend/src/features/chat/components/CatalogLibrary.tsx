@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
+import { BookOpen } from 'lucide-react';
 import { CatalogItem } from '../api/crews';
 import { useAppStore } from '../store/appStore';
+import SidebarAction from '../../../components/SidebarAction';
 
 interface CatalogLibraryProps {
   crews: CatalogItem[];
@@ -80,19 +82,13 @@ const CatalogLibrary: React.FC<CatalogLibraryProps> = ({ crews, flows, onLoadCre
   // it, no card chrome. (A bordered grey card was tried and read as heavier
   // than the content it holds.)
   return (
-    <div className="pt-4">
-      <button
+    <div>
+      <SidebarAction label="Catalog" icon={<BookOpen size={18} strokeWidth={2} aria-hidden="true" />}
+        data-tour="chat-catalog"
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-1.5 !px-3 !py-1.5 text-left transition-colors hover:bg-[var(--bg-rail-hover)]"
-        style={{ color: 'var(--text-muted)' }}
         aria-expanded={open}
-      >
-        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] flex-1">
-          Catalog
-        </span>
-        <span className="text-[10px] tabular-nums">{entries.length}</span>
-        <Chevron open={open} />
-      </button>
+        trailing={<><span className="text-[10px] tabular-nums">{entries.length}</span><Chevron open={open} /></>}
+      />
       {open && (
         <div className="px-2 pt-1">
           {showSearch && (

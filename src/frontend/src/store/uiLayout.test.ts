@@ -270,7 +270,7 @@ describe('conversation split preferences', () => {
     useUILayoutStore.getState().setAssistantPanelSide('right');
     useUILayoutStore.getState().setAssistantPanelRatio(0.7);
     useUILayoutStore.getState().setExecutionHistoryVisible(true);
-    expect(useUILayoutStore.getState()).toMatchObject({ assistantResponseFocused: true, assistantPanelRatio: 0.7, assistantPanelSide: 'right', assistantPanelVisible: false });
+    expect(useUILayoutStore.getState()).toMatchObject({ assistantResponseFocused: true, assistantPanelRatio: 0.7, assistantPanelSide: 'right', assistantPanelVisible: true });
     const restored = await freshModule(readPersisted());
     expect(restored.useUILayoutStore.getState()).toMatchObject({ assistantPanelRatio: 0.7, assistantPanelSide: 'right' });
     restored.useUILayoutStore.getState().setAssistantPanelRatio(10);
@@ -288,7 +288,7 @@ describe('Flow Builder pane', () => {
     useUILayoutStore.getState().setFlowPanelTab('responses');
     expect(useUILayoutStore.getState()).toMatchObject({ flowPanelTab: 'responses', assistantPanelVisible: true, chatPanelVisible: true });
     useUILayoutStore.getState().setExecutionHistoryVisible(true);
-    expect(useUILayoutStore.getState()).toMatchObject({ flowPanelTab: 'runs', assistantPanelVisible: false, chatPanelVisible: true });
+    expect(useUILayoutStore.getState()).toMatchObject({ flowPanelTab: 'responses', assistantPanelVisible: true, chatPanelVisible: true });
     useUILayoutStore.getState().setAreFlowsVisible(false);
     useUILayoutStore.getState().setAreFlowsVisible(true);
     expect(useUILayoutStore.getState().flowPanelTab).toBe('crews');

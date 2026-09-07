@@ -79,7 +79,6 @@ import { builderTranscript } from './utils/builderTranscript';
 import { ChatMessageItem } from './components/ChatMessageItem';
 import { KnowledgeFileUpload, KnowledgeFileUploadHandle } from './KnowledgeFileUpload';
 import ChatInputPlusMenu from './components/ChatInputPlusMenu';
-import ModeSwitcher from '../../../app/workspace/ModeSwitcher';
 import SlashCommandMenu from './components/SlashCommandMenu';
 import { openConversationCanvas } from './utils/conversationCanvas';
 import { CanvasAssistantLayout } from './components/CanvasAssistantLayout';
@@ -1893,7 +1892,6 @@ showSessionList && (
                 itself: an attached file is state that goes out with the
                 next message, so hiding it behind a menu is how people
                 re-upload a file they already attached. */}
-            <ModeSwitcher />
 
 
             {/* Knowledge File Upload — trigger hidden (the "+" owns it),
@@ -2132,7 +2130,6 @@ showSessionList && (
   if (layout === 'canvas') return <>
     <CanvasAssistantLayout composer={composerContent} response={responseContent} sessionKey={`${builderMode}:${sessionId}`}
       responseKey={messages[messages.length - 1]?.id} hasMessages={messages.length > 0} busy={isLoading || !!executingJobId} dark={composerDark}
-      onNewChat={handleNewConversation}
       onHide={onToggleCollapse} />
     <HtmlPreviewDialog />
   </>;

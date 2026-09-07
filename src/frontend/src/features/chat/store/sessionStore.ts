@@ -19,6 +19,8 @@ import {
 } from '../persistence/sessionApi';
 
 const ACTIVE_SESSION_KEY = 'kasal-chat-active-session';
+let sessionNavigationVersion = 0;
+export const cancelSessionNavigation = () => { sessionNavigationVersion += 1; };
 
 /**
  * Complete a partial message update with the persisted-envelope fields from the
@@ -234,8 +236,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   reloadForGroup: async (restoreActiveSession = false) => {
+    const version = ++sessionNavigationVersion;
+    const group = currentGroupId();
     // Always re-list this workspace's sessions for the history rail.
     const allSessions = await dbListSessions(currentGroupId());
+    if (group !== currentGroupId()) return;
+    if (version !== sessionNavigationVersion) { set({ sessions: allSessions }); return; }
     const activeId = localStorage.getItem(ACTIVE_SESSION_KEY);
     // On a full page reload (refresh), RESTORE the session the user left — so a
     // refresh keeps you in your conversation instead of bouncing to a new chat.
@@ -247,6 +253,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       allSessions.some((s) => s.id === activeId)
     ) {
       const msgs = await getSessionMessages(activeId);
+      if (version !== sessionNavigationVersion || group !== currentGroupId()) return;
       set({ sessions: allSessions, currentSessionId: activeId, messages: msgs });
       return;
     }
@@ -258,8 +265,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   switchSession: async (sessionId: string) => {
-    localStorage.setItem(ACTIVE_SESSION_KEY, sessionId);
+    const version = ++sessionNavigationVersion;
+    const group = currentGroupId();
     const msgs = await getSessionMessages(sessionId);
+    if (version !== sessionNavigationVersion || group !== currentGroupId()) return;
+    localStorage.setItem(ACTIVE_SESSION_KEY, sessionId);
     set({ currentSessionId: sessionId, messages: msgs });
   },
 
@@ -304,6 +314,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   // button uses: eagerly creating here would drop an untitled "New Chat" into
   // the Recent rail next to the button (the duplicate users reported).
   startNewChat: () => {
+    cancelSessionNavigation();
     localStorage.removeItem(ACTIVE_SESSION_KEY);
     set({ currentSessionId: null, messages: [] });
   },

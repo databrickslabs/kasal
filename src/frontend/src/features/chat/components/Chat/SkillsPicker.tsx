@@ -62,12 +62,13 @@ const SkillsPicker: React.FC<{ disabled?: boolean }> = ({ disabled }) => {
       aria-hidden="true"
       className="w-3.5 h-3.5 rounded flex-shrink-0 flex items-center justify-center"
       style={{
-        border: `1px solid ${isSelected ? 'var(--accent)' : 'var(--border-color)'}`,
-        backgroundColor: isSelected ? 'var(--accent)' : 'transparent',
+        border: `1px solid ${isSelected ? 'var(--text-secondary)' : 'var(--border-color)'}`,
+        backgroundColor: isSelected ? 'var(--bg-active-chip)' : 'transparent',
+        color: 'var(--text-primary)',
       }}
     >
       {isSelected && (
-        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="#fff" strokeWidth={3}>
+        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
         </svg>
       )}

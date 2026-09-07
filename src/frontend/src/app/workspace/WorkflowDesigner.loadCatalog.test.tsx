@@ -1,6 +1,6 @@
 /**
  * Full-mount regression: "Load from Catalog" on the flow canvas opens the FLOWS
- * tab (not crews). Mounts WorkflowDesigner, fires TabBar's onLoadCrew, and asserts
+ * tab (not crews). Mounts WorkflowDesigner, fires the left sidebar's catalog action, and asserts
  * the CrewFlowSelectionDialog opens pinned to the Flows tab. This exercises the
  * onLoadCrew JSX closure end to end (the only part not covered by the helper test).
  *
@@ -17,7 +17,7 @@ import { CATALOG_FLOWS_TAB, CATALOG_CREWS_TAB } from './WorkflowEventHandlers';
 vi.mock('./WorkflowPanels', () => ({ default: () => null }));
 vi.mock('../../features/workflow/assistant/ChatPanel', () => ({ default: () => null }));
 vi.mock('./RightSidebar', () => ({ default: () => null }));
-vi.mock('./LeftSidebar', () => ({ default: () => null }));
+vi.mock('../sessions/SessionSidebar', () => ({ default: ({ onOpenCatalog }: { onOpenCatalog: () => void }) => <button onClick={onOpenCatalog}>load-from-catalog</button> }));
 vi.mock('../../features/groups/components/GroupSelector', () => ({ default: () => null }));
 vi.mock('../../features/chat/ChatWorkspace', () => ({ default: () => null }));
 vi.mock('../../features/workflow/agents/components/AgentDialog', () => ({ default: () => null }));
@@ -37,12 +37,7 @@ vi.mock('../../features/workflow/flows/components/SaveFlow', () => ({ default: (
 vi.mock('../Flow/CheckpointResumeDialog', () => ({ default: () => null }));
 vi.mock('../../features/workflow/crews/components/TrifectaWarningDialog', () => ({ default: () => null }));
 
-// TabBar → expose onLoadCrew via a button we can click.
-vi.mock('./TabBar', () => ({
-  default: (props: { onLoadCrew?: () => void }) => (
-    <button onClick={() => props.onLoadCrew?.()}>load-from-catalog</button>
-  ),
-}));
+vi.mock('../sessions/SessionLibrary', () => ({ default: () => null }));
 
 // CrewFlowSelectionDialog → surface the props the closure sets.
 vi.mock('../../features/workflow/crews/components/CrewFlowDialog/index', () => ({
@@ -142,6 +137,6 @@ describe('WorkflowDesigner - Load from Catalog matches the active canvas', () =>
 
     const dialog = screen.getAllByTestId('catalog-dialog').find(d => d.getAttribute('data-open') === 'true');
     expect(dialog).toBeTruthy();
-    expect(dialog?.getAttribute('data-showonlytab')).toBe(String(CATALOG_CREWS_TAB));
+    expect(dialog?.getAttribute('data-initialtab')).toBe(String(CATALOG_CREWS_TAB));
   });
 });

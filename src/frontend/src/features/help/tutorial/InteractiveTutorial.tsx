@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Joyride, { ACTIONS, EVENTS, STATUS, type CallBackProps, type Step, type TooltipRenderProps } from 'react-joyride';
 import { Box, Button, ButtonBase, Dialog, DialogContent, IconButton, Paper, Typography } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
@@ -8,7 +8,8 @@ import { usePermissionStore } from '../../../store/permissions';
 import { useWorkflowStore } from '../../../store/workflow';
 import { useUILayoutStore, type AppMode } from '../../../store/uiLayout';
 import { useFlowConfigStore } from '../../../store/flowConfig';
-import { useTabManagerStore } from '../../../store/tabManager';
+import { switchWorkspaceMode } from '../../../app/sessions/sessionNavigation';
+import { useAppStore } from '../../chat/store/appStore';
 import type { TutorialProps } from '../../../types/config/tutorial';
 import { getTutorialSteps, tutorialPaths, visibleTutorialSteps } from './tutorialSteps';
 
@@ -43,34 +44,46 @@ const InteractiveTutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
   const [steps, setSteps] = useState<Step[]>([]);
   const [stepIndex, setStepIndex] = useState(0);
   const [run, setRun] = useState(false);
+  const sidebarBeforeTour = useRef<boolean | null>(null);
+  const restoreSidebar = useCallback(() => {
+    if (sidebarBeforeTour.current !== null) {
+      useAppStore.getState().setSidebarOpen(sidebarBeforeTour.current);
+      sidebarBeforeTour.current = null;
+    }
+  }, []);
 
   const close = useCallback(() => {
     setRun(false);
     setPath(null);
+    restoreSidebar();
     useWorkflowStore.getState().setHasSeenTutorial(true);
     onClose();
-  }, [onClose]);
+  }, [onClose, restoreSidebar]);
 
   useEffect(() => {
-    if (!isOpen) { setRun(false); setPath(null); setSteps([]); }
-  }, [isOpen]);
+    if (!isOpen) { setRun(false); setPath(null); setSteps([]); restoreSidebar(); }
+  }, [isOpen, restoreSidebar]);
+  useEffect(() => restoreSidebar, [restoreSidebar]);
 
   // Wait for the selected mode and composer portals to mount, and cancel on close.
   useEffect(() => {
     if (!isOpen || !path) return;
     const timer = window.setTimeout(() => {
-      setSteps(visibleTutorialSteps(getTutorialSteps(path)));
+      setSteps(visibleTutorialSteps(getTutorialSteps(path, { crew: allowAgent, flow: allowFlow && flowsEnabled })));
       setStepIndex(0);
       setRun(true);
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [isOpen, path]);
+  }, [isOpen, path, allowAgent, allowFlow, flowsEnabled]);
 
   const start = (mode: AppMode) => {
+    if ((mode === 'crew' && !allowAgent) || (mode === 'flow' && (!allowFlow || !flowsEnabled))) return;
     const layout = useUILayoutStore.getState();
-    if (mode !== 'chat') useTabManagerStore.getState().activateTabForViewMode(mode);
-    layout.setAppMode(mode);
+    switchWorkspaceMode(mode);
     if (useUILayoutStore.getState().appMode !== mode) return;
+    sidebarBeforeTour.current ??= useAppStore.getState().sidebarOpen;
+    useAppStore.getState().setSidebarOpen(true);
+    window.dispatchEvent(new Event('collapseBuilderConversation'));
     if (mode === 'flow') layout.setFlowPanelTab('crews');
     if (mode === 'crew') layout.setAssistantPanelVisible(true);
     setPath(mode);
@@ -95,8 +108,8 @@ const InteractiveTutorial: React.FC<TutorialProps> = ({ isOpen, onClose }) => {
           <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, mb: 3 }}>
             <Box sx={{ flex: 1 }}>
               <Typography sx={{ fontSize: 11, fontWeight: 600, letterSpacing: 1, color: 'text.secondary', mb: 1 }}>GET TO KNOW KASAL</Typography>
-              <Typography id="tutorial-title" component="h2" sx={{ fontSize: 24, fontWeight: 600, mb: 1 }}>A quick tour of your workspace</Typography>
-              <Typography sx={{ fontSize: 14, lineHeight: 1.6, color: 'text.secondary' }}>Choose a mode to explore its controls. Each tour takes about a minute.</Typography>
+              <Typography id="tutorial-title" component="h2" sx={{ fontSize: 24, fontWeight: 600, mb: 1 }}>Get comfortable with Kasal</Typography>
+              <Typography sx={{ fontSize: 14, lineHeight: 1.6, color: 'text.secondary' }}>Explore sessions, your conversation, and the controls around it. Choose a tour to get started.</Typography>
             </Box>
             <IconButton aria-label="Close tutorial" onClick={close} size="small"><Close sx={{ fontSize: 20 }} /></IconButton>
           </Box>

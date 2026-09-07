@@ -15,19 +15,20 @@ import {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Box, Snackbar, Alert, Dialog, DialogContent, Menu, Button, DialogTitle, IconButton, Typography, Drawer, SpeedDial, SpeedDialAction, SpeedDialIcon } from '@mui/material';
-import { ArrowLeftRight } from 'lucide-react';
 import WorkspaceSplitDivider from './WorkspaceSplitDivider';
 import ChatIcon from '@mui/icons-material/Chat';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import HistoryIcon from '@mui/icons-material/History';
 import SettingsIcon from '@mui/icons-material/Settings';
 import { useWorkflowStore } from '../../store/workflow';
-import { ThemeProvider, createTheme } from '@mui/material/styles';
-import { getThemeOptions } from '../../theme/theme';
 import { kasalStageSurface } from '../../theme/kasalSurfaces';
 import { useAppStore as useChatAppStore } from '../../features/chat/store/appStore';
 import { usePermissionStore } from '../../store/permissions';
-import SidebarToggle from '../../features/chat/SidebarToggle';
+import SessionSidebar from '../sessions/SessionSidebar';
+import BuilderPanelControls from '../sessions/BuilderPanelControls';
+import SessionLibrary from '../sessions/SessionLibrary';
+import CanvasTools from '../sessions/CanvasTools';
+import { useBuilderSessionMode } from '../sessions/useWorkspaceSessions';
 import { useThemeManager } from '../../hooks/workflow/useThemeManager';
 import { useErrorManager } from '../../hooks/workflow/useErrorManager';
 import { useFlowManager } from '../../hooks/workflow/useFlowManager';
@@ -49,11 +50,8 @@ import CloseIcon from '@mui/icons-material/Close';
 // Component Imports
 import { InputVariablesDialog } from '../../features/executions/components/InputVariablesDialog';
 import WorkflowPanels from './WorkflowPanels';
-import TabBar from './TabBar';
-import ModeSwitcher from './ModeSwitcher';
 import ChatPanel from '../../features/workflow/assistant/ChatPanel';
 import RightSidebar from './RightSidebar';
-import LeftSidebar from './LeftSidebar';
 import ChatWorkspace from '../../features/chat/ChatWorkspace';
 import { useUILayoutStore } from '../../store/uiLayout';
 import { useUIFitView } from '../../hooks/workflow/useUIFitView';
@@ -67,7 +65,6 @@ import TaskDialog from '../../features/workflow/tasks/components/TaskDialog';
 import CrewPlanningDialog from '../../features/workflow/planning/components/CrewPlanningDialog';
 import ScheduleDialog from '../../features/workflow/scheduling/components/ScheduleDialog';
 import TriggersDialog from '../../features/triggers/components/TriggersDialog';
-import JobsPanel from '../../features/executions/components/JobsPanel';
 import TutorialButton from '../../features/help/tutorial/TutorialButton';
 import InteractiveTutorial from '../../features/help/tutorial/InteractiveTutorial';
 import APIKeys from '../../features/configuration/components/APIKeys/APIKeys';
@@ -98,8 +95,7 @@ import {
   useFlowSelectHandler,
   useCrewFlowDialogHandler,
   useFlowSelectionDialogHandler,
-  useEventBindings,
-  openCatalogForCanvas
+  useEventBindings
 } from './WorkflowEventHandlers';
 import { useDialogManager } from './WorkflowDialogManager';
 
@@ -130,7 +126,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
   // Use tab manager for multi-tab support
   const {
-    tabs,
     getActiveTab,
     updateTabExecutionStatus,
     updateTabFlowNodes,
@@ -327,64 +322,19 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     executionHistoryVisible: showRunHistory,
     assistantPanelVisible,
     flowPanelTab,
-    setFlowPanelTab,
     assistantPanelSide,
     setAssistantPanelVisible,
     assistantResponseFocused,
     assistantPanelRatio,
     setAssistantPanelRatio,
-    setAssistantPanelSide,
     panelPosition,
     areFlowsVisible,
     appMode,
   } = useUILayoutStore();
 
-  // View mode (crew vs flow) reconciliation between the global appMode/areFlowsVisible
-  // (uiLayout — restored SYNCHRONOUSLY from localStorage) and the per-tab viewMode
-  // (tabManager — rehydrated ASYNCHRONOUSLY via persist middleware, defaulting to 'crew').
-  //
-  // On a hard refresh the synchronously-restored appMode is authoritative, so the async
-  // per-tab viewMode must NOT clobber it (that was the "refresh drops me back to the crew
-  // canvas" bug). We therefore:
-  //   • the first time the active tab resolves (mount/hydration): trust the restored
-  //     appMode and heal this tab's viewMode to match it — without changing the view;
-  //   • on a genuine tab switch: restore the target tab's saved viewMode.
-  const prevActiveTabIdRef = React.useRef<string | undefined>(undefined);
-  React.useEffect(() => {
-    const tab = getActiveTab();
-    const currentId = activeTab?.id;
-    const prevId = prevActiveTabIdRef.current;
-    if (currentId === prevId) return; // not an actual tab change
-    prevActiveTabIdRef.current = currentId;
-    if (!tab) return;
-    if (prevId === undefined) {
-      // Initial mount / hydration — appMode wins; align the tab to it.
-      const desired = areFlowsVisible ? 'flow' : 'crew';
-      if (tab.viewMode !== desired) {
-        updateTabViewMode(tab.id, desired);
-      }
-    } else if (tab.viewMode) {
-      // Genuine tab switch — restore that tab's remembered view.
-      const shouldShowFlows = tab.viewMode === 'flow';
-      if (areFlowsVisible !== shouldShowFlows) {
-        setUIStoreAreFlowsVisible(shouldShowFlows);
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab?.id]);
-
-  // Mirror the live flow visibility onto the active tab's viewMode so that switching
-  // modes (TabBar grid button, flow toggle, catalog open) persists per tab and survives
-  // a refresh. Keeps the two stores from drifting apart.
-  React.useEffect(() => {
-    const tab = getActiveTab();
-    if (!tab) return;
-    const desired = areFlowsVisible ? 'flow' : 'crew';
-    if (tab.viewMode !== desired) {
-      updateTabViewMode(tab.id, desired);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [areFlowsVisible]);
+  useBuilderSessionMode();
+  const sessionSidebarOpen = useChatAppStore(state => state.sidebarOpen);
+  const sessionSidebarWidth = sessionSidebarOpen ? 256 : leftSidebarBaseWidth;
 
   // Responsive layout — computed overrides, never mutates the store
   const { isCompact, isMobile } = useResponsiveLayout();
@@ -392,8 +342,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   const responseFocused = assistantResponseFocused && showRunHistory;
   const showingResponses = assistantPanelVisible && (!areFlowsVisible || flowPanelTab === 'responses');
   const showingCrews = areFlowsVisible && flowPanelTab === 'crews';
-  const responseMainWidth = (window.innerWidth - leftSidebarBaseWidth - rightSidebarWidth) * assistantPanelRatio;
-  const effectiveLeftMargin = leftSidebarBaseWidth + (responseFocused && !isCompact && assistantPanelSide === 'left' ? responseMainWidth : 0); // Always reserve sidebar space
+  const responseMainWidth = (window.innerWidth - sessionSidebarWidth - rightSidebarWidth) * assistantPanelRatio;
+  const effectiveLeftMargin = sessionSidebarWidth + (responseFocused && !isCompact && assistantPanelSide === 'left' ? responseMainWidth : 0); // Always reserve sidebar space
 
   // Use the panel manager
   const {
@@ -447,9 +397,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     return () => window.clearTimeout(id);
   }, [showRunHistory, assistantPanelVisible, assistantPanelSide, responseFocused, assistantPanelRatio]);
 
-  const toggleExecutionHistory = React.useCallback(() => {
-    setExecutionHistoryVisible(!(showRunHistory && !assistantPanelVisible));
-  }, [showRunHistory, setExecutionHistoryVisible, assistantPanelVisible]);
+
 
   // Auto-open execution history when crew is executed
   React.useEffect(() => {
@@ -540,7 +488,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     setSelectedTools,
     handleRunClick,
     handleGenerateCrew,
-    executeTab,
     executeFlow: _executeFlow,
     setNodes: setCrewExecutionNodes,
     setEdges: setCrewExecutionEdges,
@@ -1045,27 +992,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     setSelectedTools(newSelectedTools);
   };
 
-  // Handle running a specific tab
-  const handleRunTab = useCallback(async (tabId: string) => {
-    const tab = tabs.find(t => t.id === tabId);
-    if (tab) {
-      // Set this tab as running
-      setRunningTabId(tabId);
-      updateTabExecutionStatus(tabId, 'running');
-
-      try {
-        // Execute the tab directly with its nodes and edges
-        await executeTab(tabId, tab.nodes, tab.edges, tab.name);
-        // Don't clear running state here - let the job completion events handle it
-      } catch (error) {
-        // Clear running state on error
-
-        setRunningTabId(null);
-        updateTabExecutionStatus(tabId, 'failed');
-      }
-    }
-  }, [tabs, executeTab, updateTabExecutionStatus]);
-
   // Handle showing execution logs
   const handleShowExecutionLogs = useCallback(async (jobId?: string) => {
     try {
@@ -1154,18 +1080,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appMode, allowAgentBuilder, allowFlowBuilder]);
-  // Chat carries its own (chat-scoped) dark theme. The top strip (TabBar +
-  // GroupSelector) sits OUTSIDE #kasal-chat-root, so when chat is dark it
-  // stayed white. Re-theme just that strip with a dark MUI theme.
-  const chatThemeDark = useChatAppStore((s) => s.theme) === 'dark';
-  const topStripDark = isChatMode && chatThemeDark;
-  const topStripTheme = React.useMemo(
-    () => (topStripDark ? createTheme(getThemeOptions('deepOcean')) : null),
-    [topStripDark],
-  );
-  const themeStrip = (node: React.ReactElement) =>
-    topStripTheme ? <ThemeProvider theme={topStripTheme}>{node}</ThemeProvider> : node;
-
   // Render the component
   return (
     <div className="workflow-designer">
@@ -1184,27 +1098,22 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         {/* Interactive walkthrough tutorial */}
         <InteractiveTutorial isOpen={dialogManager.isTutorialOpen} onClose={dialogManager.handleCloseTutorial} />
 
-        {/* Tab Bar — in chat mode only the mode switcher + group selector show */}
-        {themeStrip(
-        <TabBar
-          onRunTab={handleRunTab}
-          isRunning={!!runningTabId}
-          runningTabId={runningTabId}
-          // Load from the catalog matching the active canvas (Flows on the flow
-          // canvas, Crews on the crew canvas).
-          onLoadCrew={() => openCatalogForCanvas(areFlowsVisible, {
-            setInitialTab: setCrewFlowDialogInitialTab,
-            setShowOnlyTab: setCrewFlowDialogShowOnlyTab,
-            setOpen: setIsCrewFlowDialogOpen,
-          })}
+        <SessionSidebar
+          onOpenSettings={() => dialogManager.setIsConfigurationDialogOpen(true)}
+          library={<SessionLibrary />}
+          onOpenCatalog={() => {
+              // Context-aware catalog: Show only Flows tab when on Flow Canvas
+              if (areFlowsVisible) {
+                setCrewFlowDialogInitialTab(3); // Flows tab
+                setCrewFlowDialogShowOnlyTab(3); // Show only Flows tab
+              } else {
+                setCrewFlowDialogInitialTab(0); // Crews tab
+                setCrewFlowDialogShowOnlyTab(undefined); // Show all tabs
+              }
+              setIsCrewFlowDialogOpen(true);
+            }}
 
-          disabled={isChatProcessing || !!runningTabId}
-          hideTabsAndButtons={isChatMode}
-          isMobile={isMobile}
-          forceDark={topStripDark}
-          leftSlot={isChatMode ? <SidebarToggle /> : undefined}
-        />,
-        )}
+        />
 
         {/* Chat workspace — replaces the crew/flow canvas and all of its
             sidebars/panels when the user switches to Chat mode. Kept mounted
@@ -1214,6 +1123,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           <Box
             sx={{
               display: isChatMode ? 'flex' : 'none',
+              marginLeft: `${sessionSidebarWidth}px`,
               flex: isChatMode ? 1 : '0 0 auto',
               overflow: 'hidden',
               position: 'relative',
@@ -1346,6 +1256,14 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               }}
             />
 
+            {!showRunHistory && <Box sx={{ position: 'absolute', top: 4, right: 8, zIndex: 25 }}><BuilderPanelControls /></Box>}
+            <CanvasTools
+            onClear={() => { if (areFlowsVisible) { setFlowNodes([]); setFlowEdges([]); } else { setNodes([]); setEdges([]); } }}
+            onFit={() => areFlowsVisible ? flowFlowInstanceRef.current?.fitView({ padding: 0.2, duration: 300 }) : handleUIAwareFitView()}
+            onZoomIn={() => (areFlowsVisible ? flowFlowInstanceRef : crewFlowInstanceRef).current?.zoomIn({ duration: 200 })}
+            onZoomOut={() => (areFlowsVisible ? flowFlowInstanceRef : crewFlowInstanceRef).current?.zoomOut({ duration: 200 })}
+            />
+
             {/* The shared Chat preview occupies the canvas column, so it follows
                 the conversation when the user swaps left and right. */}
             <Box id="builder-assistant-preview-host" sx={{ position: 'absolute', inset: 0, zIndex: 20, pointerEvents: 'none' }} />
@@ -1354,7 +1272,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             {(!effectiveChatVisible) && (
               <Box sx={{ position: 'absolute', left: 12, right: rightSidebarWidth + 12, bottom: isMobile ? 76 : 12, zIndex: 10, display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
                 <Box sx={{ pointerEvents: 'auto', display: 'flex', alignItems: 'center', gap: 1, p: 0.75, borderRadius: 3, bgcolor: 'background.paper' }}>
-                  <ModeSwitcher />
                   <Button color="inherit" size="small" onClick={() => setChatPanelVisible(true)} sx={{ fontSize: 12 }}>Show input</Button>
                 </Box>
               </Box>
@@ -1417,24 +1334,12 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
         {/* Responses and execution history share a resizable workspace pane. */}
         {!isChatMode && showRunHistory && !isCompact && (
-          <WorkspaceSplitDivider side={assistantPanelSide} ratio={assistantPanelRatio} leftInset={leftSidebarBaseWidth} rightInset={rightSidebarWidth} onChange={setAssistantPanelRatio} />
+          <WorkspaceSplitDivider side={assistantPanelSide} ratio={assistantPanelRatio} leftInset={sessionSidebarWidth} rightInset={rightSidebarWidth} onChange={setAssistantPanelRatio} />
         )}
         {!isChatMode && showRunHistory && (
           <Drawer anchor={assistantPanelSide} variant={isCompact && !responseFocused ? 'temporary' : 'persistent'} open onClose={() => setExecutionHistoryVisible(false)}
-            PaperProps={{ 'data-testid': 'workspace-conversation-pane', sx: { background: 'transparent', left: isCompact ? 56 : assistantPanelSide === 'left' ? leftSidebarBaseWidth + 8 : 'auto', right: isCompact ? 56 : assistantPanelSide === 'right' ? rightSidebarWidth + 8 : 'auto', top: 56, bottom: 8, height: 'auto', width: isCompact ? 'calc(100vw - 112px)' : responseMainWidth - 16, ...(isCompact ? { bottom: 'auto', height: 'calc(55vh - 16px)' } : {}), border: 0, borderRadius: '20px', overflow: 'hidden', boxShadow: 'none' } }}>
-            <Box data-tour="workspace-panel-tabs" sx={{ display: 'flex', alignItems: 'center', gap: 0.25, px: 1, pt: 1.5, pb: 1, flexShrink: 0 }}>
-              {areFlowsVisible && <Button color="inherit" size="small" aria-pressed={showingCrews} onClick={() => setFlowPanelTab('crews')} sx={{ fontSize: 12, px: 1, borderRadius: 2, bgcolor: showingCrews ? 'action.selected' : 'transparent' }}>Available Crews</Button>}
-              <Button color="inherit" size="small" aria-pressed={!showingResponses && !showingCrews} onClick={() => setExecutionHistoryVisible(true)} sx={{ fontSize: 12, minWidth: 0, px: 1, borderRadius: 2, bgcolor: !showingResponses && !showingCrews ? 'action.selected' : 'transparent' }}>Execution history</Button>
-              <Button color="inherit" size="small" aria-pressed={showingResponses} onClick={() => setAssistantPanelVisible(true)} sx={{ fontSize: 12, minWidth: 0, px: 1, borderRadius: 2, bgcolor: showingResponses ? 'action.selected' : 'transparent' }}>Conversation</Button>
-              <Box sx={{ display: 'flex', ml: 'auto' }}>
-                {!isCompact && <>
-                  <IconButton aria-label={`Move workspace panel to ${assistantPanelSide === 'left' ? 'right' : 'left'}`} title="Swap panel and canvas" size="small" onClick={() => setAssistantPanelSide(assistantPanelSide === 'left' ? 'right' : 'left')}><ArrowLeftRight size={15} /></IconButton>
-                </>}
-              </Box>
-
-              <IconButton aria-label="Close workspace panel" size="small" onClick={() => setExecutionHistoryVisible(false)}><CloseIcon sx={{ fontSize: 17 }} /></IconButton>
-            </Box>
-            <Box sx={{ flex: 1, minHeight: 0, display: showingResponses || showingCrews ? 'none' : 'block' }}><JobsPanel /></Box>
+            PaperProps={{ 'data-testid': 'workspace-conversation-pane', sx: { background: 'transparent', left: isCompact ? 56 : assistantPanelSide === 'left' ? sessionSidebarWidth + 8 : 'auto', right: isCompact ? 56 : assistantPanelSide === 'right' ? rightSidebarWidth + 8 : 'auto', top: 0, bottom: 8, height: 'auto', width: isCompact ? 'calc(100vw - 112px)' : responseMainWidth - 16, ...(isCompact ? { bottom: 'auto', height: 'calc(55vh - 16px)' } : {}), border: 0, borderRadius: '20px', overflow: 'hidden', boxShadow: 'none' } }}>
+            <BuilderPanelControls />
             {areFlowsVisible && <Box id="builder-available-crews-host" sx={{ flex: 1, minHeight: 0, display: showingCrews ? 'flex' : 'none', flexDirection: 'column' }} />}
             <Box id="builder-assistant-response-host" sx={{ flex: 1, minHeight: 0, display: showingResponses ? 'flex' : 'none', flexDirection: 'column' }} />
             <Box id="builder-assistant-composer-host" sx={{ flexShrink: 0 }} />
@@ -1677,22 +1582,10 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         {!isChatMode && (
         <RightSidebar
             onOpenTutorial={() => dialogManager.setIsTutorialOpen(true)}
-            onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
             onToggleChat={() => setChatPanelVisible(!showChatPanel)}
             isChatOpen={showChatPanel}
             setIsAgentDialogOpen={() => openAgentDialog(true)}
             setIsTaskDialogOpen={() => openTaskDialog(true)}
-            setIsCrewDialogOpen={() => {
-              // Context-aware catalog: Show only Flows tab when on Flow Canvas
-              if (areFlowsVisible) {
-                setCrewFlowDialogInitialTab(3); // Flows tab
-                setCrewFlowDialogShowOnlyTab(3); // Show only Flows tab
-              } else {
-                setCrewFlowDialogInitialTab(0); // Crews tab
-                setCrewFlowDialogShowOnlyTab(undefined); // Show all tabs
-              }
-              setIsCrewFlowDialogOpen(true);
-            }}
             onSaveCrewClick={() => {
               const activeTab = getActiveTab();
               if (activeTab?.savedCrewId) {
@@ -1716,10 +1609,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             }}
             showRunHistory={false}
             executionHistoryHeight={executionHistoryHeight}
-            onOpenSchedulesDialog={() => {
-              // Open schedule dialog
-              dialogManager.setScheduleDialogOpen(true);
-            }}
             onOpenTriggersDialog={() => {
               dialogManager.setTriggersDialogOpen(true);
             }}
@@ -1744,49 +1633,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           />
         )}
 
-        {/* Left Sidebar — hidden in chat mode */}
-        {!isChatMode && (
-        <LeftSidebar
-            onClearCanvas={() => {
-              // Context-aware: clear flow canvas or crew canvas based on which is visible
-              if (areFlowsVisible) {
-                setFlowNodes([]);
-                setFlowEdges([]);
-              } else {
-                setNodes([]);
-                setEdges([]);
-              }
-            }}
-            onZoomIn={() => {
-              // Context-aware: zoom the visible canvas
-              const reactFlowInstance = areFlowsVisible ? flowFlowInstanceRef.current : crewFlowInstanceRef.current;
-              if (reactFlowInstance) {
-                reactFlowInstance.zoomIn({ duration: 200 });
-              }
-            }}
-            onZoomOut={() => {
-              // Context-aware: zoom the visible canvas
-              const reactFlowInstance = areFlowsVisible ? flowFlowInstanceRef.current : crewFlowInstanceRef.current;
-              if (reactFlowInstance) {
-                reactFlowInstance.zoomOut({ duration: 200 });
-              }
-            }}
-            onFitView={() => {
-              // Use the UI-aware fit view that respects canvas boundaries
-              handleUIAwareFitView();
-            }}
-            onToggleInteractivity={() => {
-              // Toggle interactivity if needed
-              console.log('Toggle interactivity');
-            }}
-            setIsConfigurationDialogOpen={dialogManager.setIsConfigurationDialogOpen}
-            onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
-            showRunHistory={showRunHistory}
-            onToggleExecutionHistory={toggleExecutionHistory}
-            executionHistoryHeight={executionHistoryHeight}
-          />
-        )}
-
         {/* Mobile: SpeedDial for quick actions */}
         {isMobile && (
           <SpeedDial
@@ -1796,7 +1642,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           >
             <SpeedDialAction icon={<ChatIcon />} tooltipTitle="Chat" onClick={() => setChatPanelVisible(true)} />
             <SpeedDialAction icon={<PlayArrowIcon />} tooltipTitle="Run" onClick={() => handleRunClick('crew')} />
-            <SpeedDialAction icon={<HistoryIcon />} tooltipTitle="History" onClick={toggleExecutionHistory} />
+            <SpeedDialAction icon={<HistoryIcon />} tooltipTitle="History" onClick={() => window.dispatchEvent(new Event('openWorkspaceActivity'))} />
             <SpeedDialAction icon={<SettingsIcon />} tooltipTitle="Settings" onClick={() => dialogManager.setIsConfigurationDialogOpen(true)} />
           </SpeedDial>
         )}

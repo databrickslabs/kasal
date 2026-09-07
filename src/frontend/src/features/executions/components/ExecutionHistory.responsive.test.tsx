@@ -125,7 +125,7 @@ describe('Job history sidebar', () => {
   it('shows a useful empty state and closes from its header', () => {
     renderHistory();
     expect(screen.getByText('Your work, all in one place')).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Close job history' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close activity' }));
     expect(mockClose).toHaveBeenCalledOnce();
   });
   it('makes search and sorting available without a table header', () => {

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { ChatMessage } from '../types/index';
+import { useTabManagerStore } from '../../../../store/tabManager';
 import { streamExecution } from '../../../chat/api/streaming';
 
 import { runService } from '../../../../api/execution/ExecutionHistoryService';
@@ -76,6 +77,10 @@ export const useExecutionMonitoring = (
     const handleJobCreated = (event: CustomEvent) => {
       const { jobId, jobName } = event.detail;
       settledJobsRef.current.delete(jobId);
+      useTabManagerStore.setState(state => ({ tabs: state.tabs.map(tab =>
+        tab.chatSessionId === sessionId && !tab.executionJobIds?.includes(jobId)
+          ? { ...tab, executionJobIds: [...(tab.executionJobIds || []), jobId] } : tab
+      ) }));
 
       // Check if this session initiated the execution via markPendingExecution
       const isPendingForThisSession = pendingExecutionRef.current;

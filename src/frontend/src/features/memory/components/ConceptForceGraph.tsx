@@ -6,9 +6,8 @@
  * fullscreen toggle and the hover tooltip so the component blends with the
  * rest of the Memory Browser.
  *
- * Visual identity preserved from the previous SVG version:
- *  - Flat-fill nodes coloured by importance
- *  - White-outlined labels readable on any fill
+ * Visuals follow the same warm and sage surfaces as builder nodes:
+ *  - Subtle concept colours with theme-aware labels
  *  - Sparse edge set (top weights only) so dense graphs stay readable
  *  - Dashed selection ring for pinned/active concepts
  *  - Hover dim with neighbour-highlight
@@ -22,6 +21,8 @@ import React, {
   useState,
 } from 'react';
 import { Box, IconButton, Tooltip, Typography } from '@mui/material';
+import { alpha, useTheme } from '@mui/material/styles';
+import { kasalNodePalette } from '../../../theme/kasalSurfaces';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
 import CenterFocusStrongIcon from '@mui/icons-material/CenterFocusStrong';
@@ -46,7 +47,6 @@ interface PhysicsNode extends ConceptGraphNode {
   /** Pre-split label lines so we don't recompute every frame. */
   lines: string[];
   radius: number;
-  fill: string;
   // Mutated by force-graph
   x?: number; y?: number; vx?: number; vy?: number; fx?: number; fy?: number;
 }
@@ -78,25 +78,11 @@ const LABEL_CHAR_W = LABEL_FONT * 0.6;
 
 const ZOOM_STEP = 1.3;
 
-// Curated 16-colour palette (Tailwind 500 shades — perceptually balanced).
-// Each concept hashes to one of these so every node looks distinct, the way
-// graph UIs like Obsidian / Logseq / Gephi present concept maps.
-const CONCEPT_PALETTE = [
-  '#6366f1', '#06b6d4', '#10b981', '#f59e0b',
-  '#ef4444', '#ec4899', '#8b5cf6', '#3b82f6',
-  '#14b8a6', '#84cc16', '#f97316', '#a855f7',
-  '#0ea5e9', '#22c55e', '#eab308', '#f43f5e',
-];
-
 // djb2 — fast, decent distribution, deterministic per id.
 function hashId(id: string): number {
   let h = 5381;
   for (let i = 0; i < id.length; i++) h = ((h << 5) + h + id.charCodeAt(i)) | 0;
   return Math.abs(h);
-}
-
-function paletteColor(id: string): string {
-  return CONCEPT_PALETTE[hashId(id) % CONCEPT_PALETTE.length];
 }
 
 function splitLabel(label: string): string[] {
@@ -126,6 +112,9 @@ interface ForceGraphInstance {
   linkCanvasObjectMode(fn: () => 'replace' | 'before' | 'after'): ForceGraphInstance;
   onNodeClick(fn: (n: PhysicsNode) => void): ForceGraphInstance;
   onNodeHover(fn: (n: PhysicsNode | null) => void): ForceGraphInstance;
+  onEngineTick(fn: () => void): ForceGraphInstance;
+  onEngineStop(fn: () => void): ForceGraphInstance;
+  graphData(): { nodes: PhysicsNode[]; links: PhysicsLink[] };
   graphData(data: { nodes: PhysicsNode[]; links: PhysicsLink[] }): ForceGraphInstance;
   zoom(): number;
   zoom(level: number, ms?: number): ForceGraphInstance;
@@ -152,8 +141,32 @@ export const ConceptForceGraph: React.FC<Props> = ({
   importanceColor,
   height = 520,
 }) => {
+  const theme = useTheme();
+  const dark = theme.palette.mode === 'dark';
+  const agentPalette = kasalNodePalette(dark, 'agent');
+  const taskPalette = kasalNodePalette(dark, 'task');
+  // Read current colours inside the persistent canvas callbacks. Changing the
+  // theme should repaint the graph without resetting node positions or pins.
+  const colorsRef = useRef({ fills: [] as string[], text: '', edge: '', focus: '', shadow: '' });
+  useEffect(() => {
+    colorsRef.current = {
+      fills: [agentPalette.surface, taskPalette.surface, agentPalette.badge, taskPalette.badge],
+      text: theme.palette.text.primary, edge: theme.palette.text.secondary,
+      focus: taskPalette.accent, shadow: alpha(theme.palette.common.black, dark ? 0.22 : 0.08),
+    };
+  }, [theme, agentPalette.surface, agentPalette.badge, taskPalette.surface, taskPalette.badge, taskPalette.accent, dark]);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const graphRef     = useRef<ForceGraphInstance | null>(null);
+  const initialFitRef = useRef(true);
+  const settleFitRef = useRef(true);
+  const fitGraph = useCallback((duration = 0) => {
+    const graph = graphRef.current;
+    const bounds = containerRef.current?.getBoundingClientRect();
+    if (!graph || !bounds || bounds.width < 1 || bounds.height < 1) return;
+    const positioned = graph.graphData().nodes;
+    if (!positioned.length || positioned.some(node => !Number.isFinite(node.x) || !Number.isFinite(node.y))) return;
+    graph.zoomToFit(duration, Math.min(56, bounds.width / 5, bounds.height / 5));
+  }, []);
 
   const [hoveredId,    setHoveredId]    = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -188,7 +201,7 @@ export const ConceptForceGraph: React.FC<Props> = ({
   useEffect(() => { neighboursRef.current    = neighbours;    }, [neighbours]);
   useEffect(() => { maxEdgeWeightRef.current = maxEdgeWeight; }, [maxEdgeWeight]);
 
-  // Build the physics node payload. We re-derive radius / colour here so
+  // Build the physics node payload. We re-derive radius here so
   // canvas callbacks can read them straight off the node object.
   const physicsNodes = useMemo<PhysicsNode[]>(() => {
     const maxCount = nodes.reduce((m, n) => Math.max(m, n.count), 1);
@@ -196,7 +209,7 @@ export const ConceptForceGraph: React.FC<Props> = ({
       const lines  = splitLabel(n.label);
       const baseR  = 14 + Math.sqrt(n.count / maxCount) * 22;
       const radius = Math.max(baseR, requiredRadiusForLabel(lines));
-      return { ...n, lines, radius, fill: paletteColor(n.id) };
+      return { ...n, lines, radius };
     });
   }, [nodes]);
 
@@ -219,7 +232,16 @@ export const ConceptForceGraph: React.FC<Props> = ({
       .linkCanvasObjectMode(() => 'replace')
       .onNodeClick((n: PhysicsNode) => onToggleNodeRef.current(n.id))
       .onNodeHover((n) => setHoveredId(n?.id ?? null))
-      .minZoom(0.2)
+      .onEngineTick(() => {
+        if (!initialFitRef.current) return;
+        fitGraph();
+        initialFitRef.current = false;
+      })
+      .onEngineStop(() => {
+        if (settleFitRef.current) fitGraph(250);
+        settleFitRef.current = false;
+      })
+      .minZoom(0.001)
       .maxZoom(6)
       .enableNodeDrag(true)
       .d3AlphaDecay(0.035)
@@ -237,16 +259,31 @@ export const ConceptForceGraph: React.FC<Props> = ({
     if (centre?.strength) centre.strength(0.04);
 
     // Keep the canvas sized to its container.
+    let resizeFrame = 0;
+    let previousWidth = 0;
+    let previousHeight = 0;
     const sync = () => {
       const r = container.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1 || (r.width === previousWidth && r.height === previousHeight)) return;
+      previousWidth = r.width; previousHeight = r.height;
       g.width(r.width).height(r.height);
+      cancelAnimationFrame(resizeFrame);
+      resizeFrame = requestAnimationFrame(() => fitGraph());
     };
     sync();
     const ro = new ResizeObserver(sync);
     ro.observe(container);
+    // Native pan/zoom/drag takes ownership of the viewport. A delayed layout
+    // completion must not undo a user's adjustment.
+    const takeControl = () => { initialFitRef.current = false; settleFitRef.current = false; };
+    container.addEventListener('pointerdown', takeControl);
+    container.addEventListener('wheel', takeControl, { passive: true });
 
     return () => {
       ro.disconnect();
+      cancelAnimationFrame(resizeFrame);
+      container.removeEventListener('pointerdown', takeControl);
+      container.removeEventListener('wheel', takeControl);
       g._destructor?.();
       graphRef.current = null;
     };
@@ -265,8 +302,12 @@ export const ConceptForceGraph: React.FC<Props> = ({
 
     // Preserve positions for nodes that already exist by copying x/y/vx/vy
     // off the previous force-graph data array (force-graph mutates these).
-    const prev    = (g as unknown as { graphData(): { nodes: PhysicsNode[] } }).graphData();
+    const prev    = g.graphData();
     const prevMap = new Map(prev.nodes.map((n) => [n.id, n]));
+    if (prev.nodes.length !== physicsNodes.length || physicsNodes.some(node => !prevMap.has(node.id))) {
+      initialFitRef.current = true;
+      settleFitRef.current = true;
+    }
     for (const n of physicsNodes) {
       const p = prevMap.get(n.id);
       if (p) { n.x = p.x; n.y = p.y; n.vx = p.vx; n.vy = p.vy; }
@@ -303,10 +344,10 @@ export const ConceptForceGraph: React.FC<Props> = ({
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
       ctx.strokeStyle = isFocused
-        ? `rgba(99,102,241,0.70)`
+        ? alpha(colorsRef.current.focus, 0.7)
         : dimmed
-          ? `rgba(148,163,184,0.05)`
-          : `rgba(148,163,184,0.22)`;
+          ? alpha(colorsRef.current.edge, 0.05)
+          : alpha(colorsRef.current.edge, 0.22);
       ctx.lineWidth   = 0.5 + wRatio * 1.6;
       ctx.lineCap     = 'round';
       ctx.stroke();
@@ -330,10 +371,10 @@ export const ConceptForceGraph: React.FC<Props> = ({
 
       // Drop shadow + focus glow.
       if (isFocused) {
-        ctx.shadowColor = 'rgba(99,102,241,0.55)';
-        ctx.shadowBlur  = 14;
+        ctx.shadowColor = alpha(colorsRef.current.focus, 0.2);
+        ctx.shadowBlur  = 10;
       } else {
-        ctx.shadowColor = 'rgba(15,23,42,0.18)';
+        ctx.shadowColor = colorsRef.current.shadow;
         ctx.shadowBlur  = 4;
         ctx.shadowOffsetY = 1.5;
       }
@@ -341,8 +382,7 @@ export const ConceptForceGraph: React.FC<Props> = ({
       // Main fill.
       ctx.beginPath();
       ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = node.fill;
-      ctx.globalAlpha *= 0.92;
+      ctx.fillStyle = colorsRef.current.fills[hashId(node.id) % colorsRef.current.fills.length];
       ctx.fill();
       ctx.globalAlpha = dimmed ? 0.18 : 1;
       ctx.shadowBlur  = 0;
@@ -351,8 +391,8 @@ export const ConceptForceGraph: React.FC<Props> = ({
       // Border.
       ctx.lineWidth   = isFocused ? 2.5 : isPinned ? 2 : 1.2;
       ctx.strokeStyle = isFocused || isPinned
-        ? '#ffffff'
-        : 'rgba(255,255,255,0.65)';
+        ? colorsRef.current.focus
+        : alpha(colorsRef.current.edge, 0.15);
       ctx.stroke();
 
       // Pinned-selection dashed ring — coloured by importance so the rim
@@ -375,15 +415,12 @@ export const ConceptForceGraph: React.FC<Props> = ({
         ctx.font         = `${isFocused || isPinned ? 700 : 500} ${fontSize}px system-ui, -apple-system, sans-serif`;
         ctx.textAlign    = 'center';
         ctx.textBaseline = 'middle';
-        ctx.lineWidth    = 2.8;
-        ctx.strokeStyle  = 'rgba(0,0,0,0.32)';
-        ctx.fillStyle    = '#ffffff';
+        ctx.fillStyle    = colorsRef.current.text;
 
         const lines  = node.lines;
         const startY = node.y - ((lines.length - 1) / 2) * LABEL_LINE_H;
         for (let i = 0; i < lines.length; i++) {
           const y = startY + i * LABEL_LINE_H;
-          ctx.strokeText(lines[i], node.x, y);
           ctx.fillText(lines[i], node.x, y);
         }
       }
@@ -392,6 +429,12 @@ export const ConceptForceGraph: React.FC<Props> = ({
     },
     [],
   );
+
+  // Force-graph pauses redraws once the simulation settles. Rebind the painter
+  // to invalidate that cached frame on theme changes without reheating physics.
+  useEffect(() => {
+    graphRef.current?.nodeCanvasObject((node, ctx, scale) => drawNode(node, ctx, scale));
+  }, [theme, drawNode]);
 
   const paintNodeHit = useCallback(
     (node: PhysicsNode, color: string, ctx: CanvasRenderingContext2D) => {
@@ -406,16 +449,19 @@ export const ConceptForceGraph: React.FC<Props> = ({
 
   // ---- Zoom / view controls ----
   const zoomIn  = useCallback(() => {
+    initialFitRef.current = false; settleFitRef.current = false;
     const g = graphRef.current;
     if (g) g.zoom(g.zoom() * ZOOM_STEP, 200);
   }, []);
   const zoomOut = useCallback(() => {
+    initialFitRef.current = false; settleFitRef.current = false;
     const g = graphRef.current;
     if (g) g.zoom(g.zoom() / ZOOM_STEP, 200);
   }, []);
   const resetView = useCallback(() => {
-    graphRef.current?.zoomToFit(400, 60);
-  }, []);
+    initialFitRef.current = false; settleFitRef.current = false;
+    fitGraph(250);
+  }, [fitGraph]);
 
   // ---- Fullscreen ----
   useEffect(() => {
@@ -440,8 +486,7 @@ export const ConceptForceGraph: React.FC<Props> = ({
   return (
     <Box
       sx={{
-        border: isFullscreen ? 'none' : '1px solid',
-        borderColor: 'divider',
+        border: 0,
         borderRadius: isFullscreen ? 0 : 2,
         position: isFullscreen ? 'fixed' : 'relative',
         ...(isFullscreen
@@ -449,7 +494,6 @@ export const ConceptForceGraph: React.FC<Props> = ({
           : { height }),
         overflow: 'hidden',
         bgcolor: 'background.paper',
-        backgroundImage: 'radial-gradient(ellipse 70% 55% at 50% 10%, rgba(99,102,241,0.05) 0%, transparent 100%)',
       }}
     >
       <Box
@@ -490,23 +534,23 @@ export const ConceptForceGraph: React.FC<Props> = ({
             minWidth: 160,
             maxWidth: 240,
             borderRadius: 1.5,
-            bgcolor: 'rgba(15,23,42,0.90)',
-            color: '#f8fafc',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.22)',
+            bgcolor: alpha(theme.palette.background.paper, 0.96),
+            color: 'text.primary',
+            boxShadow: `0 4px 20px ${alpha(theme.palette.common.black, dark ? 0.22 : 0.08)}`,
             pointerEvents: 'none',
             backdropFilter: 'blur(6px)',
-            border: '1px solid rgba(255,255,255,0.10)',
+            border: 0,
           }}
         >
-          <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.25, color: '#f1f5f9' }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.25, color: 'text.primary' }}>
             {tipNode.label}
           </Typography>
-          <Typography variant="caption" sx={{ display: 'block', color: '#94a3b8' }}>
+          <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>
             {tipNode.count} {tipNode.count === 1 ? 'record' : 'records'}
             {' · '}importance {tipNode.avgImportance.toFixed(2)}
           </Typography>
           {tipNbrCount > 0 && (
-            <Typography variant="caption" sx={{ display: 'block', color: '#64748b', mt: 0.25 }}>
+            <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', mt: 0.25 }}>
               {tipNbrCount} connected concepts
             </Typography>
           )}
@@ -525,12 +569,12 @@ export const ConceptForceGraph: React.FC<Props> = ({
           px: 1.25,
           py: 0.5,
           borderRadius: 1,
-          bgcolor: 'rgba(248,250,252,0.92)',
+          bgcolor: alpha(theme.palette.background.paper, 0.92),
           fontSize: 11,
-          color: 'text.disabled',
+          color: 'text.secondary',
           backdropFilter: 'blur(3px)',
-          border: '1px solid',
-          borderColor: 'divider',
+          border: 0,
+          flexWrap: 'wrap', maxWidth: 'calc(100% - 16px)',
         }}
       >
         <span>size = frequency</span>
@@ -553,11 +597,10 @@ export const ConceptForceGraph: React.FC<Props> = ({
           gap: 0.5,
           p: 0.5,
           borderRadius: 1.5,
-          bgcolor: 'rgba(248,250,252,0.95)',
+          bgcolor: alpha(theme.palette.background.paper, 0.95),
           boxShadow: '0 1px 6px rgba(0,0,0,0.07)',
           backdropFilter: 'blur(4px)',
-          border: '1px solid',
-          borderColor: 'divider',
+          border: 0,
         }}
       >
         <Tooltip title="Zoom in" placement="right">

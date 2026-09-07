@@ -117,7 +117,7 @@ const Option: React.FC<{
         {label}
       </span>
       {active && (
-        <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--accent)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+        <svg className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--text-primary)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
         </svg>
       )}
@@ -326,7 +326,7 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
         {badgeCount > 0 && (
           <span
             className="absolute -top-1 -right-1 text-[9px] tabular-nums rounded-full min-w-[14px] h-[14px] flex items-center justify-center px-0.5"
-            style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
+            style={{ backgroundColor: 'var(--bg-active-chip)', color: 'var(--text-primary)' }}
           >
             {badgeCount}
           </span>
@@ -365,7 +365,7 @@ const ComposerMenu: React.FC<ComposerMenuProps> = ({
                     attachmentCount > 0 ? (
                       <span
                         className="text-[10px] tabular-nums rounded-full min-w-[16px] h-[16px] flex items-center justify-center px-1"
-                        style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
+                        style={{ backgroundColor: 'var(--bg-active-chip)', color: 'var(--text-primary)' }}
                       >
                         {attachmentCount}
                       </span>

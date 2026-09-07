@@ -1,6 +1,7 @@
 import React from 'react';
 import type { ReactFlowInstance, Node } from 'reactflow';
 import { CanvasLayoutManager } from '../../features/workflow/canvas/lib/CanvasLayoutManager';
+import { useCanvasViewportResize } from './useCanvasViewportResize';
 import { useUILayoutStore } from '../../store/uiLayout';
 
 export function useUIFitView(params: {
@@ -25,7 +26,12 @@ export function useUIFitView(params: {
     currentUIState.screenHeight = window.innerHeight;
 
     layoutManager.updateUIState(currentUIState);
-    const canvasArea = layoutManager.getAvailableCanvasArea('crew');
+    // The ReactFlow element already excludes the session rail and conversation.
+    // Measure it directly so opening the rail doesn't shift the viewport twice.
+    const bounds = document.querySelector('[data-crew-container] .react-flow')?.getBoundingClientRect();
+    const canvasArea = bounds?.width && bounds?.height
+      ? { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height }
+      : layoutManager.getAvailableCanvasArea('crew');
 
     // Calculate bounds of all nodes
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -51,7 +57,6 @@ export function useUIFitView(params: {
     const zoom = Math.max(0.01, Math.min(zoomX, zoomY, 1.5)); // Cap at 1.5x to prevent over-zooming
 
     // Convert the usable screen area to ReactFlow's local viewport coordinates.
-    const bounds = document.querySelector('[data-crew-container] .react-flow')?.getBoundingClientRect();
     const canvasCenterX = canvasArea.x + canvasArea.width / 2 - (bounds?.left || 0);
     const canvasCenterY = canvasArea.y + canvasArea.height / 2 - (bounds?.top || 0);
 
@@ -129,6 +134,8 @@ export function useUIFitView(params: {
       }
     }
   }, [handleUIAwareFitView, handleFlowUIAwareFitView, flowFlowInstanceRef]);
+
+  useCanvasViewportResize(handleUIAwareFitView, handleFlowUIAwareFitView);
 
   return { handleUIAwareFitView, handleFitViewToNodesInternal } as const;
 }

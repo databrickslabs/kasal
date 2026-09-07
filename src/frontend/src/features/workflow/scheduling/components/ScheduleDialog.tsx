@@ -102,12 +102,13 @@ const ConfigViewerDialog: React.FC<ConfigViewerDialogProps> = ({ open, onClose, 
   );
 };
 
-const ScheduleDialog: React.FC<ScheduleDialogProps> = ({ 
+const ScheduleDialog: React.FC<ScheduleDialogProps & { embedded?: boolean }> = ({
   open, 
   onClose, 
   nodes: _nodes, 
   edges: _edges,
-  selectedModel: _selectedModel
+  selectedModel: _selectedModel,
+  embedded = false
 }) => {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [name, setName] = useState('');
@@ -455,10 +456,8 @@ const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
     );
   };
 
-  return (
-    <>
-      <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-        <DialogTitle sx={{ 
+  const content = <>
+        {!embedded && <DialogTitle sx={{
           display: 'flex', 
           alignItems: 'center', 
           justifyContent: 'space-between',
@@ -479,7 +478,7 @@ const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
           >
             <CloseIcon />
           </IconButton>
-        </DialogTitle>
+        </DialogTitle>}
         <DialogContent>
           {viewMode === 'list' ? (
             // List View
@@ -503,7 +502,7 @@ const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
                     No schedules found
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    Schedule jobs from the Execution History table
+                    Use Schedule on a completed response, or open an execution’s actions in Activity.
                   </Typography>
                 </Box>
               ) : (
@@ -684,10 +683,15 @@ const ScheduleDialog: React.FC<ScheduleDialogProps> = ({
             </Box>
           )}
         </DialogContent>
-        <DialogActions>
+        {!embedded && <DialogActions>
           <Button onClick={onClose}>Close</Button>
-        </DialogActions>
-      </Dialog>
+        </DialogActions>}
+  </>;
+  return (
+    <>
+      {embedded ? <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>{content}</Box>
+        : <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>{content}</Dialog>}
+
 
       <ConfigViewerDialog
         open={isConfigViewerOpen}

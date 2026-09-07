@@ -2,13 +2,7 @@ import React from 'react';
 import { IconButton } from '@mui/material';
 import { useAppStore } from './store/appStore';
 
-/**
- * The ONE chat-sidebar toggle, rendered top-left in the app bar (TabBar
- * leftSlot) while chat mode is active. It lives OUTSIDE #kasal-chat-root, so
- * it is MUI-styled to blend with the (transparent) bar; the panel glyph
- * matches the chat's own iconography. Serves both directions — collapse when
- * the sidebar is open, expand when it shows the slim rail.
- */
+/** Shared collapse/expand control at the top of the sessions sidebar. */
 const SidebarToggle: React.FC = () => {
   const sidebarOpen = useAppStore((s) => s.sidebarOpen);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
@@ -16,7 +10,7 @@ const SidebarToggle: React.FC = () => {
     <IconButton
       onClick={toggleSidebar}
       size="small"
-      aria-label={sidebarOpen ? 'Hide chat history' : 'Show chat history'}
+      aria-label={sidebarOpen ? 'Hide sessions' : 'Show sessions'}
       sx={{
         ml: 0.5,
         borderRadius: 2,

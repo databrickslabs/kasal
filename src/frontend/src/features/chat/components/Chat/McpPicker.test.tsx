@@ -308,16 +308,16 @@ describe('McpPicker', () => {
       expect(row.className).toContain('!px-2.5');
     });
 
-    it('uses a neutral "+" trigger colour, reserving the accent for the count badge', () => {
+    it('uses neutral colours for both the "+" trigger and selection count', () => {
       useExecutionStore.setState({ selectedMcpServers: ['My MCP'] });
       render(<McpPicker />);
       const trigger = screen.getByLabelText('MCP servers');
       const triggerStyle = trigger.getAttribute('style') || '';
       expect(triggerStyle).toContain('var(--text-secondary)');
       expect(triggerStyle).not.toContain('var(--accent)');
-      // …the accent lives on the selection count badge instead.
+      // Selection is a normal state, not a red alert badge.
       const badge = screen.getByText('1');
-      expect(badge.getAttribute('style') || '').toContain('var(--accent)');
+      expect(badge.getAttribute('style') || '').toContain('var(--bg-active-chip)');
     });
   });
 

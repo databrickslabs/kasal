@@ -34,7 +34,7 @@ export default function WorkspaceSplitDivider({ side, ratio, leftInset, rightIns
       else if (event.key === 'End') onChange(0.75);
       else onChange(ratio + (event.key === 'ArrowRight' ? 0.05 : -0.05) * (side === 'left' ? 1 : -1));
     }}
-    sx={{ position: 'fixed', zIndex: 1201, top: 70, bottom: 24, width: 12,
+    sx={{ position: 'fixed', zIndex: 1201, top: 8, bottom: 24, width: 12,
       left: `calc(${leftInset}px + (100vw - ${leftInset + rightInset}px) * ${side === 'left' ? ratio : 1 - ratio} - 6px)`,
       cursor: 'col-resize', touchAction: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 2,
       '&::after': { content: '""', width: 3, height: 36, borderRadius: 2, bgcolor: 'text.disabled', opacity: 0.3, transition: 'opacity 150ms' },

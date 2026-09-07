@@ -112,12 +112,10 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   setReasoningEnabled: _setReasoningEnabled,
   selectedModel: _selectedModelProp,
   setSelectedModel: _setSelectedModelProp,
-  onOpenLogsDialog,
   onToggleChat,
   isChatOpen,
   setIsAgentDialogOpen,
   setIsTaskDialogOpen,
-  setIsCrewDialogOpen,
   showRunHistory,
   executionHistoryHeight = 200,
   onOpenTutorial: _onOpenTutorial,
@@ -634,12 +632,10 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
           />
 
           <RightSidebar
-            onOpenLogsDialog={onOpenLogsDialog}
             onToggleChat={onToggleChat}
             isChatOpen={isChatOpen}
             setIsAgentDialogOpen={setIsAgentDialogOpen}
             setIsTaskDialogOpen={setIsTaskDialogOpen}
-            setIsCrewDialogOpen={setIsCrewDialogOpen}
             showRunHistory={showRunHistory}
             executionHistoryHeight={executionHistoryHeight}
             hasCrewNodes={nodes.some(node => node.type === 'agentNode' || node.type === 'taskNode' || node.type === 'managerNode')}

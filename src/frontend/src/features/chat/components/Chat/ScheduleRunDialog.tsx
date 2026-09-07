@@ -104,7 +104,7 @@ export function describeChoice(
 
 const chipStyle = (active: boolean): React.CSSProperties => ({
   padding: '6px 10px',
-  color: active ? 'var(--accent)' : 'var(--text-secondary)',
+  color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
   backgroundColor: active ? 'var(--bg-active-chip)' : 'var(--bg-secondary)',
   border: '1px solid var(--border-color)',
 });
@@ -360,7 +360,7 @@ const ScheduleRunDialog: React.FC<ScheduleRunDialogProps> = ({
             onClick={() => void create()}
             disabled={!canCreate}
             className="rounded-lg text-sm font-medium transition-opacity disabled:opacity-50"
-            style={{ padding: '8px 14px', color: 'white', backgroundColor: 'var(--accent)' }}
+            style={{ padding: '8px 14px', color: 'var(--bg-primary)', backgroundColor: 'var(--text-primary)' }}
           >
             {saving ? 'Creating…' : 'Create schedule'}
           </button>

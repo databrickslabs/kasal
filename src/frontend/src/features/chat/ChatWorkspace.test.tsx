@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { useUILayoutStore } from '../../store/uiLayout';
 import { render, screen, fireEvent, act, cleanup } from '@testing-library/react';
 
 // Unmount every rendered ChatWorkspace between tests. Without this, a prior test's
@@ -710,6 +711,7 @@ describe('cleanTaskLabel', () => {
 // ===========================================================================
 describe('ChatWorkspace component', () => {
   beforeEach(() => {
+  useUILayoutStore.setState({ appMode: 'chat', areFlowsVisible: false });
     vi.clearAllMocks();
     h.session.currentSessionId = 's1';
     h.session.messages = [];
@@ -748,13 +750,12 @@ describe('ChatWorkspace component', () => {
     Element.prototype.scrollIntoView = vi.fn();
   });
 
-  it('renders the chat root, sidebar and container; runs init + theme effects', () => {
+  it('renders the chat content and initializes models independently of session navigation', () => {
     render(<ChatWorkspace />);
     expect(document.getElementById('kasal-chat-root')).toBeInTheDocument();
     expect(screen.getByTestId('chat-container')).toBeInTheDocument();
     expect(h.app.init).toHaveBeenCalled();
     expect(document.getElementById('kasal-chat-root')).toHaveAttribute('data-theme', 'light');
-    expect(h.session.init).toHaveBeenCalled();
   });
 
   it('shows the preview panel only when previewOwnerSessionId matches the current session', () => {
@@ -1290,56 +1291,17 @@ describe('ChatWorkspace component', () => {
   });
 
   // --- sidebar interactions ---
-  it('New Chat saves state + resets to a blank chat WITHOUT persisting a session', async () => {
-    render(<ChatWorkspace />);
-    await act(async () => { fireEvent.click(screen.getByLabelText('New chat')); });
-    // Lazy creation: the row is created on the first message, not on the button —
-    // so no empty "New Chat" lands in the Recent rail.
-    expect(h.session.startNewChat).toHaveBeenCalled();
-    expect(h.session.createNewSession).not.toHaveBeenCalled();
-    expect(h.exec.resetForSession).toHaveBeenCalled();
-  });
 
-  it('clicking a session switches to it', async () => {
-    render(<ChatWorkspace />);
-    await act(async () => { fireEvent.click(screen.getByTitle('Two')); });
-    expect(h.session.switchSession).toHaveBeenCalledWith('s2');
-  });
 
-  it('opens the context menu and renames a session', async () => {
-    render(<ChatWorkspace />);
-    // kebab buttons have title "Options"
-    fireEvent.click(screen.getAllByTitle('Options')[0]);
-    fireEvent.click(screen.getByText('Rename'));
-    const input = document.querySelector('input[autofocus], input') as HTMLInputElement;
-    fireEvent.change(input, { target: { value: 'Renamed' } });
-    await act(async () => { fireEvent.keyDown(input, { key: 'Enter' }); });
-    expect(h.session.renameSession).toHaveBeenCalledWith('s1', 'Renamed');
-  });
 
-  it('rename can be cancelled with Escape', () => {
-    render(<ChatWorkspace />);
-    fireEvent.click(screen.getAllByTitle('Options')[0]);
-    fireEvent.click(screen.getByText('Rename'));
-    const input = document.querySelector('input') as HTMLInputElement;
-    fireEvent.keyDown(input, { key: 'Escape' });
-    expect(h.session.renameSession).not.toHaveBeenCalled();
-  });
 
-  it('deletes a session from the context menu', async () => {
-    render(<ChatWorkspace />);
-    fireEvent.click(screen.getAllByTitle('Options')[0]);
-    await act(async () => { fireEvent.click(screen.getByText('Delete')); });
-    expect(h.session.deleteSession).toHaveBeenCalledWith('s1');
-  });
 
-  it('renders the collapsed icon rail when sidebarOpen is false', () => {
-    h.app.sidebarOpen = false;
-    render(<ChatWorkspace />);
-    expect(screen.getByTestId('chat-container')).toBeInTheDocument();
-    // The sidebar never fully disappears — it collapses to a slim icon rail.
-    expect(screen.getByTestId('collapsed-rail')).toBeInTheDocument();
-  });
+
+
+
+
+
+
 
   // --- preview panel controls ---
   it('preview panel close + toggle-chat buttons call the store', () => {
@@ -1583,15 +1545,7 @@ describe('ChatWorkspace component', () => {
     expect(h.createExecution).toHaveBeenCalled();
   });
 
-  it('right-clicking a session opens its context menu, backdrop click closes it', () => {
-    render(<ChatWorkspace />);
-    fireEvent.contextMenu(screen.getByTitle('One'));
-    expect(screen.getByText('Rename')).toBeInTheDocument();
-    // backdrop is the fixed full-screen overlay behind the context menu
-    const backdrop = screen.getByTestId('context-menu-backdrop');
-    fireEvent.click(backdrop);
-    expect(screen.queryByText('Rename')).not.toBeInTheDocument();
-  });
+
 
   it('forwards model selection to the app store', () => {
     render(<ChatWorkspace />);
@@ -1599,12 +1553,7 @@ describe('ChatWorkspace component', () => {
     expect(h.app.setSelectedModel).toHaveBeenCalledWith('m2');
   });
 
-  it('shows a spinner for sessions with an active execution', () => {
-    h.exec.hasActiveExecution = vi.fn(() => true);
-    render(<ChatWorkspace />);
-    // SessionSpinner renders a spinning dot inside the session button (no crash)
-    expect(screen.getByTitle('One')).toBeInTheDocument();
-  });
+
 
   it('dispatcher option callbacks start the generation/execution streams', () => {
     render(<ChatWorkspace />);
@@ -1842,26 +1791,9 @@ describe('ChatWorkspace component', () => {
     expect(h.session.addMessage).toHaveBeenCalledWith('assistant', expect.stringContaining('Failed to stop'));
   });
 
-  it('New Chat and session switch skip saving when there is no current session', async () => {
-    h.session.currentSessionId = null;
-    render(<ChatWorkspace />);
-    await act(async () => { fireEvent.click(screen.getByLabelText('New chat')); });
-    expect(h.exec.saveSessionState).not.toHaveBeenCalled();
-    expect(h.session.startNewChat).toHaveBeenCalled();
-    await act(async () => { fireEvent.click(screen.getByTitle('Two')); });
-    expect(h.session.switchSession).toHaveBeenCalledWith('s2');
-    expect(h.exec.saveSessionState).not.toHaveBeenCalled();
-  });
 
-  it('finishing a rename with a blank value does not call renameSession', async () => {
-    render(<ChatWorkspace />);
-    fireEvent.click(screen.getAllByTitle('Options')[0]);
-    fireEvent.click(screen.getByText('Rename'));
-    const input = document.querySelector('input') as HTMLInputElement;
-    fireEvent.change(input, { target: { value: '   ' } });
-    await act(async () => { fireEvent.blur(input); });
-    expect(h.session.renameSession).not.toHaveBeenCalled();
-  });
+
+
 
   it('crew and flow executions started with no current session pass an undefined origin', async () => {
     h.session.currentSessionId = null;
@@ -1893,23 +1825,7 @@ describe('ChatWorkspace component', () => {
     expect(h.createExecution).not.toHaveBeenCalled();
   });
 
-  it('the context-menu Rename is a no-op when its session no longer exists', () => {
-    const { rerender } = render(<ChatWorkspace />);
-    // Open the context menu for session s1...
-    fireEvent.contextMenu(screen.getByTitle('One'));
-    expect(screen.getByText('Rename')).toBeInTheDocument();
-    // ...then the session list loses s1 (re-render) before Rename is clicked, so the
-    // find() inside the handler returns undefined and the guard short-circuits.
-    h.session.sessions = [{ id: 's2', title: 'Two', updatedAt: new Date(), createdAt: new Date() }] as unknown[];
-    rerender(<ChatWorkspace />);
-    fireEvent.click(screen.getByText('Rename'));
-    expect(h.session.renameSession).not.toHaveBeenCalled();
-    // restore for later tests
-    h.session.sessions = [
-      { id: 's1', title: 'One', updatedAt: new Date(), createdAt: new Date() },
-      { id: 's2', title: 'Two', updatedAt: new Date(), createdAt: new Date() },
-    ] as unknown[];
-  });
+
 
   // --- REST polling fallback (Job-History style) ---------------------------
   // ChatMode renders trace pills / completion from the live SSE stream, but the
@@ -2145,26 +2061,9 @@ describe('ChatWorkspace component', () => {
   });
 
   // --- group switching + reconnect-after-refresh (window-driven) ---
-  it('group-changed reloads the workspace sessions and restores the active one', async () => {
-    h.session.currentSessionId = 's1';
-    render(<ChatWorkspace />);
-    await act(async () => {
-      window.dispatchEvent(new Event('group-changed'));
-      await new Promise((r) => setTimeout(r, 0));
-    });
-    expect(h.session.reloadForGroup).toHaveBeenCalled();
-    expect(h.exec.restoreSessionState).toHaveBeenCalledWith('s1');
-  });
 
-  it('group-changed with no active session resets per-session state', async () => {
-    h.session.currentSessionId = null;
-    render(<ChatWorkspace />);
-    await act(async () => {
-      window.dispatchEvent(new Event('group-changed'));
-      await new Promise((r) => setTimeout(r, 0));
-    });
-    expect(h.exec.resetForSession).toHaveBeenCalled();
-  });
+
+
 
   it('reconnects to a still-running job after refresh, then clears it once finished', async () => {
     h.getSessionRunningJob.mockResolvedValueOnce('job-rc');
@@ -2354,12 +2253,12 @@ describe('ChatWorkspace component', () => {
     expect(screen.getByTestId('cc-pending-label')).toHaveTextContent('');
   });
 
-  it('switching sessions clears a pending loaded run', async () => {
-    render(<ChatWorkspace />);
+  it('switching sessions hides a pending run owned by the previous session', async () => {
+    const { rerender } = render(<ChatWorkspace />);
     await act(async () => { h.dispatcherOpts.onCrewLoaded({ name: 'Armed', nodes: [], edges: [] }, 's1'); });
     expect(screen.getByTestId('cc-pending-label')).toHaveTextContent('Armed');
-    await act(async () => { fireEvent.click(screen.getByTitle('Two')); });
-    expect(h.session.switchSession).toHaveBeenCalledWith('s2');
+    h.session.currentSessionId = 's2';
+    rerender(<ChatWorkspace />);
     expect(screen.getByTestId('cc-pending-label')).toHaveTextContent('');
   });
 
@@ -2368,7 +2267,7 @@ describe('ChatWorkspace component', () => {
     h.app.savedFlows = [];
     h.app.catalogOpen = true; // mocked store: pre-expand (no re-render on set)
     render(<ChatWorkspace />);
-    await act(async () => { fireEvent.click(screen.getByText('My Saved Crew')); });
+    await act(async () => { window.dispatchEvent(new CustomEvent('sessionCatalogLoad', { detail: { kind: 'crew', name: 'My Saved Crew' } })); });
     // saves current state, spins up a new session, restores it, and sends /load
     expect(h.exec.saveSessionState).toHaveBeenCalledWith('s1');
     expect(h.session.createNewSession).toHaveBeenCalled();
@@ -2386,7 +2285,7 @@ describe('ChatWorkspace component', () => {
     h.app.savedFlows = [{ id: 'f1', name: 'My Saved Flow' }];
     h.app.catalogOpen = true; // mocked store: pre-expand (no re-render on set)
     render(<ChatWorkspace />);
-    await act(async () => { fireEvent.click(screen.getByText('My Saved Flow')); });
+    await act(async () => { window.dispatchEvent(new CustomEvent('sessionCatalogLoad', { detail: { kind: 'flow', name: 'My Saved Flow' } })); });
     expect(h.exec.saveSessionState).not.toHaveBeenCalled();
     expect(h.dispatcherSend).toHaveBeenCalledWith(
       '/load flow My Saved Flow', 'm1', undefined, undefined, undefined, 'Open flow: My Saved Flow', undefined, undefined,

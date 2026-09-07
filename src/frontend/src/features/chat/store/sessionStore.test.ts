@@ -780,3 +780,27 @@ describe('workspace scoping (per-group sessions)', () => {
     spy.mockRestore();
   });
 });
+
+describe('session navigation races', () => {
+  it('keeps the latest selection when an earlier request finishes later', async () => {
+    let finishOld!: (messages: ChatMessage[]) => void;
+    vi.mocked(db.getSessionMessages).mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }));
+    const old = useSessionStore.getState().switchSession('old');
+    vi.mocked(db.getSessionMessages).mockResolvedValueOnce([makeMsg('new-message')]);
+    await useSessionStore.getState().switchSession('new');
+    finishOld([makeMsg('old-message')]); await old;
+    expect(useSessionStore.getState().currentSessionId).toBe('new');
+    expect(useSessionStore.getState().messages[0].id).toBe('new-message');
+    expect(localStorage.getItem(ACTIVE_SESSION_KEY)).toBe('new');
+  });
+
+  it('new chat is not overwritten by an in-flight session load', async () => {
+    let finish!: (messages: ChatMessage[]) => void;
+    vi.mocked(db.getSessionMessages).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const pending = useSessionStore.getState().switchSession('old');
+    useSessionStore.getState().startNewChat();
+    finish([makeMsg('old-message')]); await pending;
+    expect(useSessionStore.getState().currentSessionId).toBeNull();
+    expect(useSessionStore.getState().messages).toEqual([]);
+  });
+});

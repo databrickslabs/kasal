@@ -110,12 +110,15 @@ interface ScheduleCreateData {
 }
 
 interface RunHistoryProps {
+  jobIds?: string[];
+  title?: string;
+  embedded?: boolean;
   onClose?: () => void;
   executionHistoryHeight?: number;
   onExecutionCountChange?: (count: number) => void;
 }
 
-const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExecutionCountChange }, ref) => {
+const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExecutionCountChange, jobIds, title = 'Activity', embedded = false }, ref) => {
   const { t } = useTranslation();
   const { showRunResult, selectedRun, isOpen, closeRunResult } = useRunResult();
   const { userRole } = usePermissions();
@@ -140,7 +143,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
     handleDeleteRun,
     getCurrentPageJobs: _getCurrentPageJobs,
     handleSort,
-  } = useRunHistory();
+  } = useRunHistory(jobIds);
 
   // SSE handles all updates automatically - no polling needed
 
@@ -545,28 +548,22 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
     return <ExecutionHistorySkeleton />;
   }
 
-  if (error) {
-    return (
-      <Alert severity="error" sx={{ mb: 2 }}>
-        {error}
-      </Alert>
-    );
-  }
 
   return (
     <>
-      <Card component="section" aria-label="Job history" sx={{
+      <Card component="section" aria-label={title} sx={{
         boxShadow: 'none', height: '100%', borderRadius: 0, backgroundImage: 'none',
         bgcolor: 'transparent', color: dark ? '#E8ECEF' : '#20262D',
       }}>
         <CardContent sx={{ p: 0, height: '100%', '&:last-child': { pb: 0 }, display: 'flex', flexDirection: 'column' }}>
+          {error && <Alert severity="warning">{error}<Button color="inherit" onClick={() => void fetchRuns()}>Retry</Button></Alert>}
           <Box sx={{ px: 1.5, pt: 2, pb: 1, flexShrink: 0 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+            {!embedded && <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
               <History size={20} strokeWidth={1.7} />
-              <Typography component="h2" sx={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.025em', flex: 1 }}>Job history</Typography>
-              {onClose && <IconButton size="small" aria-label="Close job history" onClick={onClose}><X size={18} /></IconButton>}
-            </Box>
-            <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 2 }}>Runs and results</Typography>
+              <Typography component="h2" sx={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.025em', flex: 1 }}>{title}</Typography>
+              {onClose && <IconButton size="small" aria-label={`Close ${title.toLowerCase()}`} onClick={onClose}><X size={18} /></IconButton>}
+            </Box>}
+            <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 2 }}>{jobIds ? 'Executions from this session' : 'All teamspace executions, including scheduled and API runs'}</Typography>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1, minWidth: 0, bgcolor: dark ? '#292F36' : '#F0F2F5', borderRadius: 2.5, px: 1.25, py: 0.5, '&:focus-within': { boxShadow: dark ? '0 0 0 2px #65717E' : '0 0 0 2px #CDD2D8' } }}>
                 <SearchIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
@@ -578,7 +575,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
                 <MenuItem selected={sortField === 'created_at'} onClick={() => { handleSort('created_at'); setAnchorEl(null); }} sx={{ fontSize: 13 }}>Sort by date {sortField === 'created_at' ? (sortOrder === 'desc' ? '↓' : '↑') : ''}</MenuItem>
                 <MenuItem selected={sortField === 'status'} onClick={() => { handleSort('status'); setAnchorEl(null); }} sx={{ fontSize: 13 }}>Sort by status {sortField === 'status' ? (sortOrder === 'desc' ? '↓' : '↑') : ''}</MenuItem>
                 <MenuItem onClick={() => { setAnchorEl(null); setRecipesDialogOpen(true); }} sx={{ fontSize: 13, gap: 1 }}><InsightsIcon fontSize="small" />Reuse insights</MenuItem>
-                {userRole !== 'operator' && <MenuItem disabled={!runs.length} onClick={() => { setAnchorEl(null); setDeleteDialogOpen(true); }} sx={{ fontSize: 13, gap: 1, color: 'error.main' }}><DeleteIcon fontSize="small" />{t('runHistory.deleteAllRuns')}</MenuItem>}
+                {jobIds === undefined && userRole !== 'operator' && <MenuItem disabled={!runs.length} onClick={() => { setAnchorEl(null); setDeleteDialogOpen(true); }} sx={{ fontSize: 13, gap: 1, color: 'error.main' }}><DeleteIcon fontSize="small" />{t('runHistory.deleteAllRuns')}</MenuItem>}
               </Menu>
             </Box>
           </Box>

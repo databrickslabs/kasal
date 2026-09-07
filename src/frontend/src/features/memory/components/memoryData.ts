@@ -209,10 +209,10 @@ export function deriveIndex(records: MemoryRecord[]): DerivedIndex {
 }
 
 export const importanceColor = (v: number): string => {
-  if (v >= 0.75) return '#6366f1'; // indigo — high
-  if (v >= 0.6)  return '#3b82f6'; // blue
-  if (v >= 0.45) return '#06b6d4'; // cyan
-  return '#94a3b8';                // slate — low
+  if (v >= 0.75) return '#658373'; // deep sage — high
+  if (v >= 0.6)  return '#829C8D';
+  if (v >= 0.45) return '#9CB2A5';
+  return '#B7C5BD';                // soft sage — low
 };
 
 export interface MemoryTrace {
