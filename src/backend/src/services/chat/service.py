@@ -442,21 +442,26 @@ class LightAgentService:
                     _log,
                 )
 
-                # This agent's own LLM instance. CrewAI emits tool/LLM events with
-                # ``source = <the LLM>`` (crewai/llm.py, llms/base_llm.py), and native
-                # function-calling / MCP tool events can arrive with ``from_agent``
-                # already nulled by ToolUsageEvent.__init__ (it copies agent_id/role
-                # off from_agent then clears it) — or, for a direct LLM tool call,
-                # with NO agent attribution at all. Matching ``source is _agent_llm``
-                # catches those, and is tenant-safe: build_agent builds a fresh LLM
-                # per agent, so each in-process light run has its own instance.
-                _agent_llm = getattr(agent, "llm", None)
+                # The transport that makes this agent's model requests and emits
+                # Kasal tool/LLM events. The CrewAI harness puts that transport
+                # behind ``KasalBackedLLM.inner``; targeting the wrapper would set
+                # streaming on an object that never makes the HTTP request, and its
+                # identity would not match the event source. The Kasal harness uses
+                # the transport directly, so unwrapping is a no-op there.
+                #
+                # Native function-calling / MCP tool events can arrive with
+                # ``from_agent`` already nulled by ToolUsageEvent.__init__ (it copies
+                # agent_id/role off from_agent then clears it) — or, for a direct LLM
+                # tool call, with NO agent attribution at all. Matching
+                # ``source is _agent_llm`` catches those, and is tenant-safe:
+                # build_agent builds a fresh LLM per agent, so each in-process light
+                # run has its own instance.
+                _agent_llm = self._transport_llm(getattr(agent, "llm", None))
 
                 # Token streaming (chat live-typing): opt the per-run LLM into
                 # streamed completions so the engine emits LLMStreamChunkEvent
-                # per text delta. Chat Completions only — the Responses-API
-                # branch (codex models) does not read the flag, so setting it
-                # there is a harmless no-op. Kill-switch: CHAT_TOKEN_STREAMING=false.
+                # per text delta. Both the Chat Completions and Responses API
+                # adapters honor the flag. Kill-switch: CHAT_TOKEN_STREAMING=false.
                 if _agent_llm is not None and os.getenv(
                     "CHAT_TOKEN_STREAMING", "true"
                 ).strip().lower() not in ("0", "false", "no"):
@@ -1410,6 +1415,16 @@ class LightAgentService:
                 pass  # cancelled before the writer was constructed
             except Exception:  # noqa: BLE001 — teardown must never raise
                 pass
+
+    @staticmethod
+    def _transport_llm(llm: Any) -> Any:
+        """Return the object that makes requests and emits Kasal LLM events.
+
+        CrewAI agents hold a ``KasalBackedLLM`` adapter whose ``inner`` object is
+        the real transport. Kasal agents already hold that transport directly.
+        """
+        inner = getattr(llm, "inner", None)
+        return inner if inner is not None else llm
 
     @staticmethod
     def _event_matches_run(

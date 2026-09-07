@@ -479,6 +479,39 @@ def test_resolve_group_id_handles_missing_group_context():
 # ── _event_matches_run — bus event → this run attribution ─────────────────────
 
 
+def test_transport_llm_unwraps_crewai_adapter_for_streaming_and_events():
+    """Chat must configure and match the transport, not CrewAI's outer adapter."""
+    transport = SimpleNamespace(stream=False)
+    adapter = SimpleNamespace(inner=transport, stream=False)
+
+    resolved = LightAgentService._transport_llm(adapter)
+    resolved.stream = True
+
+    assert resolved is transport
+    assert transport.stream is True
+    assert adapter.stream is False
+    agent = SimpleNamespace(id="agent-1", role="Assistant")
+    event = SimpleNamespace(
+        agent_id=None,
+        agent=None,
+        from_agent=None,
+        agent_role=None,
+    )
+    assert LightAgentService._event_matches_run(
+        event,
+        source=transport,
+        agent=agent,
+        agent_id="agent-1",
+        role_lower="assistant",
+        agent_llm=resolved,
+    )
+
+
+def test_transport_llm_keeps_kasal_transport_unchanged():
+    transport = SimpleNamespace(stream=False)
+    assert LightAgentService._transport_llm(transport) is transport
+
+
 def _evt(**kw):
     """A bus event with the given identity fields (others default to None)."""
     defaults = dict(

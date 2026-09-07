@@ -1,10 +1,9 @@
 """
 Databricks Responses API
 
-The LLM for Databricks-served models that speak the Responses API rather than
-chat completions. gpt-5.3-codex is the only such model today and every quirk
-below was found on it, but the class is named for the API because that is what
-decides which models land here.
+The LLM for Databricks-hosted OpenAI models routed through the native Responses
+API. The phase-preservation behavior was discovered on Codex and is harmless
+for response items that do not carry a phase.
 
 The Responses API base path differs from chat/embeddings:
 - AI Gateway on:  /ai-gateway/openai/v1  (→ /ai-gateway/openai/v1/responses)
@@ -39,7 +38,11 @@ import json
 import logging
 from typing import Any
 
-from agent_server.kasal_runtime.core.events import LLMCallType
+from agent_server.kasal_runtime.core.events import (
+    LLMCallType,
+    LLMStreamChunkEvent,
+    event_bus,
+)
 from agent_server.kasal_runtime.core.llm.transport import OpenAICompletion
 
 # Use the "crew" logger so messages appear in crew.log alongside other
@@ -48,7 +51,7 @@ logger = logging.getLogger("crew")
 
 
 class DatabricksResponsesLLM(OpenAICompletion):
-    """OpenAICompletion subclass tailored for Databricks-hosted gpt-5.3-codex.
+    """OpenAICompletion subclass for Databricks-hosted Responses API models.
 
     Preserves the ``phase`` field on assistant output items across
     multi-turn conversations so the model does not degrade into early
@@ -143,11 +146,17 @@ class DatabricksResponsesLLM(OpenAICompletion):
         # (max_output_tokens=128000), which used to flow into every request —
         # ~30x the largest response ever observed (p99 well under 4k tokens)
         # and an open invitation for a runaway generation to bill 128k output
-        # tokens. Override via KASAL_CODEX_MAX_OUTPUT_TOKENS when a workload
-        # genuinely needs more.
+        # tokens. Override via KASAL_RESPONSES_MAX_OUTPUT_TOKENS when a workload
+        # genuinely needs more. Keep the older Codex setting as a compatibility
+        # fallback for existing deployments.
         import os as _os
 
-        cap = int(_os.environ.get("KASAL_CODEX_MAX_OUTPUT_TOKENS", "16000"))
+        cap = int(
+            _os.environ.get(
+                "KASAL_RESPONSES_MAX_OUTPUT_TOKENS",
+                _os.environ.get("KASAL_CODEX_MAX_OUTPUT_TOKENS", "16000"),
+            )
+        )
         current = params.get("max_output_tokens")
         if current is None:
             explicit = getattr(self, "max_completion_tokens", None) or getattr(
@@ -330,6 +339,78 @@ class DatabricksResponsesLLM(OpenAICompletion):
                 logger.debug("[DatabricksCodex] cache write skipped: %s", exc)
         return response
 
+    def _responses_create(
+        self,
+        params: dict[str, Any],
+        from_task: Any | None = None,
+        from_agent: Any | None = None,
+    ) -> Any:
+        """Create one response, streaming only when this LLM opted in.
+
+        Keep the existing cached request path byte-for-byte for normal calls.
+        A streamed call bypasses the response cache because replaying a completed
+        response cannot reproduce its token deltas.
+        """
+        if not getattr(self, "stream", False):
+            return self._cached_responses_create(params)
+        return self._stream_responses_create(params, from_task, from_agent)
+
+    def _stream_responses_create(
+        self,
+        params: dict[str, Any],
+        from_task: Any | None,
+        from_agent: Any | None,
+    ) -> Any:
+        """Consume one Responses API stream and return its terminal response."""
+        getter = getattr(self, "_get_sync_client", None)
+        client = getter() if callable(getter) else self.client
+        response_stream = client.responses.create(**{**params, "stream": True})
+
+        self._last_response_from_cache = False
+        response = None
+        chunk_index = 0
+        try:
+            for event in response_stream:
+                event_type = getattr(event, "type", "")
+                if event_type == "response.output_text.delta":
+                    delta = getattr(event, "delta", "") or ""
+                    if delta:
+                        event_bus.emit(
+                            self,
+                            LLMStreamChunkEvent(
+                                model=self.model,
+                                chunk=delta,
+                                chunk_index=chunk_index,
+                                from_task=from_task,
+                                from_agent=from_agent,
+                            ),
+                        )
+                        chunk_index += 1
+                elif event_type in {
+                    "response.completed",
+                    "response.incomplete",
+                    "response.failed",
+                }:
+                    response = getattr(event, "response", None)
+
+            # ``responses.create(stream=True)`` returns the SDK's basic Stream,
+            # whose terminal response arrives in ``response.completed``. Accept
+            # the richer ResponseStream accessor as well for SDK compatibility.
+            if response is None:
+                final_response = getattr(response_stream, "get_final_response", None)
+                if callable(final_response):
+                    response = final_response()
+        finally:
+            close = getattr(response_stream, "close", None)
+            if callable(close):
+                close()
+
+        if response is None:
+            raise RuntimeError(
+                "Responses API stream ended without a terminal response event"
+            )
+        return response
+
     def _handle_responses(
         self,
         params: dict[str, Any],
@@ -379,7 +460,9 @@ class DatabricksResponsesLLM(OpenAICompletion):
                 # cached create uses the lazy getter. Served from litellm's cache
                 # when an identical request is seen again (codex bypasses
                 # litellm.completion, so we reuse the cache object directly).
-                response: Response = self._cached_responses_create(params)
+                response: Response = self._responses_create(
+                    params, from_task, from_agent
+                )
 
                 # Capture raw output items WITH phase for next turn
                 self._capture_output_items(response)
@@ -521,7 +604,7 @@ class DatabricksResponsesLLM(OpenAICompletion):
             # tool-less request so the model answers with what it gathered rather
             # than the run ending on a bare tool result.
             params.pop("tools", None)
-            response = self._cached_responses_create(params)
+            response = self._responses_create(params, from_task, from_agent)
             self._capture_output_items(response)
             if not getattr(self, "_last_response_from_cache", False):
                 usage_for_event = self._extract_responses_token_usage(response)

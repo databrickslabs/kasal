@@ -8,8 +8,7 @@ Three routes, all on Kasal's vendored transport:
 
   LOCAL_LLM_BASE_URL set  -> plain OpenAICompletion against that endpoint;
                              the whole app then runs with no Databricks auth.
-  gpt-5-3-codex           -> DatabricksResponsesLLM (the Chat Completions route
-                             404s with "Supervisor API is not enabled").
+  documented Databricks OpenAI endpoints -> DatabricksResponsesLLM.
   everything else         -> DatabricksLLM.
 
 ``ENABLE_OBO`` lives here rather than in ``agent.py`` because the only thing
@@ -29,9 +28,33 @@ LLM_REQUEST_TIMEOUT = int(os.environ.get("LLM_REQUEST_TIMEOUT", "300"))
 ENABLE_OBO = {{ENABLE_OBO}}
 
 
-def _is_codex_model(model_name: str) -> bool:
-    """gpt-5-3-codex on Databricks only works via the OpenAI Responses API."""
-    return bool(model_name) and "gpt-5-3-codex" in str(model_name).lower()
+# Native OpenAI Responses API support documented by Databricks. Match exact
+# endpoint IDs so GPT OSS and user-created aliases stay on their existing route.
+_DATABRICKS_OPENAI_RESPONSES_MODELS = frozenset(
+    {
+        "databricks-gpt-6-astra",
+        "databricks-gpt-5-6-sol",
+        "databricks-gpt-5-6-terra",
+        "databricks-gpt-5-6-luna",
+        "databricks-gpt-5-5-pro",
+        "databricks-gpt-5-5",
+        "databricks-gpt-5-4",
+        "databricks-gpt-5-4-mini",
+        "databricks-gpt-5-4-nano",
+        "databricks-gpt-5-3-codex",
+        "databricks-gpt-5-2",
+        "databricks-gpt-5-1",
+        "databricks-gpt-5",
+        "databricks-gpt-5-mini",
+        "databricks-gpt-5-nano",
+    }
+)
+
+
+def _uses_responses_api(model_name: str) -> bool:
+    """Whether Databricks documents this endpoint for OpenAI Responses."""
+    endpoint = str(model_name or "").lower().rsplit("/", 1)[-1].replace(".", "-")
+    return endpoint in _DATABRICKS_OPENAI_RESPONSES_MODELS
 
 
 def _model_rejects_temperature(model_name: str) -> bool:
@@ -114,9 +137,9 @@ def _make_llm(model_name: str, temperature: float = 0.7):
     does not. ``DatabricksLLM`` adds the endpoint policy Kasal's
     ``DatabricksRetryLLM`` provides: message sanitization and retry/backoff.
 
-    gpt-5-3-codex is the exception — the Chat Completions route returns 404
-    "Supervisor API is not enabled", so it uses the Databricks Responses API
-    via ``DatabricksResponsesLLM``.
+    Databricks-hosted OpenAI endpoints documented for the native Responses API
+    use ``DatabricksResponsesLLM``. GPT-5.6 chat completions reject function
+    tools while reasoning is enabled; Responses supports both together.
 
     Local/self-hosted serving: when LOCAL_LLM_BASE_URL is set (an OpenAI-compatible
     endpoint, e.g. a vLLM server), EVERY model routes there instead of Databricks,
@@ -145,8 +168,8 @@ def _make_llm(model_name: str, temperature: float = 0.7):
             timeout=LLM_REQUEST_TIMEOUT,
         )
     host, token = _databricks_host_token()
-    if _is_codex_model(model_name):
-        # gpt-5-3-codex ONLY works via the Databricks Responses API, and plain
+    if _uses_responses_api(model_name):
+        # These models use the Databricks Responses API, and plain
         # OpenAICompletion(api="responses") does NOT complete the tool-execution
         # loop — it emits a tool call and stops (the raw tool-call is returned
         # instead of the answer). DatabricksResponsesLLM (vendored verbatim from

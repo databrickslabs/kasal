@@ -620,50 +620,29 @@ class TestConfigureCrewaiLlm:
             assert call_kwargs["timeout"] == 297  # non-GPT-5
 
     @pytest.mark.asyncio
-    async def test_databricks_gpt5_model(self):
-        config = _make_model_config(
-            "databricks-gpt-5", "databricks", max_output_tokens=128000
-        )
-        p_session, p_service = _patch_session_and_config(config)
-
-        mock_auth = MagicMock()
-        mock_auth.token = "db-token"
-        mock_auth.workspace_url = "https://example.com"
-        mock_auth.auth_method = "PAT"
-
-        with (
-            p_session,
-            p_service,
-            patch(
-                "src.utils.databricks_auth.get_auth_context",
-                new_callable=AsyncMock,
-                return_value=mock_auth,
-            ),
-            patch(
-                "src.utils.user_context.UserContext.get_user_token",
-                return_value="user-tok",
-            ),
-            patch(
-                "src.services.llm.manager.DatabricksURLUtils.construct_serving_endpoints_url",
-                return_value="https://example.com/serving-endpoints",
-            ),
-            patch("src.services.llm.manager.DatabricksRetryLLM") as MockRetryLLM,
-        ):
-            await LLMManager.configure_kasal_llm("databricks-gpt-5", "group-1", None)
-            call_kwargs = MockRetryLLM.call_args[1]
-            assert call_kwargs["timeout"] == 300  # GPT-5 gets 300s
-            assert "max_completion_tokens" in call_kwargs
-            # Temperature should NOT be set for GPT-5 (even if passed)
-            assert "temperature" not in call_kwargs
-            # The engine ignores litellm's drop knobs — omission is the mechanism.
-            assert "additional_drop_params" not in call_kwargs
-
-    @pytest.mark.asyncio
-    async def test_databricks_codex_model(self):
-        """gpt-5-3-codex should return DatabricksResponsesLLM."""
-        config = _make_model_config(
-            "databricks-gpt-5-3-codex", "databricks", max_output_tokens=128000
-        )
+    @pytest.mark.parametrize(
+        "model_name",
+        [
+            "databricks-gpt-6-astra",
+            "databricks-gpt-5-6-sol",
+            "databricks-gpt-5-6-terra",
+            "databricks-gpt-5-6-luna",
+            "databricks-gpt-5-5-pro",
+            "databricks-gpt-5-5",
+            "databricks-gpt-5-4",
+            "databricks-gpt-5-4-mini",
+            "databricks-gpt-5-4-nano",
+            "databricks-gpt-5-3-codex",
+            "databricks-gpt-5-2",
+            "databricks-gpt-5-1",
+            "databricks-gpt-5",
+            "databricks-gpt-5-mini",
+            "databricks-gpt-5-nano",
+        ],
+    )
+    async def test_databricks_responses_api_models(self, model_name):
+        """Databricks Responses models should use DatabricksResponsesLLM."""
+        config = _make_model_config(model_name, "databricks", max_output_tokens=128000)
         p_session, p_service = _patch_session_and_config(config)
 
         mock_auth = MagicMock()
@@ -696,13 +675,13 @@ class TestConfigureCrewaiLlm:
                 mock_codex_cls,
             ),
         ):
-            result = await LLMManager.configure_kasal_llm(
-                "databricks-gpt-5-3-codex", "group-1", None
-            )
+            await LLMManager.configure_kasal_llm(model_name, "group-1", None)
             mock_codex_cls.assert_called_once()
             call_kwargs = mock_codex_cls.call_args[1]
-            assert call_kwargs["model"] == "databricks-gpt-5-3-codex"
+            assert call_kwargs["model"] == model_name
             assert call_kwargs["timeout"] == 300
+            assert call_kwargs["max_tokens"] == 128000
+            assert "temperature" not in call_kwargs
 
     @pytest.mark.asyncio
     async def test_databricks_no_auth_available_fails_closed(self):

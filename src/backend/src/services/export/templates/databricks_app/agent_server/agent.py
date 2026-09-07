@@ -296,7 +296,7 @@ from agent_server.llm_factory import (  # noqa: E402
     LLM_REQUEST_TIMEOUT,
     _databricks_host_token,
     _gateway_on,
-    _is_codex_model,
+    _uses_responses_api,
     _make_llm,
     _model_rejects_temperature,
 )

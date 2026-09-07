@@ -91,6 +91,37 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 
+# Databricks documents these pay-per-token endpoints as supported by its native
+# OpenAI Responses API. Keep this exact rather than matching every ``gpt-*``
+# name: GPT OSS and any user-created endpoint aliases are not on that contract.
+# https://docs.databricks.com/aws/en/machine-learning/model-serving/query-openai-responses#supported-models
+_DATABRICKS_OPENAI_RESPONSES_MODELS = frozenset(
+    {
+        "databricks-gpt-6-astra",
+        "databricks-gpt-5-6-sol",
+        "databricks-gpt-5-6-terra",
+        "databricks-gpt-5-6-luna",
+        "databricks-gpt-5-5-pro",
+        "databricks-gpt-5-5",
+        "databricks-gpt-5-4",
+        "databricks-gpt-5-4-mini",
+        "databricks-gpt-5-4-nano",
+        "databricks-gpt-5-3-codex",
+        "databricks-gpt-5-2",
+        "databricks-gpt-5-1",
+        "databricks-gpt-5",
+        "databricks-gpt-5-mini",
+        "databricks-gpt-5-nano",
+    }
+)
+
+
+def _uses_databricks_responses_api(model_name: str) -> bool:
+    """Whether a documented Databricks OpenAI endpoint uses Responses here."""
+    endpoint = str(model_name or "").lower().rsplit("/", 1)[-1].replace(".", "-")
+    return endpoint in _DATABRICKS_OPENAI_RESPONSES_MODELS
+
+
 def _refused_params(
     model_config_dict: Dict[str, Any], served_model: Optional[str]
 ) -> List[str]:
@@ -987,15 +1018,15 @@ class LLMManager:
                 f"Creating CrewAI LLM with model: {prefixed_model}, has_api_key: {bool(api_key)}, api_base: {api_base}"
             )
 
-            # Codex and GPT-5.5 only support the Responses API on Databricks.
+            # Route every Databricks-hosted OpenAI endpoint documented for the
+            # native Responses API through the same adapter. In particular,
+            # GPT-5.6 chat completions reject function tools while reasoning is
+            # enabled; Responses supports both together.
             # DatabricksResponsesLLM extends OpenAICompletion with:
             #  - phase preservation (prevents early stopping / skipped tool calls)
             #  - stop-word suppression (GPT-5 reasoning rejects 'stop')
             #  - diagnostic logging for tool-calling debugging
-            responses_api_model = any(
-                fragment in model_name_value.lower()
-                for fragment in ("gpt-5-3-codex", "gpt-5-5", "gpt-5.5")
-            )
+            responses_api_model = _uses_databricks_responses_api(model_name_value)
             if responses_api_model:
                 from src.services.llm.handlers.databricks_responses_llm import (
                     DatabricksResponsesLLM,

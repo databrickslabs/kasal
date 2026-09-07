@@ -336,9 +336,9 @@ async def build_agent_llm(
 
     # In an execution subprocess, opt the LLM into streamed completions so the
     # engine emits LLMStreamChunkEvent per delta — the event pipe forwards
-    # coalesced chunks to the parent's SSE for live typing in the UI. Only
-    # meaningful on the Chat Completions branch (the Responses-API branch
-    # ignores the flag). Kill-switch: CREW_TOKEN_STREAMING=false.
+    # coalesced chunks to the parent's SSE for live typing in the UI. Both the
+    # Chat Completions and Responses API adapters honor this flag. Kill-switch:
+    # CREW_TOKEN_STREAMING=false.
     if (
         os.environ.get("CREW_SUBPROCESS_MODE", "").lower() == "true"
         and os.environ.get("CREW_TOKEN_STREAMING", "true").strip().lower()

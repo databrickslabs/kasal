@@ -7,6 +7,7 @@ diagnostic logging.
 """
 
 import logging
+from types import SimpleNamespace
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
@@ -17,6 +18,14 @@ import pytest
 
 # Mock OpenAICompletion before importing the handler so we control the base
 _mock_openai_completion_module = MagicMock()
+
+
+class _FakeLLMStreamChunkEvent:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+_fake_event_bus = MagicMock()
 
 
 class _FakeOpenAICompletion:
@@ -123,6 +132,8 @@ _MOCK_MODULES = {
     ),
     "src.core.events": MagicMock(
         LLMCallType=MagicMock(LLM_CALL="LLM_CALL", TOOL_CALL="TOOL_CALL"),
+        LLMStreamChunkEvent=_FakeLLMStreamChunkEvent,
+        event_bus=_fake_event_bus,
     ),
 }
 _HANDLER_MODULE_KEY = "src.services.llm.handlers.databricks_responses_llm"
@@ -257,6 +268,78 @@ class TestInit:
     def test_initial_state(self, handler):
         """Handler should start with empty output items."""
         assert handler._last_output_items == []
+
+
+class TestStreamingResponses:
+    def test_streams_answer_deltas_and_returns_completed_response(
+        self, handler, make_response
+    ):
+        completed = make_response(output_text="Hello")
+        stream = MagicMock()
+        stream.__iter__.return_value = iter(
+            [
+                SimpleNamespace(
+                    type="response.reasoning_summary_text.delta",
+                    delta="private reasoning",
+                ),
+                SimpleNamespace(type="response.output_text.delta", delta="Hel"),
+                SimpleNamespace(type="response.output_text.delta", delta="lo"),
+                SimpleNamespace(type="response.completed", response=completed),
+            ]
+        )
+        handler.stream = True
+        handler.client.responses.create.return_value = stream
+        agent, task = object(), object()
+        _fake_event_bus.emit.reset_mock()
+
+        with patch.object(handler, "_cached_responses_create") as cached_create:
+            result = handler._handle_responses(
+                {"model": "test", "input": []},
+                from_task=task,
+                from_agent=agent,
+            )
+
+        assert result == "Hello"
+        handler.client.responses.create.assert_called_once_with(
+            model="test", input=[], stream=True
+        )
+        cached_create.assert_not_called()
+        chunks = [call.args[1] for call in _fake_event_bus.emit.call_args_list]
+        assert [chunk.chunk for chunk in chunks] == ["Hel", "lo"]
+        assert [chunk.chunk_index for chunk in chunks] == [0, 1]
+        assert all(
+            chunk.from_task is task and chunk.from_agent is agent for chunk in chunks
+        )
+        stream.close.assert_called_once_with()
+
+    def test_non_streaming_keeps_cached_request_path(self, handler):
+        completed = object()
+        handler.stream = False
+        with patch.object(
+            handler, "_cached_responses_create", return_value=completed
+        ) as cached_create:
+            result = handler._responses_create(
+                {"model": "test", "input": []}, object(), object()
+            )
+
+        assert result is completed
+        cached_create.assert_called_once_with({"model": "test", "input": []})
+        handler.client.responses.create.assert_not_called()
+
+    def test_missing_terminal_response_fails_instead_of_returning_partial_text(
+        self, handler
+    ):
+        stream = MagicMock(spec=["__iter__", "close"])
+        stream.__iter__.return_value = iter(
+            [SimpleNamespace(type="response.output_text.delta", delta="partial")]
+        )
+        handler.stream = True
+        handler.client.responses.create.return_value = stream
+
+        with pytest.raises(RuntimeError, match="without a terminal response"):
+            handler._responses_create({"model": "test", "input": []})
+
+        stream.close.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------

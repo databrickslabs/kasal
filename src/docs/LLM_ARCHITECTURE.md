@@ -67,7 +67,7 @@ Subclasses of the engine's `LLM` that add what one serving endpoint needs.
 | Class | Responsibility |
 |-------|----------------|
 | `DatabricksRetryLLM` | Retry and backoff (with longer waits for rate limits), OBO token refresh, cross-model fallback, and Databricks message sanitization — empty assistant content, Llama message format, Gemini system-prompt merging and `$ref` resolution. |
-| `DatabricksResponsesLLM` | The Databricks Responses API, served under a different base URL than chat completions (`gpt-5-3-codex` today). Preserves the `phase` field on assistant output items across turns, without which the model degrades into early text-only responses. |
+| `DatabricksResponsesLLM` | The native OpenAI Responses API for Databricks-hosted OpenAI endpoints, served under a different base URL than chat completions. Preserves the `phase` field on assistant output items across turns, without which Codex degrades into early text-only responses. |
 
 Files here are named for the endpoint or protocol they serve, never for a model. Models leave the catalog and a module named after one outlives it — `databricks_gpt_oss_handler.py` sat in the tree long after the models it existed for were pruned.
 

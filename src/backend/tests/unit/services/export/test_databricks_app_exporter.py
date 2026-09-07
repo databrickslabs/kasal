@@ -436,13 +436,57 @@ class TestDatabricksAppExporter:
         assert "litellm" in pyproject
 
     @pytest.mark.asyncio
-    async def test_codex_model_uses_responses_api(self, exporter, crew_data):
-        """gpt-5-3-codex is routed via the Databricks Responses API, not chat."""
+    async def test_responses_models_use_responses_api(self, exporter, crew_data):
+        """Every documented Databricks OpenAI endpoint routes through Responses."""
         agent = _files(await exporter.export(crew_data, {}))[
             "agent_server/llm_factory.py"
         ]
-        assert "_is_codex_model" in agent
-        assert "gpt-5-3-codex" in agent
+        tree = ast.parse(agent)
+        fn = next(
+            n
+            for n in tree.body
+            if isinstance(n, ast.FunctionDef) and n.name == "_uses_responses_api"
+        )
+        constant = next(
+            n
+            for n in tree.body
+            if isinstance(n, ast.Assign)
+            and any(
+                isinstance(target, ast.Name)
+                and target.id == "_DATABRICKS_OPENAI_RESPONSES_MODELS"
+                for target in n.targets
+            )
+        )
+        namespace = {"frozenset": frozenset}
+        exec(
+            compile(
+                ast.Module(body=[constant, fn], type_ignores=[]), "<router>", "exec"
+            ),
+            namespace,
+        )
+        uses_responses = namespace["_uses_responses_api"]
+
+        supported = {
+            "databricks-gpt-6-astra",
+            "databricks-gpt-5-6-sol",
+            "databricks-gpt-5-6-terra",
+            "databricks-gpt-5-6-luna",
+            "databricks-gpt-5-5-pro",
+            "databricks-gpt-5-5",
+            "databricks-gpt-5-4",
+            "databricks-gpt-5-4-mini",
+            "databricks-gpt-5-4-nano",
+            "databricks-gpt-5-3-codex",
+            "databricks-gpt-5-2",
+            "databricks-gpt-5-1",
+            "databricks-gpt-5",
+            "databricks-gpt-5-mini",
+            "databricks-gpt-5-nano",
+        }
+        assert all(uses_responses(model) for model in supported)
+        assert uses_responses("databricks/databricks-gpt-6-astra")
+        assert not uses_responses("databricks-gpt-oss-120b")
+        assert not uses_responses("custom-gpt-5-endpoint")
         assert 'api="responses"' in agent
 
     @pytest.mark.asyncio
@@ -1842,12 +1886,10 @@ class TestA2uiFrontendVendor:
         assert not mismatched, f"a2ui vendor content drift in: {mismatched}"
 
 
-class TestCodexHandlerVendor:
+class TestResponsesHandlerVendor:
     @pytest.mark.asyncio
     async def test_codex_handler_shipped_and_wired(self, exporter, crew_data):
-        """The export must ship the vendored DatabricksResponsesLLM handler and
-        wire _make_llm to use it — plain OpenAICompletion(api='responses') does NOT
-        run the tool loop for gpt-5-3-codex (returns the raw tool-call)."""
+        """The export must ship and wire the vendored Responses handler."""
         files = _files(await exporter.export(crew_data, {}))
         assert (
             "agent_server/databricks_responses_llm.py" in files
@@ -1884,6 +1926,7 @@ class TestCodexHandlerVendor:
         # backend from its own package, the export from the vendored runtime it
         # ships. Normalize those import lines so real drift is still caught.
         def _normalize(text: str) -> str:
+            text = text.replace("agent_server.kasal_runtime.core.", "src.core.")
             for stale, canonical_import in _CODEX_IMPORT_ALIASES:
                 text = text.replace(stale, canonical_import)
             return text
