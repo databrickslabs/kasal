@@ -7,7 +7,6 @@ import {
   IconButton,
   TextField,
   Pagination,
-  CircularProgress,
   Typography,
   Button,
   Menu,
@@ -18,13 +17,12 @@ import { useThemeStore } from '../../../store/theme';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SearchIcon from '@mui/icons-material/Search';
 import InsightsIcon from '@mui/icons-material/Insights';
-import RecipeCurationButton from './RecipeCurationButton';
-import ExecutionMemoryButton from './ExecutionMemoryButton';
+import RunActivityRow from './RunActivityRow';
+import RunActivityOverview, { matchesRunFilter, type RunFilter } from './RunActivityOverview';
 import ExecutionHistorySkeleton from './ExecutionHistorySkeleton';
 import { refreshRecipeIndexIfStale } from './recipeIndexCache';
 import RecipeEffectivenessDialog from './RecipeEffectivenessDialog';
-import AccessTimeIcon from '@mui/icons-material/AccessTime';
-import { Run, calculateDurationFromTraces } from '../../../api/execution/ExecutionHistoryService';
+import { Run } from '../../../api/execution/ExecutionHistoryService';
 import { ScheduleService } from '../../../api/execution/ScheduleService';
 import ShowTraceTimeline from './ShowTraceTimeline';
 import ShowResult from './ShowResult';
@@ -42,54 +40,10 @@ import RunDialogs from './RunDialogs';
 import { AgentYaml, TaskYaml } from '../../../types/workflow/crewPayload';
 import { useTaskExecutionStore } from '../../../store/taskExecutionStore';
 import { usePermissions } from '../../../hooks/usePermissions';
-import ExecutionStatusBadge from './ExecutionStatusBadge';
 
 export interface RunHistoryRef {
   refreshRuns: () => Promise<void>;
 }
-
-// Component to handle async duration loading
-const DurationCell: React.FC<{ run: Run }> = ({ run }) => {
-  const [duration, setDuration] = useState<string>('-');
-  const [loading, setLoading] = useState<boolean>(true);
-
-  useEffect(() => {
-    let mounted = true;
-    
-    const loadDuration = async () => {
-      try {
-        const calculatedDuration = await calculateDurationFromTraces(run);
-        if (mounted) {
-          setDuration(calculatedDuration);
-          setLoading(false);
-        }
-      } catch (error) {
-        if (mounted) {
-          setDuration('-');
-          setLoading(false);
-        }
-      }
-    };
-
-    // Only calculate for completed jobs
-    const status = (run.status || '').toUpperCase();
-    if (status === 'COMPLETED' || status === 'FAILED' || status === 'CANCELLED') {
-      loadDuration();
-    } else {
-      setDuration('-');
-      setLoading(false);
-    }
-
-    return () => {
-      mounted = false;
-    };
-  }, [run]);
-
-  if (loading) return <CircularProgress size={12} color="inherit" />;
-  return <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, color: 'text.secondary', fontSize: 12 }}>
-    {duration !== '-' && <AccessTimeIcon sx={{ fontSize: 13 }} />}{duration}
-  </Box>;
-};
 
 interface ScheduleCreateData {
   name: string;
@@ -167,6 +121,7 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
   const [deleteRunDialogOpen, setDeleteRunDialogOpen] = useState(false);
   const [runToDelete, setRunToDelete] = useState<Run | null>(null);
   const [localPage, setLocalPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState<RunFilter>('all');
 
   // Initialize static refs outside of useEffect  
   const isInitializedRef = useRef<boolean>(false);
@@ -175,10 +130,12 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
   const userActivityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const itemsPerPage = 20;
-  const startIndex = (localPage - 1) * itemsPerPage;
+  const filteredRuns = runs.filter(run => matchesRunFilter(run, statusFilter));
+  const totalLocalPages = Math.ceil(filteredRuns.length / itemsPerPage);
+  const visiblePage = Math.min(localPage, Math.max(1, totalLocalPages));
+  const startIndex = (visiblePage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
-  const displayedRuns = runs.slice(startIndex, endIndex);
-  const totalLocalPages = Math.ceil(runs.length / itemsPerPage);
+  const displayedRuns = filteredRuns.slice(startIndex, endIndex);
   
   // Memoize the result for ShowResult to prevent unnecessary re-renders
   const memoizedResult = React.useMemo(() => {
@@ -553,19 +510,20 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
     <>
       <Card component="section" aria-label={title} sx={{
         boxShadow: 'none', height: '100%', borderRadius: 0, backgroundImage: 'none',
-        bgcolor: 'transparent', color: dark ? '#E8ECEF' : '#20262D',
+        bgcolor: 'transparent', color: 'text.primary',
       }}>
         <CardContent sx={{ p: 0, height: '100%', '&:last-child': { pb: 0 }, display: 'flex', flexDirection: 'column' }}>
           {error && <Alert severity="warning">{error}<Button color="inherit" onClick={() => void fetchRuns()}>Retry</Button></Alert>}
-          <Box sx={{ px: 1.5, pt: 2, pb: 1, flexShrink: 0 }}>
+          <Box sx={{ px: { xs: 2, sm: 3 }, pt: 2, pb: 1.5, flexShrink: 0 }}>
             {!embedded && <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
               <History size={20} strokeWidth={1.7} />
               <Typography component="h2" sx={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.025em', flex: 1 }}>{title}</Typography>
               {onClose && <IconButton size="small" aria-label={`Close ${title.toLowerCase()}`} onClick={onClose}><X size={18} /></IconButton>}
             </Box>}
-            <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 2 }}>{jobIds ? 'Executions from this session' : 'All teamspace executions, including scheduled and API runs'}</Typography>
+            <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 2 }}>{jobIds ? 'Follow the work in this session and return to its results.' : 'Crew and flow executions across your teamspace, including scheduled and API runs.'}</Typography>
+            <RunActivityOverview runs={runs} value={statusFilter} onChange={value => { setStatusFilter(value); setLocalPage(1); }} />
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1, minWidth: 0, bgcolor: dark ? '#292F36' : '#F0F2F5', borderRadius: 2.5, px: 1.25, py: 0.5, '&:focus-within': { boxShadow: dark ? '0 0 0 2px #65717E' : '0 0 0 2px #CDD2D8' } }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1, minWidth: 0, bgcolor: 'action.hover', borderRadius: 2.5, px: 1.25, py: 0.5, '&:focus-within': { boxShadow: dark ? '0 0 0 2px #65717E' : '0 0 0 2px #CDD2D8' } }}>
                 <SearchIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
                 <TextField fullWidth size="small" variant="standard" placeholder="Search runs" value={searchQuery} onChange={handleSearchChange} onKeyDown={e => e.stopPropagation()}
                   inputProps={{ 'aria-label': 'Search runs' }} InputProps={{ disableUnderline: true }} sx={{ '& .MuiInputBase-root': { fontSize: 13 } }} />
@@ -579,45 +537,27 @@ const RunHistory = forwardRef<RunHistoryRef, RunHistoryProps>(({ onClose, onExec
               </Menu>
             </Box>
           </Box>
-          <Box sx={{ px: 1.5, pb: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography sx={{ fontSize: 11, fontWeight: 500, color: 'text.secondary' }}>{runs.length} {runs.length === 1 ? 'run' : 'runs'}</Typography>
+          <Box sx={{ px: { xs: 2, sm: 3 }, pb: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography sx={{ fontSize: 11, fontWeight: 500, color: 'text.secondary' }}>{filteredRuns.length} {filteredRuns.length === 1 ? 'run' : 'runs'}{searchQuery ? ' matching your search' : ' loaded'}</Typography>
             <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>{sortField === 'status' ? 'By status' : sortOrder === 'desc' ? 'Newest first' : 'Oldest first'}</Typography>
           </Box>
-          <Box sx={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', px: 0.75, pb: 1.5 }}>
+          <Box sx={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', px: { xs: 1, sm: 2 }, pb: 2 }}>
             {displayedRuns.length === 0 ? <Box sx={{ px: 2.5, py: 6, textAlign: 'center' }}>
               <Box sx={{ display: 'inline-flex', p: 2, borderRadius: 4, bgcolor: 'action.hover', mb: 2 }}><History size={28} strokeWidth={1.3} /></Box>
-              <Typography sx={{ fontSize: 14, fontWeight: 500, mb: 1 }}>{searchQuery ? t('runHistory.noSearchResults') : 'Your work, all in one place'}</Typography>
-              <Typography sx={{ fontSize: 13, color: 'text.secondary', lineHeight: 1.6 }}>{searchQuery ? 'Try a different run name.' : 'Run your agents or flow to follow progress and return to the results here.'}</Typography>
+              <Typography sx={{ fontSize: 14, fontWeight: 500, mb: 1 }}>{searchQuery || statusFilter !== 'all' ? 'No matching runs' : 'Your work, all in one place'}</Typography>
+              <Typography sx={{ fontSize: 13, color: 'text.secondary', lineHeight: 1.6 }}>{searchQuery || statusFilter !== 'all' ? 'Try another status or search for a different run name.' : 'Run your agents or flow to follow progress and return to the results here.'}</Typography>
             </Box> : <Box component="ul" aria-label="Job runs" sx={{ listStyle: 'none', p: 0, m: 0 }}>
-              {displayedRuns.map(run => {
-                const name = run.run_name?.replace(/^"|"$/g, '') || run.job_id;
-                const expanded = expandedRunId === run.id;
-                const toggleDetails = () => setExpandedRunId(expanded ? null : run.id);
-                const count = (value: unknown) => { try { return Object.keys(typeof value === 'string' ? JSON.parse(value) : value || {}).length; } catch { return 0; } };
-                const agents = count(run.inputs?.agents_yaml || run.agents_yaml);
-                const tasks = count(run.inputs?.tasks_yaml || run.tasks_yaml);
-                return <Box component="li" key={run.id} sx={{ px: 1, py: 1, mb: 0.5, borderRadius: 2, bgcolor: expanded ? (dark ? '#232930' : '#F0F2F5') : 'transparent', '&:hover': { bgcolor: dark ? '#2A3139' : '#EDF0F4' }, transition: 'background-color 150ms' }}>
-                  <Button color="inherit" onClick={toggleDetails} aria-expanded={expanded} aria-label={`Details for ${name}`} title={name}
-                    sx={{ p: 0, mb: 0.5, minWidth: 0, width: '100%', display: 'block', textAlign: 'left', fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</Button>
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 0.25 }}>
-                    <ExecutionStatusBadge appearance="soft" showIcon={false} status={run.status} size="small" executionId={run.job_id} onApprovalComplete={() => { fetchRuns(); }} />
-                    <RunActions compact run={run} onShowDetails={toggleDetails} onViewResult={handleShowResult} onShowTrace={handleShowTrace} onShowLogs={handleShowLogs} onSchedule={handleOpenScheduleDialog} onDelete={openDeleteRunDialog} onStatusChange={() => { fetchRuns(); }} />
-                  </Box>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 0.25, gap: 1 }}>
-                    <Typography title={new Date(run.created_at).toLocaleString()} sx={{ fontSize: 10, color: 'text.secondary' }}>{new Date(run.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} · {new Date(run.created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</Typography>
-                    <DurationCell run={run} />
-                  </Box>
-                  {expanded && <Box role="region" aria-label={`Details for ${name}`} sx={{ pt: 1.5, overflowWrap: 'anywhere' }}>
-                    <Typography sx={{ fontSize: 11, color: 'text.secondary', mb: 1 }}>{run.harness === 'crewai' ? 'CrewAI' : 'Kasal'} · {agents} agents · {tasks} tasks</Typography><Typography sx={{ fontSize: 11, color: 'text.secondary' }}>Submitter</Typography><Typography sx={{ fontSize: 12, mb: 1 }}>{run.group_email || '—'}</Typography>
-                    <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>Execution ID</Typography><Typography sx={{ fontSize: 12, mb: 1 }}>{run.job_id}</Typography>
-                    <ExecutionMemoryButton jobId={run.job_id} /><RecipeCurationButton jobId={run.job_id} />
-                  </Box>}
-                </Box>;
-              })}
+              {displayedRuns.map(run => <RunActivityRow key={run.id} run={run}
+                expanded={expandedRunId === run.id} showSubmitter={jobIds === undefined}
+                onToggle={() => setExpandedRunId(expandedRunId === run.id ? null : run.id)}
+                onStatusChange={() => { void fetchRuns(); }}
+                actions={<RunActions compact run={run} onShowDetails={() => setExpandedRunId(expandedRunId === run.id ? null : run.id)}
+                  onViewResult={handleShowResult} onShowTrace={handleShowTrace} onShowLogs={handleShowLogs}
+                  onSchedule={handleOpenScheduleDialog} onDelete={openDeleteRunDialog} onStatusChange={() => { void fetchRuns(); }} />} />)}
             </Box>}
           </Box>
           {totalLocalPages > 1 && <Box sx={{ display: 'flex', justifyContent: 'center', px: 1, py: 1, flexShrink: 0 }}>
-            <Pagination count={totalLocalPages} page={localPage} onChange={(_, value) => setLocalPage(value)} color="standard" size="small" />
+            <Pagination count={totalLocalPages} page={visiblePage} onChange={(_, value) => setLocalPage(value)} color="standard" size="small" />
           </Box>}
 
           {selectedRunId && (

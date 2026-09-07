@@ -136,6 +136,32 @@ describe('Job history sidebar', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: /Sort by status/ }));
     expect(mockSort).toHaveBeenCalledWith('status');
   });
+  it('filters failures and approval requests without hiding their actions', () => {
+    mockRuns = [
+      { id: '1', job_id: 'job-1', run_name: 'Research', status: 'RUNNING' },
+      { id: '2', job_id: 'job-2', run_name: 'Presentation', status: 'failed', error: 'The model timed out.' },
+      { id: '3', job_id: 'job-3', run_name: 'Review', status: 'WAITING_FOR_APPROVAL' },
+    ].map(run => ({ ...run, created_at: '2026-09-06T10:00:00Z' } as Run));
+    renderHistory();
+    fireEvent.click(screen.getByRole('button', { name: /Needs attention 2/ }));
+    expect(screen.queryByRole('button', { name: 'Details for Research' })).toBeNull();
+    expect(screen.getByText('The model timed out.')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Details for Review' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: /In progress 1/ }));
+    expect(screen.getByRole('button', { name: 'Details for Research' })).toBeVisible();
+    expect(screen.queryByText('The model timed out.')).toBeNull();
+  });
+  it('shows flow scale and recorded model without inventing agent counts', () => {
+    mockRuns = [{ id: 'flow', job_id: 'job-flow', run_name: 'News flow', status: 'COMPLETED',
+      execution_type: 'flow', created_at: '2026-09-06T10:00:00Z', completed_at: '2026-09-06T10:02:00Z',
+      inputs: { nodes: [{ id: 'a' }, { id: 'b' }], model: 'test-model' } } as Run];
+    renderHistory();
+    expect(screen.getByText('Flow · 2 nodes')).toBeVisible();
+    expect(screen.queryByText(/0 agents/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Details for News flow' }));
+    expect(screen.getByRole('region', { name: 'Details for News flow' })).toHaveTextContent('test-model');
+    expect(screen.getByText('2.0m')).toBeVisible();
+  });
   it.each([false, true])('keeps run actions and secondary details reachable on compact=%s', async compact => {
     mockIsMobile = compact;
     mockRuns = [{ id: 'run-1', job_id: 'job-1', run_name: 'Research report', status: 'COMPLETED', created_at: '2026-09-06T10:00:00Z', group_email: 'person@example.com' } as Run];

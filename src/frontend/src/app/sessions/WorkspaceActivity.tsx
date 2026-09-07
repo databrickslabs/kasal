@@ -33,7 +33,7 @@ export function WorkspaceActivity({ expanded }: { expanded: boolean }) {
   return <>
     <SidebarAction label="Activity" icon={<Activity size={18} />} expanded={expanded}
       onClick={() => setOpen(true)} data-tour="workspace-activity" />
-    <Dialog key={`${groupId}:${sessionKey}`} open={open} onClose={() => setOpen(false)} maxWidth="md" fullWidth aria-label="Activity"
+    <Dialog key={`${groupId}:${sessionKey}`} open={open} onClose={() => setOpen(false)} maxWidth="lg" fullWidth aria-label="Activity"
       PaperProps={{ sx: { height: 'min(780px, 85dvh)', borderRadius: 4, bgcolor: 'background.default', backgroundImage: 'none' } }}>
       <Box sx={{ display: 'flex', alignItems: 'center', px: 2.5, pt: 2, pb: 1, gap: 1 }}>
         <Activity size={19} />
@@ -44,7 +44,7 @@ export function WorkspaceActivity({ expanded }: { expanded: boolean }) {
         {sections.filter(item => item.id === 'executions' || canUseBuilders).map(item => <Button key={item.id} size="small" color="inherit" aria-pressed={activeSection === item.id}
           onClick={() => setSection(item.id)} sx={{ borderRadius: 2, px: 1.5, fontSize: 13, bgcolor: activeSection === item.id ? 'action.selected' : 'transparent' }}>{item.label}</Button>)}
       </Box>
-      {activeSection === 'executions' && <Box sx={{ display: 'flex', px: 2, pt: 0.5, gap: 0.5 }}>
+      {activeSection === 'executions' && <Box sx={{ display: 'flex', px: { xs: 2, sm: 3 }, pt: 1.5, gap: 0.5 }}>
         {(['session', 'teamspace'] as const).map(value => <Button key={value} size="small" color="inherit" aria-pressed={scope === value}
           onClick={() => setScope(value)} sx={{ borderRadius: 2, fontSize: 12, color: scope === value ? 'text.primary' : 'text.secondary', bgcolor: scope === value ? 'action.hover' : 'transparent' }}>
           {value === 'session' ? 'This session' : 'All teamspace runs'}
