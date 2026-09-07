@@ -48,3 +48,57 @@ def test_blank_prompt_rejected_before_generation():
         response = client("editor").post("/flows/generate", json={"prompt": "   "})
     assert response.status_code == 422
     service.assert_not_called()
+
+
+def test_builder_start_returns_run_identity_before_model_work():
+    from src.api.builder_generation_router import router as builder_router
+
+    app = FastAPI()
+    app.include_router(builder_router)
+    register_exception_handlers(app)
+    app.dependency_overrides[get_group_context] = lambda: GroupContext(
+        group_ids=["team"], group_email="user@example.com", user_role="editor"
+    )
+    app.dependency_overrides[get_smart_db_session] = lambda: AsyncMock()
+    with (
+        patch("src.api.builder_generation_router.BuilderGenerationService") as service,
+        patch(
+            "src.api.builder_generation_router._generate", new_callable=AsyncMock
+        ) as work,
+    ):
+        service.return_value.open = AsyncMock(return_value="generation-job")
+        with TestClient(app) as http:
+            response = http.post(
+                "/builder-generations/flow", json={"prompt": "Connect the saved crews"}
+            )
+        assert response.status_code == 202
+        assert response.json() == {"generation_id": "generation-job"}
+        work.assert_awaited_once()
+        assert work.await_args.args[-1] == "generation-job"
+
+
+def test_operator_cannot_start_either_builder_generation():
+    from src.api.builder_generation_router import router as builder_router
+
+    app = FastAPI()
+    app.include_router(builder_router)
+    register_exception_handlers(app)
+    app.dependency_overrides[get_group_context] = lambda: GroupContext(
+        group_ids=["team"], group_email="user@example.com", user_role="operator"
+    )
+    app.dependency_overrides[get_smart_db_session] = lambda: AsyncMock()
+    with patch("src.api.builder_generation_router.BuilderGenerationService") as service:
+        with TestClient(app) as http:
+            assert (
+                http.post(
+                    "/builder-generations/flow", json={"prompt": "Connect crews"}
+                ).status_code
+                == 403
+            )
+            assert (
+                http.post(
+                    "/builder-generations/crew", json={"message": "Create a plan"}
+                ).status_code
+                == 403
+            )
+        service.assert_not_called()

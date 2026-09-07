@@ -1,4 +1,5 @@
-import { FlowService } from '../../../api/workflow/FlowService';
+import { useGenerationTrace } from './hooks/useGenerationTrace';
+import { generateFlowTurn } from './utils/generateFlowTurn';
 import { getDefaultModel } from '../../../config/defaultModel';
 import React, { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
 import {
@@ -104,9 +105,10 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   onOpenLogs,
 }) => {
   const flowRequest = useRef<AbortController | null>(null);
+  const crewRequest = useRef<AbortController | null>(null);
   useEffect(() => {
     setIsLoading(false);
-    return () => { flowRequest.current?.abort(); };
+    return () => { flowRequest.current?.abort(); crewRequest.current?.abort(); };
   }, [providedChatSessionId, builderMode]);
   const [inputValue, setInputValue] = useState('');
   const [isImproving, setIsImproving] = useState(false);
@@ -550,6 +552,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
   // ── Progressive crew generation via SSE ──────────────────────────
   const [generationId, setGenerationId] = useState<string | null>(null);
+  const { generationCompletedRef, generationTraceId, setGenerationTraceId, beginGenerationTrace } = useGenerationTrace(setMessages, saveMessageToBackend);
   const indexMapRef = useRef<IndexNodeIdMap | null>(null);
   const progressMsgIdRef = useRef<string | null>(null);
   const pendingGenieConfigsRef = useRef<ToolConfigNeededData[]>([]);
@@ -626,8 +629,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       pendingGenieConfigsRef.current = [...pendingGenieConfigsRef.current, data];
     },
     onComplete: () => {
+      generationCompletedRef.current = true;
       setGenerationId(null);
-      setIsLoading(false);
+      if (!generationTraceId) setIsLoading(false);
       indexMapRef.current = null;
 
       // Append success line BEFORE clearing the ref so it still finds the message
@@ -680,44 +684,15 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         },
       ]);
     },
-  }), [setNodes, setEdges, setLastExecutionJobId, setExecutingJobId, setMessages, selectedModel, layoutManagerRef, appendProgressLine, detachTabFromSavedCrew]);
+  }), [setNodes, setEdges, setLastExecutionJobId, setExecutingJobId, setMessages, selectedModel, layoutManagerRef, appendProgressLine, detachTabFromSavedCrew, generationTraceId, generationCompletedRef]);
 
   useCrewGenerationSSE(generationId, sseHandlers);
 
   const handleSendMessage = async () => {
-    if (!inputValue.trim() || isLoading) return;
+    if (!inputValue.trim() || isLoading || generationTraceId) return;
 
     if (builderMode === 'flow' && !isCollectingVariables && !isExecuteFlowCommand(inputValue) && !/^\/?run(?:\s+(?:the\s+)?flow)?[.!]?$/i.test(inputValue.trim())) {
-      const controller = new AbortController();
-      flowRequest.current = controller;
-      const userMessage: ChatMessage = { id: `flow-user-${Date.now()}`, type: 'user', content: inputValue.trim(), timestamp: new Date() };
-      const progressId = `flow-progress-${Date.now()}`;
-      setMessages(prev => [...prev, userMessage, { id: progressId, type: 'assistant', content: 'Finding saved crews and connecting your flow…', isIntermediate: true, timestamp: new Date() }]);
-      setInputValue(''); setIsLoading(true);
-      useUILayoutStore.getState().setFlowPanelTab('responses');
-      try {
-        await saveMessageToBackend(userMessage);
-        const draft = await FlowService.generateFlow(userMessage.content, selectedModel, nodes.map(node => node.data?.crewId).filter(Boolean), controller.signal);
-        if (controller.signal.aborted) return;
-        if (draft.nodes.length) onFlowGenerated?.(draft);
-        const response: ChatMessage = {
-          id: `flow-response-${Date.now()}`, type: 'assistant', timestamp: new Date(),
-          metadata: draft.nodes.length ? { catalogKind: 'flow', catalogName: draft.name } : undefined,
-          content: `${draft.nodes.length ? `**${draft.name}**\n\n` : ''}${draft.message}${draft.missing_capabilities?.length ? `\n\nNeeded: ${draft.missing_capabilities.join('; ')}` : ''}${draft.nodes.length ? '\n\nYour flow is on the canvas. Review the connections, then use Play to run it.' : ''}`,
-        };
-        setMessages(prev => [...prev.filter(message => message.id !== progressId), response]);
-        await saveMessageToBackend(response);
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          const detail = (error as { response?: { data?: { detail?: unknown } } }).response?.data?.detail;
-          const response: ChatMessage = { id: `flow-error-${Date.now()}`, type: 'assistant', timestamp: new Date(), content: typeof detail === 'string' ? detail : 'Could not build the flow. Please try again.' };
-          setMessages(prev => [...prev.filter(message => message.id !== progressId), response]);
-          await saveMessageToBackend(response);
-        }
-      } finally {
-        setMessages(prev => prev.filter(message => message.id !== progressId));
-        if (flowRequest.current === controller) { flowRequest.current = null; setIsLoading(false); }
-      }
+      await generateFlowTurn({ inputValue, selectedModel, nodes, flowRequest, setMessages, setInputValue, setIsLoading, saveMessageToBackend, onFlowGenerated, beginGenerationTrace, setGenerationTraceId });
       return;
     }
 
@@ -1099,6 +1074,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     // Progressive canvas feedback: add temporary placeholder nodes/edges while generating
     let cleanupPlaceholders: (() => void) | null = null;
     const lower = userMessage.content.trim().toLowerCase();
+    const crewController = new AbortController();
+    crewRequest.current = crewController;
     let cleanupProgress: (() => void) | null = null;
     const wantsCrewOrPlan = /\b(create|build|make|generate|draft|compose|design)\b.*\b(plan|crew|workflow)\b/.test(lower)
       || /\b(plan|crew|workflow)\b.*\b(create|build|make|generate|draft|compose|design)\b/.test(lower)
@@ -1210,7 +1187,22 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         message: userMessage.content,
         model: selectedModel,
         tools: selectedTools,
-      });
+      }, jobId => { beginGenerationTrace(jobId); setGenerationId(jobId); }, crewController.signal);
+      const completedGeneration = (result.generation_result as StreamingGenerationResult | null)?.completed;
+      if (completedGeneration) {
+        if (!generationCompletedRef.current) {
+          // Recover the complete canvas if a proxy dropped progressive SSE.
+          const crew = (result.generation_result as StreamingGenerationResult).generated_crew;
+          if (crew?.agents?.length && crew?.tasks?.length) {
+            detachTabFromSavedCrew();
+            handleCrewGenerated(crew);
+            const recovered: ChatMessage = { id: `generated-${Date.now()}`, type: 'assistant', timestamp: new Date(), content: 'Crew generated successfully. Review the plan on the canvas, then use Play to run it.', metadata: { catalogKind: 'crew', catalogName: crew.tasks[0]?.name || crew.agents[0]?.name } };
+            setMessages(prev => [...prev, recovered]);
+            await saveMessageToBackend(recovered);
+          }
+        }
+        return;
+      }
 
       // Remove any temporary progress message
       if (cleanupProgress) {
@@ -1382,6 +1374,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         }
       }
     } catch (error) {
+      if (crewController.signal.aborted) return;
 
 
       const errorMessage: ChatMessage = {
@@ -1394,6 +1387,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       setMessages(prev => [...prev, errorMessage]);
       saveMessageToBackend(errorMessage);
     } finally {
+      if (crewRequest.current === crewController) crewRequest.current = null;
+      setGenerationTraceId(null);
+      setGenerationId(null);
       // Ensure placeholders/progress are removed on error/cancellation
       if (cleanupPlaceholders) {
         cleanupPlaceholders();
@@ -1806,7 +1802,7 @@ showSessionList && (
             pb: 0, // Remove bottom padding
           }}>
             {builderTranscript(messages, executingJobId).map(item => item.kind === 'activity'
-              ? <BuilderRunActivity key={`activity-${item.jobId}`} jobId={item.jobId} running={item.jobId === executingJobId} onOpenLogs={onOpenLogs} />
+              ? <BuilderRunActivity key={`activity-${item.jobId}`} jobId={item.jobId} running={item.jobId === executingJobId || item.jobId === generationTraceId} onOpenLogs={onOpenLogs} />
               : <ChatMessageItem key={item.message.id} message={item.message} onOpenLogs={onOpenLogs} appearance="assistant-panel" dark={composerDark} />)}
           </List>
         )}

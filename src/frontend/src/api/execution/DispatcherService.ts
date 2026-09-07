@@ -1,3 +1,4 @@
+import { generateWithTrace } from './builderGeneration';
 import { apiClient } from '../../shared/api/client';
 
 export interface DispatcherRequest {
@@ -94,6 +95,8 @@ export interface FlowSaveResult {
 export interface StreamingGenerationResult {
   generation_id: string;
   type: 'streaming';
+  completed?: boolean;
+  generated_crew?: import('../../features/workflow/assistant/types').GeneratedCrew;
 }
 
 export interface DispatchResult {
@@ -106,7 +109,8 @@ class DispatcherService {
   /**
    * Dispatch a natural language request to the appropriate generation service
    */
-  async dispatch(request: DispatcherRequest): Promise<DispatchResult> {
+  async dispatch(request: DispatcherRequest, onStarted?: (jobId: string) => void, signal?: AbortSignal): Promise<DispatchResult> {
+    if (onStarted) return generateWithTrace<DispatchResult>('crew', request, onStarted, signal);
     try {
       const response = await apiClient.post<DispatchResult>(
         '/dispatcher/dispatch',

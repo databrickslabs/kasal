@@ -1383,36 +1383,18 @@ Please analyze this message and provide your intent classification."""
                     )
 
                 elif dispatcher_response.intent == IntentType.GENERATE_CREW:
-                    import uuid as _uuid
-
-                    generation_id = str(_uuid.uuid4())
-                    # The generation's stream and result answer only to this
-                    # workspace (audit F04).
-                    from src.core.sse_manager import sse_manager
-
-                    sse_manager.register_job_owner(
-                        generation_id, getattr(group_context, "primary_group_id", None)
-                    )
-                    from src.services.chat.streaming_request import (
-                        streaming_request_for,
+                    from src.services.generation.crew.dispatch import (
+                        dispatch_progressive,
                     )
 
-                    streaming_request = streaming_request_for(
-                        request, dispatcher_response.suggested_prompt, effective_tools
+                    generation_result = await dispatch_progressive(
+                        self.crew_service,
+                        request,
+                        dispatcher_response.suggested_prompt,
+                        effective_tools,
+                        group_context,
+                        mlflow_enabled,
                     )
-                    # Spawn progressive generation in background
-                    asyncio.create_task(
-                        self.crew_service.create_crew_progressive(
-                            streaming_request,
-                            group_context,
-                            generation_id,
-                            mlflow_enabled=mlflow_enabled,
-                        )
-                    )
-                    generation_result = {
-                        "generation_id": generation_id,
-                        "type": "streaming",
-                    }
 
                 elif dispatcher_response.intent == IntentType.CATALOG_ROUTE:
                     # Decided above, so the result could rewrite the intent.

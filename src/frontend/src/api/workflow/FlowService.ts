@@ -1,3 +1,4 @@
+import { generateWithTrace } from '../execution/builderGeneration';
 import { apiClient } from '../../shared/api/client';
 import { FlowResponse, Flow, FlowSaveData } from '../../types/workflow/flow';
 import { Node } from 'reactflow';
@@ -8,7 +9,8 @@ import { logger } from '../../utils/logger';
 const flowLogger = logger.createChild('FlowService');
 
 export class FlowService {
-  static async generateFlow(prompt: string, model: string, currentCrewIds: string[], signal?: AbortSignal): Promise<import('../../features/workflow/assistant/types').FlowDraft> {
+  static async generateFlow(prompt: string, model: string, currentCrewIds: string[], signal?: AbortSignal, onStarted?: (jobId: string) => void): Promise<import('../../features/workflow/assistant/types').FlowDraft> {
+    if (onStarted) return generateWithTrace<import('../../features/workflow/assistant/types').FlowDraft>('flow', { prompt, model, current_crew_ids: currentCrewIds }, onStarted, signal);
     const response = await apiClient.post('/flows/generate', { prompt, model, current_crew_ids: currentCrewIds }, { timeout: 180000, signal });
     return response.data;
   }

@@ -119,3 +119,257 @@ def test_close_run_completes_or_fails(monkeypatch):
         ("j1", "COMPLETED", "Slide refined", {"a": 1}),
         ("j2", "FAILED", "boom", None),
     ]
+
+
+def test_builder_trace_streams_requests_answers_and_isolates_concurrent_turns(
+    monkeypatch,
+):
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    from src.core.events.bus import event_bus
+    from src.core.events.types import LLMCallCompletedEvent, LLMCallStartedEvent
+    from src.services.otel_tracing import generation_scope
+
+    exporters = {}
+
+    def exporter(job_id, group_context):
+        exporters[job_id] = InMemorySpanExporter()
+        return exporters[job_id]
+
+    monkeypatch.setattr(generation_scope, "KasalDBSpanExporter", exporter)
+
+    async def turn(job_id):
+        async with generation_scope.generation_trace(job_id, _Group(), "Builder"):
+
+            def emit_request():
+                event_bus.emit(
+                    None,
+                    LLMCallStartedEvent(
+                        model="model", messages=[{"role": "user", "content": job_id}]
+                    ),
+                )
+
+            await asyncio.to_thread(emit_request)
+            # The request is visible BEFORE an answer arrives.
+            assert any(
+                s.attributes.get("kasal.event_type") == "llm_call"
+                for s in exporters[job_id].get_finished_spans()
+            )
+            await asyncio.sleep(0)
+            event_bus.emit(
+                None,
+                LLMCallCompletedEvent(
+                    call_type="llm_call", model="model", response=f"answer-{job_id}"
+                ),
+            )
+
+    async def run():
+        await asyncio.gather(turn("one"), turn("two"))
+
+    asyncio.run(run())
+    for job_id, exp in exporters.items():
+        spans = exp.get_finished_spans()
+        calls = [s for s in spans if s.attributes.get("kasal.event_type") == "llm_call"]
+        answers = [
+            s for s in spans if s.attributes.get("kasal.event_type") == "llm_response"
+        ]
+        assert len(calls) == len(answers) == 1
+        assert calls[0].attributes["kasal.extra.prompt"] == job_id
+        assert answers[0].attributes["kasal.output_content"] == f"answer-{job_id}"
+        count = len(spans)
+        event_bus.emit(
+            None, LLMCallCompletedEvent(call_type="llm_call", response="unrelated")
+        )
+        assert len(exp.get_finished_spans()) == count
+
+
+def test_builder_trace_records_failures_and_removes_subscriptions(monkeypatch):
+    import pytest
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+        InMemorySpanExporter,
+    )
+
+    from src.core.events.bus import event_bus
+    from src.services.otel_tracing import generation_scope
+
+    exp = InMemorySpanExporter()
+    monkeypatch.setattr(generation_scope, "KasalDBSpanExporter", lambda *args: exp)
+    count = sum(len(handlers) for handlers in event_bus._handlers.values())
+
+    async def run():
+        async with generation_scope.generation_trace(
+            "failed", _Group(), "Flow Builder"
+        ):
+            raise ValueError("Invalid routing")
+
+    with pytest.raises(ValueError, match="Invalid routing"):
+        asyncio.run(run())
+    assert any(
+        s.attributes.get("kasal.event_type") == "task_failed"
+        for s in exp.get_finished_spans()
+    )
+    assert sum(len(handlers) for handlers in event_bus._handlers.values()) == count
+
+
+def test_generation_scope_persists_live_requests_and_final_answers(
+    tmp_path, monkeypatch
+):
+    """Exercise the real bridge -> exporter -> repository path on an isolated DB."""
+    from contextlib import asynccontextmanager
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from src.core.events.bus import event_bus
+    from src.core.events.types import LLMCallCompletedEvent, LLMCallStartedEvent
+    from src.db import all_models  # noqa: F401 -- resolve ORM relationships
+    from src.db import session as sessions
+    from src.models.execution_trace import ExecutionTrace
+    from src.services.otel_tracing.generation_scope import generation_trace
+
+    engine = create_async_engine(
+        f"sqlite+aiosqlite:///{tmp_path / 'trace.db'}", poolclass=NullPool
+    )
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    @asynccontextmanager
+    async def isolated():
+        async with factory() as session:
+            yield session
+
+    monkeypatch.setattr(sessions, "routed_scoped_session", isolated)
+
+    async def rows():
+        async with engine.connect() as conn:
+            return (
+                await conn.execute(
+                    text(
+                        "SELECT event_type, output, group_id, event_context FROM execution_trace ORDER BY id"
+                    )
+                )
+            ).all()
+
+    async def run():
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "CREATE TABLE executionhistory (id INTEGER PRIMARY KEY, job_id TEXT UNIQUE)"
+                )
+            )
+            await conn.execute(
+                text("INSERT INTO executionhistory (job_id) VALUES ('draft')")
+            )
+            await conn.run_sync(ExecutionTrace.__table__.create)
+        async with generation_trace(
+            "draft", _Group(), "Agent Builder", "Create the crew plan"
+        ):
+            event_bus.emit(
+                None,
+                LLMCallStartedEvent(
+                    model="model",
+                    messages=[{"role": "user", "content": "Create a crew plan"}],
+                ),
+            )
+            for _ in range(100):
+                if any(row[0] == "llm_call" for row in await rows()):
+                    break
+                await asyncio.sleep(0.02)
+            else:
+                raise AssertionError(
+                    "Request was not persisted while generation was live"
+                )
+            event_bus.emit(
+                None,
+                LLMCallCompletedEvent(
+                    call_type="llm_call",
+                    model="model",
+                    response="The complete crew plan",
+                ),
+            )
+        saved = await rows()
+        assert [row[0] for row in saved] == [
+            "task_started",
+            "llm_call",
+            "llm_response",
+            "task_completed",
+        ]
+        assert all(row[2] == "g1" for row in saved)
+        assert all(row[3] == "Create the crew plan" for row in saved)
+        assert "The complete crew plan" in saved[2][1]
+        await engine.dispose()
+
+    asyncio.run(run())
+
+
+def test_traced_dispatch_waits_for_all_progressive_work_and_returns_recovery_payload(
+    monkeypatch,
+):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from src.core.events.bus import event_context
+    from src.services.generation.crew import dispatch
+
+    group = SimpleNamespace(primary_group_id="team", group_ids=["team"])
+    terminal = SimpleNamespace(
+        event="generation_complete",
+        data={"agents": [{"id": "agent"}], "tasks": [{"id": "task"}]},
+    )
+    monkeypatch.setattr(dispatch, "streaming_request_for", lambda *args: "request")
+    monkeypatch.setattr(dispatch.sse_manager, "register_job_owner", lambda *args: None)
+    monkeypatch.setattr(
+        dispatch.sse_manager, "get_terminal_event", lambda *args, **kwargs: terminal
+    )
+    service = SimpleNamespace(create_crew_progressive=AsyncMock())
+
+    async def run():
+        with event_context(generation_job_id="design"):
+            return await dispatch.dispatch_progressive(
+                service, None, "prompt", [], group, False
+            )
+
+    result = asyncio.run(run())
+    service.create_crew_progressive.assert_awaited_once_with(
+        "request", group, "design", mlflow_enabled=False
+    )
+    assert result["completed"] is True
+    assert result["generation_id"] == "design"
+    assert result["generated_crew"] == terminal.data
+
+
+def test_progressive_failure_fails_the_traced_parent_turn(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    import pytest
+
+    from src.core.events.bus import event_context
+    from src.services.generation.crew import dispatch
+
+    group = SimpleNamespace(primary_group_id="team", group_ids=["team"])
+    monkeypatch.setattr(dispatch, "streaming_request_for", lambda *args: "request")
+    monkeypatch.setattr(dispatch.sse_manager, "register_job_owner", lambda *args: None)
+    monkeypatch.setattr(
+        dispatch.sse_manager,
+        "get_terminal_event",
+        lambda *args, **kwargs: SimpleNamespace(
+            event="generation_failed", data={"error": "Planning failed"}
+        ),
+    )
+
+    async def run():
+        with event_context(generation_job_id="design"):
+            await dispatch.dispatch_progressive(
+                SimpleNamespace(create_crew_progressive=AsyncMock()),
+                None,
+                "prompt",
+                [],
+                group,
+                False,
+            )
+
+    with pytest.raises(ValueError, match="Planning failed"):
+        asyncio.run(run())

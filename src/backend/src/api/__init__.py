@@ -9,6 +9,7 @@ from src.api.agentbricks_router import router as agentbricks_router
 from src.api.agents_router import router as agents_router
 from src.api.analytics_export_router import router as analytics_export_router
 from src.api.api_keys_router import router as api_keys_router
+from src.api.builder_generation_router import router as builder_generation_router
 from src.api.chat_assets_router import router as chat_assets_router
 from src.api.chat_history_router import router as chat_history_router
 from src.api.connections_router import router as connections_router
@@ -124,6 +125,7 @@ api_router.include_router(runs_router)
 api_router.include_router(execution_logs_router)
 api_router.include_router(mcp_router)
 api_router.include_router(dispatcher_router)
+api_router.include_router(builder_generation_router)
 api_router.include_router(engine_config_router)
 api_router.include_router(users_router)
 api_router.include_router(group_router)
@@ -174,6 +176,7 @@ __all__ = [
     "flow_execution_router",
     "mcp_router",
     "dispatcher_router",
+    "builder_generation_router",
     "engine_config_router",
     "users_router",
     "runs_router",

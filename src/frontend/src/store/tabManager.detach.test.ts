@@ -34,7 +34,7 @@ describe('tabManager - clearTabCrewInfo', () => {
 });
 
 describe('WorkflowChat - generation detaches tab from saved crew (wiring)', () => {
-  it('calls detachTabFromSavedCrew on both generation paths', async () => {
+  it('detaches generated crews, including recovery when progressive updates are missed', async () => {
     const { readFileSync } = await import('fs');
     const { resolve } = await import('path');
     const src = readFileSync(
@@ -42,8 +42,8 @@ describe('WorkflowChat - generation detaches tab from saved crew (wiring)', () =
       'utf-8'
     );
     expect(src).toContain('clearTabCrewInfo(activeTabId)');
-    // onPlanReady (streaming) + legacy synchronous fallback
+    // onPlanReady (streaming), completed-run recovery, and legacy synchronous fallback
     const calls = src.match(/detachTabFromSavedCrew\(\);/g) || [];
-    expect(calls.length).toBe(2);
+    expect(calls.length).toBe(3);
   });
 });

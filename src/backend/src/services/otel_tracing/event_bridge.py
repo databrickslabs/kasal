@@ -459,11 +459,15 @@ class OTelEventBridge:
         tracer: Tracer,
         job_id: str,
         group_context: Optional[Any] = None,
+        *,
+        scoped: bool = False,
     ):
         self._tracer = tracer
         self._job_id = job_id
         self._group_context = group_context
         self._registered_count = 0
+        self._scoped = scoped
+        self._subscriptions = []
         # Captured from CrewKickoffStartedEvent and stamped on all subsequent
         # spans so that task-level traces carry the crew name for flow monitoring.
         self._current_crew_name: Optional[str] = None
@@ -534,16 +538,7 @@ class OTelEventBridge:
         self._event_span_ctx: "OrderedDict[str, Any]" = OrderedDict()
 
     def register(self, event_bus: Any) -> int:
-        """Register span-creating handlers for all available CrewAI event types.
-
-        Imports event classes directly from crewai.events (no callback layer dependency).
-
-        Args:
-            event_bus: The event_bus instance.
-
-        Returns:
-            Number of event types registered.
-        """
+        """Subscribe to Kasal event classes; each mapped event emits one span."""
         registered = 0
 
         import importlib
@@ -596,12 +591,25 @@ class OTelEventBridge:
         @event_bus.on(event_cls)
         def _handler(source: Any, event: Any) -> None:
             if (
+                bridge._scoped
+                and event.execution_context.get("generation_job_id") != bridge._job_id
+            ):
+                return
+            if (
                 event_name == "MemoryQueryCompletedEvent"
                 and getattr(event, "stage", "search") == "selected"
             ):
                 bridge._emit_span(*_SELECTED_RECALL_SPAN, event)
                 return
             bridge._emit_span(span_name, event_type, event)
+
+        self._subscriptions.append((event_bus, event_cls, _handler))
+
+    def unregister(self) -> None:
+        """Remove only this bridge's handlers; concurrent runs keep theirs."""
+        for bus, event_cls, handler in self._subscriptions:
+            bus.off(event_cls, handler)
+        self._subscriptions.clear()
 
     def _emit_span(self, span_name: str, event_type: str, event: Any) -> None:
         """Create and immediately end an OTel span for a point-in-time event."""
