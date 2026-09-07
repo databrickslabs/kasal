@@ -17,6 +17,8 @@ interface MessageContentProps {
   streaming?: boolean;
   /** The message this content belongs to — a deck's studio writes edits back to it. */
   messageId?: string;
+  /** Hosts without a persisted Chat message can still preview and export decks. */
+  allowDeckEditing?: boolean;
 }
 
 // Render a plain text/markdown run the way this component always has.
@@ -40,7 +42,7 @@ function renderText(content: string, key?: React.Key) {
 
 // Text/diagram rendering for one run of content (everything except skill
 // cards, which are split out first).
-function renderRich(content: string, streaming: boolean, messageId?: string) {
+function renderRich(content: string, streaming: boolean, messageId?: string, allowDeckEditing = true) {
   // A ```html / ```svg block is rendered as a live diagram (sandboxed iframe)
   // instead of a code block, and can be copied as a Databricks %md-sandbox cell.
   // An unclosed fence (streaming) renders a live "building" preview.
@@ -62,6 +64,7 @@ function renderRich(content: string, streaming: boolean, messageId?: string) {
                 streaming={building}
                 truncated={!seg.closed && !streaming}
                 messageId={messageId}
+                editable={allowDeckEditing}
               />
             ) : (
               <HtmlDiagramBlock key={i} code={seg.code} streaming={building} />
@@ -78,7 +81,7 @@ function renderRich(content: string, streaming: boolean, messageId?: string) {
 // Memoized on the content string: the markdown detection (10 regexes) + full
 // ReactMarkdown parse used to re-run for every message on every render tick.
 const MessageContent: React.FC<MessageContentProps> = React.memo(
-  ({ content, streaming = false, messageId }) => {
+  ({ content, streaming = false, messageId, allowDeckEditing = true }) => {
     // A ```skill block (a SKILL.md draft) renders as a card with a Save
     // button. Split on those FIRST; each text run between them still gets the
     // diagram / deck treatment.
@@ -95,13 +98,13 @@ const MessageContent: React.FC<MessageContentProps> = React.memo(
                 truncated={!seg.closed && !streaming}
               />
             ) : seg.text.trim() ? (
-              <React.Fragment key={`text-${i}`}>{renderRich(seg.text, streaming, messageId)}</React.Fragment>
+                <React.Fragment key={`text-${i}`}>{renderRich(seg.text, streaming, messageId, allowDeckEditing)}</React.Fragment>
             ) : null,
           )}
         </>
       );
     }
-    return renderRich(content, streaming, messageId);
+    return renderRich(content, streaming, messageId, allowDeckEditing);
   },
 );
 MessageContent.displayName = 'MessageContent';

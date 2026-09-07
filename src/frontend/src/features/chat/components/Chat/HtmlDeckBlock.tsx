@@ -27,6 +27,7 @@ interface HtmlDeckBlockProps {
   truncated?: boolean;
   /** The chat message the deck lives in — the studio writes its edits back there. */
   messageId?: string;
+  editable?: boolean;
 }
 
 const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
@@ -34,6 +35,7 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
   streaming = false,
   truncated = false,
   messageId,
+  editable = true,
 }) => {
   // While the deck streams in, rebuild the (expensive) iframe at most every
   // 400ms instead of per token — same throttle the diagram card uses. The
@@ -163,7 +165,7 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
         <span className="font-medium">{label}</span>
         <div className="flex items-center gap-1">
           {nav}
-          <button
+          {editable && <button
             type="button"
             className={navBtn}
             title="Edit deck"
@@ -173,7 +175,7 @@ const HtmlDeckBlock: React.FC<HtmlDeckBlockProps> = ({
             onClick={() => setStudio(true)}
           >
             <SquarePen size={14} />
-          </button>
+          </button>}
           <button type="button" className={navBtn} title="Present" onClick={() => setFull(true)}>
             <Maximize2 size={14} />
           </button>

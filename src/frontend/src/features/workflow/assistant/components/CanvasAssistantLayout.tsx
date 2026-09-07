@@ -44,6 +44,11 @@ export function CanvasAssistantLayout({ composer, response, responseKey, session
     useUILayoutStore.getState().setAssistantResponseFocused(true);
     showResponse();
   };
+  const openResult = (content: PreviewContent) => {
+    setPreview({ content, sessionKey });
+    useUILayoutStore.getState().setAssistantResponseFocused(true);
+    showResponse();
+  };
   useEffect(() => {
     const expand = () => setFullscreen(true);
     const collapse = () => setFullscreen(false);
@@ -96,12 +101,13 @@ export function CanvasAssistantLayout({ composer, response, responseKey, session
     </Box>
   </Box>;
 
-  const sidePreview = activePreview && <Box role="region" aria-label={activePreview.content.type === 'memory' ? 'Run memory preview' : 'Run activity preview'} className="kasal-chat-root" data-theme={dark ? 'dark' : 'light'}
-    sx={{ display: 'flex', height: '100%', width: '100%', minWidth: 0, minHeight: 0, overflow: 'hidden', pointerEvents: 'auto', color: 'text.primary', '& > aside': { minWidth: 0 } }}>
+  const sidePreview = activePreview && <Box role="region" aria-label={activePreview.content.type === 'memory' ? 'Run memory preview' : activePreview.content.type === 'ui' ? 'Result preview' : 'Run activity preview'} className="kasal-chat-root" data-theme={dark ? 'dark' : 'light'}
+    sx={{ display: 'flex', height: '100%', width: '100%', minWidth: 0, minHeight: 0, overflow: 'hidden', pointerEvents: 'auto', color: 'text.primary', '& > aside': { minWidth: 0 },
+      '& button': { border: 0, backgroundColor: 'transparent', color: 'inherit', cursor: 'pointer' } }}>
     <PreviewPanel content={activePreview.content} focusStep={activePreview.step} chatCollapsed={false} onClose={() => setPreview(null)} />
   </Box>;
 
-  return <BuilderPreviewContext.Provider value={{ openMemory, openStep }}>
+  return <BuilderPreviewContext.Provider value={{ openMemory, openStep, openResult, previewMessageId: activePreview?.content.sourceMessageId, closePreview: () => setPreview(null) }}>
     {createPortal(composer, composerHost)}
     {visible && !fullscreen && host && createPortal(panel, host)}
     {focused && !fullscreen && composerTarget && createPortal(focusComposer, composerTarget)}

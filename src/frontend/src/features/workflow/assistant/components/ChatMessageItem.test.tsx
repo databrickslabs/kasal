@@ -14,6 +14,11 @@ vi.mock('./MessageRenderer', () => ({
     <div data-testid="message-content">{content}</div>
   ),
 }));
+vi.mock('../../../chat/components/Chat/MessageContent', () => ({
+  default: ({ content, streaming }: { content: string; streaming?: boolean }) => (
+    <div data-testid="rich-message-content" data-streaming={streaming}>{content}</div>
+  ),
+}));
 
 // Mock textProcessing utilities so we can control markdown detection
 const mockStripAnsiEscapes = vi.fn((text: string) => text);
@@ -872,7 +877,7 @@ describe('ChatMessageItem', () => {
   // =========================================================================
 
   describe('raw HTML document wrapping', () => {
-    it('wraps raw HTML documents in a code fence for syntax highlighting', () => {
+    it('sends raw HTML documents to the shared live renderer', () => {
       mockIsHtmlDocument.mockReturnValue(true);
 
       render(
@@ -884,10 +889,17 @@ describe('ChatMessageItem', () => {
         />
       );
 
-      // The content should be wrapped in ```html ... ``` before passing to MessageContent
-      const messageContent = screen.getByTestId('message-content');
+      const messageContent = screen.getByTestId('rich-message-content');
       expect(messageContent.textContent).toContain('```html');
       expect(messageContent.textContent).toContain('<!doctype html>');
+    });
+    it('renders HTML from the final result envelope and streams incomplete fences', () => {
+      const content = '```html\n<div>Report</div>\n```';
+      const view = render(<ChatMessageItem message={makeMessage({ type: 'result', content: JSON.stringify({ value: content }) })} />);
+      expect(screen.getByTestId('rich-message-content')).toHaveTextContent('Report');
+      expect(screen.queryByTestId('message-content')).toBeNull();
+      view.rerender(<ChatMessageItem message={makeMessage({ content: '```html\n<div>Building', isIntermediate: true })} />);
+      expect(screen.getByTestId('rich-message-content')).toHaveAttribute('data-streaming', 'true');
     });
 
     it('does not wrap non-HTML content in a code fence', () => {
@@ -967,6 +979,15 @@ describe('ChatMessageItem', () => {
       expect(
         textBox.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING
       ).toBeTruthy();
+    });
+
+    it('shows the canonical A2UI surface without a second HTML version of it', () => {
+      const envelope = JSON.parse(a2uiEnvelope);
+      envelope.text = '<!-- Start Screen -->\n<div>Quiz questions</div>';
+      render(<ChatMessageItem message={makeMessage({ type: 'result', content: JSON.stringify(envelope) })} />);
+      expect(screen.getByTestId('ui-surface-result')).toBeInTheDocument();
+      expect(screen.queryByTestId('rich-message-content')).toBeNull();
+      expect(screen.queryByTestId('result-text')).toBeNull();
     });
 
     it('renders the envelope answer text plain (no bordered container)', () => {

@@ -131,3 +131,11 @@ def test_html_owned_intent_non_deck_senses_stay_on_a2ui():
         is False
     )
     assert html_owned_intent("Just explain it in words, no diagram needed") is False
+
+
+def test_html_quiz_flashcards_and_mindmap_do_not_bypass_a2ui():
+    body = "```html\n<div>Questions and answers</div>\n```"
+    for prompt in ("create a quiz", "make flashcards", "create a mindmap"):
+        assert wants_rich_surface(body, prompt)
+    assert not wants_rich_surface(body, "create a presentation")
+    assert not wants_rich_surface(body, "draw a diagram")

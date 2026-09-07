@@ -26,6 +26,8 @@ import { GenieSpaceConfigPrompt } from '../GenieSpaceConfigPrompt';
 import BuilderRunActions from './BuilderRunActions';
 import BuilderCatalogAction from './BuilderCatalogAction';
 import { UiSurfaceResult } from './UiSurfaceResult';
+import BuilderRichText from './BuilderRichText';
+import { hasRichHtml } from '../utils/resultContent';
 import { toSurface } from '../../../chat/utils/surfaceAdapter';
 import type { ToolConfigNeededData } from '../../../../hooks/global/useCrewGenerationSSE';
 
@@ -72,6 +74,7 @@ const extractResultText = (raw: string): string | null => {
     if (typeof wrapped === 'string') {
       const nested = extractResultText(wrapped);
       if (nested) return nested;
+      if (!wrapped.trim().startsWith('{')) return wrapped;
     } else if (wrapped && typeof wrapped === 'object' && !Array.isArray(wrapped)) {
       const nested = pickEnvelopeText(wrapped as Record<string, unknown>);
       if (nested) return nested;
@@ -208,6 +211,9 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
 
     // Process content to remove ANSI codes
     const processedContent = stripAnsiEscapes(message.content);
+    const renderAnswer = (content: string) => hasRichHtml(content)
+      ? <BuilderRichText content={content} streaming={Boolean(message.isIntermediate)} />
+      : <MessageContent uniformTypography={panel} content={normalizeResultMarkdown(content)} />;
 
     // Special handling for result messages
     if (message.type === 'result') {
@@ -222,12 +228,12 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
       if (surface) {
         return (
           <Box sx={{ width: '100%', maxWidth: '100%' }}>
-            {answerText && (
+            {answerText && !hasRichHtml(answerText) && (
               <Box data-testid="result-text" sx={{ ...resultTextSx, mb: 1.5 }}>
-                <MessageContent uniformTypography={panel} content={normalizeResultMarkdown(answerText)} />
+                {renderAnswer(answerText)}
               </Box>
             )}
-            <UiSurfaceResult surface={surface} />
+            <UiSurfaceResult surface={surface} messageId={message.id} />
           </Box>
         );
       }
@@ -236,7 +242,7 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
       if (answerText) {
         return (
           <Box data-testid="result-text" sx={resultTextSx}>
-            <MessageContent uniformTypography={panel} content={normalizeResultMarkdown(answerText)} />
+            {renderAnswer(answerText)}
           </Box>
         );
       }
@@ -280,7 +286,7 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
         // chat's default background — no border, no card chrome.
         return (
           <Box data-testid="result-text" sx={resultTextSx}>
-            <MessageContent uniformTypography={panel} content={normalizeResultMarkdown(processedContent)} />
+            {renderAnswer(processedContent)}
           </Box>
         );
       }
@@ -412,7 +418,10 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
       }
     }
     
-    // Wrap raw HTML documents in a code fence so they get syntax highlighting + Preview button
+    if (message.type === 'assistant' && hasRichHtml(processedContent)) {
+      return <BuilderRichText content={processedContent} streaming={Boolean(message.isIntermediate)} />;
+    }
+    // Preserve source rendering for user-authored HTML.
     if (isHtmlDocument(processedContent)) {
       return <MessageContent uniformTypography={panel} content={'```html\n' + processedContent + '\n```'} />;
     }

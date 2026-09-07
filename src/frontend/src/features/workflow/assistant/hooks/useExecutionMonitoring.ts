@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { ChatMessage } from '../types/index';
 import { useTabManagerStore } from '../../../../store/tabManager';
 import { streamExecution } from '../../../chat/api/streaming';
+import { builderResultContent } from '../utils/resultContent';
 
 import { runService } from '../../../../api/execution/ExecutionHistoryService';
 import { useTaskExecutionStore } from '../../../../store/taskExecutionStore';
@@ -145,47 +146,15 @@ export const useExecutionMonitoring = (
           runService.getRunByJobId(jobId).then(run => {
             const existing = useChatMessagesStore.getState().messagesBySession[sessionId] || [];
             if (existing.some(message => message.jobId === jobId && message.type === 'result' && !message.isIntermediate)) return;
-            if (run?.result?.output) {
-              let formattedOutput = run.result.output;
-              try {
-                const parsed = JSON.parse(run.result.output);
-                formattedOutput = JSON.stringify(parsed, null, 2);
-              } catch {
-                formattedOutput = run.result.output;
-              }
-
-              const resultMessage: ChatMessage = {
-                id: `exec-result-${jobId}`,
-                type: 'result',
-                content: formattedOutput,
-                timestamp: new Date(),
-                jobId
-              };
-
-              addMessage(sessionId, resultMessage);
-              saveMessageToBackend(resultMessage);
-            } else if (run?.result) {
-              let resultContent = typeof run.result === 'string'
-                ? run.result
-                : JSON.stringify(run.result, null, 2);
-
-              if (typeof run.result === 'string') {
-                try {
-                  const parsed = JSON.parse(run.result);
-                  resultContent = JSON.stringify(parsed, null, 2);
-                } catch {
-                  // Not JSON, use as-is
-                }
-              }
-
+            const resultContent = builderResultContent(run?.result);
+            if (resultContent) {
               const resultMessage: ChatMessage = {
                 id: `exec-result-${jobId}`,
                 type: 'result',
                 content: resultContent,
                 timestamp: new Date(),
-                jobId
+                jobId,
               };
-
               addMessage(sessionId, resultMessage);
               saveMessageToBackend(resultMessage);
             } else {

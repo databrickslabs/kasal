@@ -15,6 +15,17 @@ const props = {
 const wrapper = ({ children }: { children: React.ReactNode }) => <><div id="builder-assistant-response-host" /><div id="builder-assistant-composer-host" /><div id="builder-assistant-preview-host" />{children}</>;
 beforeEach(() => useUILayoutStore.setState({ assistantResponseFocused: false, assistantPanelSide: 'right', assistantPanelVisible: false, executionHistoryVisible: true }));
 describe('Canvas assistant sidebar', () => {
+  it('opens a rich result beside either side of the conversation and clears it on a session switch', () => {
+    const response = <BuilderPreviewContext.Consumer>{preview => <button onClick={() => preview?.openResult?.({ type: 'ui', data: 'Surface data', sourceMessageId: 'result-one' })}>Open result</button>}</BuilderPreviewContext.Consumer>;
+    const view = render(<CanvasAssistantLayout {...props} response={response} sessionKey="crew:one" />, { wrapper });
+    fireEvent.click(screen.getByRole('button', { name: 'Open result' }));
+    const pane = screen.getByRole('region', { name: 'Result preview' });
+    expect(pane.closest('#builder-assistant-preview-host')).not.toBeNull();
+    act(() => useUILayoutStore.getState().setAssistantPanelSide('left'));
+    expect(screen.getByRole('region', { name: 'Result preview' })).toBe(pane);
+    view.rerender(<CanvasAssistantLayout {...props} response={response} sessionKey="flow:two" />);
+    expect(screen.queryByRole('region', { name: 'Result preview' })).toBeNull();
+  });
   it('opens run memory in the adjacent preview, follows swaps, and retains the fullscreen composer', async () => {
     const response = <BuilderPreviewContext.Consumer>{open => <button onClick={() => open?.openMemory('historical-run')}>Open run memory</button>}</BuilderPreviewContext.Consumer>;
     const { rerender } = render(<CanvasAssistantLayout {...props} response={response} sessionKey="crew:one" />, { wrapper });

@@ -3,6 +3,7 @@ import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { UiSurfaceResult, UiSurfaceView } from './UiSurfaceResult';
 import type { Surface } from '../../../../shared/a2ui/index';
+import { BuilderPreviewContext } from './BuilderPreviewContext';
 
 // ---------------------------------------------------------------------------
 // Mocks — A2uiSurface resolves workspace branding via useA2uiThemes →
@@ -66,22 +67,35 @@ describe('UiSurfaceResult (A2UI result card)', () => {
     render(<UiSurfaceResult surface={makeSurface()} />);
     expect(screen.getByText('Hello Report')).toBeInTheDocument();
     expect(screen.getByText('All good')).toBeInTheDocument();
-    expect(screen.getByText('Generated UI')).toBeInTheDocument();
+    expect(screen.queryByText('Generated UI')).toBeNull();
   });
 
   it('opens a full-size dialog from the expand control', () => {
     render(<UiSurfaceResult surface={makeSurface()} />);
-    fireEvent.click(screen.getByLabelText('Open full view'));
+    fireEvent.click(screen.getByLabelText('Open in preview pane'));
     // Surface now renders twice: inline preview + dialog.
     expect(screen.getAllByText('Hello Report')).toHaveLength(2);
 
     fireEvent.click(screen.getByLabelText('Close full view'));
   });
 
-  it('opens the dialog when the preview itself is clicked', () => {
+  it('keeps the inline surface interactive instead of opening a dialog on every click', () => {
     render(<UiSurfaceResult surface={makeSurface()} />);
     fireEvent.click(screen.getByText('Hello Report'));
-    expect(screen.getAllByText('Hello Report')).toHaveLength(2);
+    expect(screen.getAllByText('Hello Report')).toHaveLength(1);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+  it('opens in the builder preview and avoids rendering a duplicate inline surface', () => {
+    const openResult = vi.fn(); const closePreview = vi.fn();
+    const value = { openMemory: vi.fn(), openStep: vi.fn(), openResult, closePreview };
+    const view = render(<BuilderPreviewContext.Provider value={value}><UiSurfaceResult surface={makeSurface()} messageId="result-one" /></BuilderPreviewContext.Provider>);
+    fireEvent.click(screen.getByLabelText('Open in preview pane'));
+    expect(openResult).toHaveBeenCalledWith(expect.objectContaining({ type: 'ui', sourceMessageId: 'result-one' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    view.rerender(<BuilderPreviewContext.Provider value={{ ...value, previewMessageId: 'result-one' }}><UiSurfaceResult surface={makeSurface()} messageId="result-one" /></BuilderPreviewContext.Provider>);
+    expect(screen.queryByText('Hello Report')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Show here' }));
+    expect(closePreview).toHaveBeenCalledOnce();
   });
 
   // The shared renderer's Tailwind utilities are compiled under the
@@ -107,7 +121,7 @@ describe('UiSurfaceResult (retired presentation payload)', () => {
 
   it('still offers the explicit expand control for decks', () => {
     render(<UiSurfaceResult surface={makeDeckSurface()} />);
-    fireEvent.click(screen.getByLabelText('Open full view'));
+    fireEvent.click(screen.getByLabelText('Open in preview pane'));
     expect(screen.getAllByText('Unsupported component: SlideDeck')).toHaveLength(2);
   });
 });

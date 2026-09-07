@@ -19,6 +19,7 @@ from src.core.logger import LoggerManager
 from src.services.execution.harnesses import active_harness
 from src.services.execution.kernel.genie_formatting import apply_genie_mcp_space_id
 from src.services.execution.kernel.guardrail_stack import build_guardrail_stack
+from src.services.execution.kernel.task_presentation import apply_task_presentation
 from src.services.execution.kernel.output_contract import (
     apply_output_schema,
     build_detection_gate,
@@ -80,6 +81,7 @@ async def build_task_args(
     # If a managed-Genie MCP server was selected AND the generator also assigned
     # the custom GenieTool, hand the MCP server's space id to that GenieTool so
     # it doesn't error "Genie space ID is not configured". Common to both paths.
+    await apply_task_presentation(task_args, task_config, config)
     applied_space = apply_genie_mcp_space_id(task_args["tools"], agent)
     if applied_space:
         logger.info(

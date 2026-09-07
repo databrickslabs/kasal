@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -837,7 +836,11 @@ def wants_rich_surface(text: str, query: str) -> bool:
     # Yield to an agent-authored diagram: a self-contained ```html/```svg block is
     # rendered directly in chat as a %md-sandbox diagram, so composing an A2UI
     # surface over it would double-render (or replace) the agent's own drawing.
-    if re.search(r"```(?:html|svg)\s*\n", body, re.IGNORECASE):
+    # An app-owned deliverable must still compose if the model ignored its
+    # structured-output instructions and wrote HTML (e.g. an HTML quiz).
+    # Real diagrams/decks and unsolicited HTML retain their own renderer.
+    app_owned = infer_deliverable(query or "") and not html_owned_intent(query or "")
+    if re.search(r"```(?:html|svg)\s*\n", body, re.IGNORECASE) and not app_owned:
         return False
     return any(k in intent for k in RICH_INTENT)
 

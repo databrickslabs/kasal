@@ -35,6 +35,7 @@ from src.services.a2ui.stream import (
     delete_surface_msg,
     surface_to_messages,
 )
+from src.services.a2ui.stream import DATA_COMPONENTS as _DATA_COMPONENTS
 from src.services.a2ui.structured_text import render_research_envelope
 
 logger = logging.getLogger(__name__)
@@ -272,9 +273,6 @@ _DATA_SURFACE_KINDS = frozenset({"dashboard", "document"})
 # carries data), and two copies of it is exactly how Kanban ended up in the
 # renderer and the catalog but not here, which silently drops every Kanban
 # dashboard back to markdown.
-from src.services.a2ui.stream import DATA_COMPONENTS as _DATA_COMPONENTS
-
-
 def _has_data_component(surface: Dict[str, Any]) -> bool:
     """True if the surface contains at least one deliverable-bearing component.
 
@@ -935,11 +933,18 @@ async def wrap_result_with_surface(
     # either way. See services/a2ui/structured_text.
     rendered = render_research_envelope(text)
     text = rendered or text
+    from src.services.a2ui.compose import html_owned_intent
+
+    query = crew_intent_text(config, inputs)
+    # Same ownership gate as Chat: decks and diagrams render directly as HTML,
+    # even if the model failed to include a language-labelled fence.
+    if html_owned_intent(query):
+        return result
     try:
         surface = await compose_surface(
             text,
             purpose=_crew_purpose(config),
-            query=crew_intent_text(config, inputs),
+            query=query,
             model=(config or {}).get("model"),
             group_id=group_id,
             execution_id=execution_id,
