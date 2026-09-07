@@ -3,6 +3,8 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { KnowledgeFileUpload } from './KnowledgeFileUpload';
 import { Agent } from '../../../types/workflow/agent';
+import { ThemeProvider, createTheme, getContrastRatio } from '@mui/material/styles';
+import { getThemeOptions } from '../../../theme/theme';
 
 // Mock the knowledge config store - must use vi.hoisted for variables used in vi.mock
 const mockKnowledgeConfigStore = vi.hoisted(() => ({
@@ -29,6 +31,7 @@ vi.mock('../../../shared/api/client', () => ({
   apiClient: {
     post: vi.fn(),
     get: vi.fn(),
+    delete: vi.fn().mockResolvedValue({}),
   },
 }));
 
@@ -243,6 +246,17 @@ describe('KnowledgeFileUpload — attachments survive a refresh', () => {
 
     // MUI renders the Chip's onDelete as a cancel icon.
     expect(container.querySelector('.MuiChip-deleteIcon')).toBeTruthy();
+  });
+  it.each(['professional', 'dark'])('keeps the detach notification readable in the %s theme', async name => {
+    localStorage.setItem(KEY, JSON.stringify([{ id: 'a', filename: 'paper.pdf', path: 'uploads/g/s/paper.pdf', size: 10, status: 'success' }]));
+    const theme = createTheme(getThemeOptions(name));
+    const { container } = render(<ThemeProvider theme={theme}><KnowledgeFileUpload {...props} /></ThemeProvider>);
+    fireEvent.click(container.querySelector('.MuiChip-deleteIcon')!);
+    const notice = await screen.findByRole('alert');
+    expect(notice).toHaveTextContent('paper.pdf detached');
+    const style = getComputedStyle(notice);
+    expect(style.backgroundImage).toBe('none');
+    expect(getContrastRatio(style.color, style.backgroundColor)).toBeGreaterThanOrEqual(4.5);
   });
 
   it('does not restore a failed upload', () => {

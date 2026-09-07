@@ -162,6 +162,21 @@ export const getThemeOptions = (themeName: string): ThemeOptions => ({
     MuiDialogTitle: { styleOverrides: { root: { ...kasalStageSurface(themeName === 'deepOcean' || themeName === 'dark') } } },
     MuiDialogContent: { styleOverrides: { root: { ...kasalStageSurface(themeName === 'deepOcean' || themeName === 'dark') } } },
     MuiDialogActions: { styleOverrides: { root: { ...kasalStageSurface(themeName === 'deepOcean' || themeName === 'dark') } } },
+    MuiSnackbarContent: {
+      styleOverrides: {
+        root: ({ theme }) => ({
+          // SnackbarContent inherits Paper. Override its stage background and
+          // pair the foreground explicitly, instead of keeping white toast text.
+          '&&': {
+            backgroundColor: theme.palette.background.paper,
+            backgroundImage: 'none',
+            color: theme.palette.text.primary,
+            fontSize: 13,
+            lineHeight: 1.5,
+          },
+        }),
+      },
+    },
     MuiCard: {
       styleOverrides: {
         root: {
@@ -184,4 +199,4 @@ export const getThemeOptions = (themeName: string): ThemeOptions => ({
 // Default theme
 const theme = createTheme(getThemeOptions('professional'));
 
-export default theme; 
+export default theme;
