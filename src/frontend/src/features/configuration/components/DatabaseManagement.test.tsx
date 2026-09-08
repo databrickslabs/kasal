@@ -168,14 +168,14 @@ describe('DatabaseManagement', () => {
     renderWithProviders(<DatabaseManagement />);
 
     await waitFor(() => {
-      expect(screen.getByText('General')).toBeInTheDocument();
-      expect(screen.getByText('Databricks Import / Export')).toBeInTheDocument();
-      expect(screen.getByText('Lakebase')).toBeInTheDocument();
+      expect(screen.getByText('Data cleanup')).toBeInTheDocument();
+      expect(screen.getByText('Backups & restore')).toBeInTheDocument();
+      expect(screen.getByText('Connection')).toBeInTheDocument();
     });
   });
 
   describe('Database Information Display', () => {
-    it('renders sqlite database info with info alert', async () => {
+    it('renders a compact SQLite overview', async () => {
       setMockDatabaseInfo({
         success: true,
         database_type: 'sqlite',
@@ -193,12 +193,9 @@ describe('DatabaseManagement', () => {
         expect(screen.getByText(/Current Database Backend: SQLITE/)).toBeInTheDocument();
       });
 
-      // SQLite should render an 'info' severity alert
-      const alert = screen.getByRole('alert');
-      expect(alert).toHaveClass('MuiAlert-standardInfo');
-
-      // Should show type
-      expect(screen.getByText('sqlite')).toBeInTheDocument();
+      // Routine status is a quiet summary; alerts are reserved for failures.
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(screen.getByText('10 tables')).toBeInTheDocument();
 
       // Should show path
       expect(screen.getByText('/data/kasal.db')).toBeInTheDocument();
@@ -208,7 +205,7 @@ describe('DatabaseManagement', () => {
       expect(screen.getByText('tasks (12 rows)')).toBeInTheDocument();
     });
 
-    it('renders lakebase database info with success alert when no connection error', async () => {
+    it('renders a compact Lakebase overview when connected', async () => {
       setMockDatabaseInfo({
         success: true,
         database_type: 'lakebase',
@@ -225,9 +222,7 @@ describe('DatabaseManagement', () => {
         expect(screen.getByText(/Current Database Backend: LAKEBASE/)).toBeInTheDocument();
       });
 
-      // Lakebase without connection_error should show 'success' severity
-      const alert = screen.getByRole('alert');
-      expect(alert).toHaveClass('MuiAlert-standardSuccess');
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 
       // Should show instance name
       expect(screen.getByText(/Connected to Lakebase instance: my-lakebase-instance/)).toBeInTheDocument();
@@ -402,12 +397,12 @@ describe('DatabaseManagement', () => {
       });
 
       // Table count header
-      expect(screen.getByText('Tables (3)')).toBeInTheDocument();
+      expect(screen.getByText('3 tables')).toBeInTheDocument();
     });
   });
 
   describe('Alert severity logic', () => {
-    it('uses info severity for non-lakebase database types', async () => {
+    it('keeps routine SQLite status out of alerts', async () => {
       setMockDatabaseInfo({
         success: true,
         database_type: 'sqlite',
@@ -416,12 +411,12 @@ describe('DatabaseManagement', () => {
       renderWithProviders(<DatabaseManagement />);
 
       await waitFor(() => {
-        const alert = screen.getByRole('alert');
-        expect(alert).toHaveClass('MuiAlert-standardInfo');
+        expect(screen.getByText(/Current Database Backend: SQLITE/)).toBeInTheDocument();
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
       });
     });
 
-    it('uses info severity for postgresql database type', async () => {
+    it('keeps routine PostgreSQL status out of alerts', async () => {
       setMockDatabaseInfo({
         success: true,
         database_type: 'postgresql',
@@ -432,12 +427,12 @@ describe('DatabaseManagement', () => {
       renderWithProviders(<DatabaseManagement />);
 
       await waitFor(() => {
-        const alert = screen.getByRole('alert');
-        expect(alert).toHaveClass('MuiAlert-standardInfo');
+        expect(screen.getByText(/Current Database Backend: POSTGRESQL/)).toBeInTheDocument();
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
       });
     });
 
-    it('uses success severity for lakebase without connection error', async () => {
+    it('keeps routine Lakebase status out of alerts', async () => {
       setMockDatabaseInfo({
         success: true,
         database_type: 'lakebase',
@@ -447,8 +442,8 @@ describe('DatabaseManagement', () => {
       renderWithProviders(<DatabaseManagement />);
 
       await waitFor(() => {
-        const alert = screen.getByRole('alert');
-        expect(alert).toHaveClass('MuiAlert-standardSuccess');
+        expect(screen.getByText(/Current Database Backend: LAKEBASE/)).toBeInTheDocument();
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
       });
     });
 
@@ -474,9 +469,9 @@ describe('DatabaseManagement', () => {
   describe('Lakebase tab - connect form visibility', () => {
     const navigateToLakebaseTab = async () => {
       await waitFor(() => {
-        expect(screen.getByText('Lakebase')).toBeInTheDocument();
+        expect(screen.getByText('Connection')).toBeInTheDocument();
       });
-      fireEvent.click(screen.getByText('Lakebase'));
+      expect(screen.getByRole('button', { name: /Connection choose/ })).toHaveAttribute('aria-expanded', 'true');
     };
 
     it('shows connect form when lakebase is selected but not connected', async () => {
@@ -487,18 +482,18 @@ describe('DatabaseManagement', () => {
       fireEvent.click(screen.getByText('Databricks Lakebase'));
 
       await waitFor(() => {
-        expect(screen.getByText('Connect to Existing Lakebase Instance')).toBeInTheDocument();
+        expect(screen.getByText('Connect a Lakebase instance')).toBeInTheDocument();
       });
     });
 
-    it('shows prerequisites alert when not connected', async () => {
+    it('offers setup prerequisites on demand when not connected', async () => {
       renderWithProviders(<DatabaseManagement />);
       await navigateToLakebaseTab();
 
       fireEvent.click(screen.getByText('Databricks Lakebase'));
 
       await waitFor(() => {
-        expect(screen.getByText('Databricks App Setup')).toBeInTheDocument();
+        expect(screen.getByText('Before you connect')).toBeInTheDocument();
       });
     });
 
@@ -519,11 +514,11 @@ describe('DatabaseManagement', () => {
       fireEvent.click(screen.getByText('Databricks Lakebase'));
 
       await waitFor(() => {
-        expect(screen.queryByText('Connect to Existing Lakebase Instance')).not.toBeInTheDocument();
+        expect(screen.queryByText('Connect a Lakebase instance')).not.toBeInTheDocument();
       });
     });
 
-    it('hides prerequisites alert when instance is enabled and READY', async () => {
+    it('hides setup prerequisites when instance is enabled and READY', async () => {
       mockDatabaseStoreState.lakebaseConfig = {
         enabled: true,
         instance_name: 'kasal-lakebase1',
@@ -540,7 +535,7 @@ describe('DatabaseManagement', () => {
       fireEvent.click(screen.getByText('Databricks Lakebase'));
 
       await waitFor(() => {
-        expect(screen.queryByText('Databricks App Setup')).not.toBeInTheDocument();
+        expect(screen.queryByText('Before you connect')).not.toBeInTheDocument();
       });
     });
 
@@ -561,7 +556,7 @@ describe('DatabaseManagement', () => {
       fireEvent.click(screen.getByText('Databricks Lakebase'));
 
       await waitFor(() => {
-        expect(screen.getByText('Connect to Existing Lakebase Instance')).toBeInTheDocument();
+        expect(screen.getByText('Connect a Lakebase instance')).toBeInTheDocument();
       });
     });
 
@@ -582,7 +577,7 @@ describe('DatabaseManagement', () => {
       fireEvent.click(screen.getByText('Databricks Lakebase'));
 
       await waitFor(() => {
-        expect(screen.getByText('Current Status')).toBeInTheDocument();
+        expect(screen.getByText('READY')).toBeInTheDocument();
         expect(screen.getByText('View in Databricks')).toBeInTheDocument();
         expect(screen.getByText('Refresh Status')).toBeInTheDocument();
       });
@@ -595,7 +590,7 @@ describe('DatabaseManagement', () => {
       fireEvent.click(screen.getByText('Databricks Lakebase'));
 
       await waitFor(() => {
-        expect(screen.getByText('Connect to Existing Lakebase Instance')).toBeInTheDocument();
+        expect(screen.getByText('Connect a Lakebase instance')).toBeInTheDocument();
       });
 
       expect(screen.queryByText('Create New Instance')).not.toBeInTheDocument();
@@ -636,9 +631,7 @@ describe('DatabaseManagement', () => {
         expect(screen.getByText(/Current Database Backend: LAKEBASE/)).toBeInTheDocument();
       });
 
-      // Verify no warning-colored text is present in the alert
-      const alert = screen.getByRole('alert');
-      expect(alert).toHaveClass('MuiAlert-standardSuccess');
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     });
 
     it('renders connection error alongside instance name', async () => {
