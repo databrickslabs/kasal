@@ -11,6 +11,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 const mockApproveGate = vi.fn();
 const mockRejectGate = vi.fn();
 vi.mock('../../../../api/execution/HITLService', () => ({
+  HITLRejectionAction: { RETRY: 'retry', REJECT: 'reject' },
   HITLService: {
     approveGate: (...args: unknown[]) => mockApproveGate(...args),
     rejectGate: (...args: unknown[]) => mockRejectGate(...args),
@@ -47,6 +48,13 @@ beforeEach(() => {
 });
 
 describe('ApprovalCard', () => {
+  it('lets builder conversations own decision state without writing to Chat history', async () => {
+    const onDecision = vi.fn();
+    render(<ApprovalCard data={TOOL_CALL} messageId="builder-approval" onDecision={onDecision} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    await waitFor(() => expect(onDecision).toHaveBeenCalledWith(expect.objectContaining({ approval_id: 7, decided: 'approved' })));
+    expect(updateMessage).not.toHaveBeenCalled();
+  });
   it('a FLOW gate does not claim an agent wants to run a tool', () => {
     // The card is shared with tool approval on purpose — same decision, same
     // endpoint — but a flow paused between two steps is not an agent reaching
@@ -186,4 +194,22 @@ describe('ApprovalCard', () => {
     // Input stays open so the user can retry or cancel.
     expect(screen.getByPlaceholderText('Reason (optional)')).toBeInTheDocument();
   });
+});
+
+
+it('requires an approval comment before submitting', async () => {
+  render(<ApprovalCard data={{ approval_id: 1, kind: 'flow_gate', require_comment: true }} messageId="gate" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+  expect(mockApproveGate).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('Approval comment'), { target: { value: 'Reviewed the output' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+  await waitFor(() => expect(mockApproveGate).toHaveBeenCalledWith(1, { comment: 'Reviewed the output' }));
+});
+
+it('requests a flow retry with feedback rather than failing the flow', async () => {
+  render(<ApprovalCard data={{ approval_id: 1, kind: 'flow_gate' }} messageId="gate" />);
+  fireEvent.click(screen.getByRole('button', { name: /Request changes & retry/ }));
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Use current sources' } });
+  fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+  await waitFor(() => expect(mockRejectGate).toHaveBeenCalledWith(1, { action: 'retry', reason: 'Use current sources' }));
 });

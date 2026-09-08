@@ -263,7 +263,7 @@ const CheckpointDialog: React.FC<CheckpointDialogProps> = ({
         {error && !checkpoint && <Button color="inherit" onClick={() => void load()}>Try again</Button>}
         {renderBody()}
       </Box>;
-  const actions = <Box sx={{ px: 3, pb: 2, pt: 1, display: 'flex', gap: 1, alignItems: 'center', flexShrink: 0 }}>
+  const actions = <Box sx={{ px: 3, pr: embedded ? 7 : 3, pb: embedded ? { xs: 8, sm: 2 } : 2, pt: 1, flexWrap: 'wrap', display: 'flex', gap: 1, alignItems: 'center', flexShrink: 0 }}>
         {checkpoint && !embedded && (
           <Button onClick={handleExpire} color="error" size="small">
             Discard checkpoint

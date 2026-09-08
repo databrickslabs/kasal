@@ -163,3 +163,114 @@ def patch_build(module: str, what: str, **mock_kwargs: Any) -> Iterator[MagicMoc
     setattr(harness, attr, builder)
     with patch(f"{module}.active_harness", return_value=harness):
         yield builder
+
+
+@contextmanager
+def patch_flow_modules(values):
+    """Patch flow construction and its extracted route execution boundary."""
+    import importlib
+
+    with ExitStack() as stack:
+        for name in ("flow_builder", "route_listener"):
+            module = importlib.import_module(
+                f"src.services.flow_builder.modules.{name}"
+            )
+            selected = {
+                key: value for key, value in values.items() if hasattr(module, key)
+            }
+            if selected:
+                stack.enter_context(patch.multiple(module, **selected))
+        yield
+
+
+# ---------------------------------------------------------------------------
+# Fake CrewAIFlow base (real class so type() works)
+# ---------------------------------------------------------------------------
+class _FakeFlow:
+    """Minimal stand-in for crewai.flow.flow.Flow."""
+
+    def __init__(self, **kwargs):
+        self.state = {}
+
+
+# Decorator stubs imitating @start, @listen, @router, and_, or_
+def _fake_start(*a, **kw):
+    """@start() → identity decorator."""
+
+    def decorator(fn):
+        fn._is_start_method = True
+        return fn
+
+    return decorator
+
+
+def _fake_listen(target):
+    """@listen(target) → identity decorator."""
+
+    def decorator(fn):
+        fn._listen_to = target
+        fn._meth = fn  # needed by name-patching code
+        return fn
+
+    return decorator
+
+
+def _fake_router(target):
+    """@router(target) → identity decorator."""
+
+    def decorator(fn):
+        fn._router_for = target
+        fn._meth = fn
+        return fn
+
+    return decorator
+
+
+def _fake_and(*names):
+    return ("AND", names)
+
+
+def _fake_or(*names):
+    return ("OR", names)
+
+
+# ---------------------------------------------------------------------------
+# Common patch context
+# ---------------------------------------------------------------------------
+def _patches():
+    """Return a dict of attribute names → values for patch.multiple(MODULE, ...)."""
+    return {
+        "CrewAIFlow": _FakeFlow,
+        "listen": _fake_listen,
+        "router": _fake_router,
+        "and_": _fake_and,
+        "or_": _fake_or,
+        "active_harness": MagicMock(return_value=HarnessDouble()),
+        "FlowConfigManager": MagicMock(),
+        "FlowProcessorManager": MagicMock(),
+        "FlowMethodFactory": MagicMock(),
+        "create_execution_callbacks": MagicMock(
+            return_value=(MagicMock(), MagicMock())
+        ),
+        "extract_final_answer": MagicMock(return_value="answer"),
+        "get_model_context_limits": AsyncMock(return_value=(128000, 16000)),
+    }
+
+
+def _use_engine(p, *, crew=None, task=None):
+    """Point ``active_harness`` in ``p`` at a double carrying these builders.
+
+    Mutates the double already in ``p`` rather than installing a fresh one, so
+    setting the crew builder and then the task builder leaves BOTH in place —
+    two independent entries would have left the first recording nothing while
+    the test asserted on it.
+    """
+    engine = getattr(p.get("active_harness"), "return_value", None)
+    if not isinstance(engine, HarnessDouble):
+        engine = HarnessDouble()
+        p["active_harness"] = MagicMock(return_value=engine)
+    if crew is not None:
+        engine.build_crew = crew
+    if task is not None:
+        engine.build_task = task
+    return engine

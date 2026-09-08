@@ -9,6 +9,7 @@ export const BuilderPreviewContext = createContext<{
   openCheckpoints?: (jobId: string, onResumed: (newJobId: string) => void) => void;
   openMemory: (jobId: string) => void;
   openStep: (jobId: string, step: RunStep) => void;
+  openApproval?: (jobId: string, approvalId: number, onDecision: () => void) => void;
   openResult?: (content: PreviewContent) => void;
   previewMessageId?: string;
   closePreview?: () => void;

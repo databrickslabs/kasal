@@ -151,8 +151,7 @@ const FlowStateSection: React.FC = () => {
         Flow state
       </Typography>
       <Typography variant="caption" color="text.secondary">
-        Applies to the WHOLE flow, not just this connection — unlike the
-        checkpoint above. Channels are read from the flow&apos;s router
+        Applies to the whole flow. Channels are read from the flow&apos;s router
         conditions and task placeholders; choose how each one merges when
         something writes to it.
       </Typography>

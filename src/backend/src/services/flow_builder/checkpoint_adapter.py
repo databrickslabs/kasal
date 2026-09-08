@@ -21,7 +21,7 @@ is 1-based for the same reason.
 import logging
 from typing import Any, Iterable, Optional, Tuple
 
-from src.core.events.types import CrewKickoffCompletedEvent
+from src.core.events.types import CrewCheckpointRestoredEvent, CrewKickoffCompletedEvent
 from src.services.execution.checkpointing.record import KIND_FLOW, build_unit
 from src.services.execution.checkpointing.recorder import CheckpointRecorder
 from src.services.execution.runtime.identity import crew_content_key
@@ -50,7 +50,19 @@ class FlowCrewCheckpointRecorder(CheckpointRecorder):
         self._seen_crews = set()
 
     def _subscriptions(self) -> Iterable[Tuple[type, Any]]:
-        return ((CrewKickoffCompletedEvent, self._on_crew_completed),)
+        return (
+            (CrewKickoffCompletedEvent, self._on_crew_completed),
+            (CrewCheckpointRestoredEvent, self._on_crew_restored),
+        )
+
+    def _on_crew_restored(
+        self, source: Any, event: CrewCheckpointRestoredEvent
+    ) -> None:
+        # Restored units already exist in the checkpoint. Reserve their positions
+        # so the first new completion does not overwrite the first restored crew.
+        if event.crew_name not in self._seen_crews:
+            self._seen_crews.add(event.crew_name)
+            self._sequence += 1
 
     def _on_crew_completed(self, source: Any, event: CrewKickoffCompletedEvent) -> None:
         try:

@@ -55,6 +55,7 @@ MISSING: Final = _Missing()
 _SKIP_KEYS: Final = frozenset(
     {
         "kasal_crew_identities",
+        "kasal_completed_crews",
         "previous_output",
         "messages",
         "id",

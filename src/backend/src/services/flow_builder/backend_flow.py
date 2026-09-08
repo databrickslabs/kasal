@@ -346,6 +346,7 @@ class BackendFlow:
         # 2. Synchronous callbacks set on each Crew instance in flow methods
         flow_id_for_callbacks = str(self._flow_id) if self._flow_id else None
         self._config["callbacks"] = {
+            "review_feedback": self._config.get("review_feedback"),
             "handlers": [],  # No async handlers for flows
             "job_id": self._job_id,  # Pass job_id directly for sync callbacks
             "flow_id": flow_id_for_callbacks,  # Pass flow_id for HITL webhooks

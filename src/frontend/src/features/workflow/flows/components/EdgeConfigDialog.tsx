@@ -74,7 +74,7 @@ export interface HITLConfig {
   message: string;                          // Message shown to approvers
   timeout_seconds: number;                  // Timeout before automatic action
   timeout_action: 'auto_reject' | 'fail';   // Action on timeout
-  require_comment: boolean;                 // Require comment for approval/rejection
+  require_comment: boolean;                 // Require a comment to approve
 }
 
 export interface EdgeConfig {
@@ -89,7 +89,7 @@ export interface EdgeConfig {
   // State management (aligned with CrewAI Flow state)
   stateMappings?: StateMapping[]; // Extract task outputs → state variables (with sourceTaskId)
   checkpoint?: boolean;           // Enable @persist - checkpoint after this step for resume capability
-  // HITL (Human in the Loop) - requires checkpoint to be enabled
+  // Human approval enables any required flow persistence automatically.
   hitl?: HITLConfig;
 }
 
@@ -116,7 +116,6 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
   const [saveError, setSaveError] = useState<string | null>(null);
 
   // State management
-  const [checkpoint, setCheckpoint] = useState(false);
 
   // HITL configuration
   const [hitlEnabled, setHitlEnabled] = useState(false);
@@ -178,7 +177,6 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
       setRouterSchema(contract?.name || edge.data.routerSchema || '');
       setSaveError(null);
       // Use explicit boolean check to handle false values correctly
-      setCheckpoint(edge.data.checkpoint === true);
 
       // Load HITL configuration
       if (edge.data.hitl) {
@@ -205,7 +203,6 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
       setTargetTaskIds([]);
       setRouterSchema('');
       setSaveError(null);
-      setCheckpoint(false);
       // Reset HITL
       setHitlEnabled(false);
       setHitlMessage('Please review and approve to continue');
@@ -297,21 +294,14 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
       description,
       listenToTaskIds,
       targetTaskIds,
-      // Always include checkpoint (explicit true/false)
-      checkpoint: checkpoint,
-      // Always include HITL config (when checkpoint enabled, use settings; when disabled, explicitly disable)
-      hitl: checkpoint ? {
+      // Preserve legacy persistence for saved flows. Recovery checkpoints are automatic.
+      checkpoint: edge.data?.checkpoint === true || hitlEnabled,
+      hitl: {
         enabled: hitlEnabled,
         message: hitlMessage,
         timeout_seconds: hitlTimeoutSeconds,
         timeout_action: hitlTimeoutAction,
         require_comment: hitlRequireComment,
-      } : {
-        enabled: false,
-        message: 'Please review and approve to continue',
-        timeout_seconds: 86400,
-        timeout_action: 'auto_reject' as const,
-        require_comment: false,
       },
     };
 
@@ -621,65 +611,28 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
             </Box>
           )}
 
-          {/* Checkpoint - Simple inline checkbox */}
-          <FormControlLabel
-            control={
-              <Checkbox
-                size="small"
-                checked={checkpoint}
-                onChange={(e) => {
-                  setCheckpoint(e.target.checked);
-                  // Disable HITL if checkpoint is disabled
-                  if (!e.target.checked) {
-                    setHitlEnabled(false);
-                  }
-                }}
-              />
-            }
-            label={
-              <Typography variant="body2" sx={{ fontSize: '0.85rem' }}>
-                Enable Checkpoint <Typography component="span" variant="caption" color="text.secondary">— Resume flow from here if interrupted</Typography>
-              </Typography>
-            }
-            sx={{ mt: 1, ml: 0 }}
-          />
-
-          {/* HITL (Human in the Loop) Configuration - visible always, enabled only when checkpoint is enabled */}
-          <Box sx={{
-            mt: 2,
-            p: 2,
-            bgcolor: checkpoint ? 'warning.light' : 'action.disabledBackground',
-            borderRadius: 1,
-            border: '1px solid',
-            borderColor: checkpoint ? 'warning.main' : 'divider',
-            opacity: checkpoint ? 1 : 0.7,
-          }}>
+          <Box sx={{ mt: 2 }}>
             <FormControlLabel
               control={
                 <Checkbox
                   size="small"
                   checked={hitlEnabled}
                   onChange={(e) => setHitlEnabled(e.target.checked)}
-                  disabled={!checkpoint}
                 />
               }
               label={
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <PanToolIcon sx={{ fontSize: 18, color: checkpoint ? 'warning.dark' : 'text.disabled' }} />
-                  <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 600, color: checkpoint ? 'text.primary' : 'text.disabled' }}>
-                    Require Human Approval (HITL)
+                  <PanToolIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                  <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 600, color: 'text.primary' }}>
+                    Require human approval
                   </Typography>
-                  {!checkpoint && (
-                    <Typography variant="caption" sx={{ color: 'text.secondary', fontStyle: 'italic' }}>
-                      — Enable checkpoint first
-                    </Typography>
-                  )}
+
                 </Box>
               }
-              sx={{ ml: 0, mb: (hitlEnabled && checkpoint) ? 2 : 0 }}
+              sx={{ ml: 0, mb: hitlEnabled ? 2 : 0 }}
             />
 
-            {hitlEnabled && checkpoint && (
+            {hitlEnabled && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pl: 4 }}>
                 <TextField
                   fullWidth
@@ -733,7 +686,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
                   }
                   label={
                     <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>
-                      Require comment for approval/rejection
+                      Require a comment to approve
                     </Typography>
                   }
                   sx={{ ml: 0 }}
@@ -742,12 +695,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
             )}
           </Box>
 
-          {/* Flow-level state, hosted here because it is only useful WITH the
-              checkpoint above: a conversation needs somewhere to live and
-              something to write it, and separating the two controls is how a
-              flow ends up with one of them. Writes straight to the flow's
-              declaration, so it is saved with the FLOW rather than with this
-              edge — Cancel below does not undo it. */}
+          {/* Flow state is saved independently of this connection. */}
           <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
             <FlowStateSection />
           </Box>

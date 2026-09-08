@@ -69,6 +69,10 @@ class HITLPermissionDeniedError(HITLServiceError):
     pass
 
 
+class HITLApprovalValidationError(HITLServiceError):
+    """The requested decision does not satisfy the gate policy."""
+
+
 class HITLService:
     """Service for Human in the Loop approval operations."""
 
@@ -210,6 +214,13 @@ class HITLService:
             if not approval.can_be_approved_by(approved_by):
                 raise HITLPermissionDeniedError(
                     f"User {approved_by} is not allowed to approve this gate"
+                )
+
+            if (approval.gate_config or {}).get("require_comment") and not (
+                comment or ""
+            ).strip():
+                raise HITLApprovalValidationError(
+                    "A comment is required to approve this request"
                 )
 
             # Update approval status
@@ -762,13 +773,17 @@ class HITLService:
 
             # Build the retry configuration
             # For retry, we re-run from the SAME crew sequence (not +1)
-            # This means crew_sequence - 1 since we want to include the failed crew
-            retry_from_sequence = max(0, approval.crew_sequence - 1)
+            # The resume point is the first crew to RUN (one-based).
+            retry_from_sequence = approval.crew_sequence
             retry_config = {
                 **original_inputs,
                 "resume_from_flow_uuid": flow_uuid,
                 "resume_from_execution_id": approval.execution_id,
                 "resume_from_crew_sequence": retry_from_sequence,  # Re-run the same crew
+                "review_feedback": {
+                    "method": approval.previous_crew_name,
+                    "reason": approval.rejection_reason,
+                },
             }
 
             logger.info(

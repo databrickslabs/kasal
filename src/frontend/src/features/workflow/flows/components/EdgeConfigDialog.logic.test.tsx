@@ -86,3 +86,17 @@ it('opens generated same-item conditions with their flow-local schema and saves 
   expect(updateTask).not.toHaveBeenCalled();
   vi.restoreAllMocks();
 });
+
+
+it('allows human approval without a checkpoint prerequisite', async () => {
+  const save = vi.fn();
+  render(<EdgeConfigDialog open edge={edge as never} nodes={[]} edges={[]}
+    onClose={vi.fn()} onSave={save} aggregatedSourceTasks={[twoTaskCrew] as never}
+    targetTasks={[{ id: 't9', name: 'Next step' }] as never} />);
+  expect(screen.queryByLabelText(/Enable Checkpoint/)).not.toBeInTheDocument();
+  const approval = screen.getByRole('checkbox', { name: 'Require human approval' });
+  expect(approval).toBeEnabled();
+  fireEvent.click(approval);
+  fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
+  await waitFor(() => expect(save).toHaveBeenCalledWith('e1', expect.objectContaining({ hitl: expect.objectContaining({ enabled: true }) })));
+});
