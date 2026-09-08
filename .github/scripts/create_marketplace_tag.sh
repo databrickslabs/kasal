@@ -234,14 +234,41 @@ if [ -f "src/backend/run_tests.py" ]; then
     echo "  ✓ Removed run_tests.py"
 fi
 
-# Remove uv lockfiles from the marketplace payload. The Databricks Apps
-# builder runs `uv sync --locked` whenever uv.lock is present, and its uv
-# is older than ours: our uv writes lockfile revision 3, which the builder
-# rejects with "The lockfile at uv.lock needs to be updated" and the app
-# never starts. Known-good installs (marketplace-v1.3.0 and earlier)
-# shipped NO lockfiles and resolved fresh from pyproject.toml.
-rm -f src/uv.lock src/backend/uv.lock
-echo "  ✓ Removed uv lockfiles (Apps builder uv can't parse lock revision 3)"
+# Dependency install for the marketplace payload: ship a fully-pinned
+# src/requirements.txt (pip) and no app-root uv manifests. The marketplace
+# payload uses the pip deployment path for compatibility with Apps builders
+# that do not support this lockfile revision. Export from the selected source
+# snapshot, never from the contributor's working directory. Normal uv-based
+# deployments keep their existing manifests and are unaffected.
+echo "📦 Generating pinned requirements.txt from uv.lock (pip install path)..."
+if command -v uv >/dev/null 2>&1 && [ -f "src/backend/uv.lock" ]; then
+    # Export from the exported source lock (in TEMP_DIR/src/backend), where the lock is
+    # still present, into the marketplace payload's src/requirements.txt.
+    # --no-emit-project: don't list the app itself as a dependency.
+    # --no-dev: runtime deps only. --no-hashes: the Apps builder pip has no
+    # network-pinned hash support and hashes just bloat the file.
+    if uv export --frozen --no-hashes --no-emit-project --no-dev \
+        --project "$TEMP_DIR/src/backend" \
+        -o "$TEMP_DIR/src/requirements.txt" 2>"$TEMP_DIR/uv-export-err.log"; then
+        rm -f "$TEMP_DIR/uv-export-err.log"
+        REQ_LINES=$(grep -cvE '^\s*(#|$)' "$TEMP_DIR/src/requirements.txt" || echo "?")
+        echo "  ✓ Wrote src/requirements.txt ($REQ_LINES pinned packages)"
+    else
+        echo "  ❌ uv export failed:"
+        sed 's/^/     /' "$TEMP_DIR/uv-export-err.log"
+        echo "  Aborting: cannot produce a dependency manifest for the tag."
+        exit 1
+    fi
+else
+    echo "  ❌ uv not on PATH or src/backend/uv.lock missing — cannot generate requirements.txt"
+    echo "     (install uv and regenerate src/backend/uv.lock before tagging)"
+    exit 1
+fi
+
+# Remove the uv manifests from the payload so the Apps builder uses the pip
+# path (requirements.txt) above, NOT uv sync.
+rm -f src/uv.lock src/backend/uv.lock src/pyproject.toml
+echo "  ✓ Removed uv manifests (src/uv.lock, src/backend/uv.lock, src/pyproject.toml) — using pip + requirements.txt"
 
 # Count files after cleanup
 FILES_AFTER=$(find . -type f | wc -l)
