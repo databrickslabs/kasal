@@ -9,6 +9,7 @@ import { runService } from '../../../../api/execution/ExecutionHistoryService';
 import { useThemeStore } from '../../../../store/theme';
 import type { Run } from '../../../../types/execution/run';
 import CompletedRunActions from '../../../chat/components/Cards/CompletedRunActions';
+import MLflowRunAction from '../../../chat/components/Cards/MLflowRunAction';
 import MemoryPane from '../../../chat/components/Preview/MemoryPane';
 import { BuilderPreviewContext } from './BuilderPreviewContext';
 import BuilderOptimizeAction from './BuilderOptimizeAction';
@@ -66,6 +67,7 @@ const BuilderRunActions: React.FC<{ jobId: string }> = ({ jobId }) => {
           onOpenSchedule={openPreview?.openSchedule}
           onOpenMemory={() => openPreview ? openPreview.openMemory(jobId) : setMemoryOpen(true)}
         />
+        <MLflowRunAction key={jobId} executionId={jobId} />
         <BuilderOptimizeAction run={run} /></>}
         {hasCheckpoints && <button type="button" onClick={() => openPreview?.openCheckpoints?.(jobId, checkpointResumeHandler(run))}
           className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-80"

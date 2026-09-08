@@ -35,7 +35,7 @@ export default function ExpandedBuilderConversation({ dark, landing, response, p
       display: 'flex', minWidth: 0, overflow: 'hidden', ...kasalStageSurface(dark),
       '& [data-testid="builder-composer"]': { bgcolor: 'var(--bg-input)', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-input)',
         '&:focus-within': { boxShadow: 'var(--shadow-input-focus)' } },
-      '& [data-testid="builder-conversation-scroll"]': { px: 2, pt: 3, pb: 3 },
+      '& [data-testid="builder-conversation-scroll"]': { pt: 3, pb: 3 },
     }}>
     <Box component="main" sx={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }}>
       <IconButton ref={closeRef} aria-label="Back to canvas" onClick={onClose} size="small"

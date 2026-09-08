@@ -117,11 +117,18 @@ export function CanvasAssistantLayout({ composer, response, responseKey, session
   }, []);
   useEffect(() => () => { useUILayoutStore.getState().setAssistantDockHeight(0); }, []);
 
-  const panel = <Box role="region" aria-label="Conversation" sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'transparent', color: 'text.primary', ...(fullscreen || focused ? { flex: 1, height: 'auto', maxWidth: 1000, width: '100%', mx: 'auto', pt: fullscreen ? 2 : 0, pb: 1, boxSizing: 'border-box' } : {}) }}>
+  // Match the transcript to the composer, including the tutorial clearance on
+  // the right. Full screen uses Chat's 768px column with 16px side gutters.
+  const columnSx = { width: '100%', maxWidth: fullscreen ? 768 : 760, minWidth: 0, mx: 'auto',
+    pl: fullscreen ? 2 : 1.5, pr: fullscreen ? 2 : side === 'right' ? 6.5 : 1.5, boxSizing: 'border-box' as const };
+  const panel = <Box role="region" aria-label="Conversation" sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, minWidth: 0, background: 'transparent', color: 'text.primary', overflowWrap: 'anywhere', ...(fullscreen || focused ? {
+    ...columnSx, flex: 1, height: 'auto', pt: fullscreen ? 2 : 0, pb: 1,
+    '& [data-testid="builder-conversation-scroll"]': { px: 0, boxSizing: 'border-box' },
+  } : {}) }}>
     <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>{response}</Box>
   </Box>;
 
-  const focusComposer = <Box>    <Box sx={{ width: '100%', maxWidth: 760, mx: 'auto', pl: 1.5, pr: side === 'right' ? 6.5 : 1.5, pb: 1.5, flexShrink: 0, boxSizing: 'border-box' }}>
+  const focusComposer = <Box>    <Box sx={{ ...columnSx, pb: 1.5, flexShrink: 0 }}>
       <Box ref={(node: HTMLDivElement | null) => { if (node && !fullscreen && composerHost.parentElement !== node) node.appendChild(composerHost); }} />
     </Box>
   </Box>;
