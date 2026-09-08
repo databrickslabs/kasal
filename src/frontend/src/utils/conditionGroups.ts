@@ -155,13 +155,16 @@ function literal(raw: string): string {
   const lowered = raw.trim().toLowerCase();
   if (lowered === 'true') return 'True';
   if (lowered === 'false') return 'False';
-  return isNaN(Number(raw)) ? `"${raw}"` : raw;
+  return isNaN(Number(raw)) ? JSON.stringify(raw) : raw;
 }
 
 function unquote(raw: string): string {
   const trimmed = raw.trim();
   if (trimmed === 'True' || trimmed === 'False') return trimmed.toLowerCase();
-  return trimmed.replace(/^["']|["']$/g, '');
+  if (trimmed.startsWith('"')) {
+    try { return JSON.parse(trimmed) as string; } catch { /* legacy literal */ }
+  }
+  return trimmed.replace(/^["']|["']$/g, '').replace(/\\([\\'"nrt])/g, (_, escaped: string) => ({ n: '\n', r: '\r', t: '\t' }[escaped] ?? escaped));
 }
 
 function termToPython(term: ConditionTerm): string {
@@ -247,7 +250,7 @@ function splitTopLevel(expression: string): Array<{ connector?: 'AND' | 'OR'; pa
 function parseTerm(text: string): ConditionTerm | null {
   const part = text.trim();
 
-  const comparison = /^state\.get\("([^"]+)",\s*[^)]*\)\s*(==|!=|>=|<=|>|<)\s*(.+)$/.exec(part);
+  const comparison = /^state\.get\(["']([^"']+)["'],\s*[^)]*\)\s*(==|!=|>=|<=|>|<)\s*(.+)$/.exec(part);
   if (comparison) {
     const [, field, operator, value] = comparison;
     return {
@@ -257,12 +260,12 @@ function parseTerm(text: string): ConditionTerm | null {
     };
   }
 
-  const contains = /^(.+?)\s+in\s+state\.get\("([^"]+)",\s*[^)]*\)$/.exec(part);
+  const contains = /^(.+?)\s+in\s+state\.get\(["']([^"']+)["'],\s*[^)]*\)$/.exec(part);
   if (contains) {
     return { field: contains[2], operator: 'contains', value: unquote(contains[1]) };
   }
 
-  const method = /^state\.get\("([^"]+)",\s*[^)]*\)\.(startswith|endswith)\((.+)\)$/.exec(part);
+  const method = /^state\.get\(["']([^"']+)["'],\s*[^)]*\)\.(startswith|endswith)\((.+)\)$/.exec(part);
   if (method) {
     return {
       field: method[1],
@@ -271,6 +274,21 @@ function parseTerm(text: string): ConditionTerm | null {
     };
   }
   return null;
+}
+
+/** Commas inside a quoted category/value belong to that value. */
+function splitArguments(text: string): string[] {
+  const parts: string[] = [];
+  let quote = '', start = 0;
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    if (quote && char === '\\') { index++; continue; }
+    if (quote) { if (char === quote) quote = ''; }
+    else if (char === '"' || char === "'") quote = char;
+    else if (char === ',') { parts.push(text.slice(start, index).trim()); start = index + 1; }
+  }
+  parts.push(text.slice(start).trim());
+  return parts;
 }
 
 /** Read a stored condition back into groups. */
@@ -283,10 +301,9 @@ export function pythonToGroups(expression: string): ConditionGroup[] {
     for (const { connector, part } of splitTopLevel(expression)) {
       const text = part.trim().replace(/^\((.*)\)$/s, '$1');
 
-      const grouped = /^where\(\s*"([^"]+)"\s*,\s*(.+)\)$/.exec(text);
+      const grouped = /^where\(\s*["']([^"']+)["']\s*,\s*(.+)\)$/.exec(text);
       if (grouped) {
-        const terms = grouped[2]
-          .split(/\s*,\s*/)
+        const terms = splitArguments(grouped[2])
           .map((term) => /^([A-Za-z_][A-Za-z0-9_]*?)(__[a-z]+)?=(.+)$/.exec(term))
           .filter((match): match is RegExpExecArray => Boolean(match))
           .map((match) => ({

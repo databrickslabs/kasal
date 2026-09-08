@@ -37,6 +37,7 @@ import { TaskService } from '../../../../api/workflow/TaskService';
 import { Schema } from '../../../../types/workflow/schema';
 
 import BuilderNodeEditor from '../../assistant/components/BuilderNodeEditor';
+import FlowOutputSchema, { type FlowOutputContract } from './FlowOutputSchema';
 import FlowStateSection from './FlowStateSection';
 export type FlowLogicType = 'AND' | 'OR' | 'ROUTER' | 'NONE';
 
@@ -80,6 +81,7 @@ export interface EdgeConfig {
   logicType: FlowLogicType;
   routerCondition?: string;       // Evaluated against state variables (e.g., "state.confidence > 0.8")
   isDefaultRoute?: boolean;       // The "otherwise" branch: taken when no other route matched
+  outputContract?: FlowOutputContract | null;
   routerSchema?: string;          // Name of the output schema the router routes on (set on source crew's final task)
   description?: string;
   listenToTaskIds?: string[];     // Tasks from source crew to wait for
@@ -109,6 +111,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
   // Router schema-driven routing
   const [schemas, setSchemas] = useState<Schema[]>([]);
   const [routerSchema, setRouterSchema] = useState<string>('');
+  const [outputContract, setOutputContract] = useState<FlowOutputContract | null>(null);
   const [schemaCreateOpen, setSchemaCreateOpen] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -170,7 +173,9 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
       setTargetTaskIds(edge.data.targetTaskIds || []);
 
       // Load router schema selection
-      setRouterSchema(edge.data.routerSchema || '');
+      const contract = sourceNode?.data?.outputContract as FlowOutputContract | undefined;
+      setOutputContract(contract || null);
+      setRouterSchema(contract?.name || edge.data.routerSchema || '');
       setSaveError(null);
       // Use explicit boolean check to handle false values correctly
       setCheckpoint(edge.data.checkpoint === true);
@@ -208,7 +213,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
       setHitlTimeoutAction('auto_reject');
       setHitlRequireComment(false);
     }
-  }, [edge]);
+  }, [edge, sourceNode?.data?.outputContract]);
 
   // Auto-include all source/target tasks — task selection was removed from the UI.
   // The edge endpoints already define source → target, so we listen to every source
@@ -246,10 +251,8 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
     || sourceNode?.data?.label
     || 'the source crew';
 
-  // Resolve the selected schema's fields → router condition variables.
-  // Only scalar fields (string / number / integer / boolean) are routable, since
-  // the condition operators compare single values; arrays/objects are excluded.
-  const selectedSchema = schemas.find(s => s.name === routerSchema);
+  const localSchema = outputContract?.name === routerSchema ? outputContract : null;
+  const selectedSchema = localSchema || schemas.find(s => s.name === routerSchema);
   // Every value the schema can be routed on, including those nested in an
   // object or repeated across a list. This used to be the schema's TOP-LEVEL
   // scalar properties only, which meant a schema shaped like real model output
@@ -283,6 +286,10 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
     if (!edge) return;
     setSaveError(null);
 
+    if (localSchema && routerConditions.some(group => group.terms.some(term => !schemaFields.some(field => field.path === (group.subject ? `${group.subject}[].${term.field}` : term.field))))) {
+      setSaveError('A routing field was removed. Update the conditions before saving.');
+      return;
+    }
     const routerConditionStr = groupsToPython(routerConditions);
 
     const config: EdgeConfig = {
@@ -314,11 +321,13 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
       // condition of its own.
       if (routerConditionStr && !isDefaultRoute) config.routerCondition = routerConditionStr;
       if (routerSchema) config.routerSchema = routerSchema;
+      config.outputContract = localSchema;
+      if (localSchema) config.stateMappings = []; // Flow contracts expose their fields directly.
 
       // Apply the chosen schema to the source crew's final task so it produces the
       // structured output the router evaluates. Fetch-then-update preserves the
       // task's other config fields.
-      if (routerSchema && finalSourceTask) {
+      if (routerSchema && finalSourceTask && !localSchema) {
         try {
           const fullTask = await TaskService.getTask(finalSourceTask.id);
           if (fullTask && fullTask.config?.output_pydantic !== routerSchema) {
@@ -384,7 +393,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
                     <Box key={group.crewName} sx={{ mb: 1.5 }}>
                       <Typography
                         variant="caption"
-                        sx={{ color: 'primary.main', fontWeight: 600, fontSize: '0.7rem', display: 'block', mb: 0.5 }}
+                        sx={{ color: 'text.primary', fontWeight: 600, fontSize: '0.7rem', display: 'block', mb: 0.5 }}
                       >
                         {group.crewName}
                       </Typography>
@@ -529,7 +538,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
 
           {logicType === 'ROUTER' && !isDefaultRoute && (
             <Box sx={{ mt: 1, p: 2, bgcolor: 'action.hover', borderRadius: 1 }}>
-              <Typography variant="subtitle2" sx={{ mb: 0.5, fontWeight: 600, color: 'primary.main' }}>
+              <Typography variant="subtitle2" sx={{ mb: 0.5, fontWeight: 600, color: 'text.primary' }}>
                 Router Configuration
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
@@ -567,15 +576,17 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
                   <MenuItem value="" disabled sx={{ fontSize: '0.85rem' }}>
                     <em>Select a schema…</em>
                   </MenuItem>
-                  {schemas.map((s) => (
+                  {outputContract && <MenuItem value={outputContract.name}>{outputContract.name} · This flow</MenuItem>}
+                  {schemas.filter(s => s.name !== outputContract?.name).map((s) => (
                     <MenuItem key={s.id} value={s.name} sx={{ fontSize: '0.85rem' }}>{s.name}</MenuItem>
                   ))}
-                  <MenuItem value="__create__" sx={{ color: 'primary.main', fontSize: '0.85rem' }}>
+                  <MenuItem value="__create__" sx={{ color: 'text.primary', fontSize: '0.85rem' }}>
                     <AddIcon fontSize="small" sx={{ mr: 1 }} /> Add new schema…
                   </MenuItem>
                 </Select>
               </FormControl>
 
+              {localSchema && <FlowOutputSchema key={`${edge?.id}:${localSchema.task_id}`} contract={localSchema} onChange={setOutputContract} />}
               {/* Step 2: Condition on a schema variable */}
               {!routerSchema ? (
                 <Alert severity="info" sx={{ fontSize: '0.75rem', py: 0.5 }}>
