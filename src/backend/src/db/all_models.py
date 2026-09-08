@@ -31,6 +31,7 @@ from src.models.documentation_embedding import (
     KnowledgeEmbedding,
 )
 from src.models.engine_config import EngineConfig
+from src.models.event_subscription import EmitRule, EventSubscription
 from src.models.execution_history import ErrorTrace, ExecutionHistory, TaskStatus
 from src.models.execution_logs import ExecutionLog
 from src.models.execution_trace import ExecutionTrace
@@ -50,6 +51,7 @@ from src.models.mcp_settings import MCPSettings
 
 # Memory backend models
 from src.models.memory_backend import MemoryBackend
+from src.models.model_billing_rate import ModelBillingRate
 from src.models.model_config import ModelConfig
 
 # PowerBI models
@@ -61,13 +63,12 @@ from src.models.powerbi_semantic_model_cache import PowerBISemanticModelCache
 
 # Prompt optimization models
 from src.models.prompt_optimization_run import PromptOptimizationRun
-from src.models.event_subscription import EmitRule, EventSubscription
 from src.models.schedule import Schedule
-from src.models.trigger_queue import TriggerQueue
 from src.models.schema import Schema
 from src.models.task import Task
 from src.models.template import PromptTemplate
 from src.models.tool import Tool
+from src.models.trigger_queue import TriggerQueue
 
 # User models (simplified auth)
 from src.models.user import User
@@ -119,6 +120,7 @@ __all__ = [
     "User",
     # Billing models
     "LLMUsageBilling",
+    "ModelBillingRate",
     "BillingPeriod",
     "BillingAlert",
     # Documentation models

@@ -8,6 +8,7 @@ vi.mock('./useSessionRunIds', () => ({ useSessionRunIds: () => ({ ids: ['session
 vi.mock('../../features/executions/components/ExecutionHistory', () => ({ default: ({ jobIds }: { jobIds?: string[] }) => <div>{jobIds ? jobIds.join(',') : 'Teamspace executions'}</div> }));
 vi.mock('../../features/workflow/scheduling/components/ScheduleDialog', () => ({ default: ({ embedded }: { embedded?: boolean }) => <div>{embedded ? 'Schedule management' : 'Separate schedule dialog'}</div> }));
 vi.mock('../../features/executions/components/LLMLogs', () => ({ default: () => <div>Existing model logs</div> }));
+vi.mock('../../features/billing/BillingActivity', () => ({ default: ({ executionIds }: { executionIds?: string[] }) => <div>{executionIds ? `Session billing: ${executionIds.join(',')}` : 'Teamspace billing'}</div> }));
 beforeEach(() => {
   useGroupStore.setState({ currentGroupId: 'g' });
   usePermissionStore.setState({ allowAgentBuilder: true, allowFlowBuilder: true });
@@ -35,4 +36,14 @@ it('keeps the existing builder capability restriction for schedules and model lo
   expect(screen.queryByRole('button', { name: 'Schedules' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Model calls' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Executions' })).toBeVisible();
+});
+
+it('exposes session and teamspace billing in Chat mode for operators', async () => {
+  usePermissionStore.setState({ allowAgentBuilder: false, allowFlowBuilder: false });
+  render(<WorkspaceActivity expanded />);
+  fireEvent.click(screen.getByRole('button', { name: 'Activity' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Billing', exact: true }));
+  expect(await screen.findByText('Session billing: session-run')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'All teamspace usage' }));
+  expect(await screen.findByText('Teamspace billing')).toBeVisible();
 });

@@ -9,6 +9,7 @@ from src.api.agentbricks_router import router as agentbricks_router
 from src.api.agents_router import router as agents_router
 from src.api.analytics_export_router import router as analytics_export_router
 from src.api.api_keys_router import router as api_keys_router
+from src.api.billing_router import router as billing_router
 from src.api.builder_generation_router import router as builder_generation_router
 from src.api.chat_assets_router import router as chat_assets_router
 from src.api.chat_history_router import router as chat_history_router
@@ -96,6 +97,7 @@ api_router.include_router(powerbi_router)
 api_router.include_router(flows_router)
 api_router.include_router(healthcheck_router)
 api_router.include_router(logs_router)
+api_router.include_router(billing_router)
 api_router.include_router(models_router)
 api_router.include_router(databricks_secrets_router)
 api_router.include_router(api_keys_router)
