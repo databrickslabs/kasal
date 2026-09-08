@@ -6,6 +6,7 @@ import type { PreviewContent } from '../../../chat/types/preview';
 export const BuilderPreviewContext = createContext<{
   openSchedule?: (executionId: string, defaultName: string, onCreated: (name: string) => void) => void;
   openOptimize?: (crewId: string, crewName: string) => void;
+  openCheckpoints?: (jobId: string, onResumed: (newJobId: string) => void) => void;
   openMemory: (jobId: string) => void;
   openStep: (jobId: string, step: RunStep) => void;
   openResult?: (content: PreviewContent) => void;

@@ -1,6 +1,8 @@
 import React, { useContext, useEffect, useState } from 'react';
 import { Box, Dialog, IconButton, Typography } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
+import { History } from 'lucide-react';
+import { usePermissionStore } from '../../../../store/permissions';
 import { apiClient } from '../../../../shared/api/client';
 import { parseRunConfig, runConfiguration, runEntities } from '../utils/runConfiguration';
 import { runService } from '../../../../api/execution/ExecutionHistoryService';
@@ -10,6 +12,7 @@ import CompletedRunActions from '../../../chat/components/Cards/CompletedRunActi
 import MemoryPane from '../../../chat/components/Preview/MemoryPane';
 import { BuilderPreviewContext } from './BuilderPreviewContext';
 import BuilderOptimizeAction from './BuilderOptimizeAction';
+import { checkpointResumeHandler } from '../utils/checkpointResume';
 import '../../../chat/chat.css';
 
 /** Read the saved execution configuration, never the current canvas's settings. */
@@ -25,6 +28,7 @@ export function runUsedMemory(run: Run): boolean {
 const BuilderRunActions: React.FC<{ jobId: string }> = ({ jobId }) => {
   const openPreview = useContext(BuilderPreviewContext);
   const dark = useThemeStore((s) => s.isDarkMode);
+  const canResume = usePermissionStore(s => s.userRole === 'admin' || s.userRole === 'editor');
   const [run, setRun] = useState<Run | null>(null);
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [hasMemoryTrace, setHasMemoryTrace] = useState(false);
@@ -44,18 +48,30 @@ const BuilderRunActions: React.FC<{ jobId: string }> = ({ jobId }) => {
     return () => { active = false; controller.abort(); };
   }, [jobId]);
 
-  if (!run || !['completed', 'complete', 'success', 'succeeded'].includes(run.status.toLowerCase())) return null;
+  if (!run) return null;
+  const completed = ['completed', 'complete', 'success', 'succeeded'].includes(run.status.toLowerCase());
+  const terminal = completed || ['failed', 'stopped', 'cancelled', 'canceled'].includes(run.status.toLowerCase());
+  const config = runConfiguration(run);
+  const hasCheckpoints = canResume && terminal && Boolean(openPreview?.openCheckpoints) && (
+    (run.execution_type || config.execution_type) === 'flow' || Object.keys(runEntities(config.tasks_yaml, run.tasks_yaml)).length > 1
+  );
+  if (!completed && !hasCheckpoints) return null;
   return (
     <div className="kasal-chat-root" data-theme={dark ? 'dark' : 'light'}>
       <div className="flex items-center gap-2 flex-wrap mt-2">
-        <CompletedRunActions
+        {completed && <><CompletedRunActions
           executionId={jobId}
           defaultName={`${run.run_name || 'Crew'} schedule`}
           usedWorkspaceMemory={hasMemoryTrace || runUsedMemory(run)}
           onOpenSchedule={openPreview?.openSchedule}
           onOpenMemory={() => openPreview ? openPreview.openMemory(jobId) : setMemoryOpen(true)}
         />
-        <BuilderOptimizeAction run={run} />
+        <BuilderOptimizeAction run={run} /></>}
+        {hasCheckpoints && <button type="button" onClick={() => openPreview?.openCheckpoints?.(jobId, checkpointResumeHandler(run))}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-80"
+          style={{ background: 'transparent', border: 0, color: 'var(--text-secondary)' }}>
+          <History size={14} />Checkpoints
+        </button>}
       </div>
       <Dialog open={memoryOpen} onClose={() => setMemoryOpen(false)} maxWidth="md" fullWidth
         aria-labelledby="builder-run-memory-title"

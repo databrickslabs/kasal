@@ -4,6 +4,7 @@ import { X } from 'lucide-react';
 import PreviewPanel from '../../../chat/components/Preview/PreviewPanel';
 import ScheduleRunDialog from '../../../chat/components/Chat/ScheduleRunDialog';
 import CrewOptimizeDialog from '../../crews/components/CrewOptimizeDialog';
+import CheckpointDialog from '../../../executions/components/CheckpointDialog';
 import type { PreviewContent } from '../../../chat/types/preview';
 import type { RunStep } from '../../../chat/components/Preview/traceEventStep';
 import type { BuilderNodeEditorEntry } from '../store/builderNodeEditorBridge';
@@ -13,10 +14,11 @@ export type BuilderPaneTab =
   | { id: 'activity' | 'memory' | 'result'; content: PreviewContent; step?: RunStep }
   | { id: 'schedule'; executionId: string; defaultName: string; onCreated: (name: string) => void }
   | { id: 'optimize'; crewId: string; crewName: string }
+  | { id: 'checkpoints'; jobId: string; onResumed: (newJobId: string) => void }
   | { id: BuilderNodeEditorEntry['id']; editor: BuilderNodeEditorEntry };
 export type BuilderPaneId = BuilderPaneTab['id'] | 'canvas';
 const labels: Partial<Record<BuilderPaneId, string>> = {
-  canvas: 'Canvas', activity: 'Run activity', result: 'Result', memory: 'Memory graph', optimize: 'Optimize crew', schedule: 'Schedule',
+  canvas: 'Canvas', activity: 'Run activity', result: 'Result', memory: 'Memory graph', optimize: 'Optimize crew', schedule: 'Schedule', checkpoints: 'Checkpoints',
 };
 
 /** One canvas-side destination, with views opened only from conversation actions. */
@@ -70,6 +72,7 @@ export default function BuilderSidePane({ tabs, active, onSelect, onClose, dark,
         : tab.id === 'schedule' ? <ScheduleRunDialog key={tab.executionId} embedded executionId={tab.executionId} defaultName={tab.defaultName}
         onClose={() => onClose(tab.id)} onCreated={name => { tab.onCreated(name); onClose(tab.id); }} />
         : tab.id === 'optimize' ? <CrewOptimizeDialog key={tab.crewId} embedded open={active === tab.id} crewId={tab.crewId} crewName={tab.crewName} onClose={() => onClose(tab.id)} />
+        : tab.id === 'checkpoints' ? <CheckpointDialog key={tab.jobId} embedded open jobId={tab.jobId} onResumed={tab.onResumed} onClose={() => onClose(tab.id)} />
         : <Box role="region" aria-label={tab.id === 'memory' ? 'Run memory preview' : tab.id === 'result' ? 'Result preview' : 'Run activity preview'}
           sx={{ display: 'flex', height: '100%', width: '100%', minWidth: 0, '& > aside': { minWidth: 0 }, '& button': { border: 0, backgroundColor: 'transparent', color: 'inherit', cursor: 'pointer' } }}>
           <PreviewPanel embedded content={tab.content} focusStep={tab.step} chatCollapsed={false} onClose={() => onClose(tab.id)} />

@@ -72,6 +72,7 @@ export function CanvasAssistantLayout({ composer, response, responseKey, session
   const openResult = (content: PreviewContent) => openTab({ id: 'result', content });
   const openSchedule = (executionId: string, defaultName: string, onCreated: (name: string) => void) => openTab({ id: 'schedule', executionId, defaultName, onCreated });
   const openOptimize = (crewId: string, crewName: string) => openTab({ id: 'optimize', crewId, crewName });
+  const openCheckpoints = (jobId: string, onResumed: (newJobId: string) => void) => openTab({ id: 'checkpoints', jobId, onResumed });
   useEffect(() => {
     const expand = () => setFullscreen(true);
     const collapse = () => setFullscreen(false);
@@ -127,7 +128,7 @@ export function CanvasAssistantLayout({ composer, response, responseKey, session
   const sidePreview = tabs.length > 0 && (!fullscreen || activeTab !== 'canvas') && <BuilderSidePane tabs={tabs} active={activeTab} onSelect={selectTab} onClose={closeTab}
     dark={dark} canvasHost={fullscreen ? null : previewHost} />;
 
-  return <BuilderPreviewContext.Provider value={{ openMemory, openStep, openResult, openSchedule, openOptimize,
+  return <BuilderPreviewContext.Provider value={{ openMemory, openStep, openResult, openSchedule, openOptimize, openCheckpoints,
     previewMessageId: activePreview && 'content' in activePreview ? activePreview.content.sourceMessageId : undefined,
     closePreview: () => selectTab('canvas') }}>
 

@@ -561,7 +561,7 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
               ) && <BuilderCatalogAction
                 flow={message.metadata?.catalogKind === 'flow' || message.intent === 'generate_flow' || message.content.includes('Your flow is on the canvas.')}
                 suggestedName={typeof message.metadata?.catalogName === 'string' ? message.metadata.catalogName : undefined} />}
-              {message.type === 'result' && message.jobId && !message.isIntermediate && (
+              {(message.type === 'result' || message.type === 'execution') && message.jobId && !message.isIntermediate && (
                 <BuilderRunActions key={message.jobId} jobId={message.jobId} />
               )}
               <Typography variant="caption" color="text.secondary" sx={{ ml: 1, display: panel ? 'none' : undefined }}>

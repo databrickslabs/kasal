@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -21,9 +21,12 @@ import ExecutionCheckpointService, {
   ExecutionCheckpoint,
 } from '../../../api/execution/ExecutionCheckpointService';
 import CheckpointUnitPicker from '../checkpoints/components/CheckpointUnitPicker';
+import { useThemeStore } from '../../../store/theme';
+import { kasalStageSurface } from '../../../theme/kasalSurfaces';
 
 interface CheckpointDialogProps {
   open: boolean;
+  embedded?: boolean;
   jobId: string | null;
   onClose: () => void;
   /** Called with the NEW execution's job_id after a successful resume. */
@@ -43,27 +46,36 @@ interface CheckpointDialogProps {
  */
 const CheckpointDialog: React.FC<CheckpointDialogProps> = ({
   open,
+  embedded = false,
   jobId,
   onClose,
   onResumed,
 }) => {
   const { t } = useTranslation();
+  const dark = useThemeStore(s => s.isDarkMode);
   const [checkpoint, setCheckpoint] = useState<ExecutionCheckpoint | null>(null);
   const [loading, setLoading] = useState(false);
   const [resuming, setResuming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fromUnit, setFromUnit] = useState<string>('');
+  const requestId = useRef(0);
 
   const load = useCallback(async () => {
     if (!jobId) return;
+    const request = ++requestId.current;
     setLoading(true);
+    setCheckpoint(null);
     setError(null);
     try {
-      setCheckpoint(await ExecutionCheckpointService.getCheckpoint(jobId));
+      const result = await ExecutionCheckpointService.getCheckpoint(jobId);
+      if (request !== requestId.current) return;
+      setCheckpoint(result);
+      // A completed run has nothing left to continue: offer a real rerun.
+      setFromUnit(result?.execution_status?.toLowerCase() === 'completed' ? result.units.at(-1)?.key || '' : '');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load checkpoint');
+      if (request === requestId.current) setError(err instanceof Error ? err.message : 'Failed to load checkpoint');
     } finally {
-      setLoading(false);
+      if (request === requestId.current) setLoading(false);
     }
   }, [jobId]);
 
@@ -72,10 +84,11 @@ const CheckpointDialog: React.FC<CheckpointDialogProps> = ({
       setFromUnit('');
       void load();
     }
+    return () => { requestId.current += 1; };
   }, [open, load]);
 
   const handleResume = async () => {
-    if (!jobId) return;
+    if (!jobId || resuming || !checkpoint?.resumable) return;
     setResuming(true);
     setError(null);
     try {
@@ -200,6 +213,7 @@ const CheckpointDialog: React.FC<CheckpointDialogProps> = ({
         </Typography>
 
         <CheckpointUnitPicker
+          hideDefault={checkpoint.execution_status?.toLowerCase() === 'completed' && checkpoint.units.length > 0}
           units={checkpoint.units.map((unit) => ({
             key: unit.key,
             name: unit.name,
@@ -233,48 +247,53 @@ const CheckpointDialog: React.FC<CheckpointDialogProps> = ({
     );
   };
 
-  return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <HistoryIcon color="primary" />
+  const title = <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 3, pt: 3, pb: 2, flexShrink: 0 }}>
+        <HistoryIcon sx={{ color: 'text.secondary' }} />
         <Typography variant="h6" component="span">
-          Checkpoint
+          {embedded ? 'Checkpoints' : 'Checkpoint'}
           {checkpoint?.run_name ? ` — ${checkpoint.run_name}` : ''}
         </Typography>
-      </DialogTitle>
-
-      <DialogContent>
+      </Box>;
+  const content = <Box sx={{ px: 3, pb: 2, flex: 1, minHeight: 0, overflowY: 'auto' }}>
         {error && (
           <Alert severity="error" sx={{ mb: 2 }}>
             {error}
           </Alert>
         )}
+        {error && !checkpoint && <Button color="inherit" onClick={() => void load()}>Try again</Button>}
         {renderBody()}
-      </DialogContent>
-
-      <DialogActions sx={{ px: 3, pb: 2 }}>
-        {checkpoint && (
+      </Box>;
+  const actions = <Box sx={{ px: 3, pb: 2, pt: 1, display: 'flex', gap: 1, alignItems: 'center', flexShrink: 0 }}>
+        {checkpoint && !embedded && (
           <Button onClick={handleExpire} color="error" size="small">
             Discard checkpoint
           </Button>
         )}
         <Box sx={{ flex: 1 }} />
-        <Button onClick={onClose} disabled={resuming}>
+        <Button color="inherit" onClick={onClose} disabled={resuming} sx={{ borderRadius: '12px', textTransform: 'none' }}>
           {t('common.cancel')}
         </Button>
         <Button
           onClick={handleResume}
           variant="contained"
+          disableElevation
+          sx={{ borderRadius: '12px', textTransform: 'none', bgcolor: 'text.primary', color: 'background.paper', '&:hover': { bgcolor: 'text.secondary' } }}
           startIcon={
             resuming ? <CircularProgress size={16} color="inherit" /> : <PlayArrowIcon />
           }
           disabled={resuming || loading || !checkpoint?.resumable}
         >
-          Resume
+          {embedded ? 'Run from checkpoint' : 'Resume'}
         </Button>
-      </DialogActions>
-    </Dialog>
-  );
+      </Box>;
+  if (embedded) return <Box role="region" aria-label="Execution checkpoints" sx={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', minHeight: 0, ...kasalStageSurface(dark) }}>
+    {title}{content}{actions}
+  </Box>;
+  return <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+    <DialogTitle sx={{ p: 0 }}>{title}</DialogTitle>
+    <DialogContent sx={{ p: 0 }}>{content}</DialogContent>
+    <DialogActions sx={{ p: 0 }}>{actions}</DialogActions>
+  </Dialog>;
 };
 
 export default CheckpointDialog;
