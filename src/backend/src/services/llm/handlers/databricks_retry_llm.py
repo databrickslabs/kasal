@@ -192,6 +192,14 @@ class DatabricksRetryLLM(LLM):
         # max_retries still wins, for callers that want the SDK behaviour.
         kwargs.setdefault("max_retries", 0)
 
+        # Databricks forwards this OpenAI-only option into Gemini's
+        # generation_config, which rejects it. Generation without streaming
+        # works; executing the same plan must also stay on the selected model.
+        # Both Kasal and CrewAI use this transport. Usage returned by the
+        # endpoint is still collected without requesting stream_options.
+        if _is_gemini_model(str(kwargs.get("model", ""))):
+            kwargs["stream_usage"] = False
+
         # A global `litellm.request_timeout = REQUEST_TIMEOUT` used to be set here,
         # because litellm's Databricks provider ignored the per-call timeout. The
         # engine does not call litellm at all — `timeout` above is handed straight

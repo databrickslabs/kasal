@@ -10,7 +10,8 @@ ImportError is raised on first use if it is missing.
 import logging
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import closing
 from typing import Any, Literal
 
 from pydantic import BaseModel, PrivateAttr
@@ -187,6 +188,8 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
     max_tokens: int | None = None
     max_completion_tokens: int | None = None
     stream: bool = False
+    # Endpoint policy: keep streaming even when usage opt-in is unsupported.
+    stream_usage: bool = True
     response_format: Any | None = None
     reasoning_effort: str | None = None
     #: Anthropic extended thinking. Claude does NOT accept `reasoning_effort`;
@@ -296,7 +299,8 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
             available_functions,
             from_task,
             from_agent,
-            response_model,
+            # Endpoint handlers accept structured output via **kwargs.
+            response_model=response_model,
         )
 
     # ------------------------------- call -------------------------------
@@ -838,92 +842,137 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
             )
         return ""
 
+    def _chat_stream_chunks(self, params: dict[str, Any]) -> Iterator[Any]:
+        """Negotiate usage before model fallback, including errors sent via SSE.
+
+        The SDK can accept HTTP 200 and only raise the provider's validation
+        error when the stream is read. Retry once on the SAME model, and only
+        before yielding a chunk, so already-emitted output is never replayed.
+        Remember rejection on this LLM to avoid repeating it every tool round.
+        """
+        params = {**params, "stream": True}
+        if self.stream_usage:
+            params["stream_options"] = {"include_usage": True}
+        else:
+            params.pop("stream_options", None)
+        while True:
+            response_stream = None
+            started = False
+            try:
+                response_stream = self.client.chat.completions.create(
+                    **bounded_params(params)
+                )
+                for part in response_stream:
+                    started = True
+                    yield part
+                return
+            except Exception as e:
+                # Some gateways put the actual field violation in the error
+                # body while the SDK's message is only "error during streaming".
+                detail = f"{e} {getattr(e, 'body', '')}".lower()
+                if (
+                    started
+                    or getattr(e, "status_code", None) not in (None, 400, 422)
+                    or "stream_options" not in params
+                    or "stream_options" not in detail
+                    or not any(
+                        marker in detail
+                        for marker in (
+                            "unknown",
+                            "unsupported",
+                            "not supported",
+                            "invalid",
+                            "unrecognized",
+                            "not permitted",
+                        )
+                    )
+                ):
+                    raise
+                params.pop("stream_options")
+                self.stream_usage = False
+                logger.info(
+                    "[llm] %s rejects stream_options; continuing streaming on "
+                    "the same model without usage opt-in",
+                    self.model,
+                )
+            finally:
+                close = getattr(response_stream, "close", None)
+                if callable(close):
+                    close()
+
     def _stream_chat_completion(
         self, params: dict[str, Any]
     ) -> tuple[str, dict[str, Any] | None, list[dict[str, Any]]]:
         """One streamed chat completion: emits LLMStreamChunkEvent per text
         delta, accumulates tool-call deltas, returns (text, usage, calls)."""
-        params = {**params, "stream": True, "stream_options": {"include_usage": True}}
-        try:
-            response_stream = self.client.chat.completions.create(
-                **bounded_params(params)
-            )
-        except Exception as e:
-            # Some OpenAI-compatible servers reject stream_options; retry
-            # without it (usage is then unavailable for this call).
-            if "stream_options" not in str(e):
-                raise
-            params.pop("stream_options", None)
-            response_stream = self.client.chat.completions.create(
-                **bounded_params(params)
-            )
 
         chunks: list[str] = []
         calls_by_index: dict[int, dict[str, Any]] = {}
         usage: dict[str, Any] | None = None
         chunk_index = 0
         finish_reason: str | None = None
-        for part in response_stream:
-            check_request_deadline("".join(chunks))
-            if getattr(part, "usage", None) is not None:
-                usage = self._extract_chat_token_usage(part)
-            choices = getattr(part, "choices", None)
-            if not choices:
-                continue
-            # The last chunk carries why generation stopped. "length" means the
-            # allowance ran out mid-sentence — the model never finished, and the
-            # accumulated text is not an answer.
-            if getattr(choices[0], "finish_reason", None):
-                finish_reason = choices[0].finish_reason
-            delta = choices[0].delta
-            # `content` is a plain string on most endpoints, but Anthropic-style
-            # reasoning models (Claude Fable 5) send a LIST of typed blocks and
-            # MIX the two within one stream. Passing that list straight into
-            # LLMStreamChunkEvent(chunk=...) — declared `chunk: str` — killed
-            # every run with a pydantic string_type error, and appending it to
-            # `chunks` would have put the reasoning block into the answer.
-            text, reasoning = split_message_content(delta)
-            if reasoning:
-                self._add_reasoning(reasoning)
-                # Don't stream the placeholder: it is a per-call fact, not a
-                # chunk, and one event per delta is what produced the repeated
-                # sentinel the user saw. The final LLMCallCompletedEvent carries
-                # it once.
-                if reasoning != REDACTED_REASONING:
+        with closing(self._chat_stream_chunks(params)) as response_stream:
+            for part in response_stream:
+                check_request_deadline("".join(chunks))
+                if getattr(part, "usage", None) is not None:
+                    usage = self._extract_chat_token_usage(part)
+                choices = getattr(part, "choices", None)
+                if not choices:
+                    continue
+                # The last chunk carries why generation stopped. "length" means the
+                # allowance ran out mid-sentence — the model never finished, and the
+                # accumulated text is not an answer.
+                if getattr(choices[0], "finish_reason", None):
+                    finish_reason = choices[0].finish_reason
+                delta = choices[0].delta
+                # `content` is a plain string on most endpoints, but Anthropic-style
+                # reasoning models (Claude Fable 5) send a LIST of typed blocks and
+                # MIX the two within one stream. Passing that list straight into
+                # LLMStreamChunkEvent(chunk=...) — declared `chunk: str` — killed
+                # every run with a pydantic string_type error, and appending it to
+                # `chunks` would have put the reasoning block into the answer.
+                text, reasoning = split_message_content(delta)
+                if reasoning:
+                    self._add_reasoning(reasoning)
+                    # Don't stream the placeholder: it is a per-call fact, not a
+                    # chunk, and one event per delta is what produced the repeated
+                    # sentinel the user saw. The final LLMCallCompletedEvent carries
+                    # it once.
+                    if reasoning != REDACTED_REASONING:
+                        event_bus.emit(
+                            self,
+                            LLMReasoningChunkEvent(
+                                model=self.model,
+                                reasoning=reasoning,
+                                chunk_index=chunk_index,
+                            ),
+                        )
+                if text:
+                    chunks.append(text)
+                    chunk_task, chunk_agent = self._call_attribution()
                     event_bus.emit(
                         self,
-                        LLMReasoningChunkEvent(
+                        LLMStreamChunkEvent(
                             model=self.model,
-                            reasoning=reasoning,
+                            chunk=text,
                             chunk_index=chunk_index,
+                            from_task=chunk_task,
+                            from_agent=chunk_agent,
                         ),
                     )
-            if text:
-                chunks.append(text)
-                chunk_task, chunk_agent = self._call_attribution()
-                event_bus.emit(
-                    self,
-                    LLMStreamChunkEvent(
-                        model=self.model,
-                        chunk=text,
-                        chunk_index=chunk_index,
-                        from_task=chunk_task,
-                        from_agent=chunk_agent,
-                    ),
-                )
-                chunk_index += 1
-            for tc in getattr(delta, "tool_calls", None) or []:
-                slot = calls_by_index.setdefault(
-                    tc.index, {"id": None, "name": "", "arguments": ""}
-                )
-                if getattr(tc, "id", None):
-                    slot["id"] = tc.id
-                function = getattr(tc, "function", None)
-                if function is not None:
-                    if getattr(function, "name", None):
-                        slot["name"] = function.name
-                    if getattr(function, "arguments", None):
-                        slot["arguments"] += function.arguments
+                    chunk_index += 1
+                for tc in getattr(delta, "tool_calls", None) or []:
+                    slot = calls_by_index.setdefault(
+                        tc.index, {"id": None, "name": "", "arguments": ""}
+                    )
+                    if getattr(tc, "id", None):
+                        slot["id"] = tc.id
+                    function = getattr(tc, "function", None)
+                    if function is not None:
+                        if getattr(function, "name", None):
+                            slot["name"] = function.name
+                        if getattr(function, "arguments", None):
+                            slot["arguments"] += function.arguments
 
         if usage:
             self._track_token_usage_internal(usage)
