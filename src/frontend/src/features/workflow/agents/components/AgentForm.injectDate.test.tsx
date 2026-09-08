@@ -1,6 +1,6 @@
 import { vi, beforeEach, describe, it, expect } from 'vitest';
 import React from 'react';
-import { render, screen, waitFor, within, act } from '@testing-library/react';
+import { render, screen, waitFor, within, act, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import AgentForm from './AgentForm';
 
@@ -527,12 +527,12 @@ describe('AgentForm - Inject Date Feature', () => {
 
       render(<AgentForm {...defaultProps} />);
 
-      // Fill in required fields
+      // Set unrelated required fields once; this test checks the date payload, not keyboard timing.
       await act(async () => {
-        await userEvent.type(screen.getByLabelText(/Name/i), 'Test Agent');
-        await userEvent.type(screen.getByLabelText(/Role/i), 'Test Role');
-        await userEvent.type(screen.getByLabelText(/Goal/i), 'Test Goal');
-        await userEvent.type(screen.getByLabelText(/Backstory/i), 'Test Backstory');
+        fireEvent.change(screen.getByLabelText(/Name/i), { target: { value: 'Test Agent' } });
+        fireEvent.change(screen.getByLabelText(/Role/i), { target: { value: 'Test Role' } });
+        fireEvent.change(screen.getByLabelText(/Goal/i), { target: { value: 'Test Goal' } });
+        fireEvent.change(screen.getByLabelText(/Backstory/i), { target: { value: 'Test Backstory' } });
       });
 
       await expandBehaviorSettings();
@@ -564,12 +564,12 @@ describe('AgentForm - Inject Date Feature', () => {
 
       render(<AgentForm {...defaultProps} />);
 
-      // Fill in required fields
+      // Set unrelated required fields once; this test checks the date payload, not keyboard timing.
       await act(async () => {
-        await userEvent.type(screen.getByLabelText(/Name/i), 'Test Agent');
-        await userEvent.type(screen.getByLabelText(/Role/i), 'Test Role');
-        await userEvent.type(screen.getByLabelText(/Goal/i), 'Test Goal');
-        await userEvent.type(screen.getByLabelText(/Backstory/i), 'Test Backstory');
+        fireEvent.change(screen.getByLabelText(/Name/i), { target: { value: 'Test Agent' } });
+        fireEvent.change(screen.getByLabelText(/Role/i), { target: { value: 'Test Role' } });
+        fireEvent.change(screen.getByLabelText(/Goal/i), { target: { value: 'Test Goal' } });
+        fireEvent.change(screen.getByLabelText(/Backstory/i), { target: { value: 'Test Backstory' } });
       });
 
       await expandBehaviorSettings();
@@ -642,12 +642,12 @@ describe('AgentForm - Inject Date Feature', () => {
 
       render(<AgentForm {...defaultProps} />);
 
-      // Fill in required fields
+      // Set unrelated required fields once; this test checks the date payload, not keyboard timing.
       await act(async () => {
-        await userEvent.type(screen.getByLabelText(/Name/i), 'Test Agent');
-        await userEvent.type(screen.getByLabelText(/Role/i), 'Test Role');
-        await userEvent.type(screen.getByLabelText(/Goal/i), 'Test Goal');
-        await userEvent.type(screen.getByLabelText(/Backstory/i), 'Test Backstory');
+        fireEvent.change(screen.getByLabelText(/Name/i), { target: { value: 'Test Agent' } });
+        fireEvent.change(screen.getByLabelText(/Role/i), { target: { value: 'Test Role' } });
+        fireEvent.change(screen.getByLabelText(/Goal/i), { target: { value: 'Test Goal' } });
+        fireEvent.change(screen.getByLabelText(/Backstory/i), { target: { value: 'Test Backstory' } });
       });
 
       // Don't enter a date format, leaving it empty

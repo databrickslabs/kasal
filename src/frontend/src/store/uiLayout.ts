@@ -76,7 +76,7 @@ export const useUILayoutStore = create<UILayoutStore>((set, get) => ({
   // Default UI state with persisted values
   screenWidth: typeof window !== 'undefined' ? window.innerWidth : 1200,
   screenHeight: typeof window !== 'undefined' ? window.innerHeight : 800,
-  tabBarHeight: 48,
+  tabBarHeight: 0,
   leftSidebarVisible: true,
   leftSidebarExpanded: false,
   leftSidebarBaseWidth: 48,

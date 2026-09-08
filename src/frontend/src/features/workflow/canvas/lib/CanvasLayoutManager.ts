@@ -63,7 +63,7 @@ export class CanvasLayoutManager {
       screenHeight: typeof window !== 'undefined' ? window.innerHeight : 800,
 
       // Fixed UI elements
-      tabBarHeight: 48,
+      tabBarHeight: 0,
 
       // Left sidebar defaults
       leftSidebarVisible: true,
