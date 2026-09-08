@@ -23,6 +23,13 @@ logger = logging.getLogger(__name__)
 # a model field.
 _DAX_TABLE_REF = re.compile(r"(?:'([^']+)'|(\w+))\s*\[")
 
+# Cap on the raw M shipped downstream for a table `resolve_mquery_with_context`
+# couldn't compile. Matches the truncation `metric_view_utils/pipeline.py`
+# already applies to its OWN "tables not emitted" report — kept consistent
+# rather than inventing a second cutoff. See `_build_ucmv_mquery`. Module-level
+# for the same Pydantic-private-attribute reason as `_DAX_TABLE_REF` above.
+_UNRESOLVED_MQUERY_PREVIEW_CHARS = 2000
+
 
 class PipelineConfigGeneratorSchema(BaseModel):
     """Input schema — drives the Kasal UI form."""
@@ -373,14 +380,36 @@ class PipelineConfigGeneratorTool(BaseTool):
             # NOT fatal: on failure we fall back to Fabric TMDL (which a Service
             # Account CAN read), mirroring the Semantic Model Fetcher.
             admin_tables = {}
+            # {name: raw_M} of the model's named/shared expressions — parsed
+            # from the SAME scan_result/tmdl_parts as admin_tables (no extra
+            # API calls). Needed for two M shapes a table's own mquery_
+            # expression can't resolve alone: a table that's nothing but a
+            # passthrough to a disabled staging query, and a table whose
+            # physical source is built from model PARAMETERS (also surfaced
+            # here, not in `tables`) via string concatenation. See
+            # metric_view_utils.mquery_parser.resolve_mquery_with_context.
+            expressions: dict[str, str] = {}
+            # Which tier actually supplied each — surfaced in `summary` below so a
+            # rerun is self-diagnosing (which tier fired, how many expressions it
+            # found) without needing a live repro script to find out.
+            admin_tables_source: Optional[str] = None
+            expressions_source: Optional[str] = None
             logger.info("[PipelineConfigGen] API 3: Admin Scanner (workspace scan)...")
             try:
                 scan_result = gen.trigger_admin_scan(admin_token, workspace_id)
                 admin_tables = gen.parse_admin_tables(
                     scan_result, dataset_id=dataset_id
                 )
+                if admin_tables:
+                    admin_tables_source = "admin scanner"
+                expressions = gen.parse_admin_expressions(
+                    scan_result, dataset_id=dataset_id
+                )
+                if expressions:
+                    expressions_source = "admin scanner"
                 logger.info(
-                    f"[PipelineConfigGen]   → {len(admin_tables)} tables (admin scanner)"
+                    f"[PipelineConfigGen]   → {len(admin_tables)} tables, "
+                    f"{len(expressions)} shared expressions (admin scanner)"
                 )
             except Exception as e:
                 msg = f"API 3 (Admin Scanner) failed: {e}"
@@ -390,9 +419,20 @@ class PipelineConfigGeneratorTool(BaseTool):
             # API 3 fallback: Fabric TMDL (works for Service Accounts that the
             # Admin Scanner blocks). Uses whichever non-admin creds are present
             # (SA username/password OR SP client_secret) to mint a Fabric token.
-            if not admin_tables:
+            #
+            # Gated on EITHER admin_tables OR expressions being empty, not just
+            # admin_tables — a tier can return real tables but empty expressions
+            # (e.g. a token whose rights cover dataset schema but not the
+            # tenant-admin-gated "detailed metadata" expressions/parameters
+            # section within the same API), which used to be silently accepted
+            # as "done" and skip every remaining tier, leaving every
+            # reference-following / parameter-driven M unresolved even though
+            # admin_tables looked like a success. Each tier below only fills in
+            # whichever of the two is still missing — it never overwrites a
+            # good result from an earlier tier with a worse one.
+            if not admin_tables or not expressions:
                 logger.info(
-                    "[PipelineConfigGen] Admin scan empty — trying Fabric TMDL fallback..."
+                    "[PipelineConfigGen] Admin scan tables/expressions incomplete — trying Fabric TMDL fallback..."
                 )
                 try:
                     fabric_token = gen.get_fabric_token(
@@ -406,11 +446,19 @@ class PipelineConfigGeneratorTool(BaseTool):
                         fabric_token, workspace_id, dataset_id
                     )
                     if tmdl_parts:
-                        admin_tables = gen.parse_tmdl_to_admin_tables(
-                            tmdl_parts, dataset_id=dataset_id
-                        )
+                        if not admin_tables:
+                            admin_tables = gen.parse_tmdl_to_admin_tables(
+                                tmdl_parts, dataset_id=dataset_id
+                            )
+                            if admin_tables:
+                                admin_tables_source = "Fabric TMDL"
+                        if not expressions:
+                            expressions = gen.parse_tmdl_expressions(tmdl_parts)
+                            if expressions:
+                                expressions_source = "Fabric TMDL"
                         logger.info(
-                            f"[PipelineConfigGen]   → {len(admin_tables)} tables (Fabric TMDL)"
+                            f"[PipelineConfigGen]   → {len(admin_tables)} tables, "
+                            f"{len(expressions)} shared expressions (Fabric TMDL)"
                         )
                     else:
                         logger.warning(
@@ -428,10 +476,11 @@ class PipelineConfigGeneratorTool(BaseTool):
             # PRINCIPAL token, if an admin client_secret was supplied. Covers the
             # case where the workspace is NOT Fabric-enabled (TMDL unavailable)
             # and the SA cannot use the Admin Scanner — an SP with admin rights
-            # still can. Only runs when a distinct SP secret is available.
-            if not admin_tables and admin_client_secret:
+            # still can. Only runs when a distinct SP secret is available. Same
+            # independent-fill behavior as the TMDL tier above.
+            if (not admin_tables or not expressions) and admin_client_secret:
                 logger.info(
-                    "[PipelineConfigGen] TMDL empty — retrying Admin Scanner with Service Principal..."
+                    "[PipelineConfigGen] Tables/expressions still incomplete — retrying Admin Scanner with Service Principal..."
                 )
                 try:
                     sp_admin_token = self._resolve_token(
@@ -445,11 +494,21 @@ class PipelineConfigGeneratorTool(BaseTool):
                         label="admin-SP-fallback",
                     )
                     scan_result = gen.trigger_admin_scan(sp_admin_token, workspace_id)
-                    admin_tables = gen.parse_admin_tables(
-                        scan_result, dataset_id=dataset_id
-                    )
+                    if not admin_tables:
+                        admin_tables = gen.parse_admin_tables(
+                            scan_result, dataset_id=dataset_id
+                        )
+                        if admin_tables:
+                            admin_tables_source = "SP fallback"
+                    if not expressions:
+                        expressions = gen.parse_admin_expressions(
+                            scan_result, dataset_id=dataset_id
+                        )
+                        if expressions:
+                            expressions_source = "SP fallback"
                     logger.info(
-                        f"[PipelineConfigGen]   → {len(admin_tables)} tables (SP fallback)"
+                        f"[PipelineConfigGen]   → {len(admin_tables)} tables, "
+                        f"{len(expressions)} shared expressions (SP fallback)"
                     )
                 except Exception as e:
                     msg = f"Service Principal Admin Scanner fallback failed: {e}"
@@ -604,7 +663,7 @@ class PipelineConfigGeneratorTool(BaseTool):
             # `warehouse_id` and added in later phases.
             enrichment_log: list[dict] = []
             enrichment_log += self._enrich_source_tables_from_mquery(
-                config, admin_tables
+                config, admin_tables, expressions
             )
 
             # P2 (warehouse): resolve flag-column filter_sets whose values live in
@@ -697,7 +756,41 @@ class PipelineConfigGeneratorTool(BaseTool):
             ucmv_measures = self._build_ucmv_measures(
                 measures, admin_tables=admin_tables, config=config
             )
-            ucmv_mquery = self._build_ucmv_mquery(admin_tables)
+            ucmv_mquery = self._build_ucmv_mquery(admin_tables, expressions)
+
+            # Diagnostic split: how many tables resolve via the DIRECT path alone
+            # (resolve_mquery_to_sql — no `expressions` needed) vs how many the
+            # ACTUAL ucmv_mquery got (resolve_mquery_with_context — reference-
+            # following + parameter-substitution, needs `expressions`). If these
+            # two numbers come out equal despite `expressions` being non-empty,
+            # the context-aware half of resolve_mquery_with_context isn't
+            # contributing anything at runtime — points at a stale/uncommitted
+            # deploy of metric_view_utils/mquery_parser.py or
+            # mquery_let_evaluator.py rather than a data problem.
+            try:
+                from src.services.tools.metric_view_utils.mquery_parser import (
+                    resolve_mquery_to_sql as _direct_resolve,
+                )
+
+                _direct_resolved = sum(
+                    1
+                    for _tname, _tinfo in (admin_tables or {}).items()
+                    if isinstance(_tinfo, dict)
+                    and _direct_resolve(
+                        (
+                            _tinfo.get("mquery_expression")
+                            or _tinfo.get("mquery")
+                            or ""
+                        ).strip()
+                    )
+                )
+            except Exception:
+                _direct_resolved = None
+            _context_resolved = sum(
+                1
+                for _e in ucmv_mquery
+                if _e.get("transpiled_sql", "").strip().upper().startswith("SELECT")
+            )
 
             # ── Measure usage ranking (reviewer prioritization) ──────────────
             # How many OTHER measures reference each measure (in-degree). Lets
@@ -718,6 +811,18 @@ class PipelineConfigGeneratorTool(BaseTool):
                 _um["referenced_by"] = _usage.get(
                     _um.get("original_name") or _um.get("measure_name"), 0
                 )
+
+            # Ship the raw Power Query M per table so the UCMV pipeline can resolve
+            # physical table/column names and materialize generated (List.Dates)
+            # tables — KASAL_FIXES Gaps 1-3 — without a separate scan_data handoff.
+            # Rides inside proposed_config (already injected into the generator's
+            # config_json), so no new flow field/wiring is needed. Keyed table→raw M.
+            config["table_mquery_expressions"] = {
+                _n: (_t.get("mquery_expression") or _t.get("mquery") or "")
+                for _n, _t in (admin_tables or {}).items()
+                if isinstance(_t, dict)
+                and (_t.get("mquery_expression") or _t.get("mquery"))
+            }
 
             output = {
                 "proposed_config": config,
@@ -741,6 +846,11 @@ class PipelineConfigGeneratorTool(BaseTool):
                     "measures_referenced_by_others": len(usage_ranking),
                     "mquery_tables_for_ucmv": len(ucmv_mquery),
                     "admin_tables_scanned": len(admin_tables),
+                    "admin_tables_source": admin_tables_source,
+                    "expressions_captured": len(expressions),
+                    "expressions_source": expressions_source,
+                    "mquery_resolved_direct_only": _direct_resolved,
+                    "mquery_resolved_with_context": _context_resolved,
                 },
                 "warnings": warnings,
                 # Additive-enrichment audit trail (source_table parse, warehouse
@@ -791,6 +901,7 @@ class PipelineConfigGeneratorTool(BaseTool):
                         workspace_id=workspace_id,
                         dataset_id=dataset_id,
                         report_id=report_id,
+                        expressions=expressions,
                     )
                 )
             except Exception as _ext_err:
@@ -941,7 +1052,7 @@ class PipelineConfigGeneratorTool(BaseTool):
         return out
 
     @staticmethod
-    def _build_ucmv_mquery(admin_tables: dict) -> list[dict]:
+    def _build_ucmv_mquery(admin_tables: dict, expressions: dict | None = None) -> list[dict]:
         """Convert admin_tables into the UCMV `mquery_json` shape.
 
         Both `parse_admin_tables` and `parse_tmdl_to_admin_tables` populate
@@ -950,16 +1061,59 @@ class PipelineConfigGeneratorTool(BaseTool):
             {table_name, transpiled_sql, validation_passed}
         and skips any entry without both a table_name and sql — so tables with
         no source expression are omitted (they carry no fact/source signal).
+
+        Prefers a deterministic compile to compact SQL
+        (``resolve_mquery_with_context``) over shipping the raw M. Three
+        reasons, not one:
+        (1) M authored via a catalog-browse connector (``Databricks.Catalogs`` et
+            al — "Get Data → browse catalog/schema/table" in the PBI UI) carries
+            no embedded SQL text at all, so the downstream SQL-only parser finds
+            no FROM clause and silently treats the table as non-fact — every such
+            table was dropped, 0 views generated.
+        (2) Some tables are nothing but a reference to a disabled "staging"
+            query (their own M has no source at all), or build their physical
+            source from model PARAMETERS via string concatenation rather than
+            a literal — both need the model's named/shared ``expressions``
+            (parsed alongside ``admin_tables`` — see ``parse_admin_expressions``
+            / ``parse_tmdl_expressions``) to resolve at all.
+        (3) That M is also the largest text in this payload (a single table's
+            source can run 10-15K+ chars once the connector's ordinary column
+            select/rename steps are included). Shipping it raw, per table, is
+            what breaks the pipeline-config → UCMV task handoff: the receiving
+            agent has to reproduce this JSON verbatim as its own tool-call
+            argument, which is bounded by its own output-token budget — nowhere
+            near enough for a payload like that. A table with unresolved M and
+            no embedded SQL previously still shipped in full; now it's capped.
         """
+        from src.services.tools.metric_view_utils.mquery_parser import (
+            resolve_mquery_with_context,
+        )
+
         out: list[dict] = []
         for tbl_name, tbl_info in (admin_tables or {}).items():
             if not isinstance(tbl_info, dict):
                 continue
-            sql = (
+            raw = (
                 tbl_info.get("mquery_expression") or tbl_info.get("mquery") or ""
             ).strip()
-            if not tbl_name or not sql:
+            if not tbl_name or not raw:
                 continue
+            resolved = resolve_mquery_with_context(raw, expressions)
+            if resolved:
+                sql = resolved
+            elif len(raw) <= _UNRESOLVED_MQUERY_PREVIEW_CHARS:
+                # Small enough to ship as-is: covers Value.NativeQuery-style M
+                # (the downstream parser finds the embedded SELECT/FROM
+                # regardless of the M wrapper around it) and non-warehouse /
+                # DAX-calc / inline-constant tables the migration report still
+                # wants to explain as "correctly skipped" rather than vanishing.
+                sql = raw
+            else:
+                # Large AND unresolved — cap it. The table still gets reported
+                # (with enough of the M to classify why it was skipped), without
+                # repeating the handoff-breaking mistake. The full text remains
+                # queryable via the persisted powerbi_extraction row.
+                sql = raw[:_UNRESOLVED_MQUERY_PREVIEW_CHARS]
             out.append(
                 {
                     "table_name": tbl_name,
@@ -1071,6 +1225,7 @@ class PipelineConfigGeneratorTool(BaseTool):
         workspace_id,
         dataset_id,
         report_id,
+        expressions=None,
     ) -> None:
         """Persist the FULL raw extraction to the powerbi_extraction table (fail-open).
 
@@ -1119,6 +1274,7 @@ class PipelineConfigGeneratorTool(BaseTool):
                 relationships=relationships,
                 measures=measures,
                 admin_tables=admin_tables,
+                expressions=expressions or {},
                 report_definition=report_def or None,
                 proposed_config=config,
                 warnings=warnings or [],
@@ -1148,7 +1304,7 @@ class PipelineConfigGeneratorTool(BaseTool):
 
     @staticmethod
     def _enrich_source_tables_from_mquery(
-        config: dict, admin_tables: dict
+        config: dict, admin_tables: dict, expressions: dict | None = None,
     ) -> list[dict]:
         """P1 enrichment: fill ``join_key_map[dim].source_table`` from the dimension's
         Power Query M source (deterministic — no warehouse, no LLM).
@@ -1156,7 +1312,10 @@ class PipelineConfigGeneratorTool(BaseTool):
         A dimension's physical UC table name isn't in the PBI APIs, but a
         Databricks-connector / native-query M source spells it out. For each join
         entry lacking a ``source_table`` (or holding a ``TODO:`` placeholder), parse
-        it from ``admin_tables[dim]["mquery_expression"]``. Strictly additive: an
+        it from ``admin_tables[dim]["mquery_expression"]`` — following a reference
+        to a disabled staging query, or evaluating a parameter-driven source, via
+        the model's named/shared ``expressions`` when the dimension's own M alone
+        isn't enough (``extract_source_table`` accepts them). Strictly additive: an
         existing non-TODO value is never overwritten. Returns an audit log of what
         was filled vs. skipped (and why), for the Config Editor.
         """
@@ -1175,7 +1334,9 @@ class PipelineConfigGeneratorTool(BaseTool):
                 continue  # human/derived value — never overwrite
             tinfo = admin_tables.get(dim) or {}
             mquery = tinfo.get("mquery_expression") or tinfo.get("mquery") or ""
-            resolved = extract_source_table(mquery) if mquery else None
+            resolved = (
+                extract_source_table(mquery, expressions) if mquery else None
+            )
             if resolved:
                 entry["source_table"] = resolved
                 log.append(
