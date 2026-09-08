@@ -1,18 +1,20 @@
 """Connection approval gates for selected conditional branches."""
 
+from typing import Any
+
 from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
 
 def route_approval_gates(
-    config,
-    router,
-    route_tasks,
-    crew_name,
-    upstream_method,
-    sequence,
-    callbacks,
-    group_context,
-):
+    config: dict[str, Any],
+    router: dict[str, Any],
+    route_tasks: list[dict[str, Any]],
+    crew_name: str | None,
+    upstream_method: str,
+    sequence: int,
+    callbacks: dict[str, Any] | None,
+    group_context: Any,
+) -> list[Any]:
     """Match both ends; another incoming branch must not impose its approval.
 
     A gate runs inside its selected route listener. Registering it directly on

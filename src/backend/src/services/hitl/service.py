@@ -8,7 +8,7 @@ handling timeouts, and triggering flow resume.
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -216,9 +216,10 @@ class HITLService:
                     f"User {approved_by} is not allowed to approve this gate"
                 )
 
-            if (approval.gate_config or {}).get("require_comment") and not (
-                comment or ""
-            ).strip():
+            if (
+                cast(Dict[str, Any], approval.gate_config or {}).get("require_comment")
+                and not (comment or "").strip()
+            ):
                 raise HITLApprovalValidationError(
                     "A comment is required to approve this request"
                 )

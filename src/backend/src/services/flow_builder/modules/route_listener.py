@@ -1,5 +1,7 @@
 """Execute a selected router branch with the same task policies as other crews."""
 
+from typing import Any, Sequence
+
 from src.core.logger import LoggerManager
 from src.services.execution.harnesses import active_harness
 from src.services.execution.kernel.execution_callback import create_execution_callbacks
@@ -21,22 +23,22 @@ logger = LoggerManager.get_instance().flow
 
 
 def route_listener_factory(
-    route_task_list,
-    route_listener_method_name,
-    callbacks_param,
-    group_ctx,
-    expected_route,
-    route_crew_name_param,
-    upstream_method,
-    approval_gates=(),
-    replay_output=None,
-):
+    route_task_list: list[Any],
+    route_listener_method_name: str,
+    callbacks_param: dict[str, Any] | None,
+    group_ctx: Any,
+    expected_route: str,
+    route_crew_name_param: str | None,
+    upstream_method: str,
+    approval_gates: Sequence[Any] = (),
+    replay_output: Any = None,
+) -> Any:
     route_task_list = tasks_for_review(
         route_task_list, route_listener_method_name, callbacks_param
     )
 
     @listen(expected_route)
-    async def route_listener_method(self, previous_output):
+    async def route_listener_method(self: Any, previous_output: Any) -> Any:
         logger.info("=" * 80)
         logger.info(f"ROUTE LISTENER METHOD CALLED - {route_listener_method_name}")
         logger.info(f"Executing route listener for route: {expected_route}")
@@ -75,7 +77,8 @@ def route_listener_factory(
 
         # On approval resume, already completed branches must not execute again.
         if replay_output is not None:
-            _emit_checkpoint_restored(route_crew_name_param, replay_output)
+            if route_crew_name_param:
+                _emit_checkpoint_restored(route_crew_name_param, replay_output)
             self.state[route_listener_method_name] = replay_output
             if route_crew_name_param:
                 self.state[route_crew_name_param] = replay_output

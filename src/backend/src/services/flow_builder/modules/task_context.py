@@ -1,9 +1,10 @@
 """Add context without losing guardrails, callbacks or private task identity."""
 
 from copy import copy
+from typing import Any
 
 
-def task_with_context(task, context):
+def task_with_context(task: Any, context: str) -> Any:
     # Both harness Task types implement shallow copying. Keep tool/agent and
     # guardrail identities, without rerunning validators or mutating the catalog.
     result = copy(task)
@@ -12,7 +13,9 @@ def task_with_context(task, context):
     return result
 
 
-def tasks_for_review(tasks, method_name, callbacks):
+def tasks_for_review(
+    tasks: list[Any], method_name: str, callbacks: dict[str, Any] | None
+) -> list[Any]:
     """Only the rejected crew receives the reviewer's correction instructions."""
     feedback = (callbacks or {}).get("review_feedback") or {}
     reason = feedback.get("reason")
