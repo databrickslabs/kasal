@@ -4,7 +4,7 @@ import { Box, Typography, Theme } from '@mui/material';
 import SupervisorAccountIcon from '@mui/icons-material/SupervisorAccount';
 import { useUILayoutStore } from '../../../../store/uiLayout';
 import { useCrewExecutionStore } from '../../../../store/crewExecution';
-import { useTabDirtyState } from '../../../../hooks/workflow/useTabDirtyState';
+import { useBuilderDirtyState } from '../../../../hooks/workflow/useBuilderDirtyState';
 import LLMSelectionDialog from './LLMSelectionDialog';
 
 interface ManagerNodeData {
@@ -22,7 +22,7 @@ const ManagerNode: React.FC<{ data: ManagerNodeData; id: string }> = ({ data, id
   const layoutOrientation = useUILayoutStore(state => state.layoutOrientation);
   const { setNodes } = useReactFlow();
   const setManagerLLM = useCrewExecutionStore(state => state.setManagerLLM);
-  const { markCurrentTabDirty } = useTabDirtyState();
+  const { markCurrentTabDirty } = useBuilderDirtyState();
 
   // Open the model picker on a left-click anywhere on the node body, mirroring
   // the AgentNode. Ignore clicks on the ReactFlow connection handles.

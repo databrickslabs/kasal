@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { ChatMessage, ChatSession } from '../types/chat';
-import { generateId } from '../utils/markdown';
+import { ChatMessage, ChatSession } from '../../features/chat/types/chat';
+import { generateId } from '../../features/chat/utils/markdown';
 // Sessions persist server-side (SQLite locally / Lakebase when active)
 // through the /chat-history API instead of browser IndexedDB. The adapter
 // retains the store's contract; previews and running-job markers also persist
@@ -16,7 +16,7 @@ import {
   addMessageToSession,
   updateMessageInSession,
   clearSessionMessages,
-} from '../persistence/sessionApi';
+} from '../../features/chat/persistence/sessionApi';
 
 const ACTIVE_SESSION_KEY = 'kasal-chat-active-session';
 let sessionNavigationVersion = 0;
@@ -250,7 +250,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     if (
       restoreActiveSession &&
       activeId &&
-      allSessions.some((s) => s.id === activeId)
+      allSessions.some((s) => s.id === activeId && (!s.mode || s.mode === 'chat'))
     ) {
       const msgs = await getSessionMessages(activeId);
       if (version !== sessionNavigationVersion || group !== currentGroupId()) return;
@@ -325,8 +325,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     const state = get();
 
     if (id === state.currentSessionId) {
-      if (remaining.length > 0) {
-        const next = remaining[0];
+      const next = remaining.find(session => !session.mode || session.mode === 'chat');
+      if (next) {
         localStorage.setItem(ACTIVE_SESSION_KEY, next.id);
         const msgs = await getSessionMessages(next.id);
         set({ sessions: remaining, currentSessionId: next.id, messages: msgs });
@@ -335,7 +335,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         const session = await dbCreateSession('New Chat', currentGroupId());
         localStorage.setItem(ACTIVE_SESSION_KEY, session.id);
         set({
-          sessions: [session],
+          sessions: [...remaining, session],
           currentSessionId: session.id,
           messages: [],
         });

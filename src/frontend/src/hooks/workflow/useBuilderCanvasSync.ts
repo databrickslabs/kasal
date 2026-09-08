@@ -1,8 +1,8 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { Node, Edge } from 'reactflow';
-import { useTabManagerStore } from '../../store/tabManager';
+import { useBuilderCanvasStore } from '../../app/sessions/builderCanvasStore';
 
-interface UseTabSyncProps {
+interface UseBuilderCanvasSyncProps {
   nodes: Node[];
   edges: Edge[];
   setNodes: React.Dispatch<React.SetStateAction<Node[]>>;
@@ -61,14 +61,14 @@ const edgesHaveChanged = (oldEdges: Edge[], newEdges: Edge[]): boolean => {
   return false;
 };
 
-export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps) => {
+export const useBuilderCanvasSync = ({ nodes, edges, setNodes, setEdges }: UseBuilderCanvasSyncProps) => {
   const {
-    activeTabId,
-    getActiveTab,
-    updateTabNodes,
-    updateTabEdges,
-    updateTabCrewInfo
-  } = useTabManagerStore();
+    activeCanvasId,
+    getActiveCanvas,
+    updateCanvasNodes,
+    updateCanvasEdges,
+    updateCanvasCrewInfo
+  } = useBuilderCanvasStore();
 
   // Keep track of whether we're currently loading crew data or switching tabs
   const isLoadingCrewRef = useRef(false);
@@ -88,19 +88,19 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
   // Save current state for a specific tab
   const saveStateForTab = useCallback((tabId: string, nodesToSave: Node[], edgesToSave: Edge[]) => {
     if (tabId && !isLoadingCrewRef.current) {
-      updateTabNodes(tabId, nodesToSave);
-      updateTabEdges(tabId, edgesToSave);
+      updateCanvasNodes(tabId, nodesToSave);
+      updateCanvasEdges(tabId, edgesToSave);
     }
-  }, [updateTabNodes, updateTabEdges]);
+  }, [updateCanvasNodes, updateCanvasEdges]);
 
   // Sync tab data to flow manager when active tab changes
   useEffect(() => {
     const timers: ReturnType<typeof setTimeout>[] = [];
     const later = (callback: () => void, delay: number) => timers.push(setTimeout(callback, delay));
-    if (activeTabId !== lastActiveTabIdRef.current) {
+    if (activeCanvasId !== lastActiveTabIdRef.current) {
       // Don't interfere if we're currently loading a crew
       if (isLoadingCrewRef.current) {
-        lastActiveTabIdRef.current = activeTabId;
+        lastActiveTabIdRef.current = activeCanvasId;
         return;
       }
 
@@ -112,7 +112,12 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
       // Tab is changing
       isSwitchingTabsRef.current = true;
       
-      const activeTab = getActiveTab();
+      const activeTab = getActiveCanvas();
+      if (!activeTab) {
+        setNodes([]); setEdges([]);
+        lastNodesRef.current = []; lastEdgesRef.current = [];
+        isSwitchingTabsRef.current = false;
+      }
       if (activeTab) {
         
         // Create deep copies to ensure proper restoration
@@ -170,23 +175,23 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
       }
       
       // Update the last active tab reference
-      lastActiveTabIdRef.current = activeTabId;
+      lastActiveTabIdRef.current = activeCanvasId;
     }
     return () => timers.forEach(clearTimeout);
-  }, [activeTabId, getActiveTab, setNodes, setEdges, saveStateForTab]);
+  }, [activeCanvasId, getActiveCanvas, setNodes, setEdges, saveStateForTab]);
 
   // Save current state before tab switch
   const saveCurrentState = useCallback(() => {
-    if (activeTabId && !isLoadingCrewRef.current && !isSwitchingTabsRef.current) {
-      saveStateForTab(activeTabId, lastNodesRef.current, lastEdgesRef.current);
+    if (activeCanvasId && !isLoadingCrewRef.current && !isSwitchingTabsRef.current) {
+      saveStateForTab(activeCanvasId, lastNodesRef.current, lastEdgesRef.current);
     }
-  }, [activeTabId, saveStateForTab]);
+  }, [activeCanvasId, saveStateForTab]);
 
   // Save state before unload
   useEffect(() => {
     const handleBeforeUnload = () => {
-      if (activeTabId) {
-        saveStateForTab(activeTabId, lastNodesRef.current, lastEdgesRef.current);
+      if (activeCanvasId) {
+        saveStateForTab(activeCanvasId, lastNodesRef.current, lastEdgesRef.current);
       }
     };
 
@@ -194,26 +199,26 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [activeTabId, saveStateForTab]);
+  }, [activeCanvasId, saveStateForTab]);
 
   // Sync flow manager changes back to active tab (with debouncing)
   const syncNodesToTab = useCallback(() => {
-    if (activeTabId && !isLoadingCrewRef.current && !isSwitchingTabsRef.current) {
-      const activeTab = getActiveTab();
+    if (activeCanvasId && !isLoadingCrewRef.current && !isSwitchingTabsRef.current) {
+      const activeTab = getActiveCanvas();
       if (activeTab && nodesHaveChanged(activeTab.nodes, nodes)) {
-        updateTabNodes(activeTabId, nodes);
+        updateCanvasNodes(activeCanvasId, nodes);
       }
     }
-  }, [nodes, activeTabId, updateTabNodes, getActiveTab]);
+  }, [nodes, activeCanvasId, updateCanvasNodes, getActiveCanvas]);
 
   const syncEdgesToTab = useCallback(() => {
-    if (activeTabId && !isLoadingCrewRef.current && !isSwitchingTabsRef.current) {
-      const activeTab = getActiveTab();
+    if (activeCanvasId && !isLoadingCrewRef.current && !isSwitchingTabsRef.current) {
+      const activeTab = getActiveCanvas();
       if (activeTab && edgesHaveChanged(activeTab.edges, edges)) {
-        updateTabEdges(activeTabId, edges);
+        updateCanvasEdges(activeCanvasId, edges);
       }
     }
-  }, [edges, activeTabId, updateTabEdges, getActiveTab]);
+  }, [edges, activeCanvasId, updateCanvasEdges, getActiveCanvas]);
 
   // Use separate effects with debouncing to avoid excessive updates
   useEffect(() => {
@@ -231,10 +236,10 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
     const handleSaveCrewComplete = (event: CustomEvent<{ crewId: string; crewName: string; tabId?: string }>) => {
       if (event.detail) {
         const { crewId, crewName, tabId } = event.detail;
-        const targetTabId = tabId || activeTabId; // Use specified tab ID or current active tab
+        const targetTabId = tabId || activeCanvasId; // Use specified tab ID or current active tab
         
         if (targetTabId && crewId && crewName && !isLoadingCrewRef.current) {
-          updateTabCrewInfo(targetTabId, crewId, crewName);
+          updateCanvasCrewInfo(targetTabId, crewId, crewName);
         } else if (isLoadingCrewRef.current) {
           // Skip update while loading crew
         }
@@ -246,7 +251,7 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
     return () => {
       window.removeEventListener('saveCrewComplete', handleSaveCrewComplete as EventListener);
     };
-  }, [activeTabId, updateTabCrewInfo]);
+  }, [activeCanvasId, updateCanvasCrewInfo]);
 
   // Listen for crew load events to prevent marking as dirty during load
   useEffect(() => {
@@ -272,7 +277,7 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
   // Listen for clear canvas events (for new tabs)
   useEffect(() => {
     const handleClearCanvas = (event: CustomEvent<{ tabId: string }>) => {
-      if (event.detail.tabId === activeTabId) {
+      if (event.detail.tabId === activeCanvasId) {
         setNodes([]);
         setEdges([]);
       }
@@ -283,11 +288,11 @@ export const useTabSync = ({ nodes, edges, setNodes, setEdges }: UseTabSyncProps
     return () => {
       window.removeEventListener('clearCanvas', handleClearCanvas as EventListener);
     };
-  }, [activeTabId, setNodes, setEdges]);
+  }, [activeCanvasId, setNodes, setEdges]);
 
   return {
-    activeTabId,
-    getActiveTab,
+    activeCanvasId,
+    getActiveCanvas,
     saveCurrentState
   };
 }; 

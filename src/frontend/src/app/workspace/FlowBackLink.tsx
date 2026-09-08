@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Box, Chip, Menu, MenuItem, ListItemText } from '@mui/material';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
-import { useTabManagerStore } from '../../store/tabManager';
+import { useBuilderCanvasStore } from '../sessions/builderCanvasStore';
 import { useUILayoutStore } from '../../store/uiLayout';
 import { flowsContainingCrew } from '../../utils/flowsContainingCrew';
 
@@ -19,11 +19,11 @@ import { flowsContainingCrew } from '../../utils/flowsContainingCrew';
  * silently picking one.
  */
 const FlowBackLink: React.FC = () => {
-  const tabs = useTabManagerStore((state) => state.tabs);
-  const activeTabId = useTabManagerStore((state) => state.activeTabId);
+  const tabs = useBuilderCanvasStore((state) => state.canvases);
+  const activeCanvasId = useBuilderCanvasStore((state) => state.activeCanvasId);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
 
-  const activeTab = tabs.find((tab) => tab.id === activeTabId);
+  const activeTab = tabs.find((tab) => tab.id === activeCanvasId);
   const flows = flowsContainingCrew(
     tabs.filter((tab) => tab.group_id === activeTab?.group_id),
     activeTab?.savedCrewId,
@@ -37,8 +37,8 @@ const FlowBackLink: React.FC = () => {
     // effect restores whichever canvas the tab last remembered, and runs after
     // this handler — so a flow tab last left on its crew side would otherwise
     // win the race and land us on a crew canvas, having just asked for a flow.
-    useTabManagerStore.getState().updateTabViewMode(tabId, 'flow');
-    useTabManagerStore.getState().setActiveTab(tabId);
+    useBuilderCanvasStore.getState().updateCanvasViewMode(tabId, 'flow');
+    useBuilderCanvasStore.getState().setActiveCanvas(tabId);
     useUILayoutStore.getState().setAppMode('flow');
   };
 

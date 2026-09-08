@@ -8,7 +8,7 @@ import { renderHook, act } from '@testing-library/react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Node, Edge } from 'reactflow';
 import { useEventBindings } from './WorkflowEventHandlers';
-import { useTabManagerStore } from '../../store/tabManager';
+import { useBuilderCanvasStore } from '../sessions/builderCanvasStore';
 import { useUILayoutStore } from '../../store/uiLayout';
 
 const crewNode = (id: string): Node => ({
@@ -20,7 +20,7 @@ const crewNode = (id: string): Node => ({
 
 describe('handleCrewSelectWrapper forces the crew canvas', () => {
   beforeEach(() => {
-    useTabManagerStore.setState({ tabs: [], activeTabId: null });
+    useBuilderCanvasStore.setState({ canvases: [], activeCanvasId: null });
   });
 
   it('creates the loaded-crew tab in crew view even when on the flow canvas', () => {
@@ -39,7 +39,7 @@ describe('handleCrewSelectWrapper forces the crew canvas', () => {
       );
     });
 
-    const active = useTabManagerStore.getState().getActiveTab();
+    const active = useBuilderCanvasStore.getState().getActiveCanvas();
     expect(active?.viewMode).toBe('crew');
     expect(active?.name).toBe('My Crew');
   });

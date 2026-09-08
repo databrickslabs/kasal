@@ -1,29 +1,29 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { useSessionRunIds } from './useSessionRunIds';
-import { useTabManagerStore } from '../../store/tabManager';
+import { useBuilderCanvasStore } from './builderCanvasStore';
 import { useUILayoutStore } from '../../store/uiLayout';
-import { useSessionStore } from '../../features/chat/store/sessionStore';
+import { useSessionStore } from './sessionStore';
 import { useChatMessagesStore } from '../../features/workflow/assistant/store/chatMessagesStore';
 vi.mock('../../features/chat/persistence/sessionApi', () => ({}));
 beforeEach(() => {
   localStorage.setItem('selectedGroupId', 'a');
-  useTabManagerStore.setState({ tabs: [], activeTabId: null });
+  useBuilderCanvasStore.setState({ canvases: [], activeCanvasId: null });
   useChatMessagesStore.setState({ messagesBySession: {} });
   useSessionStore.setState({ currentSessionId: 'chat', sessions: [], messages: [] });
 });
 it('keeps builder runs isolated, deduplicates persisted results, and preserves links after canvas edits', () => {
-  const first = useTabManagerStore.getState().createTab('Crew', 'crew');
-  const second = useTabManagerStore.getState().createTab('Flow', 'flow');
-  useTabManagerStore.setState(state => ({ tabs: state.tabs.map(tab => ({ ...tab, executionJobIds: tab.id === first ? ['run-a'] : ['run-b'] })), activeTabId: first }));
-  const sid = useTabManagerStore.getState().getActiveTab()!.chatSessionId!;
+  const first = useBuilderCanvasStore.getState().createCanvas('Crew', 'crew');
+  const second = useBuilderCanvasStore.getState().createCanvas('Flow', 'flow');
+  useBuilderCanvasStore.setState(state => ({ canvases: state.canvases.map(tab => ({ ...tab, executionJobIds: tab.id === first ? ['run-a'] : ['run-b'] })), activeCanvasId: first }));
+  const sid = useBuilderCanvasStore.getState().getActiveCanvas()!.chatSessionId!;
   useChatMessagesStore.getState().addMessage(sid, { id: 'result', type: 'result', jobId: 'run-a', content: 'Done', timestamp: new Date() });
   useUILayoutStore.setState({ appMode: 'crew' });
   const { result } = renderHook(() => useSessionRunIds());
   expect(result.current.ids).toEqual(['run-a']);
-  act(() => useTabManagerStore.getState().updateTabNodes(first, [{ id: 'node', data: {}, position: { x: 0, y: 0 } }]));
+  act(() => useBuilderCanvasStore.getState().updateCanvasNodes(first, [{ id: 'node', data: {}, position: { x: 0, y: 0 } }]));
   expect(result.current.ids).toEqual(['run-a']);
-  act(() => useTabManagerStore.getState().setActiveTab(second));
+  act(() => useBuilderCanvasStore.getState().setActiveCanvas(second));
   expect(result.current.ids).toEqual(['run-b']);
 });
 it('uses Chat execution links and does not include the inactive builder', () => {

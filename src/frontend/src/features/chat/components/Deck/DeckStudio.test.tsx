@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import DeckStudio from './DeckStudio';
-import { useSessionStore } from '../../store/sessionStore';
+import { useSessionStore } from '../../../../app/sessions/sessionStore';
 import { splitSlides } from '../../utils/htmlDeck';
 
 const refineSlide = vi.fn();

@@ -81,6 +81,23 @@ class ChatSessionRepository:
         )
         await self.session.execute(stmt)
 
+    async def save_canvas(self, session_id, group_id, user_id, revision, **values):
+        """Compare-and-swap prevents another browser's canvas being overwritten."""
+        result = await self.session.execute(
+            update(ChatSession)
+            .where(
+                ChatSession.id == session_id,
+                ChatSession.group_id == group_id,
+                ChatSession.user_id == user_id,
+                ChatSession.canvas_revision == revision,
+            )
+            .values(
+                **values, canvas_revision=revision + 1, updated_at=datetime.utcnow()
+            )
+        )
+        await self.session.flush()
+        return bool(result.rowcount)
+
     async def set_running_job(
         self, session_id: str, group_ids: List[str], job_id: Optional[str]
     ) -> Optional[ChatSession]:

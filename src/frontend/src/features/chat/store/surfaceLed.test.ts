@@ -23,7 +23,7 @@ interface FakeMessage {
 
 // Same shape as streamPacing.test.ts — the array lives INSIDE the factory
 // because vi.mock is hoisted above any top-level const.
-vi.mock('./sessionStore', () => {
+vi.mock('../../../app/sessions/sessionStore', () => {
   const painted: FakeMessage[] = [];
   const state = {
     currentSessionId: 'session-1' as string | null,
@@ -79,7 +79,7 @@ vi.mock('../utils/sessionPreview', () => ({
 }));
 
 import { useExecutionStore } from './executionStore';
-import { useSessionStore } from './sessionStore';
+import { useSessionStore } from '../../../app/sessions/sessionStore';
 import type { A2uiMessage } from '../../../shared/a2ui/stream';
 
 const paintedMessages = (): FakeMessage[] =>

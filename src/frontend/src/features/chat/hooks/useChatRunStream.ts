@@ -19,7 +19,7 @@ import React, { useCallback, useEffect, useRef } from 'react';
 import { pendingActionsBelongTo } from '../utils/pendingActions';
 import { ExecutionStatus } from '../types/execution';
 import { getExecutionStatus } from '../api/executions';
-import { useSessionStore } from '../store/sessionStore';
+import { useSessionStore } from '../../../app/sessions/sessionStore';
 import { rememberTaskOutputMessage, useExecutionStore } from '../store/executionStore';
 import { readActiveExecution, clearActiveExecution } from '../store/activeExecutionMarker';
 import { useExecutionStream } from './useExecutionStream';

@@ -19,6 +19,8 @@ from src.schemas.chat_history import (
     UpdateMessageRequest,
 )
 from src.services.chat.history import ChatHistoryService
+from src.schemas.builder_session import BuilderCanvasRequest, BuilderCanvasResponse
+from src.services.chat.builder_sessions import BuilderSessionService
 
 router = APIRouter(
     prefix="/chat-history",
@@ -46,6 +48,23 @@ def get_chat_history_service(session: SessionDep) -> ChatHistoryService:
 
 # Type alias for cleaner function signatures
 ChatHistoryServiceDep = Annotated[ChatHistoryService, Depends(get_chat_history_service)]
+
+
+@router.get("/sessions/{session_id}/canvas", response_model=BuilderCanvasResponse)
+async def get_builder_canvas(
+    session_id: str, session: SessionDep, group_context: GroupContextDep
+):
+    return await BuilderSessionService(session).get(session_id, group_context)
+
+
+@router.put("/sessions/{session_id}/canvas", response_model=BuilderCanvasResponse)
+async def save_builder_canvas(
+    session_id: str,
+    request: BuilderCanvasRequest,
+    session: SessionDep,
+    group_context: GroupContextDep,
+):
+    return await BuilderSessionService(session).save(session_id, request, group_context)
 
 
 @router.post(

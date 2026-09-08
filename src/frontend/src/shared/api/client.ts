@@ -27,7 +27,7 @@ apiClient.interceptors.request.use(
       && /\/(?:users\/me|groups\/my-groups)\/?(?:\?|$)/.test(config.url ?? '');
     if (identityDiscovery) {
       delete config.headers['group_id'];
-    } else if (selectedGroupId) {
+    } else if (selectedGroupId && !config.headers['group_id']) {
       config.headers['group_id'] = selectedGroupId;  // Use 'group_id' to match database column name
     }
 

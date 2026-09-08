@@ -21,7 +21,7 @@ import { latestDeck, parseSlideEdit } from '../utils/slideRefine';
 import { splitSlides } from '../utils/htmlDeck';
 import { saveGeneratedCrew, CrewNameConflictError } from '../api/crews';
 import { GenerationCompleteData } from '../types/dispatcher';
-import { useSessionStore } from '../store/sessionStore';
+import { useSessionStore } from '../../../app/sessions/sessionStore';
 import { useExecutionStore } from '../store/executionStore';
 import { useAppStore } from '../store/appStore';
 

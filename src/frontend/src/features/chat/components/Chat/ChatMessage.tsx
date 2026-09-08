@@ -25,7 +25,7 @@ import CrewDetailCard from '../Cards/CrewDetailCard';
 import FlowDetailCard from '../Cards/FlowDetailCard';
 import HelpCard from '../Cards/HelpCard';
 import GenieSpaceSelector from '../Cards/GenieSpaceSelector';
-import { useSessionStore } from '../../store/sessionStore';
+import { useSessionStore } from '../../../../app/sessions/sessionStore';
 import InputVariablesPrompt from '../Cards/InputVariablesPrompt';
 import NoMatchPrompt from '../Cards/NoMatchPrompt';
 import GenieSpacePrompt from '../Cards/GenieSpacePrompt';

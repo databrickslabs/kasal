@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useTabManagerStore } from '../../store/tabManager';
+import { useBuilderCanvasStore } from '../../app/sessions/builderCanvasStore';
 
 /**
  * Whether the reasoning control can do anything for the crew on the canvas.
@@ -35,8 +35,8 @@ export function useReasoningSupport(
   // Canvas nodes come from the ACTIVE TAB, not useWorkflowStore: that store has
   // a single shared nodes array that goes stale when switching between the crew
   // and flow canvases.
-  const activeTabNodes = useTabManagerStore(
-    (s) => s.tabs.find((t) => t.id === s.activeTabId)?.nodes,
+  const activeTabNodes = useBuilderCanvasStore(
+    (s) => s.canvases.find((t) => t.id === s.activeCanvasId)?.nodes,
   );
 
   // The models the NEXT run could actually use — both halves matter.

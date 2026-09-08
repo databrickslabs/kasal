@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import HITLApprovalDialog from '../../features/approvals/components/HITLApprovalDialog';
 import { HITLService } from '../../api/execution/HITLService';
 import { useExecutionStore } from '../../features/chat/store/executionStore';
-import { useTabManagerStore } from '../../store/tabManager';
+import { useBuilderCanvasStore } from '../sessions/builderCanvasStore';
 
 /**
  * Global listener for tool-call approval gates.
@@ -26,14 +26,14 @@ const ToolApprovalListener: React.FC = () => {
       // the chat shell is on screen at all (covers replayed events for jobs
       // the store no longer tracks).
       if (useExecutionStore.getState().jobOwnerOf(detail.job_id)) return;
-      if (useTabManagerStore.getState().tabs.some(tab => tab.executionJobIds?.includes(detail.job_id!))) return;
+      if (useBuilderCanvasStore.getState().canvases.some(tab => tab.executionJobIds?.includes(detail.job_id!))) return;
       if (document.getElementById('kasal-chat-root')) return;
       const jobId = detail.job_id;
       // Only open for a LIVE pending approval — an SSE reconnect replays old
       // hitl_request events, and popping an expired gate helps no one.
       void HITLService.getExecutionHITLStatus(jobId)
         .then((status) => {
-          if (useTabManagerStore.getState().tabs.some(tab => tab.executionJobIds?.includes(jobId))) return;
+          if (useBuilderCanvasStore.getState().canvases.some(tab => tab.executionJobIds?.includes(jobId))) return;
           if (status.has_pending_approval && !status.pending_approval?.is_expired) {
             setExecutionId(jobId);
           }

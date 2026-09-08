@@ -2,6 +2,7 @@
 import type { ChatMessage, ChatSession } from '../types/chat';
 
 export interface NamedSessionWire {
+  mode?: 'chat' | 'crew' | 'flow';
   id: string;
   title: string;
   user_id: string;
@@ -30,6 +31,7 @@ export const toSession = (w: NamedSessionWire): ChatSession => ({
   createdAt: parseUtc(w.created_at),
   updatedAt: parseUtc(w.updated_at),
   ...(w.group_id ? { groupId: w.group_id } : {}),
+  ...(w.mode && w.mode !== 'chat' ? { mode: w.mode } : {}),
 });
 
 // ChatMode-specific message fields ride in generation_result under this key

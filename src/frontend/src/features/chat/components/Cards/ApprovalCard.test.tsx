@@ -19,7 +19,7 @@ vi.mock('../../../../api/execution/HITLService', () => ({
 }));
 
 const updateMessage = vi.fn();
-vi.mock('../../store/sessionStore', () => ({
+vi.mock('../../../../app/sessions/sessionStore', () => ({
   useSessionStore: (selector: (s: { updateMessage: typeof updateMessage }) => unknown) =>
     selector({ updateMessage }),
 }));

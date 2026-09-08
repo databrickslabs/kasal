@@ -16,7 +16,7 @@ import TaskForm from './TaskForm';
 import BuilderNodeEditor from '../../assistant/components/BuilderNodeEditor';
 import QuickToolSelectionDialog from './QuickToolSelectionDialog';
 import { Theme } from '@mui/material/styles';
-import { useTabDirtyState } from '../../../../hooks/workflow/useTabDirtyState';
+import { useBuilderDirtyState } from '../../../../hooks/workflow/useBuilderDirtyState';
 import { useTaskExecutionStore } from '../../../../store/taskExecutionStore';
 import { useUILayoutStore } from '../../../../store/uiLayout';
 import { useErrorStore } from '../../../../store/error';
@@ -108,7 +108,7 @@ const TaskNode: React.FC<TaskNodeProps> = ({ data, id }) => {
   const [isSelected, setIsSelected] = useState(false);
 
   // Tab dirty state management
-  const { markCurrentTabDirty } = useTabDirtyState();
+  const { markCurrentTabDirty } = useBuilderDirtyState();
 
   // Global error surface — a failed save must not stay console-only
   const showErrorMessage = useErrorStore(state => state.showErrorMessage);

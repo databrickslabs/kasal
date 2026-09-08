@@ -52,7 +52,7 @@ import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
 import { useFlowConfigStore } from '../../../../../store/flowConfig';
 import { useCrewExecutionStore } from '../../../../../store/crewExecution';
-import { useTabManagerStore } from '../../../../../store/tabManager';
+import { useBuilderCanvasStore } from '../../../../../app/sessions/builderCanvasStore';
 import PublishButton from './PublishButton';
 import { usePublicationStore } from '../../../../../store/publication';
 import { usePermissions } from '../../../../../hooks/usePermissions';
@@ -509,7 +509,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
       // Restore execution config after nodes are added
       setTimeout(() => {
         const store = useCrewExecutionStore.getState();
-        const tabStore = useTabManagerStore.getState();
+        const tabStore = useBuilderCanvasStore.getState();
 
         const settings = catalogExecutionSettings(selectedCrew, managerNode?.data?.llm, hasManagerNode);
         store.setProcessType(settings.processType!);
@@ -518,7 +518,7 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
         store.setReasoningConfig(settings.reasoningConfig!);
         store.setManagerLLM(settings.managerLLM!);
         if (managerNode) store.setManagerNodeId(managerNode.id);
-        if (tabStore.activeTabId) tabStore.updateTabExecutionConfig(tabStore.activeTabId, settings);
+        if (tabStore.activeCanvasId) tabStore.updateCanvasExecutionConfig(tabStore.activeCanvasId, settings);
 
         // Clear the loading flag after all config is set
         store.setIsLoadingCrew(false);
@@ -607,11 +607,11 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
       // savedFlowId, so Save offers to create a new flow instead of updating
       // the one just opened, and anything keyed on the flow id — the state
       // declaration among them — has nothing to address.
-      const tabId = useTabManagerStore.getState().activeTabId;
+      const tabId = useBuilderCanvasStore.getState().activeCanvasId;
       if (tabId && selectedFlow.id) {
-        useTabManagerStore
+        useBuilderCanvasStore
           .getState()
-          .updateTabFlowInfo(tabId, String(selectedFlow.id), selectedFlow.name);
+          .updateCanvasFlowInfo(tabId, String(selectedFlow.id), selectedFlow.name);
       }
       onFlowSelect(selectedFlow.nodes, selectedFlow.edges, flowConfig);
       onClose();

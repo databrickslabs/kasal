@@ -6,26 +6,26 @@
  * next Save silently overwrites the old crew record (new content, old name).
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { useTabManagerStore } from './tabManager';
-import { applyCrewDispatchResult } from '../features/workflow/assistant/utils/applyCrewDispatchResult';
+import { useBuilderCanvasStore } from './builderCanvasStore';
+import { applyCrewDispatchResult } from '../../features/workflow/assistant/utils/applyCrewDispatchResult';
 
-describe('tabManager - clearTabCrewInfo', () => {
+describe('builderCanvasStore - clearCanvasCrewInfo', () => {
   beforeEach(() => {
-    useTabManagerStore.setState({ tabs: [], activeTabId: null });
+    useBuilderCanvasStore.setState({ canvases: [], activeCanvasId: null });
   });
 
   it('detaches the tab from its saved crew so the next save creates a new one', () => {
-    const store = useTabManagerStore.getState();
-    const tabId = store.createTab('Send Email');
-    store.updateTabCrewInfo(tabId, 'crew-old-id', 'Send Email');
+    const store = useBuilderCanvasStore.getState();
+    const tabId = store.createCanvas('Send Email');
+    store.updateCanvasCrewInfo(tabId, 'crew-old-id', 'Send Email');
 
-    let tab = useTabManagerStore.getState().getTab(tabId);
+    let tab = useBuilderCanvasStore.getState().getCanvas(tabId);
     expect(tab?.savedCrewId).toBe('crew-old-id');
     expect(tab?.savedCrewName).toBe('Send Email');
 
-    useTabManagerStore.getState().clearTabCrewInfo(tabId);
+    useBuilderCanvasStore.getState().clearCanvasCrewInfo(tabId);
 
-    tab = useTabManagerStore.getState().getTab(tabId);
+    tab = useBuilderCanvasStore.getState().getCanvas(tabId);
     expect(tab?.savedCrewId).toBeUndefined();
     expect(tab?.savedCrewName).toBeUndefined();
     expect(tab?.lastSavedAt).toBeUndefined();
@@ -37,16 +37,16 @@ describe('tabManager - clearTabCrewInfo', () => {
 
 describe('generated plans detach an existing catalog association', () => {
   it.each(['legacy', 'recovered stream'] as const)('%s clears the old crew before applying the new plan', async (path) => {
-    useTabManagerStore.setState({ tabs: [], activeTabId: null });
-    const store = useTabManagerStore.getState();
-    const id = store.createTab('Existing crew');
-    store.updateTabCrewInfo(id, 'saved-crew', 'Existing crew');
+    useBuilderCanvasStore.setState({ canvases: [], activeCanvasId: null });
+    const store = useBuilderCanvasStore.getState();
+    const id = store.createCanvas('Existing crew');
+    store.updateCanvasCrewInfo(id, 'saved-crew', 'Existing crew');
     const crew = {
       agents: [{ id: 'agent-new', name: 'Researcher', role: 'Research', goal: 'Find news', backstory: 'Reporter', tools: [] }],
       tasks: [{ id: 'task-new', name: 'Find news', description: 'Research current news', expected_output: 'Report', agent_id: 'agent-new', tools: [] }],
     };
     const apply = vi.fn(() => {
-      expect(useTabManagerStore.getState().getTab(id)?.savedCrewId).toBeUndefined();
+      expect(useBuilderCanvasStore.getState().getCanvas(id)?.savedCrewId).toBeUndefined();
     });
     await applyCrewDispatchResult({
       dispatcher: { intent: 'generate_crew', confidence: 1, extracted_info: {} },
@@ -54,7 +54,7 @@ describe('generated plans detach an existing catalog association', () => {
       generation_result: path === 'legacy' ? crew : { type: 'streaming', generation_id: 'generation-1', completed: true, generated_crew: crew },
     }, {
       generationCompletedRef: { current: false },
-      detachTabFromSavedCrew: () => useTabManagerStore.getState().clearTabCrewInfo(id),
+      detachTabFromSavedCrew: () => useBuilderCanvasStore.getState().clearCanvasCrewInfo(id),
       handleCrewGenerated: apply,
       handleAgentGenerated: vi.fn().mockResolvedValue(undefined),
       handleTaskGenerated: vi.fn().mockResolvedValue(undefined),
@@ -65,6 +65,6 @@ describe('generated plans detach an existing catalog association', () => {
       nodes: [],
     });
     expect(apply).toHaveBeenCalledWith(crew);
-    expect(useTabManagerStore.getState().getTab(id)?.name).toBe('Existing crew');
+    expect(useBuilderCanvasStore.getState().getCanvas(id)?.name).toBe('Existing crew');
   });
 });

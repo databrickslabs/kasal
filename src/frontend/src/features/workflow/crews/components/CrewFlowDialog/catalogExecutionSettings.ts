@@ -1,8 +1,8 @@
 import type { CrewResponse } from '../../../../../types/workflow/crew';
-import type { TabExecutionConfig } from '../../../../../store/tabManager';
+import type { CanvasExecutionConfig } from '../../../../../app/sessions/builderCanvasStore';
 
 /** A catalog load replaces the previous crew's settings, including effort. */
-export function catalogExecutionSettings(crew: CrewResponse, managerModel?: string, hasManager = false): TabExecutionConfig {
+export function catalogExecutionSettings(crew: CrewResponse, managerModel?: string, hasManager = false): CanvasExecutionConfig {
   const process = hasManager ? 'hierarchical' : crew.process;
   return {
     processType: process === 'hierarchical' || process === 'parallel' ? process : 'sequential',

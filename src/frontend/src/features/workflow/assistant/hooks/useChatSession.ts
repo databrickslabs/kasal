@@ -1,4 +1,4 @@
-import { useTabManagerStore } from '../../../../store/tabManager';
+import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasStore';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { SaveMessageRequest, ChatSession, ChatMessage as BackendChatMessage } from '../../../../api/chat/ChatHistoryService';
 import { ChatHistoryServiceEnhanced as ChatHistoryService } from '../../../../api/chat/ChatHistoryServiceEnhanced';
@@ -114,7 +114,7 @@ export const useChatSession = (providedChatSessionId?: string) => {
 
   // Save message to backend
   const saveMessageToBackend = useCallback(async (message: ChatMessage): Promise<void> => {
-    if (sessionId && message.type === 'user') useTabManagerStore.getState().nameSessionFromPrompt(sessionId, message.content || '');
+    if (sessionId && message.type === 'user') useBuilderCanvasStore.getState().nameSessionFromPrompt(sessionId, message.content || '');
     if (!sessionId || chatHistoryDisabled) return;
     // Skip saving messages with empty content (backend requires min_length=1)
     if (!message.content) return;

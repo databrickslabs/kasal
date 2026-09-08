@@ -1,4 +1,4 @@
-import { useTabManagerStore } from '../../../../store/tabManager';
+import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasStore';
 
 export interface CanvasSaveCallbacks {
   onSaved?: (saved: { name: string }) => void;
@@ -7,7 +7,7 @@ export interface CanvasSaveCallbacks {
 
 /** Use the same SaveCrew/SaveFlow handlers as the sidebar, with an automatic name. */
 export function saveCanvasToCatalog(flow: boolean, suggestedName: string): Promise<{ name: string }> {
-  const tab = useTabManagerStore.getState().getActiveTab();
+  const tab = useBuilderCanvasStore.getState().getActiveCanvas();
   if (!tab) return Promise.reject(new Error('Open a canvas to save it to the catalog.'));
   const nodes = flow ? tab.flowNodes : tab.nodes;
   if (!nodes?.some(node => node.type === (flow ? 'crewNode' : 'agentNode'))) {

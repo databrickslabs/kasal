@@ -15,7 +15,7 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useExecutionStore } from '../store/executionStore';
 import type { PreviewContent } from '../types/preview';
 import type { RunStep } from '../components/Preview/traceEventStep';
-import { useSessionStore } from '../store/sessionStore';
+import { useSessionStore } from '../../../app/sessions/sessionStore';
 
 interface UseRunActivityArgs {
   viewIsExecuting: boolean;

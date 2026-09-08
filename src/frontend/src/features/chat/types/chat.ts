@@ -60,6 +60,7 @@ export interface ChatMessage {
 }
 
 export interface ChatSession {
+  mode?: 'chat' | 'crew' | 'flow';
   id: string;
   title: string;
   createdAt: Date;

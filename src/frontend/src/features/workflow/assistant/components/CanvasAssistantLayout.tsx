@@ -48,7 +48,7 @@ export function CanvasAssistantLayout({ composer, response, responseKey, session
   const releaseTab = useCallback((id: BuilderPaneId) => setViews(previous => ({ ...previous,
     tabs: previous.tabs.filter(tab => tab.id !== id), active: previous.active === id ? 'canvas' : previous.active,
   })), []);
-  const closeTab = (id: BuilderPaneId) => {
+  const closeCanvas = (id: BuilderPaneId) => {
     const tab = tabs.find(item => item.id === id);
     if (tab && 'editor' in tab) tab.editor.onClose();
     releaseTab(id);
@@ -126,7 +126,7 @@ export function CanvasAssistantLayout({ composer, response, responseKey, session
     </Box>
   </Box>;
 
-  const sidePreview = tabs.length > 0 && (!fullscreen || activeTab !== 'canvas') && <BuilderSidePane tabs={tabs} active={activeTab} onSelect={selectTab} onClose={closeTab}
+  const sidePreview = tabs.length > 0 && (!fullscreen || activeTab !== 'canvas') && <BuilderSidePane tabs={tabs} active={activeTab} onSelect={selectTab} onClose={closeCanvas}
     dark={dark} canvasHost={fullscreen ? null : previewHost} />;
 
   return <BuilderPreviewContext.Provider value={{ openMemory, openStep, openResult, openSchedule, openOptimize, openCheckpoints, openApproval,

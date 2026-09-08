@@ -5,7 +5,7 @@ import axios from 'axios';
 import type { CanvasSaveCallbacks } from '../../assistant/utils/saveCanvasToCatalog';
 import { SaveCrewProps } from '../types/dialogs';
 import { Edge } from 'reactflow';
-import { useTabManagerStore } from '../../../../store/tabManager';
+import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasStore';
 import { useCrewExecutionStore } from '../../../../store/crewExecution';
 import { useAppStore as useChatAppStore } from '../../../chat/store/appStore';
 
@@ -28,7 +28,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
   const [autoSave, setAutoSave] = useState(false);
   const pendingSave = useRef<CanvasSaveCallbacks | null>(null);
 
-  const { activeTabId, updateTabCrewInfo } = useTabManagerStore();
+  const { activeCanvasId, updateCanvasCrewInfo } = useBuilderCanvasStore();
 
   // Get execution configuration from the store
   const {
@@ -63,7 +63,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
       try {
         console.log('SaveCrew: Updating existing crew', { tabId, crewId });
         
-        const tab = useTabManagerStore.getState().getTab(tabId);
+        const tab = useBuilderCanvasStore.getState().getCanvas(tabId);
         if (!tab) {
           console.error('SaveCrew: Tab not found for update', tabId);
           return;
@@ -151,9 +151,9 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         customEvent.detail.onSaved?.({ name: updatedCrew.name });
         
         // Update the tab's crew info and mark as clean
-        const { updateTabCrewInfo, markTabClean } = useTabManagerStore.getState();
-        updateTabCrewInfo(tabId, updatedCrew.id, updatedCrew.name);
-        markTabClean(tabId);
+        const { updateCanvasCrewInfo, markCanvasClean } = useBuilderCanvasStore.getState();
+        updateCanvasCrewInfo(tabId, updatedCrew.id, updatedCrew.name);
+        markCanvasClean(tabId);
         refreshChatCatalog();
         
         // Dispatch completion event
@@ -182,7 +182,7 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
       try {
         console.log('SaveCrew: Updating crew by name:', { tabId, crewName });
         
-        const tab = useTabManagerStore.getState().getTab(tabId);
+        const tab = useBuilderCanvasStore.getState().getCanvas(tabId);
         if (!tab) {
           console.error('SaveCrew: Tab not found for update by name', tabId);
           return;
@@ -251,9 +251,9 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
         console.log('SaveCrew: Update by name successful', updatedCrew);
         
         // Update the tab's crew info and mark as clean
-        const { updateTabCrewInfo, markTabClean } = useTabManagerStore.getState();
-        updateTabCrewInfo(tabId, updatedCrew.id, updatedCrew.name);
-        markTabClean(tabId);
+        const { updateCanvasCrewInfo, markCanvasClean } = useBuilderCanvasStore.getState();
+        updateCanvasCrewInfo(tabId, updatedCrew.id, updatedCrew.name);
+        markCanvasClean(tabId);
         refreshChatCatalog();
         
         // Dispatch completion event
@@ -539,24 +539,24 @@ const SaveCrew: React.FC<SaveCrewComponentProps> = ({ nodes, edges, trigger, dis
 
       // Update the tab's crew info
       console.log('SaveCrew: Updating tab crew info:', {
-        activeTabId,
+        activeCanvasId,
         savedCrewId: savedCrew.id,
         savedCrewIdType: typeof savedCrew.id,
         crewName: name,
-        willUpdate: !!(activeTabId && savedCrew.id)
+        willUpdate: !!(activeCanvasId && savedCrew.id)
       });
 
-      if (activeTabId && savedCrew.id) {
-        updateTabCrewInfo(activeTabId, savedCrew.id, name);
+      if (activeCanvasId && savedCrew.id) {
+        updateCanvasCrewInfo(activeCanvasId, savedCrew.id, name);
         // Verify the update was successful
-        const updatedTab = useTabManagerStore.getState().getTab(activeTabId);
-        console.log('SaveCrew: updateTabCrewInfo called, verification:', {
+        const updatedTab = useBuilderCanvasStore.getState().getCanvas(activeCanvasId);
+        console.log('SaveCrew: updateCanvasCrewInfo called, verification:', {
           updatedTabSavedCrewId: updatedTab?.savedCrewId,
           updatedTabSavedCrewName: updatedTab?.savedCrewName,
           expectedId: savedCrew.id
         });
       } else {
-        console.warn('SaveCrew: Could not update tab crew info - missing activeTabId or savedCrew.id');
+        console.warn('SaveCrew: Could not update tab crew info - missing activeCanvasId or savedCrew.id');
       }
 
       // Close dialog and reset state

@@ -9,7 +9,7 @@ import { AgentService } from '../workflow/AgentService';
 import { Models } from '../../types/config/models';
 import { buildFlowConfiguration } from '../../utils/flowConfigBuilder';
 import { declaredStateForTab } from '../../store/flowState';
-import { useTabManagerStore } from '../../store/tabManager';
+import { useBuilderCanvasStore } from '../../app/sessions/builderCanvasStore';
 
 interface NodeData {
   label?: string;
@@ -118,7 +118,7 @@ export class JobExecutionService {
             nodes,
             edges,
             'Dynamic Flow',
-            declaredStateForTab(useTabManagerStore.getState().activeTabId),
+            declaredStateForTab(useBuilderCanvasStore.getState().activeCanvasId),
           );
 
           console.log(`[JobExecutionService] Built flow config with:`, {

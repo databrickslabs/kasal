@@ -26,7 +26,7 @@ interface ModelConfigState {
   setDatabricksEnabled: (enabled: boolean) => void;
   setError: (error: string | null) => void;
   incrementRefreshKey: () => void;
-  setActiveTab: (tab: number) => void;
+  setActiveCanvas: (tab: number) => void;
   resetModelConfig: () => void;
 }
 
@@ -57,7 +57,7 @@ export const useModelConfigStore = create<ModelConfigState>((set) => ({
   setDatabricksEnabled: (enabled) => set({ databricksEnabled: enabled }),
   setError: (error) => set({ error }),
   incrementRefreshKey: () => set((state) => ({ refreshKey: state.refreshKey + 1 })),
-  setActiveTab: (tab) => set({ activeTab: tab }),
+  setActiveCanvas: (tab) => set({ activeTab: tab }),
   resetModelConfig: () => set({
     models: defaultModels,
     currentEditModel: null,

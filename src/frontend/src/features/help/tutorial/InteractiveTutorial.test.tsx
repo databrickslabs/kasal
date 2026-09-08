@@ -6,7 +6,7 @@ import InteractiveTutorial from './InteractiveTutorial';
 import { useAppStore } from '../../chat/store/appStore';
 import { usePermissionStore } from '../../../store/permissions';
 import { useFlowConfigStore } from '../../../store/flowConfig';
-import { useTabManagerStore } from '../../../store/tabManager';
+import { useBuilderCanvasStore } from '../../../app/sessions/builderCanvasStore';
 import { useUILayoutStore } from '../../../store/uiLayout';
 
 vi.mock('react-joyride', async importOriginal => ({
@@ -23,8 +23,8 @@ beforeEach(() => {
   useFlowConfigStore.setState({ kasalFlowEnabled: true });
   useAppStore.setState({ sidebarOpen: false });
   useUILayoutStore.setState({ appMode: 'crew' });
-  useTabManagerStore.setState({ tabs: [], activeTabId: null });
-  useTabManagerStore.getState().createTab('Original crew', 'crew');
+  useBuilderCanvasStore.setState({ canvases: [], activeCanvasId: null });
+  useBuilderCanvasStore.getState().createCanvas('Original crew', 'crew');
   vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{ width: 100, height: 40 }] as unknown as DOMRectList);
 });
 afterEach(() => vi.restoreAllMocks());
@@ -40,7 +40,7 @@ function mount(onClose = vi.fn()) {
 
 describe('current UI tutorial', () => {
   it('reveals sidebar targets, uses the existing builder session, and restores the sidebar on completion', async () => {
-    const original = useTabManagerStore.getState().activeTabId;
+    const original = useBuilderCanvasStore.getState().activeCanvasId;
     const onClose = vi.fn();
     mount(onClose);
     fireEvent.click(screen.getByRole('button', { name: 'Tour Agent Builder' }));
@@ -48,7 +48,7 @@ describe('current UI tutorial', () => {
     expect(await screen.findByText(/Control the canvas here/)).toBeInTheDocument();
     expect(screen.getByText(/without confirmation/)).toBeInTheDocument();
     expect(screen.getByText(/Crew catalog now lives in the left sidebar/)).toBeInTheDocument();
-    expect(useTabManagerStore.getState().activeTabId).toBe(original);
+    expect(useBuilderCanvasStore.getState().activeCanvasId).toBe(original);
     fireEvent.click(screen.getByRole('button', { name: 'Finish test tour' }));
     expect(onClose).toHaveBeenCalledOnce();
     expect(useAppStore.getState().sidebarOpen).toBe(false);

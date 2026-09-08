@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { useReasoningSupport, reasoningUnsupportedReason } from './useReasoningSupport';
-import { useTabManagerStore } from '../../store/tabManager';
+import { useBuilderCanvasStore } from '../../app/sessions/builderCanvasStore';
 
 /**
  * Whether the reasoning control can do anything depends on the models the NEXT
@@ -30,9 +30,9 @@ const TAB_BASE = {
 };
 
 function setCanvasAgents(models: string[]) {
-  useTabManagerStore.setState({
-    activeTabId: 'tab-1',
-    tabs: [
+  useBuilderCanvasStore.setState({
+    activeCanvasId: 'tab-1',
+    canvases: [
       {
         ...TAB_BASE,
         nodes: models.map((llm, i) => ({
@@ -90,9 +90,9 @@ describe('useReasoningSupport', () => {
   });
 
   it('ignores non-agent nodes', () => {
-    useTabManagerStore.setState({
-      activeTabId: 'tab-1',
-      tabs: [
+    useBuilderCanvasStore.setState({
+      activeCanvasId: 'tab-1',
+      canvases: [
         {
           ...TAB_BASE,
           nodes: [

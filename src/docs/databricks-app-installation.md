@@ -147,6 +147,14 @@ sets `KASAL_DEPLOYMENT_MODE=local`, which explicitly disables installation defau
 
 ## Conversation tracing
 
+Chat and both builders persist sessions through the same server-side storage
+(Lakebase in a configured App installation, SQLite locally). Builder sessions
+include encrypted canvas snapshots and their execution history references.
+After upgrading, open Kasal in the browser that holds your existing canvases:
+they are imported automatically with their conversation IDs preserved. The old
+browser entries are removed only after a successful server save. Pending edits
+remain in a per-user, per-teamspace browser outbox if a save fails.
+
 Chat, Agent Builder, and Flow Builder attach the originating conversation ID to
 MLflow traces. Builder planning calls and subsequent workload executions use that
 same ID, so MLflow can group them as a session. Completed plans and run results

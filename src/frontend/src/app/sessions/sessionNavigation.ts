@@ -1,7 +1,7 @@
-import { useTabManagerStore } from '../../store/tabManager';
+import { useBuilderCanvasStore } from './builderCanvasStore';
 import { useUILayoutStore, type AppMode } from '../../store/uiLayout';
 import { usePermissionStore } from '../../store/permissions';
-import { useSessionStore, cancelSessionNavigation } from '../../features/chat/store/sessionStore';
+import { useSessionStore, cancelSessionNavigation } from './sessionStore';
 import { useExecutionStore } from '../../features/chat/store/executionStore';
 import { useSessionPreferences } from './sessionPreferences';
 import type { WorkspaceSession } from './sessionIndex';
@@ -29,7 +29,7 @@ export function newWorkspaceSession(mode: AppMode) {
     useSessionStore.getState().startNewChat();
     useExecutionStore.getState().resetForSession();
   } else {
-    useTabManagerStore.getState().createTab(`New ${mode === 'crew' ? 'crew' : 'flow'}`, mode, { sessionDraft: true });
+    useBuilderCanvasStore.getState().createCanvas(`New ${mode === 'crew' ? 'crew' : 'flow'}`, mode, { sessionDraft: true });
   }
   useUILayoutStore.getState().setAppMode(mode);
   if (mode === 'crew') useUILayoutStore.getState().setAssistantPanelVisible(true);
@@ -47,9 +47,9 @@ export async function openWorkspaceSession(session: WorkspaceSession) {
     if (version !== navigationVersion || useSessionStore.getState().currentSessionId !== session.id) return;
     useExecutionStore.getState().restoreSessionState(session.id);
   } else {
-    const tab = useTabManagerStore.getState().getTab(session.id);
+    const tab = useBuilderCanvasStore.getState().getCanvas(session.id);
     if (!tab || tab.group_id !== (localStorage.getItem('selectedGroupId') || '')) return;
-    useTabManagerStore.getState().setActiveTab(tab.id);
+    useBuilderCanvasStore.getState().setActiveCanvas(tab.id);
   }
   useUILayoutStore.getState().setAppMode(session.mode);
   if (session.mode !== 'chat') useUILayoutStore.getState().setAssistantPanelVisible(true);
@@ -64,14 +64,14 @@ export function switchWorkspaceMode(mode: AppMode) {
     useUILayoutStore.getState().setAppMode(mode);
     return;
   }
-  const store = useTabManagerStore.getState();
+  const store = useBuilderCanvasStore.getState();
   const preferences = useSessionPreferences.getState().entries;
-  const matching = store.getTabsForCurrentGroup()
+  const matching = store.getCanvasesForCurrentGroup()
     .filter(tab => tab.viewMode === mode && !preferences[`builder:${tab.id}`]?.archived)
-    .sort((a, b) => Number(b.id === store.activeTabId) - Number(a.id === store.activeTabId)
+    .sort((a, b) => Number(b.id === store.activeCanvasId) - Number(a.id === store.activeCanvasId)
       || new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime());
   if (matching[0]) {
-    store.setActiveTab(matching[0].id);
+    store.setActiveCanvas(matching[0].id);
     useUILayoutStore.getState().setAppMode(mode);
   } else newWorkspaceSession(mode);
 }

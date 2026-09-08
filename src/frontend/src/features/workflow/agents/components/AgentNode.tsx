@@ -20,7 +20,7 @@ import LLMSelectionDialog from './LLMSelectionDialog';
 import { ToolService } from '../../../../api/tools/ToolService';
 import { Tool, KnowledgeSource } from '../../../../types/workflow/agent';
 import { alpha, Theme } from '@mui/material/styles';
-import { useTabDirtyState } from '../../../../hooks/workflow/useTabDirtyState';
+import { useBuilderDirtyState } from '../../../../hooks/workflow/useBuilderDirtyState';
 import { useAgentStore } from '../../../../store/agent';
 import { useUILayoutStore } from '../../../../store/uiLayout';
 import { useCrewExecutionStore } from '../../../../store/crewExecution';
@@ -68,7 +68,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
   const [tools, setTools] = useState<Tool[]>([]);
 
   // Tab dirty state management
-  const { markCurrentTabDirty } = useTabDirtyState();
+  const { markCurrentTabDirty } = useBuilderDirtyState();
 
   // Use agent store instead of local state
   const { getAgent, updateAgent } = useAgentStore();

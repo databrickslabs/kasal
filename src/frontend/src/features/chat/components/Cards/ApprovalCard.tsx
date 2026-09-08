@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { HITLService, HITLRejectionAction } from '../../../../api/execution/HITLService';
-import { useSessionStore } from '../../store/sessionStore';
+import { useSessionStore } from '../../../../app/sessions/sessionStore';
 
 /**
  * Inline APPROVAL card for ChatMode — one card for every kind of gate.

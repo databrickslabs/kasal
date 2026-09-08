@@ -2,13 +2,13 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePermissionStore } from '../../../../store/permissions';
 import { ChatMessageItem } from './ChatMessageItem';
-import { useTabManagerStore } from '../../../../store/tabManager';
+import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasStore';
 import type { ChatMessage } from '../types';
 
 const save = vi.hoisted(() => vi.fn(async () => ({ name: 'Dutch news' })));
 vi.mock('../utils/saveCanvasToCatalog', () => ({ saveCanvasToCatalog: save }));
 vi.mock('../../../chat/store/appStore', () => ({ useAppStore: { getState: () => ({ loadCatalog: vi.fn() }) } }));
-beforeEach(() => { vi.clearAllMocks(); useTabManagerStore.setState({ tabs: [], activeTabId: null }); usePermissionStore.setState({ allowAgentBuilder: true, allowFlowBuilder: true, userRole: 'admin' }); });
+beforeEach(() => { vi.clearAllMocks(); useBuilderCanvasStore.setState({ canvases: [], activeCanvasId: null }); usePermissionStore.setState({ allowAgentBuilder: true, allowFlowBuilder: true, userRole: 'admin' }); });
 describe('Generated plan catalog action', () => {
   it.each(['crew', 'flow'])('saves a generated %s plan immediately using its name', async kind => {
     const message: ChatMessage = { id: 'plan', type: 'assistant', content: 'Your plan is ready.', timestamp: new Date(), metadata: { catalogKind: kind, catalogName: 'Dutch news' } };
@@ -20,10 +20,10 @@ describe('Generated plan catalog action', () => {
   });
   it.each(['agentNode', 'taskNode', 'crewNode'])('allows saving again after editing a %s', async type => {
     const flow = type === 'crewNode';
-    const store = useTabManagerStore.getState();
-    const id = store.createTab('News', flow ? 'flow' : 'crew');
+    const store = useBuilderCanvasStore.getState();
+    const id = store.createCanvas('News', flow ? 'flow' : 'crew');
     const nodes = [{ id: 'node', type, position: { x: 0, y: 0 }, data: { name: 'Before' } }];
-    const update = flow ? store.updateTabFlowNodes : store.updateTabNodes;
+    const update = flow ? store.updateCanvasFlowNodes : store.updateCanvasNodes;
     update(id, nodes);
     render(<ChatMessageItem message={{ id: 'plan', type: 'assistant', content: 'Ready', timestamp: new Date(),
       metadata: { catalogKind: flow ? 'flow' : 'crew', catalogName: 'News' } }} appearance="assistant-panel" />);

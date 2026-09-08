@@ -14,7 +14,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // vi.mock is hoisted above any top-level const.
 interface FakeMessage { id: string; content: string }
 
-vi.mock('./sessionStore', () => {
+vi.mock('../../../app/sessions/sessionStore', () => {
   const painted: FakeMessage[] = [];
   const state = {
     currentSessionId: 'session-1' as string | null,
@@ -60,7 +60,7 @@ vi.mock('../utils/sessionPreview', () => ({
 }));
 
 import { useExecutionStore } from './executionStore';
-import { useSessionStore } from './sessionStore';
+import { useSessionStore } from '../../../app/sessions/sessionStore';
 
 /** The mocked session store's message list. */
 const paintedMessages = (): FakeMessage[] =>

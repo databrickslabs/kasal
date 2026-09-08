@@ -96,6 +96,17 @@ async def _ensure_chat_sessions_columns(conn) -> None:
         conn,
         "chat_sessions",
         [
+            (
+                "mode",
+                "VARCHAR(16) NOT NULL DEFAULT 'chat'",
+                "VARCHAR(16) NOT NULL DEFAULT 'chat'",
+            ),
+            ("canvas_state", "TEXT", "TEXT"),
+            (
+                "canvas_revision",
+                "INTEGER NOT NULL DEFAULT 0",
+                "INTEGER NOT NULL DEFAULT 0",
+            ),
             ("running_job_id", "VARCHAR", "VARCHAR"),
             ("preview_type", "VARCHAR(50)", "VARCHAR(50)"),
             ("preview_data", "TEXT", "TEXT"),

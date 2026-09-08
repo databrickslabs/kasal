@@ -2,10 +2,10 @@ import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import SessionSidebar from './SessionSidebar';
-import { useTabManagerStore } from '../../store/tabManager';
+import { useBuilderCanvasStore } from './builderCanvasStore';
 import { useUILayoutStore } from '../../store/uiLayout';
 import { usePermissionStore } from '../../store/permissions';
-import { useSessionStore } from '../../features/chat/store/sessionStore';
+import { useSessionStore } from './sessionStore';
 import { useAppStore } from '../../features/chat/store/appStore';
 import { useSessionPreferences } from './sessionPreferences';
 import { deleteSession } from '../../features/chat/persistence/sessionApi';
@@ -27,9 +27,9 @@ beforeEach(() => {
   usePermissionStore.setState({ allowAgentBuilder: true, allowFlowBuilder: true });
   useUILayoutStore.setState({ appMode: 'crew', areFlowsVisible: false });
   useSessionPreferences.setState({ entries: {} });
-  useTabManagerStore.setState({ tabs: [], activeTabId: null });
-  useTabManagerStore.getState().createTab('Research crew', 'crew');
-  useTabManagerStore.getState().createTab('Reporting flow', 'flow');
+  useBuilderCanvasStore.setState({ canvases: [], activeCanvasId: null });
+  useBuilderCanvasStore.getState().createCanvas('Research crew', 'crew');
+  useBuilderCanvasStore.getState().createCanvas('Reporting flow', 'flow');
   useSessionStore.setState({ currentSessionId: 'c', sessions: [{ id: 'c', title: 'A conversation', groupId: 'g', createdAt: new Date(), updatedAt: new Date() }], messages: [] });
 });
 const mount = () => render(<SessionSidebar onOpenSettings={vi.fn()} />);
@@ -56,12 +56,12 @@ describe('shared session sidebar', () => {
     expect(screen.getByTitle('Reporting weekly · Flow Builder')).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Options for Reporting weekly'));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Pin', exact: true }));
-    const id = useTabManagerStore.getState().tabs.find(tab => tab.name === 'Reporting weekly')!.id;
+    const id = useBuilderCanvasStore.getState().canvases.find(tab => tab.name === 'Reporting weekly')!.id;
     expect(useSessionPreferences.getState().entries[`builder:${id}`]?.pinned).toBe(true);
     fireEvent.click(screen.getByLabelText('Options for Reporting weekly'));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Archive', exact: true }));
     expect(screen.queryByTitle('Reporting weekly · Flow Builder')).toBeNull();
-    expect(useTabManagerStore.getState().getTab(id)).toBeTruthy();
+    expect(useBuilderCanvasStore.getState().getCanvas(id)).toBeTruthy();
     fireEvent.click(screen.getByLabelText('Archived sessions'));
     fireEvent.click(screen.getByLabelText('Options for Reporting weekly'));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Restore session' }));
@@ -85,7 +85,7 @@ describe('shared session sidebar', () => {
   });
 
   it.each(['chat', 'crew', 'flow'] as const)('deletes an archived %s session immediately without a confirmation dialog', async mode => {
-    const tab = useTabManagerStore.getState().tabs.find(item => item.viewMode === mode);
+    const tab = useBuilderCanvasStore.getState().canvases.find(item => item.viewMode === mode);
     const key = tab ? `builder:${tab.id}` : 'chat:c';
     const chatId = tab?.chatSessionId || 'c';
     const title = tab?.name || 'A conversation';
@@ -101,13 +101,13 @@ describe('shared session sidebar', () => {
     fireEvent.click(screen.getByLabelText('Archived sessions'));
     fireEvent.click(screen.getByLabelText(`Options for ${title}`));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Delete session' }));
-    expect(deleteSession).toHaveBeenCalledExactlyOnceWith(chatId);
+    await waitFor(() => expect(deleteSession).toHaveBeenCalledExactlyOnceWith(chatId));
     expect(screen.queryByRole('dialog')).toBeNull();
     await waitFor(() => expect(screen.queryByTitle(`${title} · ${mode === 'chat' ? 'Chat' : mode === 'crew' ? 'Agent Builder' : 'Flow Builder'}`)).toBeNull());
     expect(useSessionStore.getState().sessions.some(item => item.id === chatId)).toBe(false);
     expect(useSessionPreferences.getState().entries[key]).toBeUndefined();
     if (tab) {
-      expect(useTabManagerStore.getState().getTab(tab.id)).toBeNull();
+      expect(useBuilderCanvasStore.getState().getCanvas(tab.id)).toBeNull();
       expect(useChatMessagesStore.getState().messagesBySession[chatId]).toBeUndefined();
       expect(sessionStorage.getItem(`kasal-builder-run:g:${chatId}`)).toBeNull();
     } else expect(useSessionStore.getState().currentSessionId).toBeNull();
@@ -130,14 +130,14 @@ describe('shared session sidebar', () => {
 
   it('removes a local canvas when its conversation was never persisted', async () => {
     vi.mocked(deleteSession).mockRejectedValueOnce({ isAxiosError: true, response: { status: 404 } });
-    const tab = useTabManagerStore.getState().tabs.find(item => item.viewMode === 'crew')!;
+    const tab = useBuilderCanvasStore.getState().canvases.find(item => item.viewMode === 'crew')!;
     useSessionPreferences.getState().update(`builder:${tab.id}`, { archived: true });
     mount();
     fireEvent.click(screen.getByLabelText('Archived sessions'));
     fireEvent.click(screen.getByLabelText('Options for Research crew'));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Delete session' }));
     await waitFor(() => expect(screen.queryByTitle('Research crew · Agent Builder')).toBeNull());
-    expect(useTabManagerStore.getState().getTab(tab.id)).toBeNull();
+    expect(useBuilderCanvasStore.getState().getCanvas(tab.id)).toBeNull();
   });
 
   it('keeps a running session and explains why it cannot yet be deleted', async () => {

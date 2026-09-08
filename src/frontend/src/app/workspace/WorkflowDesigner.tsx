@@ -33,9 +33,9 @@ import { useThemeManager } from '../../hooks/workflow/useThemeManager';
 import { useErrorManager } from '../../hooks/workflow/useErrorManager';
 import { useFlowManager } from '../../hooks/workflow/useFlowManager';
 import { useCrewExecutionStore } from '../../store/crewExecution';
-import { useTabManagerStore } from '../../store/tabManager';
-import { useTabSync } from '../../hooks/workflow/useTabSync';
-import { useTabExecutionSync } from '../../hooks/workflow/useTabExecutionSync';
+import { useBuilderCanvasStore } from '../sessions/builderCanvasStore';
+import { useBuilderCanvasSync } from '../../hooks/workflow/useBuilderCanvasSync';
+import { useBuilderExecutionSync } from '../../hooks/workflow/useBuilderExecutionSync';
 import { useRunStatusStore } from '../../store/runStatus';
 import { useResponsiveLayout } from '../../hooks/workflow/useResponsiveLayout';
 
@@ -115,13 +115,13 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     setUIState: _setUIState
   } = useWorkflowStore();
 
-  // Use tab manager for multi-tab support
+  // Canvas state belongs to the selected shared session.
   const {
-    getActiveTab,
-    updateTabExecutionStatus,
-    updateTabFlowNodes,
-    updateTabFlowEdges,
-  } = useTabManagerStore();
+    getActiveCanvas,
+    updateCanvasExecutionStatus,
+    updateCanvasFlowNodes,
+    updateCanvasFlowEdges,
+  } = useBuilderCanvasStore();
 
   // Use run status store for job monitoring (SSE-based, no polling needed)
   const { runHistory } = useRunStatusStore();
@@ -143,30 +143,30 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
   // CRITICAL: Flow Canvas state from tab manager (persisted per tab)
   // Get the active tab's flow nodes/edges
-  const activeTab = getActiveTab();
+  const activeTab = getActiveCanvas();
   const flowNodes = activeTab?.flowNodes || [];
   const flowEdges = activeTab?.flowEdges || [];
 
   // Wrappers to update flow nodes/edges in the tab manager
   const setFlowNodes = useCallback((nodesOrUpdater: _Node[] | ((prev: _Node[]) => _Node[])) => {
-    const tab = getActiveTab();
+    const tab = getActiveCanvas();
     if (!tab) return;
 
     const newNodes = typeof nodesOrUpdater === 'function'
       ? nodesOrUpdater(tab.flowNodes || [])
       : nodesOrUpdater;
-    updateTabFlowNodes(tab.id, newNodes);
-  }, [getActiveTab, updateTabFlowNodes]);
+    updateCanvasFlowNodes(tab.id, newNodes);
+  }, [getActiveCanvas, updateCanvasFlowNodes]);
 
   const setFlowEdges = useCallback((edgesOrUpdater: _Edge[] | ((prev: _Edge[]) => _Edge[])) => {
-    const tab = getActiveTab();
+    const tab = getActiveCanvas();
     if (!tab) return;
 
     const newEdges = typeof edgesOrUpdater === 'function'
       ? edgesOrUpdater(tab.flowEdges || [])
       : edgesOrUpdater;
-    updateTabFlowEdges(tab.id, newEdges);
-  }, [getActiveTab, updateTabFlowEdges]);
+    updateCanvasFlowEdges(tab.id, newEdges);
+  }, [getActiveCanvas, updateCanvasFlowEdges]);
 
   // Flow canvas change handlers
   const onFlowNodesChange = useCallback((changes: NodeChange[]) => {
@@ -259,13 +259,13 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   }, [flowEdges]);
 
   // Use tab sync to keep tabs and flow manager in sync
-  const { activeTabId: _activeTabId } = useTabSync({ nodes, edges, setNodes, setEdges });
+  const { activeCanvasId: _activeTabId } = useBuilderCanvasSync({ nodes, edges, setNodes, setEdges });
 
   // View-mode reconciliation lives below, right after the uiLayout store hook,
   // so that areFlowsVisible is in scope for the effect dependency arrays.
 
   // Use tab execution sync to keep execution config (process type, reasoning, etc.) in sync per tab
-  useTabExecutionSync();
+  useBuilderExecutionSync();
 
   const { handleAgentSelect } = useAgentManager({ setNodes });
   const { handleTaskSelect } = useTaskManager({ setNodes });
@@ -448,10 +448,10 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   React.useEffect(() => {
     if (typeof window !== 'undefined') {
       (window as Window & { clearStuckTabs?: () => void }).clearStuckTabs = () => {
-        const state = useTabManagerStore.getState();
-        state.tabs.forEach(tab => {
+        const state = useBuilderCanvasStore.getState();
+        state.canvases.forEach(tab => {
           if (tab.executionStatus === 'running') {
-            state.updateTabExecutionStatus(tab.id, 'completed');
+            state.updateCanvasExecutionStatus(tab.id, 'completed');
           }
         });
       };
@@ -601,22 +601,22 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
       // Task states will be cleared when a new job is created (in handleJobCreated)
 
       // Get the active tab to ensure we clear the right one
-      const activeTab = getActiveTab();
+      const activeTab = getActiveCanvas();
 
       // Also log all tabs to debug
-      const tabManagerState = useTabManagerStore.getState();
+      const canvasState = useBuilderCanvasStore.getState();
 
       if (runningTabId) {
-        tabManagerState.updateTabExecutionStatus(runningTabId, 'completed');
+        canvasState.updateCanvasExecutionStatus(runningTabId, 'completed');
         setRunningTabId(null);
       } else if (activeTab?.executionStatus === 'running') {
         // Fallback: if no runningTabId but active tab is running, clear it
-        tabManagerState.updateTabExecutionStatus(activeTab.id, 'completed');
+        canvasState.updateCanvasExecutionStatus(activeTab.id, 'completed');
       } else {
         // Extra fallback: check all tabs for running status
-        tabManagerState.tabs.forEach(tab => {
+        canvasState.canvases.forEach(tab => {
           if (tab.executionStatus === 'running') {
-            tabManagerState.updateTabExecutionStatus(tab.id, 'completed');
+            canvasState.updateCanvasExecutionStatus(tab.id, 'completed');
           }
         });
       }
@@ -635,22 +635,22 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
       // Task states will be cleared when a new job is created (in handleJobCreated)
 
       // Get the active tab to ensure we clear the right one
-      const activeTab = getActiveTab();
+      const activeTab = getActiveCanvas();
 
       // Also log all tabs to debug
-      const tabManagerState = useTabManagerStore.getState();
+      const canvasState = useBuilderCanvasStore.getState();
 
       if (runningTabId) {
-        tabManagerState.updateTabExecutionStatus(runningTabId, 'failed');
+        canvasState.updateCanvasExecutionStatus(runningTabId, 'failed');
         setRunningTabId(null);
       } else if (activeTab?.executionStatus === 'running') {
         // Fallback: if no runningTabId but active tab is running, clear it
-        tabManagerState.updateTabExecutionStatus(activeTab.id, 'failed');
+        canvasState.updateCanvasExecutionStatus(activeTab.id, 'failed');
       } else {
         // Extra fallback: check all tabs for running status
-        tabManagerState.tabs.forEach(tab => {
+        canvasState.canvases.forEach(tab => {
           if (tab.executionStatus === 'running') {
-            tabManagerState.updateTabExecutionStatus(tab.id, 'failed');
+            canvasState.updateCanvasExecutionStatus(tab.id, 'failed');
           }
         });
       }
@@ -673,7 +673,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
       window.removeEventListener('jobCompleted', handleJobCompleted as EventListener);
       window.removeEventListener('jobFailed', handleJobFailed as EventListener);
     };
-  }, [runningTabId, getActiveTab, clearTaskStates]);
+  }, [runningTabId, getActiveCanvas, clearTaskStates]);
 
   // Fallback: Monitor job status directly from runHistory
   useEffect(() => {
@@ -686,16 +686,16 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
           // Clear the running tab if it's still set
           if (runningTabId) {
-            updateTabExecutionStatus(runningTabId, job.status.toLowerCase() as 'completed' | 'failed');
+            updateCanvasExecutionStatus(runningTabId, job.status.toLowerCase() as 'completed' | 'failed');
             setRunningTabId(null);
           }
 
           // Also check all tabs for stuck running status
           // Get tabs directly from store to avoid dependency issues
-          const tabManagerState = useTabManagerStore.getState();
-          tabManagerState.tabs.forEach(tab => {
+          const canvasState = useBuilderCanvasStore.getState();
+          canvasState.canvases.forEach(tab => {
             if (tab.executionStatus === 'running') {
-              tabManagerState.updateTabExecutionStatus(tab.id, job.status.toLowerCase() as 'completed' | 'failed');
+              canvasState.updateCanvasExecutionStatus(tab.id, job.status.toLowerCase() as 'completed' | 'failed');
             }
           });
 
@@ -709,7 +709,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         // No execution status, continue normally
       }
     }
-  }, [executingJobId, runHistory, runningTabId, updateTabExecutionStatus]);
+  }, [executingJobId, runHistory, runningTabId, updateCanvasExecutionStatus]);
 
   // Add event listener to force clear stuck execution state
   useEffect(() => {
@@ -717,10 +717,10 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
       // Clear any running tabs
       // Get tabs directly from store to avoid dependency issues
-      const tabManagerState = useTabManagerStore.getState();
-      tabManagerState.tabs.forEach(tab => {
+      const canvasState = useBuilderCanvasStore.getState();
+      canvasState.canvases.forEach(tab => {
         if (tab.executionStatus === 'running') {
-          tabManagerState.updateTabExecutionStatus(tab.id, 'completed');
+          canvasState.updateCanvasExecutionStatus(tab.id, 'completed');
         }
       });
 
@@ -777,7 +777,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   useEffect(() => {
     const restoreExecutionStates = async () => {
       // Get fresh data from stores
-      const { tabs: currentTabs } = useTabManagerStore.getState();
+      const { canvases: currentTabs } = useBuilderCanvasStore.getState();
       const { fetchInitialRunHistory: fetchHistory } = useRunStatusStore.getState();
       const { loadTaskStates: loadStates } = useTaskExecutionStore.getState();
       const { loadCrewStates } = useFlowExecutionStore.getState();
@@ -1205,7 +1205,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                     const config = buildFlowConfiguration(draft.nodes, draft.edges, draft.name);
                     setFlowNodes(draft.nodes); setFlowEdges(draft.edges);
                     useWorkflowStore.getState().setFlowConfig(config);
-                    const tab = getActiveTab();
+                    const tab = getActiveCanvas();
                     if (tab) useFlowStateStore.getState().clearDeclared(tab.id);
                     window.setTimeout(() => flowFlowInstanceRef.current?.fitView({ padding: 0.2, duration: 300 }), 150);
                   }}
@@ -1213,10 +1213,10 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                   onLoadingStateChange={setIsChatProcessing} isVisible={showChatPanel} nodes={areFlowsVisible ? flowNodes : nodes} edges={areFlowsVisible ? flowEdges : edges}
                   onExecuteCrew={() => {
                     // Set current tab as running when executing from chat
-                    const activeTab = getActiveTab();
+                    const activeTab = getActiveCanvas();
                     if (activeTab) {
                       setRunningTabId(activeTab.id);
-                      updateTabExecutionStatus(activeTab.id, 'running');
+                      updateCanvasExecutionStatus(activeTab.id, 'running');
 
                       // Clear any existing timeout
                       if (runningTabTimeoutRef.current) {
@@ -1232,7 +1232,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                           }
                           return currentRunningTabId;
                         });
-                        updateTabExecutionStatus(tabIdToTimeout, 'completed');
+                        updateCanvasExecutionStatus(tabIdToTimeout, 'completed');
                       }, 5 * 60 * 1000); // 5 minutes
                     }
                     // Make sure nodes are synced to the execution store
@@ -1244,7 +1244,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                     }, 100);
                   }}
                   onToggleCollapse={() => setChatPanelVisible(false)}
-                  chatSessionId={getActiveTab()?.chatSessionId} onOpenLogs={handleShowExecutionLogs} />
+                  chatSessionId={getActiveCanvas()?.chatSessionId} onOpenLogs={handleShowExecutionLogs} />
               </Box>
             )}
           </Box>

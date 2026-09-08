@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { ChatMessage } from '../types/index';
-import { useTabManagerStore } from '../../../../store/tabManager';
+import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasStore';
 import { streamExecution } from '../../../chat/api/streaming';
 import { builderResultContent } from '../utils/resultContent';
 
@@ -78,7 +78,7 @@ export const useExecutionMonitoring = (
     const handleJobCreated = (event: CustomEvent) => {
       const { jobId, jobName } = event.detail;
       settledJobsRef.current.delete(jobId);
-      useTabManagerStore.setState(state => ({ tabs: state.tabs.map(tab =>
+      useBuilderCanvasStore.setState(state => ({ canvases: state.canvases.map(tab =>
         tab.chatSessionId === sessionId && !tab.executionJobIds?.includes(jobId)
           ? { ...tab, executionJobIds: [...(tab.executionJobIds || []), jobId] } : tab
       ) }));

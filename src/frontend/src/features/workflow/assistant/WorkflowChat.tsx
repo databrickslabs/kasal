@@ -2,6 +2,7 @@ import { useGroupStore } from '../../../store/groups';
 import { usePlanGenerationStore, planGenerationKey, startPlanGeneration, resumePlanGeneration, consumePlanGeneration } from './store/planGenerationStore';
 import { applyCrewDispatchResult } from './utils/applyCrewDispatchResult';
 import { useGenerationTrace } from './hooks/useGenerationTrace';
+import { extractVariablesFromNodes } from './utils/canvasVariables';
 import { generateFlowTurn } from './utils/generateFlowTurn';
 import { getDefaultModel } from '../../../config/defaultModel';
 import React, { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
@@ -36,7 +37,7 @@ import { useCrewExecutionStore } from '../../../store/crewExecution';
 import { useChatMessagesStore, deduplicateMessages } from './store/chatMessagesStore';
 import { useKnowledgeConfigStore } from '../../../store/knowledgeConfigStore';
 import { useModelConfigStore } from '../../../store/modelConfig';
-import { useTabManagerStore } from '../../../store/tabManager';
+import { useBuilderCanvasStore } from '../../../app/sessions/builderCanvasStore';
 import { Node as FlowNode } from 'reactflow';
 import { ChatHistoryService } from '../../../api/chat/ChatHistoryService';
 import { ModelService } from '../../../api/config/ModelService';
@@ -335,45 +336,6 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     previousScrollTopRef.current = el.scrollTop;
   };
 
-  // Extract variables from nodes
-  const extractVariablesFromNodes = (workflowNodes: FlowNode[]): string[] => {
-    const variablePattern = /\{([a-zA-Z_][a-zA-Z0-9_-]*)\}/g;
-    const foundVariables = new Set<string>();
-
-    const scanString = (value: unknown) => {
-      if (value && typeof value === 'string') {
-        let match;
-        variablePattern.lastIndex = 0;
-        while ((match = variablePattern.exec(value)) !== null) {
-          foundVariables.add(match[1]);
-        }
-      }
-    };
-
-    workflowNodes.forEach(node => {
-      if (node.type === 'agentNode' || node.type === 'taskNode') {
-        const data = node.data as Record<string, unknown>;
-
-        // Scan standard agent/task fields
-        [data.role, data.goal, data.backstory, data.description, data.expected_output, data.label]
-          .forEach(scanString);
-
-        // Scan tool_configs values (e.g. {user_question} in Reducer config)
-        // Check both data.tool_configs (progressive SSE path) and data.task.tool_configs (all-at-once/LoadCrew path)
-        const toolConfigs = (data.tool_configs || (data.task as Record<string, unknown>)?.tool_configs) as Record<string, Record<string, unknown>> | undefined;
-        if (toolConfigs && typeof toolConfigs === 'object') {
-          Object.values(toolConfigs).forEach(toolCfg => {
-            if (toolCfg && typeof toolCfg === 'object') {
-              Object.values(toolCfg).forEach(scanString);
-            }
-          });
-        }
-      }
-    });
-
-    return Array.from(foundVariables);
-  };
-
   // Update layout manager when UI state changes
   React.useEffect(() => {
     layoutManagerRef.current.updateUIState({
@@ -558,14 +520,14 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
    * record in place (overwriting its content, keeping its old name) instead
    * of opening the save dialog to create a new crew. */
   const detachTabFromSavedCrew = useCallback(() => {
-    const { activeTabId, getTab, clearTabCrewInfo } = useTabManagerStore.getState();
-    if (!activeTabId) return;
-    const tab = getTab(activeTabId);
+    const { activeCanvasId, getCanvas, clearCanvasCrewInfo } = useBuilderCanvasStore.getState();
+    if (!activeCanvasId) return;
+    const tab = getCanvas(activeCanvasId);
     if (tab?.savedCrewId) {
       console.log(
-        `[WorkflowChat] Detaching tab ${activeTabId} from saved crew ${tab.savedCrewId} (new crew generated)`
+        `[WorkflowChat] Detaching tab ${activeCanvasId} from saved crew ${tab.savedCrewId} (new crew generated)`
       );
-      clearTabCrewInfo(activeTabId);
+      clearCanvasCrewInfo(activeCanvasId);
     }
   }, []);
 
@@ -758,7 +720,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     if (!inputValue.trim() || isLoading || generationTraceId) return;
 
     if (builderMode === 'flow' && !isCollectingVariables && !isExecuteFlowCommand(inputValue) && !/^\/?run(?:\s+(?:the\s+)?flow)?[.!]?$/i.test(inputValue.trim())) {
-      await generateFlowTurn({ inputValue, selectedModel, nodes, flowRequest, setMessages, setInputValue, setIsLoading, saveMessageToBackend, onFlowGenerated, beginGenerationTrace, setGenerationTraceId });
+      await generateFlowTurn({ sessionId, inputValue, selectedModel, nodes, flowRequest, setMessages, setInputValue, setIsLoading, saveMessageToBackend, onFlowGenerated, beginGenerationTrace, setGenerationTraceId });
       return;
     }
 

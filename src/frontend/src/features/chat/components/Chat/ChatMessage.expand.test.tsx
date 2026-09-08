@@ -5,7 +5,7 @@ import ChatMessageComponent from './ChatMessage';
 vi.mock('../../store/executionStore', () => ({
   useExecutionStore: Object.assign(vi.fn(() => false), { getState: () => ({}) }),
 }));
-vi.mock('../../store/sessionStore', () => ({
+vi.mock('../../../../app/sessions/sessionStore', () => ({
   useSessionStore: Object.assign(vi.fn(() => undefined), { getState: () => ({}) }),
 }));
 

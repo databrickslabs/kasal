@@ -13,7 +13,7 @@
 import { useState, useCallback } from 'react';
 import { useChatEffortStore } from '../../../store/chatEffort';
 import { createExecution } from '../api/executions';
-import { useSessionStore } from '../store/sessionStore';
+import { useSessionStore } from '../../../app/sessions/sessionStore';
 import { useExecutionStore } from '../store/executionStore';
 import { useAppStore } from '../store/appStore';
 import { PlanData, FlowData } from './useDispatcher';

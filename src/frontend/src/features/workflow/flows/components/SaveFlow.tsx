@@ -5,7 +5,7 @@ import { FlowService } from '../../../../api/workflow/FlowService';
 import axios from 'axios';
 import type { CanvasSaveCallbacks } from '../../assistant/utils/saveCanvasToCatalog';
 import { Edge, Node } from 'reactflow';
-import { useTabManagerStore } from '../../../../store/tabManager';
+import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasStore';
 import { buildFlowConfiguration } from '../../../../utils/flowConfigBuilder';
 import { declaredStateForTab } from '../../../../store/flowState';
 
@@ -25,7 +25,7 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
   const [autoSave, setAutoSave] = useState(false);
   const pendingSave = useRef<CanvasSaveCallbacks | null>(null);
 
-  const { activeTabId, updateTabFlowInfo } = useTabManagerStore();
+  const { activeCanvasId, updateCanvasFlowInfo } = useBuilderCanvasStore();
 
   // Listen for the custom event to open the save flow dialog
   useEffect(() => {
@@ -51,7 +51,7 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
       try {
         console.log('SaveFlow: Updating existing flow', { tabId, flowId });
 
-        const tab = useTabManagerStore.getState().getTab(tabId);
+        const tab = useBuilderCanvasStore.getState().getCanvas(tabId);
         if (!tab) {
           console.error('SaveFlow: Tab not found for update', tabId);
           return;
@@ -128,9 +128,9 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
         customEvent.detail.onSaved?.({ name: updatedFlow.name });
 
         // Update the tab's flow info and mark as clean
-        const { updateTabFlowInfo, markTabClean } = useTabManagerStore.getState();
-        updateTabFlowInfo(tabId, updatedFlow.id, updatedFlow.name);
-        markTabClean(tabId);
+        const { updateCanvasFlowInfo, markCanvasClean } = useBuilderCanvasStore.getState();
+        updateCanvasFlowInfo(tabId, updatedFlow.id, updatedFlow.name);
+        markCanvasClean(tabId);
 
         // Dispatch completion event
         setTimeout(() => {
@@ -248,9 +248,9 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
         removedEdges: uniqueEdges.length - validEdges.length
       });
 
-      // Get active tab to get crew_id - use getActiveTab() for latest state
-      // This ensures we read the current activeTabId from store state, not the potentially stale hook value
-      const activeTab = useTabManagerStore.getState().getActiveTab();
+      // Get active tab to get crew_id - use getActiveCanvas() for latest state
+      // This ensures we read the current activeCanvasId from store state, not the potentially stale hook value
+      const activeTab = useBuilderCanvasStore.getState().getActiveCanvas();
       let crew_id = activeTab?.savedCrewId || '';
 
       // If no savedCrewId on tab, try to get crew_id from CrewNodes in the flow
@@ -265,7 +265,7 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
       // Log debug info to help diagnose issues
       console.log('SaveFlow: crew_id resolution:', {
         savedCrewId: activeTab?.savedCrewId,
-        activeTabId: activeTab?.id,
+        activeCanvasId: activeTab?.id,
         crew_id,
         crewNodeCount: uniqueNodes.filter(n => n.type === 'crewNode').length
       });
@@ -283,7 +283,7 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
         uniqueNodes,
         validEdges,
         name,
-        declaredStateForTab(activeTabId),
+        declaredStateForTab(activeCanvasId),
       );
 
       console.log('SaveFlow: Built flowConfig:', {
@@ -305,8 +305,8 @@ const SaveFlow: React.FC<SaveFlowProps> = ({ nodes, edges, trigger, disabled = f
       pendingSave.current = null;
 
       // Update the tab's flow info
-      if (activeTabId && savedFlow.id) {
-        updateTabFlowInfo(activeTabId, savedFlow.id, name);
+      if (activeCanvasId && savedFlow.id) {
+        updateCanvasFlowInfo(activeCanvasId, savedFlow.id, name);
       }
 
       // Close dialog and reset state

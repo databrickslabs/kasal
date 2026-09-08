@@ -57,8 +57,8 @@ vi.mock('../../../../utils/taskIdUtils', () => ({
 }));
 
 // Mock hooks
-vi.mock('../../../../hooks/workflow/useTabDirtyState', () => ({
-  useTabDirtyState: () => ({
+vi.mock('../../../../hooks/workflow/useBuilderDirtyState', () => ({
+  useBuilderDirtyState: () => ({
     markCurrentTabDirty: vi.fn(),
   }),
 }));

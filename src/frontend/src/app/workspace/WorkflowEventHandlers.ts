@@ -5,7 +5,7 @@ import { FlowConfiguration } from '../../types/workflow/flow';
 import { CrewTask } from '../../types/workflow/crewPlan';
 import { v4 as uuidv4 } from 'uuid';
 import { useFlowStateStore, DeclaredFlowState } from '../../store/flowState';
-import { useTabManagerStore } from '../../store/tabManager';
+import { useBuilderCanvasStore } from '../sessions/builderCanvasStore';
 import { CanvasLayoutManager } from '../../features/workflow/canvas/lib/CanvasLayoutManager';
 import { useUILayoutStore } from '../../store/uiLayout';
 
@@ -111,15 +111,15 @@ export const useFlowSelectHandler = (
     // from the canvas on every save, but reducers and the conversational flag
     // are the author's decisions — without this, opening a conversational flow
     // and saving it would quietly demote it to a one-shot.
-    const activeTabId = useTabManagerStore.getState().activeTabId;
+    const activeCanvasId = useBuilderCanvasStore.getState().activeCanvasId;
     const declaredState = (flowConfig as { state?: DeclaredFlowState } | undefined)?.state;
-    if (activeTabId) {
+    if (activeCanvasId) {
       if (declaredState) {
-        useFlowStateStore.getState().setDeclared(activeTabId, declaredState);
+        useFlowStateStore.getState().setDeclared(activeCanvasId, declaredState);
       } else {
         // A flow that declares nothing must not inherit the last flow opened
         // in this tab.
-        useFlowStateStore.getState().clearDeclared(activeTabId);
+        useFlowStateStore.getState().clearDeclared(activeCanvasId);
       }
     }
 
@@ -315,17 +315,17 @@ export const useEventBindings = (
     });
 
     // Get the tab manager store
-    const { createTab, updateTabNodes, updateTabEdges, setActiveTab, getActiveTab, updateTabCrewInfo } =
-      useTabManagerStore.getState();
+    const { createCanvas, updateCanvasNodes, updateCanvasEdges, setActiveCanvas, getActiveCanvas, updateCanvasCrewInfo } =
+      useBuilderCanvasStore.getState();
 
     // Save the current active tab ID before creating new one
-    const previousActiveTabId = getActiveTab()?.id;
+    const previousActiveTabId = getActiveCanvas()?.id;
     console.log('Previous active tab ID:', previousActiveTabId);
 
     // Create a new tab for the loaded crew with the crew name. Force 'crew' view so
     // loading a crew always lands on the crew canvas even if the user was in flow mode.
     const actualCrewName = crewName || 'Loaded Crew';
-    const newTabId = createTab(actualCrewName, 'crew');
+    const newTabId = createCanvas(actualCrewName, 'crew');
     console.log('Created new tab with ID:', newTabId, 'and name:', actualCrewName);
 
     // Update edge handles and styles to match the current layout orientation
@@ -398,12 +398,12 @@ export const useEventBindings = (
     });
 
     // Update the new tab with the reorganized nodes and updated edges BEFORE setting it as active
-    // This ensures useTabSync will restore the correct positions when the tab becomes active
-    updateTabNodes(newTabId, reorganizedNodes);
-    updateTabEdges(newTabId, updatedEdges);
+    // This ensures useBuilderCanvasSync will restore the correct positions when the tab becomes active
+    updateCanvasNodes(newTabId, reorganizedNodes);
+    updateCanvasEdges(newTabId, updatedEdges);
 
     // Verify the tab was updated correctly
-    const updatedTab = useTabManagerStore.getState().getTab(newTabId);
+    const updatedTab = useBuilderCanvasStore.getState().getCanvas(newTabId);
 
     console.log('✅ Updated tab with reorganized nodes and edges before activation', {
       tabId: newTabId,
@@ -416,18 +416,18 @@ export const useEventBindings = (
     // If we have a crew name and ID, mark this tab as having loaded crew content
     if (crewName && crewId) {
       console.log('Marking tab as loaded crew with name:', crewName, 'and ID:', crewId);
-      updateTabCrewInfo(newTabId, crewId, crewName);
+      updateCanvasCrewInfo(newTabId, crewId, crewName);
     }
 
     // Use setTimeout to ensure Zustand state updates are processed before tab activation
-    // This prevents useTabSync from seeing stale/empty tab data
+    // This prevents useBuilderCanvasSync from seeing stale/empty tab data
     setTimeout(() => {
       // Now set the new tab as active
-      setActiveTab(newTabId);
+      setActiveCanvas(newTabId);
       console.log('Set new tab as active:', newTabId);
 
       // Directly set the nodes and edges to ensure they're displayed
-      // This overrides any potential clearing from useTabSync
+      // This overrides any potential clearing from useBuilderCanvasSync
       setTimeout(() => {
         setNodes(reorganizedNodes);
         setEdges(updatedEdges);

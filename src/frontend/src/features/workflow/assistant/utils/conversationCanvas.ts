@@ -1,24 +1,24 @@
-import { useTabManagerStore } from '../../../../store/tabManager';
+import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasStore';
 import { useWorkflowStore } from '../../../../store/workflow';
 
 /** Open a conversation's canvas within the current workspace, preserving the current draft canvas. */
 export function openConversationCanvas(sessionId?: string, viewMode: 'crew' | 'flow' = 'crew'): string {
-  const tabs = useTabManagerStore.getState();
-  const current = tabs.getActiveTab();
+  const tabs = useBuilderCanvasStore.getState();
+  const current = tabs.getActiveCanvas();
   if (current) {
     const workflow = useWorkflowStore.getState();
-    tabs.updateTabNodes(current.id, workflow.nodes);
-    tabs.updateTabEdges(current.id, workflow.edges);
+    tabs.updateCanvasNodes(current.id, workflow.nodes);
+    tabs.updateCanvasEdges(current.id, workflow.edges);
   }
-  const existing = sessionId ? tabs.getTabsForCurrentGroup().find(tab => tab.chatSessionId === sessionId) : undefined;
+  const existing = sessionId ? tabs.getCanvasesForCurrentGroup().find(tab => tab.chatSessionId === sessionId) : undefined;
   if (existing) {
-    tabs.setActiveTab(existing.id);
+    tabs.setActiveCanvas(existing.id);
     return existing.id;
   }
-  const id = tabs.createTab(undefined, viewMode);
+  const id = tabs.createCanvas(undefined, viewMode);
   if (sessionId) {
     // Historical conversations without a local canvas begin on a fresh tab.
-    useTabManagerStore.setState(state => ({ tabs: state.tabs.map(tab => tab.id === id ? { ...tab, chatSessionId: sessionId } : tab) }));
+    useBuilderCanvasStore.setState(state => ({ canvases: state.canvases.map(tab => tab.id === id ? { ...tab, chatSessionId: sessionId } : tab) }));
   }
   return id;
 }

@@ -6,13 +6,13 @@ import {
   Menu, MenuItem, Tooltip, Typography,
 } from '@mui/material';
 import { Archive, ArrowLeft, BookOpen, MessageSquare, MoreHorizontal, Network, Pin, Search, Workflow } from 'lucide-react';
-import { useTabManagerStore } from '../../store/tabManager';
+import { useBuilderCanvasStore } from './builderCanvasStore';
 import { useUILayoutStore } from '../../store/uiLayout';
 import { useFlowConfigStore } from '../../store/flowConfig';
 import { usePermissionStore } from '../../store/permissions';
 import { useThemeStore } from '../../store/theme';
 import { useAppStore } from '../../features/chat/store/appStore';
-import { useSessionStore } from '../../features/chat/store/sessionStore';
+import { useSessionStore } from './sessionStore';
 import { useExecutionStore } from '../../features/chat/store/executionStore';
 import SidebarAccountActions from '../../components/SidebarAccountActions';
 import SidebarAction from '../../components/SidebarAction';
@@ -29,8 +29,8 @@ interface Props { onOpenSettings: () => void; onOpenCatalog?: () => void; librar
 
 export default function SessionSidebar({ onOpenSettings, onOpenCatalog, library }: Props) {
   const { groupId, loadError } = useWorkspaceSessions();
-  const tabs = useTabManagerStore(state => state.tabs);
-  const activeTabId = useTabManagerStore(state => state.activeTabId);
+  const tabs = useBuilderCanvasStore(state => state.canvases);
+  const activeCanvasId = useBuilderCanvasStore(state => state.activeCanvasId);
   const chats = useSessionStore(state => state.sessions);
   const currentChatId = useSessionStore(state => state.currentSessionId);
   const mode = useUILayoutStore(state => state.appMode);
@@ -59,7 +59,7 @@ export default function SessionSidebar({ onOpenSettings, onOpenCatalog, library 
   const visible = sessions.filter(session => Boolean(preferences[session.key]?.archived) === archived
     && `${session.title} ${modeLabels[session.mode]}`.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => Number(Boolean(preferences[b.key]?.pinned)) - Number(Boolean(preferences[a.key]?.pinned)));
-  const activeKey = mode === 'chat' ? `chat:${currentChatId}` : `builder:${activeTabId}`;
+  const activeKey = mode === 'chat' ? `chat:${currentChatId}` : `builder:${activeCanvasId}`;
   const select = async (session: WorkspaceSession) => {
     setOpening(session.key); setError('');
     try { await openWorkspaceSession(session); }
@@ -71,7 +71,7 @@ export default function SessionSidebar({ onOpenSettings, onOpenCatalog, library 
     if (!rename.trim() || rename.trim() === session.title) return;
     try {
       if (session.mode === 'chat') await useSessionStore.getState().renameSession(session.id, rename.trim());
-      else useTabManagerStore.getState().updateTabName(session.id, rename.trim());
+      else useBuilderCanvasStore.getState().updateCanvasName(session.id, rename.trim());
     } catch { setError('Could not rename this session. Please try again.'); }
   };
   const remove = async (session: WorkspaceSession) => {

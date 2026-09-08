@@ -48,7 +48,7 @@ const QuickToolSelectionDialog: React.FC<QuickToolSelectionDialogProps> = ({
   initialTab = 0
 }) => {
   // Tab state
-  const [activeTab, setActiveTab] = useState(initialTab);
+  const [activeTab, setActiveCanvas] = useState(initialTab);
 
   // Tools state
   const [tools, setTools] = useState<Tool[]>([]);
@@ -82,7 +82,7 @@ const QuickToolSelectionDialog: React.FC<QuickToolSelectionDialogProps> = ({
   // Sync initialTab when dialog opens
   useEffect(() => {
     if (open) {
-      setActiveTab(initialTab);
+      setActiveCanvas(initialTab);
     }
   }, [open, initialTab]);
 
@@ -277,7 +277,7 @@ const QuickToolSelectionDialog: React.FC<QuickToolSelectionDialogProps> = ({
 
       <Tabs
         value={activeTab}
-        onChange={(_, newValue) => setActiveTab(newValue)}
+        onChange={(_, newValue) => setActiveCanvas(newValue)}
         sx={{ px: 3, borderBottom: 1, borderColor: 'divider' }}
       >
         <Tab

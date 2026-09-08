@@ -7,7 +7,7 @@ import ThumbnailRail from './ThumbnailRail';
 import SlideInstructionBar from './SlideInstructionBar';
 import { DeckService } from '../../../../api/chat/DeckService';
 import { useAppStore } from '../../store/appStore';
-import { useSessionStore } from '../../store/sessionStore';
+import { useSessionStore } from '../../../../app/sessions/sessionStore';
 import { planSlideEdit, type SlideEdit } from '../../utils/slideRefine';
 import { useResolvedAssetHtml } from '../../hooks/useResolvedAssetHtml';
 import { hasPendingAssets } from '../../utils/assetRefs';

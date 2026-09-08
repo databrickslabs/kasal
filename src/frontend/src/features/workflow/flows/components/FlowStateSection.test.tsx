@@ -18,7 +18,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import FlowStateSection from './FlowStateSection';
 import { useFlowStateStore } from '../../../../store/flowState';
-import { useTabManagerStore } from '../../../../store/tabManager';
+import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasStore';
 import { FlowService } from '../../../../api/workflow/FlowService';
 
 vi.mock('../../../../api/workflow/FlowService', () => ({
@@ -46,9 +46,9 @@ const tab = (extra: Record<string, unknown> = {}) => ({
 beforeEach(() => {
   vi.clearAllMocks();
   useFlowStateStore.setState({ declared: {} });
-  useTabManagerStore.setState({
-    activeTabId: TAB,
-    tabs: [tab({ savedFlowId: 'flow-1' })],
+  useBuilderCanvasStore.setState({
+    activeCanvasId: TAB,
+    canvases: [tab({ savedFlowId: 'flow-1' })],
   } as never);
   (FlowService.getFlow as ReturnType<typeof vi.fn>).mockResolvedValue(null);
   (FlowService.updateFlowState as ReturnType<typeof vi.fn>).mockResolvedValue(true);
@@ -94,7 +94,7 @@ describe('hydration from the saved flow', () => {
   });
 
   it('does not call the API for an unsaved flow', async () => {
-    useTabManagerStore.setState({ tabs: [tab()] } as never);
+    useBuilderCanvasStore.setState({ canvases: [tab()] } as never);
 
     render(<FlowStateSection />);
 
@@ -146,7 +146,7 @@ describe('editing', () => {
   it('does not try to write an unsaved flow', async () => {
     // Nothing to write to yet; the store carries it and the first save picks
     // it up.
-    useTabManagerStore.setState({ tabs: [tab()] } as never);
+    useBuilderCanvasStore.setState({ canvases: [tab()] } as never);
     render(<FlowStateSection />);
 
     await userEvent.click(

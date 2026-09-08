@@ -14,6 +14,7 @@ it('persists the generation failure reason and clears progress without applying 
   const saveMessageToBackend = vi.fn().mockResolvedValue(undefined);
   const onFlowGenerated = vi.fn();
   await generateFlowTurn({
+    sessionId: 'flow-session',
     inputValue: 'Build a flow', selectedModel: 'test-model', nodes: [],
     flowRequest: { current: null }, setMessages, setInputValue: vi.fn(),
     setIsLoading, saveMessageToBackend, onFlowGenerated,

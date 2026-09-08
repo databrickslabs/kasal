@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 const updateMessage = vi.fn();
-vi.mock('../../store/sessionStore', () => ({
+vi.mock('../../../../app/sessions/sessionStore', () => ({
   useSessionStore: { getState: () => ({ updateMessage }) },
 }));
 const postCrewFeedback = vi.fn(async () => ({}));

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { GenerationCompleteData } from '../../types/dispatcher';
 import { postCrewFeedback, CrewNameConflictError, deriveCrewName } from '../../api/crews';
 import CompletedRunActions from './CompletedRunActions';
-import { useSessionStore } from '../../store/sessionStore';
+import { useSessionStore } from '../../../../app/sessions/sessionStore';
 import OpenOnCanvasButtons from './OpenOnCanvasButtons';
 
 /**

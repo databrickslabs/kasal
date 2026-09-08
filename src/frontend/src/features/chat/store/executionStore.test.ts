@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { rememberTaskOutputMessage, useExecutionStore } from './executionStore';
-import { useSessionStore } from './sessionStore';
+import { useSessionStore } from '../../../app/sessions/sessionStore';
 import { saveSessionPreview, getSessionPreview, clearSessionRunningJob } from '../persistence/sessionApi';
 import { parsePreviewContent } from '../utils/preview';
 import { deriveSessionPreviews } from '../utils/sessionPreview';
 
 // --- Mocks for sibling modules ---
-vi.mock('./sessionStore', () => {
+vi.mock('../../../app/sessions/sessionStore', () => {
   const state = {
     currentSessionId: null as string | null,
     addMessage: vi.fn(),

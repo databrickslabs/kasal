@@ -2,10 +2,10 @@ import type { Dispatch, SetStateAction, MutableRefObject } from 'react';
 import type { Node } from 'reactflow';
 import { FlowService } from '../../../../api/workflow/FlowService';
 import { useUILayoutStore } from '../../../../store/uiLayout';
-import { useTabManagerStore } from '../../../../store/tabManager';
 import type { ChatMessage, FlowDraft } from '../types';
 
 interface FlowTurnOptions {
+  sessionId: string;
   inputValue: string;
   selectedModel: string;
   nodes: Node[];
@@ -19,9 +19,7 @@ interface FlowTurnOptions {
   setGenerationTraceId: (jobId: string | null) => void;
 }
 
-export async function generateFlowTurn({ inputValue, selectedModel, nodes, flowRequest, setMessages, setInputValue, setIsLoading, saveMessageToBackend, onFlowGenerated, beginGenerationTrace, setGenerationTraceId }: FlowTurnOptions) {
-  const tabs = useTabManagerStore.getState();
-  const sessionId = tabs.tabs.find(tab => tab.id === tabs.activeTabId)?.chatSessionId;
+export async function generateFlowTurn({ sessionId, inputValue, selectedModel, nodes, flowRequest, setMessages, setInputValue, setIsLoading, saveMessageToBackend, onFlowGenerated, beginGenerationTrace, setGenerationTraceId }: FlowTurnOptions) {
   const controller = new AbortController();
   flowRequest.current = controller;
   const userMessage: ChatMessage = { id: `flow-user-${Date.now()}`, type: 'user', content: inputValue.trim(), timestamp: new Date() };

@@ -264,7 +264,7 @@ export const useWorkflowStore = create<WorkflowState>()(
     {
       name: 'workflow-storage',
       partialize: (state) => ({
-        // Don't persist nodes and edges - they should be managed by tab-manager-storage
+        // Canvas snapshots persist through the shared server-side session lifecycle.
         // nodes: state.nodes,
         // edges: state.edges,
         hasSeenTutorial: state.hasSeenTutorial,

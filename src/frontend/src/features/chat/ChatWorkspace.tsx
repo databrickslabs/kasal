@@ -4,7 +4,7 @@ import { useRunActivity } from './hooks/useRunActivity';
 import { useChatCommands } from './hooks/useChatCommands';
 import { useChatLibraryActions } from './hooks/useChatLibraryActions';
 import { useChatExecutionActions } from './hooks/useChatExecutionActions';
-import { useSessionStore } from './store/sessionStore';
+import { useSessionStore } from '../../app/sessions/sessionStore';
 import { useExecutionStore } from './store/executionStore';
 import { useAppStore } from './store/appStore';
 import { useDispatcher } from './hooks/useDispatcher';

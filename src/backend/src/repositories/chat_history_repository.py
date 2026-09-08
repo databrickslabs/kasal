@@ -13,6 +13,24 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
     Follows Kasal's patterns for multi-group data isolation.
     """
 
+    async def session_has_other_owner(self, session_id, user_id, group_id):
+        """Legacy message-only sessions must not be claimable by another user."""
+        from sqlalchemy import or_, select
+
+        result = await self.session.execute(
+            select(ChatHistory.id)
+            .where(
+                ChatHistory.session_id == session_id,
+                or_(
+                    ChatHistory.user_id != user_id,
+                    ChatHistory.group_id != group_id,
+                    ChatHistory.group_id.is_(None),
+                ),
+            )
+            .limit(1)
+        )
+        return result.first() is not None
+
     def __init__(self, session: AsyncSession):
         super().__init__(ChatHistory, session)
 

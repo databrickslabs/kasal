@@ -82,8 +82,8 @@ vi.mock('../../../../store/crewExecution', () => ({
 
 // Hooks
 const mockMarkCurrentTabDirty = vi.fn();
-vi.mock('../../../../hooks/workflow/useTabDirtyState', () => ({
-  useTabDirtyState: () => ({ markCurrentTabDirty: mockMarkCurrentTabDirty }),
+vi.mock('../../../../hooks/workflow/useBuilderDirtyState', () => ({
+  useBuilderDirtyState: () => ({ markCurrentTabDirty: mockMarkCurrentTabDirty }),
 }));
 
 // ToolService

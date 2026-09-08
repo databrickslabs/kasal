@@ -33,7 +33,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { useTabManagerStore } from '../../../../store/tabManager';
+import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasStore';
 import { useFlowStateStore } from '../../../../store/flowState';
 import { FlowService } from '../../../../api/workflow/FlowService';
 import type { DeclaredFlowState } from '../../../../store/flowState';
@@ -56,7 +56,7 @@ const CONVERSATION_CHANNELS = [
 ];
 
 const FlowStateSection: React.FC = () => {
-  const activeTabId = useTabManagerStore((state) => state.activeTabId);
+  const activeCanvasId = useBuilderCanvasStore((state) => state.activeCanvasId);
   const declared = useFlowStateStore((state) => state.declared);
   const { setReducer, setConversational } = useFlowStateStore();
 
@@ -73,9 +73,9 @@ const FlowStateSection: React.FC = () => {
   // Only when the store has nothing: an unsaved edit must win over what is on
   // disk, or opening the dialog twice would silently discard a change.
   useEffect(() => {
-    if (!activeTabId) return;
-    if (useFlowStateStore.getState().getDeclared(activeTabId)) return;
-    const flowId = useTabManagerStore.getState().getActiveTab()?.savedFlowId;
+    if (!activeCanvasId) return;
+    if (useFlowStateStore.getState().getDeclared(activeCanvasId)) return;
+    const flowId = useBuilderCanvasStore.getState().getActiveCanvas()?.savedFlowId;
     if (!flowId) return;
 
     let cancelled = false;
@@ -85,7 +85,7 @@ const FlowStateSection: React.FC = () => {
           flow?.flowConfig ?? (flow as { flow_config?: { state?: DeclaredFlowState } })?.flow_config
         )?.state as DeclaredFlowState | undefined;
         if (!cancelled && declared) {
-          useFlowStateStore.getState().setDeclared(activeTabId, declared);
+          useFlowStateStore.getState().setDeclared(activeCanvasId, declared);
         }
       })
       .catch(() => {
@@ -95,15 +95,15 @@ const FlowStateSection: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [activeTabId]);
+  }, [activeCanvasId]);
 
 
   const channels = useMemo(() => {
-    const tab = useTabManagerStore.getState().getActiveTab();
+    const tab = useBuilderCanvasStore.getState().getActiveCanvas();
     return flowStateNames(tab?.flowNodes ?? [], tab?.flowEdges ?? []);
   }, []);
 
-  const current = activeTabId ? declared[activeTabId] : undefined;
+  const current = activeCanvasId ? declared[activeCanvasId] : undefined;
   const conversational = !!current?.conversational;
 
   const reducerFor = useCallback(
@@ -126,21 +126,21 @@ const FlowStateSection: React.FC = () => {
   // An UNSAVED flow has nowhere to write to; there the store still carries it
   // and the first save picks it up.
   const persist = useCallback(async () => {
-    const flowId = useTabManagerStore.getState().getActiveTab()?.savedFlowId;
-    if (!flowId || !activeTabId) return;
+    const flowId = useBuilderCanvasStore.getState().getActiveCanvas()?.savedFlowId;
+    if (!flowId || !activeCanvasId) return;
     setSaving(true);
-    const declaration = useFlowStateStore.getState().getDeclared(activeTabId);
+    const declaration = useFlowStateStore.getState().getDeclared(activeCanvasId);
     const ok = await FlowService.updateFlowState(
       flowId,
       declaration as Record<string, unknown> | undefined,
     );
     setSaving(false);
     if (ok) setSavedAt(Date.now());
-  }, [activeTabId]);
+  }, [activeCanvasId]);
 
   const handleReducer = (channel: string, reducer: FlowStateReducer) => {
-    if (!activeTabId) return;
-    setReducer(activeTabId, channel, reducer);
+    if (!activeCanvasId) return;
+    setReducer(activeCanvasId, channel, reducer);
     void persist();
   };
 
@@ -162,8 +162,8 @@ const FlowStateSection: React.FC = () => {
         <Switch
           checked={conversational}
           onChange={(e) => {
-            if (!activeTabId) return;
-            setConversational(activeTabId, e.target.checked);
+            if (!activeCanvasId) return;
+            setConversational(activeCanvasId, e.target.checked);
             void persist();
           }}
         />

@@ -1,14 +1,14 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import type { ChatSession, ChatMessage } from '../types/chat';
+import type { ChatSession, ChatMessage } from '../../features/chat/types/chat';
 
 // --- Mock generateId ---
 let idCounter = 0;
-vi.mock('../utils/markdown', () => ({
+vi.mock('../../features/chat/utils/markdown', () => ({
   generateId: vi.fn(() => `gen-id-${++idCounter}`),
 }));
 
 // --- Mock sessionDb ---
-vi.mock('../persistence/sessionApi', () => ({
+vi.mock('../../features/chat/persistence/sessionApi', () => ({
   initDb: vi.fn(),
   assignUngroupedSessions: vi.fn(),
   createSession: vi.fn(),
@@ -22,7 +22,7 @@ vi.mock('../persistence/sessionApi', () => ({
 }));
 
 import { useSessionStore, __clearRememberedExtras } from './sessionStore';
-import * as db from '../persistence/sessionApi';
+import * as db from '../../features/chat/persistence/sessionApi';
 
 const ACTIVE_SESSION_KEY = 'kasal-chat-active-session';
 

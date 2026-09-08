@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Bookmark } from 'lucide-react';
 import { usePermissionStore } from '../../../../store/permissions';
-import { useTabManagerStore } from '../../../../store/tabManager';
+import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasStore';
 import { useThemeStore } from '../../../../store/theme';
 import { useAppStore } from '../../../chat/store/appStore';
 import { saveCanvasToCatalog } from '../utils/saveCanvasToCatalog';
@@ -10,7 +10,7 @@ import { saveCanvasToCatalog } from '../utils/saveCanvasToCatalog';
 export default function BuilderCatalogAction({ flow, suggestedName = '' }: { flow: boolean; suggestedName?: string }) {
   const dark = useThemeStore(state => state.isDarkMode);
   const [saving, setSaving] = useState(false);
-  const tab = useTabManagerStore(state => state.tabs.find(item => item.id === state.activeTabId));
+  const tab = useBuilderCanvasStore(state => state.canvases.find(item => item.id === state.activeCanvasId));
   const revision = useMemo(() => JSON.stringify({
     id: tab?.id,
     nodes: (flow ? tab?.flowNodes : tab?.nodes)?.map(({ id, type, data }) => ({ id, type, data })),

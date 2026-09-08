@@ -6,7 +6,7 @@
  */
 import { useCallback } from 'react';
 import { saveGeneratedCrew, synthesizeCrewFromConversation, CrewNameConflictError } from '../api/crews';
-import { useSessionStore } from '../store/sessionStore';
+import { useSessionStore } from '../../../app/sessions/sessionStore';
 import { useAppStore } from '../store/appStore';
 import { useExecutionStore } from '../store/executionStore';
 import { GenerationCompleteData } from '../types/dispatcher';

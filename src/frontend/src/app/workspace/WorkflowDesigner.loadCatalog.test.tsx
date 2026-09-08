@@ -60,8 +60,8 @@ vi.mock('../../hooks/workflow/useFlowManager', () => ({
     manuallyPositionedNodes: new Set(),
   }),
 }));
-vi.mock('../../hooks/workflow/useTabSync', () => ({ useTabSync: () => ({ activeTabId: null }) }));
-vi.mock('../../hooks/workflow/useTabExecutionSync', () => ({ useTabExecutionSync: () => undefined }));
+vi.mock('../../hooks/workflow/useBuilderCanvasSync', () => ({ useBuilderCanvasSync: () => ({ activeCanvasId: null }) }));
+vi.mock('../../hooks/workflow/useBuilderExecutionSync', () => ({ useBuilderExecutionSync: () => undefined }));
 vi.mock('../../hooks/workflow/useResponsiveLayout', () => ({ useResponsiveLayout: () => ({ isCompact: false, isMobile: false }) }));
 vi.mock('../../hooks/workflow/useUIFitView', () => ({ useUIFitView: () => ({ handleUIAwareFitView: vi.fn(), handleFitViewToNodesInternal: vi.fn() }) }));
 vi.mock('../../hooks/workflow/useWorkflowLayoutEvents', () => ({ useWorkflowLayoutEvents: () => undefined }));
@@ -96,12 +96,12 @@ vi.mock('../../api/execution/ExecutionLogs', () => ({ executionLogService: { get
 
 import WorkflowDesigner from './WorkflowDesigner';
 import { useUILayoutStore } from '../../store/uiLayout';
-import { useTabManagerStore } from '../../store/tabManager';
+import { useBuilderCanvasStore } from '../sessions/builderCanvasStore';
 
 describe('WorkflowDesigner - Load from Catalog matches the active canvas', () => {
   beforeEach(() => {
-    useTabManagerStore.setState({ tabs: [], activeTabId: null });
-    useTabManagerStore.getState().createTab('Canvas 1', 'flow');
+    useBuilderCanvasStore.setState({ canvases: [], activeCanvasId: null });
+    useBuilderCanvasStore.getState().createCanvas('Canvas 1', 'flow');
   });
 
   it('opens the Flows tab when invoked on the flow canvas', () => {

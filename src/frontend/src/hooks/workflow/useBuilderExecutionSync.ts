@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { useTabManagerStore, TabExecutionConfig } from '../../store/tabManager';
+import { useBuilderCanvasStore, CanvasExecutionConfig } from '../../app/sessions/builderCanvasStore';
 import { useCrewExecutionStore } from '../../store/crewExecution';
 
 /**
@@ -9,12 +9,12 @@ import { useCrewExecutionStore } from '../../store/crewExecution';
  * This ensures each tab can have its own runtime configuration that persists
  * when switching between tabs.
  */
-export const useTabExecutionSync = () => {
+export const useBuilderExecutionSync = () => {
   const {
-    activeTabId,
-    updateTabExecutionConfig,
-    getTabExecutionConfig
-  } = useTabManagerStore();
+    activeCanvasId,
+    updateCanvasExecutionConfig,
+    getCanvasExecutionConfig
+  } = useBuilderCanvasStore();
 
   const {
     processType,
@@ -43,11 +43,11 @@ export const useTabExecutionSync = () => {
    * Save current execution config to the active tab
    */
   const saveConfigToTab = useCallback(() => {
-    if (!activeTabId || isRestoringRef.current || isLoadingCrew) {
+    if (!activeCanvasId || isRestoringRef.current || isLoadingCrew) {
       return;
     }
 
-    const config: TabExecutionConfig = {
+    const config: CanvasExecutionConfig = {
       processType,
       reasoningEnabled,
       reasoningLLM,
@@ -56,17 +56,17 @@ export const useTabExecutionSync = () => {
       selectedModel
     };
 
-    console.log('[useTabExecutionSync] Saving config to tab:', activeTabId, config);
-    updateTabExecutionConfig(activeTabId, config);
+    console.log('[useBuilderExecutionSync] Saving config to tab:', activeCanvasId, config);
+    updateCanvasExecutionConfig(activeCanvasId, config);
   }, [
-    activeTabId,
+    activeCanvasId,
     processType,
     reasoningEnabled,
     reasoningLLM,
     reasoningConfig,
     managerLLM,
     selectedModel,
-    updateTabExecutionConfig,
+    updateCanvasExecutionConfig,
     isLoadingCrew
   ]);
 
@@ -74,14 +74,14 @@ export const useTabExecutionSync = () => {
    * Restore execution config from a tab
    */
   const restoreConfigFromTab = useCallback((tabId: string) => {
-    const config = getTabExecutionConfig(tabId);
+    const config = getCanvasExecutionConfig(tabId);
 
     if (!config) {
-      console.log('[useTabExecutionSync] No config found for tab:', tabId, '- using current values');
+      console.log('[useBuilderExecutionSync] No config found for tab:', tabId, '- using current values');
       return;
     }
 
-    console.log('[useTabExecutionSync] Restoring config from tab:', tabId, config);
+    console.log('[useBuilderExecutionSync] Restoring config from tab:', tabId, config);
 
     isRestoringRef.current = true;
 
@@ -109,7 +109,7 @@ export const useTabExecutionSync = () => {
       isRestoringRef.current = false;
     }, 100);
   }, [
-    getTabExecutionConfig,
+    getCanvasExecutionConfig,
     setProcessType,
     setReasoningEnabled,
     setReasoningLLM,
@@ -127,15 +127,15 @@ export const useTabExecutionSync = () => {
       return;
     }
 
-    if (activeTabId !== lastActiveTabIdRef.current) {
-      console.log('[useTabExecutionSync] Tab switch detected:', {
+    if (activeCanvasId !== lastActiveTabIdRef.current) {
+      console.log('[useBuilderExecutionSync] Tab switch detected:', {
         from: lastActiveTabIdRef.current,
-        to: activeTabId
+        to: activeCanvasId
       });
 
       // Save config to the old tab before switching (if there was one)
       if (lastActiveTabIdRef.current && !isInitialMountRef.current) {
-        const oldConfig: TabExecutionConfig = {
+        const oldConfig: CanvasExecutionConfig = {
           processType,
           reasoningEnabled,
           reasoningLLM,
@@ -143,28 +143,28 @@ export const useTabExecutionSync = () => {
           managerLLM,
           selectedModel
         };
-        console.log('[useTabExecutionSync] Saving config to previous tab:', lastActiveTabIdRef.current, oldConfig);
-        updateTabExecutionConfig(lastActiveTabIdRef.current, oldConfig);
+        console.log('[useBuilderExecutionSync] Saving config to previous tab:', lastActiveTabIdRef.current, oldConfig);
+        updateCanvasExecutionConfig(lastActiveTabIdRef.current, oldConfig);
       }
 
       // Restore config from the new tab
-      if (activeTabId) {
-        restoreConfigFromTab(activeTabId);
+      if (activeCanvasId) {
+        restoreConfigFromTab(activeCanvasId);
       }
 
       // Update the reference
-      lastActiveTabIdRef.current = activeTabId;
+      lastActiveTabIdRef.current = activeCanvasId;
       isInitialMountRef.current = false;
     }
   }, [
-    activeTabId,
+    activeCanvasId,
     processType,
     reasoningEnabled,
     reasoningLLM,
     reasoningConfig,
     managerLLM,
     selectedModel,
-    updateTabExecutionConfig,
+    updateCanvasExecutionConfig,
     restoreConfigFromTab,
     isLoadingCrew
   ]);

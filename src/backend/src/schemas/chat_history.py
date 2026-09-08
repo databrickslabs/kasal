@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def _require_content_or_payload(content: Optional[str], generation_result) -> None:
@@ -228,6 +228,13 @@ class NamedChatSessionResponse(BaseModel):
 
     id: str = Field(..., description="Session identifier")
     title: str = Field(..., description="Session title")
+    mode: str = "chat"
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def default_session_mode(cls, value):
+        return value or "chat"
+
     user_id: str = Field(..., description="Owner user id")
     group_id: Optional[str] = Field(None, description="Workspace (group) id")
     created_at: datetime = Field(..., description="Creation timestamp")

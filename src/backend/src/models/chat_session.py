@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, Index, String, Text
+from sqlalchemy import Column, DateTime, Index, Integer, String, Text
 
 from src.db.base import Base
 
@@ -25,6 +25,11 @@ class ChatSession(Base):
 
     id = Column(String, primary_key=True, default=generate_uuid)
     title = Column(String(255), nullable=False, default="New Chat")
+    mode = Column(String(16), nullable=False, default="chat", server_default="chat")
+    canvas_state = Column(
+        Text, nullable=True
+    )  # Encrypted builder state, loaded on demand
+    canvas_revision = Column(Integer, nullable=False, default=0, server_default="0")
     user_id = Column(String, nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(

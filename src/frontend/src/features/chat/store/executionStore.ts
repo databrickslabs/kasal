@@ -4,7 +4,7 @@ import { ExecutionStatus } from '../types/execution';
 import type { ExecutionContext } from '../types/execution';
 import type { PreviewContent } from '../types/preview';
 import { parsePreviewContent } from '../utils/preview';
-import { useSessionStore } from './sessionStore';
+import { useSessionStore } from '../../../app/sessions/sessionStore';
 import {
   saveSessionPreview,
   getSessionPreview,

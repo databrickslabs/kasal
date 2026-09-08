@@ -156,7 +156,7 @@ function storeHook(obj: Record<string, unknown>) {
   return hook;
 }
 
-vi.mock('./store/sessionStore', () => ({ useSessionStore: storeHook(h.session) }));
+vi.mock('../../app/sessions/sessionStore', () => ({ useSessionStore: storeHook(h.session) }));
 vi.mock('./store/executionStore', () => ({
   useExecutionStore: storeHook(h.exec),
   // The run registers the message holding its task output so completion can

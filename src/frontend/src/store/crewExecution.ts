@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { Node, Edge } from 'reactflow';
 import { jobExecutionService } from '../api/execution/JobExecutionService';
 import { useErrorStore } from './error';
-import { useTabManagerStore } from './tabManager';
+import { useBuilderCanvasStore } from '../app/sessions/builderCanvasStore';
 import { useFlowExecutionStore } from './flowExecutionStore';
 import { Tool } from '../types/workflow/tool';
 import { assessTrifecta, TrifectaAssessment } from '../utils/toolCapabilityManifest';
@@ -21,7 +21,7 @@ interface RunHistoryItem {
 
 // Reasoning controls (the model's native thinking budget). Defined in types/workflow/crew
 // (a leaf module) and re-exported here so existing imports keep working without an
-// import cycle (tabManager <-> crewExecution). Sent to the backend as
+// import cycle (builderCanvasStore <-> crewExecution). Sent to the backend as
 // `reasoning_config` only when reasoning is enabled.
 export type { ReasoningConfig } from '../types/workflow/crew';
 import type { ReasoningConfig } from '../types/workflow/crew';
@@ -342,8 +342,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     console.log('[CrewExecution] executeCrew - edges:', edges);
 
     const { selectedModel, reasoningEnabled, reasoningLLM, reasoningConfig, schemaDetectionEnabled, inputVariables, processType, managerLLM } = get();
-    const originTab = useTabManagerStore.getState().tabs.find(
-      tab => tab.id === useTabManagerStore.getState().activeTabId
+    const originTab = useBuilderCanvasStore.getState().canvases.find(
+      tab => tab.id === useBuilderCanvasStore.getState().activeCanvasId
     );
     set({ isExecuting: true });
 
@@ -587,8 +587,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     console.log('[CrewExecution] executeFlow - savedFlowId:', savedFlowId);
 
     const { selectedModel, reasoningEnabled, reasoningLLM, reasoningConfig, schemaDetectionEnabled, inputVariables } = get();
-    const originTab = useTabManagerStore.getState().tabs.find(
-      tab => tab.id === useTabManagerStore.getState().activeTabId
+    const originTab = useBuilderCanvasStore.getState().canvases.find(
+      tab => tab.id === useBuilderCanvasStore.getState().activeCanvasId
     );
     set({ isExecuting: true });
 
@@ -819,7 +819,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       // Record which saved definition the run came from, so a resume can rebuild
       // from it. Whichever of the two is set follows from executionType, and an
       // unsaved tab sends neither.
-      const tab = useTabManagerStore.getState().tabs.find(t => t.id === tabId);
+      const tab = useBuilderCanvasStore.getState().canvases.find(t => t.id === tabId);
 
       const response = await jobExecutionService.executeJob(
         nodes,
@@ -890,8 +890,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     // Resolve correct nodes/edges based on execution type from tab manager
     // The crewExecution store has a single nodes/edges property that gets overwritten
     // when switching between crew and flow canvases. Read directly from tab state instead.
-    const tabState = useTabManagerStore.getState();
-    const activeTab = tabState.tabs.find(t => t.id === tabState.activeTabId);
+    const tabState = useBuilderCanvasStore.getState();
+    const activeTab = tabState.canvases.find(t => t.id === tabState.activeCanvasId);
     let resolvedNodes: Node[];
     let resolvedEdges: Edge[];
     if (type === 'crew' && activeTab) {
@@ -967,8 +967,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       // event arrives.
       useFlowExecutionStore.getState().clearStates();
 
-      const tabManagerState = useTabManagerStore.getState();
-      const activeTab = tabManagerState.tabs.find(tab => tab.id === tabManagerState.activeTabId);
+      const canvasState = useBuilderCanvasStore.getState();
+      const activeTab = canvasState.canvases.find(tab => tab.id === canvasState.activeCanvasId);
       const savedFlowId = activeTab?.savedFlowId || undefined;
 
       window.dispatchEvent(new CustomEvent('openExecutionHistory'));
@@ -1123,8 +1123,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
         await state.executeCrew(nodes, edges);
       } else {
         // Get savedFlowId from tab manager for flow executions
-        const tabManagerState = useTabManagerStore.getState();
-        const activeTab = tabManagerState.tabs.find(tab => tab.id === tabManagerState.activeTabId);
+        const canvasState = useBuilderCanvasStore.getState();
+        const activeTab = canvasState.canvases.find(tab => tab.id === canvasState.activeCanvasId);
         const savedFlowId = activeTab?.savedFlowId || undefined;
         await state.executeFlow(nodes, edges, savedFlowId);
       }

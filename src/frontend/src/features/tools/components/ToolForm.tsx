@@ -100,7 +100,7 @@ const ToolForm: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
-  const [activeTab, setActiveTab] = useState<number>(0);
+  const [activeTab, setActiveCanvas] = useState<number>(0);
   const [securityDisclaimerOpen, setSecurityDisclaimerOpen] = useState(false);
   const [pendingToggleTool, setPendingToggleTool] = useState<Tool | null>(null);
   const [notification, setNotification] = useState<{
@@ -367,7 +367,7 @@ const ToolForm: React.FC = () => {
   };
 
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
-    setActiveTab(newValue);
+    setActiveCanvas(newValue);
   };
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {

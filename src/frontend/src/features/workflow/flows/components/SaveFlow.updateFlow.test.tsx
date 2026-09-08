@@ -10,7 +10,7 @@ import { render } from '@testing-library/react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Node, Edge } from 'reactflow';
 import SaveFlow from './SaveFlow';
-import { useTabManagerStore } from '../../../../store/tabManager';
+import { useBuilderCanvasStore } from '../../../../app/sessions/builderCanvasStore';
 import { FlowService } from '../../../../api/workflow/FlowService';
 
 vi.mock('../../../../api/workflow/FlowService', () => ({
@@ -35,20 +35,20 @@ const flowEdge = (source: string, target: string): Edge => ({
 describe('SaveFlow - updateExistingFlow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useTabManagerStore.setState({ tabs: [], activeTabId: null });
+    useBuilderCanvasStore.setState({ canvases: [], activeCanvasId: null });
   });
 
   it('persists the flow canvas nodes/edges, not the crew canvas ones', async () => {
-    const tabId = useTabManagerStore.getState().createTab('My Flow', 'flow');
+    const tabId = useBuilderCanvasStore.getState().createCanvas('My Flow', 'flow');
     // Crew canvas content that must NOT be saved as the flow.
-    useTabManagerStore.getState().updateTabNodes(tabId, [crewNode('crew-canvas-node')]);
-    useTabManagerStore.getState().updateTabEdges(tabId, []);
+    useBuilderCanvasStore.getState().updateCanvasNodes(tabId, [crewNode('crew-canvas-node')]);
+    useBuilderCanvasStore.getState().updateCanvasEdges(tabId, []);
     // Flow canvas content that SHOULD be saved.
-    useTabManagerStore.getState().updateTabFlowNodes(tabId, [
+    useBuilderCanvasStore.getState().updateCanvasFlowNodes(tabId, [
       crewNode('flow-node-a'),
       crewNode('flow-node-b'),
     ]);
-    useTabManagerStore.getState().updateTabFlowEdges(tabId, [flowEdge('flow-node-a', 'flow-node-b')]);
+    useBuilderCanvasStore.getState().updateCanvasFlowEdges(tabId, [flowEdge('flow-node-a', 'flow-node-b')]);
 
     render(<SaveFlow nodes={[]} edges={[]} trigger={<button>save</button>} />);
 

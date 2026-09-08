@@ -27,7 +27,7 @@ export const useModelConfig = () => {
     setDatabricksEnabled,
     setError,
     incrementRefreshKey,
-    setActiveTab,
+    setActiveCanvas,
     resetModelConfig,
   } = useModelConfigStore();
 
@@ -76,8 +76,8 @@ export const useModelConfig = () => {
   }, [incrementRefreshKey]);
 
   const handleSetActiveTab = useCallback((tab: number) => {
-    setActiveTab(tab);
-  }, [setActiveTab]);
+    setActiveCanvas(tab);
+  }, [setActiveCanvas]);
 
   const handleResetModelConfig = useCallback(() => {
     resetModelConfig();
@@ -110,7 +110,7 @@ export const useModelConfig = () => {
     setDatabricksEnabled: handleSetDatabricksEnabled,
     setError: handleSetError,
     incrementRefreshKey: handleIncrementRefreshKey,
-    setActiveTab: handleSetActiveTab,
+    setActiveCanvas: handleSetActiveTab,
     resetModelConfig: handleResetModelConfig,
   };
 }; 
