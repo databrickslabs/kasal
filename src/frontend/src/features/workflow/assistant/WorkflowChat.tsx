@@ -1,3 +1,6 @@
+import { useGroupStore } from '../../../store/groups';
+import { usePlanGenerationStore, planGenerationKey, startPlanGeneration, resumePlanGeneration, consumePlanGeneration } from './store/planGenerationStore';
+import { applyCrewDispatchResult } from './utils/applyCrewDispatchResult';
 import { useGenerationTrace } from './hooks/useGenerationTrace';
 import { generateFlowTurn } from './utils/generateFlowTurn';
 import { getDefaultModel } from '../../../config/defaultModel';
@@ -27,7 +30,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 
 
-import DispatcherService, { DispatchResult, ConfigureCrewResult, CatalogListResult, CatalogLoadResult, FlowListResult, FlowLoadResult, StreamingGenerationResult } from '../../../api/execution/DispatcherService';
+import type { DispatchResult } from '../../../api/execution/DispatcherService';
 import { useThemeStore } from '../../../store/theme';
 import { useWorkflowStore } from '../../../store/workflow';
 import { useCrewExecutionStore } from '../../../store/crewExecution';
@@ -47,10 +50,7 @@ import { useUILayoutState, useUILayoutStore } from '../../../store/uiLayout';
 import {
   WorkflowChatProps,
   ChatMessage,
-  ModelConfig,
-  GeneratedAgent,
-  GeneratedTask,
-  GeneratedCrew
+  ModelConfig
 } from './types/index';
 
 // Import utilities
@@ -59,7 +59,6 @@ import {
   createAgentGenerationHandler,
   createTaskGenerationHandler,
   createCrewGenerationHandler,
-  handleConfigureCrew,
   createCrewSkeletonHandler,
   updateAgentNodeDetail,
   updateTaskNodeDetail,
@@ -104,10 +103,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
   onOpenLogs,
 }) => {
   const flowRequest = useRef<AbortController | null>(null);
-  const crewRequest = useRef<AbortController | null>(null);
   useEffect(() => {
     setIsLoading(false);
-    return () => { flowRequest.current?.abort(); crewRequest.current?.abort(); };
+    return () => { flowRequest.current?.abort(); };
   }, [providedChatSessionId, builderMode]);
   const [inputValue, setInputValue] = useState('');
   const [isImproving, setIsImproving] = useState(false);
@@ -224,6 +222,13 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     startNewChat,
   } = useChatSession(providedChatSessionId);
 
+  const groupId = useGroupStore(state => state.currentGroupId);
+  const visibleSessionRef = useRef(providedChatSessionId || sessionId);
+  visibleSessionRef.current = providedChatSessionId || sessionId;
+  const generationKey = planGenerationKey(groupId, sessionId);
+  const planRequest = usePlanGenerationStore(state => state.requests[generationKey]);
+  const planActivity = usePlanGenerationStore(state => state.activityBySession[generationKey]);
+
   // Subscribe to raw session messages via selector — this guarantees re-renders
   // when addMessage() is called from useExecutionMonitoring or any other source.
   // Previously, destructuring only methods from useChatMessagesStore() did not create
@@ -258,6 +263,20 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       setZustandMessages(sessionId, updater);
     }
   }, [sessionId, setZustandMessages]);
+
+  // A saved job link outlives both the observer and transcript loading. Restore
+  // missing anchors so returning to a session never loses its durable trace.
+  useEffect(() => {
+    if (!planActivity?.length) return;
+    setMessages(previous => {
+      const linked = new Set(previous.map(message => message.jobId));
+      const missing: ChatMessage[] = planActivity.filter(item => !linked.has(item.jobId)).map(item => ({
+        id: `generation-trace-${item.jobId}`, type: 'trace', jobId: item.jobId,
+        content: 'Design activity', timestamp: new Date(item.createdAt),
+      }));
+      return missing.length ? [...previous, ...missing] : previous;
+    });
+  }, [planActivity, setMessages]);
 
   const {
     executingJobId,
@@ -503,11 +522,13 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     checkConfiguration();
   }, [checkConfiguration]);
 
+  const generationModel = planRequest?.model || selectedModel;
+
   // Create handlers using extracted utilities
   const handleAgentGenerated = createAgentGenerationHandler(
     setNodes,
     setMessages,
-    selectedModel,
+    generationModel,
     onNodesGenerated,
     layoutManagerRef,
     inputRef
@@ -527,7 +548,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     setEdges,
     setLastExecutionJobId,
     setExecutingJobId,
-    selectedModel,
+    generationModel,
     onNodesGenerated,
     layoutManagerRef,
     inputRef
@@ -551,7 +572,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
   // ── Progressive crew generation via SSE ──────────────────────────
   const [generationId, setGenerationId] = useState<string | null>(null);
-  const { generationCompletedRef, generationTraceId, setGenerationTraceId, beginGenerationTrace } = useGenerationTrace(setMessages, saveMessageToBackend);
+  const { generationCompletedRef, generationTraceId: flowGenerationTraceId, setGenerationTraceId, beginGenerationTrace } = useGenerationTrace(setMessages, saveMessageToBackend);
+  const generationTraceId = builderMode === 'crew' ? planRequest?.jobId || null : flowGenerationTraceId;
   const indexMapRef = useRef<IndexNodeIdMap | null>(null);
   const progressMsgIdRef = useRef<string | null>(null);
   const pendingGenieConfigsRef = useRef<ToolConfigNeededData[]>([]);
@@ -569,6 +591,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
   const sseHandlers = useMemo<CrewGenerationSSEHandlers>(() => ({
     onPlanReady: (plan) => {
+      if (visibleSessionRef.current !== sessionId) return;
       // The generated crew REPLACES the canvas content. Detach the tab from
       // any previously loaded crew, otherwise the next Save silently
       // overwrites that crew (content AND keeps its old name) instead of
@@ -582,10 +605,10 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
 
       const processLabel = plan.process_type === 'parallel' ? 'parallel' : 'sequential';
       const complexityLabel = plan.complexity || 'standard';
-      const msgId = `msg-progress-${Date.now()}`;
+      const msgId = `msg-progress-${generationId}`;
       progressMsgIdRef.current = msgId;
       setMessages((prev) => [
-        ...prev,
+        ...prev.filter(message => message.id !== msgId),
         {
           id: msgId,
           type: 'assistant' as const,
@@ -596,8 +619,9 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       ]);
     },
     onAgentDetail: (data) => {
+      if (visibleSessionRef.current !== sessionId) return;
       if (indexMapRef.current) {
-        updateAgentNodeDetail(setNodes, setEdges, indexMapRef.current, selectedModel)(data);
+        updateAgentNodeDetail(setNodes, setEdges, indexMapRef.current, generationModel)(data);
       }
       const name = (data.agent.name as string) || `Agent ${data.index + 1}`;
       const role = (data.agent.role as string) || '';
@@ -607,6 +631,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       appendProgressLine(`\n**${name}** — ${role}${toolsLabel}\n\n${goal}`);
     },
     onTaskDetail: (data) => {
+      if (visibleSessionRef.current !== sessionId) return;
       if (indexMapRef.current) {
         updateTaskNodeDetail(setNodes, setEdges, indexMapRef.current)(data);
       }
@@ -616,18 +641,22 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       appendProgressLine(`\n${data.index + 1}. **${name}**\n\n   ${shortDesc}`);
     },
     onEntityError: (data) => {
+      if (visibleSessionRef.current !== sessionId) return;
       if (indexMapRef.current) {
         markNodeError(setNodes, indexMapRef.current)(data);
       }
       appendProgressLine(`  ⚠ Failed to generate ${data.entity_type} "${data.name}"`);
     },
     onDependenciesResolved: (data) => {
+      if (visibleSessionRef.current !== sessionId) return;
       addDependencyEdges(setNodes, setEdges)(data);
     },
     onToolConfigNeeded: (data) => {
+      if (visibleSessionRef.current !== sessionId) return;
       pendingGenieConfigsRef.current = [...pendingGenieConfigsRef.current, data];
     },
     onComplete: () => {
+      if (visibleSessionRef.current !== sessionId) return;
       generationCompletedRef.current = true;
       setGenerationId(null);
       if (!generationTraceId) setIsLoading(false);
@@ -637,6 +666,8 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       appendProgressLine('\n✓ Crew generated successfully');
       const completedPlanId = progressMsgIdRef.current;
       setMessages(prev => prev.map(message => message.id === completedPlanId ? { ...message, metadata: { ...message.metadata, catalogKind: 'crew' } } : message));
+      const completedPlan = useChatMessagesStore.getState().messagesBySession[sessionId]?.find(message => message.id === completedPlanId);
+      if (completedPlan) void saveMessageToBackend(completedPlan);
       progressMsgIdRef.current = null;
 
       // Signal the Play button to pulse
@@ -668,6 +699,7 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
       }, hasPendingConfigs ? 100 : 300);
     },
     onFailed: (data) => {
+      if (visibleSessionRef.current !== sessionId) return;
       setGenerationId(null);
       setIsLoading(false);
       indexMapRef.current = null;
@@ -683,9 +715,45 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
         },
       ]);
     },
-  }), [setNodes, setEdges, setLastExecutionJobId, setExecutingJobId, setMessages, selectedModel, layoutManagerRef, appendProgressLine, detachTabFromSavedCrew, generationTraceId, generationCompletedRef]);
+  }), [setNodes, setEdges, setLastExecutionJobId, setExecutingJobId, setMessages, generationModel, layoutManagerRef, appendProgressLine, detachTabFromSavedCrew, generationTraceId, generationCompletedRef, generationId, sessionId, saveMessageToBackend]);
 
   useCrewGenerationSSE(generationId, sseHandlers);
+
+  // The request belongs to the session. Only its current view consumes the
+  // completed result, so another canvas can never receive these nodes.
+  const applyPlanResult = useRef<(result: DispatchResult) => Promise<void>>(async () => {});
+  applyPlanResult.current = result => applyCrewDispatchResult(result, {
+    generationCompletedRef, detachTabFromSavedCrew, handleCrewGenerated, handleAgentGenerated, handleTaskGenerated,
+    setMessages, saveMessageToBackend, setGenerationId, inputRef, onExecuteCrew, nodes, jobId: planRequest?.jobId,
+  });
+  useLayoutEffect(() => {
+    generationCompletedRef.current = false;
+    indexMapRef.current = null;
+    progressMsgIdRef.current = null;
+    pendingGenieConfigsRef.current = [];
+    setGenerationId(null);
+    setGenerationTraceId(null);
+  }, [sessionId, generationCompletedRef, setGenerationTraceId]);
+  useEffect(() => {
+    if (builderMode !== 'crew' || (providedChatSessionId && sessionId !== providedChatSessionId)) return;
+    if (!planRequest) { setIsLoading(false); return; }
+    resumePlanGeneration(generationKey);
+    setIsLoading(planRequest.status === 'running' || planRequest.status === 'paused');
+    setGenerationId(planRequest.status === 'running' ? planRequest.jobId || null : null);
+    if (planRequest.status === 'complete' && planRequest.result) {
+      consumePlanGeneration(generationKey, planRequest.token);
+      void applyPlanResult.current(planRequest.result).catch(error => {
+        const message: ChatMessage = { id: `plan-apply-${planRequest.token}`, type: 'assistant', content: `Could not apply the generated plan: ${error instanceof Error ? error.message : 'Please try again.'}`, timestamp: new Date() };
+        setMessages(prev => [...prev, message]);
+        void saveMessageToBackend(message);
+      });
+    } else if (planRequest.status === 'failed') {
+      consumePlanGeneration(generationKey, planRequest.token);
+      const message: ChatMessage = { id: `plan-error-${planRequest.token}`, type: 'assistant', content: planRequest.error || 'Plan generation failed. Please try again.', timestamp: new Date() };
+      setMessages(prev => [...prev, message]);
+      void saveMessageToBackend(message);
+    }
+  }, [generationKey, planRequest, builderMode, sessionId, providedChatSessionId, setMessages, saveMessageToBackend]);
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading || generationTraceId) return;
@@ -1063,500 +1131,12 @@ const WorkflowChat: React.FC<WorkflowChatProps> = ({
     // Force scroll to bottom when user sends a message so they always see the response
     isUserNearBottomRef.current = true;
 
-    // Await the save so the backend has the user message before the (potentially long)
-    // dispatch call.  This protects against Databricks Apps proxy resets / page reloads
-    // that would otherwise lose the message (it only existed in Zustand memory).
-    // Errors are handled inside saveMessageToBackend (grace period logic), so this
-    // won't throw even if the save fails.
-    await saveMessageToBackend(userMessage);
-
-    // Progressive canvas feedback: add temporary placeholder nodes/edges while generating
-    let cleanupPlaceholders: (() => void) | null = null;
-    const lower = userMessage.content.trim().toLowerCase();
-    const crewController = new AbortController();
-    crewRequest.current = crewController;
-    let cleanupProgress: (() => void) | null = null;
-    const wantsCrewOrPlan = /\b(create|build|make|generate|draft|compose|design)\b.*\b(plan|crew|workflow)\b/.test(lower)
-      || /\b(plan|crew|workflow)\b.*\b(create|build|make|generate|draft|compose|design)\b/.test(lower)
-      || lower.includes('create a plan')
-      || lower.includes('create plan');
-    const wantsAgent = /\b(create|add|new|make|generate)\b.*\b(agent)\b/.test(lower) || lower.includes('create an agent') || lower.includes('create agent');
-    const wantsTask = /\b(create|add|new|make|generate)\b.*\b(task)\b/.test(lower) || lower.includes('create a task') || lower.includes('create task');
-
-    const addTempProgress = (text: string) => {
-      const msg: ChatMessage = {
-        id: `progress-${Date.now()}`,
-        type: 'assistant',
-        content: text,
-        timestamp: new Date(),
-        isIntermediate: true,
-      } as ChatMessage;
-      setMessages(prev => [...prev, msg]);
-      return () => setMessages(prev => prev.filter(m => m.id !== msg.id));
-    };
-
-    try {
-      // Add placeholders based on intent keywords so users see progress immediately
-      if (wantsCrewOrPlan) {
-        cleanupProgress = addTempProgress('Generating crew with agents and tasks...');
-
-        const now = Date.now();
-        const tempAgentId = `agent-temp-${now}`;
-        const tempTaskId = `task-temp-${now}`;
-
-        // Add agent placeholder
-        setNodes((cur) => {
-          const pos = layoutManagerRef.current.getAgentNodePosition(cur as FlowNode[], 'crew') || { x: 100, y: 100 };
-          const n: FlowNode = {
-            id: tempAgentId,
-            type: 'agentNode',
-            position: pos,
-            data: { label: 'Creating agent…', loading: true },
-          };
-          return [...(cur as FlowNode[]), n];
-        });
-        // Add task placeholder slightly after (subtle motion/progression)
-        setTimeout(() => {
-          setNodes((cur) => {
-            const pos = layoutManagerRef.current.getTaskNodePosition(cur as FlowNode[], 'crew') || { x: 380, y: 100 };
-            const n: FlowNode = {
-              id: tempTaskId,
-              type: 'taskNode',
-              position: pos,
-              data: { label: 'Creating task…', taskId: tempTaskId, loading: true },
-            };
-            return [...(cur as FlowNode[]), n];
-          });
-          // Connect placeholders with animated edge
-          setEdges((cur) => [
-            ...cur,
-            {
-              id: `edge-${tempAgentId}-${tempTaskId}`,
-              source: tempAgentId,
-              target: tempTaskId,
-              type: 'default',
-              animated: true,
-              sourceHandle: 'right',
-              targetHandle: 'left',
-            },
-          ]);
-        }, 5000);
-
-        cleanupPlaceholders = () => {
-          setEdges((cur) => cur.filter((e) => e.id !== `edge-${tempAgentId}-${tempTaskId}`));
-          setNodes((cur) => (cur as FlowNode[]).filter((n) => n.id !== tempAgentId && n.id !== tempTaskId));
-        };
-      } else if (wantsAgent) {
-        cleanupProgress = addTempProgress('Creating agent...');
-        const now = Date.now();
-        const tempAgentId = `agent-temp-${now}`;
-        setNodes((cur) => {
-          const pos = layoutManagerRef.current.getAgentNodePosition(cur as FlowNode[], 'crew') || { x: 100, y: 100 };
-          const n: FlowNode = {
-            id: tempAgentId,
-            type: 'agentNode',
-            position: pos,
-            data: { label: 'Creating agent…', loading: true },
-          };
-          return [...(cur as FlowNode[]), n];
-        });
-        cleanupPlaceholders = () => {
-          setNodes((cur) => (cur as FlowNode[]).filter((n) => n.id !== tempAgentId));
-        };
-      } else if (wantsTask) {
-        cleanupProgress = addTempProgress('Creating task...');
-        const now = Date.now();
-        const tempTaskId = `task-temp-${now}`;
-        setNodes((cur) => {
-          const pos = layoutManagerRef.current.getTaskNodePosition(cur as FlowNode[], 'crew') || { x: 380, y: 100 };
-          const n: FlowNode = {
-            id: tempTaskId,
-            type: 'taskNode',
-            position: pos,
-            data: { label: 'Creating task…', taskId: tempTaskId, loading: true },
-          };
-          return [...(cur as FlowNode[]), n];
-        });
-        cleanupPlaceholders = () => {
-          setNodes((cur) => (cur as FlowNode[]).filter((n) => n.id !== tempTaskId));
-        };
-      }
-
-      const result: DispatchResult = await DispatcherService.dispatch({
-        message: userMessage.content,
-        model: selectedModel,
-        tools: selectedTools,
-      }, jobId => { beginGenerationTrace(jobId); setGenerationId(jobId); }, crewController.signal);
-      const completedGeneration = (result.generation_result as StreamingGenerationResult | null)?.completed;
-      if (completedGeneration) {
-        if (!generationCompletedRef.current) {
-          // Recover the complete canvas if a proxy dropped progressive SSE.
-          const crew = (result.generation_result as StreamingGenerationResult).generated_crew;
-          if (crew?.agents?.length && crew?.tasks?.length) {
-            detachTabFromSavedCrew();
-            handleCrewGenerated(crew);
-            const recovered: ChatMessage = { id: `generated-${Date.now()}`, type: 'assistant', timestamp: new Date(), content: 'Crew generated successfully. Review the plan on the canvas, then use Play to run it.', metadata: { catalogKind: 'crew', catalogName: crew.tasks[0]?.name || crew.agents[0]?.name } };
-            setMessages(prev => [...prev, recovered]);
-            await saveMessageToBackend(recovered);
-          }
-        }
-        return;
-      }
-
-      // Remove any temporary progress message
-      if (cleanupProgress) {
-        cleanupProgress();
-        cleanupProgress = null;
-      }
-
-
-      const assistantMessage: ChatMessage = {
-        id: `msg-${Date.now() + 1}`,
-        type: 'assistant',
-        content: getAssistantResponse(result),
-        timestamp: new Date(),
-        intent: result.dispatcher.intent,
-        confidence: result.dispatcher.confidence,
-        result: result.generation_result,
-      };
-
-      setMessages(prev => [...prev, assistantMessage]);
-      saveMessageToBackend(assistantMessage);
-
-      // Remove any temporary placeholders before rendering final nodes
-      if (cleanupPlaceholders) {
-        cleanupPlaceholders();
-        cleanupPlaceholders = null;
-      }
-
-      if (result.generation_result) {
-        switch (result.dispatcher.intent) {
-          case 'generate_agent':
-            await handleAgentGenerated(result.generation_result as GeneratedAgent);
-            break;
-          case 'generate_task':
-            await handleTaskGenerated(result.generation_result as GeneratedTask);
-            break;
-          case 'generate_crew':
-          case 'generate_plan': {
-            const genResult = result.generation_result as StreamingGenerationResult | GeneratedCrew;
-            if (genResult && typeof genResult === 'object' && 'type' in genResult && genResult.type === 'streaming') {
-              // Progressive SSE path
-              const streamResult = genResult as StreamingGenerationResult;
-              setGenerationId(streamResult.generation_id);
-              // Keep isLoading true — it will be cleared by onComplete/onFailed
-            } else {
-              // Legacy synchronous path (fallback)
-              detachTabFromSavedCrew();
-              handleCrewGenerated(genResult as GeneratedCrew);
-              const crew = genResult as GeneratedCrew;
-              if (crew.agents?.length && crew.tasks?.length) {
-                setMessages(prev => prev.map(message => message.id === assistantMessage.id
-                  ? { ...message, metadata: { ...message.metadata, catalogKind: 'crew', catalogName: crew.tasks?.[0]?.name || crew.agents?.[0]?.name } }
-                  : message));
-              }
-            }
-            break;
-          }
-          case 'configure_crew':
-            handleConfigureCrew(result.generation_result as ConfigureCrewResult, inputRef);
-            break;
-          case 'catalog_list':
-          case 'catalog_help':
-            // Handled via response message only (no canvas action)
-            break;
-          case 'catalog_load': {
-            const loadResult = result.generation_result as CatalogLoadResult;
-            if (loadResult.plan?.nodes) {
-              // Dispatch custom event for WorkflowDesigner to handle via handleCrewSelectWrapper
-              const loadEvent = new CustomEvent('catalogLoadCrew', {
-                detail: {
-                  nodes: loadResult.plan.nodes,
-                  edges: loadResult.plan.edges,
-                  name: loadResult.plan.name,
-                  id: loadResult.plan.id,
-                },
-              });
-              window.dispatchEvent(loadEvent);
-            }
-            break;
-          }
-          case 'catalog_save': {
-            const saveResult = result.generation_result as { suggested_name?: string; message: string };
-            const saveEvent = new CustomEvent('openSaveCrewDialog', {
-              detail: { suggestedName: saveResult.suggested_name },
-            });
-            window.dispatchEvent(saveEvent);
-            break;
-          }
-          case 'catalog_schedule': {
-            const scheduleEvent = new CustomEvent('openScheduleDialog');
-            window.dispatchEvent(scheduleEvent);
-            break;
-          }
-          case 'flow_list':
-          case 'catalog_delete':
-          case 'flow_delete':
-            // Handled via response message only (no canvas action)
-            break;
-          case 'flow_load': {
-            const flowLoadResult = result.generation_result as FlowLoadResult;
-            if (flowLoadResult.flow?.nodes) {
-              window.dispatchEvent(new CustomEvent('catalogLoadFlow', {
-                detail: {
-                  nodes: flowLoadResult.flow.nodes,
-                  edges: flowLoadResult.flow.edges,
-                  flowConfig: flowLoadResult.flow.flow_config,
-                  name: flowLoadResult.flow.name,
-                  id: flowLoadResult.flow.id,
-                },
-              }));
-            }
-            break;
-          }
-          case 'flow_save': {
-            const flowSaveResult = result.generation_result as { suggested_name?: string; message: string };
-            window.dispatchEvent(new CustomEvent('openSaveFlowDialog', {
-              detail: { suggestedName: flowSaveResult.suggested_name },
-            }));
-            break;
-          }
-          case 'execute_crew': {
-            const execResult = result.generation_result as { plan?: CatalogLoadResult['plan']; message: string };
-            if (execResult.plan?.nodes) {
-              // Load crew on canvas first
-              window.dispatchEvent(new CustomEvent('catalogLoadCrew', {
-                detail: {
-                  nodes: execResult.plan.nodes,
-                  edges: execResult.plan.edges,
-                  name: execResult.plan.name,
-                  id: execResult.plan.id,
-                },
-              }));
-              // Give canvas time to render, then trigger execution
-              setTimeout(() => {
-                if (onExecuteCrew) {
-                  onExecuteCrew();
-                }
-              }, 500);
-            } else if (!execResult.plan) {
-              // No name provided — execute whatever is on canvas
-              if (onExecuteCrew && hasCrewContent(nodes)) {
-                onExecuteCrew();
-              }
-            }
-            break;
-          }
-          case 'execute_flow': {
-            const execFlowResult = result.generation_result as { flow?: FlowLoadResult['flow']; message: string };
-            if (execFlowResult.flow?.nodes) {
-              // Load flow on canvas first
-              window.dispatchEvent(new CustomEvent('catalogLoadFlow', {
-                detail: {
-                  nodes: execFlowResult.flow.nodes,
-                  edges: execFlowResult.flow.edges,
-                  flowConfig: execFlowResult.flow.flow_config,
-                  name: execFlowResult.flow.name,
-                  id: execFlowResult.flow.id,
-                },
-              }));
-              // Give canvas time to render, then trigger flow execution
-              setTimeout(() => {
-                window.dispatchEvent(new CustomEvent('executeFlowEvent'));
-              }, 500);
-            } else if (!execFlowResult.flow) {
-              // No name provided — execute whatever is on canvas
-              window.dispatchEvent(new CustomEvent('executeFlowEvent'));
-            }
-            break;
-          }
-        }
-      }
-    } catch (error) {
-      if (crewController.signal.aborted) return;
-
-
-      const errorMessage: ChatMessage = {
-        id: `msg-${Date.now() + 1}`,
-        type: 'assistant',
-        content: '❌ Failed to process your request. Please try again or rephrase your message.',
-        timestamp: new Date(),
-      };
-
-      setMessages(prev => [...prev, errorMessage]);
-      saveMessageToBackend(errorMessage);
-    } finally {
-      if (crewRequest.current === crewController) crewRequest.current = null;
-      setGenerationTraceId(null);
-      setGenerationId(null);
-      // Ensure placeholders/progress are removed on error/cancellation
-      if (cleanupPlaceholders) {
-        cleanupPlaceholders();
-        cleanupPlaceholders = null;
-      }
-      if (cleanupProgress) {
-        cleanupProgress();
-        cleanupProgress = null;
-      }
-      setIsLoading(false);
-      const focusDelays = [0, 50, 100, 200, 300, 500, 800, 1200];
-      focusDelays.forEach(delay => {
-        setTimeout(() => {
-          inputRef.current?.focus();
-        }, delay);
+    startPlanGeneration(groupId, sessionId, { message: userMessage.content, model: selectedModel, tools: selectedTools },
+      () => saveMessageToBackend(userMessage), jobId => {
+        const anchor: ChatMessage = { id: `generation-trace-${jobId}`, type: 'trace', jobId, content: 'Design activity', timestamp: new Date() };
+        setMessages(prev => prev.some(message => message.id === anchor.id) ? prev : [...prev, anchor]);
+        void saveMessageToBackend(anchor);
       });
-    }
-  };
-
-  const getAssistantResponse = (result: DispatchResult): string => {
-    const { dispatcher, generation_result } = result;
-
-    if (dispatcher.intent === 'unknown') {
-      return "I'm not sure what you want to create. Please specify if you want to create an agent, a task, or a complete crew.";
-    }
-
-    if (!generation_result) {
-      return "I understood your request but couldn't generate the result. Please try again.";
-    }
-
-    switch (dispatcher.intent) {
-      case 'generate_agent': {
-        const agent = generation_result as GeneratedAgent;
-        return `I've created an agent: **${agent.name}** (${agent.role})\n- Goal: ${agent.goal}\n- Backstory: ${agent.backstory}`;
-      }
-      case 'generate_task': {
-        const task = generation_result as GeneratedTask;
-        return `I've created a task: **${task.name}**\n- Description: ${task.description}\n- Expected Output: ${task.expected_output}`;
-      }
-      case 'generate_crew': {
-        const crew = generation_result as GeneratedCrew;
-        let response = "I've created a crew with:\n";
-
-        if (crew.agents && crew.agents.length > 0) {
-          response += "\n**Agents & Tasks:**\n";
-          crew.agents.forEach((agent, index) => {
-            response += `${index + 1}. **${agent.name}** (${agent.role}) - ${agent.goal}\n`;
-
-            const agentTasks = crew.tasks?.filter((task) =>
-              task.agent_id === agent.id || task.agent_id?.toString() === agent.id?.toString()
-            ) || [];
-
-            if (agentTasks.length > 0) {
-              agentTasks.forEach((task) => {
-                response += `   → ${task.name}: ${task.description}\n`;
-              });
-            }
-          });
-
-          const unassignedTasks = crew.tasks?.filter((task) => !task.agent_id) || [];
-          if (unassignedTasks.length > 0) {
-            response += "\n**Unassigned Tasks:**\n";
-            unassignedTasks.forEach((task, index) => {
-              response += `${index + 1}. **${task.name}** - ${task.description}\n`;
-            });
-          }
-        }
-
-        response += "\nClick the **▶ Play** button on the right sidebar to run the crew.";
-        return response;
-      }
-      case 'generate_plan': {
-        const crew = generation_result as GeneratedCrew;
-        let response = "I've created a plan with:\n";
-
-        if (crew.agents && crew.agents.length > 0) {
-          response += "\n**Agents & Tasks:**\n";
-          crew.agents.forEach((agent, index) => {
-            response += `${index + 1}. **${agent.name}** (${agent.role}) - ${agent.goal}\n`;
-
-            const agentTasks = crew.tasks?.filter((task) =>
-              task.agent_id === agent.id || task.agent_id?.toString() === agent.id?.toString()
-            ) || [];
-
-            if (agentTasks.length > 0) {
-              agentTasks.forEach((task) => {
-                response += `   → ${task.name}: ${task.description}\n`;
-              });
-            }
-          });
-
-          const unassignedTasks = crew.tasks?.filter((task) => !task.agent_id) || [];
-          if (unassignedTasks.length > 0) {
-            response += "\n**Unassigned Tasks:**\n";
-            unassignedTasks.forEach((task, index) => {
-              response += `${index + 1}. **${task.name}** - ${task.description}\n`;
-            });
-          }
-        }
-
-        response += "\nClick the **▶ Play** button on the right sidebar to run the crew.";
-        return response;
-      }
-      case 'catalog_list': {
-        const listResult = generation_result as CatalogListResult;
-        let msg = listResult.message + '\n';
-        if (listResult.plans?.length > 0) {
-          listResult.plans.forEach((p, i) => {
-            msg += `${i + 1}. **${p.name}** — ${p.agent_count || 0} agents, ${p.task_count || 0} tasks — \`/load crew ${p.name}\` \`/run crew ${p.name}\`\n`;
-          });
-        }
-        return msg;
-      }
-      case 'catalog_load': {
-        // When multiple matches or no name given, backend returns type "catalog_list" with plans array
-        const genResult = generation_result as Record<string, unknown>;
-        if (genResult.type === 'catalog_list' && Array.isArray(genResult.plans)) {
-          const plans = genResult.plans as Array<{ id: string; name: string; agent_count?: number; task_count?: number }>;
-          let msg = (genResult.message as string) + '\n';
-          plans.forEach((p, i) => {
-            msg += `${i + 1}. **${p.name}**`;
-            if (p.agent_count !== undefined || p.task_count !== undefined) {
-              msg += ` — ${p.agent_count || 0} agents, ${p.task_count || 0} tasks`;
-            }
-            msg += ` — \`/load crew ${p.name}\` \`/run crew ${p.name}\`\n`;
-          });
-          return msg;
-        }
-        return (genResult.message as string) || 'Plan loaded.';
-      }
-      case 'catalog_save':
-      case 'catalog_schedule':
-      case 'catalog_help':
-        return (generation_result as { message: string }).message;
-      case 'flow_list': {
-        const flowListResult = generation_result as FlowListResult;
-        let flowListMsg = flowListResult.message + '\n';
-        if (flowListResult.flows?.length > 0) {
-          flowListResult.flows.forEach((f, i) => {
-            flowListMsg += `${i + 1}. **${f.name}** — ${f.node_count || 0} crew nodes — \`/load flow ${f.name}\` \`/run flow ${f.name}\`\n`;
-          });
-        }
-        return flowListMsg;
-      }
-      case 'flow_load': {
-        const flowGenResult = generation_result as Record<string, unknown>;
-        if (flowGenResult.type === 'flow_list' && Array.isArray(flowGenResult.flows)) {
-          const flows = flowGenResult.flows as Array<{ id: string; name: string; node_count?: number }>;
-          let flowMsg = (flowGenResult.message as string) + '\n';
-          flows.forEach((f, i) => {
-            flowMsg += `${i + 1}. **${f.name}**`;
-            if (f.node_count !== undefined) flowMsg += ` — ${f.node_count} crew nodes`;
-            flowMsg += ` — \`/load flow ${f.name}\` \`/run flow ${f.name}\`\n`;
-          });
-          return flowMsg;
-        }
-        return (flowGenResult.message as string) || 'Flow loaded.';
-      }
-      case 'flow_save':
-        return (generation_result as { message: string }).message;
-      case 'execute_crew':
-      case 'execute_flow':
-      case 'catalog_delete':
-      case 'flow_delete':
-        return (generation_result as { message: string }).message;
-      default:
-        return "Your request has been processed successfully.";
-    }
   };
 
   const handleSlashSelect = useCallback((cmd: SlashCommand) => {
@@ -1800,7 +1380,7 @@ showSessionList && (
             pt: 0, // Remove top padding
             pb: 0, // Remove bottom padding
           }}>
-            {builderTranscript(messages, executingJobId).map(item => item.kind === 'activity'
+            {builderTranscript(messages, executingJobId || generationTraceId).map(item => item.kind === 'activity'
               ? <BuilderRunActivity key={`activity-${item.jobId}`} jobId={item.jobId} running={item.jobId === executingJobId || item.jobId === generationTraceId} onOpenLogs={onOpenLogs} />
               : <ChatMessageItem key={item.message.id} message={item.message} onOpenLogs={onOpenLogs} appearance="assistant-panel" dark={composerDark} />)}
           </List>

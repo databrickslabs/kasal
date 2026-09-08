@@ -5,6 +5,9 @@ import RunTraceTimeline from '../Preview/RunTraceTimeline';
 import { traceEventToRunStep, type RunStep } from '../Preview/traceEventStep';
 import { useRunTimeline } from '../../hooks/useRunTimeline';
 
+// Keep a run's chosen trace visibility when its session temporarily unmounts.
+const expandedRuns = new Map<string, boolean>();
+
 /** One-line live status for the collapsed header: the LATEST step's name plus
  *  the first line of its query/answer, so the box visibly progresses while the
  *  crew works (agent → task → memory query → memory answer → tool call → …)
@@ -45,7 +48,10 @@ const RunProgress: React.FC<{
   /** The run whose trace the expanded activity renders. */
   jobId?: string;
 }> = ({ latestStep, inline = false, running, generating, onStop, onShowInPane, onSelectStep, jobId }) => {
-  const [open, setOpen] = useState(inline && running);
+  const [open, setOpen] = useState(() => (jobId ? expandedRuns.get(jobId) : undefined) ?? (inline && running));
+  useEffect(() => {
+    if (jobId) expandedRuns.set(jobId, open);
+  }, [jobId, open]);
   useEffect(() => {
     if (inline && running) setOpen(true);
   }, [inline, running, jobId]);

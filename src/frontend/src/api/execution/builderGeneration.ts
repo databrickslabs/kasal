@@ -8,6 +8,11 @@ export async function generateWithTrace<T>(
   signal?.throwIfAborted();
   const jobId = data.generation_id;
   onStarted(jobId);
+  return waitForBuilderGeneration<T>(jobId, signal);
+}
+
+/** Observe an existing durable job without submitting another generation. */
+export async function waitForBuilderGeneration<T>(jobId: string, signal?: AbortSignal): Promise<T> {
   for (;;) {
     signal?.throwIfAborted();
     const { data: run } = await apiClient.get<{ status: string; result?: { builder_result?: T } | string; error?: string }>(`/executions/${jobId}`, { signal });
