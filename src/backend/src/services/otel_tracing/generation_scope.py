@@ -1,16 +1,36 @@
 """Generation uses the same event bridge and durable trace exporter as runs."""
 
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
+from uuid import uuid4
 
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
-from src.core.events.bus import event_bus, event_context
+from src.core.events.bus import current_event_context, event_bus, event_context
 from src.core.events.types import TaskCompletedEvent, TaskFailedEvent, TaskStartedEvent
 from src.services.otel_tracing.db_exporter import KasalDBSpanExporter
 from src.services.otel_tracing.event_bridge import OTelEventBridge
+
+
+@contextmanager
+def generation_step(label):
+    """Attribute a real generation stage to its own task in the existing trace."""
+    if not current_event_context().get("generation_job_id"):
+        yield
+        return
+    with event_context(task_name=label, task_id=str(uuid4())):
+        event_bus.emit(None, TaskStartedEvent(context=label))
+        try:
+            yield
+        except BaseException as exc:
+            event_bus.emit(
+                None, TaskFailedEvent(error=str(exc) or "Generation cancelled")
+            )
+            raise
+        else:
+            event_bus.emit(None, TaskCompletedEvent(output=f"{label} completed"))
 
 
 @asynccontextmanager

@@ -12,6 +12,7 @@ from fastapi import APIRouter
 from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.dispatcher import DispatcherRequest, DispatcherResponse
 from src.services.chat.dispatcher import DEFAULT_DISPATCHER_MODEL, DispatcherService
+from src.services.chat.intent_dispatch import detect_request_intent
 from src.services.tools.tool_service import ToolService
 
 router = APIRouter(prefix="/dispatcher", tags=["dispatcher"])
@@ -101,23 +102,12 @@ async def detect_intent_only(
     # Fetch workspace-enabled tools for automatic suggestion
     available_tools = await _fetch_available_tools(session, group_context)
 
-    # Only detect intent without dispatching. Logged like dispatch() does, so a
-    # misroute here is visible in llmlog instead of surfacing as an unexplained
-    # generate-agent/generate-task call with no classification step.
-    # Intent classification always rides the fast model chain; the caller's
-    # model is passed only as a last-resort fallback (see detect_intent).
-    intent_result = await dispatcher_service.detect_intent_logged(
-        request.message,
+    intent_result = await detect_request_intent(
+        dispatcher_service,
+        request,
+        group_context,
+        available_tools,
         DEFAULT_DISPATCHER_MODEL,
-        group_context=group_context,
-        available_tools=available_tools,
-        chat_mode=request.chat_mode,
-        last_resort_model=request.model,
-        # Spelled out because this endpoint spells its arguments out, unlike
-        # POST /dispatch which hands the whole request over. Omitted, an
-        # intent-only call would classify as though the user never asked to
-        # reuse — silently, and only on this endpoint.
-        prefer_existing=request.prefer_existing,
     )
 
     # Create response

@@ -39,6 +39,7 @@ from src.seeds.prompt_templates import DETECT_INTENT_TEMPLATE
 from src.services.catalog.crews import CrewService
 from src.services.catalog.templates import TemplateService
 from src.services.chat.capability_dispatch import route_and_dispatch
+from src.services.chat.intent_dispatch import detect_request_intent
 from src.services.chat.slash_commands import detect_slash_command
 from src.services.databricks.workspace.service import DatabricksService
 from src.services.execution.logs.llm_log_service import LLMLogService
@@ -56,7 +57,7 @@ logger = logging.getLogger(__name__)
 # Fast-model fallback chain for intent detection. Intent is a 6-way
 # classification emitting fixed JSON — it wants small, fast, reliable instruct
 # models, not a reasoning model. detect_intent tries the caller's preferred model
-# first (the model picked in chat, else this chain's first entry), then walks the
+# first (the model picked in Agent Builder, else this chain's first entry), then walks the
 # rest so a single gated or erroring endpoint can't drop intent to the dumb
 # semantic fallback. Spread across providers (Anthropic / OpenAI / Google) to
 # avoid a correlated outage. Override via env (comma-separated), e.g.
@@ -969,9 +970,12 @@ Please analyze this message and provide your intent classification."""
                 cached["source"] = "cache+surface_override"
             return cached
 
-        result, used_model, attempted = await self._walk_model_chain(
-            messages, model, last_resort_model
-        )
+        from src.services.otel_tracing.generation_scope import generation_step
+
+        with generation_step("Understand request"):
+            result, used_model, attempted = await self._walk_model_chain(
+                messages, model, last_resort_model
+            )
 
         if result is None:
             # No candidate produced a usable result. Distinguish "every circuit
@@ -1241,22 +1245,12 @@ Please analyze this message and provide your intent classification."""
                 except Exception:
                     pass
 
-            # Detect intent. Intent classification ALWAYS rides the fast model
-            # chain (DEFAULT_DISPATCHER_MODEL + fallbacks), decoupled from the
-            # possibly-heavy/reasoning model the user picked for the crew —
-            # request.model is passed only as a last-resort fallback so intent
-            # never hard-fails on a workspace where the fast models aren't enabled.
-            # detect_intent_logged writes the DB record (separate from MLflow),
-            # skipping the no-LLM paths and attributing the row to the model that
-            # actually answered — one implementation for both surfaces.
-            intent_result = await self.detect_intent_logged(
-                request.message,
-                DEFAULT_DISPATCHER_MODEL,
+            intent_result = await detect_request_intent(
+                self,
+                request,
                 group_context,
                 available_tools,
-                chat_mode=request.chat_mode,
-                last_resort_model=request.model,
-                prefer_existing=request.prefer_existing,
+                DEFAULT_DISPATCHER_MODEL,
             )
 
             # Create dispatcher response

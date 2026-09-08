@@ -1807,13 +1807,10 @@ class TestEdgeCases:
         request = DispatcherRequest(message="hello", model="m")
         await svc.dispatch(request, group_context=gc)
 
-        # Intent runs on the fast chain (DEFAULT_DISPATCHER_MODEL), with the
-        # user's crew model "m" passed only as a last-resort fallback.
-        from src.services.chat.dispatcher import DEFAULT_DISPATCHER_MODEL
-
+        # Agent Builder honours the selected model for classification too.
         svc.detect_intent.assert_awaited_once_with(
             "hello",
-            DEFAULT_DISPATCHER_MODEL,
+            "m",
             gc,
             None,
             chat_mode=False,
