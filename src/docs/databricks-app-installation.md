@@ -31,6 +31,37 @@ The selected database and branch are used as supplied. Kasal does not guess a
 production branch or create a replacement SQLite database if Lakebase fails.
 Existing data is not automatically migrated when changing the assigned database.
 
+## Startup and fresh databases
+
+The frontend build and backend startup are separate steps. For Git/Marketplace
+source deployments, `src/package.json` builds the frontend; `src/app.yaml` then
+starts `python entrypoint.py`. The deployment script also ships that entrypoint
+and command. The entrypoint serves the backend's original FastAPI application,
+including its startup lifecycle, middleware, and shutdown handlers.
+
+Before accepting requests, Kasal creates the application tables in the assigned
+Lakebase database, applies schema updates, initializes memory tables, and awaits
+seeding when `AUTO_SEED_DATABASE` is enabled (the default). Startup verifies that
+models, prompt templates, and tools have persisted defaults. A database setup
+failure stops startup instead of serving an application with missing tables.
+Redeploying runs the non-destructive initialization again.
+
+Kasal attempts to enable pgvector if absent. If the app principal cannot install
+it, complete the owner preparation below; Kasal does not grant itself additional
+permissions. Missing `users` tables can prevent personal teamspace allocation:
+fix database startup first rather than changing a user's permissions.
+
+## Adding members before their first visit
+
+In teamspace configuration, select existing Kasal users or enter email addresses
+in **Add User**. Users do not need to open Kasal first. Membership is assigned to
+the supplied email and becomes available when that identity signs in. This does
+not send an invitation or grant access to the Databricks app itself.
+
+The suggestions list contains Kasal users, not the entire Databricks directory.
+A Databricks directory search would require a separate SCIM integration with
+appropriate directory-read permissions.
+
 ## Installer preparation
 
 Complete these once with an administrator, before starting Kasal:

@@ -50,4 +50,5 @@ async def seed():
             }
             await repo.create(model_dict)
             created += 1
+        await session.commit()
         logger.info(f"API Keys seeder completed. Created {created} placeholder keys.")

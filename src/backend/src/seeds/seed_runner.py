@@ -219,7 +219,13 @@ async def resync_postgres_sequences() -> None:
         from src.config.settings import settings
 
         db_uri = str(settings.DATABASE_URI)
-        if "sqlite" in db_uri:
+        # The configured fallback URI can still be SQLite after native Lakebase
+        # activation. Seeders write through that activated factory, as must DDL.
+        from src.db.session import async_session_factory as async_session_factory
+
+        if "sqlite" in db_uri and not getattr(
+            async_session_factory, "is_lakebase", False
+        ):
             return  # SQLite uses ROWID, no sequences
 
         import re
@@ -234,7 +240,7 @@ async def resync_postgres_sequences() -> None:
             result = await session.execute(
                 sa_text(
                     "SELECT table_name FROM information_schema.columns "
-                    "WHERE column_name = 'id' AND table_schema = 'public' "
+                    "WHERE column_name = 'id' AND table_schema = current_schema() "
                     "AND (is_identity = 'YES' OR column_default LIKE 'nextval%')"
                 )
             )

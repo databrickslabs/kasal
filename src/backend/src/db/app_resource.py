@@ -147,6 +147,7 @@ async def initialize_resource_database() -> None:
     from sqlalchemy import text
 
     from src.db.all_models import Base
+    from src.db.lakebase_ddl import enable_pgvector_async
     from src.db.lakebase_session import LakebaseSessionFactory
     from src.db.lakebase_state import mark_lakebase_activated
     from src.db.session import async_session_factory, run_schema_self_heal
@@ -161,7 +162,7 @@ async def initialize_resource_database() -> None:
             vector = await connection.execute(
                 text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")
             )
-            if vector.scalar() != 1:
+            if vector.scalar() != 1 and not await enable_pgvector_async(connection):
                 raise RuntimeError(
                     "Prepare the selected Lakebase database before deployment: its owner must run CREATE EXTENSION IF NOT EXISTS vector"
                 )

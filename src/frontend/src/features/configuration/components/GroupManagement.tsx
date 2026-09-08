@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
+  Autocomplete,
   Typography,
   Button,
   IconButton,
@@ -104,7 +105,13 @@ const GroupManagement: React.FC = () => {
     user_email: '',
     role: 'operator',
   });
-  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [selectedUserEmails, setSelectedUserEmails] = useState<string[]>([]);
+  const [memberEmailInput, setMemberEmailInput] = useState('');
+  const memberEmailsToAdd = Array.from(new Set([
+    ...selectedUserEmails, ...(memberEmailInput.trim() ? [memberEmailInput.trim()] : []),
+  ])).filter(email => !groupUsers.some(user => user.email === email));
+  const invalidMemberEmail = memberEmailsToAdd.some(email => !/^[^\s@]+@[^\s@]+$/.test(email));
+
 
   // Computed values
   const totalUsers = groups.reduce((sum, group) => sum + (group.user_count || 0), 0);
@@ -198,7 +205,7 @@ const GroupManagement: React.FC = () => {
   };
 
   const handleAssignUser = async () => {
-    if (!selectedUserIds.length || !selectedGroup) {
+    if (!memberEmailsToAdd.length || invalidMemberEmail || !selectedGroup) {
       showNotification('Please select at least one user and role', 'warning');
       return;
     }
@@ -209,33 +216,26 @@ const GroupManagement: React.FC = () => {
       let successCount = 0;
       let errorCount = 0;
 
-      // Process each selected user
-      for (const userId of selectedUserIds) {
+      // Membership can be assigned before the person's first Kasal login.
+      for (const email of memberEmailsToAdd) {
         try {
-          // Find the user's email
-          const selectedUser = availableUsers.find(user => user.id === userId);
-          if (!selectedUser) {
-            console.error(`User with ID ${userId} not found`);
-            errorCount++;
-            continue;
-          }
-
           const userAssignment = {
-            user_email: selectedUser.email,
+            user_email: email,
             role: newUserAssignment.role
           };
 
           await groupService.assignUserToGroup(selectedGroup.id, userAssignment);
           successCount++;
         } catch (error) {
-          console.error(`Error assigning user ${userId}:`, error);
+          console.error(`Error assigning user ${email}:`, error);
           errorCount++;
         }
       }
 
       setAssignUserDialogOpen(false);
       setNewUserAssignment({ user_email: '', role: 'operator' });
-      setSelectedUserIds([]);
+      setSelectedUserEmails([]);
+      setMemberEmailInput('');
 
       // Show appropriate notification based on results
       if (errorCount === 0) {
@@ -1080,72 +1080,37 @@ const GroupManagement: React.FC = () => {
             Team members will gain access to this teamspace&apos;s data and workflows based on their role.
           </Alert>
 
-          <Alert severity="warning" sx={{ mb: 3 }}>
-            <Typography variant="body2">
-              <strong>Note:</strong> Users must log in to Kasal at least once to appear in this list.
-              If you don&apos;t see the user you&apos;re looking for, ask them to visit the application first.
-            </Typography>
-          </Alert>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            Add members by email, even before they first open Kasal. They will see
+            this teamspace when they sign in with that address.
+          </Typography>
 
           <Grid container spacing={3}>
             <Grid item xs={12}>
-              <FormControl fullWidth required>
-                <InputLabel>Select Users</InputLabel>
-                <Select
-                  multiple
-                  value={selectedUserIds}
-                  label="Select Users"
-                  onChange={(e) => setSelectedUserIds(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
-                  disabled={loadingUsers}
-                  renderValue={(selected) => (
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                      {selected.map((userId) => {
-                        const user = availableUsers.find(u => u.id === userId);
-                        return (
-                          <Chip
-                            key={userId}
-                            label={user?.email || userId}
-                            size="small"
-                            onDelete={() => {
-                              setSelectedUserIds(selectedUserIds.filter(id => id !== userId));
-                            }}
-                            deleteIcon={<DeleteIcon />}
-                          />
-                        );
-                      })}
-                    </Box>
-                  )}
-                >
-                  {loadingUsers ? (
-                    <MenuItem disabled>
-                      <Typography color="text.secondary">Loading users...</Typography>
-                    </MenuItem>
-                  ) : availableUsers.length === 0 ? (
-                    <MenuItem disabled>
-                      <Typography color="text.secondary">No users found - ask team members to log in first</Typography>
-                    </MenuItem>
-                  ) : (
-                    availableUsers
-                      .filter(user => !groupUsers.some(gu => gu.email === user.email))
-                      .map((user) => (
-                        <MenuItem key={user.id} value={user.id}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
-                            <PersonIcon fontSize="small" />
-                            <Box>
-                              <Typography variant="body2">{user.email}</Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                Last login: {user.last_login ? new Date(user.last_login).toLocaleDateString() : 'Never'}
-                              </Typography>
-                            </Box>
-                          </Box>
-                        </MenuItem>
-                      ))
-                  )}
-                </Select>
-                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                  Hold Ctrl/Cmd to select multiple users. Only users who have logged in to Kasal will appear in this list.
-                </Typography>
-              </FormControl>
+              <Autocomplete
+                multiple
+                freeSolo
+                filterSelectedOptions
+                loading={loadingUsers}
+                options={availableUsers
+                  .filter(user => !groupUsers.some(member => member.email === user.email))
+                  .map(user => user.email)}
+                value={selectedUserEmails}
+                inputValue={memberEmailInput}
+                onInputChange={(_, value) => setMemberEmailInput(value)}
+                onChange={(_, values) => setSelectedUserEmails(Array.from(new Set(values.map(email => email.trim()))))}
+                renderInput={params => (
+                  <TextField
+                    {...params}
+                    label="Email addresses"
+                    placeholder="Select a user or type an email"
+                    error={invalidMemberEmail}
+                    helperText={invalidMemberEmail
+                      ? 'Enter a valid email address.'
+                      : 'Press Enter to add another address. Members still need access to the Databricks app.'}
+                  />
+                )}
+              />
             </Grid>
             <Grid item xs={12}>
               <FormControl fullWidth required>
@@ -1209,10 +1174,10 @@ const GroupManagement: React.FC = () => {
           <Button
             onClick={handleAssignUser}
             variant="contained"
-            disabled={loading || !selectedUserIds.length}
+            disabled={loading || !memberEmailsToAdd.length || invalidMemberEmail}
             startIcon={loading ? undefined : <PersonAddIcon />}
           >
-            {loading ? 'Adding...' : `Add ${selectedUserIds.length} Member${selectedUserIds.length !== 1 ? 's' : ''}`}
+            {loading ? 'Adding...' : `Add ${memberEmailsToAdd.length} Member${memberEmailsToAdd.length !== 1 ? 's' : ''}`}
           </Button>
         </DialogActions>
       </Dialog>

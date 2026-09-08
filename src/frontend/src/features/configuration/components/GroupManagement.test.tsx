@@ -17,6 +17,8 @@ import theme from '../../../theme/theme';
 const mocks = vi.hoisted(() => ({
   mockGetGroups: vi.fn(),
   mockGetUsers: vi.fn(),
+  mockGetGroupUsers: vi.fn(),
+  mockAssignUser: vi.fn(),
   mockCreateGroup: vi.fn(),
   mockDeleteGroup: vi.fn(),
   mockRefreshGroupStore: vi.fn(),
@@ -30,9 +32,9 @@ vi.mock('../../../api/groups/GroupService', () => ({
       createGroup: mocks.mockCreateGroup,
       updateGroup: vi.fn(),
       deleteGroup: mocks.mockDeleteGroup,
-      assignUserToGroup: vi.fn(),
+      assignUserToGroup: mocks.mockAssignUser,
       removeUserFromGroup: vi.fn(),
-      getGroupUsers: vi.fn(),
+      getGroupUsers: mocks.mockGetGroupUsers,
     })),
   },
 }));
@@ -106,6 +108,8 @@ describe('GroupManagement', () => {
     vi.clearAllMocks();
     mocks.mockGetGroups.mockResolvedValue(mockGroups);
     mocks.mockGetUsers.mockResolvedValue(mockUsers);
+    mocks.mockGetGroupUsers.mockResolvedValue([]);
+    mocks.mockAssignUser.mockResolvedValue({});
   });
 
   it('renders the component', async () => {
@@ -141,6 +145,43 @@ describe('GroupManagement', () => {
       // Component should handle error gracefully
       expect(mocks.mockGetGroups).toHaveBeenCalled();
     });
+  });
+
+  it('adds a member by email before their first login', async () => {
+    mocks.mockGetUsers.mockResolvedValue([]);
+    renderWithProviders(<GroupManagement />);
+    fireEvent.click(await screen.findByText('Developers'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add User' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Email addresses' }), {
+      target: { value: 'new.person@example.com' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add 1 Member' }));
+    await waitFor(() => expect(mocks.mockAssignUser).toHaveBeenCalledWith('2', {
+      user_email: 'new.person@example.com', role: 'operator',
+    }));
+  });
+
+  it('deduplicates an entered address before assigning membership', async () => {
+    renderWithProviders(<GroupManagement />);
+    fireEvent.click(await screen.findByText('Developers'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add User' }));
+    const input = screen.getByRole('combobox', { name: 'Email addresses' });
+    fireEvent.change(input, { target: { value: 'new.person@example.com' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.change(input, { target: { value: 'new.person@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add 1 Member' }));
+    await waitFor(() => expect(mocks.mockAssignUser).toHaveBeenCalledTimes(1));
+  });
+
+  it('does not submit an incomplete email address', async () => {
+    renderWithProviders(<GroupManagement />);
+    fireEvent.click(await screen.findByText('Developers'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add User' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Email addresses' }), {
+      target: { value: 'new.person@' },
+    });
+    expect(screen.getByRole('button', { name: 'Add 1 Member' })).toBeDisabled();
+    expect(mocks.mockAssignUser).not.toHaveBeenCalled();
   });
 
   it('wires up refreshGroupStore from the Zustand group store', async () => {

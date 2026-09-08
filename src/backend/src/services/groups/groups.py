@@ -395,10 +395,17 @@ class GroupService:
             # Create a basic User record
             from uuid import uuid4
 
+            # Emails with the same local part can belong to different people.
+            # Keep the familiar username when free, otherwise allocate a unique
+            # one without changing the email used for authentication.
+            username = user_id
+            if await self.user_repo.get_by_username(username):
+                username = f"{user_id[:16]}_{uuid4().hex}"
             user = User(
                 id=str(uuid4()),
-                username=user_id,
+                username=username,
                 email=user_email,
+                personal_group_id=f"user_{uuid4().hex}",
                 role=UserRole.REGULAR,
                 status=UserStatus.ACTIVE,
                 created_at=datetime.utcnow(),

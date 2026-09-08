@@ -363,7 +363,13 @@ async def lifespan(app: FastAPI):
         system_logger.info(f"AUTO_SEED_DATABASE setting: {settings.AUTO_SEED_DATABASE}")
 
         # Run seeders if enabled
-        if should_seed:
+        if should_seed and installed_database:
+            # A fresh installation must have its defaults before its first user
+            # request. This awaits async DB work on the server's own event loop.
+            from src.seeds.installation import seed_installed_database
+
+            await seed_installed_database()
+        elif should_seed:
             system_logger.info("Running database seeders...")
             try:
                 # Always run seeders in background to avoid blocking startup
