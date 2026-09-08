@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .budget import deadline_passed
+from .response_parsing import chat_tool_call
 
 #: Stands in for a tool that was never run because the budget went. Phrased for
 #: the MODEL, which reads it as a tool result: it explains the gap and tells it
@@ -139,17 +140,7 @@ def run_chat_round(
         {
             "role": "assistant",
             "content": content,
-            "tool_calls": [
-                {
-                    "id": call["id"],
-                    "type": "function",
-                    "function": {
-                        "name": call["name"],
-                        "arguments": call["arguments"],
-                    },
-                }
-                for call in function_calls
-            ],
+            "tool_calls": [chat_tool_call(call) for call in function_calls],
         }
     )
     outcome = _run_calls(function_calls, execute, deadline, available_functions)
@@ -269,17 +260,7 @@ def stub_repeated_chat_round(
         {
             "role": "assistant",
             "content": content,
-            "tool_calls": [
-                {
-                    "id": call["id"],
-                    "type": "function",
-                    "function": {
-                        "name": call["name"],
-                        "arguments": call["arguments"],
-                    },
-                }
-                for call in function_calls
-            ],
+            "tool_calls": [chat_tool_call(call) for call in function_calls],
         }
     )
     for call in function_calls:

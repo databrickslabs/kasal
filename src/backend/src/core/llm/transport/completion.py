@@ -54,6 +54,8 @@ from .response_parsing import (
     answer_from_reasoning,
     builtin_tool_outputs,
     chat_token_usage,
+    merge_tool_call_metadata,
+    tool_call_metadata,
 )
 from .response_parsing import function_calls as parse_function_calls
 from .response_parsing import (
@@ -967,6 +969,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
                     )
                     if getattr(tc, "id", None):
                         slot["id"] = tc.id
+                    merge_tool_call_metadata(slot, tc)
                     function = getattr(tc, "function", None)
                     if function is not None:
                         if getattr(function, "name", None):
@@ -982,6 +985,7 @@ class OpenAICompletion(ContextWindowBudget, BaseLLM):
                 "id": slot["id"] or f"call_{index}",
                 "name": slot["name"],
                 "arguments": slot["arguments"],
+                **tool_call_metadata(slot),
             }
             for index, slot in sorted(calls_by_index.items())
             if slot["name"]

@@ -17,6 +17,7 @@ object carries a flat ``output`` list. ``function_calls`` reads either.
 
 import json
 import re
+from copy import deepcopy
 from typing import Any
 
 #: Sentinel used as the reasoning value when the model DID reason but the
@@ -80,6 +81,7 @@ def function_calls(response: Any) -> list[dict[str, Any]]:
                         "id": call.id,
                         "name": function.name,
                         "arguments": function.arguments,
+                        **tool_call_metadata(call),
                     }
                 )
         return calls
@@ -93,6 +95,43 @@ def function_calls(response: Any) -> list[dict[str, Any]]:
                 }
             )
     return calls
+
+
+def tool_call_metadata(call: Any) -> dict[str, Any]:
+    """Preserve opaque provider state at its original OpenAI-compatible location.
+
+    Gemini requires tool_calls[].extra_content.google.thought_signature on
+    subsequent turns. It is protocol state, never tool arguments or answer text.
+    """
+    extra = _block_field(call, "extra_content")
+    return {"extra_content": deepcopy(extra)} if isinstance(extra, dict) else {}
+
+
+def merge_tool_call_metadata(target: dict[str, Any], source: Any) -> None:
+    """Merge metadata-only stream deltas without erasing earlier signatures.
+
+    A signature is opaque: copy its value exactly, never concatenate it as if
+    it were a text delta. Metadata can arrive after the function arguments.
+    """
+
+    def merge(left: dict[str, Any], right: dict[str, Any]) -> None:
+        for key, value in right.items():
+            if isinstance(value, dict) and isinstance(left.get(key), dict):
+                merge(left[key], value)
+            elif value is not None:
+                left[key] = deepcopy(value)
+
+    merge(target, tool_call_metadata(source))
+
+
+def chat_tool_call(call: dict[str, Any]) -> dict[str, Any]:
+    """Rebuild a tool-call history entry without losing provider metadata."""
+    return {
+        "id": call["id"],
+        "type": "function",
+        "function": {"name": call["name"], "arguments": call["arguments"]},
+        **tool_call_metadata(call),
+    }
 
 
 def reasoning_items(response: Any) -> list[Any]:

@@ -41,13 +41,69 @@ and adds nothing to the request path.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
 from src.core.logger import LoggerManager
+from src.core.llm.transport.response_parsing import (
+    merge_tool_call_metadata,
+    tool_call_metadata,
+)
 from src.services.execution.harnesses.crewai.availability import crewai_symbols
 
 logger = LoggerManager.get_instance().crew
+
+
+class _ToolCallHistory:
+    """Restore protocol metadata CrewAI drops when rebuilding assistant history.
+
+    Scoped to one agent adapter, pruned to its current conversation, and matched
+    by ID, function name AND arguments. Restored metadata lives on the caller's
+    history too, so subsequent serialization does not depend on this cache.
+    """
+
+    def __init__(self) -> None:
+        self._metadata: dict[tuple, dict[str, Any]] = {}
+
+    @staticmethod
+    def _key(call: dict[str, Any]) -> tuple:
+        function = call.get("function") or call
+        arguments = function.get("arguments")
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except (ValueError, TypeError):
+                pass
+        return (
+            call.get("id"),
+            function.get("name"),
+            json.dumps(arguments, sort_keys=True),
+        )
+
+    def restore(self, messages: Any) -> None:
+        active = set()
+        for message in messages if isinstance(messages, list) else []:
+            if not isinstance(message, dict) or message.get("role") != "assistant":
+                continue
+            for call in message.get("tool_calls") or []:
+                if not isinstance(call, dict):
+                    continue
+                key = self._key(call)
+                active.add(key)
+                if key in self._metadata:
+                    metadata = tool_call_metadata(self._metadata[key])
+                    merge_tool_call_metadata(metadata, call)
+                    call.update(metadata)
+        self._metadata = {
+            key: value for key, value in self._metadata.items() if key in active
+        }
+
+    def remember(self, calls: list[dict[str, Any]]) -> None:
+        for call in calls:
+            metadata = tool_call_metadata(call)
+            if metadata and call.get("id"):
+                self._metadata[self._key(call)] = metadata
 
 
 @dataclass(frozen=True)
@@ -116,6 +172,7 @@ def build_kasal_backed_llm(inner: Any) -> Any:
             inner_llm = data.pop("_inner", None)
             super().__init__(**data)
             object.__setattr__(self, "_inner", inner_llm)
+            object.__setattr__(self, "_tool_call_history", _ToolCallHistory())
 
         @property
         def inner(self) -> Any:
@@ -135,6 +192,7 @@ def build_kasal_backed_llm(inner: Any) -> Any:
             from_agent: Any = None,
             response_model: Any = None,
         ) -> Any:
+            self._tool_call_history.restore(messages)
             answer = self.inner.call(
                 messages,
                 tools,
@@ -152,6 +210,7 @@ def build_kasal_backed_llm(inner: Any) -> Any:
             # decision back for CrewAI's executor to act on — see
             # `delegate_tool_calls`. Text passes straight through.
             if isinstance(answer, list):
+                self._tool_call_history.remember(answer)
                 return _as_crewai_tool_calls(answer)
             return answer
 
@@ -165,6 +224,7 @@ def build_kasal_backed_llm(inner: Any) -> Any:
             from_agent: Any = None,
             response_model: Any = None,
         ) -> Any:
+            self._tool_call_history.restore(messages)
             answer = await self.inner.acall(
                 messages,
                 tools,
@@ -176,6 +236,7 @@ def build_kasal_backed_llm(inner: Any) -> Any:
                 response_model=response_model,
             )
             if isinstance(answer, list):
+                self._tool_call_history.remember(answer)
                 return _as_crewai_tool_calls(answer)
             return answer
 
