@@ -4,7 +4,6 @@ import {
   Button,
   Box,
   FormControl,
-  FormHelperText,
   InputLabel,
   Select,
   Typography,
@@ -25,9 +24,6 @@ import {
   IconButton,
   InputAdornment,
   Tooltip,
-  Switch,
-  FormControlLabel,
-  CircularProgress,
 } from '@mui/material';
 import { type Task } from '../../../../api/workflow/TaskService';
 import { type Agent } from '../../../../types/workflow/agent';
@@ -72,6 +68,7 @@ import { PerplexityConfig, SerperConfig } from '../../../../types/workflow/confi
 import { type LLMGuardrailConfig } from '../../../../types/workflow/task';
 import { ModelService } from '../../../../api/config/ModelService';
 import { type ModelConfig } from '../../../../types/config/models';
+import TaskGuardrailSection from './TaskGuardrailSection';
 import TaskBestPractices from '../../../help/best-practices/TaskBestPractices';
 
 interface TaskFormProps {
@@ -852,100 +849,12 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
               }}
             />
 
-            {/* LLM Guardrail - Prominent placement for visibility */}
-            <Box sx={{
-              mt: 2,
-              p: 2,
-              backgroundColor: 'rgba(156, 39, 176, 0.04)',
-              borderRadius: 1,
-              border: '1px solid rgba(156, 39, 176, 0.2)'
-            }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                <Typography variant="subtitle2" sx={{ fontWeight: 600, color: 'secondary.main' }}>
-                  LLM Guardrail
-                </Typography>
-                <Tooltip title="Uses an LLM agent to validate task output against criteria you define. This provides flexible, AI-powered validation.">
-                  <IconButton size="small" sx={{ ml: 0.5 }}>
-                    <HelpOutlineIcon fontSize="small" />
-                  </IconButton>
-                </Tooltip>
-              </Box>
-
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={Boolean(formData.config?.llm_guardrail)}
-                    onChange={(e) => handleLlmGuardrailToggle(e.target.checked)}
-                    color="secondary"
-                  />
-                }
-                label="Enable LLM Guardrail"
-              />
-
-              {formData.config?.llm_guardrail && (
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
-                  <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      onClick={handleSuggestGuardrail}
-                      disabled={isSuggestingGuardrail || (!formData.description && !formData.expected_output)}
-                      startIcon={isSuggestingGuardrail ? <CircularProgress size={16} /> : undefined}
-                    >
-                      {isSuggestingGuardrail ? 'Suggesting…' : 'Suggest criteria from task'}
-                    </Button>
-                  </Box>
-                  <TextField
-                    label="Validation Criteria"
-                    value={formData.config.llm_guardrail.description || ''}
-                    onChange={(e) => handleLlmGuardrailChange('description', e.target.value)}
-                    fullWidth
-                    multiline
-                    rows={2}
-                    placeholder="Describe how the LLM should validate the task output..."
-                    helperText="Describe the criteria the LLM will use to validate the task output, or click Suggest to generate it from the task description and expected output"
-                  />
-                  <FormControl fullWidth>
-                    <InputLabel>Validation LLM Model</InputLabel>
-                    <Select
-                      value={formData.config.llm_guardrail.llm_model || ''}
-                      onChange={(e) => handleLlmGuardrailChange('llm_model', e.target.value)}
-                      label="Validation LLM Model"
-                      disabled={llmModelsLoading}
-                      startAdornment={llmModelsLoading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
-                    >
-                      <MenuItem value="">
-                        <em>Use the model selected for the run (default)</em>
-                      </MenuItem>
-                      {llmModels.map((model) => (
-                        <MenuItem key={model.name} value={model.name}>
-                          {model.name}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                    <FormHelperText>
-                      Defaults to the model selected for the run (the chat input model).
-                      Pick a specific model to override.
-                    </FormHelperText>
-                  </FormControl>
-                  <TextField
-                    label="Max retries on validation failure"
-                    type="number"
-                    value={formData.config?.max_retries ?? 3}
-                    onChange={(e) => {
-                      const parsed = Math.max(0, Math.min(10, parseInt(e.target.value, 10) || 0));
-                      setFormData(prev => ({
-                        ...prev,
-                        config: { ...prev.config, max_retries: parsed },
-                      }));
-                    }}
-                    fullWidth
-                    inputProps={{ min: 0, max: 10 }}
-                    helperText="How many times the task is retried if the guardrail rejects the output (default 3)"
-                  />
-                </Box>
-              )}
-            </Box>
+            <TaskGuardrailSection guardrail={formData.config?.llm_guardrail}
+              onToggle={handleLlmGuardrailToggle} onSuggest={handleSuggestGuardrail}
+              suggesting={isSuggestingGuardrail} canSuggest={Boolean(formData.description || formData.expected_output)}
+              onChange={handleLlmGuardrailChange} models={llmModels} modelsLoading={llmModelsLoading}
+              maxRetries={formData.config?.max_retries ?? 3}
+              onRetriesChange={value => setFormData(previous => ({ ...previous, config: { ...previous.config, max_retries: value } }))} />
 
             <FormControl fullWidth>
               <InputLabel id="tools-label">Tools</InputLabel>

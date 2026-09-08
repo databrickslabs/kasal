@@ -22,7 +22,7 @@ it('keeps executions, schedules and assistant logs within one Activity dialog', 
   expect(await screen.findByText('Schedule management')).toBeVisible();
   expect(screen.queryByRole('button', { name: 'This session' })).not.toBeInTheDocument();
   expect(screen.getAllByRole('dialog')).toHaveLength(1);
-  fireEvent.click(screen.getByRole('button', { name: 'Assistant logs' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Model calls' }));
   expect(await screen.findByText('Existing model logs')).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: 'Executions' }));
   expect(await screen.findByText('Teamspace executions')).toBeVisible();
@@ -33,6 +33,6 @@ it('keeps the existing builder capability restriction for schedules and model lo
   render(<WorkspaceActivity expanded={false} />);
   fireEvent.click(screen.getByRole('button', { name: 'Activity' }));
   expect(screen.queryByRole('button', { name: 'Schedules' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Assistant logs' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Model calls' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Executions' })).toBeVisible();
 });

@@ -1,13 +1,13 @@
-import { kasalStageSurface } from '../../../../theme/kasalSurfaces';
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Box } from '@mui/material';
 import ExpandedBuilderConversation from './ExpandedBuilderConversation';
 import { useUILayoutStore } from '../../../../store/uiLayout';
 import type { PreviewContent } from '../../../chat/types/preview';
 import type { RunStep } from '../../../chat/components/Preview/traceEventStep';
-import PreviewPanel from '../../../chat/components/Preview/PreviewPanel';
+import BuilderSidePane, { type BuilderPaneTab, type BuilderPaneId } from './BuilderSidePane';
 import { BuilderPreviewContext } from './BuilderPreviewContext';
+import { useBuilderNodeEditorBridge, type BuilderNodeEditorEntry } from '../store/builderNodeEditorBridge';
 import '../../../chat/chat.css';
 
 interface Props {
@@ -30,25 +30,48 @@ export function CanvasAssistantLayout({ composer, response, responseKey, session
   // Keep one composer mounted while moving its DOM between the dock and reader.
   const [composerHost] = useState(() => document.createElement('div'));
   const [fullscreen, setFullscreen] = useState(false);
-  const [preview, setPreview] = useState<{ content: PreviewContent; step?: RunStep; sessionKey?: string } | null>(null);
-  const activePreview = preview?.sessionKey === sessionKey ? preview : null;
+  const [views, setViews] = useState<{ sessionKey?: string; tabs: BuilderPaneTab[]; active: BuilderPaneId }>({ sessionKey, tabs: [], active: 'canvas' });
+  const tabs = views.sessionKey === sessionKey ? views.tabs : [];
+  const activeTab = views.sessionKey === sessionKey ? views.active : 'canvas';
+  const activePreview = tabs.find(tab => tab.id === activeTab);
   const [previewHost, setPreviewHost] = useState<HTMLElement | null>(null);
-  useEffect(() => { setPreview(null); setFullscreen(false); }, [sessionKey]);
-  const openMemory = (jobId: string) => {
-    setPreview({ content: { type: 'memory', data: jobId, title: 'Run memory' }, sessionKey });
+  useEffect(() => { setViews({ sessionKey, tabs: [], active: 'canvas' }); setFullscreen(false); }, [sessionKey]);
+  const openTab = useCallback((tab: BuilderPaneTab) => {
+    setViews(previous => {
+      const current = previous.sessionKey === sessionKey ? previous.tabs : [];
+      return { sessionKey, active: tab.id, tabs: current.some(item => item.id === tab.id)
+        ? current.map(item => item.id === tab.id ? tab : item) : [...current, tab] };
+    });
     useUILayoutStore.getState().setAssistantResponseFocused(true);
-    showResponse();
+    useUILayoutStore.getState().setAssistantPanelVisible(true);
+  }, [sessionKey]);
+  const releaseTab = useCallback((id: BuilderPaneId) => setViews(previous => ({ ...previous,
+    tabs: previous.tabs.filter(tab => tab.id !== id), active: previous.active === id ? 'canvas' : previous.active,
+  })), []);
+  const closeTab = (id: BuilderPaneId) => {
+    const tab = tabs.find(item => item.id === id);
+    if (tab && 'editor' in tab) tab.editor.onClose();
+    releaseTab(id);
   };
-  const openStep = (jobId: string, step: RunStep) => {
-    setPreview({ content: { type: 'text', data: step.detail || '', title: 'Run activity', sourceMessageId: jobId }, step, sessionKey });
-    useUILayoutStore.getState().setAssistantResponseFocused(true);
-    showResponse();
+  useLayoutEffect(() => {
+    const editors = new Map<BuilderNodeEditorEntry['id'], BuilderNodeEditorEntry>();
+    const open = (editor: BuilderNodeEditorEntry) => { editors.set(editor.id, editor); openTab({ id: editor.id, editor }); };
+    const release = (id: BuilderNodeEditorEntry['id']) => { editors.delete(id); releaseTab(id); };
+    useBuilderNodeEditorBridge.setState({ open, release });
+    return () => {
+      editors.forEach(editor => editor.onClose());
+      if (useBuilderNodeEditorBridge.getState().open === open) useBuilderNodeEditorBridge.setState({ open: null, release: null });
+    };
+  }, [openTab, releaseTab]);
+  const selectTab = (id: BuilderPaneId) => {
+    setViews(previous => ({ ...previous, active: id }));
+    if (id === 'canvas') setFullscreen(false);
   };
-  const openResult = (content: PreviewContent) => {
-    setPreview({ content, sessionKey });
-    useUILayoutStore.getState().setAssistantResponseFocused(true);
-    showResponse();
-  };
+  const openMemory = (jobId: string) => openTab({ id: 'memory', content: { type: 'memory', data: jobId, title: 'Run memory' } });
+  const openStep = (jobId: string, step: RunStep) => openTab({ id: 'activity', content: { type: 'text', data: step.detail || '', title: 'Run activity', sourceMessageId: jobId }, step });
+  const openResult = (content: PreviewContent) => openTab({ id: 'result', content });
+  const openSchedule = (executionId: string, defaultName: string, onCreated: (name: string) => void) => openTab({ id: 'schedule', executionId, defaultName, onCreated });
+  const openOptimize = (crewId: string, crewName: string) => openTab({ id: 'optimize', crewId, crewName });
   useEffect(() => {
     const expand = () => setFullscreen(true);
     const collapse = () => setFullscreen(false);
@@ -101,18 +124,18 @@ export function CanvasAssistantLayout({ composer, response, responseKey, session
     </Box>
   </Box>;
 
-  const sidePreview = activePreview && <Box role="region" aria-label={activePreview.content.type === 'memory' ? 'Run memory preview' : activePreview.content.type === 'ui' ? 'Result preview' : 'Run activity preview'} className="kasal-chat-root" data-theme={dark ? 'dark' : 'light'}
-    sx={{ display: 'flex', height: '100%', width: '100%', minWidth: 0, minHeight: 0, overflow: 'hidden', pointerEvents: 'auto', color: 'text.primary', '& > aside': { minWidth: 0 },
-      '& button': { border: 0, backgroundColor: 'transparent', color: 'inherit', cursor: 'pointer' } }}>
-    <PreviewPanel content={activePreview.content} focusStep={activePreview.step} chatCollapsed={false} onClose={() => setPreview(null)} />
-  </Box>;
+  const sidePreview = tabs.length > 0 && (!fullscreen || activeTab !== 'canvas') && <BuilderSidePane tabs={tabs} active={activeTab} onSelect={selectTab} onClose={closeTab}
+    dark={dark} canvasHost={fullscreen ? null : previewHost} />;
 
-  return <BuilderPreviewContext.Provider value={{ openMemory, openStep, openResult, previewMessageId: activePreview?.content.sourceMessageId, closePreview: () => setPreview(null) }}>
+  return <BuilderPreviewContext.Provider value={{ openMemory, openStep, openResult, openSchedule, openOptimize,
+    previewMessageId: activePreview && 'content' in activePreview ? activePreview.content.sourceMessageId : undefined,
+    closePreview: () => selectTab('canvas') }}>
+
     {createPortal(composer, composerHost)}
     {visible && !fullscreen && host && createPortal(panel, host)}
     {focused && !fullscreen && composerTarget && createPortal(focusComposer, composerTarget)}
     {visible && focused && !fullscreen && sidePreview && previewHost && createPortal(
-      <Box sx={{ position: 'absolute', inset: 0, ...kasalStageSurface(dark), overflow: 'hidden', borderRadius: 3, pointerEvents: 'auto' }}>{sidePreview}</Box>, previewHost)}
+      <Box sx={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>{sidePreview}</Box>, previewHost)}
     {fullscreen && visible && <ExpandedBuilderConversation dark={dark} landing={!hasMessages && !busy} response={panel} preview={sidePreview} composerHost={composerHost} onClose={returnToSidebar} />}
     <Box ref={dockRef} data-testid="canvas-assistant-dock" sx={{ position: 'absolute', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: 'min(600px, 100%)', pointerEvents: 'none', display: focused ? 'none' : 'block' }}>
       <Box sx={{ pointerEvents: 'auto' }} ref={(node: HTMLDivElement | null) => { if (node && !fullscreen && !focused && composerHost.parentElement !== node) node.appendChild(composerHost); }} />

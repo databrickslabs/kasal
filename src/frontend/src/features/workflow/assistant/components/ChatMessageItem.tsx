@@ -26,6 +26,7 @@ import { GenieSpaceConfigPrompt } from '../GenieSpaceConfigPrompt';
 import BuilderRunActions from './BuilderRunActions';
 import BuilderCatalogAction from './BuilderCatalogAction';
 import { UiSurfaceResult } from './UiSurfaceResult';
+import { useBuilderResultSurface } from '../hooks/useBuilderResultSurface';
 import BuilderRichText from './BuilderRichText';
 import { hasRichHtml } from '../utils/resultContent';
 import { toSurface } from '../../../chat/utils/surfaceAdapter';
@@ -174,6 +175,7 @@ const resultTextSx = {
 } as const;
 
 export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpenLogs, appearance = 'default', dark = false }) => {
+  const { content: resultContent, restyle } = useBuilderResultSurface(message);
   const panel = appearance === 'assistant-panel';
   const getIntentIcon = (intent?: string) => {
     switch (intent) {
@@ -210,7 +212,7 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
     }
 
     // Process content to remove ANSI codes
-    const processedContent = stripAnsiEscapes(message.content);
+    const processedContent = stripAnsiEscapes(resultContent);
     const renderAnswer = (content: string) => hasRichHtml(content)
       ? <BuilderRichText content={content} streaming={Boolean(message.isIntermediate)} />
       : <MessageContent uniformTypography={panel} content={normalizeResultMarkdown(content)} />;
@@ -233,7 +235,7 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({ message, onOpe
                 {renderAnswer(answerText)}
               </Box>
             )}
-            <UiSurfaceResult surface={surface} messageId={message.id} />
+            <UiSurfaceResult surface={surface} messageId={message.id} onRestyle={restyle} />
           </Box>
         );
       }

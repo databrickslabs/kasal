@@ -17,10 +17,14 @@ export default function BuilderPanelControls() {
     {mode === 'flow' && <Button color="inherit" size="small" aria-pressed={open && flowTab === 'crews'}
       onClick={() => layout.setFlowPanelTab('crews')} sx={{ fontSize: 12, borderRadius: 2 }}>Available crews</Button>}
     {!conversation && <IconButton size="small" aria-label="Show conversation" onClick={() => layout.setAssistantPanelVisible(true)}><MessageSquare size={16} /></IconButton>}
-    {open && <>
+    {open && <Box data-conversation-controls sx={{ display: 'flex', gap: 0.5, alignItems: 'center', transition: 'opacity 140ms ease',
+      ...(conversation ? { '@media (hover: hover) and (pointer: fine)': { opacity: 0, pointerEvents: 'none',
+        '[data-testid="workspace-conversation-pane"]:hover &, &:focus-within': { opacity: 1, pointerEvents: 'auto' },
+      } } : {}),
+    }}>
       <IconButton size="small" aria-label={`Move panel to ${side === 'left' ? 'right' : 'left'}`} onClick={() => layout.setAssistantPanelSide(side === 'left' ? 'right' : 'left')}><ArrowLeftRight size={16} /></IconButton>
       {conversation && <IconButton size="small" aria-label="Full screen conversation" onClick={() => window.dispatchEvent(new Event('expandBuilderConversation'))}><Maximize2 size={16} /></IconButton>}
       <IconButton size="small" aria-label="Close panel" onClick={() => layout.setExecutionHistoryVisible(false)}><X size={17} /></IconButton>
-    </>}
+    </Box>}
   </Box>;
 }

@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
@@ -37,6 +36,7 @@ import { SchemaService } from '../../../../api/workflow/SchemaService';
 import { TaskService } from '../../../../api/workflow/TaskService';
 import { Schema } from '../../../../types/workflow/schema';
 
+import BuilderNodeEditor from '../../assistant/components/BuilderNodeEditor';
 import FlowStateSection from './FlowStateSection';
 export type FlowLogicType = 'AND' | 'OR' | 'ROUTER' | 'NONE';
 
@@ -343,15 +343,9 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
   };
 
   return (
-    <Dialog
-      open={open}
-      onClose={handleCancel}
-      maxWidth="md"
-      fullWidth
-      PaperProps={{
-        sx: { height: '80vh', maxHeight: '700px' }
-      }}
-    >
+    <BuilderNodeEditor open={open} kind="connection" nodeId={edge?.id || 'connection'}
+      label={`${sourceNode?.data?.crewName || 'Source'} → ${targetNode?.data?.crewName || 'Target'}`} onClose={handleCancel}>
+
       <DialogTitle sx={{ pb: 1 }}>
         Configure Connection Logic
       </DialogTitle>
@@ -359,7 +353,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
       <DialogContent sx={{ pt: 1 }}>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           {/* Task Selection Section - Two Column Layout */}
-          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: 2 }}>
             {/* Source Tasks Selection */}
             <Box>
               <FormLabel component="legend" sx={{ fontSize: '0.875rem', fontWeight: 600, mb: 0.5 }}>
@@ -787,7 +781,7 @@ const EdgeConfigDialog: React.FC<EdgeConfigDialogProps> = ({
           setSchemaCreateOpen(false);
         }}
       />
-    </Dialog>
+    </BuilderNodeEditor>
   );
 };
 

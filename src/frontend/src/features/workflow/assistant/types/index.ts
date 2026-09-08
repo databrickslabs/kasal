@@ -35,6 +35,7 @@ export interface GeneratedCrew {
 
 export interface ChatMessage {
   id: string;
+  backendId?: string;
   type: 'user' | 'assistant' | 'execution' | 'trace' | 'result';
   content: string;
   timestamp: Date;

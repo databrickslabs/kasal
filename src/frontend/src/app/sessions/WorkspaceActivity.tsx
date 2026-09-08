@@ -2,21 +2,24 @@ import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { Box, Button, CircularProgress, Dialog, IconButton, Typography } from '@mui/material';
 import { Activity, X } from 'lucide-react';
 import { useSessionRunIds } from './useSessionRunIds';
+import { useThemeStore } from '../../store/theme';
+import { kasalStageSurface } from '../../theme/kasalSurfaces';
 import { useGroupStore } from '../../store/groups';
 import { usePermissionStore } from '../../store/permissions';
 import SidebarAction from '../../components/SidebarAction';
 
 const ExecutionHistory = lazy(() => import('../../features/executions/components/ExecutionHistory'));
 const Schedules = lazy(() => import('../../features/workflow/scheduling/components/ScheduleDialog'));
-const AssistantLogs = lazy(() => import('../../features/executions/components/LLMLogs'));
+const ModelCalls = lazy(() => import('../../features/executions/components/LLMLogs'));
 type Section = 'executions' | 'schedules' | 'logs';
 const sections: { id: Section; label: string }[] = [
   { id: 'executions', label: 'Executions' },
   { id: 'schedules', label: 'Schedules' },
-  { id: 'logs', label: 'Assistant logs' },
+  { id: 'logs', label: 'Model calls' },
 ];
 
 export function WorkspaceActivity({ expanded }: { expanded: boolean }) {
+  const dark = useThemeStore(state => state.isDarkMode);
   const [open, setOpen] = useState(false);
   const [section, setSection] = useState<Section>('executions');
   const [scope, setScope] = useState<'session' | 'teamspace'>('session');
@@ -34,7 +37,7 @@ export function WorkspaceActivity({ expanded }: { expanded: boolean }) {
     <SidebarAction label="Activity" icon={<Activity size={18} />} expanded={expanded}
       onClick={() => setOpen(true)} data-tour="workspace-activity" />
     <Dialog key={`${groupId}:${sessionKey}`} open={open} onClose={() => setOpen(false)} maxWidth="lg" fullWidth aria-label="Activity"
-      PaperProps={{ sx: { height: 'min(780px, 85dvh)', borderRadius: 4, bgcolor: 'background.default', backgroundImage: 'none' } }}>
+      PaperProps={{ sx: { height: 'min(780px, 85dvh)', borderRadius: 4, ...kasalStageSurface(dark) } }}>
       <Box sx={{ display: 'flex', alignItems: 'center', px: 2.5, pt: 2, pb: 1, gap: 1 }}>
         <Activity size={19} />
         <Typography component="h2" sx={{ fontWeight: 600, fontSize: 16, flex: 1 }}>Activity</Typography>
@@ -54,9 +57,8 @@ export function WorkspaceActivity({ expanded }: { expanded: boolean }) {
         <Suspense fallback={<Box sx={{ p: 4, textAlign: 'center' }}><CircularProgress size={24} color="inherit" aria-label="Loading activity" /></Box>}>
           {activeSection === 'executions' && <ExecutionHistory key={scope} embedded jobIds={scope === 'session' ? ids : undefined} title="Executions" />}
           {activeSection === 'schedules' && <Schedules embedded open onClose={() => setOpen(false)} nodes={[]} edges={[]} selectedModel="" />}
-          {activeSection === 'logs' && <Box sx={{ p: 2.5, pt: 1, overflow: 'auto' }}>
-            <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 2 }}>Model requests and responses across this teamspace.</Typography>
-            <AssistantLogs />
+          {activeSection === 'logs' && <Box sx={{ p: 2.5, pt: 1, flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex' }}>
+            <ModelCalls embedded />
           </Box>}
         </Suspense>
       </Box>}

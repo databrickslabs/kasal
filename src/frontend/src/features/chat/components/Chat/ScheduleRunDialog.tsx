@@ -13,11 +13,13 @@ import { ScheduleService } from '../../../../api/execution/ScheduleService';
  * choices and stays behind a small "Advanced" disclosure; editing it there
  * switches to custom mode (the pickers step aside rather than lie).
  *
- * Rendered inside #kasal-chat-root (NOT portaled) so the chat CSS tokens apply;
+ * Rendered inside the chat theme scope, as a dialog or an embedded pane.
+ * In dialog mode,
  * `position: fixed` escapes the chat layout's overflow clipping — the same
  * pattern as ChatMcpDialog.
  */
 export interface ScheduleRunDialogProps {
+  embedded?: boolean;
   executionId: string;
   defaultName: string;
   onClose: () => void;
@@ -102,15 +104,33 @@ export function describeChoice(
   }
 }
 
+// The same neutral fill, fine border and 12px corners as the chat composer.
+// Explicit styles also reset native button chrome in the portaled dialog,
+// which has the chat theme class but sits outside its root ID.
+const buttonClass = 'rounded-xl text-[13px] font-medium transition-opacity hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--text-muted)] disabled:opacity-40 disabled:cursor-not-allowed';
+const buttonStyle: React.CSSProperties = {
+  padding: '8px 12px',
+  lineHeight: '20px',
+  color: 'var(--text-secondary)',
+  backgroundColor: 'var(--bg-secondary)',
+  border: '1px solid var(--border-color)',
+  cursor: 'pointer',
+};
+const quietButtonStyle: React.CSSProperties = {
+  ...buttonStyle,
+  backgroundColor: 'transparent',
+  border: '1px solid transparent',
+};
 const chipStyle = (active: boolean): React.CSSProperties => ({
-  padding: '6px 10px',
+  ...buttonStyle,
   color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
   backgroundColor: active ? 'var(--bg-active-chip)' : 'var(--bg-secondary)',
-  border: '1px solid var(--border-color)',
+  fontWeight: active ? 600 : 500,
 });
 
 const ScheduleRunDialog: React.FC<ScheduleRunDialogProps> = ({
   executionId,
+  embedded = false,
   defaultName,
   onClose,
   onCreated,
@@ -158,20 +178,20 @@ const ScheduleRunDialog: React.FC<ScheduleRunDialogProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4 animate-fade-in"
-      style={{ backgroundColor: 'rgba(0,0,0,0.4)' }}
+      className={embedded ? 'h-full w-full overflow-auto' : 'fixed inset-0 z-[60] flex items-center justify-center p-4 animate-fade-in'}
+      style={{ backgroundColor: embedded ? 'transparent' : 'rgba(0,0,0,0.4)' }}
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (!embedded && e.target === e.currentTarget) onClose();
       }}
     >
       <div
-        role="dialog"
+        role={embedded ? 'region' : 'dialog'}
         aria-label="Run this on a schedule"
-        className="w-full max-w-md rounded-2xl flex flex-col overflow-hidden"
+        className={embedded ? 'w-full flex flex-col' : 'w-full max-w-md rounded-2xl flex flex-col overflow-hidden'}
         style={{
-          backgroundColor: 'var(--bg-primary)',
-          border: '1px solid var(--border-color)',
-          boxShadow: 'var(--shadow-popover)',
+          backgroundColor: embedded ? 'transparent' : 'var(--bg-primary)',
+          border: embedded ? 0 : '1px solid var(--border-color)',
+          boxShadow: embedded ? 'none' : 'var(--shadow-popover)',
         }}
       >
         <div className="flex items-center gap-3 px-5 py-4" style={{ borderBottom: '1px solid var(--border-color)' }}>
@@ -192,17 +212,17 @@ const ScheduleRunDialog: React.FC<ScheduleRunDialogProps> = ({
               Re-runs exactly what just ran — same agents, tasks and model
             </div>
           </div>
-          <button
+          {!embedded && <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-[var(--bg-rail-hover)]"
-            style={{ color: 'var(--text-muted)' }}
+            className={`${buttonClass} w-8 h-8 flex items-center justify-center`}
+            style={{ ...quietButtonStyle, padding: 0 }}
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
-          </button>
+          </button>}
         </div>
 
         <div className="px-5 py-4 space-y-3">
@@ -222,7 +242,7 @@ const ScheduleRunDialog: React.FC<ScheduleRunDialogProps> = ({
             <span className="text-[11px] font-semibold uppercase tracking-[0.08em]" style={sectionLabel}>
               How often
             </span>
-            <div className="mt-1 flex flex-wrap gap-1.5">
+            <div className="mt-2 flex flex-wrap gap-2">
               {FREQUENCIES.map((f) => (
                 <button
                   key={f.value}
@@ -231,7 +251,8 @@ const ScheduleRunDialog: React.FC<ScheduleRunDialogProps> = ({
                     setFreq(f.value);
                     setCustomCron(null);
                   }}
-                  className="rounded-lg text-xs transition-colors"
+                  className={buttonClass}
+                  aria-pressed={customCron === null && freq === f.value}
                   style={chipStyle(customCron === null && freq === f.value)}
                 >
                   {f.label}
@@ -245,13 +266,14 @@ const ScheduleRunDialog: React.FC<ScheduleRunDialogProps> = ({
               <span className="text-[11px] font-semibold uppercase tracking-[0.08em]" style={sectionLabel}>
                 On which day
               </span>
-              <div className="mt-1 flex flex-wrap gap-1.5">
+              <div className="mt-2 flex flex-wrap gap-2">
                 {WEEKDAYS.map((d) => (
                   <button
                     key={d.value}
                     type="button"
                     onClick={() => setWeekday(d.value)}
-                    className="rounded-lg text-xs transition-colors"
+                    className={buttonClass}
+                    aria-pressed={weekday === d.value}
                     style={chipStyle(weekday === d.value)}
                   >
                     {d.label}
@@ -317,8 +339,8 @@ const ScheduleRunDialog: React.FC<ScheduleRunDialogProps> = ({
             <button
               type="button"
               onClick={() => setAdvanced(true)}
-              className="text-[11px] underline-offset-2 hover:underline"
-              style={sectionLabel}
+              className={buttonClass}
+              style={{ ...quietButtonStyle, padding: '6px 0' }}
             >
               Advanced: edit as a cron expression
             </button>
@@ -350,8 +372,8 @@ const ScheduleRunDialog: React.FC<ScheduleRunDialogProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg text-sm transition-colors hover:bg-[var(--bg-rail-hover)]"
-            style={{ padding: '8px 14px', color: 'var(--text-secondary)' }}
+            className={buttonClass}
+            style={quietButtonStyle}
           >
             Cancel
           </button>
@@ -359,8 +381,8 @@ const ScheduleRunDialog: React.FC<ScheduleRunDialogProps> = ({
             type="button"
             onClick={() => void create()}
             disabled={!canCreate}
-            className="rounded-lg text-sm font-medium transition-opacity disabled:opacity-50"
-            style={{ padding: '8px 14px', color: 'var(--bg-primary)', backgroundColor: 'var(--text-primary)' }}
+            className={buttonClass}
+            style={{ ...buttonStyle, cursor: canCreate ? 'pointer' : 'not-allowed' }}
           >
             {saving ? 'Creating…' : 'Create schedule'}
           </button>

@@ -22,7 +22,7 @@ export function getTutorialSteps(mode: AppMode, access = { crew: true, flow: tru
   ];
   const activityStep = step('[data-tour="workspace-activity"]', 'Find your runs in Activity',
     'Open Activity in the left sidebar to review execution results, traces, and memory. Choose This session for linked runs, or All teamspace runs for the wider history, including scheduled and API runs.'
-    + (access.crew || access.flow ? ' Schedules and Assistant logs are also here.' : ''));
+    + (access.crew || access.flow ? ' Schedules and Model calls are also here.' : ''));
   const accountSteps = [
     step('[data-tour="workspace-account-actions"]', 'Your teamspace and appearance', 'The bottom row brings your teamspace, appearance, and settings together. Select the profile or teamspace name to switch teamspaces. The sun or moon changes the appearance across every mode.'),
     step('[data-tour="configuration-button"]', 'Configure Kasal', 'The gear in the same bottom row opens Configuration. It shows the settings available to you, including models, tools, and memory.'),

@@ -2,7 +2,7 @@ import { kasalNodeSurface, kasalNodePalette } from '../../../../theme/kasalSurfa
 import { getDefaultModel } from '../../../../config/defaultModel';
 import React, { useCallback, useState, useEffect } from 'react';
 import { Handle, Position, useReactFlow } from 'reactflow';
-import { Box, Typography, Dialog, DialogContent, IconButton, Tooltip, CircularProgress } from '@mui/material';
+import { Box, Typography, IconButton, Tooltip, CircularProgress } from '@mui/material';
 import { Bot } from 'lucide-react';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
@@ -15,6 +15,7 @@ import MemoryIcon from '@mui/icons-material/Psychology';
 import ModelIcon from '@mui/icons-material/ModelTraining';
 import { Agent, AgentService } from '../../../../api/workflow/AgentService';
 import AgentForm from './AgentForm';
+import BuilderNodeEditor from '../../assistant/components/BuilderNodeEditor';
 import LLMSelectionDialog from './LLMSelectionDialog';
 import { ToolService } from '../../../../api/tools/ToolService';
 import { Tool, KnowledgeSource } from '../../../../types/workflow/agent';
@@ -702,21 +703,8 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
       )}
 
       {isEditing && agentData && (
-        <Dialog
-          open={isEditing}
-          onClose={() => setIsEditing(false)}
-          maxWidth="md"
-          fullWidth
-          PaperProps={{
-            sx: {
-              display: 'flex',
-              flexDirection: 'column',
-              height: '85vh',
-              maxHeight: '85vh'
-            }
-          }}
-        >
-          <DialogContent sx={{ p: 2, overflow: 'hidden', display: 'flex', flexDirection: 'column', flex: 1 }}>
+        <BuilderNodeEditor open={isEditing} kind="agent" nodeId={id} label={String(data.label || data.name || 'Agent')}
+          onClose={() => setIsEditing(false)}>
             <AgentForm
               initialData={agentData}
               tools={tools}
@@ -731,8 +719,7 @@ const AgentNode: React.FC<{ data: AgentNodeData; id: string }> = ({ data, id }) 
                 }
               }}
             />
-          </DialogContent>
-        </Dialog>
+        </BuilderNodeEditor>
       )}
 
       {/* Quick LLM Selection Dialog */}

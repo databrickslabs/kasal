@@ -19,7 +19,7 @@ export const UiSurfaceView: React.FC<{ surface: Surface }> = ({ surface }) => {
 };
 
 /** Render at the conversation's width, using Chat's surface controls and theme. */
-export const UiSurfaceResult: React.FC<{ surface: Surface; messageId?: string }> = ({ surface, messageId }) => {
+export const UiSurfaceResult: React.FC<{ surface: Surface; messageId?: string; onRestyle?: (surface: Surface) => void }> = ({ surface, messageId, onRestyle }) => {
   const preview = useContext(BuilderPreviewContext);
   const dark = useThemeStore(state => state.isDarkMode);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -33,7 +33,7 @@ export const UiSurfaceResult: React.FC<{ surface: Surface; messageId?: string }>
       Opened in the side panel
       <Button size="small" color="inherit" onClick={preview?.closePreview}>Show here</Button>
     </Box> : <Box className="kasal-chat-root" data-theme={dark ? 'dark' : 'light'} sx={scopeSx}>
-      <A2uiSurface blendWithHost surface={surface} onExpand={expand}
+      <A2uiSurface blendWithHost surface={surface} onExpand={expand} onRestyle={onRestyle}
         onDownloadPdf={() => downloadSurfacePdf(surface, surface.surfaceKind || 'kasal-app')} />
     </Box>}
     <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="lg">

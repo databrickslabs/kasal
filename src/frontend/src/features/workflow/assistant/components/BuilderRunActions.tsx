@@ -52,6 +52,7 @@ const BuilderRunActions: React.FC<{ jobId: string }> = ({ jobId }) => {
           executionId={jobId}
           defaultName={`${run.run_name || 'Crew'} schedule`}
           usedWorkspaceMemory={hasMemoryTrace || runUsedMemory(run)}
+          onOpenSchedule={openPreview?.openSchedule}
           onOpenMemory={() => openPreview ? openPreview.openMemory(jobId) : setMemoryOpen(true)}
         />
         <BuilderOptimizeAction run={run} />
