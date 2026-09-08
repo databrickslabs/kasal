@@ -1,0 +1,3476 @@
+{
+ "APPROXIMATEDISTINCTCOUNT": {
+  "name": "APPROXIMATEDISTINCTCOUNT",
+  "category": "Aggregation",
+  "feasibility": "no_equivalent",
+  "default_dax_class": "unsupported",
+  "dax_example": "APPROXIMATEDISTINCTCOUNT(sales[id])",
+  "sql_reference_raw": "Approximation varies by dialect; no standard SQL equivalent",
+  "curated": false
+ },
+ "AVERAGE": {
+  "name": "AVERAGE",
+  "category": "Aggregation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "AVERAGE(sales[amount])",
+  "sql_reference_raw": "`AVG(amount)`",
+  "curated": false
+ },
+ "AVERAGEA": {
+  "name": "AVERAGEA",
+  "category": "Aggregation",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "AVERAGEA(table[text_or_num])",
+  "sql_reference_raw": "`AVG(CAST(col AS DOUBLE))` or UDF treating text as 0",
+  "curated": false
+ },
+ "AVERAGEX": {
+  "name": "AVERAGEX",
+  "category": "Aggregation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "AVERAGEX(sales, sales[price] * sales[qty])",
+  "sql_reference_raw": "`AVG(price * qty)`",
+  "curated": false
+ },
+ "COUNT": {
+  "name": "COUNT",
+  "category": "Aggregation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "COUNT(sales[id])",
+  "sql_reference_raw": "`COUNT(id)`",
+  "curated": false
+ },
+ "COUNTA": {
+  "name": "COUNTA",
+  "category": "Aggregation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "COUNTA(sales[id])",
+  "sql_reference_raw": "`COUNT(*)` or `COUNT(id)` (both count non-null)",
+  "curated": false
+ },
+ "COUNTAX": {
+  "name": "COUNTAX",
+  "category": "Aggregation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "COUNTAX(sales, sales[qty])",
+  "sql_reference_raw": "`COUNT(qty)`",
+  "curated": false
+ },
+ "COUNTBLANK": {
+  "name": "COUNTBLANK",
+  "category": "Aggregation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "COUNTBLANK(sales[notes])",
+  "sql_reference_raw": "`COUNT(*) - COUNT(notes)`",
+  "curated": false
+ },
+ "COUNTROWS": {
+  "name": "COUNTROWS",
+  "category": "Aggregation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "COUNTROWS(FILTER(sales, sales[region]=\"US\"))",
+  "sql_reference_raw": "`COUNT(*)` or table rowcount",
+  "curated": false
+ },
+ "COUNTX": {
+  "name": "COUNTX",
+  "category": "Aggregation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "COUNTX(sales, sales[price])",
+  "sql_reference_raw": "`COUNT(price)`",
+  "curated": false
+ },
+ "DISTINCTCOUNT": {
+  "name": "DISTINCTCOUNT",
+  "category": "Aggregation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "DISTINCTCOUNT(sales[customer_id])",
+  "sql_reference_raw": "`COUNT(DISTINCT customer_id)`",
+  "curated": false
+ },
+ "DISTINCTCOUNTNOBLANK": {
+  "name": "DISTINCTCOUNTNOBLANK",
+  "category": "Aggregation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "DISTINCTCOUNTNOBLANK(sales[id])",
+  "sql_reference_raw": "`COUNT(DISTINCT id)` (excludes NULL by default)",
+  "curated": false
+ },
+ "MAX": {
+  "name": "MAX",
+  "category": "Aggregation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "MAX(sales[amount])",
+  "sql_reference_raw": "`MAX(amount)`",
+  "curated": false
+ },
+ "MAXA": {
+  "name": "MAXA",
+  "category": "Aggregation",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "MAXA(table[values])",
+  "sql_reference_raw": "`MAX(CAST(col AS DOUBLE))` or UDF for text handling",
+  "curated": false
+ },
+ "MAXX": {
+  "name": "MAXX",
+  "category": "Aggregation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "MAXX(sales, sales[price] * sales[qty])",
+  "sql_reference_raw": "`MAX(price * qty)`",
+  "curated": false
+ },
+ "MIN": {
+  "name": "MIN",
+  "category": "Aggregation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "MIN(sales[amount])",
+  "sql_reference_raw": "`MIN(amount)`",
+  "curated": false
+ },
+ "MINA": {
+  "name": "MINA",
+  "category": "Aggregation",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "MINA(table[values])",
+  "sql_reference_raw": "`MIN(CAST(col AS DOUBLE))` or UDF for text handling",
+  "curated": false
+ },
+ "MINX": {
+  "name": "MINX",
+  "category": "Aggregation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "MINX(sales, sales[price] * sales[qty])",
+  "sql_reference_raw": "`MIN(price * qty)`",
+  "curated": false
+ },
+ "PRODUCT": {
+  "name": "PRODUCT",
+  "category": "Aggregation",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "PRODUCT(sales[multiplier])",
+  "sql_reference_raw": "`EXP(SUM(LN(multiplier)))` or UDF",
+  "curated": false
+ },
+ "PRODUCTX": {
+  "name": "PRODUCTX",
+  "category": "Aggregation",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "PRODUCTX(sales, sales[factor])",
+  "sql_reference_raw": "`EXP(SUM(LN(factor)))` or UDF",
+  "curated": false
+ },
+ "SUM": {
+  "name": "SUM",
+  "category": "Aggregation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "SUM(sales[amount])",
+  "sql_reference_raw": "`SUM(amount)`",
+  "curated": false
+ },
+ "SUMX": {
+  "name": "SUMX",
+  "category": "Aggregation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "SUMX(sales, sales[price] * sales[qty])",
+  "sql_reference_raw": "`SUM(price * qty)`",
+  "curated": false
+ },
+ "CALENDAR": {
+  "name": "CALENDAR",
+  "category": "Date & time",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CALENDAR(DATE(2024,1,1), DATE(2024,12,31))",
+  "sql_reference_raw": "`SELECT EXPLODE(SEQUENCE(DATE '2024-01-01', DATE '2024-12-31')) AS Date`",
+  "curated": false
+ },
+ "CALENDARAUTO": {
+  "name": "CALENDARAUTO",
+  "category": "Date & time",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CALENDARAUTO()",
+  "sql_reference_raw": "`SELECT EXPLODE(SEQUENCE(MIN(date_col), MAX(date_col))) FROM table`",
+  "curated": false
+ },
+ "DATE": {
+  "name": "DATE",
+  "category": "Date & time",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "DATE(2024, 3, 15)",
+  "sql_reference_raw": "`MAKE_DATE(2024, 3, 15)`",
+  "curated": false
+ },
+ "DATEDIFF": {
+  "name": "DATEDIFF",
+  "category": "Date & time",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "DATEDIFF([EndDate], [StartDate], DAY)",
+  "sql_reference_raw": "`DATEDIFF(end_date, start_date)`",
+  "curated": false
+ },
+ "DATEVALUE": {
+  "name": "DATEVALUE",
+  "category": "Date & time",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "DATEVALUE(\"2024-03-15\")",
+  "sql_reference_raw": "`TO_DATE('2024-03-15', 'yyyy-MM-dd')`",
+  "curated": false
+ },
+ "DAY": {
+  "name": "DAY",
+  "category": "Date & time",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "DAY([OrderDate])",
+  "sql_reference_raw": "`DAY(order_date)`",
+  "curated": false
+ },
+ "EDATE": {
+  "name": "EDATE",
+  "category": "Date & time",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "EDATE([StartDate], 6)",
+  "sql_reference_raw": "`ADD_MONTHS(start_date, 6)`",
+  "curated": false
+ },
+ "EOMONTH": {
+  "name": "EOMONTH",
+  "category": "Date & time",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "EOMONTH([Date], -1)",
+  "sql_reference_raw": "`LAST_DAY(ADD_MONTHS(date_col, -1))`",
+  "curated": false
+ },
+ "HOUR": {
+  "name": "HOUR",
+  "category": "Date & time",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "HOUR([TimeStamp])",
+  "sql_reference_raw": "`HOUR(timestamp_col)`",
+  "curated": false
+ },
+ "MINUTE": {
+  "name": "MINUTE",
+  "category": "Date & time",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "MINUTE([TimeStamp])",
+  "sql_reference_raw": "`MINUTE(timestamp_col)`",
+  "curated": false
+ },
+ "MONTH": {
+  "name": "MONTH",
+  "category": "Date & time",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "MONTH([Date])",
+  "sql_reference_raw": "`MONTH(date_col)`",
+  "curated": false
+ },
+ "NETWORKDAYS": {
+  "name": "NETWORKDAYS",
+  "category": "Date & time",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "NETWORKDAYS([StartDate], [EndDate])",
+  "sql_reference_raw": "`DATEDIFF(end_date, start_date) - (DAYOFWEEK(end_date)-1 + DAYOFWEEK(start_date)-1) / 2`",
+  "curated": false
+ },
+ "NOW": {
+  "name": "NOW",
+  "category": "Date & time",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "NOW()",
+  "sql_reference_raw": "`NOW()` or `CURRENT_TIMESTAMP()`",
+  "curated": false
+ },
+ "QUARTER": {
+  "name": "QUARTER",
+  "category": "Date & time",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "QUARTER([Date])",
+  "sql_reference_raw": "`QUARTER(date_col)`",
+  "curated": false
+ },
+ "SECOND": {
+  "name": "SECOND",
+  "category": "Date & time",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "SECOND([TimeStamp])",
+  "sql_reference_raw": "`SECOND(timestamp_col)`",
+  "curated": false
+ },
+ "TIME": {
+  "name": "TIME",
+  "category": "Date & time",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "TIME(14, 30, 45)",
+  "sql_reference_raw": "`MAKE_TIMESTAMP(0, 0, 0, 14, 30, 45, 0)`",
+  "curated": false
+ },
+ "TIMEVALUE": {
+  "name": "TIMEVALUE",
+  "category": "Date & time",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "TIMEVALUE(\"14:30:45\")",
+  "sql_reference_raw": "`CAST('14:30:45' AS TIMESTAMP)` or `TO_TIMESTAMP('14:30:45', 'HH:mm:ss')`",
+  "curated": false
+ },
+ "TODAY": {
+  "name": "TODAY",
+  "category": "Date & time",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "TODAY()",
+  "sql_reference_raw": "`CURRENT_DATE()`",
+  "curated": false
+ },
+ "UTCNOW": {
+  "name": "UTCNOW",
+  "category": "Date & time",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "UTCNOW()",
+  "sql_reference_raw": "`NOW() AT TIME ZONE 'UTC'`",
+  "curated": false
+ },
+ "UTCTODAY": {
+  "name": "UTCTODAY",
+  "category": "Date & time",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "UTCTODAY()",
+  "sql_reference_raw": "`CURRENT_DATE() AT TIME ZONE 'UTC'`",
+  "curated": false
+ },
+ "WEEKDAY": {
+  "name": "WEEKDAY",
+  "category": "Date & time",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "WEEKDAY([Date])",
+  "sql_reference_raw": "`DAYOFWEEK(date_col)`",
+  "curated": false
+ },
+ "WEEKNUM": {
+  "name": "WEEKNUM",
+  "category": "Date & time",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "WEEKNUM([Date], 1)",
+  "sql_reference_raw": "`WEEKOFYEAR(date_col)`",
+  "curated": false
+ },
+ "YEAR": {
+  "name": "YEAR",
+  "category": "Date & time",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "YEAR([Date])",
+  "sql_reference_raw": "`YEAR(date_col)`",
+  "curated": false
+ },
+ "YEARFRAC": {
+  "name": "YEARFRAC",
+  "category": "Date & time",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "YEARFRAC([StartDate], [EndDate])",
+  "sql_reference_raw": "`DATEDIFF(end_date, start_date) / 365.25`",
+  "curated": false
+ },
+ "CLOSINGBALANCEWEEK": {
+  "name": "CLOSINGBALANCEWEEK",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CLOSINGBALANCEWEEK(SUM(Sales))",
+  "sql_reference_raw": "`SUM(revenue) OVER (PARTITION BY week ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` with semiadditive: last",
+  "curated": false
+ },
+ "CLOSINGBALANCEMONTH": {
+  "name": "CLOSINGBALANCEMONTH",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CLOSINGBALANCEMONTH(SUM(Inventory))",
+  "sql_reference_raw": "`SUM(quantity) OVER (PARTITION BY month ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` with semiadditive: last",
+  "curated": false
+ },
+ "CLOSINGBALANCEQUARTER": {
+  "name": "CLOSINGBALANCEQUARTER",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CLOSINGBALANCEQUARTER(SUM(Balance))",
+  "sql_reference_raw": "`SUM(balance) OVER (PARTITION BY quarter ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` with semiadditive: last",
+  "curated": false
+ },
+ "CLOSINGBALANCEYEAR": {
+  "name": "CLOSINGBALANCEYEAR",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CLOSINGBALANCEYEAR(SUM(Reserve))",
+  "sql_reference_raw": "`SUM(reserve) OVER (PARTITION BY year ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` with semiadditive: last",
+  "curated": false
+ },
+ "OPENINGBALANCEWEEK": {
+  "name": "OPENINGBALANCEWEEK",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "OPENINGBALANCEWEEK(SUM(Sales))",
+  "sql_reference_raw": "`SUM(revenue) OVER (PARTITION BY week ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` with semiadditive: first",
+  "curated": false
+ },
+ "OPENINGBALANCEMONTH": {
+  "name": "OPENINGBALANCEMONTH",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "OPENINGBALANCEMONTH(SUM(Inventory))",
+  "sql_reference_raw": "`SUM(quantity) OVER (PARTITION BY month ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` with semiadditive: first",
+  "curated": false
+ },
+ "OPENINGBALANCEQUARTER": {
+  "name": "OPENINGBALANCEQUARTER",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "OPENINGBALANCEQUARTER(SUM(Balance))",
+  "sql_reference_raw": "`SUM(balance) OVER (PARTITION BY quarter ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` with semiadditive: first",
+  "curated": false
+ },
+ "OPENINGBALANCEYEAR": {
+  "name": "OPENINGBALANCEYEAR",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "OPENINGBALANCEYEAR(SUM(Reserve))",
+  "sql_reference_raw": "`SUM(reserve) OVER (PARTITION BY year ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` with semiadditive: first",
+  "curated": false
+ },
+ "DATESYTD": {
+  "name": "DATESYTD",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CALCULATETABLE(Sales, DATESYTD(Dates[Date]))",
+  "sql_reference_raw": "`WHERE date BETWEEN date_trunc('year', current_date) AND current_date`",
+  "curated": false
+ },
+ "TOTALYTD": {
+  "name": "TOTALYTD",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "TOTALYTD(SUM(Sales), Dates[Date])",
+  "sql_reference_raw": "`SUM(amount) OVER (PARTITION BY year(date) ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` with range: cumulative",
+  "curated": false
+ },
+ "DATESQTD": {
+  "name": "DATESQTD",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CALCULATETABLE(Sales, DATESQTD(Dates[Date]))",
+  "sql_reference_raw": "`WHERE date BETWEEN date_trunc('quarter', current_date) AND current_date`",
+  "curated": false
+ },
+ "TOTALQTD": {
+  "name": "TOTALQTD",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "TOTALQTD(SUM(Sales), Dates[Date])",
+  "sql_reference_raw": "`SUM(amount) OVER (PARTITION BY quarter(date) ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` with range: cumulative",
+  "curated": false
+ },
+ "DATESMTD": {
+  "name": "DATESMTD",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CALCULATETABLE(Sales, DATESMTD(Dates[Date]))",
+  "sql_reference_raw": "`WHERE date BETWEEN date_trunc('month', current_date) AND current_date`",
+  "curated": false
+ },
+ "TOTALMTD": {
+  "name": "TOTALMTD",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "TOTALMTD(SUM(Sales), Dates[Date])",
+  "sql_reference_raw": "`SUM(amount) OVER (PARTITION BY month(date), year(date) ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` with range: cumulative",
+  "curated": false
+ },
+ "DATESWTD": {
+  "name": "DATESWTD",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CALCULATETABLE(Sales, DATESWTD(Dates[Date]))",
+  "sql_reference_raw": "`WHERE date BETWEEN date_trunc('week', current_date) AND current_date`",
+  "curated": false
+ },
+ "TOTALWTD": {
+  "name": "TOTALWTD",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "TOTALWTD(SUM(Sales), Dates[Date])",
+  "sql_reference_raw": "`SUM(amount) OVER (PARTITION BY week(date), year(date) ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` with range: cumulative",
+  "curated": false
+ },
+ "STARTOFYEAR": {
+  "name": "STARTOFYEAR",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CALCULATE(SUM(Sales), STARTOFYEAR(Dates[Date]))",
+  "sql_reference_raw": "`date_trunc('year', date)` or `MIN(date) FILTER (PARTITION BY year(date))`",
+  "curated": false
+ },
+ "STARTOFQUARTER": {
+  "name": "STARTOFQUARTER",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CALCULATE(SUM(Sales), STARTOFQUARTER(Dates[Date]))",
+  "sql_reference_raw": "`date_trunc('quarter', date)`",
+  "curated": false
+ },
+ "STARTOFMONTH": {
+  "name": "STARTOFMONTH",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CALCULATE(SUM(Sales), STARTOFMONTH(Dates[Date]))",
+  "sql_reference_raw": "`date_trunc('month', date)` or `CAST(date AS DATE)` of first day",
+  "curated": false
+ },
+ "STARTOFWEEK": {
+  "name": "STARTOFWEEK",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CALCULATE(SUM(Sales), STARTOFWEEK(Dates[Date]))",
+  "sql_reference_raw": "`date_trunc('week', date)`",
+  "curated": false
+ },
+ "ENDOFYEAR": {
+  "name": "ENDOFYEAR",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CALCULATE(SUM(Sales), ENDOFYEAR(Dates[Date]))",
+  "sql_reference_raw": "`last_day(date_trunc('year', date))`",
+  "curated": false
+ },
+ "ENDOFQUARTER": {
+  "name": "ENDOFQUARTER",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CALCULATE(SUM(Sales), ENDOFQUARTER(Dates[Date]))",
+  "sql_reference_raw": "`last_day(date_trunc('quarter', date))`",
+  "curated": false
+ },
+ "ENDOFMONTH": {
+  "name": "ENDOFMONTH",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CALCULATE(SUM(Sales), ENDOFMONTH(Dates[Date]))",
+  "sql_reference_raw": "`last_day(date)`",
+  "curated": false
+ },
+ "ENDOFWEEK": {
+  "name": "ENDOFWEEK",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CALCULATE(SUM(Sales), ENDOFWEEK(Dates[Date]))",
+  "sql_reference_raw": "`date_add(date_trunc('week', date), 6)` or window for last_day of week",
+  "curated": false
+ },
+ "FIRSTDATE": {
+  "name": "FIRSTDATE",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "FIRSTDATE(Dates[Date])",
+  "sql_reference_raw": "`MIN(date)` aggregate or FIRST_VALUE() window",
+  "curated": false
+ },
+ "LASTDATE": {
+  "name": "LASTDATE",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "LASTDATE(Dates[Date])",
+  "sql_reference_raw": "`MAX(date)` aggregate or LAST_VALUE() window",
+  "curated": false
+ },
+ "SAMEPERIODLASTYEAR": {
+  "name": "SAMEPERIODLASTYEAR",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CALCULATE(SUM(Sales), SAMEPERIODLASTYEAR(Dates[Date]))",
+  "sql_reference_raw": "`LAG(date, 365) OVER (ORDER BY date)` or UCMV offset: -12 month",
+  "curated": false
+ },
+ "PARALLELPERIOD": {
+  "name": "PARALLELPERIOD",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CALCULATE(SUM(Sales), PARALLELPERIOD(Dates[Date], -1, QUARTER))",
+  "sql_reference_raw": "`LAG(amount, n) OVER (PARTITION BY period ORDER BY date)` or UCMV offset: -n period",
+  "curated": false
+ },
+ "DATEADD": {
+  "name": "DATEADD",
+  "category": "Time intelligence",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "CALCULATE(SUM(Sales), DATEADD(Dates[Date], 30, DAY))",
+  "sql_reference_raw": "`date_add(date, INTERVAL 30 DAY)` with window frame",
+  "curated": false
+ },
+ "DATESBETWEEN": {
+  "name": "DATESBETWEEN",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CALCULATE(SUM(Sales), DATESBETWEEN(Dates[Date], start_date, end_date))",
+  "sql_reference_raw": "`WHERE date BETWEEN start_date AND end_date` or window frame",
+  "curated": false
+ },
+ "DATESINPERIOD": {
+  "name": "DATESINPERIOD",
+  "category": "Time intelligence",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CALCULATE(SUM(Sales), DATESINPERIOD(Dates[Date], start_date, 3, MONTH))",
+  "sql_reference_raw": "`WHERE date BETWEEN start_date AND date_add(start_date, INTERVAL 3 MONTH)`",
+  "curated": false
+ },
+ "NEXTDAY": {
+  "name": "NEXTDAY",
+  "category": "Time intelligence",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "CALCULATE(SUM(Sales), NEXTDAY(Dates[Date]))",
+  "sql_reference_raw": "`LEAD(date, 1) OVER (ORDER BY date)`",
+  "curated": false
+ },
+ "NEXTWEEK": {
+  "name": "NEXTWEEK",
+  "category": "Time intelligence",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "CALCULATE(SUM(Sales), NEXTWEEK(Dates[Date]))",
+  "sql_reference_raw": "`LEAD(date, 7) OVER (ORDER BY date)` or window for next week's dates",
+  "curated": false
+ },
+ "NEXTMONTH": {
+  "name": "NEXTMONTH",
+  "category": "Time intelligence",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "CALCULATE(SUM(Sales), NEXTMONTH(Dates[Date]))",
+  "sql_reference_raw": "`date_add(date_trunc('month', date), INTERVAL 1 MONTH)` with LEAD",
+  "curated": false
+ },
+ "NEXTQUARTER": {
+  "name": "NEXTQUARTER",
+  "category": "Time intelligence",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "CALCULATE(SUM(Sales), NEXTQUARTER(Dates[Date]))",
+  "sql_reference_raw": "`date_add(date_trunc('quarter', date), INTERVAL 1 QUARTER)` with LEAD",
+  "curated": false
+ },
+ "NEXTYEAR": {
+  "name": "NEXTYEAR",
+  "category": "Time intelligence",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "CALCULATE(SUM(Sales), NEXTYEAR(Dates[Date]))",
+  "sql_reference_raw": "`date_add(date_trunc('year', date), INTERVAL 1 YEAR)` with LEAD",
+  "curated": false
+ },
+ "PREVIOUSDAY": {
+  "name": "PREVIOUSDAY",
+  "category": "Time intelligence",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "CALCULATE(SUM(Sales), PREVIOUSDAY(Dates[Date]))",
+  "sql_reference_raw": "`LAG(date, 1) OVER (ORDER BY date)` or UCMV offset: -1 day",
+  "curated": false
+ },
+ "PREVIOUSWEEK": {
+  "name": "PREVIOUSWEEK",
+  "category": "Time intelligence",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "CALCULATE(SUM(Sales), PREVIOUSWEEK(Dates[Date]))",
+  "sql_reference_raw": "`LAG(date, 7) OVER (ORDER BY date)` or window for previous week",
+  "curated": false
+ },
+ "PREVIOUSMONTH": {
+  "name": "PREVIOUSMONTH",
+  "category": "Time intelligence",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "CALCULATE(SUM(Sales), PREVIOUSMONTH(Dates[Date]))",
+  "sql_reference_raw": "`date_add(date_trunc('month', date), INTERVAL -1 MONTH)` with LAG",
+  "curated": false
+ },
+ "PREVIOUSQUARTER": {
+  "name": "PREVIOUSQUARTER",
+  "category": "Time intelligence",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "CALCULATE(SUM(Sales), PREVIOUSQUARTER(Dates[Date]))",
+  "sql_reference_raw": "`date_add(date_trunc('quarter', date), INTERVAL -1 QUARTER)` with LAG",
+  "curated": false
+ },
+ "PREVIOUSYEAR": {
+  "name": "PREVIOUSYEAR",
+  "category": "Time intelligence",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "CALCULATE(SUM(Sales), PREVIOUSYEAR(Dates[Date]))",
+  "sql_reference_raw": "`date_add(date_trunc('year', date), INTERVAL -1 YEAR)` with LAG or UCMV offset: -12 month",
+  "curated": false
+ },
+ "ALL": {
+  "name": "ALL",
+  "category": "Filter",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "CALCULATE(SUM(sales), ALL(date))",
+  "sql_reference_raw": "Remove all date filters: `OVER (PARTITION BY 1)` or full table aggregate",
+  "curated": false
+ },
+ "ALLCROSSFILTERED": {
+  "name": "ALLCROSSFILTERED",
+  "category": "Filter",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "CALCULATE(SUM(sales), ALLCROSSFILTERED(table_name))",
+  "sql_reference_raw": "Clear all filters on table: `OVER ()` or `SELECT SUM(...) FROM table_name` (reset context)",
+  "curated": false
+ },
+ "ALLEXCEPT": {
+  "name": "ALLEXCEPT",
+  "category": "Filter",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "CALCULATE(SUM(sales), ALLEXCEPT(date, date_year))",
+  "sql_reference_raw": "Keep only year filter, drop day/month: `OVER (PARTITION BY date_year)`",
+  "curated": false
+ },
+ "ALLNOBLANKROW": {
+  "name": "ALLNOBLANKROW",
+  "category": "Filter",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "CALCULATE(SUM(sales), ALLNOBLANKROW(category))",
+  "sql_reference_raw": "Same as ALL but exclude nulls: `WHERE category IS NOT NULL OVER (PARTITION BY 1)`",
+  "curated": false
+ },
+ "ALLSELECTED": {
+  "name": "ALLSELECTED",
+  "category": "Filter",
+  "feasibility": "ai_bi",
+  "default_dax_class": "display_layer",
+  "dax_example": "CALCULATE(SUM(sales), ALLSELECTED(region))",
+  "sql_reference_raw": "Outer query filter scope; in Databricks use WITH cte or subquery to capture dashboard-level filters",
+  "curated": false
+ },
+ "CALCULATE": {
+  "name": "CALCULATE",
+  "category": "Filter",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "CALCULATE(SUM(sales), date[year]=2024)",
+  "sql_reference_raw": "Scoped aggregate with WHERE: `SELECT SUM(sales) WHERE date_year=2024` or subquery with filter",
+  "curated": false
+ },
+ "CALCULATETABLE": {
+  "name": "CALCULATETABLE",
+  "category": "Filter",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "CALCULATETABLE(VALUES(product), product[category]=\"A\")",
+  "sql_reference_raw": "Subquery with WHERE: `(SELECT DISTINCT product WHERE category='A')`",
+  "curated": false
+ },
+ "EARLIER": {
+  "name": "EARLIER",
+  "category": "Filter",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "COLUMN1 + EARLIER(COLUMN1)",
+  "sql_reference_raw": "Correlated subquery / self-join: `SELECT t1.col + t2.col FROM t AS t1 JOIN t AS t2 ON t1.id = t2.id`",
+  "curated": false
+ },
+ "EARLIEST": {
+  "name": "EARLIEST",
+  "category": "Filter",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "EARLIEST(COLUMN1)",
+  "sql_reference_raw": "Outermost evaluation pass; in Databricks use CTE or LAG() to reference outermost context",
+  "curated": false
+ },
+ "FILTER": {
+  "name": "FILTER",
+  "category": "Filter",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "FILTER(product, product[price]>100)",
+  "sql_reference_raw": "WHERE clause: `SELECT * WHERE price > 100` or `CASE WHEN price > 100 THEN 1 ELSE 0 END`",
+  "curated": false
+ },
+ "FIRST": {
+  "name": "FIRST",
+  "category": "Filter",
+  "feasibility": "no_equivalent",
+  "default_dax_class": "unsupported",
+  "dax_example": "FIRST(ORDERBY(sales_column, ASC))",
+  "sql_reference_raw": "Visual calculation only; in SQL use `ROW_NUMBER() OVER (ORDER BY sales) = 1` or `FIRST_VALUE()`",
+  "curated": false
+ },
+ "INDEX": {
+  "name": "INDEX",
+  "category": "Filter",
+  "feasibility": "no_equivalent",
+  "default_dax_class": "unsupported",
+  "dax_example": "INDEX(1, ORDERBY(date, ASC))",
+  "sql_reference_raw": "Visual calculation only; in SQL use `ROW_NUMBER() OVER (ORDER BY date) = position`",
+  "curated": false
+ },
+ "KEEPFILTERS": {
+  "name": "KEEPFILTERS",
+  "category": "Filter",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "CALCULATE(SUM(sales), KEEPFILTERS(date[year]=2024), region=\"North\")",
+  "sql_reference_raw": "Intersect filters with AND: `WHERE date_year=2024 AND region='North'`",
+  "curated": false
+ },
+ "LAST": {
+  "name": "LAST",
+  "category": "Filter",
+  "feasibility": "no_equivalent",
+  "default_dax_class": "unsupported",
+  "dax_example": "LAST(ORDERBY(sales_column, DESC))",
+  "sql_reference_raw": "Visual calculation only; in SQL use `ROW_NUMBER() OVER (ORDER BY sales DESC) = 1` or `LAST_VALUE()`",
+  "curated": false
+ },
+ "LOOKUP": {
+  "name": "LOOKUP",
+  "category": "Filter",
+  "feasibility": "no_equivalent",
+  "default_dax_class": "unsupported",
+  "dax_example": "LOOKUP(filter_expression)",
+  "sql_reference_raw": "Visual calculation only; in Databricks use scalar subquery or JOIN",
+  "curated": false
+ },
+ "LOOKUPWITHTOTALS": {
+  "name": "LOOKUPWITHTOTALS",
+  "category": "Filter",
+  "feasibility": "no_equivalent",
+  "default_dax_class": "unsupported",
+  "dax_example": "LOOKUPWITHTOTALS(filter_expression)",
+  "sql_reference_raw": "Visual calculation only; in Databricks use scalar subquery with explicit total logic",
+  "curated": false
+ },
+ "LOOKUPVALUE": {
+  "name": "LOOKUPVALUE",
+  "category": "Filter",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "LOOKUPVALUE(product[id], product[name], \"Widget\")",
+  "sql_reference_raw": "Scalar subquery / JOIN: `(SELECT id FROM product WHERE name='Widget' LIMIT 1)` or `JOIN...ON product.name='Widget'`",
+  "curated": false
+ },
+ "MATCHBY": {
+  "name": "MATCHBY",
+  "category": "Filter",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "WINDOW(..., MATCHBY(dimension1, dimension2))",
+  "sql_reference_raw": "Window function partition matching; in SQL use `PARTITION BY dimension1, dimension2` in OVER clause",
+  "curated": false
+ },
+ "MOVINGAVERAGE": {
+  "name": "MOVINGAVERAGE",
+  "category": "Filter",
+  "feasibility": "no_equivalent",
+  "default_dax_class": "unsupported",
+  "dax_example": "MOVINGAVERAGE(sales, ORDERBY(date))",
+  "sql_reference_raw": "Visual calculation only; in SQL use `AVG() OVER (ROWS BETWEEN N PRECEDING AND CURRENT ROW)`",
+  "curated": false
+ },
+ "NEXT": {
+  "name": "NEXT",
+  "category": "Filter",
+  "feasibility": "no_equivalent",
+  "default_dax_class": "unsupported",
+  "dax_example": "NEXT(sales_column)",
+  "sql_reference_raw": "Visual calculation only; in SQL use `LEAD(sales_column, 1) OVER (ORDER BY ...)`",
+  "curated": false
+ },
+ "OFFSET": {
+  "name": "OFFSET",
+  "category": "Filter",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "OFFSET(1, ORDERBY(date), PARTITION BY(region))",
+  "sql_reference_raw": "Window function: `LAG() or LEAD() OVER (PARTITION BY region ORDER BY date)`",
+  "curated": false
+ },
+ "ORDERBY": {
+  "name": "ORDERBY",
+  "category": "Filter",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "WINDOW(..., ORDERBY(date, ASC))",
+  "sql_reference_raw": "Window function ORDER BY; in SQL use `ORDER BY date ASC` in OVER clause",
+  "curated": false
+ },
+ "PARTITIONBY": {
+  "name": "PARTITIONBY",
+  "category": "Filter",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "WINDOW(..., PARTITIONBY(region))",
+  "sql_reference_raw": "Window function partition; in SQL use `PARTITION BY region` in OVER clause",
+  "curated": false
+ },
+ "PREVIOUS": {
+  "name": "PREVIOUS",
+  "category": "Filter",
+  "feasibility": "no_equivalent",
+  "default_dax_class": "unsupported",
+  "dax_example": "PREVIOUS(sales_column)",
+  "sql_reference_raw": "Visual calculation only; in SQL use `LAG(sales_column, 1) OVER (ORDER BY ...)`",
+  "curated": false
+ },
+ "RANGE": {
+  "name": "RANGE",
+  "category": "Filter",
+  "feasibility": "no_equivalent",
+  "default_dax_class": "unsupported",
+  "dax_example": "RANGE(ALLSELECTED(), [offset_start], [offset_end])",
+  "sql_reference_raw": "Visual calculation only; in SQL use `ROWS/RANGE BETWEEN ... AND ...` in OVER clause",
+  "curated": false
+ },
+ "RANK": {
+  "name": "RANK",
+  "category": "Filter",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "RANK(ORDERBY(sales, DESC))",
+  "sql_reference_raw": "Window function: `RANK() OVER (ORDER BY sales DESC)`",
+  "curated": false
+ },
+ "REMOVEFILTERS": {
+  "name": "REMOVEFILTERS",
+  "category": "Filter",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "CALCULATE(SUM(sales), REMOVEFILTERS(date))",
+  "sql_reference_raw": "Clear date filter: `OVER ()` or full aggregate without date predicate",
+  "curated": false
+ },
+ "ROWNUMBER": {
+  "name": "ROWNUMBER",
+  "category": "Filter",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "ROWNUMBER(ORDERBY(date))",
+  "sql_reference_raw": "Window function: `ROW_NUMBER() OVER (ORDER BY date)`",
+  "curated": false
+ },
+ "RUNNINGSUM": {
+  "name": "RUNNINGSUM",
+  "category": "Filter",
+  "feasibility": "no_equivalent",
+  "default_dax_class": "unsupported",
+  "dax_example": "RUNNINGSUM(sales, ORDERBY(date))",
+  "sql_reference_raw": "Visual calculation only; in SQL use `SUM() OVER (ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)`",
+  "curated": false
+ },
+ "SELECTEDVALUE": {
+  "name": "SELECTEDVALUE",
+  "category": "Filter",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "SELECTEDVALUE(product[category], \"Unknown\")",
+  "sql_reference_raw": "Conditional aggregate: `CASE WHEN COUNT(DISTINCT category)=1 THEN MIN(category) ELSE 'Unknown' END`",
+  "curated": false
+ },
+ "WINDOW": {
+  "name": "WINDOW",
+  "category": "Filter",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "WINDOW(ORDERBY(date), PARTITIONBY(region), RANGE(...))",
+  "sql_reference_raw": "Full window function: `ROW_NUMBER/RANK/SUM etc. OVER (PARTITION BY region ORDER BY date RANGE/ROWS BETWEEN ...)`",
+  "curated": false
+ },
+ "PMT": {
+  "name": "PMT",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "PMT(0.05/12, 360, -200000)` → 1073.64",
+  "sql_reference_raw": "`ROUND(pv * (r * (1 + r)^n) / ((1 + r)^n - 1), 2)` where r=rate/periods, n=nper",
+  "curated": false
+ },
+ "FV": {
+  "name": "FV",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "FV(0.05, 10, -1000, 0)` → 12578.0",
+  "sql_reference_raw": "`pv * (1 + r)^n + pmt * (((1 + r)^n - 1) / r)`",
+  "curated": false
+ },
+ "PV": {
+  "name": "PV",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "PV(0.05, 10, -1000)` → 7721.7",
+  "sql_reference_raw": "`fv / (1 + r)^n - pmt * ((1 - (1 + r)^-n) / r)`",
+  "curated": false
+ },
+ "NPER": {
+  "name": "NPER",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "NPER(0.05, -1000, -100000, 0)` → 119.7",
+  "sql_reference_raw": "`SQL/Python UDF (iterative)` - no closed form",
+  "curated": false
+ },
+ "RATE": {
+  "name": "RATE",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "RATE(360, -1073.64, 200000)` → 0.00417",
+  "sql_reference_raw": "`SQL/Python UDF (Newton-Raphson iterative)`",
+  "curated": false
+ },
+ "IPMT": {
+  "name": "IPMT",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "IPMT(0.05, 1, 10, -100000)",
+  "sql_reference_raw": "`(1 + r)^(per-1) * (pmt - pv * r) / ((1 + r)^n - 1)`",
+  "curated": false
+ },
+ "PPMT": {
+  "name": "PPMT",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "PPMT(0.05, 1, 10, -100000)",
+  "sql_reference_raw": "`pmt - ipmt(...)` - use above IPMT formula",
+  "curated": false
+ },
+ "CUMIPMT": {
+  "name": "CUMIPMT",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "CUMIPMT(0.05, 360, 200000, 1, 12, 0)",
+  "sql_reference_raw": "Sum of IPMT across periods; `SQL/Python UDF`",
+  "curated": false
+ },
+ "CUMPRINC": {
+  "name": "CUMPRINC",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "CUMPRINC(0.05, 360, 200000, 1, 12, 0)",
+  "sql_reference_raw": "Sum of PPMT across periods; `SQL/Python UDF`",
+  "curated": false
+ },
+ "XNPV": {
+  "name": "XNPV",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "XNPV(0.08, {-10000, 2750, 4250, 3250, 2750}, {date1, date2, ...})",
+  "sql_reference_raw": "`SQL/Python UDF: SUM(CF / (1 + rate)^(DAYS(date, date0)/365))`",
+  "curated": false
+ },
+ "XIRR": {
+  "name": "XIRR",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "XIRR({-10000, 2750, 4250, 3250, 2750}, {date1, date2, ...})",
+  "sql_reference_raw": "`SQL/Python UDF (iterative)` - solve for rate where NPV=0",
+  "curated": false
+ },
+ "SLN": {
+  "name": "SLN",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "SLN(100000, 10000, 10)` → 9000",
+  "sql_reference_raw": "`(cost - salvage) / life`",
+  "curated": false
+ },
+ "DB": {
+  "name": "DB",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "DB(100000, 10000, 10, 1)` → 20000",
+  "sql_reference_raw": "Declining balance: `cost * POWER(salvage/cost, 1/life) / life` per period",
+  "curated": false
+ },
+ "DDB": {
+  "name": "DDB",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "DDB(100000, 10000, 10, 1)` → 20000",
+  "sql_reference_raw": "Double declining: `cost * 2 / life` first period; then `(cost - prior_depn) * 2 / life`",
+  "curated": false
+ },
+ "SYD": {
+  "name": "SYD",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "SYD(100000, 10000, 10, 1)` → 16363.64",
+  "sql_reference_raw": "`(depn_base * (life - period + 1)) / (life * (life + 1) / 2)`",
+  "curated": false
+ },
+ "VDB": {
+  "name": "VDB",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "VDB(100000, 10000, 10, 1, 2, 2)",
+  "sql_reference_raw": "Hybrid declining/straight-line; `SQL/Python UDF` - switches to SLN when SLN > declining",
+  "curated": false
+ },
+ "AMORDEGRC": {
+  "name": "AMORDEGRC",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "AMORDEGRC(100000, 100000, 1, 0, 0.2)",
+  "sql_reference_raw": "French accelerated depreciation; `SQL/Python UDF`",
+  "curated": false
+ },
+ "AMORLINC": {
+  "name": "AMORLINC",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "AMORLINC(100000, 100000, 1, 0, 0.2)",
+  "sql_reference_raw": "French straight-line; `SQL/Python UDF`",
+  "curated": false
+ },
+ "PRICE": {
+  "name": "PRICE",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "PRICE(settlement, maturity, coupon, yld, redemption, basis)",
+  "sql_reference_raw": "Bond price formula: `redemption / (1+yld)^years + SUM(coupon_pmt / (1+yld)^t)`",
+  "curated": false
+ },
+ "YIELD": {
+  "name": "YIELD",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "YIELD(settlement, maturity, coupon, price, redemption, basis)",
+  "sql_reference_raw": "`SQL/Python UDF (iterative)` - solve for yield given price",
+  "curated": false
+ },
+ "PRICEMAT": {
+  "name": "PRICEMAT",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "PRICEMAT(settlement, maturity, issue, coupon, yld, basis)",
+  "sql_reference_raw": "`(100 + coupon * yearfrac(issue, maturity)) / (1 + yld * yearfrac(settlement, maturity))`",
+  "curated": false
+ },
+ "YIELDMAT": {
+  "name": "YIELDMAT",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "YIELDMAT(settlement, maturity, issue, coupon, price, basis)",
+  "sql_reference_raw": "`SQL/Python UDF (iterative)` - solve for yield with accrued interest",
+  "curated": false
+ },
+ "PRICEDISC": {
+  "name": "PRICEDISC",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "PRICEDISC(settlement, maturity, discount, redemption, basis)",
+  "sql_reference_raw": "`redemption * (1 - discount * yearfrac(settlement, maturity))`",
+  "curated": false
+ },
+ "YIELDDISC": {
+  "name": "YIELDDISC",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "YIELDDISC(settlement, maturity, price, redemption, basis)",
+  "sql_reference_raw": "`(redemption - price) / redemption / yearfrac(settlement, maturity)`",
+  "curated": false
+ },
+ "ACCRINT": {
+  "name": "ACCRINT",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "ACCRINT(issue, first_coupon, settlement, coupon, par, basis)",
+  "sql_reference_raw": "Accrued coupon interest; `par * coupon * yearfrac(last_coupon, settlement)`",
+  "curated": false
+ },
+ "ACCRINTM": {
+  "name": "ACCRINTM",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "ACCRINTM(issue, maturity, coupon, par, basis)",
+  "sql_reference_raw": "`par * coupon * yearfrac(issue, maturity)`",
+  "curated": false
+ },
+ "INTRATE": {
+  "name": "INTRATE",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "INTRATE(settlement, maturity, investment, redemption, basis)",
+  "sql_reference_raw": "`(redemption - investment) / investment / yearfrac(settlement, maturity)`",
+  "curated": false
+ },
+ "RECEIVED": {
+  "name": "RECEIVED",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "RECEIVED(settlement, maturity, investment, discount, basis)",
+  "sql_reference_raw": "`investment / (1 - discount * yearfrac(settlement, maturity))`",
+  "curated": false
+ },
+ "DISC": {
+  "name": "DISC",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "DISC(settlement, maturity, price, redemption, basis)",
+  "sql_reference_raw": "`(redemption - price) / redemption / yearfrac(settlement, maturity)`",
+  "curated": false
+ },
+ "COUPNCD": {
+  "name": "COUPNCD",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "COUPNCD(settlement, maturity, frequency, basis)",
+  "sql_reference_raw": "Next coupon date calculation; `SQL/Python UDF` - date arithmetic",
+  "curated": false
+ },
+ "COUPPCD": {
+  "name": "COUPPCD",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "COUPPCD(settlement, maturity, frequency, basis)",
+  "sql_reference_raw": "Previous coupon date calculation; `SQL/Python UDF` - date arithmetic",
+  "curated": false
+ },
+ "COUPDAYBS": {
+  "name": "COUPDAYBS",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "COUPDAYBS(settlement, maturity, frequency, basis)",
+  "sql_reference_raw": "Days from coupon start to settlement; `SQL/Python UDF` - date difference",
+  "curated": false
+ },
+ "COUPDAYS": {
+  "name": "COUPDAYS",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "COUPDAYS(settlement, maturity, frequency, basis)",
+  "sql_reference_raw": "Days in coupon period; `SQL/Python UDF` - typically 360/frequency or 365/frequency",
+  "curated": false
+ },
+ "COUPDAYSNC": {
+  "name": "COUPDAYSNC",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "COUPDAYSNC(settlement, maturity, frequency, basis)",
+  "sql_reference_raw": "Days from settlement to next coupon; `SQL/Python UDF` - date difference",
+  "curated": false
+ },
+ "COUPNUM": {
+  "name": "COUPNUM",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "COUPNUM(settlement, maturity, frequency)",
+  "sql_reference_raw": "Count of coupons from settlement to maturity; `SQL/Python UDF` - date-based count",
+  "curated": false
+ },
+ "TBILLPRICE": {
+  "name": "TBILLPRICE",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "TBILLPRICE(settlement, maturity, discount)",
+  "sql_reference_raw": "`100 * (1 - discount * days_to_maturity / 360)`",
+  "curated": false
+ },
+ "TBILLYIELD": {
+  "name": "TBILLYIELD",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "TBILLYIELD(settlement, maturity, price)",
+  "sql_reference_raw": "`(100 - price) * 360 / (price * days_to_maturity)`",
+  "curated": false
+ },
+ "TBILLEQ": {
+  "name": "TBILLEQ",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "TBILLEQ(settlement, maturity, discount)",
+  "sql_reference_raw": "`(365 * discount) / (360 - discount * days_to_maturity)`",
+  "curated": false
+ },
+ "EFFECT": {
+  "name": "EFFECT",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "EFFECT(0.08, 4)` → 0.0824",
+  "sql_reference_raw": "`(1 + nominal_rate / periods)^periods - 1`",
+  "curated": false
+ },
+ "NOMINAL": {
+  "name": "NOMINAL",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "NOMINAL(0.0824, 4)` → 0.08",
+  "sql_reference_raw": "`periods * ((1 + effective_rate)^(1/periods) - 1)`",
+  "curated": false
+ },
+ "RRI": {
+  "name": "RRI",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "RRI(10, 1000, 2000)` → 0.0718",
+  "sql_reference_raw": "`(fv / pv)^(1/periods) - 1`",
+  "curated": false
+ },
+ "DURATION": {
+  "name": "DURATION",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "DURATION(settlement, maturity, coupon, yld, basis)",
+  "sql_reference_raw": "Macauley duration; `SQL/Python UDF` - weighted avg of cash flow times",
+  "curated": false
+ },
+ "MDURATION": {
+  "name": "MDURATION",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "MDURATION(settlement, maturity, coupon, yld, basis)",
+  "sql_reference_raw": "Modified duration = DURATION / (1 + yld / freq); `SQL/Python UDF`",
+  "curated": false
+ },
+ "ODDFPRICE": {
+  "name": "ODDFPRICE",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "ODDFPRICE(settlement, maturity, issue, first_coupon, coupon, yld, redemption, basis)",
+  "sql_reference_raw": "Bond price with odd first period; `SQL/Python UDF` - special accrual calc",
+  "curated": false
+ },
+ "ODDFYIELD": {
+  "name": "ODDFYIELD",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "ODDFYIELD(settlement, maturity, issue, first_coupon, coupon, price, redemption, basis)",
+  "sql_reference_raw": "Yield with odd first period; `SQL/Python UDF (iterative)`",
+  "curated": false
+ },
+ "ODDLPRICE": {
+  "name": "ODDLPRICE",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "ODDLPRICE(settlement, maturity, last_coupon, coupon, yld, redemption, basis)",
+  "sql_reference_raw": "Bond price with odd last period; `SQL/Python UDF` - special accrual calc",
+  "curated": false
+ },
+ "ODDLYIELD": {
+  "name": "ODDLYIELD",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "ODDLYIELD(settlement, maturity, last_coupon, coupon, price, redemption, basis)",
+  "sql_reference_raw": "Yield with odd last period; `SQL/Python UDF (iterative)`",
+  "curated": false
+ },
+ "DOLLARDE": {
+  "name": "DOLLARDE",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "DOLLARDE(1.02, 32)` → 1.0625",
+  "sql_reference_raw": "`INT(price) + FRAC(price) / 100`",
+  "curated": false
+ },
+ "DOLLARFR": {
+  "name": "DOLLARFR",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "DOLLARFR(1.0625, 32)` → 1.02",
+  "sql_reference_raw": "`INT(price) + (FRAC(price) * 100) / divisor`",
+  "curated": false
+ },
+ "PDURATION": {
+  "name": "PDURATION",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "PDURATION(0.05, 1000, 2000)` → 14.2",
+  "sql_reference_raw": "Periods to reach target: `LOG(fv / pv) / LOG(1 + rate)`",
+  "curated": false
+ },
+ "ISPMT": {
+  "name": "ISPMT",
+  "category": "Financial",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "ISPMT(0.05, 1, 10, -100000)",
+  "sql_reference_raw": "Interest on even principal payments: `(n - per + 1) * pmt * rate / n`",
+  "curated": false
+ },
+ "COLUMNSTATISTICS": {
+  "name": "COLUMNSTATISTICS",
+  "category": "Information",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "COLUMNSTATISTICS()",
+  "sql_reference_raw": "`DESCRIBE TABLE table_name` or catalog metadata queries",
+  "curated": false
+ },
+ "CONTAINS": {
+  "name": "CONTAINS",
+  "category": "Information",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "CONTAINS(VALUES(Col), Values)",
+  "sql_reference_raw": "`EXISTS (SELECT 1 FROM table WHERE col IN (...))`",
+  "curated": false
+ },
+ "CONTAINSROW": {
+  "name": "CONTAINSROW",
+  "category": "Information",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "CONTAINSROW(VALUES(...), Col1, Val1)",
+  "sql_reference_raw": "`EXISTS (SELECT 1 FROM table WHERE col1 = val1 AND ...)`",
+  "curated": false
+ },
+ "CONTAINSSTRING": {
+  "name": "CONTAINSSTRING",
+  "category": "Information",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CONTAINSSTRING(Name, \"City\")",
+  "sql_reference_raw": "`Name ILIKE '%' \\",
+  "curated": false
+ },
+ "CONTAINSSTRINGEXACT": {
+  "name": "CONTAINSSTRINGEXACT",
+  "category": "Information",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CONTAINSSTRINGEXACT(\"USA\", Country)",
+  "sql_reference_raw": "`Country = 'USA'`",
+  "curated": false
+ },
+ "CUSTOMDATA": {
+  "name": "CUSTOMDATA",
+  "category": "Information",
+  "feasibility": "no_equivalent",
+  "default_dax_class": "unsupported",
+  "dax_example": "CUSTOMDATA()",
+  "sql_reference_raw": "Session/connection context (no direct equivalent)",
+  "curated": false
+ },
+ "HASONEFILTER": {
+  "name": "HASONEFILTER",
+  "category": "Information",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "HASONEFILTER(Product[Category])",
+  "sql_reference_raw": "`COUNT(DISTINCT category) = 1` in GROUP BY context",
+  "curated": false
+ },
+ "HASONEVALUE": {
+  "name": "HASONEVALUE",
+  "category": "Information",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "HASONEVALUE(Date[Year])",
+  "sql_reference_raw": "`COUNT(DISTINCT year) = 1` in filtered context",
+  "curated": false
+ },
+ "ISAFTER": {
+  "name": "ISAFTER",
+  "category": "Information",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "ISAFTER(Date, DATE(2024,1,1))",
+  "sql_reference_raw": "`Date > '2024-01-01'` (with order context)",
+  "curated": false
+ },
+ "ISBLANK": {
+  "name": "ISBLANK",
+  "category": "Information",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "IF(ISBLANK(Sales), 0, Sales)",
+  "sql_reference_raw": "`Sales IS NULL`",
+  "curated": false
+ },
+ "ISBOOLEAN": {
+  "name": "ISBOOLEAN",
+  "category": "Information",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "IF(ISBOOLEAN(x), x, FALSE)",
+  "sql_reference_raw": "`typeof(x) = 'boolean'`",
+  "curated": false
+ },
+ "ISCROSSFILTERED": {
+  "name": "ISCROSSFILTERED",
+  "category": "Information",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "ISCROSSFILTERED(Table1[Col])",
+  "sql_reference_raw": "Related table filter applied; context-dependent",
+  "curated": false
+ },
+ "ISCURRENCY": {
+  "name": "ISCURRENCY",
+  "category": "Information",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "IF(ISCURRENCY(Amount), Amount, 0)",
+  "sql_reference_raw": "`typeof(Amount) = 'decimal'`",
+  "curated": false
+ },
+ "ISDATETIME": {
+  "name": "ISDATETIME",
+  "category": "Information",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "IF(ISDATETIME(CreatedAt), CreatedAt, NOW())",
+  "sql_reference_raw": "`typeof(CreatedAt) IN ('timestamp', 'date')`",
+  "curated": false
+ },
+ "ISDECIMAL": {
+  "name": "ISDECIMAL",
+  "category": "Information",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "IF(ISDECIMAL(Price), Price, 0.0)",
+  "sql_reference_raw": "`typeof(Price) = 'decimal'`",
+  "curated": false
+ },
+ "ISDOUBLE": {
+  "name": "ISDOUBLE",
+  "category": "Information",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "IF(ISDOUBLE(Value), Value, 0.0)",
+  "sql_reference_raw": "`typeof(Value) = 'double'`",
+  "curated": false
+ },
+ "ISEMPTY": {
+  "name": "ISEMPTY",
+  "category": "Information",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "IF(ISEMPTY(Table), 0, COUNTA(Table))",
+  "sql_reference_raw": "`COUNT(*) = 0` (table expression)",
+  "curated": false
+ },
+ "ISERROR": {
+  "name": "ISERROR",
+  "category": "Information",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "IF(ISERROR(1/Divisor), 0, 1/Divisor)",
+  "sql_reference_raw": "`TRY_DIVIDE(1, Divisor)` or error-handling UDF",
+  "curated": false
+ },
+ "ISEVEN": {
+  "name": "ISEVEN",
+  "category": "Information",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "IF(ISEVEN(Number), Number, NULL)",
+  "sql_reference_raw": "`Number % 2 = 0`",
+  "curated": false
+ },
+ "ISFILTERED": {
+  "name": "ISFILTERED",
+  "category": "Information",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "IF(ISFILTERED(Product[ID]), \"Filtered\", \"All\")",
+  "sql_reference_raw": "Direct filter applied; context-dependent",
+  "curated": false
+ },
+ "ISINSCOPE": {
+  "name": "ISINSCOPE",
+  "category": "Information",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "IF(ISINSCOPE(Date[Year]), \"Year\", \"Other\")",
+  "sql_reference_raw": "Hierarchy level in GROUP BY context",
+  "curated": false
+ },
+ "ISINT64": {
+  "name": "ISINT64",
+  "category": "Information",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "IF(ISINT64(ID), ID, 0)",
+  "sql_reference_raw": "`typeof(ID) IN ('long', 'bigint', 'int')`",
+  "curated": false
+ },
+ "ISINTEGER": {
+  "name": "ISINTEGER",
+  "category": "Information",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "IF(ISINTEGER(ID), ID, 0)",
+  "sql_reference_raw": "`typeof(ID) IN ('long', 'bigint', 'int')`",
+  "curated": false
+ },
+ "ISLOGICAL": {
+  "name": "ISLOGICAL",
+  "category": "Information",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "IF(ISLOGICAL(Flag), Flag, FALSE)",
+  "sql_reference_raw": "`typeof(Flag) = 'boolean'`",
+  "curated": false
+ },
+ "ISNONTEXT": {
+  "name": "ISNONTEXT",
+  "category": "Information",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "IF(ISNONTEXT(Value), Value, NULL)",
+  "sql_reference_raw": "`typeof(Value) != 'string' AND Value IS NOT NULL`",
+  "curated": false
+ },
+ "ISNUMBER": {
+  "name": "ISNUMBER",
+  "category": "Information",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "IF(ISNUMBER(Qty), Qty, 0)",
+  "sql_reference_raw": "`typeof(Qty) IN ('byte', 'short', 'int', 'long', 'float', 'double', 'decimal')`",
+  "curated": false
+ },
+ "ISNUMERIC": {
+  "name": "ISNUMERIC",
+  "category": "Information",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "IF(ISNUMERIC(Qty), Qty, 0)",
+  "sql_reference_raw": "`typeof(Qty) IN ('byte', 'short', 'int', 'long', 'float', 'double', 'decimal')`",
+  "curated": false
+ },
+ "ISODD": {
+  "name": "ISODD",
+  "category": "Information",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "IF(ISODD(Number), Number, NULL)",
+  "sql_reference_raw": "`Number % 2 != 0`",
+  "curated": false
+ },
+ "ISONORAFTER": {
+  "name": "ISONORAFTER",
+  "category": "Information",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "ISONORAFTER(Date, DATE(2024,1,1))",
+  "sql_reference_raw": "`Date >= '2024-01-01'` (with order context)",
+  "curated": false
+ },
+ "ISSELECTEDMEASURE": {
+  "name": "ISSELECTEDMEASURE",
+  "category": "Information",
+  "feasibility": "ai_bi",
+  "default_dax_class": "display_layer",
+  "dax_example": "ISSELECTEDMEASURE([Sales], [Cost])",
+  "sql_reference_raw": "Measure selection context (AI/BI calculation items only)",
+  "curated": false
+ },
+ "ISSTRING": {
+  "name": "ISSTRING",
+  "category": "Information",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "IF(ISSTRING(Name), UPPER(Name), NULL)",
+  "sql_reference_raw": "`typeof(Name) = 'string'`",
+  "curated": false
+ },
+ "ISSUBTOTAL": {
+  "name": "ISSUBTOTAL",
+  "category": "Information",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "ISSUBTOTAL(ISODD(Number))",
+  "sql_reference_raw": "`GROUPING(number) = 1` in ROLLUP context",
+  "curated": false
+ },
+ "ISTEXT": {
+  "name": "ISTEXT",
+  "category": "Information",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "IF(ISTEXT(Category), Category, NULL)",
+  "sql_reference_raw": "`typeof(Category) = 'string'`",
+  "curated": false
+ },
+ "NAMEOF": {
+  "name": "NAMEOF",
+  "category": "Information",
+  "feasibility": "no_equivalent",
+  "default_dax_class": "unsupported",
+  "dax_example": "NAMEOF(Sales[Amount])",
+  "sql_reference_raw": "No direct equivalent (metadata reference as string)",
+  "curated": false
+ },
+ "NONVISUAL": {
+  "name": "NONVISUAL",
+  "category": "Information",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "NONVISUAL(VALUES(Product[ID]))",
+  "sql_reference_raw": "Filter context marked as non-visual (structural)",
+  "curated": false
+ },
+ "SELECTEDMEASURE": {
+  "name": "SELECTEDMEASURE",
+  "category": "Information",
+  "feasibility": "ai_bi",
+  "default_dax_class": "display_layer",
+  "dax_example": "SELECTEDMEASURE() + 0.1",
+  "sql_reference_raw": "Current measure context (calculation items)",
+  "curated": false
+ },
+ "SELECTEDMEASUREFORMATSTRING": {
+  "name": "SELECTEDMEASUREFORMATSTRING",
+  "category": "Information",
+  "feasibility": "ai_bi",
+  "default_dax_class": "display_layer",
+  "dax_example": "SELECTEDMEASUREFORMATSTRING()",
+  "sql_reference_raw": "Format string metadata (calculation items)",
+  "curated": false
+ },
+ "SELECTEDMEASURENAME": {
+  "name": "SELECTEDMEASURENAME",
+  "category": "Information",
+  "feasibility": "ai_bi",
+  "default_dax_class": "display_layer",
+  "dax_example": "SELECTEDMEASURENAME()",
+  "sql_reference_raw": "Name of current measure (calculation items)",
+  "curated": false
+ },
+ "TABLEOF": {
+  "name": "TABLEOF",
+  "category": "Information",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "TABLEOF(Sales[Amount])",
+  "sql_reference_raw": "Implicit table reference (metadata)",
+  "curated": false
+ },
+ "USERCULTURE": {
+  "name": "USERCULTURE",
+  "category": "Information",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "FORMAT(TODAY(), USERCULTURE())",
+  "sql_reference_raw": "Session locale or connection parameter",
+  "curated": false
+ },
+ "USERNAME": {
+  "name": "USERNAME",
+  "category": "Information",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "IF(USERNAME() = \"Admin\", Data, BLANK())",
+  "sql_reference_raw": "`current_user()`",
+  "curated": false
+ },
+ "USEROBJECTID": {
+  "name": "USEROBJECTID",
+  "category": "Information",
+  "feasibility": "no_equivalent",
+  "default_dax_class": "unsupported",
+  "dax_example": "USEROBJECTID()",
+  "sql_reference_raw": "Session/Azure AD object ID (no native SQL equivalent)",
+  "curated": false
+ },
+ "USERPRINCIPALNAME": {
+  "name": "USERPRINCIPALNAME",
+  "category": "Information",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "IF(USERPRINCIPALNAME() = \"user@org.com\", Data, NULL)",
+  "sql_reference_raw": "`current_user()`",
+  "curated": false
+ },
+ "AND": {
+  "name": "AND",
+  "category": "Logical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "AND(Sales > 100, Region = \"West\")",
+  "sql_reference_raw": "`WHERE sales > 100 AND region = 'West'`",
+  "curated": false
+ },
+ "BITAND": {
+  "name": "BITAND",
+  "category": "Logical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "BITAND(12, 10)",
+  "sql_reference_raw": "`12 & 10`",
+  "curated": false
+ },
+ "BITLSHIFT": {
+  "name": "BITLSHIFT",
+  "category": "Logical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "BITLSHIFT(1, 3)",
+  "sql_reference_raw": "`shiftleft(1, 3)`",
+  "curated": false
+ },
+ "BITOR": {
+  "name": "BITOR",
+  "category": "Logical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "BITOR(12, 10)",
+  "sql_reference_raw": "`12 \\",
+  "curated": false
+ },
+ "BITRSHIFT": {
+  "name": "BITRSHIFT",
+  "category": "Logical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "BITRSHIFT(16, 2)",
+  "sql_reference_raw": "`shiftright(16, 2)`",
+  "curated": false
+ },
+ "BITXOR": {
+  "name": "BITXOR",
+  "category": "Logical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "BITXOR(12, 10)",
+  "sql_reference_raw": "`12 ^ 10`",
+  "curated": false
+ },
+ "COALESCE": {
+  "name": "COALESCE",
+  "category": "Logical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "COALESCE(col1, col2, 0)",
+  "sql_reference_raw": "`coalesce(col1, col2, 0)`",
+  "curated": false
+ },
+ "FALSE": {
+  "name": "FALSE",
+  "category": "Logical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "IF(1=2, \"yes\", FALSE)",
+  "sql_reference_raw": "`case when 1=2 then 'yes' else false end`",
+  "curated": false
+ },
+ "IF": {
+  "name": "IF",
+  "category": "Logical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "IF(Sales > 1000, \"High\", \"Low\")",
+  "sql_reference_raw": "`case when sales > 1000 then 'High' else 'Low' end`",
+  "curated": false
+ },
+ "IF.EAGER": {
+  "name": "IF.EAGER",
+  "category": "Logical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "IF.EAGER(x>0, 1/x, 0)",
+  "sql_reference_raw": "`case when x>0 then 1/x else 0 end`",
+  "curated": false
+ },
+ "IFERROR": {
+  "name": "IFERROR",
+  "category": "Logical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "IFERROR(1/0, 0)",
+  "sql_reference_raw": "`coalesce(try(1/0), 0)` or UDF wrapper",
+  "curated": false
+ },
+ "NOT": {
+  "name": "NOT",
+  "category": "Logical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "NOT(IsActive)",
+  "sql_reference_raw": "`NOT is_active`",
+  "curated": false
+ },
+ "OR": {
+  "name": "OR",
+  "category": "Logical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "OR(Region=\"West\", Region=\"East\")",
+  "sql_reference_raw": "`region = 'West' OR region = 'East'`",
+  "curated": false
+ },
+ "SWITCH": {
+  "name": "SWITCH",
+  "category": "Logical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "SWITCH(Status, 1, \"Active\", 2, \"Inactive\", \"Unknown\")",
+  "sql_reference_raw": "`case status when 1 then 'Active' when 2 then 'Inactive' else 'Unknown' end`",
+  "curated": false
+ },
+ "TRUE": {
+  "name": "TRUE",
+  "category": "Logical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "IF(1=1, TRUE, FALSE)",
+  "sql_reference_raw": "`case when 1=1 then true else false end`",
+  "curated": false
+ },
+ "ABS": {
+  "name": "ABS",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "ABS(-42)",
+  "sql_reference_raw": "`ABS(-42)`",
+  "curated": false
+ },
+ "ACOS": {
+  "name": "ACOS",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "ACOS(0.5)",
+  "sql_reference_raw": "`ACOS(0.5)`",
+  "curated": false
+ },
+ "ACOSH": {
+  "name": "ACOSH",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "ACOSH(1.5)",
+  "sql_reference_raw": "`ACOSH(1.5)`",
+  "curated": false
+ },
+ "ACOT": {
+  "name": "ACOT",
+  "category": "Math & trig",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "ACOT(2)",
+  "sql_reference_raw": "`ATAN(1.0/x)` or UDF",
+  "curated": false
+ },
+ "ACOTH": {
+  "name": "ACOTH",
+  "category": "Math & trig",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "ACOTH(2)",
+  "sql_reference_raw": "`ATANH(1.0/x)` or UDF",
+  "curated": false
+ },
+ "ASIN": {
+  "name": "ASIN",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "ASIN(0.5)",
+  "sql_reference_raw": "`ASIN(0.5)`",
+  "curated": false
+ },
+ "ASINH": {
+  "name": "ASINH",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "ASINH(1)",
+  "sql_reference_raw": "`ASINH(1)`",
+  "curated": false
+ },
+ "ATAN": {
+  "name": "ATAN",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "ATAN(1)",
+  "sql_reference_raw": "`ATAN(1)`",
+  "curated": false
+ },
+ "ATANH": {
+  "name": "ATANH",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "ATANH(0.5)",
+  "sql_reference_raw": "`ATANH(0.5)`",
+  "curated": false
+ },
+ "CEILING": {
+  "name": "CEILING",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CEILING(3.2, 1)",
+  "sql_reference_raw": "`CEIL(3.2)`",
+  "curated": false
+ },
+ "CONVERT": {
+  "name": "CONVERT",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CONVERT(123, STRING)",
+  "sql_reference_raw": "`CAST(123 AS STRING)`",
+  "curated": false
+ },
+ "COS": {
+  "name": "COS",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "COS(PI()/2)",
+  "sql_reference_raw": "`COS(PI()/2)`",
+  "curated": false
+ },
+ "COSH": {
+  "name": "COSH",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "COSH(1)",
+  "sql_reference_raw": "`COSH(1)`",
+  "curated": false
+ },
+ "COT": {
+  "name": "COT",
+  "category": "Math & trig",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "COT(PI()/4)",
+  "sql_reference_raw": "`1/TAN(x)` or UDF",
+  "curated": false
+ },
+ "COTH": {
+  "name": "COTH",
+  "category": "Math & trig",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "COTH(1)",
+  "sql_reference_raw": "`1/TANH(x)` or UDF",
+  "curated": false
+ },
+ "CURRENCY": {
+  "name": "CURRENCY",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CURRENCY(123)",
+  "sql_reference_raw": "`CAST(123 AS DECIMAL(19,4))`",
+  "curated": false
+ },
+ "DEGREES": {
+  "name": "DEGREES",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "DEGREES(PI())",
+  "sql_reference_raw": "`DEGREES(PI())`",
+  "curated": false
+ },
+ "DIVIDE": {
+  "name": "DIVIDE",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "DIVIDE(10, 2)",
+  "sql_reference_raw": "`TRY_DIVIDE(10, 2)` or `10 / NULLIF(2, 0)`",
+  "curated": false
+ },
+ "EVEN": {
+  "name": "EVEN",
+  "category": "Math & trig",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "EVEN(3)` → 4",
+  "sql_reference_raw": "`CEIL(x / 2) * 2` or UDF",
+  "curated": false
+ },
+ "EXP": {
+  "name": "EXP",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "EXP(1)",
+  "sql_reference_raw": "`EXP(1)`",
+  "curated": false
+ },
+ "FACT": {
+  "name": "FACT",
+  "category": "Math & trig",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "FACT(5)",
+  "sql_reference_raw": "`FACTORIAL(5)` or UDF",
+  "curated": false
+ },
+ "FLOOR": {
+  "name": "FLOOR",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "FLOOR(3.7, 1)",
+  "sql_reference_raw": "`FLOOR(3.7)`",
+  "curated": false
+ },
+ "GCD": {
+  "name": "GCD",
+  "category": "Math & trig",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "GCD(48, 18)",
+  "sql_reference_raw": "UDF (greatest common divisor)",
+  "curated": false
+ },
+ "INT": {
+  "name": "INT",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "INT(3.7)",
+  "sql_reference_raw": "`FLOOR(3.7)` or `INT(3.7)`",
+  "curated": false
+ },
+ "ISO.CEILING": {
+  "name": "ISO.CEILING",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "ISO.CEILING(3.2, 1)",
+  "sql_reference_raw": "`CEIL(3.2)`",
+  "curated": false
+ },
+ "LCM": {
+  "name": "LCM",
+  "category": "Math & trig",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "LCM(12, 18)",
+  "sql_reference_raw": "UDF (least common multiple)",
+  "curated": false
+ },
+ "LN": {
+  "name": "LN",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "LN(2.718)",
+  "sql_reference_raw": "`LN(2.718)`",
+  "curated": false
+ },
+ "LOG": {
+  "name": "LOG",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "LOG(100, 10)",
+  "sql_reference_raw": "`LOG(10, 100)`",
+  "curated": false
+ },
+ "LOG10": {
+  "name": "LOG10",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "LOG10(100)",
+  "sql_reference_raw": "`LOG10(100)`",
+  "curated": false
+ },
+ "MOD": {
+  "name": "MOD",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "MOD(10, 3)",
+  "sql_reference_raw": "`MOD(10, 3)` or `10 % 3`",
+  "curated": false
+ },
+ "MROUND": {
+  "name": "MROUND",
+  "category": "Math & trig",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "MROUND(10, 3)` → 9",
+  "sql_reference_raw": "UDF (round to nearest multiple)",
+  "curated": false
+ },
+ "ODD": {
+  "name": "ODD",
+  "category": "Math & trig",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "ODD(4)` → 5",
+  "sql_reference_raw": "`CEIL(x / 2) * 2 - 1` or UDF",
+  "curated": false
+ },
+ "PI": {
+  "name": "PI",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "PI()",
+  "sql_reference_raw": "`PI()`",
+  "curated": false
+ },
+ "POWER": {
+  "name": "POWER",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "POWER(2, 3)",
+  "sql_reference_raw": "`POWER(2, 3)` or `2 ^ 3`",
+  "curated": false
+ },
+ "QUOTIENT": {
+  "name": "QUOTIENT",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "QUOTIENT(10, 3)",
+  "sql_reference_raw": "`DIV(10, 3)` or `FLOOR(10 / 3)`",
+  "curated": false
+ },
+ "RADIANS": {
+  "name": "RADIANS",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "RADIANS(180)",
+  "sql_reference_raw": "`RADIANS(180)`",
+  "curated": false
+ },
+ "RAND": {
+  "name": "RAND",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "RAND()",
+  "sql_reference_raw": "`RAND()`",
+  "curated": false
+ },
+ "RANDBETWEEN": {
+  "name": "RANDBETWEEN",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "RANDBETWEEN(1, 10)",
+  "sql_reference_raw": "`FLOOR(RAND() * (10 - 1 + 1)) + 1`",
+  "curated": false
+ },
+ "ROUND": {
+  "name": "ROUND",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "ROUND(3.14159, 2)",
+  "sql_reference_raw": "`ROUND(3.14159, 2)`",
+  "curated": false
+ },
+ "ROUNDDOWN": {
+  "name": "ROUNDDOWN",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "ROUNDDOWN(3.7, 0)",
+  "sql_reference_raw": "`FLOOR(3.7)` or `TRUNC(3.7)`",
+  "curated": false
+ },
+ "ROUNDUP": {
+  "name": "ROUNDUP",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "ROUNDUP(3.2, 0)",
+  "sql_reference_raw": "`CEIL(3.2)`",
+  "curated": false
+ },
+ "SIGN": {
+  "name": "SIGN",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "SIGN(-5)` → -1",
+  "sql_reference_raw": "`SIGN(-5)`",
+  "curated": false
+ },
+ "SIN": {
+  "name": "SIN",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "SIN(PI()/2)",
+  "sql_reference_raw": "`SIN(PI()/2)`",
+  "curated": false
+ },
+ "SINH": {
+  "name": "SINH",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "SINH(1)",
+  "sql_reference_raw": "`SINH(1)`",
+  "curated": false
+ },
+ "SQRT": {
+  "name": "SQRT",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "SQRT(16)",
+  "sql_reference_raw": "`SQRT(16)`",
+  "curated": false
+ },
+ "SQRTPI": {
+  "name": "SQRTPI",
+  "category": "Math & trig",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "SQRTPI(2)",
+  "sql_reference_raw": "`SQRT(2 * PI())` or UDF",
+  "curated": false
+ },
+ "TAN": {
+  "name": "TAN",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "TAN(PI()/4)",
+  "sql_reference_raw": "`TAN(PI()/4)`",
+  "curated": false
+ },
+ "TANH": {
+  "name": "TANH",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "TANH(1)",
+  "sql_reference_raw": "`TANH(1)`",
+  "curated": false
+ },
+ "TRUNC": {
+  "name": "TRUNC",
+  "category": "Math & trig",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "TRUNC(3.7)",
+  "sql_reference_raw": "`TRUNC(3.7)`",
+  "curated": false
+ },
+ "BLANK": {
+  "name": "BLANK",
+  "category": "Other",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "BLANK()",
+  "sql_reference_raw": "`NULL`",
+  "curated": false
+ },
+ "ERROR": {
+  "name": "ERROR",
+  "category": "Other",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "ERROR(\"Invalid value\")",
+  "sql_reference_raw": "`raise_error(\"Invalid value\")`",
+  "curated": false
+ },
+ "EVALUATEANDLOG": {
+  "name": "EVALUATEANDLOG",
+  "category": "Other",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "EVALUATEANDLOG([Sales], \"trace\")",
+  "sql_reference_raw": "N/A (use `COMMENT` or logging UDF)",
+  "curated": false
+ },
+ "EXTERNALMEASURE": {
+  "name": "EXTERNALMEASURE",
+  "category": "Other",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "EXTERNALMEASURE([remote_model], [measure_name])",
+  "sql_reference_raw": "Federated query or external table",
+  "curated": false
+ },
+ "TOCSV": {
+  "name": "TOCSV",
+  "category": "Other",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "TOCSV(table_expr)",
+  "sql_reference_raw": "Custom Python UDF or `concat_ws()` loop",
+  "curated": false
+ },
+ "TOJSON": {
+  "name": "TOJSON",
+  "category": "Other",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "TOJSON(table_expr)",
+  "sql_reference_raw": "`to_json(struct)` or `to_json(col)`",
+  "curated": false
+ },
+ "PATH": {
+  "name": "PATH",
+  "category": "Parent-child",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "PATH([ID], [PARENT_ID])` returns `\"1\\",
+  "sql_reference_raw": "2\\",
+  "curated": false
+ },
+ "PATHCONTAINS": {
+  "name": "PATHCONTAINS",
+  "category": "Parent-child",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "PATHCONTAINS(path, item)` returns TRUE if `\"1\\",
+  "sql_reference_raw": "2\\",
+  "curated": false
+ },
+ "PATHITEM": {
+  "name": "PATHITEM",
+  "category": "Parent-child",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "PATHITEM(path, 2)` returns `\"2\"` (2nd element in path)",
+  "sql_reference_raw": "`element_at(split(path, '\\",
+  "curated": false
+ },
+ "PATHITEMREVERSE": {
+  "name": "PATHITEMREVERSE",
+  "category": "Parent-child",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "PATHITEMREVERSE(path, 1)` returns `\"5\"` (1st from end in `\"1\\",
+  "sql_reference_raw": "2\\",
+  "curated": false
+ },
+ "PATHLENGTH": {
+  "name": "PATHLENGTH",
+  "category": "Parent-child",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "PATHLENGTH(path)` returns `3` (count of elements in `\"1\\",
+  "sql_reference_raw": "2\\",
+  "curated": false
+ },
+ "RELATED": {
+  "name": "RELATED",
+  "category": "Relationship",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "RELATED(Customer[Name])",
+  "sql_reference_raw": "`SELECT c.Name FROM Sales s JOIN Customer c ON s.CustomerKey = c.CustomerKey`",
+  "curated": false
+ },
+ "RELATEDTABLE": {
+  "name": "RELATEDTABLE",
+  "category": "Relationship",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "SUMX(RELATEDTABLE(Orders), Orders[Amount])",
+  "sql_reference_raw": "`(SELECT SUM(Amount) FROM Orders WHERE Orders.CustomerKey = Customer.CustomerKey)`",
+  "curated": false
+ },
+ "USERELATIONSHIP": {
+  "name": "USERELATIONSHIP",
+  "category": "Relationship",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "USERELATIONSHIP(Sales[DateKey], Date[AltKey])",
+  "sql_reference_raw": "`JOIN Date ON Sales.DateKey = Date.AltKey`",
+  "curated": false
+ },
+ "CROSSFILTER": {
+  "name": "CROSSFILTER",
+  "category": "Relationship",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "CROSSFILTER(Sales[CustKey], Cust[CustKey], BOTH)",
+  "sql_reference_raw": "Bidirectional filter in JOIN context / WHERE clause propagation",
+  "curated": false
+ },
+ "BETA.DIST": {
+  "name": "BETA.DIST",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "BETA.DIST(0.5, 2, 3)",
+  "sql_reference_raw": "`betadist(x, alpha, beta)` UDF or scipy",
+  "curated": false
+ },
+ "BETA.INV": {
+  "name": "BETA.INV",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "BETA.INV(0.5, 2, 3)",
+  "sql_reference_raw": "`betainv(prob, alpha, beta)` UDF",
+  "curated": false
+ },
+ "CHISQ.DIST": {
+  "name": "CHISQ.DIST",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "CHISQ.DIST(3, 2, FALSE)",
+  "sql_reference_raw": "`chisqdist(x, df, cumulative)` UDF or scipy",
+  "curated": false
+ },
+ "CHISQ.DIST.RT": {
+  "name": "CHISQ.DIST.RT",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "CHISQ.DIST.RT(3, 2)",
+  "sql_reference_raw": "`1 - chisqdist(x, df, TRUE)` UDF",
+  "curated": false
+ },
+ "CHISQ.INV": {
+  "name": "CHISQ.INV",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "CHISQ.INV(0.05, 2)",
+  "sql_reference_raw": "`chisqinv(prob, df)` UDF",
+  "curated": false
+ },
+ "CHISQ.INV.RT": {
+  "name": "CHISQ.INV.RT",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "CHISQ.INV.RT(0.05, 2)",
+  "sql_reference_raw": "`chisqinv(1 - prob, df)` UDF",
+  "curated": false
+ },
+ "COMBIN": {
+  "name": "COMBIN",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "COMBIN(5, 2)",
+  "sql_reference_raw": "`FACTORIAL(n) / (FACTORIAL(k) * FACTORIAL(n-k))` or UDF",
+  "curated": false
+ },
+ "COMBINA": {
+  "name": "COMBINA",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "COMBINA(5, 2)",
+  "sql_reference_raw": "`FACTORIAL(n+k-1) / (FACTORIAL(k) * FACTORIAL(n-1))` or UDF",
+  "curated": false
+ },
+ "CONFIDENCE.NORM": {
+  "name": "CONFIDENCE.NORM",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "CONFIDENCE.NORM(0.05, 2.5, 100)",
+  "sql_reference_raw": "`1.96 * stddev / sqrt(n)` formula or UDF",
+  "curated": false
+ },
+ "CONFIDENCE.T": {
+  "name": "CONFIDENCE.T",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "CONFIDENCE.T(0.05, 2.5, 100)",
+  "sql_reference_raw": "`t_critical * stddev / sqrt(n)` UDF",
+  "curated": false
+ },
+ "EXPON.DIST": {
+  "name": "EXPON.DIST",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "EXPON.DIST(0.5, 1, FALSE)",
+  "sql_reference_raw": "`expodist(x, lambda, cumulative)` UDF or scipy",
+  "curated": false
+ },
+ "GEOMEAN": {
+  "name": "GEOMEAN",
+  "category": "Statistical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "GEOMEAN([Sales])",
+  "sql_reference_raw": "`EXP(AVG(LN(sales)))`",
+  "curated": false
+ },
+ "GEOMEANX": {
+  "name": "GEOMEANX",
+  "category": "Statistical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "GEOMEANX(Table, [Value])",
+  "sql_reference_raw": "`EXP(AVG(LN(value)))`",
+  "curated": false
+ },
+ "LINEST": {
+  "name": "LINEST",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "LINEST(...slope, intercept)",
+  "sql_reference_raw": "`regression_slope(y, x)` / `regression_intercept(y, x)` UDF",
+  "curated": false
+ },
+ "LINESTX": {
+  "name": "LINESTX",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "LINESTX(Table, y_expr, x_expr)",
+  "sql_reference_raw": "`regression_slope(y, x)` / `regression_intercept(y, x)` UDF",
+  "curated": false
+ },
+ "MEDIAN": {
+  "name": "MEDIAN",
+  "category": "Statistical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "MEDIAN([Sales])",
+  "sql_reference_raw": "`PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY sales)` or `MEDIAN(sales)`",
+  "curated": false
+ },
+ "MEDIANX": {
+  "name": "MEDIANX",
+  "category": "Statistical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "MEDIANX(Table, [Value])",
+  "sql_reference_raw": "`PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY value)`",
+  "curated": false
+ },
+ "NORM.DIST": {
+  "name": "NORM.DIST",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "NORM.DIST(2, 1, 0.5, FALSE)",
+  "sql_reference_raw": "`normdist(x, mean, stddev, cumulative)` UDF or scipy",
+  "curated": false
+ },
+ "NORM.INV": {
+  "name": "NORM.INV",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "NORM.INV(0.95, 1, 0.5)",
+  "sql_reference_raw": "`norminv(prob, mean, stddev)` UDF",
+  "curated": false
+ },
+ "NORM.S.DIST": {
+  "name": "NORM.S.DIST",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "NORM.S.DIST(1.96, FALSE)",
+  "sql_reference_raw": "`normdist(z, 0, 1, cumulative)` UDF or scipy",
+  "curated": false
+ },
+ "NORM.S.INV": {
+  "name": "NORM.S.INV",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "NORM.S.INV(0.975)",
+  "sql_reference_raw": "`norminv(prob, 0, 1)` UDF",
+  "curated": false
+ },
+ "PERCENTILE.EXC": {
+  "name": "PERCENTILE.EXC",
+  "category": "Statistical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "PERCENTILE.EXC([Sales], 0.75)",
+  "sql_reference_raw": "`PERCENTILE_DISC(0.75) WITHIN GROUP (ORDER BY sales)`",
+  "curated": false
+ },
+ "PERCENTILE.INC": {
+  "name": "PERCENTILE.INC",
+  "category": "Statistical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "PERCENTILE.INC([Sales], 0.75)",
+  "sql_reference_raw": "`PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY sales)`",
+  "curated": false
+ },
+ "PERCENTILEX.EXC": {
+  "name": "PERCENTILEX.EXC",
+  "category": "Statistical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "PERCENTILEX.EXC(Table, [Value], 0.75)",
+  "sql_reference_raw": "`PERCENTILE_DISC(0.75) WITHIN GROUP (ORDER BY value)`",
+  "curated": false
+ },
+ "PERCENTILEX.INC": {
+  "name": "PERCENTILEX.INC",
+  "category": "Statistical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "PERCENTILEX.INC(Table, [Value], 0.75)",
+  "sql_reference_raw": "`PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY value)`",
+  "curated": false
+ },
+ "PERMUT": {
+  "name": "PERMUT",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "PERMUT(5, 2)",
+  "sql_reference_raw": "`FACTORIAL(n) / FACTORIAL(n-k)` or UDF",
+  "curated": false
+ },
+ "POISSON.DIST": {
+  "name": "POISSON.DIST",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "POISSON.DIST(2, 1.5, FALSE)",
+  "sql_reference_raw": "`poissondist(x, lambda, cumulative)` UDF or scipy",
+  "curated": false
+ },
+ "RANK.EQ": {
+  "name": "RANK.EQ",
+  "category": "Statistical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "RANK.EQ(100, [Sales])",
+  "sql_reference_raw": "`RANK() OVER (ORDER BY sales)`",
+  "curated": false
+ },
+ "RANKX": {
+  "name": "RANKX",
+  "category": "Statistical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "RANKX(Table, [Value])",
+  "sql_reference_raw": "`RANK() OVER (ORDER BY value)` or `DENSE_RANK() OVER (ORDER BY value)`",
+  "curated": false
+ },
+ "SAMPLE": {
+  "name": "SAMPLE",
+  "category": "Statistical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "SAMPLE(10, Table)",
+  "sql_reference_raw": "`TABLESAMPLE (BERNOULLI (10 PERCENT))` or `ORDER BY RAND() LIMIT 10`",
+  "curated": false
+ },
+ "STDEV.P": {
+  "name": "STDEV.P",
+  "category": "Statistical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "STDEV.P([Sales])",
+  "sql_reference_raw": "`STDDEV_POP(sales)`",
+  "curated": false
+ },
+ "STDEV.S": {
+  "name": "STDEV.S",
+  "category": "Statistical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "STDEV.S([Sales])",
+  "sql_reference_raw": "`STDDEV_SAMP(sales)` or `STDDEV(sales)`",
+  "curated": false
+ },
+ "STDEVX.P": {
+  "name": "STDEVX.P",
+  "category": "Statistical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "STDEVX.P(Table, [Value])",
+  "sql_reference_raw": "`STDDEV_POP(value)`",
+  "curated": false
+ },
+ "STDEVX.S": {
+  "name": "STDEVX.S",
+  "category": "Statistical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "STDEVX.S(Table, [Value])",
+  "sql_reference_raw": "`STDDEV_SAMP(value)` or `STDDEV(value)`",
+  "curated": false
+ },
+ "T.DIST": {
+  "name": "T.DIST",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "T.DIST(1.5, 10, FALSE)",
+  "sql_reference_raw": "`tdist(t, df, cumulative)` UDF or scipy",
+  "curated": false
+ },
+ "T.DIST.2T": {
+  "name": "T.DIST.2T",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "T.DIST.2T(1.5, 10)",
+  "sql_reference_raw": "`2 * (1 - tdist(ABS(t), df, TRUE))` UDF",
+  "curated": false
+ },
+ "T.DIST.RT": {
+  "name": "T.DIST.RT",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "T.DIST.RT(1.5, 10)",
+  "sql_reference_raw": "`1 - tdist(t, df, TRUE)` UDF",
+  "curated": false
+ },
+ "T.INV": {
+  "name": "T.INV",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "T.INV(0.05, 10)",
+  "sql_reference_raw": "`tinv(prob, df)` UDF",
+  "curated": false
+ },
+ "T.INV.2t": {
+  "name": "T.INV.2t",
+  "category": "Statistical",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "T.INV.2t(0.05, 10)",
+  "sql_reference_raw": "`tinv(prob/2, df)` UDF",
+  "curated": false
+ },
+ "VAR.P": {
+  "name": "VAR.P",
+  "category": "Statistical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "VAR.P([Sales])",
+  "sql_reference_raw": "`VAR_POP(sales)`",
+  "curated": false
+ },
+ "VAR.S": {
+  "name": "VAR.S",
+  "category": "Statistical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "VAR.S([Sales])",
+  "sql_reference_raw": "`VAR_SAMP(sales)` or `VARIANCE(sales)`",
+  "curated": false
+ },
+ "VARX.P": {
+  "name": "VARX.P",
+  "category": "Statistical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "VARX.P(Table, [Value])",
+  "sql_reference_raw": "`VAR_POP(value)`",
+  "curated": false
+ },
+ "VARX.S": {
+  "name": "VARX.S",
+  "category": "Statistical",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "VARX.S(Table, [Value])",
+  "sql_reference_raw": "`VAR_SAMP(value)` or `VARIANCE(value)`",
+  "curated": false
+ },
+ "ADDCOLUMNS": {
+  "name": "ADDCOLUMNS",
+  "category": "Table manipulation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "ADDCOLUMNS(Sales, \"Qty+1\", [Qty]+1)",
+  "sql_reference_raw": "`SELECT *, qty + 1 AS 'Qty+1' FROM Sales`",
+  "curated": false
+ },
+ "ADDMISSINGITEMS": {
+  "name": "ADDMISSINGITEMS",
+  "category": "Table manipulation",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "ADDMISSINGITEMS(Sales, Product[ID])",
+  "sql_reference_raw": "`CROSS JOIN spine_table AS st ON 1=1` with dedup",
+  "curated": false
+ },
+ "CROSSJOIN": {
+  "name": "CROSSJOIN",
+  "category": "Table manipulation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CROSSJOIN(Cities, Years)",
+  "sql_reference_raw": "`SELECT * FROM Cities CROSS JOIN Years`",
+  "curated": false
+ },
+ "CURRENTGROUP": {
+  "name": "CURRENTGROUP",
+  "category": "Table manipulation",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "CURRENTGROUP()` in GROUPBY",
+  "sql_reference_raw": "Window function or `GROUP_CONCAT()` in iteration context",
+  "curated": false
+ },
+ "DATATABLE": {
+  "name": "DATATABLE",
+  "category": "Table manipulation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "DATATABLE(\"C\", STRING, {{\"a\"},{\"b\"}})",
+  "sql_reference_raw": "`SELECT * FROM (VALUES ('a'), ('b')) t(C)`",
+  "curated": false
+ },
+ "DETAILROWS": {
+  "name": "DETAILROWS",
+  "category": "Table manipulation",
+  "feasibility": "ai_bi",
+  "default_dax_class": "display_layer",
+  "dax_example": "Measure detail rows expression",
+  "sql_reference_raw": "Drill-down query result (computed at query time)",
+  "curated": false
+ },
+ "DISTINCT": {
+  "name": "DISTINCT (table)",
+  "category": "Table manipulation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "DISTINCT(Sales)",
+  "sql_reference_raw": "`SELECT DISTINCT * FROM Sales`",
+  "curated": false
+ },
+ "EXCEPT": {
+  "name": "EXCEPT",
+  "category": "Table manipulation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "EXCEPT(Table1, Table2)",
+  "sql_reference_raw": "`SELECT * FROM Table1 EXCEPT SELECT * FROM Table2`",
+  "curated": false
+ },
+ "FILTERS": {
+  "name": "FILTERS",
+  "category": "Table manipulation",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "FILTERS(Product)` within CALCULATE",
+  "sql_reference_raw": "`WHERE column IN (SELECT ... FROM filter_context)`",
+  "curated": false
+ },
+ "GENERATE": {
+  "name": "GENERATE",
+  "category": "Table manipulation",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "GENERATE(Years, YearSales)",
+  "sql_reference_raw": "`CROSS APPLY lateral join: FROM Years CROSS JOIN LATERAL (SELECT ...)`",
+  "curated": false
+ },
+ "GENERATEALL": {
+  "name": "GENERATEALL",
+  "category": "Table manipulation",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "GENERATEALL(Years, YearSales)",
+  "sql_reference_raw": "`OUTER APPLY lateral join: FROM Years LEFT JOIN LATERAL (SELECT ...)`",
+  "curated": false
+ },
+ "GENERATESERIES": {
+  "name": "GENERATESERIES",
+  "category": "Table manipulation",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "GENERATESERIES(1, 10)",
+  "sql_reference_raw": "`SELECT * FROM GENERATE_SERIES(1, 10)` or recursive CTE",
+  "curated": false
+ },
+ "GROUPBY": {
+  "name": "GROUPBY",
+  "category": "Table manipulation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "GROUPBY(Sales, Product[ID], \"Qty\", SUMX(...))",
+  "sql_reference_raw": "`SELECT product_id, SUM(...) FROM Sales GROUP BY product_id`",
+  "curated": false
+ },
+ "IGNORE": {
+  "name": "IGNORE",
+  "category": "Table manipulation",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "SUMMARIZECOLUMNS(..., IGNORE(...))",
+  "sql_reference_raw": "Conditional NULL handling in aggregation",
+  "curated": false
+ },
+ "INTERSECT": {
+  "name": "INTERSECT",
+  "category": "Table manipulation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "INTERSECT(Table1, Table2)",
+  "sql_reference_raw": "`SELECT * FROM Table1 INTERSECT SELECT * FROM Table2`",
+  "curated": false
+ },
+ "NATURALINNERJOIN": {
+  "name": "NATURALINNERJOIN",
+  "category": "Table manipulation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "NATURALINNERJOIN(Table1, Table2)",
+  "sql_reference_raw": "`SELECT * FROM Table1 INNER JOIN Table2 USING (common_cols)`",
+  "curated": false
+ },
+ "NATURALLEFTOUTERJOIN": {
+  "name": "NATURALLEFTOUTERJOIN",
+  "category": "Table manipulation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "NATURALLEFTOUTERJOIN(Table1, Table2)",
+  "sql_reference_raw": "`SELECT * FROM Table1 LEFT JOIN Table2 USING (common_cols)`",
+  "curated": false
+ },
+ "ROLLUP": {
+  "name": "ROLLUP",
+  "category": "Table manipulation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "ROLLUP(Sales, Product[Category])",
+  "sql_reference_raw": "`SELECT category, SUM(amount) FROM Sales GROUP BY ROLLUP(category)`",
+  "curated": false
+ },
+ "ROLLUPADDISSUBTOTAL": {
+  "name": "ROLLUPADDISSUBTOTAL",
+  "category": "Table manipulation",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "Part of ROLLUP definition",
+  "sql_reference_raw": "Add subtotal marker column via CASE + GROUPING()",
+  "curated": false
+ },
+ "ROLLUPISSUBTOTAL": {
+  "name": "ROLLUPISSUBTOTAL",
+  "category": "Table manipulation",
+  "feasibility": "context_clause",
+  "default_dax_class": "filtered",
+  "dax_example": "Predicate for ROLLUP rows",
+  "sql_reference_raw": "`CASE WHEN GROUPING(col)=1 THEN 1 ELSE 0 END`",
+  "curated": false
+ },
+ "ROLLUPGROUP": {
+  "name": "ROLLUPGROUP",
+  "category": "Table manipulation",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "ROLLUPGROUP(Sales, Product[Category], ...)",
+  "sql_reference_raw": "`SELECT category, grouping_id, ... FROM Sales GROUP BY GROUPING SETS(...)`",
+  "curated": false
+ },
+ "ROW": {
+  "name": "ROW",
+  "category": "Table manipulation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "ROW(\"Value\", 42)",
+  "sql_reference_raw": "`SELECT 42 AS 'Value'`",
+  "curated": false
+ },
+ "SELECTCOLUMNS": {
+  "name": "SELECTCOLUMNS",
+  "category": "Table manipulation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "SELECTCOLUMNS(Sales, \"ID\", [ID], \"Qty\", [Qty])",
+  "sql_reference_raw": "`SELECT id AS 'ID', qty AS 'Qty' FROM Sales`",
+  "curated": false
+ },
+ "SUBSTITUTEWITHINDEX": {
+  "name": "SUBSTITUTEWITHINDEX",
+  "category": "Table manipulation",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "Left semi join logic",
+  "sql_reference_raw": "`WHERE col IN (subquery)` or EXISTS clause",
+  "curated": false
+ },
+ "SUMMARIZE": {
+  "name": "SUMMARIZE",
+  "category": "Table manipulation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "SUMMARIZE(Sales, Product[ID], \"Total\", SUM([Qty]))",
+  "sql_reference_raw": "`SELECT product_id, SUM(qty) AS Total FROM Sales GROUP BY product_id`",
+  "curated": false
+ },
+ "SUMMARIZECOLUMNS": {
+  "name": "SUMMARIZECOLUMNS",
+  "category": "Table manipulation",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "SUMMARIZECOLUMNS(Product[Cat], \"Sales\", SUM([Qty]))",
+  "sql_reference_raw": "`SELECT category, SUM(qty) FROM Sales JOIN Product GROUP BY category`",
+  "curated": false
+ },
+ "TableConstructor": {
+  "name": "Table Constructor",
+  "category": "Table manipulation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "{(1),(2),(3)}",
+  "sql_reference_raw": "`SELECT * FROM (VALUES (1), (2), (3)) t(col)`",
+  "curated": false
+ },
+ "TOPN": {
+  "name": "TOPN",
+  "category": "Table manipulation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "TOPN(10, Sales, [Date])",
+  "sql_reference_raw": "`SELECT * FROM Sales ORDER BY date DESC LIMIT 10` or `QUALIFY ROW_NUMBER()...<=10`",
+  "curated": false
+ },
+ "TREATAS": {
+  "name": "TREATAS",
+  "category": "Table manipulation",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "TREATAS({1,2,3}, Product[ID])",
+  "sql_reference_raw": "`WHERE product_id IN (1,2,3)` via JOIN on treated columns",
+  "curated": false
+ },
+ "UNION": {
+  "name": "UNION",
+  "category": "Table manipulation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "UNION(Table1, Table2)",
+  "sql_reference_raw": "`SELECT * FROM Table1 UNION ALL SELECT * FROM Table2`",
+  "curated": false
+ },
+ "VALUES": {
+  "name": "VALUES",
+  "category": "Table manipulation",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "VALUES(Product[Category])",
+  "sql_reference_raw": "`SELECT DISTINCT category FROM Product`",
+  "curated": false
+ },
+ "COMBINEVALUES": {
+  "name": "COMBINEVALUES",
+  "category": "Text",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "COMBINEVALUES(\";\", [FirstName], [LastName])",
+  "sql_reference_raw": "`CONCAT_WS(';', first_name, last_name)`",
+  "curated": false
+ },
+ "CONCATENATE": {
+  "name": "CONCATENATE",
+  "category": "Text",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "CONCATENATE([First], \" \", [Last])",
+  "sql_reference_raw": "`CONCAT(first, ' ', last)` or `first \\",
+  "curated": false
+ },
+ "CONCATENATEX": {
+  "name": "CONCATENATEX",
+  "category": "Text",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "CONCATENATEX(Employees, [Name], \",\")",
+  "sql_reference_raw": "`STRING_AGG(name, ',')` or `ARRAY_JOIN(COLLECT_LIST(name), ',')`",
+  "curated": false
+ },
+ "EXACT": {
+  "name": "EXACT",
+  "category": "Text",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "EXACT([Email1], [Email2])",
+  "sql_reference_raw": "`email1 = email2` (binary-safe comparison)",
+  "curated": false
+ },
+ "FIND": {
+  "name": "FIND",
+  "category": "Text",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "FIND(\"@\", [Email])",
+  "sql_reference_raw": "`INSTR(email, '@')` or `POSITION('@' IN email)`",
+  "curated": false
+ },
+ "FIXED": {
+  "name": "FIXED",
+  "category": "Text",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "FIXED(3.14159, 2)",
+  "sql_reference_raw": "`FORMAT_NUMBER(3.14159, 2)` or `ROUND(3.14159, 2)`",
+  "curated": false
+ },
+ "FORMAT": {
+  "name": "FORMAT",
+  "category": "Text",
+  "feasibility": "sql_view_udf",
+  "default_dax_class": "architecture_change",
+  "dax_example": "FORMAT([Date], \"yyyy-mm-dd\")",
+  "sql_reference_raw": "`DATE_FORMAT(date_col, 'yyyy-MM-dd')` or `TO_CHAR(date_col, 'YYYY-MM-DD')`",
+  "curated": false
+ },
+ "LEFT": {
+  "name": "LEFT",
+  "category": "Text",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "LEFT([Name], 3)",
+  "sql_reference_raw": "`LEFT(name, 3)` or `SUBSTR(name, 1, 3)`",
+  "curated": false
+ },
+ "LEN": {
+  "name": "LEN",
+  "category": "Text",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "LEN([Text])",
+  "sql_reference_raw": "`LENGTH(text)` or `CHAR_LENGTH(text)`",
+  "curated": false
+ },
+ "LOWER": {
+  "name": "LOWER",
+  "category": "Text",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "LOWER([Text])",
+  "sql_reference_raw": "`LOWER(text)`",
+  "curated": false
+ },
+ "MID": {
+  "name": "MID",
+  "category": "Text",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "MID([Text], 3, 5)",
+  "sql_reference_raw": "`SUBSTR(text, 3, 5)`",
+  "curated": false
+ },
+ "REPLACE": {
+  "name": "REPLACE",
+  "category": "Text",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "REPLACE([Text], 2, 3, \"XX\")",
+  "sql_reference_raw": "`OVERLAY(text PLACING 'XX' FROM 2 FOR 3)` or `SUBSTR(text, 1, 1) \\",
+  "curated": false
+ },
+ "REPT": {
+  "name": "REPT",
+  "category": "Text",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "REPT(\"*\", 5)",
+  "sql_reference_raw": "`REPEAT('*', 5)`",
+  "curated": false
+ },
+ "RIGHT": {
+  "name": "RIGHT",
+  "category": "Text",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "RIGHT([Name], 3)",
+  "sql_reference_raw": "`RIGHT(name, 3)` or `SUBSTR(name, -3)`",
+  "curated": false
+ },
+ "SEARCH": {
+  "name": "SEARCH",
+  "category": "Text",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "SEARCH(\"o\", [Text])",
+  "sql_reference_raw": "`LOCATE(LOWER(text), LOWER('o'))` or case-insensitive `INSTR`",
+  "curated": false
+ },
+ "SUBSTITUTE": {
+  "name": "SUBSTITUTE",
+  "category": "Text",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "SUBSTITUTE([Text], \"old\", \"new\")",
+  "sql_reference_raw": "`REPLACE(text, 'old', 'new')` or `REGEXP_REPLACE(text, 'old', 'new')`",
+  "curated": false
+ },
+ "TRIM": {
+  "name": "TRIM",
+  "category": "Text",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "TRIM([Text])",
+  "sql_reference_raw": "`TRIM(text)` or `TRIM(BOTH ' ' FROM text)`",
+  "curated": false
+ },
+ "UNICHAR": {
+  "name": "UNICHAR",
+  "category": "Text",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "UNICHAR(65)",
+  "sql_reference_raw": "`CHAR(65)` or `CHR(65)`",
+  "curated": false
+ },
+ "UNICODE": {
+  "name": "UNICODE",
+  "category": "Text",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "UNICODE(\"A\")",
+  "sql_reference_raw": "`ASCII('A')` or `ORD('A')`",
+  "curated": false
+ },
+ "UPPER": {
+  "name": "UPPER",
+  "category": "Text",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "UPPER([Text])",
+  "sql_reference_raw": "`UPPER(text)`",
+  "curated": false
+ },
+ "VALUE": {
+  "name": "VALUE",
+  "category": "Text",
+  "feasibility": "ucmv_direct",
+  "default_dax_class": "translatable_direct",
+  "dax_example": "VALUE(\"123.45\")",
+  "sql_reference_raw": "`CAST('123.45' AS DECIMAL)` or `TRY_CAST('123.45' AS DOUBLE)`",
+  "curated": false
+ }
+}
