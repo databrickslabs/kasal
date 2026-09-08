@@ -23,7 +23,7 @@ package gets one: ``ToolFactory.initialize`` pre-loads it from ApiKeysService
 import json
 import logging
 import os
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 

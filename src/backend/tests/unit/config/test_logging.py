@@ -7,9 +7,7 @@ console suppression, and get_configuration_summary with domain overrides.
 
 import logging
 import os
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from src.config.logging import (
     CentralizedLoggingConfig,

@@ -19,11 +19,11 @@ from src.core.logger import LoggerManager
 from src.services.execution.harnesses import active_harness
 from src.services.execution.kernel.genie_formatting import apply_genie_mcp_space_id
 from src.services.execution.kernel.guardrail_stack import build_guardrail_stack
-from src.services.execution.kernel.task_presentation import apply_task_presentation
 from src.services.execution.kernel.output_contract import (
     apply_output_schema,
     build_detection_gate,
 )
+from src.services.execution.kernel.task_presentation import apply_task_presentation
 from src.services.guardrails.wrapper import GuardrailWrapper
 
 logger = LoggerManager.get_instance().crew

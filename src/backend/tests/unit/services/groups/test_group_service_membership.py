@@ -19,8 +19,6 @@ from src.models.enums import (
     GroupStatus,
     GroupUserRole,
     GroupUserStatus,
-    UserRole,
-    UserStatus,
 )
 
 

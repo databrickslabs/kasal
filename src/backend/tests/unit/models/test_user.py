@@ -4,12 +4,9 @@ Comprehensive unit tests for User SQLAlchemy model.
 Tests the User model in user.py including table structure and utility functions.
 """
 
-from datetime import datetime, timezone
 from uuid import UUID
 
-import pytest
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, UniqueConstraint
-from sqlalchemy.orm import relationship
+from sqlalchemy import Boolean, Column, DateTime, String
 
 from src.db.base import Base
 from src.models.enums import UserRole, UserStatus

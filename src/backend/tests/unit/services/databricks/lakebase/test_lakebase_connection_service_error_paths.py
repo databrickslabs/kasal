@@ -3,7 +3,7 @@ Coverage tests for services/lakebase_connection_service.py
 Targets uncovered lines: 227-265, 290-338, 417-423, 450-464, 486-497
 """
 
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -241,7 +241,7 @@ def test_create_lakebase_engine_sync_with_timeout():
     ) as mock_create:
         mock_engine = MagicMock()
         mock_create.return_value = mock_engine
-        with patch("src.services.databricks.lakebase.connection.event") as mock_event:
+        with patch("src.services.databricks.lakebase.connection.event"):
             result = svc.create_lakebase_engine_sync(
                 "ep.db", "user", "token", statement_timeout_ms=5000
             )

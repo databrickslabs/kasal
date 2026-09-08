@@ -9,7 +9,7 @@ import logging
 import os
 import sys
 import traceback
-from typing import Awaitable, Callable, List, Optional, Set
+from typing import List, Optional, Set
 
 # Use centralized logger - no need for basicConfig
 from src.core.logger import get_logger
@@ -38,7 +38,7 @@ def debug_log(message):
 try:
     debug_log("Importing seeders...")
     # Import all needed modules
-    from src.db.session import async_session_factory
+    from src.db.session import async_session_factory as async_session_factory
     from src.seeds import (
         api_keys,
         bi_specialist_crews,
@@ -226,7 +226,7 @@ async def resync_postgres_sequences() -> None:
 
         from sqlalchemy import text as sa_text
 
-        from src.db.session import async_session_factory
+        from src.db.session import async_session_factory as async_session_factory
 
         safe_id_re = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
         async with async_session_factory() as session:

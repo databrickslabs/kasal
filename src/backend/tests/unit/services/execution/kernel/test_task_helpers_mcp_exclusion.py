@@ -6,12 +6,12 @@ handled by the dedicated MCPIntegration code path, not the tool factory.
 """
 
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.services.agent_builder.task_adapter import create_task
-from src.services.execution.runtime import Agent, Task
+from src.services.execution.runtime import Agent
 
 
 @asynccontextmanager

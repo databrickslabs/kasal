@@ -5,14 +5,11 @@ Tests the functionality of data processing repository including
 async/sync operations, record creation, status updates, and table management.
 """
 
-from typing import Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy import func, text, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
 from src.models.data_processing import DataProcessing
 from src.repositories.data_processing_repository import DataProcessingRepository

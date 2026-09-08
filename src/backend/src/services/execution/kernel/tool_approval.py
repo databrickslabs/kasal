@@ -21,7 +21,6 @@ machinery is skipped for tool gates (the blocked thread resumes itself).
 """
 
 import logging
-import os
 import time
 from typing import Any, Dict, Optional
 

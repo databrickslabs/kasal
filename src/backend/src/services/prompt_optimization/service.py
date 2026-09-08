@@ -34,21 +34,16 @@ JUDGE INTEGRITY (the two properties this module must not lose):
 """
 
 import asyncio
-import hashlib
 import logging
 import os
-import re
-import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from src.core.exceptions import BadRequestError
 from src.repositories.prompt_optimization_run_repository import (
     PromptOptimizationRunRepository,
 )
 from src.schemas.prompt_optimization import PromptOptimizationRequest
-from src.schemas.template import PromptTemplateUpdate
 from src.services.catalog.templates import TemplateService
 from src.services.prompt_optimization import (  # noqa: E402,F401
     CrewRunnerMixin,
@@ -72,10 +67,6 @@ from src.services.prompt_optimization.gepa.crew_doc import (  # noqa: E402
     _parse_requirement_lines,
     _serialize_crew_doc,
 )
-
-# Helper library, extracted to ``gepa/`` — re-exported so this module stays
-# the single import point for them and no caller (or test) has to know where
-# they live.
 from src.services.prompt_optimization.gepa.grading import (  # noqa: E402
     _CATEGORICAL_GRADES,
     JUDGE_SPREAD_WARN,
@@ -124,8 +115,37 @@ from src.services.prompt_optimization.run_state import (  # noqa: E402,F401
     _row_to_public,
     _run_to_columns,
 )
-from src.core.llm.robust_json import robust_json_parser
 from src.utils.user_context import GroupContext
+
+# Helper library, extracted to ``gepa/`` — re-exported so this module stays
+# the single import point for them and no caller (or test) has to know where
+# they live.
+
+
+__all__ = [
+    "PromptOptimizationService",
+    "_CREW_DOC_FIELD_LABELS",
+    "_distill_requirements",
+    "_extract_user_from_log",
+    "_parse_crew_doc",
+    "_parse_requirement_lines",
+    "_serialize_crew_doc",
+    "_CATEGORICAL_GRADES",
+    "JUDGE_SPREAD_WARN",
+    "VALID_INTENTS",
+    "_checklist_grade",
+    "_grade_judge_verdict",
+    "_intent_format_score",
+    "_job_name_score",
+    "_json_keys_score",
+    "_judge_value_to_grade",
+    "_median_sample",
+    "_parse_grade_from_text",
+    "_to_float",
+    "_crew_target_model",
+    "_resolve_judge_model",
+    "_stored_judge_model_to_key",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -533,7 +553,6 @@ class PromptOptimizationService(
         from src.services.catalog.crews import CrewService
         from src.services.catalog.tasks import TaskService
 
-        group_ids = group_context.group_ids if group_context else []
         # The crews PK is a UUID column — normalize the string id and treat any
         # malformed value the same as not-found (clean 400, not a 500).
         try:

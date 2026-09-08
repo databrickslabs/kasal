@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.schemas.user import UserPermissionUpdate, UserRole, UserUpdate
+from src.schemas.user import UserPermissionUpdate
 from src.services.groups.users import UserService
 
 
@@ -370,7 +370,7 @@ async def test_delete_user_with_groups():
 # Additional coverage: get_users search merging, update_user uniqueness
 # checks, and more get_or_create_user_by_email / assign_role branches
 # ==========================================================================
-from types import SimpleNamespace
+from types import SimpleNamespace  # noqa: E402 - import follows module initialization
 
 
 @pytest.mark.asyncio

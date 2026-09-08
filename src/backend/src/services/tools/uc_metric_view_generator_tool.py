@@ -14,7 +14,9 @@ from src.services.tools.base import BaseTool
 logger = logging.getLogger(__name__)
 
 
-from src.services.tools.metric_view_utils.utils import run_async as _run_async
+from src.services.tools.metric_view_utils.utils import (  # noqa: E402 - import follows module initialization
+    run_async as _run_async,
+)
 
 
 class UCMetricViewGeneratorSchema(BaseModel):
@@ -718,11 +720,10 @@ class UCMetricViewGeneratorTool(BaseTool):
                 measure_count=measure_count,
             )
 
-            group_id = None
             try:
                 group_context = UserContext.get_group_context()
                 if group_context:
-                    group_id = getattr(group_context, "primary_group_id", None)
+                    getattr(group_context, "primary_group_id", None)
             except Exception as _gc_err:
                 logger.debug(
                     f"[UCMVGenerator] Could not resolve group_id for history: {_gc_err}"

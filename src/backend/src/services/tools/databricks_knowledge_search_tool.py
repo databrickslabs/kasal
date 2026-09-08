@@ -8,7 +8,7 @@ that makes knowledge search available as a CrewAI tool.
 import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, List, Optional, Type
 
 from pydantic import BaseModel, Field, PrivateAttr
 

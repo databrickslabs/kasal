@@ -6,7 +6,6 @@ including validation, serialization, and field constraints.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Union
 
 import pytest
 from pydantic import ValidationError
@@ -557,7 +556,7 @@ class TestTaskResponse:
         task = Task(**task_data)
         task_response = TaskResponse(**task_data)
 
-        assert type(task) == type(task_response)
+        assert type(task) is type(task_response)
         assert task.id == task_response.id
         assert task.name == task_response.name
         assert task.description == task_response.description

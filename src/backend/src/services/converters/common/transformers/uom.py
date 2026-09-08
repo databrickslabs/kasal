@@ -4,7 +4,7 @@ Generates SQL/DAX code for unit of measure conversion based on KPI configuration
 Supports both fixed and dynamic UOM sources with predefined conversion presets.
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from ...base.models import KPI
 

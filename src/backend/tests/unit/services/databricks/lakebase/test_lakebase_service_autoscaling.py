@@ -1,8 +1,6 @@
 """Tests for LakebaseService - list_instances, _get_autoscaling_project, get_instance, test_connection."""
 
-import os
-import sys
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

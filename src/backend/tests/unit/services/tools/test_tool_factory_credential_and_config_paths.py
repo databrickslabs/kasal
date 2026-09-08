@@ -25,9 +25,8 @@ Focus areas:
 # later patch targeted a second, distinct module object. It is fixed (that test
 # now reloads in place and restores), and the two files pass in either order.
 
-import asyncio
 import os
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -390,7 +389,7 @@ class TestExecutionInputsInjection:
         f._tool_implementations["ScrapeWebsiteTool"] = cls
 
         f.create_tool("ScrapeWebsiteTool")
-        call_kwargs = cls.call_args[1]
+        cls.call_args[1]
         # my_custom_key should have been injected because it's not a system key
         # (but it may or may not be in call_kwargs depending on whether tool_config had it)
         # The key point: the test should not raise
@@ -620,7 +619,7 @@ class TestUpdateToolConfigAsync:
 
         with (
             patch("src.db.session.routed_scoped_session") as mock_sess_ctx,
-            patch("src.services.tools.tool_service.ToolService", return_value=mock_svc),
+            patch("src.services.tools.tool_factory.ToolService", return_value=mock_svc),
             patch.object(f, "_load_available_tools_async", new_callable=AsyncMock),
         ):
             mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
@@ -647,7 +646,7 @@ class TestUpdateToolConfigAsync:
 
         with (
             patch("src.db.session.routed_scoped_session") as mock_sess_ctx,
-            patch("src.services.tools.tool_service.ToolService", return_value=mock_svc),
+            patch("src.services.tools.tool_factory.ToolService", return_value=mock_svc),
             patch.object(f, "_load_available_tools_async", new_callable=AsyncMock),
         ):
             mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
@@ -900,7 +899,7 @@ class TestGetApiKeySyncWithRunningLoop:
         f = _make_factory()
         with (
             patch("asyncio.get_running_loop", return_value=MagicMock()),
-            patch.object(f, "_run_in_new_loop", return_value="loop-key") as mock_run,
+            patch.object(f, "_run_in_new_loop", return_value="loop-key"),
         ):
             result = f._get_api_key("SOME_KEY")
         assert result == "loop-key"
@@ -1111,7 +1110,7 @@ class TestUpdateToolConfigAsyncNonDictConfig:
         with (
             patch("src.db.session.routed_scoped_session") as mock_sess_ctx,
             patch(
-                "src.services.tools.tool_service.ToolService",
+                "src.services.tools.tool_factory.ToolService",
                 return_value=mock_svc_instance,
             ),
             patch.object(f, "_load_available_tools_async", new_callable=AsyncMock),
@@ -1290,7 +1289,7 @@ class TestGenieToolApiKeyPaths:
 
         with (
             patch("src.utils.user_context.UserContext") as mock_ctx,
-            patch("src.utils.databricks_auth.get_auth_context") as mock_auth,
+            patch("src.utils.databricks_auth.get_auth_context"),
             patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")),
         ):
             mock_ctx.get_user_token.return_value = None
@@ -1329,7 +1328,7 @@ class TestPerplexityFallbackPath:
             patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")),
             patch.object(f, "_get_api_key", return_value="direct-key"),
         ):
-            result = f.create_tool("PerplexityTool")
+            f.create_tool("PerplexityTool")
 
         call_kwargs = cls.call_args[1]
         assert call_kwargs.get("api_key") == "direct-key"
@@ -1383,7 +1382,7 @@ class TestSerperFallbackPath:
             patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")),
             patch.object(f, "_get_api_key", return_value="serper-direct"),
         ):
-            result = f.create_tool("SerperDevTool")
+            f.create_tool("SerperDevTool")
 
         call_kwargs = cls.call_args[1]
         assert call_kwargs.get("api_key") == "serper-direct"
@@ -1414,7 +1413,7 @@ class TestDatabricksJobsToolAuthPaths:
             ),
         ):
             mock_ctx.get_user_token.return_value = "ctx-token"
-            result = f.create_tool("DatabricksJobsTool")
+            f.create_tool("DatabricksJobsTool")
 
         call_kwargs = cls.call_args[1]
         assert call_kwargs.get("user_token") == "ctx-token"

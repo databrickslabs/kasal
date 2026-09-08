@@ -250,7 +250,6 @@ class TestOtelShutdownOnError:
         shutdown_provider().
         """
         import io
-        import sys
 
         mock_shutdown_provider = MagicMock()
         mock_logging_config = MagicMock()
@@ -278,11 +277,12 @@ class TestOtelShutdownOnError:
             {
                 "src.services.execution.subprocess_bootstrap": mock_logging_config,
                 "crewai": MagicMock(),
-                "src.core.llm.transport": MagicMock(LLM_CONTEXT_WINDOW_SIZES={}),
                 "src.core.events": MagicMock(),
                 "crewai.utilities": MagicMock(),
                 "crewai.utilities.exceptions": MagicMock(),
-                "src.core.llm.transport": MagicMock(CONTEXT_LIMIT_ERRORS=[]),
+                "src.core.llm.transport": MagicMock(
+                    CONTEXT_LIMIT_ERRORS=[], LLM_CONTEXT_WINDOW_SIZES={}
+                ),
                 "src.services.otel_tracing": mock_otel_tracing,
             },
         ):

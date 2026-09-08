@@ -18,10 +18,8 @@ Targets additional uncovered lines:
 """
 
 import asyncio
-import multiprocessing as mp
 import os
-import queue
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -47,7 +45,6 @@ class TestRunCrewInProcessDatabaseType:
 
     def test_database_type_set_when_not_in_env(self):
         """DATABASE_TYPE is set from settings when not in env."""
-        import os
 
         from src.services.agent_builder.process_executor import run_crew_in_process
 
@@ -63,14 +60,13 @@ class TestRunCrewInProcessDatabaseType:
 
     def test_database_type_not_overwritten_when_set(self):
         """DATABASE_TYPE is not changed when already set in env."""
-        import os
 
         from src.services.agent_builder.process_executor import run_crew_in_process
 
         original = os.environ.get("DATABASE_TYPE")
         os.environ["DATABASE_TYPE"] = "my_custom_db"
         try:
-            result = run_crew_in_process("exec-dbtype2", None)
+            run_crew_in_process("exec-dbtype2", None)
             assert os.environ.get("DATABASE_TYPE") == "my_custom_db"
         finally:
             if original is None:

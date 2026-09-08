@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from src.services.tools.uc_metric_view_generator_tool import (
     UCMetricViewGeneratorSchema,
     UCMetricViewGeneratorTool,

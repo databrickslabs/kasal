@@ -14,8 +14,7 @@ import os
 import sys
 import warnings
 from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from src.core.logger import LoggerManager
 

@@ -19,8 +19,8 @@ import pytest
 
 from src.services.flow_builder.conversation.state_model import build_state_model
 from src.services.flow_builder.modules.flow_methods import crew_inputs_from_state
-from src.utils.safe_eval import safe_eval
 from src.services.flow_builder.runtime import Flow, start
+from src.utils.safe_eval import safe_eval
 
 SCHEMA = {
     "type": "object",

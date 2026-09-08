@@ -13,13 +13,8 @@ Target lines: 434-460 (UserContext setup), 480-484 (lakebase activation),
               822-824 (timeout/error), 842-891 (exception path)
 """
 
-import asyncio
-import logging
-import os
 import sys
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
-
-import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # Helper: mock subprocess logging infrastructure
@@ -427,6 +422,7 @@ class TestRunCrewInProcessErrorPaths:
 
 def test_worker_context_retains_authenticated_personal_workspace_identity():
     from types import SimpleNamespace
+
     from src.utils.user_context import GroupContext
 
     user = SimpleNamespace(personal_group_id="user_allocated")

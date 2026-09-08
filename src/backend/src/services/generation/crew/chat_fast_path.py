@@ -6,7 +6,7 @@ a default assistant answering a message, so this skips them entirely."""
 
 import logging
 import traceback
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from src.core.sse_manager import SSEEvent, sse_manager
 from src.utils.user_context import GroupContext

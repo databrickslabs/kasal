@@ -6,8 +6,7 @@ CRUD operations, active template filtering, and custom queries.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy import delete, select, update

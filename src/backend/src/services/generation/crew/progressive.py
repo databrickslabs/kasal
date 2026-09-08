@@ -12,15 +12,14 @@ import os
 import re
 import traceback
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from src.core.exceptions import BadRequestError, KasalError
+from src.core.llm.robust_json import robust_json_parser
 from src.core.sse_manager import SSEEvent, sse_manager
 from src.repositories.crew_generator_repository import CrewGeneratorRepository
 from src.repositories.log_repository import LLMLogRepository
 from src.schemas.crew import (
-    CrewGenerationRequest,
-    CrewGenerationResponse,
     CrewPlan,
     CrewStreamingRequest,
 )
@@ -32,7 +31,6 @@ from src.services.generation.agents import AgentGenerationService
 from src.services.generation.tasks import TaskGenerationService
 from src.services.llm.manager import LLMManager
 from src.services.tools.tool_service import ToolService
-from src.core.llm.robust_json import robust_json_parser
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
 from src.utils.user_context import GroupContext
 
@@ -68,7 +66,7 @@ class ProgressiveGenerationMixin:
         has already been sent. The request-scoped DB session is closed by then,
         so all database work uses an independent session created here.
         """
-        from contextlib import asynccontextmanager, nullcontext
+        from contextlib import nullcontext
 
         from src.db.database_router import (
             get_lakebase_config_from_db,
@@ -880,7 +878,7 @@ class ProgressiveGenerationMixin:
                         )
                         await session.commit()
 
-                    except Exception as e:
+                    except Exception:
                         await session.rollback()
                         raise
 

@@ -95,7 +95,7 @@ async def test_update_with_partial_data_exclude_none():
     svc = Svc(SimpleNamespace(), repository_class=FakeRepo)
     svc.repository._get = SimpleNamespace(id="a1")
     upd = AgentUpdateModel(name="NewName", role=None, goal="NewGoal")
-    out = await svc.update_with_partial_data("a1", upd)
+    await svc.update_with_partial_data("a1", upd)
     _, data = svc.repository.updated
     assert "role" not in data
     assert data["name"] == "NewName"

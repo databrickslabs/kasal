@@ -140,7 +140,9 @@ class BillingService:
                 for key, value in items
             ]
 
-        rank = lambda item: (item[1].cost, item[1].values.total_tokens)
+        def rank(item: tuple[str, _Totals]) -> tuple[Decimal, int]:
+            return (item[1].cost, item[1].values.total_tokens)
+
         return BillingSummary(
             start=query.start,
             end=query.end,

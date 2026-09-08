@@ -12,7 +12,6 @@ Strategy:
 
 import base64
 import json
-import re
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -893,7 +892,7 @@ class TestRunWithMockedPipeline:
 # Async pipeline tests
 # ===========================================================================
 
-import asyncio
+import asyncio  # noqa: E402 - import follows module initialization
 
 
 class TestAnalysisPipelineAsync:
@@ -1338,7 +1337,7 @@ class TestFetchColumnMetadataForTable:
         mock_client.post = AsyncMock(return_value=mock_response)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -1365,7 +1364,7 @@ class TestFetchColumnMetadataForTable:
         mock_client.post = AsyncMock(return_value=mock_response)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -1383,7 +1382,7 @@ class TestFetchColumnMetadataForTable:
         mock_client.post = AsyncMock(side_effect=Exception("network error"))
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -1462,7 +1461,7 @@ class TestEnrichModelContextWithInfoColumns:
             with patch.object(
                 self.tool, "_fetch_sample_column_values", return_value={}
             ):
-                result = self._run(
+                self._run(
                     self.tool._enrich_model_context_with_metadata(
                         model_context, WS_ID, DS_ID, ACCESS_TOKEN, config
                     )
@@ -2455,7 +2454,7 @@ class TestFetchTmdlViaFabric:
         mock_client.post = AsyncMock(return_value=mock_response)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -2475,7 +2474,7 @@ class TestFetchTmdlViaFabric:
         mock_client.post = AsyncMock(return_value=mock_response)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -2491,7 +2490,7 @@ class TestFetchTmdlViaFabric:
         mock_client.post = AsyncMock(side_effect=Exception("connection error"))
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -2511,7 +2510,7 @@ class TestFetchTmdlViaFabric:
         mock_client.post = AsyncMock(return_value=mock_response)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -2548,7 +2547,7 @@ class TestExecuteDaxQuery:
         mock_client.post = AsyncMock(return_value=mock_response)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -2573,7 +2572,7 @@ class TestExecuteDaxQuery:
         mock_client.post = AsyncMock(return_value=mock_response)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -2596,7 +2595,7 @@ class TestExecuteDaxQuery:
         mock_client.post = AsyncMock(return_value=mock_response)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -2622,7 +2621,7 @@ class TestExecuteDaxQuery:
         mock_client.post = AsyncMock(side_effect=err)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -2641,7 +2640,7 @@ class TestExecuteDaxQuery:
         mock_client.post = AsyncMock(side_effect=Exception("network error"))
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -2708,7 +2707,7 @@ class TestFetchRelationshipsAnalysisTool:
         mock_client.post = AsyncMock(return_value=mock_response)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -2725,7 +2724,7 @@ class TestFetchRelationshipsAnalysisTool:
         mock_client.post = AsyncMock(side_effect=Exception("network error"))
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -2756,7 +2755,7 @@ class TestFetchRelationshipsAnalysisTool:
         mock_client.post = AsyncMock(return_value=mock_response)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -2796,7 +2795,7 @@ class TestFetchRelationshipsAnalysisTool:
         mock_client.post = AsyncMock(return_value=mock_response)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -2982,7 +2981,7 @@ class TestGenerateDaxWithLlmFallback:
         mock_client.post = AsyncMock(side_effect=Exception("LLM unreachable"))
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             with patch.object(self.tool, "_emit_llm_trace"):
@@ -3085,7 +3084,7 @@ class TestFetchModelViaAdminScanner:
         mock_client.post = AsyncMock(return_value=resp)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             measures, tables = self._run(
@@ -3104,7 +3103,7 @@ class TestFetchModelViaAdminScanner:
         mock_client.post = AsyncMock(return_value=resp)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             measures, tables = self._run(
@@ -3121,7 +3120,7 @@ class TestFetchModelViaAdminScanner:
         mock_client.post = AsyncMock(side_effect=Exception("network error"))
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             measures, tables = self._run(
@@ -3137,7 +3136,6 @@ class TestFetchModelViaAdminScanner:
         poll_resp = self._make_response(200, {"status": "Succeeded"})
         result_resp = self._make_response(200, {"workspaces": [{"id": "different-ws"}]})
 
-        response_sequence = [post_resp, poll_resp, result_resp]
         call_count = [0]
 
         async def post_side(*args, **kwargs):
@@ -3157,7 +3155,7 @@ class TestFetchModelViaAdminScanner:
         mock_client.get = AsyncMock(side_effect=get_side)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             with patch(
@@ -3217,7 +3215,7 @@ class TestFetchModelViaAdminScanner:
         mock_client.get = AsyncMock(side_effect=get_side)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             with patch(
@@ -3264,7 +3262,7 @@ class TestFetchModelViaDAX:
         mock_instance.post = AsyncMock(return_value=mock_response)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_instance,
         ):
             measures, tables = self._run(
@@ -3279,7 +3277,7 @@ class TestFetchModelViaDAX:
         mock_instance.post = AsyncMock(side_effect=Exception("network error"))
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_instance,
         ):
             measures, tables = self._run(
@@ -3301,7 +3299,7 @@ class TestFetchModelViaDAX:
         mock_instance.post = AsyncMock(return_value=mock_response)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_instance,
         ):
             measures, tables = self._run(
@@ -3329,9 +3327,7 @@ class TestFindVisualReferences:
         return asyncio.run(coro)
 
     def test_exception_returns_empty_list(self):
-        with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient"
-        ) as mock_cls:
+        with patch("httpx.AsyncClient") as mock_cls:
             mock_client = MagicMock()
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
@@ -3359,9 +3355,7 @@ class TestFindVisualReferences:
             ]
         }
 
-        with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient"
-        ) as mock_cls:
+        with patch("httpx.AsyncClient") as mock_cls:
             mock_client = MagicMock()
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
@@ -3399,9 +3393,7 @@ class TestFindVisualReferences:
                 return reports_resp
             return def_resp
 
-        with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient"
-        ) as mock_cls:
+        with patch("httpx.AsyncClient") as mock_cls:
             mock_client = MagicMock()
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
@@ -3479,7 +3471,7 @@ class TestGenerateDaxWithSelfCorrection:
         mock_client.post = AsyncMock(side_effect=Exception("LLM unreachable"))
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -4372,7 +4364,7 @@ class TestFetchTmdlViaFabric202Polling:
 
         with (
             patch(
-                "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+                "httpx.AsyncClient",
                 return_value=mock_client,
             ),
             patch(
@@ -4405,7 +4397,7 @@ class TestFetchTmdlViaFabric202Polling:
 
         with (
             patch(
-                "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+                "httpx.AsyncClient",
                 return_value=mock_client,
             ),
             patch(
@@ -4430,7 +4422,7 @@ class TestFetchTmdlViaFabric202Polling:
         mock_client.post = AsyncMock(return_value=post_response)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -4457,7 +4449,7 @@ class TestFetchTmdlViaFabric202Polling:
 
         with (
             patch(
-                "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+                "httpx.AsyncClient",
                 return_value=mock_client,
             ),
             patch(
@@ -4510,7 +4502,7 @@ class TestAdminScannerPollingBranches:
 
         with (
             patch(
-                "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+                "httpx.AsyncClient",
                 return_value=mock_client,
             ),
             patch(
@@ -4538,7 +4530,7 @@ class TestAdminScannerPollingBranches:
 
         with (
             patch(
-                "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+                "httpx.AsyncClient",
                 return_value=mock_client,
             ),
             patch(
@@ -4575,7 +4567,7 @@ class TestAdminScannerPollingBranches:
 
         with (
             patch(
-                "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+                "httpx.AsyncClient",
                 return_value=mock_client,
             ),
             patch(
@@ -4613,7 +4605,7 @@ class TestAdminScannerPollingBranches:
 
         with (
             patch(
-                "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+                "httpx.AsyncClient",
                 return_value=mock_client,
             ),
             patch(
@@ -4653,7 +4645,7 @@ class TestAdminScannerPollingBranches:
 
         with (
             patch(
-                "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+                "httpx.AsyncClient",
                 return_value=mock_client,
             ),
             patch(
@@ -4721,7 +4713,7 @@ class TestAdminScannerPollingBranches:
 
         with (
             patch(
-                "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+                "httpx.AsyncClient",
                 return_value=mock_client,
             ),
             patch(
@@ -4753,7 +4745,7 @@ class TestAdminScannerPollingBranches:
         mock_client.post = AsyncMock(return_value=scan_response)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -4776,7 +4768,7 @@ class TestAdminScannerPollingBranches:
         mock_client.post = AsyncMock(side_effect=http_error)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -4974,7 +4966,7 @@ class TestExtractDefaultFiltersHttpPaths:
         mock_client.post = AsyncMock(return_value=response)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -4992,7 +4984,7 @@ class TestExtractDefaultFiltersHttpPaths:
         mock_client.post = AsyncMock(return_value=response)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -5010,7 +5002,7 @@ class TestExtractDefaultFiltersHttpPaths:
         mock_client.post = AsyncMock(return_value=response)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -5067,7 +5059,7 @@ class TestExtractDefaultFiltersHttpPaths:
 
         with (
             patch(
-                "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+                "httpx.AsyncClient",
                 return_value=mock_client,
             ),
             patch(
@@ -5091,7 +5083,7 @@ class TestExtractDefaultFiltersHttpPaths:
         mock_client.post = AsyncMock(return_value=post_response)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -5118,7 +5110,7 @@ class TestExtractDefaultFiltersHttpPaths:
 
         with (
             patch(
-                "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+                "httpx.AsyncClient",
                 return_value=mock_client,
             ),
             patch(
@@ -5146,7 +5138,7 @@ class TestExtractDefaultFiltersHttpPaths:
         mock_client.post = AsyncMock(side_effect=http_error)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -5161,7 +5153,7 @@ class TestExtractDefaultFiltersHttpPaths:
         mock_client.post = AsyncMock(side_effect=Exception("connection refused"))
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -5233,7 +5225,7 @@ class TestGenerateDaxWithLlmHttpPath:
         mock_client.post = AsyncMock(return_value=mock_response)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -5279,7 +5271,7 @@ class TestGenerateDaxWithLlmHttpPath:
         mock_client.post = AsyncMock(return_value=mock_response)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -5311,7 +5303,7 @@ class TestGenerateDaxWithLlmHttpPath:
         mock_client.post = AsyncMock(side_effect=Exception("HTTP timeout"))
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(
@@ -5368,7 +5360,7 @@ class TestGenerateDaxWithLlmHttpPath:
         mock_client.post = AsyncMock(return_value=mock_response)
 
         with patch(
-            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=mock_client,
         ):
             result = self._run(

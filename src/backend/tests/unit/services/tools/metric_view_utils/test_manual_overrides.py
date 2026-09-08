@@ -1,8 +1,5 @@
 """Tests for the manual_overrides pipeline config feature."""
 
-import pytest
-
-from src.services.tools.metric_view_utils.data_classes import TableInfo
 from src.services.tools.metric_view_utils.mquery_parser import MQueryParser
 from src.services.tools.metric_view_utils.pipeline import MetricViewPipeline
 

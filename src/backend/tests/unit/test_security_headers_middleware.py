@@ -8,7 +8,7 @@ Tests verify that the middleware:
 - Works correctly with streaming/chunked responses (only modifies http.response.start)
 """
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 

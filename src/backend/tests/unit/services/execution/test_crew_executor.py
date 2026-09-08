@@ -10,12 +10,10 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 
 # Reset singleton before each test
-import src.services.execution.thread_executor as crew_executor_module
 
 
 def _fresh_executor(max_workers=5):
     """Create a fresh CrewExecutor bypassing the singleton."""
-    from concurrent.futures import ThreadPoolExecutor
 
     from src.services.execution.thread_executor import CrewExecutor
 
@@ -64,7 +62,6 @@ class TestCrewExecutorInit:
         assert executor._initialized is True
 
     def test_second_init_is_noop(self):
-        from src.services.execution.thread_executor import CrewExecutor
 
         # Test that calling __init__ again on an already-initialized executor is a no-op
         ex = _fresh_executor()
@@ -303,7 +300,6 @@ class TestRunCrew:
 
     @pytest.mark.asyncio
     async def test_timeout_raises(self, executor):
-        import asyncio
 
         mock_crew = MagicMock()
 

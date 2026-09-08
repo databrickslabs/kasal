@@ -2,10 +2,9 @@
 Comprehensive unit tests for services/lakebase_schema_service.py
 """
 
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy import text
 
 from src.services.databricks.lakebase.schema import (
     LakebaseSchemaService,
@@ -98,7 +97,6 @@ class TestLakebaseSchemaServiceInit:
 
 def _make_async_engine_with_conn(mock_conn):
     """Create a properly mock async engine using MagicMock context manager."""
-    import asyncio
     from unittest.mock import MagicMock
 
     class AsyncCtxMgr:
@@ -140,8 +138,6 @@ class TestCreateSchemaAsync:
     async def test_recreate_true_drops_schema(self, service):
         mock_conn = AsyncMock()
         mock_conn.execute = AsyncMock()
-
-        calls = []
 
         class AsyncCtxMgrTracked:
             async def __aenter__(self):
@@ -616,14 +612,14 @@ class TestCreateTablesSyncStream:
                 side_effect=RuntimeError("db down"),
             ):
                 with pytest.raises(RuntimeError):
-                    events = list(service.create_tables_sync_stream(mock_engine))
+                    list(service.create_tables_sync_stream(mock_engine))
 
 
 # ---------------------------------------------------------------------------
 # Orphaned table-owner tolerance (Postgres 42501 "must be owner")
 # ---------------------------------------------------------------------------
 
-from src.services.databricks.lakebase.schema import (
+from src.services.databricks.lakebase.schema import (  # noqa: E402 - import follows module initialization
     _is_not_owner_error,
     _owner_remediation,
 )

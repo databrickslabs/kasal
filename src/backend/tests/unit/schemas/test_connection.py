@@ -5,8 +5,6 @@ Tests the functionality of Pydantic schemas for connection operations
 including validation, serialization, and field constraints.
 """
 
-from typing import List
-
 import pytest
 from pydantic import ValidationError
 

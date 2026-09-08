@@ -1,8 +1,6 @@
 """Tests for metric_view_validation_utils.databricks_parser (UCMetricsViewParser)."""
 
-import io
 import textwrap
-from unittest.mock import mock_open, patch
 
 import pytest
 

@@ -6,7 +6,7 @@ Target: >=90% coverage of src/services/execution_trace_service.py.
 """
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.exc import SQLAlchemyError

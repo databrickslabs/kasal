@@ -5,9 +5,7 @@ This is an adapter service that interfaces between the execution_service
 and the flow_runner_service now located in the crewai engine folder.
 """
 
-import logging
 import uuid
-from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,7 +14,7 @@ from src.core.exceptions import BadRequestError, KasalError
 from src.core.logger import LoggerManager
 
 # SessionLocal removed - use async_session_factory instead
-from src.services.flow_builder.flow_runner_service import BackendFlow, FlowRunnerService
+from src.services.flow_builder.flow_runner_service import FlowRunnerService
 
 # Initialize flow-specific logger
 logger = LoggerManager.get_instance().flow

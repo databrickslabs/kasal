@@ -366,7 +366,7 @@ class TestGetClientWithGroupContext:
 
         # UserContext and GroupContext are imported locally inside the method
         with (
-            patch("src.utils.user_context.UserContext") as mock_uc,
+            patch("src.utils.user_context.UserContext"),
             patch("src.utils.user_context.GroupContext") as mock_gc,
         ):
             mock_gc.return_value = MagicMock()
@@ -655,7 +655,6 @@ class TestInnerClosuresCoverage:
     @patch.object(DatabricksVolumeRepository, "_get_client_with_group_context")
     async def test_upload_closure_success(self, mock_get_client, repo):
         """Run the actual _upload_file closure by letting run_in_executor execute it."""
-        import asyncio
 
         mock_client = MagicMock()
         mock_client.files.upload.return_value = None  # Success

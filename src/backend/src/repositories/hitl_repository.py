@@ -8,8 +8,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import and_, delete, desc, func, or_
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import delete, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -17,7 +16,6 @@ from src.models.execution_history import ExecutionHistory
 from src.models.hitl_approval import (
     HITLApproval,
     HITLApprovalStatus,
-    HITLTimeoutAction,
     HITLWebhook,
 )
 

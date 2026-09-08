@@ -5,12 +5,10 @@ Tests the functionality of ConversionHistoryRepository, ConversionJobRepository,
 and SavedConverterConfigurationRepository including CRUD operations and custom queries.
 """
 
-from datetime import datetime, timedelta
-from typing import List
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.conversion import (

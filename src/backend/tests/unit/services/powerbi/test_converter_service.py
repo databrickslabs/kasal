@@ -6,11 +6,11 @@ history tracking, job management, and saved configurations.
 """
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from src.core.exceptions import KasalError
 
+from src.core.exceptions import KasalError
 from src.schemas.conversion import (
     ConversionHistoryCreate,
     ConversionHistoryFilter,

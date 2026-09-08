@@ -7,14 +7,13 @@ and triggering flow resume.
 """
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.models.execution_status import ExecutionStatus
 from src.models.hitl_approval import (
-    HITLApproval,
     HITLApprovalStatus,
     HITLRejectionAction,
     HITLTimeoutAction,

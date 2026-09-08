@@ -8,7 +8,6 @@ from typing import List, Optional
 
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from src.core.base_repository import BaseRepository
 from src.core.logger import LoggerManager

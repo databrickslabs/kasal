@@ -37,7 +37,7 @@ class Ctx:
 
 @pytest.mark.asyncio
 async def test_list_endpoints():
-    service = AsyncMock()
+    AsyncMock()
     group_ctx = Ctx()
     with patch("src.api.engine_config_router.EngineConfigService") as svc_cls:
         svc = AsyncMock()
@@ -63,7 +63,7 @@ async def test_list_endpoints():
 
 @pytest.mark.asyncio
 async def test_get_engine_config_found_and_not_found():
-    service = AsyncMock()
+    AsyncMock()
     group_ctx = Ctx()
     svc = AsyncMock()
     svc.find_by_engine_name = AsyncMock(return_value={"engine_name": "e1"})

@@ -5,10 +5,7 @@ Tests the functionality of the PromptTemplate database model including
 field validation, relationships, and data integrity.
 """
 
-from datetime import datetime, timezone
-from unittest.mock import MagicMock
-
-import pytest
+from datetime import datetime
 
 from src.models.template import PromptTemplate, Template
 
@@ -279,14 +276,14 @@ class TestPromptTemplate:
     def test_prompt_template_timestamp_behavior(self):
         """Test timestamp behavior in PromptTemplate."""
         # Arrange
-        before_creation = datetime.utcnow()
+        datetime.utcnow()
 
         # Act
         prompt_template = PromptTemplate(
             name="timestamp_test", template="Testing timestamps"
         )
 
-        after_creation = datetime.utcnow()
+        datetime.utcnow()
 
         # Assert
         # Note: Timestamps are set by __init__ method, not SQLAlchemy defaults
@@ -359,7 +356,7 @@ class TestTemplateAlias:
 
         # Assert
         assert template_via_alias.template == template_via_class.template
-        assert type(template_via_alias) == type(template_via_class)
+        assert type(template_via_alias) is type(template_via_class)
         assert isinstance(template_via_alias, PromptTemplate)
 
 

@@ -689,7 +689,7 @@ class TestRunIntegrationDax:
 # Async pipeline tests (directly calling async methods)
 # ===========================================================================
 
-import asyncio
+import asyncio  # noqa: E402 - import follows module initialization
 
 
 class TestResolvModelContext:
@@ -2166,14 +2166,14 @@ class TestGenerateDaxWithSelfCorrectionDaxTool:
 # NEW TESTS — coverage push to 80%+
 # ===========================================================================
 
-import base64 as _base64
+import base64 as _base64  # noqa: E402 - import follows module initialization
 
 # ===========================================================================
 # _build_example_dax tests
 # ===========================================================================
 
 
-class TestBuildExampleDax:
+class TestBuildExampleDaxAdditionalCases:
     """Tests for _build_example_dax."""
 
     def setup_method(self):
@@ -2390,7 +2390,7 @@ class TestFetchFullCacheTables:
 # ===========================================================================
 
 
-class TestGenerateDeterministicDax:
+class TestGenerateDeterministicDaxAdditionalCases:
     """Tests for _generate_deterministic_dax."""
 
     def setup_method(self):
@@ -2495,7 +2495,7 @@ class TestGenerateDeterministicDax:
 # ===========================================================================
 
 
-class TestPatchDaxWithActiveFilters:
+class TestPatchDaxWithActiveFiltersAdditionalCases:
     """Tests for _patch_dax_with_active_filters."""
 
     def setup_method(self):
@@ -2931,7 +2931,7 @@ class TestBuildPageUrl:
 # ===========================================================================
 
 
-class TestSaveToConversionHistory:
+class TestSaveToConversionHistoryAdditionalCases:
     """Tests for _save_to_conversion_history (fail-open)."""
 
     def setup_method(self):

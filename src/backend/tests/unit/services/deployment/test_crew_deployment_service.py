@@ -8,7 +8,6 @@ from uuid import uuid4
 import pytest
 
 from src.schemas.crew_export import (
-    DeploymentResponse,
     DeploymentStatus,
     ModelServingConfig,
 )

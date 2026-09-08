@@ -6,7 +6,6 @@ is at least the minimum count value provided in the configuration.
 """
 
 import json
-import logging
 import traceback
 from typing import Any, Dict, Union
 

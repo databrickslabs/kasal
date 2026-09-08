@@ -7,7 +7,7 @@ DAX/UC-Metrics/SQL for the excise-tax KBI set defined in excise_tax_kbis.yaml.
 Run it directly (``python demo_excise_tax.py``); see README.md and demo.md.
 """
 
-import os
+import sys
 from pathlib import Path
 
 # Imported as src.services.converters.* like the rest of the codebase. This used to
@@ -99,7 +99,6 @@ def generate_demo():
     # Generate UC Metrics
     print("\n🔶 Generating UC Metrics...")
     uc_generator = UCMetricsGenerator()
-    uc_metrics_list = []
     yaml_metadata = {
         "name": "excise_tax_metrics",
         "catalog": "main",

@@ -14,14 +14,9 @@ Targets the last remaining uncovered lines:
   900-908 error path: event bus flush, otel shutdown, trace queue
 """
 
-import asyncio
-import logging
-import os
 import signal
 import sys
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # Module-level functions (lines 56-61)
@@ -291,7 +286,6 @@ class TestPrepareAndRunErrorPaths:
 
         config = {"agents": [], "tasks": [], "group_id": "grp-1"}
 
-        flush_called = [False]
         mock_event_bus = MagicMock()
         mock_event_bus.flush = MagicMock(side_effect=lambda timeout: True)
 

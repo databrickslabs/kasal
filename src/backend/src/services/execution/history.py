@@ -919,7 +919,9 @@ class ExecutionHistoryService:
             raise
 
 
-from src.dependencies.providers import SessionDep
+from src.dependencies.providers import (  # noqa: E402 - import follows module initialization
+    SessionDep,
+)
 
 
 def get_execution_history_service(session: SessionDep) -> ExecutionHistoryService:

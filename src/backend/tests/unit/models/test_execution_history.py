@@ -7,9 +7,6 @@ including relationships, validation, and database operations.
 
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
-from uuid import uuid4
-
-import pytest
 
 from src.models.execution_history import (
     ErrorTrace,

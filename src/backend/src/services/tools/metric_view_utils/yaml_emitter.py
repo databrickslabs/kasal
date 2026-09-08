@@ -10,9 +10,8 @@ from __future__ import annotations
 import copy
 import logging
 import re
-from typing import Any
 
-from .data_classes import MetricViewSpec, TranslationResult
+from .data_classes import MetricViewSpec
 from .metadata_generator import MetadataGenerator
 from .utils import col_to_readable, spark_sql_compat
 
@@ -92,7 +91,9 @@ def _yaml_scalar(value: str, indent: int = 0) -> str:
     if "\n" in value:
         prefix = " " * indent
         block_lines = value.split("\n")
-        return "|-\n" + "\n".join(f"{prefix}  {l}" for l in block_lines)
+        return "|-\n" + "\n".join(
+            f"{prefix}  {item_value}" for item_value in block_lines
+        )
     if any(
         c in value
         for c in ("{", "}", ":", "#", "'", "[", "]", "*", "&", "!", "%", "@", "`")

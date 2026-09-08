@@ -5,7 +5,6 @@ Tests the Lakebase activation state tracker that distinguishes startup
 (fallback OK) from runtime (fallback = data loss).
 """
 
-import importlib
 from datetime import datetime, timezone
 from unittest.mock import patch
 

@@ -383,7 +383,7 @@ Rules:
 
         # ── 6. Assemble output config ─────────────────────────────────────────
         # Build view names list for the Genie space
-        view_names = [s["view_name"] for s in summaries]
+        [s["view_name"] for s in summaries]
 
         # Extract join specs from UCMV YAMLs
         join_specs = []

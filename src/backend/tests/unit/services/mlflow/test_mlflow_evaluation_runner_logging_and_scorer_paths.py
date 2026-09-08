@@ -6,13 +6,11 @@ _restore_environment_vars no-auth, complete_evaluation fallback eval_data,
 _discover_traces with no search_traces, scorer building paths.
 """
 
-import io
 import os
 from types import SimpleNamespace
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
-import pytest
 
 from src.services.mlflow.evaluation_runner import MLflowEvaluationRunner
 

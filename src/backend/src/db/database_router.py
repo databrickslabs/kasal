@@ -6,12 +6,9 @@ backend based on configuration stored in the database itself.
 """
 
 import asyncio
-import logging
 import os
-from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Dict, Optional
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import LakebaseUnavailableError

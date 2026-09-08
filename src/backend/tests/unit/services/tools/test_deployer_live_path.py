@@ -11,9 +11,7 @@ Updated for app-modes refactoring:
 """
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from src.services.tools.metric_view_deployer_tool import MetricViewDeployerTool
 

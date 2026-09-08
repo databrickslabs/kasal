@@ -3,12 +3,8 @@ import json
 import os
 import subprocess
 import time
-from contextlib import contextmanager
-from types import SimpleNamespace
-from typing import Any, Dict, Optional, Tuple
-from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
-import httpx
 import pytest
 
 from src.utils.databricks_auth import (
@@ -18,7 +14,6 @@ from src.utils.databricks_auth import (
     extract_user_token_from_request,
     get_auth_context,
     get_current_databricks_user,
-    get_databricks_auth_headers,
     get_databricks_auth_headers_sync,
     get_mcp_access_token,
     get_mcp_auth_headers,

@@ -2,9 +2,7 @@
 Comprehensive unit tests for services/scheduler_service.py
 """
 
-import asyncio
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Set
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
@@ -138,7 +136,6 @@ class TestCreateSchedule:
 
     @pytest.mark.asyncio
     async def test_create_schedule_success(self):
-        from src.schemas.schedule import ScheduleCreate, ScheduleResponse
 
         service = _make_service()
         schedule_data = MagicMock()
@@ -158,7 +155,7 @@ class TestCreateSchedule:
                 "src.schemas.schedule.ScheduleResponse.model_validate",
                 return_value=MagicMock(),
             ):
-                result = await service.create_schedule(schedule_data)
+                await service.create_schedule(schedule_data)
 
         service.repository.create.assert_called_once()
 
@@ -244,7 +241,7 @@ class TestGetAllSchedules:
             "src.schemas.schedule.ScheduleResponse.model_validate",
             return_value=MagicMock(),
         ):
-            result = await service.get_all_schedules(group_context=gc)
+            await service.get_all_schedules(group_context=gc)
 
         service.repository.find_by_group.assert_called_once_with("grp-1")
 
@@ -275,7 +272,7 @@ class TestGetScheduleById:
             "src.schemas.schedule.ScheduleResponse.model_validate",
             return_value=MagicMock(),
         ):
-            result = await service.get_schedule_by_id(1)
+            await service.get_schedule_by_id(1)
 
         service.repository.find_by_id.assert_called_once_with(1)
 
@@ -303,7 +300,7 @@ class TestGetScheduleByIdWithGroupCheck:
             "src.schemas.schedule.ScheduleResponse.model_validate",
             return_value=MagicMock(),
         ):
-            result = await service.get_schedule_by_id_with_group_check(1, gc)
+            await service.get_schedule_by_id_with_group_check(1, gc)
 
     @pytest.mark.asyncio
     async def test_raises_not_found_for_different_group(self):
@@ -477,7 +474,6 @@ class TestCreateScheduleFromExecution:
 
     @pytest.mark.asyncio
     async def test_raises_not_found_when_execution_missing(self):
-        from src.schemas.schedule import ScheduleCreateFromExecution
 
         service = _make_service()
         service.execution_service.get_execution_record = AsyncMock(return_value=None)
@@ -572,7 +568,7 @@ class TestCreateScheduleFromExecution:
                 "src.schemas.schedule.ScheduleResponse.model_validate",
                 return_value=MagicMock(),
             ):
-                result = await service.create_schedule_from_execution(schedule_data)
+                await service.create_schedule_from_execution(schedule_data)
 
         service.repository.create.assert_called_once()
 
@@ -608,7 +604,7 @@ class TestCreateScheduleFromExecution:
                 "src.schemas.schedule.ScheduleResponse.model_validate",
                 return_value=MagicMock(),
             ):
-                result = await service.create_schedule_from_execution(schedule_data)
+                await service.create_schedule_from_execution(schedule_data)
 
         service.repository.create.assert_called_once()
 

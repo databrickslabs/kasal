@@ -4,10 +4,9 @@ Repository for the data_processing table.
 This module provides database access functions for the data_processing table.
 """
 
-import logging
-from typing import List, Optional
+from typing import Optional
 
-from sqlalchemy import delete, func, insert, select, text, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 

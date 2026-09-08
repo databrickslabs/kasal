@@ -5,11 +5,9 @@ This module provides business logic for engine configuration operations,
 including retrieving and managing engine configurations.
 """
 
-import logging
 from typing import Any, Dict, List, Optional
 
 from src.core.exceptions import BadRequestError
-
 from src.core.logger import LoggerManager
 from src.models.engine_config import EngineConfig
 from src.repositories.engine_config_repository import EngineConfigRepository

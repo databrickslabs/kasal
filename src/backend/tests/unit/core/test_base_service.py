@@ -5,12 +5,10 @@ Tests the functionality of the base service including
 CRUD operations and business logic.
 """
 
-from typing import Optional
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
-from src.core.base_repository import BaseRepository
 from src.core.base_service import BaseService
 
 

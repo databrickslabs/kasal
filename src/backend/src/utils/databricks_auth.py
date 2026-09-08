@@ -211,7 +211,6 @@ import asyncio
 import contextlib
 import contextvars
 import hashlib
-import json
 import logging
 import os
 import time
@@ -935,7 +934,7 @@ def get_databricks_auth_headers_sync(
 
         # Check if there's already a running event loop
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
             # If we're already in an async context, we can't use asyncio.run()
             # This shouldn't happen in a sync function, but let's handle it gracefully
             logger.warning("Sync function called from async context - returning error")

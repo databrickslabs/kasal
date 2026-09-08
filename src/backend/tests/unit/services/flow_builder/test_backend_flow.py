@@ -1,9 +1,6 @@
-import asyncio
-import json
 import os
 import uuid
-from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, call, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -334,7 +331,7 @@ class TestBackendFlow:
         ) as mock_flow_builder:
             mock_flow_builder.build_flow = AsyncMock(return_value=mock_dynamic_flow)
 
-            with patch.object(flow, "_init_callbacks") as mock_init_callbacks:
+            with patch.object(flow, "_init_callbacks"):
                 result = await flow.flow()
 
                 assert result == mock_dynamic_flow

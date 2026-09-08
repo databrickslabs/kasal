@@ -5,7 +5,6 @@ Handles CASE WHEN → IF conversion and other SQL-to-DAX transformations
 """
 
 import re
-from typing import Any, Dict
 
 
 class DaxSyntaxConverter:

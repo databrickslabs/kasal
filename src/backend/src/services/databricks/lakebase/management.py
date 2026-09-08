@@ -664,9 +664,6 @@ class DatabaseManagementService:
             from src.repositories.execution_logs_repository import (
                 ExecutionLogsRepository,
             )
-            from src.repositories.execution_trace_repository import (
-                ExecutionTraceRepository,
-            )
             from src.repositories.hitl_repository import HITLApprovalRepository
 
             cutoff = dt.fromisoformat(cutoff_date)

@@ -5,11 +5,6 @@ Tests the functionality of the Task database model including
 field validation, complex initialization logic, and data integrity.
 """
 
-from datetime import datetime
-from unittest.mock import MagicMock, patch
-
-import pytest
-
 from src.models.task import Task, generate_uuid
 
 

@@ -4,7 +4,6 @@ Comprehensive unit tests for prompt_utils module.
 Tests JSON parsing utilities and prompt template functions.
 """
 
-
 import pytest
 
 from src.utils.prompt_utils import get_prompt_template

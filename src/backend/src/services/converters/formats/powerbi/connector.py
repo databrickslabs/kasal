@@ -3,7 +3,6 @@ Power BI Inbound Connector
 Extracts measures from Power BI datasets via REST API
 """
 
-import logging
 import re
 from typing import Any, Dict, List, Optional
 

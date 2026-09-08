@@ -30,9 +30,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from src.repositories.dashboard_repository import DashboardRepository
-from src.repositories.genie_repository import GenieRepository
 from src.schemas.analytics_export import ExportFile
-from src.schemas.genie import GenieAuthConfig
 
 logger = logging.getLogger(__name__)
 
@@ -321,9 +319,9 @@ def _widget_layout_to_yaml_dict(layout_item: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     # ── Common helpers for data widgets ──────────────────────────────────────
-    frame: Dict[str, Any] = spec.get("frame") or widget.get("frame") or {}
-    title: str = frame.get("title") or widget_name
-    encodings: Dict[str, Any] = spec.get("encodings") or {}
+    frame = spec.get("frame") or widget.get("frame") or {}
+    title = frame.get("title") or widget_name
+    encodings = spec.get("encodings") or {}
 
     dataset_name = ""
     raw_fields: List[Dict[str, Any]] = []

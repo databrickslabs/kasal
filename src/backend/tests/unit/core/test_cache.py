@@ -12,7 +12,6 @@ Tests the TTLCache implementation including:
 
 import asyncio
 import time
-from unittest.mock import MagicMock, patch
 
 import pytest
 

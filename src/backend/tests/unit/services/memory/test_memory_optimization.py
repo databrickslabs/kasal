@@ -39,7 +39,7 @@ class TestMemoryOptimization:
         }
 
         should_disable = crew_prep._should_disable_memory_for_agent(agent_config)
-        assert should_disable == True
+        assert should_disable
 
     def test_should_disable_memory_for_formatter_agent(self):
         """Test that memory is disabled for formatter agents."""
@@ -55,7 +55,7 @@ class TestMemoryOptimization:
         }
 
         should_disable = crew_prep._should_disable_memory_for_agent(agent_config)
-        assert should_disable == True
+        assert should_disable
 
     def test_should_disable_memory_for_code_review_agent(self):
         """Test that memory is disabled for code review agents."""
@@ -71,7 +71,7 @@ class TestMemoryOptimization:
         }
 
         should_disable = crew_prep._should_disable_memory_for_agent(agent_config)
-        assert should_disable == True
+        assert should_disable
 
     def test_should_disable_memory_for_data_cleaning_agent(self):
         """Test that memory is disabled for data cleaning agents."""
@@ -87,7 +87,7 @@ class TestMemoryOptimization:
         }
 
         should_disable = crew_prep._should_disable_memory_for_agent(agent_config)
-        assert should_disable == True
+        assert should_disable
 
     def test_should_keep_memory_for_research_agent(self):
         """Test that memory is kept enabled for research agents."""
@@ -102,7 +102,7 @@ class TestMemoryOptimization:
         }
 
         should_disable = crew_prep._should_disable_memory_for_agent(agent_config)
-        assert should_disable == False
+        assert not should_disable
 
     def test_should_keep_memory_for_assistant_agent(self):
         """Test that memory is kept enabled for assistant agents."""
@@ -117,7 +117,7 @@ class TestMemoryOptimization:
         }
 
         should_disable = crew_prep._should_disable_memory_for_agent(agent_config)
-        assert should_disable == False
+        assert not should_disable
 
     def test_should_keep_memory_for_learning_agent(self):
         """Test that memory is kept enabled for agents that learn."""
@@ -132,7 +132,7 @@ class TestMemoryOptimization:
         }
 
         should_disable = crew_prep._should_disable_memory_for_agent(agent_config)
-        assert should_disable == False
+        assert not should_disable
 
     def test_should_keep_memory_for_conversational_agent(self):
         """Test that memory is kept enabled for conversational agents."""
@@ -147,7 +147,7 @@ class TestMemoryOptimization:
         }
 
         should_disable = crew_prep._should_disable_memory_for_agent(agent_config)
-        assert should_disable == False
+        assert not should_disable
 
     def test_should_disable_memory_for_api_caller_agent(self):
         """Test that memory is disabled for simple API caller agents."""
@@ -163,7 +163,7 @@ class TestMemoryOptimization:
         }
 
         should_disable = crew_prep._should_disable_memory_for_agent(agent_config)
-        assert should_disable == True
+        assert should_disable
 
     def test_should_disable_memory_for_notification_agent(self):
         """Test that memory is disabled for notification agents."""
@@ -179,7 +179,7 @@ class TestMemoryOptimization:
         }
 
         should_disable = crew_prep._should_disable_memory_for_agent(agent_config)
-        assert should_disable == True
+        assert should_disable
 
     @pytest.mark.asyncio
     async def test_crew_memory_disabled_when_all_agents_stateless(self):
@@ -219,12 +219,12 @@ class TestMemoryOptimization:
                         "src.services.agent_builder.crew_preparation.CrewPreparation._create_crew",
                         new_callable=AsyncMock,
                         return_value=True,
-                    ) as mock_create_crew:
+                    ):
                         crew_prep = CrewPreparation(config)
                         result = await crew_prep.prepare()
 
                         # The prepare method should succeed
-                        assert result == True
+                        assert result
 
     @pytest.mark.asyncio
     async def test_crew_memory_enabled_when_any_agent_needs_it(self):
@@ -264,12 +264,12 @@ class TestMemoryOptimization:
                         "src.services.agent_builder.crew_preparation.CrewPreparation._create_crew",
                         new_callable=AsyncMock,
                         return_value=True,
-                    ) as mock_create_crew:
+                    ):
                         crew_prep = CrewPreparation(config)
                         result = await crew_prep.prepare()
 
                         # The prepare method should succeed
-                        assert result == True
+                        assert result
 
     def test_memory_optimization_with_edge_cases(self):
         """Test memory optimization with edge cases."""
@@ -277,14 +277,11 @@ class TestMemoryOptimization:
         crew_prep = CrewPreparation(config)
 
         # Test with empty config
-        assert crew_prep._should_disable_memory_for_agent({}) == False
+        assert not crew_prep._should_disable_memory_for_agent({})
 
         # Test with only role and memory explicitly disabled
-        assert (
-            crew_prep._should_disable_memory_for_agent(
-                {"role": "Validator", "memory": False}
-            )
-            == True
+        assert crew_prep._should_disable_memory_for_agent(
+            {"role": "Validator", "memory": False}
         )
 
         # Test with conflicting keywords - memory not explicitly set
@@ -294,7 +291,7 @@ class TestMemoryOptimization:
             "backstory": "Expert researcher and validator",
         }
         # Should keep memory when there's a conflict (safer option)
-        assert crew_prep._should_disable_memory_for_agent(agent_config) == False
+        assert not crew_prep._should_disable_memory_for_agent(agent_config)
 
         # Test with no tools and simple role - memory explicitly disabled
         agent_config = {
@@ -304,4 +301,4 @@ class TestMemoryOptimization:
             "tools": [],
             "memory": False,  # Explicitly disable memory
         }
-        assert crew_prep._should_disable_memory_for_agent(agent_config) == True
+        assert crew_prep._should_disable_memory_for_agent(agent_config)

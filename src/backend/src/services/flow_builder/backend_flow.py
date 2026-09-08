@@ -5,38 +5,52 @@ Base BackendFlow class for handling flow execution.
 
 Handles the creation and execution of CrewAI flows.
 """
-import asyncio
-import json
-import logging
-import os
-import time
-import traceback
-import uuid
-from datetime import UTC, datetime
-from typing import Any, Dict, List, Optional, Union
+import json  # noqa: E402 - import follows module initialization
+import os  # noqa: E402 - import follows module initialization
+import uuid  # noqa: E402 - import follows module initialization
+from typing import (  # noqa: E402 - import follows module initialization
+    Any,
+    Dict,
+    List,
+    Optional,
+    Union,
+)
 
-from pydantic import BaseModel, Field
-
-from src.core.llm.transport import LLM
-from src.core.logger import LoggerManager
-from src.repositories.flow_repository import FlowRepository
-from src.services.flow_builder.conversation.interrupt import (
+from src.core.llm.transport import (  # noqa: E402 - import follows module initialization
+    LLM,
+)
+from src.core.logger import (  # noqa: E402 - import follows module initialization
+    LoggerManager,
+)
+from src.repositories.flow_repository import (  # noqa: E402 - import follows module initialization
+    FlowRepository,
+)
+from src.services.flow_builder.conversation.interrupt import (  # noqa: E402 - import follows module initialization
     APPROVAL_CONFIG_KEY,
     interrupt_inputs,
 )
-from src.services.flow_builder.conversation.thread import thread_state_uuid
-from src.services.flow_builder.conversation.turn import (
+from src.services.flow_builder.conversation.thread import (  # noqa: E402 - import follows module initialization
+    thread_state_uuid,
+)
+from src.services.flow_builder.conversation.turn import (  # noqa: E402 - import follows module initialization
     close_turn_async,
     is_conversational,
     turn_inputs,
 )
-from src.services.flow_builder.exceptions import FlowPausedForApprovalException
+from src.services.flow_builder.exceptions import (  # noqa: E402 - import follows module initialization
+    FlowPausedForApprovalException,
+)
 
 # Import the refactored modules
-from src.services.flow_builder.modules.flow_builder import FlowBuilder
-from src.services.flow_builder.runtime import Flow as CrewAIFlow
-from src.services.llm.manager import LLMManager
-from src.services.tools.tool_factory import ToolFactory
+from src.services.flow_builder.modules.flow_builder import (  # noqa: E402 - import follows module initialization
+    FlowBuilder,
+)
+from src.services.flow_builder.runtime import (  # noqa: E402 - import follows module initialization
+    Flow as CrewAIFlow,
+)
+from src.services.llm.manager import (  # noqa: E402 - import follows module initialization
+    LLMManager,
+)
 
 # Initialize logger manager - use flow logger for flow execution
 logger = LoggerManager.get_instance().flow

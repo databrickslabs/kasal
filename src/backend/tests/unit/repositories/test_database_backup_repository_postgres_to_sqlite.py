@@ -24,7 +24,7 @@ import os
 import sqlite3
 import tempfile
 from datetime import date, datetime
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

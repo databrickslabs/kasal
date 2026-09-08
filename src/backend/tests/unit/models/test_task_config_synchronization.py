@@ -4,11 +4,9 @@ Comprehensive unit tests for Task SQLAlchemy model.
 Tests all aspects of the Task model including complex initialization logic.
 """
 
-from datetime import datetime
 from uuid import UUID
 
-import pytest
-from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, String
+from sqlalchemy import JSON, Boolean, Column, DateTime, String
 
 from src.db.base import Base
 from src.models.task import Task, generate_uuid

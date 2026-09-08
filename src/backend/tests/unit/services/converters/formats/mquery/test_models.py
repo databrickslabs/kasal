@@ -7,8 +7,6 @@ PowerBITable, TableRelationship, SemanticModel, ConversionResult,
 CalculatedColumnResult, and MQueryConversionConfig.
 """
 
-import pytest
-
 from src.services.converters.formats.mquery.models import (
     CalculatedColumnResult,
     ColumnDataType,

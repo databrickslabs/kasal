@@ -6,8 +6,6 @@ Simple tests to verify core callback functionality without complex mocking.
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from src.services.execution.kernel.execution_callback import create_execution_callbacks
 
 

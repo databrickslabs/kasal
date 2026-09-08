@@ -6,8 +6,7 @@ CRUD operations, cron scheduling, active/inactive management, and error handling
 """
 
 from datetime import datetime, timezone
-from typing import List
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy import select

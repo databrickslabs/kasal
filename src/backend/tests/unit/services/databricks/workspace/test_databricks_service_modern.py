@@ -7,7 +7,6 @@ import pytest
 
 from src.core.exceptions import KasalError
 from src.schemas.databricks_config import (
-    DatabricksConfigCreate,
     DatabricksConfigResponse,
 )
 from src.services.databricks.workspace.service import DatabricksService
@@ -210,7 +209,7 @@ class TestSetDatabricksConfig:
         new_config = _make_full_config_mock()
         service.repository.create_config = AsyncMock(return_value=new_config)
 
-        result = await service.set_databricks_config(config_in)
+        await service.set_databricks_config(config_in)
 
         # Verify create_config was called with the correct data
         call_args = service.repository.create_config.call_args[0][0]
@@ -628,7 +627,7 @@ class TestFromSession:
                 new_callable=PropertyMock,
                 return_value=mock_secrets,
             ):
-                service = DatabricksService.from_session(
+                DatabricksService.from_session(
                     mock_session, api_keys_service=mock_api_keys
                 )
 

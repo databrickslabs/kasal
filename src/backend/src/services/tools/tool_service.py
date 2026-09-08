@@ -2,7 +2,6 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from src.core.exceptions import (
-    BadRequestError,
     ForbiddenError,
     KasalError,
     NotFoundError,
@@ -73,7 +72,6 @@ class ToolService:
         Args:
             session: Database session from FastAPI DI
         """
-        from src.repositories.tool_repository import ToolRepository
 
         self.session = session
         self.repository = ToolRepository(session)

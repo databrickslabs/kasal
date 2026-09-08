@@ -7,20 +7,10 @@ movement: every method still reads ``self`` exactly as it did in the single
 """
 
 import asyncio
-import base64
-import contextvars
-import json
 import logging
-import re
-from concurrent.futures import ThreadPoolExecutor
-from datetime import date
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional
 
 import httpx
-from pydantic import BaseModel, Field, PrivateAttr
-
-from src.services.tools.base import BaseTool
-from src.services.tools.tool_session_provider import ToolSessionProvider
 
 logger = logging.getLogger(__name__)
 
@@ -515,7 +505,7 @@ class PowerBIModelFetchMixin:
                         error_detail = error_json.get("error", {}).get(
                             "message", response.text
                         )
-                    except:
+                    except Exception:
                         error_detail = response.text[:500]
 
                     logger.debug(

@@ -127,10 +127,7 @@ _OWNED = {
 _BASELINE = {
     "flow_builder -> agent",
     "flow_builder -> crew",
-    "flow_builder -> execution_history",
-    "flow_builder -> execution_trace",
     "flow_builder -> task",
-    "flow_builder -> tool",
 }
 
 

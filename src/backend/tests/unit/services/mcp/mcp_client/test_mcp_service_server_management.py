@@ -6,10 +6,9 @@ get_settings error path, update_settings error path, get_servers_by_names
 decrypt error, enable_server_for_group error paths.
 """
 
-import asyncio
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 

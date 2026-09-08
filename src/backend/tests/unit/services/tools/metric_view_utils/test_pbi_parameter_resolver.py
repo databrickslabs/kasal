@@ -1,7 +1,5 @@
 """Tests for PBI parameter resolver."""
 
-import pytest
-
 from src.services.tools.metric_view_utils.pbi_parameter_resolver import (
     PbiParameterResolver,
 )

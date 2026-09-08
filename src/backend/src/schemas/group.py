@@ -6,7 +6,7 @@ These schemas define the request and response models for group-related endpoints
 
 import os
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from pydantic import (
     BaseModel,

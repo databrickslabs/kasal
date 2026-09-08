@@ -1,8 +1,6 @@
 """Unit tests for task_helpers module."""
 
-import json
-from typing import Any, Dict, List, Optional, Type
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from pydantic import BaseModel, create_model
@@ -244,7 +242,7 @@ class TestGetPydanticClassFromName:
         # Mock the context manager
         mock_uow_class.return_value = mock_uow
 
-        result = await get_pydantic_class_from_name("TestSchema")
+        await get_pydantic_class_from_name("TestSchema")
 
         # Note: With async context manager, initialization is handled differently
 
@@ -576,7 +574,7 @@ class TestCreateTask:
         # Test the guardrail function
         output = Mock()
         valid, result = task.guardrail(output)
-        assert valid == True
+        assert valid
         assert result == output
 
     @pytest.mark.asyncio
@@ -618,7 +616,7 @@ class TestCreateTask:
             # Test the guardrail function with failure
             output = Mock()
             valid, feedback = task.guardrail(output)
-            assert valid == False
+            assert not valid
             assert feedback == "Validation failed"
 
     @pytest.mark.asyncio
@@ -658,7 +656,7 @@ class TestCreateTask:
             # Test the guardrail function with exception
             output = Mock()
             valid, error_msg = task.guardrail(output)
-            assert valid == False
+            assert not valid
             assert "Validation error" in error_msg
 
     @pytest.mark.asyncio
@@ -829,9 +827,7 @@ class TestCreateTask:
             patch(
                 "src.services.tools.mcp_handler.create_kasal_tool_from_mcp"
             ) as mock_create_tool,
-            patch(
-                "src.services.tools.mcp_handler.register_mcp_adapter"
-            ) as mock_register,
+            patch("src.services.tools.mcp_handler.register_mcp_adapter"),
         ):
 
             # Setup MCP service mocks
@@ -1167,8 +1163,8 @@ class TestCreateTask:
 
             task = await create_task(task_key, task_config, agent)
 
-        assert task.async_execution == True
-        assert task.human_input == True
+        assert task.async_execution
+        assert task.human_input
 
     @pytest.mark.asyncio
     async def test_create_task_error_handling(self):
@@ -2671,7 +2667,7 @@ class TestCreateTask:
 
             # No tool_factory provided - should raise validation error since CrewAI requires BaseTool instances
             with pytest.raises(Exception) as exc_info:
-                task = await create_task(
+                await create_task(
                     task_key, task_config, agent, tool_service=mock_tool_service
                 )
 
@@ -2971,7 +2967,7 @@ class TestCreateTask:
 
             mock_configure.side_effect = mock_configure_fn
 
-            task = await create_task(task_key, task_config, agent)
+            await create_task(task_key, task_config, agent)
 
         # Should call configure_output_json_approach
         mock_configure.assert_called_once()
@@ -3184,7 +3180,7 @@ class TestCreateTask:
             mock_adapter.initialize = AsyncMock()
             mock_adapter_class.return_value = mock_adapter
 
-            task = await create_task(task_key, task_config, agent)
+            await create_task(task_key, task_config, agent)
 
         # Verify OAuth was NOT called for regular Databricks server (only for databricksapps.com)
         mock_auth.assert_not_called()
@@ -3240,7 +3236,7 @@ class TestCreateTask:
             mock_adapter.initialize = AsyncMock()
             mock_adapter_class.return_value = mock_adapter
 
-            task = await create_task(task_key, task_config, agent)
+            await create_task(task_key, task_config, agent)
 
         # Verify regular API key authentication was used
         call_args = mock_adapter_class.call_args[0][0]
@@ -3316,7 +3312,7 @@ class TestCreateTask:
             mock_adapter.tools = [mock_mcp_tool]
             mock_get_adapter.return_value = mock_adapter
 
-            task = await create_task(task_key, task_config, agent)
+            await create_task(task_key, task_config, agent)
 
         # Verify the adapter was requested to be created despite auth failure
         mock_get_adapter.assert_called_once()
@@ -3754,7 +3750,7 @@ class TestCreateTask:
 
             # String tools should cause a validation error in CrewAI
             with pytest.raises(Exception) as exc_info:
-                task = await create_task(
+                await create_task(
                     task_key,
                     task_config,
                     agent,
@@ -3913,7 +3909,7 @@ class TestCreateTask:
             mock_adapter.tools = [mock_mcp_tool]
             mock_get_adapter.return_value = mock_adapter
 
-            task = await create_task(task_key, task_config, agent)
+            await create_task(task_key, task_config, agent)
 
             # Verify URL was not modified (should remain ending with /sse)
             call_args = mock_get_adapter.call_args[0][0]
@@ -3993,7 +3989,7 @@ class TestCreateTask:
             mock_adapter.tools = [mock_mcp_tool]
             mock_get_adapter.return_value = mock_adapter
 
-            task = await create_task(task_key, task_config, agent)
+            await create_task(task_key, task_config, agent)
 
             # Verify URL was modified to include /sse
             call_args = mock_get_adapter.call_args[0][0]
@@ -4073,7 +4069,7 @@ class TestCreateTask:
             mock_adapter.tools = [mock_mcp_tool]
             mock_get_adapter.return_value = mock_adapter
 
-            task = await create_task(task_key, task_config, agent)
+            await create_task(task_key, task_config, agent)
 
             # When OAuth fails, no headers should be added (no automatic fallback)
             call_args = mock_get_adapter.call_args[0][0]

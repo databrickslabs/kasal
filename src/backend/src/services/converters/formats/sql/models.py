@@ -5,11 +5,11 @@ Extends the base KBI models with SQL-specific functionality
 
 import re
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from ...base.models import KPI, KPIDefinition
+from ...base.models import KPI
 
 
 class SQLDialect(Enum):
@@ -229,7 +229,6 @@ class SQLQuery(BaseModel):
 
         words = sql.split()
         indent = "    "
-        in_select = False
 
         for word in words:
             word_upper = word.upper().rstrip(",();")
@@ -240,7 +239,6 @@ class SQLQuery(BaseModel):
                     current_line = ""
 
                 if word_upper == "SELECT":
-                    in_select = True
                     current_line = word + " "
                 elif word_upper in [
                     "FROM",
@@ -250,7 +248,6 @@ class SQLQuery(BaseModel):
                     "ORDER BY",
                     "LIMIT",
                 ]:
-                    in_select = False
                     lines.append(word)
                     current_line = indent
                 else:

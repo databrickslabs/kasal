@@ -5,11 +5,6 @@ Tests the functionality of the EngineConfig database model including
 field validation, relationships, and data integrity.
 """
 
-from datetime import datetime
-from unittest.mock import MagicMock
-
-import pytest
-
 from src.models.engine_config import EngineConfig
 
 

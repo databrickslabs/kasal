@@ -10,10 +10,8 @@ This module provides decorators for enforcing the three-tier authorization model
 from functools import wraps
 from typing import Callable, List, Optional
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import HTTPException, status
 
-from src.dependencies.providers import get_group_context
-from src.models.enums import GroupUserRole
 from src.utils.user_context import GroupContext
 
 

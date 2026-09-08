@@ -2,17 +2,14 @@ from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, Path, Query, status
 
-from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import BadRequestError, NotFoundError
-from src.models.chat_history import ChatHistory
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.chat_history import (
     ChatHistoryListResponse,
     ChatHistoryResponse,
     ChatSessionCreateRequest,
     ChatSessionListResponse,
     ChatSessionRenameRequest,
-    GetSessionRequest,
-    GetUserSessionsRequest,
     NamedChatSessionResponse,
     RunningJobResponse,
     SaveMessageRequest,

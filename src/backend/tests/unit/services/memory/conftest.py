@@ -149,7 +149,7 @@ if not _is_installed("crewai"):
 # every memory read and write. In a test session that makes behaviour depend on
 # which test ran first, and this suite runs under pytest-randomly. Clear it
 # around every test so each one starts from "nothing has been checked yet".
-import pytest
+import pytest  # noqa: E402 - import follows module initialization
 
 
 @pytest.fixture(autouse=True)

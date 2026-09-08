@@ -1,9 +1,7 @@
 """Unit tests for PowerBIDaxExecutorTool (Tool 82)."""
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from src.services.tools.powerbi_dax_executor_tool import (
     PowerBIDaxExecutorSchema,

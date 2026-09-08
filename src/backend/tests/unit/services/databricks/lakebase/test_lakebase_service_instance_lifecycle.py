@@ -14,8 +14,7 @@ Targets the uncovered paths in LakebaseService:
   - migrate_existing_data (unavailable)
 """
 
-from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

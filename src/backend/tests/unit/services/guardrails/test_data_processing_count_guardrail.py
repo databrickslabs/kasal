@@ -1,7 +1,4 @@
-import json
-import traceback
-from typing import Any, Dict
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -146,7 +143,9 @@ class TestDataProcessingCountGuardrail:
         assert "meets or exceeds the minimum count (5)" in result["feedback"]
 
     @patch("src.services.guardrails.demo.data_processing_count_guardrail.logger")
-    def test_validate_failure_with_insufficient_records(self, mock_logger):
+    def test_validate_failure_with_insufficient_records(
+        self, mock_logger, mock_repo_class
+    ):
         """Test validate method with insufficient records."""
         # Setup mocks
         mock_sync_session = MagicMock()
@@ -207,7 +206,7 @@ class TestDataProcessingCountGuardrail:
         )
 
     @patch("src.services.guardrails.demo.data_processing_count_guardrail.logger")
-    def test_validate_with_none_session(self, mock_logger):
+    def test_validate_with_none_session(self, mock_logger, mock_repo_class):
         """Test validate method when session is None."""
         # Setup mocks
         mock_sync_session = MagicMock()
@@ -254,7 +253,7 @@ class TestDataProcessingCountGuardrail:
         assert callable(guardrail.validate)
 
     @patch("src.services.guardrails.demo.data_processing_count_guardrail.logger")
-    def test_validate_equal_counts(self, mock_logger):
+    def test_validate_equal_counts(self, mock_logger, mock_repo_class):
         """Test validate method when actual count equals minimum count."""
         # Setup mocks
         mock_sync_session = MagicMock()
@@ -311,7 +310,7 @@ class TestDataProcessingCountGuardrail:
             DataProcessingCountGuardrail(config)
 
     @patch("src.services.guardrails.demo.data_processing_count_guardrail.logger")
-    def test_validate_with_zero_actual_count(self, mock_logger):
+    def test_validate_with_zero_actual_count(self, mock_logger, mock_repo_class):
         """Test validate method with zero actual count."""
         # Setup mocks
         mock_sync_session = MagicMock()
@@ -333,7 +332,9 @@ class TestDataProcessingCountGuardrail:
         )
 
     @patch("src.services.guardrails.demo.data_processing_count_guardrail.logger")
-    def test_validate_with_negative_minimum_count_validation(self, mock_logger):
+    def test_validate_with_negative_minimum_count_validation(
+        self, mock_logger, mock_repo_class
+    ):
         """Test validate method with negative minimum count."""
         # Setup mocks
         mock_sync_session = MagicMock()
@@ -417,7 +418,7 @@ class TestDataProcessingCountGuardrail:
         mock_repo_class.return_value = mock_repo
 
         guardrail = DataProcessingCountGuardrail({"minimum_count": 5})
-        result = guardrail.validate("test_output")
+        guardrail.validate("test_output")
 
         # Verify all expected log calls are made
         mock_logger.info.assert_any_call(

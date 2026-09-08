@@ -7,8 +7,6 @@ and that the LRU eviction policy works correctly.
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 _INJECTION_RC = "src.services.guardrails.core.llm_injection_guardrail._run_completion"
 _REFLECTION_RC = (
     "src.services.guardrails.core.self_reflection_guardrail._run_completion"

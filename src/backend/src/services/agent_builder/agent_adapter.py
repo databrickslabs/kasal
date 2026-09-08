@@ -5,13 +5,16 @@ Utilities for Agent configuration, validation, and setup.
 
 This module provides helper functions for working with CrewAI agents.
 """
-from typing import Any, Dict, List, Optional
+from typing import (  # noqa: E402 - import follows module initialization
+    Any,
+    Dict,
+    List,
+    Optional,
+)
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from src.core.logger import LoggerManager
-from src.services.execution.kernel.tool_helpers import resolve_tool_ids_to_names
-from src.utils.model_config import model_rejects_temperature
+from src.core.logger import (  # noqa: E402 - import follows module initialization
+    LoggerManager,
+)
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().crew

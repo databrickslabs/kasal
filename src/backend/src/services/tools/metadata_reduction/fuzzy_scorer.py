@@ -374,7 +374,7 @@ class FuzzyScorer:
         kept = []
         for col in columns:
             col_name = col.get("name", "") if isinstance(col, dict) else str(col)
-            col_name_lower = col_name.lower()
+            col_name.lower()
 
             # Always keep: relationship columns
             if col_name in kept_rel_cols:

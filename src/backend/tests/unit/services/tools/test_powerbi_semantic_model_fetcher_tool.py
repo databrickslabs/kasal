@@ -474,7 +474,7 @@ class TestFetcherOutputStructure:
 # Async pipeline tests (directly testing async methods)
 # ===========================================================================
 
-import asyncio
+import asyncio  # noqa: E402 - import follows module initialization
 
 
 class TestFetcherPipelineAsync:
@@ -650,7 +650,6 @@ class TestFetcherParseTmdlMeasuresAndTables:
 # NEW COMPREHENSIVE TESTS — added to increase coverage
 # ===========================================================================
 
-import asyncio
 
 # ===========================================================================
 # _merge_slicer_defaults_into_filters tests
@@ -2045,8 +2044,6 @@ class TestFetcherSlicerDistinctValues:
         model_context = {"sample_data": {}}
         call_count = [0]
 
-        original_execute = self.tool._execute_dax_query
-
         async def counting_execute(ws, ds, token, dax):
             call_count[0] += 1
             return {"success": True, "data": [{"[BU]": "Italy"}]}
@@ -2118,7 +2115,6 @@ class TestFetcherExtractReportDefinitionParts:
         assert result == []
 
     def test_202_with_location_succeeds(self):
-        import json as _json
 
         parts = [{"path": "report.json", "payload": "abc"}]
 
@@ -3716,7 +3712,6 @@ class TestFetcherGetFabricToken:
         """_get_fabric_token exists and can be called with a mocked auth helper."""
         from unittest.mock import AsyncMock, patch
 
-        config = {"tenant_id": "t1", "client_id": "c1", "client_secret": "s1"}
         with patch(
             "src.services.tools.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelFetcherTool._get_fabric_token",
             new_callable=lambda: AsyncMock(return_value="fabric-token"),

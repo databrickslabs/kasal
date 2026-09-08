@@ -11,7 +11,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.core.exceptions import ForbiddenError, KasalError, NotFoundError
-from src.schemas.tool import ToggleResponse, ToolCreate, ToolResponse, ToolUpdate
 from src.services.tools.tool_service import ToolService
 
 
@@ -110,7 +109,7 @@ async def test_get_tool_with_group_check_default_tool_always_accessible():
     ctx = make_group_context()
     with patch("src.services.tools.tool_service.ToolResponse") as mock_resp:
         mock_resp.model_validate.return_value = MagicMock(id=1)
-        result = await svc.get_tool_with_group_check(1, ctx)
+        await svc.get_tool_with_group_check(1, ctx)
     mock_resp.model_validate.assert_called_once_with(tool)
 
 
@@ -153,7 +152,7 @@ async def test_create_tool_with_group_adds_group_info():
     ctx = make_group_context()
     with patch("src.services.tools.tool_service.ToolResponse") as mock_resp:
         mock_resp.model_validate.return_value = MagicMock(id=1)
-        result = await svc.create_tool_with_group(tool_data, ctx)
+        await svc.create_tool_with_group(tool_data, ctx)
     call_dict = svc.repository.create.call_args[0][0]
     assert call_dict.get("group_id") == "g1"
 

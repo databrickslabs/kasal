@@ -267,7 +267,7 @@ class TestCreateMemoryConfig:
                 "src.api.memory_backend.configs_router.MemoryBackendResponse"
             ) as mock_resp:
                 mock_resp.model_validate.return_value = {"id": "1"}
-                result = await create_memory_config(
+                await create_memory_config(
                     config=config,
                     group_context=_admin_ctx(),
                     service=svc,

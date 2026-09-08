@@ -223,7 +223,7 @@ class DAXExpressionParser:
 
             # For each variable, try to substitute all other variables into it
             for i, var in enumerate(working_vars):
-                original_expr = var["variable_expr"]
+                var["variable_expr"]
 
                 # Sort other variables by name length (longest first) to avoid partial matches
                 other_vars = [

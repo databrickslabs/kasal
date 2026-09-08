@@ -239,7 +239,7 @@ class TestGetExecutionById:
         tenant_ids = [str(uuid.uuid4())]
         mock_history_repo.get_execution_by_id = AsyncMock(return_value=None)
 
-        result = await service.get_execution_by_id(1, tenant_ids=tenant_ids)
+        await service.get_execution_by_id(1, tenant_ids=tenant_ids)
 
         mock_history_repo.get_execution_by_id.assert_called_once_with(
             1, tenant_ids=tenant_ids

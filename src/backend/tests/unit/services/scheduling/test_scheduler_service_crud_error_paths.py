@@ -17,9 +17,8 @@ Targets uncovered paths:
   - shutdown (empty tasks, running tasks)
 """
 
-import asyncio
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -110,7 +109,7 @@ class TestCreateSchedule:
             patch("src.services.scheduling.scheduler.ScheduleResponse") as mock_resp,
         ):
             mock_resp.model_validate.return_value = MagicMock(id=1, name="My Schedule")
-            result = await svc.create_schedule(schedule_data)
+            await svc.create_schedule(schedule_data)
         svc.repository.create.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -129,7 +128,7 @@ class TestCreateSchedule:
             patch("src.services.scheduling.scheduler.ScheduleResponse") as mock_resp,
         ):
             mock_resp.model_validate.return_value = MagicMock(group_id="grp-42")
-            result = await svc.create_schedule(schedule_data, gc)
+            await svc.create_schedule(schedule_data, gc)
         # Verify group_id was set in the dict passed to create
         call_args = svc.repository.create.call_args[0][0]
         assert call_args.get("group_id") == "grp-42"
@@ -231,7 +230,7 @@ class TestCreateScheduleFromExecution:
             patch("src.services.scheduling.scheduler.ScheduleResponse") as mock_resp,
         ):
             mock_resp.model_validate.return_value = MagicMock(id=1)
-            result = await svc.create_schedule_from_execution(data)
+            await svc.create_schedule_from_execution(data)
         svc.repository.create.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -279,7 +278,7 @@ class TestCreateScheduleFromExecution:
             patch("src.services.scheduling.scheduler.ScheduleResponse") as mock_resp,
         ):
             mock_resp.model_validate.return_value = MagicMock(id=1)
-            result = await svc.create_schedule_from_execution(data)
+            await svc.create_schedule_from_execution(data)
         svc.repository.create.assert_awaited_once()
 
 
@@ -305,7 +304,7 @@ class TestGetAllSchedules:
         svc.repository.find_by_group = AsyncMock(return_value=[])
         with patch("src.services.scheduling.scheduler.ScheduleResponse") as mock_resp:
             mock_resp.model_validate.side_effect = lambda s: s
-            result = await svc.get_all_schedules(group_context=gc)
+            await svc.get_all_schedules(group_context=gc)
         svc.repository.find_by_group.assert_awaited_once_with("grp-5")
 
     @pytest.mark.asyncio
@@ -332,7 +331,7 @@ class TestGetScheduleById:
         svc.repository.find_by_id = AsyncMock(return_value=mock_sched)
         with patch("src.services.scheduling.scheduler.ScheduleResponse") as mock_resp:
             mock_resp.model_validate.return_value = MagicMock(id=5)
-            result = await svc.get_schedule_by_id(5)
+            await svc.get_schedule_by_id(5)
         svc.repository.find_by_id.assert_awaited_once_with(5)
 
     @pytest.mark.asyncio
@@ -359,7 +358,7 @@ class TestGetScheduleByIdWithGroupCheck:
         svc.repository.find_by_id = AsyncMock(return_value=mock_sched)
         with patch("src.services.scheduling.scheduler.ScheduleResponse") as mock_resp:
             mock_resp.model_validate.return_value = MagicMock(id=7)
-            result = await svc.get_schedule_by_id_with_group_check(7, gc)
+            await svc.get_schedule_by_id_with_group_check(7, gc)
 
     @pytest.mark.asyncio
     async def test_wrong_group_raises_not_found(self):
@@ -396,7 +395,7 @@ class TestUpdateSchedule:
         su = _make_schedule_update()
         with patch("src.services.scheduling.scheduler.ScheduleResponse") as mock_resp:
             mock_resp.model_validate.return_value = MagicMock(id=3)
-            result = await svc.update_schedule(3, su)
+            await svc.update_schedule(3, su)
         svc.repository.update.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -447,7 +446,7 @@ class TestUpdateScheduleWithGroupCheck:
         su = _make_schedule_update()
         with patch("src.services.scheduling.scheduler.ScheduleResponse") as mock_resp:
             mock_resp.model_validate.return_value = MagicMock(id=10)
-            result = await svc.update_schedule_with_group_check(10, su, gc)
+            await svc.update_schedule_with_group_check(10, su, gc)
 
     @pytest.mark.asyncio
     async def test_update_wrong_group_raises_not_found(self):
@@ -554,7 +553,7 @@ class TestToggleSchedule:
         svc.repository.toggle_active = AsyncMock(return_value=mock_sched)
         with patch("src.services.scheduling.scheduler.ToggleResponse") as mock_tr:
             mock_tr.model_validate.return_value = MagicMock(is_active=False)
-            result = await svc.toggle_schedule(1)
+            await svc.toggle_schedule(1)
         svc.repository.toggle_active.assert_awaited_once_with(1)
 
     @pytest.mark.asyncio
@@ -592,7 +591,7 @@ class TestToggleScheduleWithGroupCheck:
         svc.repository.toggle_active = AsyncMock(return_value=toggled)
         with patch("src.services.scheduling.scheduler.ToggleResponse") as mock_tr:
             mock_tr.model_validate.return_value = MagicMock(is_active=False)
-            result = await svc.toggle_schedule_with_group_check(5, gc)
+            await svc.toggle_schedule_with_group_check(5, gc)
 
     @pytest.mark.asyncio
     async def test_toggle_wrong_group_raises_not_found(self):

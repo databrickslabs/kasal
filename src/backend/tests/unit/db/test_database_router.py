@@ -11,8 +11,7 @@ import os
 import sqlite3
 import tempfile
 from contextvars import Token
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -547,7 +546,7 @@ class TestGetSmartDbSessionRegularPath:
             from src.db.database_router import get_smart_db_session
 
             gen = get_smart_db_session()
-            session = await gen.__anext__()
+            await gen.__anext__()
 
             # At this point, set should have been called but reset should not
             mock_request_session.set.assert_called_once_with(mock_session)

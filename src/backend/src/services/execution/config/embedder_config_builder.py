@@ -9,7 +9,6 @@ Handles embedder setup for:
 - Other providers
 """
 
-import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.core.logger import LoggerManager

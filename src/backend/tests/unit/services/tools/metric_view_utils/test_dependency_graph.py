@@ -1,7 +1,5 @@
 """Tests for measure dependency graph — topological sort + cycle detection."""
 
-import pytest
-
 from src.services.tools.metric_view_utils.dependency_graph import (
     _find_measure_refs,
     build_dependency_graph,

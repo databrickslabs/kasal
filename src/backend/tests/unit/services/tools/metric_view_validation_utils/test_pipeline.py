@@ -3,8 +3,6 @@
 import json
 import textwrap
 
-import pytest
-
 from src.services.tools.metric_view_validation_utils.pipeline import (
     MetricExpressionValidatorPipeline,
 )

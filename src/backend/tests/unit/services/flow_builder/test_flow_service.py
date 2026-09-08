@@ -5,7 +5,6 @@ Tests the functionality of flow operations including
 flow CRUD operations, flow validation, and crew-based flow management.
 """
 
-import json
 import uuid
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -19,8 +18,7 @@ from src.core.exceptions import (
     KasalError,
     NotFoundError,
 )
-from src.models.flow import Flow
-from src.schemas.flow import Edge, FlowCreate, FlowUpdate, Node, NodeData, Position
+from src.schemas.flow import FlowCreate, FlowUpdate
 from src.services.flow_builder.flow_service import FlowService
 
 

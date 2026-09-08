@@ -7,10 +7,7 @@ with different LLM providers that have varying JSON schema support.
 
 import json
 import logging
-import os
-from typing import Any, Dict, Optional, Tuple, Type
-
-from pydantic import BaseModel
+from typing import Any, Dict, Optional
 
 # Setup logging
 logger = logging.getLogger(__name__)

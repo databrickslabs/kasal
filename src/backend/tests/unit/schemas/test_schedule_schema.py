@@ -6,7 +6,6 @@ including validation, serialization, and field constraints.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List
 from uuid import UUID, uuid4
 
 import pytest

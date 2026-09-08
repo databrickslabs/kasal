@@ -5,10 +5,7 @@ Tests the functionality of the ApiKey database model including
 field validation, relationships, and data integrity.
 """
 
-from datetime import datetime, timezone
-from unittest.mock import MagicMock
-
-import pytest
+from datetime import datetime
 
 from src.models.api_key import ApiKey
 
@@ -118,7 +115,7 @@ class TestApiKey:
     def test_api_key_primary_key(self):
         """Test that primary key is correctly configured."""
         # Act
-        api_key = ApiKey(name="pk_test", encrypted_value="encrypted_value")
+        ApiKey(name="pk_test", encrypted_value="encrypted_value")
 
         # Assert
         id_column = ApiKey.__table__.columns["id"]
@@ -428,14 +425,12 @@ class TestApiKeyEdgeCases:
     def test_api_key_timestamp_behavior(self):
         """Test timestamp behavior in ApiKey."""
         # Arrange
-        before_creation = datetime.utcnow()
+        datetime.utcnow()
 
         # Act
-        api_key = ApiKey(
-            name="timestamp_test", encrypted_value="encrypted_timestamp_value"
-        )
+        ApiKey(name="timestamp_test", encrypted_value="encrypted_timestamp_value")
 
-        after_creation = datetime.utcnow()
+        datetime.utcnow()
 
         # Assert
         # Note: created_at and updated_at are set by database defaults

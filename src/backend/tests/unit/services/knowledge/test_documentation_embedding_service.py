@@ -11,12 +11,10 @@ Tests the functionality of the documentation embedding service including:
 - Error handling and fallback paths
 """
 
-import asyncio
 import os
-import uuid
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

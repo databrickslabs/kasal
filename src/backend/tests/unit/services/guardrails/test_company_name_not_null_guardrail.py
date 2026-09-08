@@ -6,9 +6,7 @@ Goal: push coverage from 33.3% to 50%+
 """
 
 import json
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 # ---------------------------------------------------------------------------
 # Helper: suppress the logger so tests stay silent
@@ -129,7 +127,6 @@ class TestCompanyNameNotNullGuardrailValidate:
         g = CompanyNameNotNullGuardrail(config={})
 
         # Monkey-patch the try block to raise
-        original_validate = g.validate
 
         def bad_validate(output):
             raise RuntimeError("unexpected DB error")

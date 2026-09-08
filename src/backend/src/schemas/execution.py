@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.core.llm.effort import apply_effort_to_config
-from src.models.execution_status import ExecutionStatus
+from src.models.execution_status import ExecutionStatus as ExecutionStatus
 
 
 class ExecutionNameGenerationRequest(BaseModel):

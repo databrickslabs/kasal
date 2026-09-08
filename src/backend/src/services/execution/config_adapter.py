@@ -6,12 +6,17 @@ Configuration Adapter for CrewAI engine.
 This module provides functionality for adapting various configuration formats
 to the format expected by the CrewAI engine.
 """
-import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict  # noqa: E402 - import follows module initialization
 
-from src.core.logger import LoggerManager
-from src.schemas.execution import CrewConfig
-from src.services.agent_builder.conversion_helpers import extract_crew_yaml_data
+from src.core.logger import (  # noqa: E402 - import follows module initialization
+    LoggerManager,
+)
+from src.schemas.execution import (  # noqa: E402 - import follows module initialization
+    CrewConfig,
+)
+from src.services.agent_builder.conversion_helpers import (  # noqa: E402 - import follows module initialization
+    extract_crew_yaml_data,
+)
 
 
 def get_execution_logger(config: dict = None):

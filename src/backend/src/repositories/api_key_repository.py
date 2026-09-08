@@ -101,7 +101,7 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
             from src.utils.encryption_utils import EncryptionUtils
 
             return EncryptionUtils.decrypt_value(api_key.encrypted_value)
-        except Exception as e:
+        except Exception:
             return None
 
     async def get_provider_api_key(self, provider: str) -> Optional[str]:

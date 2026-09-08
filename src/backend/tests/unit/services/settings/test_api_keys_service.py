@@ -7,7 +7,7 @@ in src/services/api_keys_service.py.
 
 import os
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -316,7 +316,7 @@ class TestUpdateApiKey:
 
         with patch("src.services.settings.api_keys.EncryptionUtils") as EU:
             EU.encrypt_value.return_value = "enc"
-            result = await service.update_api_key("KEY", data)
+            await service.update_api_key("KEY", data)
 
         _, update_dict = repo.update.call_args[0]
         assert "description" not in update_dict

@@ -8,7 +8,6 @@ run ship the instant shell and then stream nothing at all for the deck, which
 looked exactly like "composition is slow" in the logs.
 """
 
-import asyncio
 import json
 from typing import Any, Dict, List
 

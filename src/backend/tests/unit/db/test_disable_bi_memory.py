@@ -9,8 +9,6 @@ self-heal flips them off. Verifies it disables only the bi-specialist group, is
 idempotent, and leaves other groups untouched.
 """
 
-from unittest.mock import MagicMock, patch
-
 import pytest
 from sqlalchemy.ext.asyncio import create_async_engine
 

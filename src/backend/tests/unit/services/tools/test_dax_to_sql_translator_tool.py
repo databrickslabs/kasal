@@ -1,9 +1,6 @@
 """Tests for DaxToSqlTranslatorTool."""
 
 import json
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 from src.services.tools.dax_to_sql_translator_tool import DaxToSqlTranslatorTool
 

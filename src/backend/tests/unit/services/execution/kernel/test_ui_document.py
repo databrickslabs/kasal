@@ -2,8 +2,6 @@
 
 import json
 
-import pytest
-
 from src.services.export.ui_document import (
     _balanced_block,
     _coerce_json,

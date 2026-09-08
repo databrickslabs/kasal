@@ -40,7 +40,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ def outcome_crews(flow_config: Dict[str, Any]) -> Set[str]:
     An explicit ``outcome: true`` on a crew overrides the default, because a flow
     can legitimately have a mid-graph crew that is worth asking for on its own.
     """
-    entries = crew_entries(flow_config)
+    crew_entries(flow_config)
 
     # Writing a line about what a crew delivers IS marking it askable — a
     # separate "this is an outcome" flag would be a second thing to remember

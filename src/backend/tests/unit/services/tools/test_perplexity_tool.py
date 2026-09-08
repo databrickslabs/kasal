@@ -1,6 +1,6 @@
 """Unit tests for PerplexitySearchTool."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
@@ -56,7 +56,7 @@ class TestPerplexitySearchTool:
     def test_api_key_fallback(self):
         """Test that the tool raises error when no API key is provided."""
         with pytest.raises(ValueError, match="Perplexity API key is required"):
-            tool = PerplexitySearchTool()
+            PerplexitySearchTool()
 
     @patch("requests.post")
     def test_run_successful_query(self, mock_post):
@@ -156,7 +156,7 @@ class TestPerplexitySearchTool:
             return_related_questions=True,
             search_recency_filter="week",
         )
-        result = tool._run("Test query")
+        tool._run("Test query")
 
         # Verify optional parameters were included
         call_args = mock_post.call_args

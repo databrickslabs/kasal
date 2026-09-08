@@ -13,14 +13,13 @@ Tests cover:
 """
 
 import os
-import sys
 from unittest.mock import MagicMock
 
 # Set database type to sqlite for testing
 os.environ.setdefault("DATABASE_TYPE", "sqlite")
 os.environ.setdefault("SQLITE_DB_PATH", ":memory:")
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 # No sys.modules stubbing: kasal_engine is a real vendored package here, and
 # stubbing it cached MagicMock-holding src.services modules that broke unrelated

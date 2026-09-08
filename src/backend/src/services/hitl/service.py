@@ -17,7 +17,6 @@ from src.models.execution_status import ExecutionStatus
 from src.models.hitl_approval import (
     HITLApproval,
     HITLApprovalStatus,
-    HITLRejectionAction,
     HITLTimeoutAction,
 )
 from src.repositories.hitl_repository import (
@@ -27,7 +26,6 @@ from src.repositories.hitl_repository import (
 from src.schemas.hitl import (
     ExecutionHITLStatus,
     HITLActionResponse,
-    HITLApprovalCreate,
     HITLApprovalListResponse,
     HITLApprovalResponse,
     HITLApprovalStatusEnum,

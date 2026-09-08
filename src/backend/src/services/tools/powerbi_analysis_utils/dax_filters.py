@@ -6,21 +6,8 @@ movement: every method still reads ``self`` exactly as it did in the single
 3,506-line file, and every ``tool._method(...)`` call site is unchanged.
 """
 
-import asyncio
-import base64
-import contextvars
-import json
 import logging
-import re
-from concurrent.futures import ThreadPoolExecutor
-from datetime import date
-from typing import Any, Dict, List, Optional, Type
-
-import httpx
-from pydantic import BaseModel, Field, PrivateAttr
-
-from src.services.tools.base import BaseTool
-from src.services.tools.tool_session_provider import ToolSessionProvider
+from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 

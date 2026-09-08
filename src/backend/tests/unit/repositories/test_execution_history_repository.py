@@ -10,15 +10,12 @@ Tests cover:
 - Error handling and edge cases
 """
 
-from datetime import datetime, timezone
-from typing import List, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.execution_history import ErrorTrace, ExecutionHistory, TaskStatus
 from src.repositories.execution_history_repository import ExecutionHistoryRepository
 
 

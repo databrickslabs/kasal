@@ -10,8 +10,7 @@ Uses unified authentication from get_auth_context() which implements:
 
 import asyncio
 import logging
-import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import httpx
 

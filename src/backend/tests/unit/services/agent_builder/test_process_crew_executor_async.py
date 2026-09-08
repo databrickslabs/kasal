@@ -9,11 +9,8 @@ Tests the process-based crew execution system including:
 - Multi-tenant support
 """
 
-import asyncio
-import multiprocessing as mp
 import os
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -59,7 +56,7 @@ class TestProcessCrewExecutorInit:
 
             from src.services.agent_builder.process_executor import ProcessCrewExecutor
 
-            executor = ProcessCrewExecutor()
+            ProcessCrewExecutor()
 
             assert os.environ.get("PYTHONUNBUFFERED") == "0"
             assert os.environ.get("CREWAI_VERBOSE") == "false"
@@ -73,7 +70,7 @@ class TestProcessCrewExecutorInit:
 
             from src.services.agent_builder.process_executor import ProcessCrewExecutor
 
-            executor = ProcessCrewExecutor()
+            ProcessCrewExecutor()
 
             mock_ctx.assert_called_once_with("spawn")
 
@@ -222,7 +219,7 @@ class TestRunCrewIsolated:
         crew_config = {"agents": [], "tasks": []}
 
         with patch.object(executor, "_process_log_queue", new_callable=AsyncMock):
-            result = await executor.run_crew_isolated(
+            await executor.run_crew_isolated(
                 execution_id="test-exec-1",
                 crew_config=crew_config,
                 group_context=mock_group_context,
@@ -778,7 +775,6 @@ class TestModuleLevelEnvironment:
     def test_crewai_tracing_disabled(self):
         """Test that CrewAI tracing is disabled at module level."""
         # Import triggers module-level setup
-        import src.services.agent_builder.process_executor
 
         assert os.environ.get("CREWAI_TRACING_ENABLED") == "false"
         assert os.environ.get("CREWAI_TELEMETRY_OPT_OUT") == "1"
@@ -786,7 +782,6 @@ class TestModuleLevelEnvironment:
 
     def test_crewai_cloud_tracing_disabled(self):
         """Test that CrewAI cloud tracing is disabled."""
-        import src.services.agent_builder.process_executor
 
         assert os.environ.get("CREWAI_CLOUD_TRACING") == "false"
         assert os.environ.get("CREWAI_CLOUD_TRACING_ENABLED") == "false"

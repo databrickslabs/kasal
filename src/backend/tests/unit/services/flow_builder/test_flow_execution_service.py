@@ -15,7 +15,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.models.execution_history import ExecutionHistory
 from src.services.flow_builder.execution_service import FlowExecutionService
 
 
@@ -158,7 +157,7 @@ class TestFlowExecutionService:
             return_value=None
         )
 
-        result = await flow_execution_service.create_execution(
+        await flow_execution_service.create_execution(
             flow_id=flow_id, job_id=job_id, config=config, group_id=group_id
         )
 

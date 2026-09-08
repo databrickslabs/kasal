@@ -5,12 +5,10 @@ This guardrail checks if any company_name in the data_processing table is null.
 """
 
 import json
-import logging
 import traceback
 from typing import Any, Dict, Union
 
 from src.core.logger import LoggerManager
-from src.repositories.data_processing_repository import DataProcessingRepository
 from src.services.guardrails.base_guardrail import BaseGuardrail
 
 # Database operations disabled in guardrails (sync context)

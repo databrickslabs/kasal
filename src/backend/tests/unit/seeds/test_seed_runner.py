@@ -12,10 +12,9 @@ Tests cover:
 """
 
 import asyncio
-import sys
 import types
 from collections import OrderedDict
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -428,7 +427,7 @@ class TestResyncPostgresSequences:
 
         # The function uses from ... import, which we can break by removing from sys.modules
         # Simplest: just patch to raise at the top level
-        with patch.object(seed_runner.logger, "debug") as mock_debug:
+        with patch.object(seed_runner.logger, "debug"):
             with patch.dict(
                 "sys.modules",
                 {"src.config.settings": None},

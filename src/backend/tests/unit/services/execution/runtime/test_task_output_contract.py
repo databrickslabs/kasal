@@ -13,8 +13,6 @@ Three defects are pinned here, each of which was invisible because the run still
   already succeeded.
 """
 
-from typing import Any
-
 import pytest
 from pydantic import BaseModel
 

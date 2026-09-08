@@ -6,19 +6,16 @@ service methods, status management, and execution logic.
 """
 
 import asyncio
-import json
 import uuid
 from datetime import UTC, datetime
-from typing import Any, Dict, List
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.schemas.execution import CrewConfig, ExecutionCreateResponse, ExecutionStatus
+from src.schemas.execution import CrewConfig, ExecutionStatus
 from src.services.execution.kasal_service import KasalExecutionService
 from src.services.execution.naming import ExecutionNameService
 from src.services.execution.service import ExecutionService
-from src.services.execution.status import ExecutionStatusService
 from src.utils.user_context import GroupContext
 
 

@@ -55,12 +55,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from src.core.llm.robust_json import robust_json_parser
 from src.schemas.crew_publication import PublishedCapability
 
 # The row this prompt normally comes from is seeded from this constant. Imported
 # as the fallback rather than copied — see build_route_messages.
 from src.seeds.prompt_templates import ROUTE_CAPABILITY_TEMPLATE
-from src.core.llm.robust_json import robust_json_parser
 
 logger = logging.getLogger(__name__)
 

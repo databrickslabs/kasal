@@ -3,9 +3,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import ForbiddenError
 from src.core.permissions import is_workspace_admin
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.ui_config import UIConfigResponse, UIConfigUpdate
 from src.services.settings.ui import UIConfigService
 

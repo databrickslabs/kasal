@@ -12,7 +12,7 @@ import os
 import re
 import time
 from contextlib import nullcontext
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     import mlflow as _mlflow
@@ -25,12 +25,8 @@ except ImportError:
 
 from src.core.cache import intent_cache
 from src.core.llm.robust_json import robust_json_parser
-from src.schemas.crew import (
-    CrewGenerationRequest,
-    CrewGenerationResponse,
-)
 from src.schemas.dispatcher import DispatcherRequest, DispatcherResponse, IntentType
-from src.schemas.task_generation import TaskGenerationRequest, TaskGenerationResponse
+from src.schemas.task_generation import TaskGenerationRequest
 
 # The templates these prompts come from live in the database and are optimizable
 # by GEPA; these constants are the rows' own source, used only when the row is
@@ -41,14 +37,12 @@ from src.services.catalog.templates import TemplateService
 from src.services.chat.capability_dispatch import route_and_dispatch
 from src.services.chat.intent_dispatch import detect_request_intent
 from src.services.chat.slash_commands import detect_slash_command
-from src.services.databricks.workspace.service import DatabricksService
 from src.services.execution.logs.llm_log_service import LLMLogService
 from src.services.flow_builder.flow_service import FlowService
 from src.services.generation.agents import AgentGenerationService
 from src.services.generation.crews import CrewGenerationService
 from src.services.generation.tasks import TaskGenerationService
 from src.services.llm.manager import LLMManager
-from src.services.mlflow.service import MLflowService
 from src.utils.user_context import GroupContext
 
 # Configure logging
@@ -1022,7 +1016,7 @@ Please analyze this message and provide your intent classification."""
                     logger.warning(
                         f"Clamped confidence from {confidence_value} to {result['confidence']}"
                     )
-            except (ValueError, TypeError) as e:
+            except (ValueError, TypeError):
                 logger.warning(
                     f"Invalid confidence value: {result['confidence']}, defaulting to 0.5"
                 )

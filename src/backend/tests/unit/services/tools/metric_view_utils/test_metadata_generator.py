@@ -1,7 +1,5 @@
 """Tests for metadata generator."""
 
-import pytest
-
 from src.services.tools.metric_view_utils.metadata_generator import MetadataGenerator
 
 

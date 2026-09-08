@@ -1,12 +1,8 @@
 import asyncio
 import base64
-import json
 import os
 import unittest
-from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
-
-import aiohttp
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.services.tools.databricks_jobs_tool import (
     DatabricksJobsTool,
@@ -2356,7 +2352,7 @@ class TestDatabricksJobsToolAdditionalCoverage(unittest.TestCase):
         mock_session.__aexit__ = AsyncMock(return_value=None)
         mock_session_class.return_value = mock_session
 
-        result = asyncio.run(
+        asyncio.run(
             tool._make_api_call(
                 "GET", "/api/2.2/jobs/list?foo=bar", params={"limit": 5}
             )
@@ -2923,7 +2919,7 @@ class TestDatabricksJobsToolAdditionalCoverage(unittest.TestCase):
         mock_api_call.return_value = {"run_id": 555}
 
         tasks = [{"task_key": "t1"}]
-        result = asyncio.run(tool._submit_run(tasks, job_params=["--a", "b"]))
+        asyncio.run(tool._submit_run(tasks, job_params=["--a", "b"]))
         payload = mock_api_call.call_args[0][2]
         self.assertIn("python_params", payload)
 

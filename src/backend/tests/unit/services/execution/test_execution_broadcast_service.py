@@ -7,7 +7,7 @@ including polling, status tracking, and event broadcasting.
 
 import asyncio
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

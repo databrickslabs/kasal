@@ -13,7 +13,7 @@ Focus areas:
 
 import asyncio
 import uuid
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -695,7 +695,7 @@ class TestStartingPointMethodBranches:
             with patch("asyncio.wait_for", new_callable=AsyncMock) as mock_wait:
                 mock_wait.return_value = MagicMock(raw="result")
                 inner = method.__wrapped__ if hasattr(method, "__wrapped__") else method
-                result = await inner(mock_flow)
+                await inner(mock_flow)
 
             # Crew was created
             mock_crew_cls.assert_called_once()
@@ -961,7 +961,6 @@ class TestListenerMethodBranches:
     @pytest.mark.asyncio
     async def test_listener_timeout(self):
         """Listener method handles asyncio.TimeoutError correctly."""
-        import asyncio
 
         from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 

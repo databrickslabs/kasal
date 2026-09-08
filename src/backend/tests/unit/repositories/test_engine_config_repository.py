@@ -6,8 +6,7 @@ CRUD operations, configuration management, enabled/disabled filtering, and error
 """
 
 from datetime import datetime
-from typing import List
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy import select

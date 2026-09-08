@@ -1,8 +1,6 @@
 import asyncio
 import logging
-import os
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Type, Union
+from typing import List, Optional, Type
 
 import aiohttp
 from pydantic import BaseModel, Field, PrivateAttr, field_validator
@@ -540,7 +538,7 @@ class GenieTool(BaseTool):
 
         try:
             # Check if there's already a running event loop
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
             # We're in an event loop, run in a thread pool with a new loop
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(run_async_in_new_loop)

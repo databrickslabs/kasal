@@ -5,7 +5,6 @@ Covers GenieTool initialisation, config parsing, helper methods, _run,
 _run_async (mocked HTTP), and _extract_response.
 """
 
-import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 

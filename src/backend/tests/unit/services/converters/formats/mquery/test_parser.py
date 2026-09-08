@@ -8,13 +8,10 @@ and TableFromRowsConverter (static data table conversion to SQL).
 import pytest
 
 from src.services.converters.formats.mquery.models import (
-    ColumnDataType,
     ExpressionType,
     MQueryExpression,
     PowerBITable,
     StorageMode,
-    TableColumn,
-    TableMeasure,
 )
 from src.services.converters.formats.mquery.parser import (
     MQueryParser,

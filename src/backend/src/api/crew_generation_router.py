@@ -11,13 +11,12 @@ import uuid
 
 from fastapi import APIRouter
 
-from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import BadRequestError
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.crew import (
     CrewCreationResponse,
     CrewFromConversationRequest,
     CrewGenerationRequest,
-    CrewGenerationResponse,
     CrewStreamingRequest,
     CrewStreamingResponse,
 )

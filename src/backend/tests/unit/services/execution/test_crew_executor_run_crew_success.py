@@ -5,13 +5,10 @@ Targets uncovered lines: run_crew, request_stop edge cases, metrics, shutdown.
 
 import asyncio
 import threading
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-
-import src.services.execution.thread_executor as crew_executor_module
 
 
 def _fresh_executor(max_workers=3):
@@ -369,7 +366,7 @@ class TestCleanupOldExecutions:
         mock_crew.kickoff.return_value = "result"
 
         # Run a new execution to trigger cleanup
-        result = await executor.run_crew(
+        await executor.run_crew(
             execution_id="trigger-cleanup",
             crew=mock_crew,
         )

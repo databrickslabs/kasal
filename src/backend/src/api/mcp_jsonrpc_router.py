@@ -25,7 +25,7 @@ import json
 import logging
 from typing import Annotated, Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.dependencies.providers import SessionDep

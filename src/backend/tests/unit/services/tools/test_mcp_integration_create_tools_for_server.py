@@ -12,8 +12,7 @@ Covers missing lines:
 - _resolve_agent_reference - exception path
 """
 
-import os
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

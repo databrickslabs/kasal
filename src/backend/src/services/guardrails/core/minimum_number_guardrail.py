@@ -3,11 +3,9 @@ Guardrail to validate that a task output contains a number larger than a specifi
 """
 
 import json
-import logging
-import os
 import re
 import traceback
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 from src.core.logger import LoggerManager
 from src.services.guardrails.base_guardrail import BaseGuardrail, is_task_output

@@ -2,17 +2,13 @@
 Databricks Volume callback for storing task outputs in Databricks Volumes.
 """
 
-import asyncio
 import io
 import json
 import logging
-import os
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.service import files
 
 from src.services.databricks.volumes.base import KasalCallback
 from src.utils.databricks_auth import get_workspace_client

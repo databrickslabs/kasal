@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime
 from typing import Dict, List
 
 from src.db.session import async_session_factory

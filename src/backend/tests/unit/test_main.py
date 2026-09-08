@@ -6,11 +6,10 @@ environment configuration.
 """
 
 import os
-from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
+
 from tests.unit.route_utils import route_paths
 
 

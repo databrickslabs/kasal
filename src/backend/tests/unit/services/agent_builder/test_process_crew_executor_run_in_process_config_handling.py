@@ -14,11 +14,9 @@ Key targets:
   1501-1521  _process_log_queue error path
 """
 
-import asyncio
-import logging
 import os
 import sys
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -197,10 +195,8 @@ class TestRunCrewInProcessDirect:
             patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"),
             patch("src.services.mlflow.tracing.cleanup_async_db_connections"),
             patch("psutil.Process") as mock_psutil,
-            patch(
-                "src.utils.user_context.UserContext.set_group_context"
-            ) as mock_set_ctx,
-            patch("src.utils.user_context.UserContext.set_user_token") as mock_set_tok,
+            patch("src.utils.user_context.UserContext.set_group_context"),
+            patch("src.utils.user_context.UserContext.set_user_token"),
             patch(
                 "src.utils.user_context.UserContext.get_group_context"
             ) as mock_get_ctx,

@@ -1,8 +1,6 @@
 """Tests for UserService.get_or_create_user_by_email email validation."""
 
-import os
-import sys
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 

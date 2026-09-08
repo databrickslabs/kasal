@@ -5,7 +5,7 @@ This module defines schemas used for validating and structuring data
 in connection-related API requests and responses.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 

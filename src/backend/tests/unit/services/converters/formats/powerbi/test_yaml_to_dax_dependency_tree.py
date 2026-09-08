@@ -230,7 +230,7 @@ class TestProcessDefinitionAndDependencyTree:
 
     def test_is_base_kbi_no_formula(self, generator):
         """Line 378-379: KPI with empty formula is base."""
-        kpi = KPI(description="Empty Formula KPI", formula="")
+        KPI(description="Empty Formula KPI", formula="")
         # Cannot create KPI with empty formula due to validation, so use a simple one
         kpi2 = make_kpi(formula="amount")
         assert generator._is_base_kbi(kpi2) is True
@@ -301,7 +301,7 @@ class TestProcessDefinitionAndDependencyTree:
     def test_build_kbi_dependency_tree_calculated_kbi(self, generator):
         """Lines 361-366: calculated KBI path - uses mock to avoid
         missing resolve_kbi on KBIDependencyResolver."""
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         # Simulate a KPI that has formula references so _is_base_kbi returns False
         calculated_kpi = make_kpi(

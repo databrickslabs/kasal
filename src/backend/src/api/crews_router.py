@@ -1,14 +1,14 @@
 import json
 import logging
-from typing import Annotated, Any, Dict, List
+from typing import Annotated, List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, status
 from pydantic import ValidationError
 
-from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import ForbiddenError, NotFoundError, UnprocessableEntityError
 from src.core.permissions import check_role_in_context
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.crew import CrewCreate, CrewResponse, CrewUpdate
 from src.schemas.crew_feedback import (
     CrewFeedbackCreateRequest,

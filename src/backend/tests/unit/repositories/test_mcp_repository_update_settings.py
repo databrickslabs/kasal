@@ -8,8 +8,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.mcp_server import MCPServer
-from src.models.mcp_settings import MCPSettings
 from src.repositories.mcp_repository import MCPServerRepository, MCPSettingsRepository
 
 
@@ -243,7 +241,7 @@ async def test_update_individual_enabled_false(settings_repo, async_session):
     with patch.object(
         settings_repo, "get_settings", new_callable=AsyncMock, return_value=s
     ):
-        result = await settings_repo.update_individual_enabled(False)
+        await settings_repo.update_individual_enabled(False)
     assert s.individual_enabled is False
 
 
@@ -269,7 +267,7 @@ async def test_update_settings_global_only(settings_repo, async_session):
     with patch.object(
         settings_repo, "get_settings", new_callable=AsyncMock, return_value=s
     ):
-        result = await settings_repo.update_settings(global_enabled=True)
+        await settings_repo.update_settings(global_enabled=True)
     assert s.global_enabled is True
 
 
@@ -279,7 +277,7 @@ async def test_update_settings_individual_only(settings_repo, async_session):
     with patch.object(
         settings_repo, "get_settings", new_callable=AsyncMock, return_value=s
     ):
-        result = await settings_repo.update_settings(individual_enabled=False)
+        await settings_repo.update_settings(individual_enabled=False)
     assert s.individual_enabled is False
 
 
@@ -289,7 +287,7 @@ async def test_update_settings_both(settings_repo, async_session):
     with patch.object(
         settings_repo, "get_settings", new_callable=AsyncMock, return_value=s
     ):
-        result = await settings_repo.update_settings(
+        await settings_repo.update_settings(
             global_enabled=True, individual_enabled=True
         )
     assert s.global_enabled is True

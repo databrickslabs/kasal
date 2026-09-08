@@ -5,7 +5,7 @@ Targets uncovered branches to push coverage to 85%+.
 
 import os
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -640,7 +640,6 @@ class TestInnerFunctionPaths:
         )
         with patch.object(svc, "_setup_mlflow_auth", return_value=fake_auth):
             # Mock asyncio.to_thread to actually call the function
-            called_args = []
 
             async def mock_to_thread(func, *args):
                 # Call the function with the args to exercise inner code
@@ -867,7 +866,6 @@ async def test_get_trace_deeplink_builds_url(monkeypatch):
 
     svc = MLflowService(session=SimpleNamespace(), group_id="g1")
     # Use DatabricksService fallback path (no auth) to avoid heavy mlflow import
-    import sys
 
     # Ensure unified auth returns None immediately (no network/config attempts)
     fake_auth_mod = SimpleNamespace()
@@ -933,7 +931,6 @@ async def test_resolve_judge_model_paths(monkeypatch):
 @pytest.mark.asyncio
 async def test_get_trace_deeplink_with_auth_and_experiment_id(monkeypatch):
     # Arrange auth so workspace_id can be derived and avoid real mlflow via to_thread stub
-    import asyncio as aio
     import sys
 
     svc = MLflowService(session=SimpleNamespace(), group_id="g1")

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from src.services.tools.metric_view_utils.constants import (
     RE_AGG_COL,
     RE_AVERAGEX_FILTER,

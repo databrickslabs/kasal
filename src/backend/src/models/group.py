@@ -7,9 +7,7 @@ This foundation can be incrementally enhanced with Unity Catalog and SCIM integr
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Column, DateTime
-from sqlalchemy import Enum as SQLAlchemyEnum
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.base import Base
@@ -20,7 +18,7 @@ def generate_uuid():
 
 
 # Simple enums for group management
-from enum import Enum
+from enum import Enum  # noqa: E402 - import follows module initialization
 
 
 class GroupStatus(str, Enum):

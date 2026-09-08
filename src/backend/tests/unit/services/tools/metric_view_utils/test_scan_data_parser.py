@@ -1,7 +1,5 @@
 """Tests for scan data parser."""
 
-import pytest
-
 from src.services.tools.metric_view_utils.scan_data_parser import ScanDataParser
 
 

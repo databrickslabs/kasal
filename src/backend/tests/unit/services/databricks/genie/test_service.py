@@ -2,19 +2,16 @@
 Test suite for GenieService
 """
 
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from src.repositories.genie_repository import GenieRepository
 from src.schemas.genie import (
     GenieAuthConfig,
-    GenieConversation,
     GenieExecutionRequest,
     GenieExecutionResponse,
-    GenieGetMessageStatusRequest,
     GenieGetQueryResultRequest,
-    GenieMessage,
     GenieMessageStatus,
     GenieQueryResult,
     GenieQueryStatus,
@@ -422,7 +419,7 @@ class TestGenieService:
         )
         mock_repository.get_spaces = AsyncMock(return_value=mock_response)
 
-        result = await service_with_mock_repo.search_spaces("", page_size=50)
+        await service_with_mock_repo.search_spaces("", page_size=50)
 
         # Should call get_spaces with empty query and specified page_size
         mock_repository.get_spaces.assert_called_once_with(

@@ -5,14 +5,9 @@ Patches CrewPreparation to return a mock crew, allowing us to cover
 lines 842-1270 inside prepare_and_run().
 """
 
-import asyncio
 import contextlib
-import logging
-import os
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
 
 
 def _make_subprocess_logger():
@@ -64,8 +59,6 @@ def _crew_execution_context(
     mock_crew_prep = MagicMock()
     mock_crew_prep.prepare = AsyncMock(return_value=True)
     mock_crew_prep.crew = crew
-
-    result_holder = [None]
 
     def mock_execute_with_mlflow_trace(kickoff_fn, **kwargs):
         # Call the kickoff function and return its result

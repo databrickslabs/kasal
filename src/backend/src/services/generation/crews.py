@@ -21,7 +21,7 @@ and no call site changes.
 
 import logging
 import traceback
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from src.core.llm.effort import EffortSettings
 from src.repositories.crew_generator_repository import CrewGeneratorRepository

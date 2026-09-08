@@ -78,7 +78,9 @@ def _node(function, root):
 
 
 def _files(root):
-    return {file.relative_to(root).as_posix() for file in root.rglob("*") if file.is_file()}
+    return {
+        file.relative_to(root).as_posix() for file in root.rglob("*") if file.is_file()
+    }
 
 
 def test_staging_preserves_nested_docs_assets_and_bytes(source_tree):

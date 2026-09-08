@@ -17,7 +17,7 @@ Targets remaining uncovered lines:
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -597,7 +597,7 @@ class TestMigrateExistingDataStreamExtended:
                 pass
 
         # Should have executed DROP SCHEMA path
-        executed_sqls = [str(c) for c in mock_lb_conn.execute.call_args_list]
+        [str(c) for c in mock_lb_conn.execute.call_args_list]
         assert len(events) >= 1
 
     @pytest.mark.asyncio
@@ -646,7 +646,7 @@ class TestMigrateExistingDataStreamExtended:
                 pass
 
         # Should have warning event for seeder failure
-        warning_events = [e for e in events if e.get("type") == "warning"]
+        [e for e in events if e.get("type") == "warning"]
         # May have warning; just verify the stream ran
         assert len(events) >= 1
 
@@ -748,9 +748,7 @@ class TestMigrateExistingDataStreamExtended:
                 pass
 
         # Slowest tables info appears in summary
-        slowest_events = [
-            e for e in events if "slowest" in e.get("message", "").lower()
-        ]
+        [e for e in events if "slowest" in e.get("message", "").lower()]
         # May or may not appear depending on timing; just verify stream ran
         assert len(events) >= 1
 

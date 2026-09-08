@@ -6,7 +6,6 @@ instance behavior that may not be covered in the main settings tests.
 """
 
 import os
-from typing import List, Union
 from unittest.mock import patch
 
 import pytest

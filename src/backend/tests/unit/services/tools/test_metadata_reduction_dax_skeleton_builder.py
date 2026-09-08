@@ -1,10 +1,6 @@
 """Unit tests for DaxSkeletonBuilder in metadata_reduction package."""
 
-import pytest
-
 from src.services.tools.metadata_reduction.dax_skeleton_builder import (
-    _DATE_COLUMN_HINTS,
-    _DATE_TABLE_NAMES,
     DaxSkeleton,
     DaxSkeletonBuilder,
 )

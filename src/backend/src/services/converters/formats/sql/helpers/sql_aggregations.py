@@ -4,8 +4,7 @@ Provides comprehensive SQL aggregation support for various SQL dialects
 """
 
 import re
-from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 
 from ..models import SQLAggregationType, SQLDialect
 
@@ -565,7 +564,7 @@ class SQLFilterProcessor:
                 processed = self._process_single_filter(filter_condition, variables)
                 if processed:
                     processed_filters.append(processed)
-            except Exception as e:
+            except Exception:
                 # Log error but continue processing other filters
                 continue
 

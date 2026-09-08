@@ -3,8 +3,6 @@
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from src.services.tools.pbi_visual_ucmv_mapper_tool import (
     PBIVisualUCMVMapperSchema,
     PBIVisualUCMVMapperTool,

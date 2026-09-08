@@ -23,11 +23,7 @@ def sanitize_for_database(data: Dict[str, Any]) -> Dict[str, Any]:
             result[key] = sanitize_for_database(value)
         elif isinstance(value, list):
             result[key] = [
-                (
-                    sanitize_for_database(item)
-                    if isinstance(item, dict)
-                    else item
-                )
+                (sanitize_for_database(item) if isinstance(item, dict) else item)
                 for item in value
             ]
         elif isinstance(value, uuid.UUID):

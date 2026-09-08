@@ -1123,7 +1123,6 @@ class PowerBIReportReferencesTool(BaseTool):
 
         for visual in visuals:
             config = visual.get("config", {})
-            original_config = config  # Keep for debugging
 
             # Handle embedded format where config is a JSON string
             if isinstance(config, str):

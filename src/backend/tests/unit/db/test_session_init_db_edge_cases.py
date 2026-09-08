@@ -21,12 +21,10 @@ Targets uncovered lines:
 - Lines 819-830, 854-855: dispose_engines edge cases
 """
 
-import asyncio
-import logging
 import os
 import sqlite3
 import tempfile
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy.exc import OperationalError
@@ -488,7 +486,7 @@ class TestGetDbEdgeCases:
             from src.db.session import get_db
 
             gen = get_db()
-            session = await gen.__anext__()
+            await gen.__anext__()
             # Throw a lock error — triggers rollback, then retries (succeeds on retry)
             try:
                 await gen.athrow(OperationalError("database is locked", None, None))
@@ -526,7 +524,7 @@ class TestGetDbEdgeCases:
             from src.db.session import get_db
 
             gen = get_db()
-            session = await gen.__anext__()
+            await gen.__anext__()
             # Should not raise even though reset raises ValueError
             try:
                 await gen.__anext__()

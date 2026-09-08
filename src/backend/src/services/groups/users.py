@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 import re
 from typing import Any, Dict, List, Optional
@@ -8,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.user import User
 from src.repositories.user_repository import UserRepository
-from src.schemas.user import UserPermissionUpdate, UserRole, UserUpdate
+from src.schemas.user import UserPermissionUpdate, UserUpdate
 
 # Removed password hash import - using OAuth proxy authentication
 

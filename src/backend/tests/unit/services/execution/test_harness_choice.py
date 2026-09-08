@@ -22,19 +22,27 @@ def _fake_isolated_session(session):
     return _cm
 
 
-from src.services.execution import harness_choice
-from src.services.execution.harness_choice import adopt_in_subprocess
-from src.services.execution.harnesses import (
+from src.services.execution import (  # noqa: E402 - import follows module initialization
+    harness_choice,
+)
+from src.services.execution.harness_choice import (  # noqa: E402 - import follows module initialization
+    adopt_in_subprocess,
+)
+from src.services.execution.harnesses import (  # noqa: E402 - import follows module initialization
     DEFAULT_HARNESS,
     HARNESS_CONFIG_KEY,
     HARNESS_ENV_VAR,
 )
-from src.services.execution.harnesses import coerce as engine_choice_coerce
-from src.services.execution.harnesses import (
+from src.services.execution.harnesses import (  # noqa: E402 - import follows module initialization
+    coerce as engine_choice_coerce,
+)
+from src.services.execution.harnesses import (  # noqa: E402 - import follows module initialization
     reset_for_tests,
     selection,
 )
-from src.services.execution.harnesses.binding import HarnessName
+from src.services.execution.harnesses.binding import (  # noqa: E402 - import follows module initialization
+    HarnessName,
+)
 
 
 @pytest.fixture(autouse=True)

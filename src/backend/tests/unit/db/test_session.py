@@ -6,10 +6,8 @@ identifier validation, and get_db.
 """
 
 import os
-import re
 import sqlite3
 import tempfile
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -88,7 +86,10 @@ class TestValidateIdentifier:
 # ---------------------------------------------------------------------------
 # Helper function tests
 # ---------------------------------------------------------------------------
-from src.db.session import get_isolation_level, get_sqlite_connect_args
+from src.db.session import (  # noqa: E402 - import follows module initialization
+    get_isolation_level,
+    get_sqlite_connect_args,
+)
 
 
 class TestGetIsolationLevel:

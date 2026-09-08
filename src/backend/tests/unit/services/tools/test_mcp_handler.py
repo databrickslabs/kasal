@@ -5,9 +5,6 @@ CrewAI tool creation from MCP dictionaries, tool wrapping, and subprocess
 isolation logic.
 """
 
-import asyncio
-import json
-import os
 from types import SimpleNamespace
 from unittest.mock import (
     AsyncMock,
@@ -120,7 +117,7 @@ class TestGetOrCreateMCPAdapter:
         with patch(
             "src.services.tools.mcp_adapter.MCPAdapter",
             return_value=mock_adapter,
-        ) as mock_cls:
+        ):
             result = await get_or_create_mcp_adapter(
                 {"url": "http://example.com", "auth_type": "pat"},
                 adapter_id="a1",
@@ -758,7 +755,7 @@ class TestWrapMCPTool:
             patch("asyncio.new_event_loop", return_value=mock_loop),
             patch("asyncio.set_event_loop"),
         ):
-            result = wrapped._run(space_id="s1")
+            wrapped._run(space_id="s1")
             assert mock_loop.run_until_complete.called
 
 

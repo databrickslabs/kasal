@@ -1628,7 +1628,7 @@ class PipelineConfigGeneratorTool(BaseTool):
             # Pair up: (condition, expression), (condition, expression), ...
             for idx in range(0, len(parts) - 1, 2):
                 cond_text = parts[idx].strip()
-                expr_text = parts[idx + 1].strip()
+                parts[idx + 1].strip()
                 # Extract a readable branch name from the condition
                 cond_match = re.search(
                     r'SELECTEDVALUE\s*\(\s*\w+\[(\w+)\]\s*\)\s*=\s*"([^"]*)"',

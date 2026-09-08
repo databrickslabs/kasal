@@ -3,11 +3,11 @@
 import logging
 import os
 import re
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .base import BaseTool, EnvVar
+from .base import BaseTool
 from .web_fetch import _safe_fetch, _TextExtractor
 
 logger = logging.getLogger(__name__)

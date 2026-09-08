@@ -1,5 +1,4 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -117,7 +116,7 @@ async def test_create_with_group_sets_fields():
     gc = SimpleNamespace(
         primary_group_id="g1", group_email="u@x", is_valid=lambda: True
     )
-    out = await svc.create_with_group(template_data, gc)
+    await svc.create_with_group(template_data, gc)
     assert svc.repository.created["group_id"] == "g1"
     assert svc.repository.created["created_by_email"] == "u@x"
 
@@ -132,7 +131,7 @@ async def test_update_with_group_check_same_group_updates_in_place():
         model_dump=lambda exclude_unset=False: {"description": "new desc"}
     )
     gc = SimpleNamespace(primary_group_id="g1", group_email="u@x")
-    out = await svc.update_with_group_check(1, template_data, gc)
+    await svc.update_with_group_check(1, template_data, gc)
     assert svc.repository.updated[0] == 1
     assert svc.repository.updated[1]["description"] == "new desc"
 
@@ -150,7 +149,7 @@ async def test_update_with_group_check_different_group_creates_override():
         model_dump=lambda exclude_unset=False: {"description": "new desc"}
     )
     gc = SimpleNamespace(primary_group_id="g1", group_email="u@x")
-    out = await svc.update_with_group_check(1, template_data, gc)
+    await svc.update_with_group_check(1, template_data, gc)
     assert svc.repository.created["name"] == "test"
     assert svc.repository.created["group_id"] == "g1"
     assert svc.repository.created["description"] == "new desc"

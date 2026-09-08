@@ -55,7 +55,6 @@ class PbiMeasureAllocatorTool(BaseTool):
 
     def _run(self, **kwargs: Any) -> str:
         from src.services.tools.metric_view_utils.mquery_parser import MQueryParser
-        from src.services.tools.metric_view_utils.utils import to_snake_case
 
         measures_raw = kwargs.get("measures_json") or self._default_config.get(
             "measures_json", "[]"

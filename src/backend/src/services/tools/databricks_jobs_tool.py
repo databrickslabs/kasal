@@ -3,11 +3,10 @@ import base64
 import hashlib
 import json
 import logging
-import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, Optional, Type, Union
+from typing import Any, ClassVar, Dict, List, Optional, Type, Union
 from urllib.parse import urlencode
 
 import aiohttp
@@ -499,7 +498,6 @@ class DatabricksJobsTool(BaseTool):
         """
         global _GLOBAL_RUN_EXECUTIONS, _GLOBAL_CREATE_EXECUTIONS
 
-        previous_count = self.current_usage_count
         previous_run_executions = len(_GLOBAL_RUN_EXECUTIONS)
         previous_create_executions = len(_GLOBAL_CREATE_EXECUTIONS)
         total_executions = previous_run_executions + previous_create_executions
@@ -861,7 +859,7 @@ class DatabricksJobsTool(BaseTool):
                     return f"⚠️ DUPLICATE CREATE PREVENTED\n\nA job with this exact configuration has already been created.\nPrevious job_id: {previous_job_id}\nJob name: {job_name}\n\n🔒 This tool enforces single execution to prevent duplicate job creation.\n💡 Use action='get', job_id={previous_job_id} to view the existing job.\n\n📊 Global tracking stats: {stats['tracked_runs']} runs, {stats['tracked_creates']} creates"
 
             # Validate input
-            validated_input = DatabricksJobsToolSchema(
+            DatabricksJobsToolSchema(
                 action=action,
                 job_id=job_id,
                 run_id=run_id,

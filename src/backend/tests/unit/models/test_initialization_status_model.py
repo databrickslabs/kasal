@@ -6,9 +6,6 @@ field validation, constraints, and data integrity.
 """
 
 from datetime import datetime
-from unittest.mock import MagicMock
-
-import pytest
 
 from src.models.initialization_status import InitializationStatus
 

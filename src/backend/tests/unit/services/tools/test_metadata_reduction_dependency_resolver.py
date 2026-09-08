@@ -1,7 +1,5 @@
 """Unit tests for MeasureDependencyResolver in metadata_reduction package."""
 
-import pytest
-
 from src.services.tools.metadata_reduction.dependency_resolver import (
     MeasureDependencyResolver,
 )

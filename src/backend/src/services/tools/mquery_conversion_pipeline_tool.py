@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # SECURITY: PowerBI table/column names are attacker-controllable (defined by
 # whoever authored the scanned semantic model) and get interpolated into DDL/DML
 # executed on the SQL warehouse. These helpers prevent identifier breakout.
-import re as _ident_re
+import re as _ident_re  # noqa: E402 - import follows module initialization
 
 _SAFE_SQL_IDENTIFIER = _ident_re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -643,7 +643,6 @@ class MqueryConversionPipelineTool(BaseTool):
 
             # Import M-Query converter (lazy import to avoid circular dependencies)
             from src.services.converters.formats.mquery import (
-                MQueryConnector,
                 MQueryConversionConfig,
             )
 
@@ -980,11 +979,10 @@ class MqueryConversionPipelineTool(BaseTool):
                 measure_count=table_count,
             )
 
-            group_id = None
             try:
                 group_context = UserContext.get_group_context()
                 if group_context:
-                    group_id = getattr(group_context, "primary_group_id", None)
+                    getattr(group_context, "primary_group_id", None)
             except Exception as _gc_err:
                 logger.debug(
                     f"[MQueryTool] Could not resolve group_id for history: {_gc_err}"

@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 
 class TestConfigGeneratorToolExtended:
 
@@ -745,7 +743,7 @@ class TestConfigGeneratorJoinKeyMapDimMatch:
         tool = TestConfigGeneratorToolExtended()._tool()
         # Create a dim table with >10 columns
         group_by = [f"col_{i}" for i in range(15)]
-        dim_cols = ",".join(f"'{c}'" for c in group_by)
+        ",".join(f"'{c}'" for c in group_by)
         mquery = json.dumps(
             [
                 {
@@ -835,7 +833,7 @@ class TestConfigGeneratorFilterSetsFromIn:
     def test_filter_sets_populated_from_switch_in_comment(self):
         """Lines 307-311 — filter_sets populated when comment has IN(...)."""
         # We need to mock the switch_decomps so it produces a comment with IN(...)
-        tool = TestConfigGeneratorToolExtended()._tool()
+        TestConfigGeneratorToolExtended()._tool()
         import re as _re
 
         # Directly test the regex used in filter_sets building
@@ -901,7 +899,6 @@ class TestConfigGeneratorFilterSetsFromIn:
 
     def test_load_cache_coroutine_executed(self):
         """Lines 100-101 — _load_cache coroutine body executes via run_async."""
-        import asyncio
 
         from src.services.tools.config_generator_tool import ConfigGeneratorTool
 

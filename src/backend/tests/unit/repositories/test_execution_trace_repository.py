@@ -6,12 +6,11 @@ which handles CRUD operations for execution traces.
 """
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
-from src.models.execution_history import ExecutionHistory
 from src.models.execution_trace import ExecutionTrace
 from src.repositories.execution_trace_repository import ExecutionTraceRepository
 
@@ -67,7 +66,7 @@ class TestCreateTrace:
         )
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        result = await repository.create(trace_data)
+        await repository.create(trace_data)
 
         mock_session.add.assert_called_once()
         mock_session.flush.assert_called()

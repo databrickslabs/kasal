@@ -1,9 +1,6 @@
 """Tests for LakebaseConnectionService.generate_credentials - provisioned + autoscaling fallback."""
 
-import os
-import sys
-import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 

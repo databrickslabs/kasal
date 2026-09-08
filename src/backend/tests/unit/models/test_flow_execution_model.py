@@ -7,9 +7,6 @@ including field validation, relationships, and data integrity.
 
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
-
-import pytest
 
 from src.models.flow_execution import FlowExecution, FlowNodeExecution
 

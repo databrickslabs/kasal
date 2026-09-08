@@ -10,10 +10,10 @@ classes, and exception handlers.
 """
 
 import json
-import os
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
 from tests.unit.route_utils import route_paths
 
 # ─── LocalDevAuthMiddleware ───────────────────────────────────────────────────
@@ -41,7 +41,7 @@ class TestLocalDevAuthMiddleware:
             "type": "http",
             "headers": [(b"x-forwarded-email", b"existing@example.com")],
         }
-        original_headers = list(scope["headers"])
+        list(scope["headers"])
         await mw(scope, MagicMock(), MagicMock())
         # Should not add another x-forwarded-email
         email_headers = [h for h in scope["headers"] if h[0] == b"x-forwarded-email"]
@@ -188,8 +188,6 @@ class TestLifespanBranches:
 
     def test_lifespan_function_is_async_generator(self):
         """Verify lifespan is an async context manager factory."""
-        import asyncio
-        import inspect
 
         from src.main import lifespan
 
@@ -199,7 +197,6 @@ class TestLifespanBranches:
     @pytest.mark.asyncio
     async def test_lifespan_module_log_levels_exception_handled(self):
         """Test that failure to set module log levels is handled gracefully."""
-        import logging
 
         # Ensure the module's log level adjustment code path is covered
         # by importing main (already imported) and checking the lifespan
@@ -219,7 +216,7 @@ class TestLifespanBranches:
 
     def test_lifespan_is_registered_with_app(self):
         """Verify lifespan is registered with the FastAPI app."""
-        from src.main import app, lifespan
+        from src.main import app
 
         # The app should have router registered
         assert app is not None

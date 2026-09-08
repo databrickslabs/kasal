@@ -22,8 +22,6 @@ import contextlib
 import io
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from src.services.agent_builder.process_executor import run_crew_in_process
 
 
@@ -62,11 +60,12 @@ def _run_with_prepare_false(crew_config):
                 {
                     "src.services.execution.subprocess_bootstrap": mock_logging_config,
                     "crewai": MagicMock(),
-                    "src.core.llm.transport": MagicMock(LLM_CONTEXT_WINDOW_SIZES={}),
                     "src.core.events": MagicMock(),
                     "crewai.utilities": MagicMock(),
                     "crewai.utilities.exceptions": MagicMock(),
-                    "src.core.llm.transport": MagicMock(CONTEXT_LIMIT_ERRORS=[]),
+                    "src.core.llm.transport": MagicMock(
+                        CONTEXT_LIMIT_ERRORS=[], LLM_CONTEXT_WINDOW_SIZES={}
+                    ),
                 },
             )
         )

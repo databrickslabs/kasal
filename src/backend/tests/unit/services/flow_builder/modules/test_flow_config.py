@@ -7,8 +7,7 @@ Covers:
 All repositories are mocked with AsyncMock. No real DB, no real logger calls.
 """
 
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 

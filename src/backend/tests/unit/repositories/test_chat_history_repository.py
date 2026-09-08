@@ -5,11 +5,10 @@ Tests the data access layer of chat history functionality including
 database operations, group filtering, and pagination.
 """
 
-from datetime import UTC, datetime
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.chat_history import ChatHistory
@@ -162,7 +161,7 @@ class TestChatHistoryRepository:
         # Assert
         mock_session.execute.assert_called_once()
         # Verify the query includes pagination (offset=20, limit=10)
-        call_args = mock_session.execute.call_args[0][0]
+        mock_session.execute.call_args[0][0]
         # Note: In a real test, you'd inspect the query more thoroughly
 
     @pytest.mark.asyncio

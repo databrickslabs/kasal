@@ -5,8 +5,6 @@ reasoning_config column need this idempotent ALTER on startup. Verifies it adds
 the column on SQLite and is safe to run repeatedly.
 """
 
-from unittest.mock import MagicMock, patch
-
 import pytest
 from sqlalchemy.ext.asyncio import create_async_engine
 

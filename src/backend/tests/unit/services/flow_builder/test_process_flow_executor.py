@@ -1225,7 +1225,6 @@ class TestModuleLevelCode:
         assert _kasal_noinput_global(None) == "n"
 
     def test_env(self):
-        import src.services.flow_builder.process_executor
 
         assert os.environ.get("CREWAI_TRACING_ENABLED") == "false"
 
@@ -1840,7 +1839,7 @@ class TestRunFlowValidationError:
 
         # Pass a config that will cause a validation error during JSON parsing
         # by making json.loads succeed but subsequent code fail
-        p = _std()
+        _std()
         with patch(
             "src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
             side_effect=Exception("validation boom"),
@@ -1903,7 +1902,7 @@ class TestOtelBranches:
         p = _std()
         ml = MagicMock()
         ml.run_until_complete.return_value = flow_result
-        instrumentor_patch = patch.dict(
+        patch.dict(
             "sys.modules",
             {
                 "opentelemetry.instrumentation.crewai": None,  # force ImportError
@@ -2487,7 +2486,7 @@ class TestCleanupBranches:
                         mock_exit.assert_called_once_with(0)
 
 
-class TestModuleLevelExceptions:
+class TestModuleLevelExceptionsAdditionalCases:
     """Lines 45-46, 59-60, 67-68: module-level try/except fallback branches."""
 
     def test_os_environ_exception(self):
@@ -2523,9 +2522,7 @@ class TestModuleLevelExceptions:
 
         with patch("builtins.input", new=property(lambda s: None)):
             # Force builtins module access to fail
-            orig_builtins = (
-                __builtins__ if isinstance(__builtins__, dict) else vars(__builtins__)
-            )
+            (__builtins__ if isinstance(__builtins__, dict) else vars(__builtins__))
         # Just verify module loads fine (the except: pass handles it)
         importlib.reload(mod)
 
@@ -2562,7 +2559,7 @@ class TestValidationException:
         assert "validation" in r["error"].lower() or "unexpected" in r["error"].lower()
 
 
-class TestSignalHandlerBranches:
+class TestSignalHandlerBranchesAdditionalCases:
     """Lines 222-223, 233-234: NoSuchProcess and AccessDenied in signal handler."""
 
     def test_signal_handler_nosuchprocess_on_terminate(self):
@@ -3533,15 +3530,14 @@ class TestNoinputFunction:
 
     def test_builtins_except_via_reload(self):
         """Lines 59-60: builtins patching except branch via reload."""
-        import builtins
+        import builtins  # noqa: F401 - verifies optional dependency availability
         import importlib
 
-        import src.services.flow_builder.process_executor as mod
-
-        orig_input = builtins.input
         # Make the builtins module import raise by setting sys.modules["builtins"] to None
         # This forces the `import builtins as _kasal_builtins_mod` to fail with ImportError
         import sys as _sys
+
+        import src.services.flow_builder.process_executor as mod
 
         real_builtins = _sys.modules.get("builtins")
         _sys.modules["builtins"] = None  # This makes import builtins raise ImportError

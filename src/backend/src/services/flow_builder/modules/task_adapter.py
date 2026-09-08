@@ -5,7 +5,7 @@ This module handles the configuration of tasks for CrewAI flows.
 """
 
 import json
-from typing import Dict, Optional
+from typing import Optional
 
 from src.core.logger import LoggerManager
 from src.services.execution.harnesses import active_harness
@@ -286,7 +286,6 @@ class TaskConfig:
             group_context: Group context for multi-tenant tool access (optional)
         """
         # Initialize the ToolFactory with proper context for API key access
-        from src.services.tools.tool_factory import ToolFactory
 
         # Build config with group_id for multi-tenant isolation
         factory_config = {}

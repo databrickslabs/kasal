@@ -5,7 +5,7 @@ This module defines the base interface for all AI execution engines.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 
 class BaseEngineService(ABC):

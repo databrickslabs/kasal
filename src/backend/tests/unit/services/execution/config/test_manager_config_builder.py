@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -180,7 +180,7 @@ class TestManagerConfigBuilder:
             patch(
                 "src.services.execution.config.manager_config_builder.create_agent",
                 return_value=mock_agent,
-            ) as mock_create_agent,
+            ),
             patch(
                 "src.services.execution.config.manager_config_builder.LLMManager.configure_kasal_llm",
                 return_value=mock_llm,

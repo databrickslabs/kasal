@@ -1,7 +1,5 @@
 """Tests for migration report emitter."""
 
-import pytest
-
 from src.services.tools.metric_view_utils.data_classes import (
     MetricViewSpec,
     TranslationResult,

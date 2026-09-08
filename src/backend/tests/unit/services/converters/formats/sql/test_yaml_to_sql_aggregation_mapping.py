@@ -14,7 +14,7 @@ Focuses on:
 
 import pytest
 
-from src.services.converters.base.models import KPI, KPIDefinition, QueryFilter
+from src.services.converters.base.models import KPI, KPIDefinition
 from src.services.converters.formats.sql.models import (
     SQLAggregationType,
     SQLDialect,

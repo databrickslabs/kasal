@@ -49,7 +49,7 @@ def test_get_execution_service_returns_service():
     fake_session = MagicMock()
     with patch("src.api.executions_router.ExecutionService") as MockSvc:
         MockSvc.return_value = MagicMock(spec=ExecutionService)
-        svc = get_execution_service(session=fake_session)
+        get_execution_service(session=fake_session)
         MockSvc.assert_called_once_with(session=fake_session)
 
 
@@ -351,9 +351,9 @@ async def test_list_executions_scopes_to_selected_workspace(MockExecSvc):
 
     assert isinstance(out, list)
     _, kwargs = svc.list_executions.call_args
-    assert kwargs["group_ids"] == ["g1"], (
-        "must scope to the selected workspace, not the union"
-    )
+    assert kwargs["group_ids"] == [
+        "g1"
+    ], "must scope to the selected workspace, not the union"
 
 
 @pytest.mark.asyncio

@@ -14,11 +14,9 @@ Targets uncovered lines (63% → 85%+):
 """
 
 import json
-from typing import Any, Dict, List
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pydantic import BaseModel
 
 from src.services.agent_builder.task_adapter import (
     create_callback_from_string,
@@ -422,7 +420,7 @@ async def _create_task_patched(task_key, task_config, agent, **kwargs):
         ) as mock_mem_svc,
     ):
 
-        mock_mcp_instance = MagicMock()
+        MagicMock()
         mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
         mock_session = AsyncMock()
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
@@ -596,7 +594,7 @@ class TestCreateTaskToolResolution:
             mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
             mock_resolve.return_value = ["SearchTool"]
 
-            task = await create_task(
+            await create_task(
                 task_key="tool-task",
                 task_config=task_config,
                 agent=agent,
@@ -649,7 +647,7 @@ class TestCreateTaskToolResolution:
             mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
             mock_resolve.return_value = ["MCPTool"]
 
-            task = await create_task(
+            await create_task(
                 task_key="mcp-tuple-task",
                 task_config=task_config,
                 agent=agent,
@@ -752,7 +750,7 @@ class TestCreateTaskToolResolution:
             )
             mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
 
-            task = await create_task(
+            await create_task(
                 task_key="auto-resolve-task",
                 task_config=task_config,
                 agent=agent,
@@ -846,7 +844,7 @@ class TestCreateTaskGuardrail:
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
             ) as mock_gf,
             patch(
-                "src.services.agent_builder.task_adapter.GuardrailWrapper"
+                "src.services.execution.kernel.task_builder.GuardrailWrapper"
             ) as mock_gw,
         ):
 
@@ -867,7 +865,7 @@ class TestCreateTaskGuardrail:
             mock_wrapper.__call__ = MagicMock(return_value=True)
             mock_gw.return_value = mock_wrapper
 
-            task = await create_task(
+            await create_task(
                 task_key="guardrail-task",
                 task_config=task_config,
                 agent=agent,
@@ -954,7 +952,7 @@ class TestCreateTaskGuardrail:
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
             ) as mock_gf,
             patch(
-                "src.services.agent_builder.task_adapter.GuardrailWrapper"
+                "src.services.execution.kernel.task_builder.GuardrailWrapper"
             ) as mock_gw,
         ):
 
@@ -1025,7 +1023,7 @@ class TestCreateTaskGuardrail:
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
             ) as mock_gf,
             patch(
-                "src.services.agent_builder.task_adapter.GuardrailWrapper"
+                "src.services.execution.kernel.task_builder.GuardrailWrapper"
             ) as mock_gw,
         ):
 
@@ -1100,7 +1098,7 @@ class TestCreateTaskGuardrail:
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
             ) as mock_gf,
             patch(
-                "src.services.agent_builder.task_adapter.GuardrailWrapper"
+                "src.services.execution.kernel.task_builder.GuardrailWrapper"
             ) as mock_gw,
         ):
 
@@ -1221,7 +1219,7 @@ class TestCreateTaskGuardrail:
             mock_llm_cls.return_value = MagicMock()
             mock_llm_g.return_value = MagicMock()
 
-            task = await create_task(
+            await create_task(
                 task_key="llm-prefix-task",
                 task_config=task_config,
                 agent=agent,
@@ -1472,7 +1470,7 @@ class TestCreateTaskGuardrail:
             mock_llm_cls.return_value = MagicMock()
             mock_llm_g.return_value = MagicMock()
 
-            task = await create_task(
+            await create_task(
                 task_key="llm-augment-task",
                 task_config=task_config,
                 agent=agent,
@@ -1561,7 +1559,7 @@ class TestCreateTaskGuardrail:
             )
             mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
 
-            task = await create_task(
+            await create_task(
                 task_key="callable-cb-task",
                 task_config=task_config,
                 agent=agent,
@@ -1678,7 +1676,7 @@ class TestCreateTaskDatabricksVolumeAutoCallback:
                 return_value=mock_active_config
             )
 
-            task = await create_task(
+            await create_task(
                 task_key="no-auto-cb",
                 task_config=task_config,
                 agent=agent,

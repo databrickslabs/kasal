@@ -7,8 +7,8 @@ Kasal is an AI agent workflow orchestration platform that transforms complex AI 
 ## Quick Start for Contributors
 
 ### Prerequisites
-- **Python 3.9+** for backend development
-- **Node.js 16+** for frontend development (optional)
+- **Python 3.11** for backend development
+- **Node.js 22+** for frontend development (optional)
 - **Git** for version control
 
 ### 5-Minute Setup
@@ -23,8 +23,8 @@ uv sync            # install dependencies (creates .venv)
 ./run.sh sqlite    # SQLite for development (run.sh runs `uv sync` for you)
 
 # Frontend setup (optional - only if working on UI)
-cd src/frontend
-npm install
+cd ../frontend
+npm ci
 npm start  # http://localhost:3000
 ```
 
@@ -39,10 +39,10 @@ Visual Workflow Designer (React) → FastAPI → Agentic Engine → Database
 ```
 
 ### Key Characteristics
-- **AI-First Platform**: Framework-agnostic agentic orchestration with CrewAI implementation and extensible engine architecture
+- **AI-First Platform**: Native Kasal runtime with an optional CrewAI framework adapter
 - **Clean Architecture**: Repository → Service → API pattern with clear separation of concerns
 - **Enterprise Ready**: Built for Databricks deployment with OAuth and production-grade patterns
-- **Type-Safe**: Full TypeScript frontend, Python type hints throughout backend
+- **Typing**: TypeScript checks plus strict mypy diagnostics tracked by a no-new-errors baseline
 
 ### Tech Stack
 - **Backend**: FastAPI, SQLAlchemy 2.0, CrewAI, pytest
@@ -56,7 +56,7 @@ Visual Workflow Designer (React) → FastAPI → Agentic Engine → Database
 ├── api/             # FastAPI route handlers (controllers)
 ├── services/        # Business logic layer (main work area)
 ├── repositories/    # Data access layer (Repository pattern)
-├── engines/crewai/  # AI agent implementation
+├── services/execution/  # Shared kernel and Kasal/CrewAI framework adapters
 ├── models/          # SQLAlchemy database models
 ├── schemas/         # Pydantic validation schemas
 └── core/            # Dependencies, logging, base service/repository
@@ -64,14 +64,16 @@ Visual Workflow Designer (React) → FastAPI → Agentic Engine → Database
 
 ### Frontend (`src/frontend/src/`)
 ```
-├── components/      # React components by feature
-├── store/           # Zustand state management
-├── api/             # API service layer
-└── types/           # TypeScript definitions
+├── app/             # Application shell and session workspace
+├── features/        # Chat, workflow canvas, catalog, activity and configuration
+├── shared/          # Reusable UI, API client and types
+└── store/           # Zustand state management
 ```
 
 ### Documentation (`src/docs/`)
 All project documentation including architecture guides, best practices, and deployment instructions.
+
+Backend typing debt and dependency exposure are documented in [Validation and security](src/docs/VALIDATION_AND_SECURITY.md). Run `uv run mypy src` to see the full strict typing report; a passing baseline gate does not mean that report is clean.
 
 ## Development Workflow
 
@@ -90,8 +92,9 @@ cd src/backend
 
 # Code quality (run before committing)
 uv run black src tests && uv run isort src tests
-uv run mypy src
-uv run flake8 src tests
+uv run python check_types.py  # reject new errors; known debt is reported
+uv run ruff check src tests run_tests.py check_types.py
+uv run lint-imports
 ```
 
 **Database Changes:**
@@ -105,8 +108,8 @@ alembic upgrade head
 **Testing (Required):**
 ```bash
 cd src/backend
-python run_tests.py  # All tests
-python run_tests.py --coverage --html-coverage  # With coverage report
+uv run python run_tests.py  # All tests
+uv run python run_tests.py --coverage --html-coverage  # With coverage report
 ```
 
 ### 3. Critical Development Standards
@@ -119,7 +122,7 @@ python run_tests.py --coverage --html-coverage  # With coverage report
 - Mock external dependencies (LLMs, databases)
 
 **Code Quality Standards:**
-- **Backend**: Black formatting, isort imports, mypy type checking, flake8 linting
+- **Backend**: Black formatting, isort imports, mypy baseline checking, Ruff linting
 - **Frontend**: TypeScript strict mode, ESLint
 - **Architecture**: Follow Repository → Service → API pattern
 - **Async/Await**: All database operations must be async
@@ -189,14 +192,14 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
 ### Backend Testing (80%+ Coverage Required)
 ```bash
 # Run all tests
-python run_tests.py
+uv run python run_tests.py
 
 # Specific test types
-python run_tests.py --type unit
-python run_tests.py --type integration
+uv run python run_tests.py --type unit
+uv run python run_tests.py --type integration
 
 # With coverage reporting
-python run_tests.py --coverage --html-coverage
+uv run python run_tests.py --coverage --html-coverage
 ```
 
 **Test Structure:**
@@ -248,7 +251,7 @@ Before submitting your contribution:
 - [ ] **Setup**: Development environment working correctly
 - [ ] **Architecture**: Follows established Repository → Service → API pattern
 - [ ] **Testing**: 80%+ test coverage with meaningful tests
-- [ ] **Code Quality**: Passes Black, isort, mypy, flake8
+- [ ] **Code Quality**: Passes Black, isort, Ruff and the mypy no-new-errors gate
 - [ ] **Database**: Includes Alembic migrations for model changes
 - [ ] **Documentation**: Updates relevant docs and includes docstrings
 - [ ] **Type Safety**: Full type hints in Python, strict TypeScript

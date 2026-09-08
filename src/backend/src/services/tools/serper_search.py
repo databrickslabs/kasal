@@ -1,10 +1,9 @@
 """SerperDevTool — web search via the Serper.dev API."""
 
-import datetime
 import json
 import logging
 import os
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -16,8 +15,6 @@ from .web_fetch import (
     OrganicResult,
     PeopleAlsoAskResult,
     RelatedSearchResult,
-    SearchParameters,
-    Sitelink,
     _http_json,
     _save_results_to_file,
 )

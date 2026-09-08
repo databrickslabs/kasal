@@ -2,8 +2,6 @@
 
 import json
 
-import pytest
-
 from src.services.tools.pbi_measure_allocator_tool import PbiMeasureAllocatorTool
 
 

@@ -1318,7 +1318,6 @@ class TestRunRegistryBehaviors:
         assert repo.rows["dead_task"].status == "failed"
 
     def test_prune_keeps_active_runs(self):
-        from datetime import timezone
 
         base = datetime.now(timezone.utc)
         for i in range(svc_module._MAX_KEPT_RUNS + 5):
@@ -2250,7 +2249,7 @@ class TestCrewOptimizationOrchestration:
         entry, which start_crew_optimization always creates."""
         monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "1")
         base, _, _, _ = _crew_fixture()
-        run = self._drive([base], max_metric_calls=2)
+        self._drive([base], max_metric_calls=2)
         assert svc_module._RUNS[self.RUN_ID]["candidates_tried"] == 1
 
     # -- caching -------------------------------------------------------------

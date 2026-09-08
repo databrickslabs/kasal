@@ -6,9 +6,8 @@ Targets uncovered converter class lines (42% → 85%+).
 
 import json
 from typing import List, Optional
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock
 
-import pytest
 from pydantic import BaseModel
 
 from src.services.execution.kernel.model_conversion_handler import (

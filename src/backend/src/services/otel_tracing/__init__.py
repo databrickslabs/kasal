@@ -8,8 +8,6 @@ CrewAIInstrumentor and written to the execution_trace DB table by
 KasalDBSpanExporter.
 """
 
-from src.services.otel_tracing.event_bridge import OTelEventBridge
-from src.services.otel_tracing.mlflow_exporter import KasalMLflowSpanExporter
 from src.services.mlflow.mlflow_setup import (
     MlflowSetupResult,
     configure_mlflow_in_subprocess,
@@ -17,6 +15,8 @@ from src.services.mlflow.mlflow_setup import (
     execute_with_mlflow_trace_async,
     post_execution_mlflow_cleanup,
 )
+from src.services.otel_tracing.event_bridge import OTelEventBridge
+from src.services.otel_tracing.mlflow_exporter import KasalMLflowSpanExporter
 from src.services.otel_tracing.otel_config import (
     create_kasal_tracer_provider,
     is_otel_tracing_enabled,

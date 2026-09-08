@@ -4,10 +4,9 @@ Targets coverage of start_root_trace, get_last_active_trace_id,
 flush_async_logging, and cleanup_async_db_connections.
 """
 
-import asyncio
 import logging
 from contextlib import nullcontext
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -20,7 +19,6 @@ class TestGetMlflow:
     def test_returns_mlflow_when_available(self):
         mock_mlflow = MagicMock()
         with patch.dict("sys.modules", {"mlflow": mock_mlflow}):
-            from importlib import reload
 
             import src.services.mlflow.tracing as mod
 
@@ -69,7 +67,7 @@ class TestStartRootTrace:
         mock_mlflow.start_trace = Mock(return_value=mock_span)
 
         with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
-            with start_root_trace("my_trace", inputs={"key": "val"}) as rt:
+            with start_root_trace("my_trace", inputs={"key": "val"}):
                 pass
         mock_mlflow.start_trace.assert_called_once()
 
@@ -94,7 +92,7 @@ class TestStartRootTrace:
         with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
             # The function does getattr(mlflow, "start_trace", None) -> None
             # Then tries getattr(tracing_mod, "start_trace", None) -> callable
-            with start_root_trace("sub_trace") as rt:
+            with start_root_trace("sub_trace"):
                 pass
 
     def test_uses_start_span_fn_as_fallback(self):
@@ -112,7 +110,7 @@ class TestStartRootTrace:
         mock_mlflow.start_span = Mock(return_value=mock_span)
 
         with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
-            with start_root_trace("span_trace", inputs={"a": 1}) as span:
+            with start_root_trace("span_trace", inputs={"a": 1}):
                 pass
         mock_mlflow.start_span.assert_called_once()
 
@@ -129,7 +127,7 @@ class TestStartRootTrace:
         mock_mlflow.start_span = Mock(return_value=mock_span)
 
         with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
-            with start_root_trace("with_inputs", inputs={"x": 42}) as span:
+            with start_root_trace("with_inputs", inputs={"x": 42}):
                 pass
         mock_span.set_inputs.assert_called_once_with({"x": 42})
 
@@ -148,7 +146,7 @@ class TestStartRootTrace:
 
         with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
             # Should not raise even though set_inputs raises
-            with start_root_trace("ignore_inputs_err", inputs={"y": 1}) as span:
+            with start_root_trace("ignore_inputs_err", inputs={"y": 1}):
                 pass
 
     def test_nullcontext_fallback_when_both_apis_fail(self):

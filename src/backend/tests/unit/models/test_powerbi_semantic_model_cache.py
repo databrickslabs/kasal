@@ -10,8 +10,6 @@ Tests:
 
 from datetime import date, datetime, timedelta, timezone
 
-import pytest
-
 from src.models.powerbi_semantic_model_cache import PowerBISemanticModelCache
 
 # ---------------------------------------------------------------------------

@@ -5,11 +5,6 @@ Tests the functionality of the ExecutionTrace database model including
 field validation, relationships, and data integrity.
 """
 
-from datetime import datetime
-from unittest.mock import MagicMock
-
-import pytest
-
 from src.models.execution_trace import ExecutionTrace
 
 

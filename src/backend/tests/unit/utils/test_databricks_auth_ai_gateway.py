@@ -11,8 +11,6 @@ Covers:
 
 import os
 
-import pytest
-
 from src.utils.databricks_auth import (
     AuthContext,
     _databricks_auth,

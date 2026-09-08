@@ -13,7 +13,7 @@ All SSE / asyncio / OTel dependencies are mocked.
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy import (
@@ -11,7 +11,6 @@ from sqlalchemy import (
     Numeric,
     String,
 )
-from sqlalchemy.orm import relationship
 
 from src.db.base import Base
 

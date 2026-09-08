@@ -6,17 +6,10 @@ movement: every method still reads ``self`` exactly as it did in the single
 3,031-line file, and the public surface is unchanged.
 """
 
-import asyncio
-import hashlib
 import logging
-import os
-import re
-import threading
-import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from src.core.exceptions import BadRequestError
 from src.schemas.template import PromptTemplateUpdate
 from src.services.catalog.templates import TemplateService
 from src.services.prompt_optimization import run_state
@@ -26,7 +19,6 @@ from src.services.prompt_optimization.run_state import (
     _PUBLIC_FIELDS,
     _RUNS,
     RUN_STALE_SECONDS,
-    _persist_run_changes,
     _row_to_public,
 )
 from src.utils.user_context import GroupContext

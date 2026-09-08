@@ -780,7 +780,6 @@ class MLflowService:
             prediction_text = None
 
         import asyncio
-        import os
 
         # Run blocking MLflow 3.x evaluation code in a thread to keep API async/non-blocking
         # Resolve judge model using the model configuration system

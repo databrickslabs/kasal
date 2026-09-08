@@ -5,11 +5,7 @@ Tests the functionality of the Crew database model including
 field validation, relationships, and data integrity.
 """
 
-import uuid
-from datetime import datetime, timezone
-from unittest.mock import MagicMock
-
-import pytest
+from datetime import datetime
 
 from src.models.crew import Crew, Plan
 
@@ -232,7 +228,7 @@ class TestCrew:
     def test_crew_primary_key_uuid(self):
         """Test that primary key uses UUID generation."""
         # Act
-        crew = Crew(name="UUID Test Crew")
+        Crew(name="UUID Test Crew")
 
         # Assert
         # Note: The actual UUID is generated when saved to database

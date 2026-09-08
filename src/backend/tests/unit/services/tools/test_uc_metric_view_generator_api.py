@@ -1,9 +1,6 @@
 """Tests for UC Metric View Generator Tool — API extraction mode."""
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
 
 from src.services.tools.uc_metric_view_generator_tool import UCMetricViewGeneratorTool
 

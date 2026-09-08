@@ -3,8 +3,6 @@
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from src.services.tools.ucmv_genie_config_generator_tool import (
     UCMVGenieConfigGeneratorSchema,
     UCMVGenieConfigGeneratorTool,

@@ -8,7 +8,7 @@ Tests focus on:
 - App attributes
 """
 
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI

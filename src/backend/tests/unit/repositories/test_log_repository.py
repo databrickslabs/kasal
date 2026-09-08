@@ -127,7 +127,7 @@ class TestCreate:
         }
         mock_session.execute.return_value = MagicMock()
 
-        result = await repo.create(log_data)
+        await repo.create(log_data)
 
         mock_session.add.assert_called_once()
         mock_session.flush.assert_called_once()

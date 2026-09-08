@@ -6,13 +6,12 @@ message persistence, session management, and group isolation.
 """
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import uuid4
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from src.repositories.chat_history_repository import ChatHistoryRepository
-from src.schemas.chat_history import ChatHistoryCreate, ChatHistoryResponse
+from src.schemas.chat_history import ChatHistoryResponse
 from src.services.chat.history import ChatHistoryService
 from src.utils.user_context import GroupContext
 
@@ -145,7 +144,7 @@ class TestChatHistoryServiceUnit:
         self, chat_history_service, mock_repository, group_context
     ):
         """Test saving message with confidence as None."""
-        result = await chat_history_service.save_message(
+        await chat_history_service.save_message(
             session_id="session-456",
             user_id="user@company.com",
             message_type="user",
@@ -293,7 +292,7 @@ class TestChatHistoryServiceUnit:
         expected_sessions = []
         mock_repository.get_sessions_by_group.return_value = expected_sessions
 
-        result = await chat_history_service.get_group_sessions(
+        await chat_history_service.get_group_sessions(
             page=0, per_page=20, group_context=group_context
         )
 

@@ -5,7 +5,7 @@ Targets: get_execution_logger, adapt_config, normalize_config, normalize_flow_co
 Goal: push coverage from 17.7% to 50%+
 """
 
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 

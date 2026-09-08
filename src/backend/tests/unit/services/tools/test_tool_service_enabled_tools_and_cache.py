@@ -67,7 +67,7 @@ async def test_get_enabled_tools_for_group_merges_config_and_filters():
     base2 = mk_tool(2, title="B", group_id=None, config={"y": 2}, enabled=True)
     groupA = SimpleNamespace(tool_id=1, config={"x": 9, "z": 3})
     # base3 disabled should be filtered
-    base3 = mk_tool(3, title="C", group_id=None, enabled=False)
+    mk_tool(3, title="C", group_id=None, enabled=False)
 
     svc.repository = AsyncMock()
     svc.repository.find_enabled = AsyncMock(return_value=[base1, base2])
@@ -96,8 +96,15 @@ async def test_get_enabled_tools_for_group_merges_config_and_filters():
     assert t.title == "A" and t.config.get("x") == 9 and t.config.get("z") == 3
 
 
-from src.core.exceptions import ForbiddenError, KasalError, NotFoundError
-from src.schemas.tool import ToolListResponse, ToolResponse, ToolUpdate
+from src.core.exceptions import (  # noqa: E402 - import follows module initialization
+    ForbiddenError,
+    NotFoundError,
+)
+from src.schemas.tool import (  # noqa: E402 - import follows module initialization
+    ToolListResponse,
+    ToolResponse,
+    ToolUpdate,
+)
 
 
 @pytest.mark.asyncio
@@ -246,7 +253,6 @@ async def test_toggle_paths_base_and_group():
     # toggle with group check: base tool -> create copy when no existing mapping
     base = mk_tool(20, title="B", group_id=None, enabled=True)
     svc.repository.get = AsyncMock(return_value=base)
-    from src.services.tools import tool_service as module
 
     svc.repository.find_by_title_and_group = AsyncMock(return_value=None)
     svc.repository.create = AsyncMock(

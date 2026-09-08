@@ -674,7 +674,7 @@ class TestRunIntegration:
 # NEW COMPREHENSIVE TESTS — added to increase coverage
 # ===========================================================================
 
-import asyncio
+import asyncio  # noqa: E402 - import follows module initialization
 
 # ===========================================================================
 # _format_markdown_output tests
@@ -2239,6 +2239,6 @@ class TestFetchReportDefinition202:
             "src.services.tools.powerbi_report_references_tool.httpx.AsyncClient",
             return_value=mock_client,
         ):
-            result = self._run(
+            self._run(
                 self.tool._fetch_report_definition(WS_ID, REPORT_ID, ACCESS_TOKEN)
             )

@@ -4,9 +4,6 @@ fields correctly and that flow builds its LLM the crew way (explicit group_id +
 temperature via configure_kasal_llm), so the two paths can't diverge."""
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
-
-import pytest
 
 from src.services.execution.kernel.agent_builder import build_agent_kwargs
 from src.services.flow_builder.modules.agent_adapter import AgentConfig

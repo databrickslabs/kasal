@@ -5,8 +5,7 @@ Tests the main conversion pipeline flow from inbound connectors
 to outbound converters.
 """
 
-from typing import Any, Dict
-from unittest.mock import MagicMock, Mock, call, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -342,9 +341,7 @@ class TestConversionPipeline:
             mock_format.return_value = [{"name": "Total Sales", "sql": "SUM(...)"}]
 
             # Act
-            result = pipeline._convert_to_sql(
-                sample_definition, {}, use_transpilation=True
-            )
+            pipeline._convert_to_sql(sample_definition, {}, use_transpilation=True)
 
             # Assert
             mock_format.assert_called_once()

@@ -5,13 +5,8 @@ This test file consolidates all unique test cases from multiple test files,
 removing duplicates while maintaining coverage of testable code paths.
 """
 
-import json
-import logging
-import re
-from typing import Any, Dict
-from unittest.mock import MagicMock, Mock, call, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 from pydantic import BaseModel
 
 from src.services.execution.kernel.model_conversion_handler import (

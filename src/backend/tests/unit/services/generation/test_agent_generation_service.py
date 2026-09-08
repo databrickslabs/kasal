@@ -4,7 +4,7 @@ Covers: _log_llm_interaction (exception),
 generate_agent, _prepare_prompt_template, _generate_agent_config, _process_agent_config
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -215,10 +215,12 @@ async def test_generate_agent_propagates_exception():
 # Additional isolated unit tests using fakes: process_agent_config advanced-
 # config branches and generate_agent available_tools parameter handling
 # ==========================================================================
-import sys
-from types import SimpleNamespace
+import sys  # noqa: E402 - import follows module initialization
+from types import SimpleNamespace  # noqa: E402 - import follows module initialization
 
-from src.services.generation.agents import AgentGenerationService as Svc
+from src.services.generation.agents import (  # noqa: E402 - import follows module initialization
+    AgentGenerationService as Svc,
+)
 
 
 class FakeLogService:

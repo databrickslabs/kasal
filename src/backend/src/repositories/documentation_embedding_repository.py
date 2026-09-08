@@ -438,7 +438,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
             from src.config.settings import settings
 
             return settings.DATABASE_TYPE.lower()
-        except Exception as e:
+        except Exception:
             # Default to postgres if detection fails
             return "postgresql"
 
@@ -538,7 +538,6 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
         file_paths: Optional[List[str]] = None,
     ) -> List[DocumentationEmbedding]:
         """PostgreSQL implementation using pgvector extension."""
-        from sqlalchemy import text
 
         # Format the embedding as a vector string for PostgreSQL
         query = select(self._model)

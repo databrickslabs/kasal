@@ -11,7 +11,6 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-
 from sqlalchemy.orm import relationship
 
 from src.db.base import Base

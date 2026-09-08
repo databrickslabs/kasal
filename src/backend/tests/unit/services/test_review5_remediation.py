@@ -7,9 +7,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import BackgroundTasks
-from src.core.exceptions import KasalError
 
-from src.core.exceptions import BadRequestError, ForbiddenError
+from src.core.exceptions import BadRequestError, ForbiddenError, KasalError
 from src.schemas.execution import CrewConfig
 from src.services.execution.kasal_service import KasalExecutionService
 from src.services.execution.service import ExecutionService

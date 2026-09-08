@@ -7,7 +7,6 @@ expired HITL approvals and processes them according to their timeout action.
 
 import asyncio
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
 logger = logging.getLogger(__name__)

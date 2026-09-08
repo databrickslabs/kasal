@@ -11,7 +11,6 @@ These tests verify the warning lifecycle:
 
 import importlib.util
 import sys
-from types import ModuleType
 from unittest.mock import MagicMock
 
 # ---------------------------------------------------------------------------
@@ -77,9 +76,10 @@ for _mod_name in [
         sys.modules[_mod_name] = _mock
         _STUBS[_mod_name] = _mock
 
-import pytest
 
-from src.services.tools.mcp_integration import MCPIntegration
+from src.services.tools.mcp_integration import (  # noqa: E402 - import follows module initialization
+    MCPIntegration,
+)
 
 # The stubs existed only to get that import through. Leaving them installed is
 # what made this file everyone else's problem.

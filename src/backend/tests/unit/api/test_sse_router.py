@@ -22,19 +22,19 @@ router = APIRouter(prefix="/sse", tags=["Server-Sent Events"])
 
 
 @router.get("/executions/{job_id}/stream")
-async def stream_execution_updates(job_id: str):
+async def mock_stream_execution_updates(job_id: str):
     """Stream execution updates for a specific job."""
     return StreamingResponse(content=iter([]), media_type="text/event-stream")
 
 
 @router.get("/executions/stream-all")
-async def stream_all_executions():
+async def mock_stream_all_executions():
     """Stream all execution updates."""
     return StreamingResponse(content=iter([]), media_type="text/event-stream")
 
 
 @router.get("/generations/{generation_id}/stream")
-async def stream_generation_updates(
+async def mock_stream_generation_updates(
     generation_id: str,
     timeout: int = Query(300, ge=30, le=600),
     heartbeat: int = Query(10, ge=5, le=60),
@@ -399,10 +399,10 @@ class TestSSEHeadersConfig:
 # branches that the TestClient-based tests above don't reach.
 # ============================================================================
 
-import importlib
-from types import SimpleNamespace
+import importlib  # noqa: E402 - import follows module initialization
+from types import SimpleNamespace  # noqa: E402 - import follows module initialization
 
-import pytest
+import pytest  # noqa: E402 - import follows module initialization
 
 _m = importlib.import_module("src.api.sse_router")
 

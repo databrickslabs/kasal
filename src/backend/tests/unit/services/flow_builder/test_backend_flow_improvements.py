@@ -7,10 +7,8 @@ Tests for new features added to BackendFlow:
 - Tracing support
 """
 
-import os
 import uuid
-from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 

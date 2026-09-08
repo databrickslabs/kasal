@@ -1,8 +1,7 @@
 """Tests for FlowBuilder – targeting 100 % statement coverage."""
 
 import asyncio
-import json
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -69,7 +68,6 @@ def _patches():
     """Return a dict of attribute names → values for patch.multiple(MODULE, ...)."""
     return {
         "CrewAIFlow": _FakeFlow,
-        "start": _fake_start,
         "listen": _fake_listen,
         "router": _fake_router,
         "and_": _fake_and,
@@ -79,7 +77,6 @@ def _patches():
         # name. `Process` needs no entry at all: the double's `process` returns
         # the name it is given.
         "active_harness": MagicMock(return_value=HarnessDouble()),
-        "BaseModel": MagicMock,
         "FlowConfigManager": MagicMock(),
         "FlowProcessorManager": MagicMock(),
         "FlowMethodFactory": MagicMock(),
@@ -88,7 +85,6 @@ def _patches():
         ),
         "extract_final_answer": MagicMock(return_value="answer"),
         "get_model_context_limits": AsyncMock(return_value=(128000, 16000)),
-        "FlowPausedForApprovalException": Exception,
     }
 
 
@@ -641,7 +637,7 @@ class TestCreateDynamicFlowStartMethods:
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
 
         with patch.multiple(MODULE, **p):
-            flow = await FlowBuilder._create_dynamic_flow(
+            await FlowBuilder._create_dynamic_flow(
                 sp,
                 [],
                 [],
@@ -684,7 +680,7 @@ class TestCreateDynamicFlowStartMethods:
         sp = [("starting_point_0", ["t1"], [task1], "db_name", {})]
 
         with patch.multiple(MODULE, **p):
-            flow = await FlowBuilder._create_dynamic_flow(
+            await FlowBuilder._create_dynamic_flow(
                 sp,
                 [],
                 [],
@@ -781,7 +777,7 @@ class TestCreateDynamicFlowListeners:
         ]
 
         with patch.multiple(MODULE, **p):
-            flow = await FlowBuilder._create_dynamic_flow(
+            await FlowBuilder._create_dynamic_flow(
                 sp,
                 listeners,
                 [],
@@ -1036,7 +1032,7 @@ class TestCreateDynamicFlowHITL:
         nodes = [{"id": "crew2", "data": {"crewId": "crew2"}}]
 
         with patch.multiple(MODULE, **p):
-            flow = await FlowBuilder._create_dynamic_flow(
+            await FlowBuilder._create_dynamic_flow(
                 sp,
                 listeners,
                 [],
@@ -1075,7 +1071,7 @@ class TestCreateDynamicFlowHITL:
         edges = [{"source": "t1", "target": "gate-1"}]
 
         with patch.multiple(MODULE, **p):
-            flow = await FlowBuilder._create_dynamic_flow(
+            await FlowBuilder._create_dynamic_flow(
                 sp,
                 [],
                 [],
@@ -1121,7 +1117,7 @@ class TestCreateDynamicFlowHITL:
         edges = [{"source": "t2", "target": "gate-2"}]
 
         with patch.multiple(MODULE, **p):
-            flow = await FlowBuilder._create_dynamic_flow(
+            await FlowBuilder._create_dynamic_flow(
                 sp,
                 listeners,
                 [],
@@ -1168,7 +1164,7 @@ class TestCreateDynamicFlowHITL:
         edges = [{"source": "crew2", "target": "gate-3"}]
 
         with patch.multiple(MODULE, **p):
-            flow = await FlowBuilder._create_dynamic_flow(
+            await FlowBuilder._create_dynamic_flow(
                 sp,
                 listeners,
                 [],
@@ -1208,7 +1204,7 @@ class TestCreateDynamicFlowHITL:
         edges = []
 
         with patch.multiple(MODULE, **p):
-            flow = await FlowBuilder._create_dynamic_flow(
+            await FlowBuilder._create_dynamic_flow(
                 sp,
                 [],
                 [],
@@ -1246,7 +1242,7 @@ class TestCreateDynamicFlowHITL:
         edges = [{"source": "node-xyz", "target": "gate-cd"}]
 
         with patch.multiple(MODULE, **p):
-            flow = await FlowBuilder._create_dynamic_flow(
+            await FlowBuilder._create_dynamic_flow(
                 sp,
                 [],
                 [],
@@ -2305,7 +2301,7 @@ class TestEdgeCases:
         nodes = []
 
         with patch.multiple(MODULE, **p):
-            flow = await FlowBuilder._create_dynamic_flow(
+            await FlowBuilder._create_dynamic_flow(
                 sp,
                 listeners,
                 [],
@@ -2356,7 +2352,7 @@ class TestEdgeCases:
         nodes = []
 
         with patch.multiple(MODULE, **p):
-            flow = await FlowBuilder._create_dynamic_flow(
+            await FlowBuilder._create_dynamic_flow(
                 sp,
                 listeners,
                 [],
@@ -2403,7 +2399,7 @@ class TestEdgeCases:
         ]
 
         with patch.multiple(MODULE, **p):
-            flow = await FlowBuilder._create_dynamic_flow(
+            await FlowBuilder._create_dynamic_flow(
                 sp,
                 listeners,
                 [],
@@ -2444,7 +2440,7 @@ class TestEdgeCases:
         nodes = [{"id": "crew2", "data": {"crewId": "crew2"}}]
 
         with patch.multiple(MODULE, **p):
-            flow = await FlowBuilder._create_dynamic_flow(
+            await FlowBuilder._create_dynamic_flow(
                 sp,
                 listeners,
                 [],

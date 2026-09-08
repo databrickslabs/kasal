@@ -11,7 +11,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.services.converters.formats.mquery.models import (
-    ColumnDataType,
     ExpressionType,
     MQueryConversionConfig,
     MQueryExpression,
@@ -19,7 +18,6 @@ from src.services.converters.formats.mquery.models import (
     ScanStatus,
     SemanticModel,
     StorageMode,
-    TableColumn,
     TableRelationship,
 )
 from src.services.converters.formats.mquery.scanner import PowerBIAdminScanner

@@ -27,11 +27,6 @@ from typing import Any
 RUNTIME = "{{BUNDLE_RUNTIME}}"
 
 if RUNTIME == "crewai":
-    from crewai import Agent as _CrewAgent
-    from crewai import Crew as _CrewCrew
-    from crewai import Process  # noqa: F401 — re-exported
-    from crewai import Task as _CrewTask
-
     from agent_server.kasal_runtime.services.execution.harnesses.crewai.build import (
         translate,
     )
@@ -41,6 +36,10 @@ if RUNTIME == "crewai":
     from agent_server.kasal_runtime.services.execution.harnesses.crewai.tools import (
         adapt_tools,
     )
+    from crewai import Agent as _CrewAgent
+    from crewai import Crew as _CrewCrew
+    from crewai import Process  # noqa: F401 — re-exported
+    from crewai import Task as _CrewTask
 
     def _wrap_llm(llm: Any) -> Any:
         """Kasal's transport object, presented to CrewAI as an LLM.

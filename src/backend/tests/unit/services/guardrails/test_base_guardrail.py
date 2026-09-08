@@ -1,5 +1,4 @@
 from abc import ABC
-from unittest.mock import MagicMock
 
 import pytest
 

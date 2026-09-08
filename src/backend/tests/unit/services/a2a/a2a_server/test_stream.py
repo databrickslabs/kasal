@@ -225,9 +225,8 @@ class TestRouter:
     async def test_streaming_send_starts_the_task_before_returning_the_stream(self):
         """Start and subscribe in one call: as two, a fast task can finish in
         the window between them and the caller waits for events forever."""
-        from types import SimpleNamespace
-
         import importlib
+        from types import SimpleNamespace
 
         # ``from src.api import a2a_router`` resolves to the re-exported
         # APIRouter, not the module the handlers live on.

@@ -93,7 +93,7 @@ class TestCrewToMethod:
     def test_a_crew_without_an_id_is_skipped_rather_than_keyed_on_nothing(
         self, missing
     ):
-        listeners = [(f"listener_0", missing, [], [], "C", [], "OR")]
+        listeners = [("listener_0", missing, [], [], "C", [], "OR")]
 
         assert build_crew_to_method(listeners, [], {}) == {}
 

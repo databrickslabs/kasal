@@ -514,9 +514,7 @@ class TestMainBlock:
         """Lines 974-975: __main__ block calls asyncio.run(seed())."""
         import runpy
 
-        with patch(
-            "src.seeds.prompt_templates.seed", new_callable=AsyncMock
-        ) as mock_seed:
+        with patch("src.seeds.prompt_templates.seed", new_callable=AsyncMock):
             with patch("asyncio.run") as mock_asyncio_run:
                 runpy.run_module(
                     "src.seeds.prompt_templates",

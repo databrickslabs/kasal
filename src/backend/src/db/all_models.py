@@ -28,7 +28,6 @@ from src.models.databricks_config import DatabricksConfig
 # Documentation models
 from src.models.documentation_embedding import (
     DocumentationEmbedding,
-    KnowledgeEmbedding,
 )
 from src.models.engine_config import EngineConfig
 from src.models.event_subscription import EmitRule, EventSubscription

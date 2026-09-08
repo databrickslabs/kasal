@@ -5,8 +5,6 @@ Tests the functionality of the ExecutionStatus enum including
 value validation and completeness.
 """
 
-import pytest
-
 from src.models.execution_status import ExecutionStatus
 
 
@@ -248,19 +246,23 @@ class TestExecutionStatusUseCases:
         all_statuses = list(ExecutionStatus)
 
         # Test filtering active executions
-        active_filter = lambda s: s in [
-            ExecutionStatus.PREPARING,
-            ExecutionStatus.RUNNING,
-        ]
+        def active_filter(s):
+            return s in [
+                ExecutionStatus.PREPARING,
+                ExecutionStatus.RUNNING,
+            ]
+
         active_statuses = [s for s in all_statuses if active_filter(s)]
 
         # Test filtering completed executions
-        completed_filter = lambda s: s in [
-            ExecutionStatus.STOPPED,
-            ExecutionStatus.COMPLETED,
-            ExecutionStatus.FAILED,
-            ExecutionStatus.CANCELLED,
-        ]
+        def completed_filter(s):
+            return s in [
+                ExecutionStatus.STOPPED,
+                ExecutionStatus.COMPLETED,
+                ExecutionStatus.FAILED,
+                ExecutionStatus.CANCELLED,
+            ]
+
         completed_statuses = [s for s in all_statuses if completed_filter(s)]
 
         # Assert

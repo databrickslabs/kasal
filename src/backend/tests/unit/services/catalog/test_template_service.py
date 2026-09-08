@@ -4,7 +4,7 @@ Targets uncovered branches to push coverage to 85%+.
 """
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -149,7 +149,7 @@ class TestFindAllTemplatesForGroup:
             "is_active": True,
         }
         with patch("src.services.catalog.templates.DEFAULT_TEMPLATES", [seed]):
-            result = await svc.find_all_templates_for_group(gc)
+            await svc.find_all_templates_for_group(gc)
         # Should have tried to create the base template
         assert len(svc.repository.created) >= 1
 
@@ -165,15 +165,13 @@ class TestFindAllTemplatesForGroup:
             "is_active": True,
         }
 
-        original_create = svc.repository.create
-
         async def failing_create(data):
             raise Exception("unique constraint violated")
 
         svc.repository.create = failing_create
         with patch("src.services.catalog.templates.DEFAULT_TEMPLATES", [seed]):
             # Should not raise
-            result = await svc.find_all_templates_for_group(gc)
+            await svc.find_all_templates_for_group(gc)
 
 
 # ---------------------------------------------------------------------------
@@ -321,7 +319,6 @@ class TestFindByNameWithGroupCheck:
         svc.repository._find_by_name_and_group_return = None
 
         created_t = make_template(name="seed-template")
-        original_create = svc.repository.create
 
         async def mock_create(data):
             return created_t

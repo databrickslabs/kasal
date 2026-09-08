@@ -3,8 +3,6 @@
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from src.services.tools.databricks_dashboard_creator_tool import (
     DatabricksDashboardCreatorSchema,
     DatabricksDashboardCreatorTool,
@@ -577,7 +575,7 @@ class TestDashboardCreation:
             ),
             patch.object(tool, "_publish_dashboard", return_value=True) as mock_pub,
         ):
-            result = tool._run(
+            tool._run(
                 visual_mappings_json=SAMPLE_TOOL94_OUTPUT,
                 warehouse_id="wh-123",
                 publish_dashboard=True,
@@ -602,7 +600,7 @@ class TestDashboardCreation:
             ),
             patch.object(tool, "_publish_dashboard", return_value=True) as mock_pub,
         ):
-            result = tool._run(
+            tool._run(
                 visual_mappings_json=SAMPLE_TOOL94_OUTPUT,
                 warehouse_id="wh-123",
                 publish_dashboard=False,

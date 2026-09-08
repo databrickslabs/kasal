@@ -6,26 +6,20 @@ running execution jobs, managing execution lifecycle, and handling results.
 """
 
 import asyncio
-import traceback
 import uuid
-from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
-
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger import LoggerManager
 from src.db.session import routed_scoped_session
 from src.models.execution_status import ExecutionStatus
-from src.repositories.execution_repository import ExecutionRepository
 from src.schemas.execution import CrewConfig
 from src.services.catalog.agents import AgentService
 from src.services.catalog.tasks import TaskService
 
 # Sync flow repository removed - use async FlowRepository instead
 from src.services.execution.engine_factory import EngineFactory
-from src.services.execution.engine_service import KasalEngineService
 from src.services.execution.status import ExecutionStatusService
 from src.services.flow_builder.kasal_flow_service import KasalFlowService
 from src.utils.user_context import GroupContext
@@ -505,7 +499,7 @@ class KasalExecutionService:
 
             # Run the crew via the engine - this starts the execution but doesn't wait for it to complete
             # The engine will update the status to COMPLETED or FAILED when done
-            result = await engine.run_execution(
+            await engine.run_execution(
                 execution_id, execution_config, group_context, session
             )
 

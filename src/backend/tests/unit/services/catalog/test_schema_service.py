@@ -12,7 +12,7 @@ from typing import Any, Dict
 # Helper to call instance method for JSON validation since implementation uses instance methods
 from unittest.mock import AsyncMock
 from unittest.mock import AsyncMock as _AsyncMockForHelper
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from pydantic import Field
@@ -726,7 +726,6 @@ class TestSchemaService:
     def test_validate_json_fields_line_277_coverage_bypass_loop(self):
         """Test line 277 by modifying the method to bypass the loop validation."""
         # We need to modify the validation to skip schema_definition in the loop
-        import types
 
         def create_modified_validate():
             def modified_validate_json_fields(data):
@@ -853,10 +852,9 @@ class TestSchemaService:
                 original_validate
             )
 
-    def test_validate_json_fields_line_277_coverage_bypass_loop(self):
+    def test_validate_json_fields_line_277_coverage_bypass_loopAdditionalCases(self):
         """Test line 277 by modifying the method to bypass the loop validation."""
         # We need to modify the validation to skip schema_definition in the loop
-        import types
 
         def create_modified_validate():
             def modified_validate_json_fields(data):

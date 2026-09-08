@@ -10,9 +10,8 @@ All heavy dependencies are lazily imported inside method bodies, so patches
 target the canonical source modules where the symbols are defined.
 """
 
-import asyncio
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
@@ -426,14 +425,3 @@ class TestSearchSuccess:
 # ---------------------------------------------------------------------------
 # TestSearch - empty / failure paths
 # ---------------------------------------------------------------------------
-
-
-def _search_databricks_backend(db_config):
-    b = MagicMock()
-    b.is_active = True
-    b.backend_type = MemoryBackendType.DATABRICKS
-    b.created_at = _dt(2024, 1, 1)
-    b.databricks_config = db_config
-    b.cognitive_config = None
-    b.custom_config = None
-    return b

@@ -7,16 +7,14 @@ input take the progressive path instead."""
 import logging
 import os
 import traceback
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
+from src.core.llm.robust_json import robust_json_parser
 from src.schemas.crew import (
     CrewGenerationRequest,
-    CrewGenerationResponse,
-    CrewStreamingRequest,
 )
 from src.services.llm.manager import LLMManager
 from src.services.tools.tool_service import ToolService
-from src.core.llm.robust_json import robust_json_parser
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
 from src.utils.user_context import GroupContext
 

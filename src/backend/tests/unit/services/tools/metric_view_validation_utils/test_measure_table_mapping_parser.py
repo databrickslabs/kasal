@@ -1,7 +1,6 @@
 """Tests for metric_view_validation_utils.measure_table_mapping_parser."""
 
 import json
-import textwrap
 
 import pytest
 

@@ -14,8 +14,6 @@ The FlowBuilder class coordinates these modules to construct complete CrewAI flo
 
 from typing import Any, Dict, Final, Optional
 
-from pydantic import BaseModel
-
 from src.core.logger import LoggerManager
 from src.services.execution.harnesses import active_harness
 from src.services.execution.kernel.execution_callback import create_execution_callbacks
@@ -27,10 +25,7 @@ from src.services.flow_builder.conversation.turn import (
     ConversationState,
     is_conversational,
 )
-from src.services.flow_builder.exceptions import FlowPausedForApprovalException
-from src.services.flow_builder.modules.agent_adapter import AgentConfig
 from src.services.flow_builder.modules.flow_conditions import (
-    ConditionState,
     report_no_route,
     state_snapshot,
 )
@@ -49,9 +44,8 @@ from src.services.flow_builder.modules.flow_methods import (
     get_model_context_limits,
 )
 from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
-from src.services.flow_builder.modules.task_adapter import TaskConfig
 from src.services.flow_builder.runtime import Flow as CrewAIFlow
-from src.services.flow_builder.runtime import and_, listen, or_, router, start
+from src.services.flow_builder.runtime import and_, listen, or_, router
 from src.utils.safe_eval import safe_eval
 
 # The @persist decorator is available since CrewAI 0.98.0
@@ -91,7 +85,9 @@ def pick_legacy_route(condition_value, route_names):
 #: bare literals here, two of which mean something different.
 DEFAULT_ROUTE: Final[str] = "default"
 
-from src.services.flow_builder.checkpoint_skip import CrewSkipPolicy
+from src.services.flow_builder.checkpoint_skip import (  # noqa: E402 - import follows module initialization
+    CrewSkipPolicy,
+)
 
 _FLOW_CONDITION_CALLS = frozenset(
     {"int", "float", "str", "bool", "len", "abs", "min", "max", "where"}

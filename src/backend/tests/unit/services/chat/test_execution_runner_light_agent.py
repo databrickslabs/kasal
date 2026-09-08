@@ -145,7 +145,7 @@ async def test_run_light_agent_success_writes_completed_with_raw_answer():
 
 import asyncio  # noqa: E402
 
-import src.core.events as _ce
+import src.core.events as _ce  # noqa: E402 - import follows module initialization
 
 
 async def _run_with_captured_handlers(

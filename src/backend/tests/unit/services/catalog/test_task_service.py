@@ -6,7 +6,6 @@ CRUD operations with group isolation.
 """
 
 from datetime import datetime
-from typing import Any, Dict, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -595,11 +594,13 @@ class TestTaskServiceFactoryMethod:
 # Additional isolated unit tests using fakes: group-scoped get/create/update/
 # delete branches (empty agent_id normalization, ownership checks)
 # ==========================================================================
-from types import SimpleNamespace
+from types import SimpleNamespace  # noqa: E402 - import follows module initialization
 
-from pydantic import BaseModel
+from pydantic import BaseModel  # noqa: E402 - import follows module initialization
 
-from src.services.catalog.tasks import TaskService as Svc
+from src.services.catalog.tasks import (  # noqa: E402 - import follows module initialization
+    TaskService as Svc,
+)
 
 
 class FakeRepo:

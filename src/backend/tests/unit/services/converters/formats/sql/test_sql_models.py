@@ -6,8 +6,6 @@ Targets uncovered lines: 83, 100, 108, 121-127, 131-136, 140-146, 150, 156-194,
 522-524, 536
 """
 
-import pytest
-
 from src.services.converters.base.models import KPI
 from src.services.converters.formats.sql.models import (
     SQLAggregationType,
@@ -16,7 +14,6 @@ from src.services.converters.formats.sql.models import (
     SQLJoinType,
     SQLMeasure,
     SQLQuery,
-    SQLStructure,
     SQLTranslationOptions,
     SQLTranslationResult,
 )

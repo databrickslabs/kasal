@@ -1,9 +1,5 @@
 """Unit tests for MCPServer model."""
 
-from datetime import datetime
-
-import pytest
-
 from src.models.mcp_server import MCPServer
 
 

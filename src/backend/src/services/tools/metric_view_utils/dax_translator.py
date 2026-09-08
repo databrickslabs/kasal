@@ -316,7 +316,9 @@ class DaxTranslator:
         if dax.strip() in ("Not available", ""):
             return {"reason": "DAX expression not available"}
         dax_no_comments = "\n".join(
-            l for l in dax.split("\n") if not l.strip().startswith("//")
+            item_value
+            for item_value in dax.split("\n")
+            if not item_value.strip().startswith("//")
         )
         if dax_no_comments.strip().upper() in ("BLANK()", "BLANK"):
             return {"reason": "BLANK() placeholder"}
@@ -719,7 +721,7 @@ class DaxTranslator:
             # Replace dim table references with the alternate alias
             dim_table = match["dim_table"]
             fact_col = match["fact_col"]
-            alt_alias = f"{dim_table.lower()}_{fact_col.lower()}"
+            f"{dim_table.lower()}_{fact_col.lower()}"
             # Rewrite source.col or dim.col refs if the inner expr uses the alternate dim
             return inner_result, ""
         return None, "USERELATIONSHIP inner expression not translatable"

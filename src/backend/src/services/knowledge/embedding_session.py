@@ -187,7 +187,7 @@ async def resolve_lakebase_instance(
         return None
 
 
-import re
+import re  # noqa: E402 - import follows module initialization
 
 # Lakebase objects (tables, schema) created by Databricks are owned by the
 # databricks_superuser role; individual principals are NOINHERIT members of it,

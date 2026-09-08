@@ -1,4 +1,4 @@
-from typing import List, Optional, Type
+from typing import List, Optional
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,7 +37,7 @@ class AgentRepository(BaseRepository[Agent]):
             query = select(self.model).where(self.model.id == id)
             result = await self.session.execute(query)
             return result.scalars().first()
-        except Exception as e:
+        except Exception:
             await self.session.rollback()
             raise
 
@@ -59,7 +59,7 @@ class AgentRepository(BaseRepository[Agent]):
                     setattr(db_obj, key, value)
                 await self.session.flush()
             return db_obj
-        except Exception as e:
+        except Exception:
             await self.session.rollback()
             raise
 
@@ -80,7 +80,7 @@ class AgentRepository(BaseRepository[Agent]):
                 await self.session.flush()
                 return True
             return False
-        except Exception as e:
+        except Exception:
             await self.session.rollback()
             raise
 

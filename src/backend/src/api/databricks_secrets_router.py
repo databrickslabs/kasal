@@ -5,12 +5,10 @@ This module provides a router for Databricks secrets CRUD operations.
 """
 
 import logging
-import os
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Path, status
+from fastapi import APIRouter, Depends, status
 
-from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import (
     BadRequestError,
     ForbiddenError,
@@ -18,6 +16,7 @@ from src.core.exceptions import (
     NotFoundError,
 )
 from src.core.permissions import check_role_in_context
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.databricks_secret import (
     DatabricksTokenRequest,
     SecretCreate,
@@ -83,7 +82,6 @@ async def get_databricks_secrets(
         List of secrets
     """
     # Get secrets from Databricks if configured
-    databricks_secrets = []
     try:
         config = await service.databricks_service.get_databricks_config()
         if (

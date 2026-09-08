@@ -1,6 +1,6 @@
 """Unit tests for MCPIntegration class."""
 
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -209,7 +209,7 @@ class TestCreateToolsForServerSPN:
                 return_value=mock_adapter,
             ),
         ):
-            tools = await MCPIntegration._create_tools_for_server(
+            await MCPIntegration._create_tools_for_server(
                 server,
                 "test_agent",
                 MagicMock(),
@@ -437,9 +437,7 @@ class TestCreateToolsForServerAuth:
 
         # Verify api_key was used in headers
         call_args = mock_create.call_args
-        server_params = (
-            call_args[0][0] if call_args[0] else call_args[1].get("server_params", {})
-        )
+        (call_args[0][0] if call_args[0] else call_args[1].get("server_params", {}))
         assert len(tools) >= 1
 
     @pytest.mark.asyncio

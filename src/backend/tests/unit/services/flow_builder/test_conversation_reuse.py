@@ -12,12 +12,13 @@ exists to avoid.
 """
 
 from types import SimpleNamespace
+
 from src.services.flow_builder.conversation.reuse import (
     IDENTITY_CHANNEL,
+    crews_that_answer,
     record_identity,
     reusable_output,
     reuse_enabled,
-    crews_that_answer,
     terminal_crew_names,
 )
 

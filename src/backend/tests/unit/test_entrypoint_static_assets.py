@@ -5,11 +5,10 @@ Tests that all Kasal icon variants are served correctly.
 """
 
 import os
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
+
 from tests.unit.route_utils import route_paths
 
 

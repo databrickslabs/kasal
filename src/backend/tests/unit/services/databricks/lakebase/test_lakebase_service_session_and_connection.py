@@ -24,8 +24,7 @@ Targets remaining uncovered lines:
   1574-1591 enable_lakebase
 """
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

@@ -3,7 +3,6 @@ Factory for creating guardrail instances.
 """
 
 import json
-import logging
 import traceback
 from typing import Any, Dict, Optional, Union
 

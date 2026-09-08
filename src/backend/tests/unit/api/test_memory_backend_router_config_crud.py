@@ -429,8 +429,8 @@ async def test_memory_replacement_response_matches_committed_state(
     from sqlalchemy.exc import IntegrityError
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-    from src.dependencies.providers import get_group_context
     from src.db import database_router as db
+    from src.dependencies.providers import get_group_context
     from src.main import app as production_app
     from src.models.memory_backend import MemoryBackend
     from src.repositories.memory_backend_repository import MemoryBackendRepository

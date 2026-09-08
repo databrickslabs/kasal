@@ -6,11 +6,8 @@ extraction in src/services/otel_tracing/event_bridge.py.
 Target: 100% code coverage.
 """
 
-import logging
 from types import SimpleNamespace
-from unittest.mock import MagicMock, call, patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from src.services.otel_tracing.event_bridge import (
     _EVENT_CLASSES,
@@ -900,7 +897,7 @@ class TestOTelEventBridgeEmitSpan:
         span.set_attribute.assert_any_call("kasal.event_type", "task_started")
         # Verify optional attributes were NOT set
         attr_calls = [c[0] for c in span.set_attribute.call_args_list]
-        attr_keys = [c[0] for c in attr_calls]
+        [c[0] for c in attr_calls]
         assert ("kasal.agent_name",) not in attr_calls or all(
             c[0][0] != "kasal.agent_name"
             for c in span.set_attribute.call_args_list

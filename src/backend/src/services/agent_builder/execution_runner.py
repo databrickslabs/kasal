@@ -7,7 +7,6 @@ the execution lifecycle.
 
 import asyncio
 import logging
-import traceback
 from typing import Any, Dict, Optional
 
 from src.models.execution_status import ExecutionStatus
@@ -71,7 +70,7 @@ async def run_crew_in_process(
             f.write(f"Execution ID: {execution_id}\n")
             f.write(f"Has config: {config is not None}\n")
             f.write(f"Has running_jobs: {running_jobs is not None}\n")
-    except:
+    except Exception:
         pass  # Ignore file write errors
 
     try:

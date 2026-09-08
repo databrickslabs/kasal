@@ -8,8 +8,6 @@ field validation, indexing, and multi-group support.
 from datetime import datetime
 from unittest.mock import patch
 
-import pytest
-
 from src.models.execution_logs import ExecutionLog
 
 

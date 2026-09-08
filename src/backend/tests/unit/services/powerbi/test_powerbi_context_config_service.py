@@ -6,11 +6,11 @@ business mappings and field synonyms with proper error handling.
 """
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from src.core.exceptions import KasalError
 
+from src.core.exceptions import KasalError
 from src.schemas.powerbi_context_config import (
     PowerBIBusinessMappingCreate,
     PowerBIBusinessMappingResponse,

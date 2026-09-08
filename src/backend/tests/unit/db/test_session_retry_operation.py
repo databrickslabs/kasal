@@ -4,8 +4,7 @@ Focuses on SwappableSessionFactory, retry_db_operation decorator,
 routed_scoped_session, get_db edge cases, get_smart_engine, and dispose_engines.
 """
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

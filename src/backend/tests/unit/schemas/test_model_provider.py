@@ -12,8 +12,6 @@ now derived from DEFAULT_MODELS, and what is worth testing is that the
 derivation holds — not which models happen to be current today.
 """
 
-import pytest
-
 from src.schemas.model_provider import SUPPORTED_MODELS, ModelProvider
 from src.seeds.model_configs import DEFAULT_MODELS, REMOVED_MODEL_KEYS
 

@@ -8,7 +8,7 @@ expiration processing, webhook notification dispatch, and error handling.
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -226,7 +226,6 @@ class TestStop:
 
         # Wrap the future so we can spy on done() and cancel().
         cancel_called = False
-        original_done = future.done
 
         class SpyTask:
             """Thin wrapper around a cancelled Future with call tracking."""

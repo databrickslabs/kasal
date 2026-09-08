@@ -125,7 +125,11 @@ class SQLAlchemyLogger:
 sql_logger = SQLAlchemyLogger()
 
 # Import pool classes
-from sqlalchemy.pool import AsyncAdaptedQueuePool, NullPool, StaticPool
+from sqlalchemy.pool import (  # noqa: E402 - import follows module initialization
+    AsyncAdaptedQueuePool,
+    NullPool,
+    StaticPool,
+)
 
 # Determine if we should use NullPool for event loop isolation
 # This is necessary when running in environments with multiple event loops
@@ -730,7 +734,9 @@ async def get_isolated_db_session():
 
 # Sync session factory for non-async contexts (e.g. CrewAI guardrail callbacks).
 # Uses the sync_engine underlying the async engine.
-from sqlalchemy.orm import sessionmaker as sync_sessionmaker
+from sqlalchemy.orm import (  # noqa: E402 - import follows module initialization
+    sessionmaker as sync_sessionmaker,
+)
 
 sync_session_factory = sync_sessionmaker(
     engine.sync_engine,
@@ -820,7 +826,7 @@ async def init_db() -> None:
             if not os.path.exists(db_path):
                 logger.info(f"Creating new SQLite database file: {db_path}")
                 # Create the file and initialize it
-                with open(db_path, "w") as f:
+                with open(db_path, "w"):
                     pass  # Create empty file
 
                 # Initialize it as a sqlite database

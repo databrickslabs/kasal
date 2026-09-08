@@ -5,8 +5,6 @@ Tests the functionality of Pydantic schemas for dispatcher service operations
 including validation, serialization, and field constraints.
 """
 
-from typing import Any, Dict, List
-
 import pytest
 from pydantic import ValidationError
 
@@ -662,7 +660,7 @@ class TestSchemaIntegration:
         ]
 
         for scenario in confidence_scenarios:
-            request = DispatcherRequest(message=scenario["message"])
+            DispatcherRequest(message=scenario["message"])
             response = DispatcherResponse(
                 intent=scenario["intent"],
                 confidence=scenario["confidence"],

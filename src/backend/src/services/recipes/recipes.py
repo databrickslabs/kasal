@@ -24,11 +24,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.execution_history import ExecutionHistory
-from src.models.execution_trace import ExecutionTrace
 from src.models.workflow_recipe_trial import (
     ARM_CONTROL,
     ARM_EXEMPLAR,

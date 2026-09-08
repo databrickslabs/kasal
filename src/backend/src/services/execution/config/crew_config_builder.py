@@ -8,7 +8,6 @@ Handles:
 - Optional parameters
 """
 
-import logging
 from typing import Any, Dict, List, Optional
 
 from src.core.logger import LoggerManager
@@ -152,7 +151,7 @@ class CrewConfigBuilder:
         Returns:
             Updated crew kwargs
         """
-        crew_config = self.config.get("crew", {})
+        self.config.get("crew", {})
 
         # Max RPM
         if "max_rpm" in self.config:

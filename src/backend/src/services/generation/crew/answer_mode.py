@@ -48,7 +48,7 @@ file-size ceiling.
 
 import copy
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from src.schemas.deep_research import (
     DEEP_RESEARCH_ENVELOPE_SCHEMA,

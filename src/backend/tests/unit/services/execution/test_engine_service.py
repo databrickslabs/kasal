@@ -6,7 +6,6 @@ and internal helpers.
 """
 
 import asyncio
-import os
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
@@ -125,16 +124,11 @@ class TestInitialize:
                 new_callable=AsyncMock,
             ),
             patch(
-                "src.services.execution.logs.capture.execution_log_capture",
-                side_effect=Exception("boom"),
+                "src.services.execution.engine_service.logger.info",
+                side_effect=RuntimeError("boom"),
             ),
         ):
-            # Force the import inside initialize() to fail
-            with patch.dict(
-                "sys.modules", {"src.services.execution.logs.capture": None}
-            ):
-                result = await service.initialize()
-                assert result is False
+            assert await service.initialize() is False
 
     @pytest.mark.asyncio
     async def test_flow_execution_type_uses_flow_logger(self, service):
@@ -316,7 +310,7 @@ class TestRunExecution:
             patch(
                 "src.services.execution.engine_service.run_crew_in_process",
                 new_callable=AsyncMock,
-            ) as mock_run,
+            ),
         ):
             result = await service.run_execution(
                 "exec_1", sample_execution_config, group_context, session=mock_session

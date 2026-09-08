@@ -12,7 +12,7 @@ Covers:
 
 import asyncio
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -109,7 +109,7 @@ class TestRunScheduleJob:
         config = _make_crew_config()
         now = datetime.now(timezone.utc)
 
-        mock_session_cm = AsyncMock()
+        AsyncMock()
         mock_repo = AsyncMock()
         mock_repo.find_by_id = AsyncMock(return_value=None)
 
@@ -206,7 +206,7 @@ class TestRunScheduleJob:
         update_repo = AsyncMock()
         update_repo.update_after_execution = AsyncMock()
 
-        sessions = [Exception("Session init failed")]
+        [Exception("Session init failed")]
 
         mock_factory_calls = [0]
 
@@ -258,7 +258,7 @@ class TestCheckAndRunSchedules:
         mock_repo.find_all = AsyncMock(return_value=[])
 
         # Raise on the first sleep so the loop exits
-        mock_sleep = AsyncMock(side_effect=[asyncio.CancelledError()])
+        AsyncMock(side_effect=[asyncio.CancelledError()])
 
         with (
             patch(
@@ -279,10 +279,8 @@ class TestCheckAndRunSchedules:
             mock_session.commit = AsyncMock()
 
             # Patch the module-level asyncio reference used inside scheduler_service
-            import src.services.scheduling.scheduler as sched_mod
 
-            original_sleep = asyncio.sleep
-            sched_mod_asyncio = __import__("asyncio")
+            __import__("asyncio")
 
             task = asyncio.create_task(svc.check_and_run_schedules())
             # Give the loop time to run one iteration and hit sleep
@@ -392,14 +390,14 @@ class TestGetAllJobsForGroup:
             "src.services.scheduling.scheduler.SchedulerJobResponse"
         ) as mock_resp:
             mock_resp.return_value = MagicMock(id=1)
-            result = await svc.get_all_jobs_for_group(gc)
+            await svc.get_all_jobs_for_group(gc)
         svc.repository.find_by_group.assert_awaited_once_with("grp-42")
 
     @pytest.mark.asyncio
     async def test_without_group_context_finds_all(self):
         svc = _make_service()
         svc.repository.find_all = AsyncMock(return_value=[])
-        result = await svc.get_all_jobs_for_group(group_context=None)
+        await svc.get_all_jobs_for_group(group_context=None)
         svc.repository.find_all.assert_awaited_once()
 
 
@@ -442,7 +440,7 @@ class TestCreateJob:
         ):
             mock_sc.return_value = MagicMock(model_dump=MagicMock(return_value={}))
             mock_resp.return_value = MagicMock(id=10, name="My Job")
-            result = await svc.create_job(jc)
+            await svc.create_job(jc)
         svc.repository.create.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -468,7 +466,7 @@ class TestCreateJob:
         ):
             mock_sc.return_value = MagicMock(model_dump=MagicMock(return_value={}))
             mock_resp.return_value = MagicMock(id=11)
-            result = await svc.create_job(jc)
+            await svc.create_job(jc)
 
 
 # ---------------------------------------------------------------------------
@@ -503,7 +501,7 @@ class TestCreateJobWithGroup:
             ),
         ):
             mock_resp.return_value = MagicMock(id=20)
-            result = await svc.create_job_with_group(jc, gc)
+            await svc.create_job_with_group(jc, gc)
         call_args = svc.repository.create.call_args[0][0]
         assert call_args.get("group_id") == "grp-77"
 
@@ -523,7 +521,7 @@ class TestCreateJobWithGroup:
             ),
         ):
             mock_resp.return_value = MagicMock(id=21)
-            result = await svc.create_job_with_group(jc, group_context=None)
+            await svc.create_job_with_group(jc, group_context=None)
         svc.repository.create.assert_awaited_once()
 
 
@@ -564,7 +562,7 @@ class TestUpdateJob:
             "src.services.scheduling.scheduler.SchedulerJobResponse"
         ) as mock_resp:
             mock_resp.return_value = MagicMock(id=5)
-            result = await svc.update_job(5, ju)
+            await svc.update_job(5, ju)
         svc.repository.update.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -586,7 +584,7 @@ class TestUpdateJob:
             "src.services.scheduling.scheduler.SchedulerJobResponse"
         ) as mock_resp:
             mock_resp.return_value = MagicMock(id=6)
-            result = await svc.update_job(6, ju)
+            await svc.update_job(6, ju)
         call_data = svc.repository.update.call_args[0][1]
         assert call_data.get("agents_yaml") == {"a": {}}
         assert call_data.get("model") == "claude-3"

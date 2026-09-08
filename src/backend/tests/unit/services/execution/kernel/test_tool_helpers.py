@@ -1,4 +1,3 @@
-from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -133,6 +132,7 @@ class TestResolveToolIdsToNames:
 @pytest.mark.asyncio
 async def test_agent_metadata_is_batched_and_keeps_order_duplicates_and_missing_ids():
     from types import SimpleNamespace
+
     from src.services.execution.kernel.tool_helpers import resolve_tools_for_agent
 
     service = AsyncMock()

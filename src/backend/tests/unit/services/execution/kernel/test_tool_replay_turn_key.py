@@ -6,12 +6,10 @@ re-asked question whose search the model rephrased pays again.
 """
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 
 from src.services.execution.kernel.tool_replay import install_tool_replay_hook
-from src.services.execution.runtime import unregister_tool_hooks
 from src.services.execution.runtime.executor import wrap_tool
 from src.services.trace.recordings import ToolRecording, canonical_args
 

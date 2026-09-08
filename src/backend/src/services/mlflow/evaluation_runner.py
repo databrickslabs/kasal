@@ -10,7 +10,6 @@ This module contains:
 """
 
 import os
-from json import dumps
 from typing import Any, Dict, List, Optional
 
 from src.core.logger import LoggerManager
@@ -89,7 +88,7 @@ class MLflowEvaluationRunner:
                 "MLFLOW_CREW_TRACES_EXPERIMENT", "/Shared/kasal-crew-execution-traces"
             )
 
-            eval_exp = mlflow.set_experiment(eval_exp_name)
+            mlflow.set_experiment(eval_exp_name)
 
             # Discover related traces and build evaluation dataset
             related_trace_ids, records = self._discover_traces_and_build_dataset(
@@ -524,9 +523,7 @@ class MLflowEvaluationRunner:
                 import mlflow as _ml
 
                 metrics_ns = getattr(_ml, "metrics", None)
-                m_genai_metrics = (
-                    getattr(metrics_ns, "genai", None) if metrics_ns else None
-                )
+                (getattr(metrics_ns, "genai", None) if metrics_ns else None)
 
                 # Prepare evaluation data for mlflow.genai.evaluate
                 eval_data = []
@@ -906,7 +903,7 @@ class MLflowEvaluationRunner:
 
                         # Pre-evaluation debug
                         try:
-                            first_keys = list(eval_data[0].keys()) if eval_data else []
+                            list(eval_data[0].keys()) if eval_data else []
                             scorer_names = [type(s).__name__ for s in (scorers or [])]
                             from_types = (
                                 "trace"

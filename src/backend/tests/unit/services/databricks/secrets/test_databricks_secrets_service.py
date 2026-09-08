@@ -27,7 +27,6 @@ IMPORTANT patching notes:
 
 import base64
 import os
-import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 

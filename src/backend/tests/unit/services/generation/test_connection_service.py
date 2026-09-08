@@ -15,7 +15,6 @@ Tests cover:
 
 import json
 import os
-import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -441,7 +440,7 @@ class TestGenerateConnections:
 
         # Patch the template repository and service at their real import locations
         with (
-            patch(_TEMPLATE_REPO_PATCH) as MockRepo,
+            patch(_TEMPLATE_REPO_PATCH),
             patch(_TEMPLATE_SVC_PATCH) as MockTplSvc,
         ):
 
@@ -719,7 +718,7 @@ class TestGenerateConnections:
         mock_parser.return_value = response_data
 
         with patch.dict(os.environ, {"CONNECTION_MODEL": "custom-model"}):
-            result = await svc.generate_connections(request)
+            await svc.generate_connections(request)
 
         assert "custom-model" in captured_model
 
@@ -758,7 +757,7 @@ class TestGenerateConnections:
         with patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=auth_ctx):
             # Remove CONNECTION_MODEL if present
             os.environ.pop("CONNECTION_MODEL", None)
-            result = await svc.generate_connections(request)
+            await svc.generate_connections(request)
 
         assert any(DEFAULT_ENGINE_MODEL in m for m in captured_model)
 
@@ -792,7 +791,7 @@ class TestGenerateConnections:
             _AUTH_PATCH, new_callable=AsyncMock, side_effect=ImportError("no module")
         ):
             os.environ.pop("CONNECTION_MODEL", None)
-            result = await svc.generate_connections(request)
+            await svc.generate_connections(request)
 
         assert any(DEFAULT_ENGINE_MODEL in m for m in captured_model)
 
@@ -822,7 +821,7 @@ class TestGenerateConnections:
         MockLLMManager.completion = capture_completion
         mock_parser.return_value = response_data
 
-        result = await svc.generate_connections(request)
+        await svc.generate_connections(request)
 
         assert "claude-3-opus" in captured_model
 

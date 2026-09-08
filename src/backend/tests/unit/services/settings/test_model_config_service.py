@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from src.models.model_config import ModelConfig
 from src.services.settings.models import ModelConfigService
 
 

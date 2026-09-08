@@ -4,6 +4,8 @@ Unit tests for tool capability manifest and lethal-trifecta detection.
 
 import logging
 
+import pytest
+
 from src.services.security.tool_capability_manifest import (
     TOOL_CAPABILITIES,
     ToolCapability,
@@ -238,7 +240,10 @@ class TestClassifyMcpServer:
 # Additional coverage: assess_mixed_task, log_mixed_task_warning,
 # apply_spotlighting_wrappers, run_crew_security_checks
 # ==========================================================================
-from unittest.mock import MagicMock, patch
+from unittest.mock import (  # noqa: E402 - import follows module initialization
+    MagicMock,
+    patch,
+)
 
 
 def test_assess_mixed_task_no_tools():
@@ -318,7 +323,6 @@ def test_assess_mixed_task_is_mixed():
 def test_assess_mixed_task_with_destructive():
     from src.services.security import tool_capability_manifest as mod
     from src.services.security.tool_capability_manifest import (
-        TOOL_CAPABILITIES,
         ToolCapability,
         assess_mixed_task,
     )
@@ -400,7 +404,9 @@ def test_apply_spotlighting_agent_no_untrusted_tools():
 
     class FakeTool:
         name = "safe_tool_not_in_manifest"
-        _run = lambda self, *a, **k: "result"
+
+        def _run(self, *a, **k):
+            return "result"
 
     crew = MagicMock()
     crew.agents = [FakeAgent()]
@@ -411,7 +417,6 @@ def test_apply_spotlighting_agent_no_untrusted_tools():
 def test_apply_spotlighting_with_untrusted_tool():
     from src.services.security import tool_capability_manifest as mod
     from src.services.security.tool_capability_manifest import (
-        TOOL_CAPABILITIES,
         ToolCapability,
         apply_spotlighting_wrappers,
     )

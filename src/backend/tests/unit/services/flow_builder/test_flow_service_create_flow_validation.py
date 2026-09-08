@@ -510,7 +510,7 @@ async def test_update_flow_with_nodes_and_edges():
         mock_repo.update = AsyncMock(return_value=updated_flow)
         MockRepo.return_value = mock_repo
 
-        from src.schemas.flow import Edge, FlowUpdate, Node, NodeData
+        from src.schemas.flow import Edge, FlowUpdate, Node
 
         nodes = [
             Node(

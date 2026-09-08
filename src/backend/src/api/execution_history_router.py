@@ -5,14 +5,14 @@ This module provides API endpoints for retrieving, managing, and deleting
 execution history records and related data.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 
 from src.config.settings import settings
-from src.dependencies.providers import GroupContextDep, SessionDep
 from src.core.exceptions import NotFoundError
 from src.core.logger import LoggerManager
+from src.dependencies.providers import GroupContextDep, SessionDep
 from src.schemas.execution_history import (
     DeleteResponse,
     ExecutionHistoryItem,

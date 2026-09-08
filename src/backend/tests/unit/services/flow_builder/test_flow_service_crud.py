@@ -1,10 +1,9 @@
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from src.core.exceptions import BadRequestError, KasalError, NotFoundError
+from src.core.exceptions import BadRequestError, NotFoundError
 from src.services.flow_builder.flow_service import FlowService as Svc
 
 
@@ -169,7 +168,7 @@ async def test_update_flow_adds_empty_actions(monkeypatch):
     )
     # Create update object with all required attributes
     upd = SimpleNamespace(name="NewFlow", flow_config={}, nodes=None, edges=None)
-    out = await svc.update_flow(flow.id, upd)
+    await svc.update_flow(flow.id, upd)
     assert upd.flow_config["actions"] == []
 
 

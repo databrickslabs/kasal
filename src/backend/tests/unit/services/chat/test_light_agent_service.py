@@ -200,7 +200,9 @@ async def test_attach_memory_best_effort_on_failure():
 
 
 # ── Conversation history (cross-turn recall) ─────────────────────────────────
-from contextlib import asynccontextmanager
+from contextlib import (  # noqa: E402 - import follows module initialization
+    asynccontextmanager,
+)
 
 
 def _msg(mtype, content):
@@ -576,7 +578,9 @@ def test_no_match_when_nothing_identifies_the_run():
 # ---------------------------------------------------------------------------
 # _RunTraceWriter — per-run batched trace persistence (perf W1.3)
 # ---------------------------------------------------------------------------
-from src.services.chat.service import _RunTraceWriter
+from src.services.chat.service import (  # noqa: E402 - import follows module initialization
+    _RunTraceWriter,
+)
 
 
 def _fake_isolated_session(opens: list):

@@ -55,7 +55,7 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
 
             result = await self.session.execute(query)
             return list(result.scalars().all())
-        except Exception as e:
+        except Exception:
             await self.session.rollback()
             raise
 
@@ -171,7 +171,7 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
                 }
                 for row in rows
             ]
-        except Exception as e:
+        except Exception:
             await self.session.rollback()
             raise
 
@@ -244,7 +244,7 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
 
             result = await self.session.execute(query)
             return list(result.all())
-        except Exception as e:
+        except Exception:
             await self.session.rollback()
             raise
 
@@ -275,7 +275,7 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
             result = await self.session.execute(stmt)
             await self.session.flush()
             return (result.rowcount or 0) > 0
-        except Exception as e:
+        except Exception:
             await self.session.rollback()
             raise
 
@@ -309,7 +309,7 @@ class ChatHistoryRepository(BaseRepository[ChatHistory]):
 
             result = await self.session.execute(query)
             return result.scalar() or 0
-        except Exception as e:
+        except Exception:
             await self.session.rollback()
             raise
 

@@ -11,8 +11,6 @@ Covers:
  - load_state JSON decode failure -> None
 """
 
-import json
-
 import pytest
 from pydantic import BaseModel
 

@@ -5,10 +5,7 @@ Tests the functionality of the Agent database model including
 field validation, relationships, and data integrity.
 """
 
-from datetime import datetime, timezone
-from unittest.mock import MagicMock
-
-import pytest
+from datetime import datetime
 
 from src.models.agent import Agent, generate_uuid
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
@@ -415,7 +412,7 @@ class TestAgent:
     def test_agent_primary_key_generation(self):
         """Test that primary key uses UUID generation."""
         # Act
-        agent = Agent(name="UUID Test", role="Test Role", goal="Test UUID generation")
+        Agent(name="UUID Test", role="Test Role", goal="Test UUID generation")
 
         # Note: The actual UUID is generated when saved to database
         # Here we just test that the default function is set correctly
@@ -461,12 +458,12 @@ class TestAgent:
     def test_agent_timestamp_behavior(self):
         """Test timestamp behavior in Agent."""
         # Arrange
-        before_creation = datetime.utcnow()
+        datetime.utcnow()
 
         # Act
-        agent = Agent(name="Timestamp Test", role="Time Keeper", goal="Test timestamps")
+        Agent(name="Timestamp Test", role="Time Keeper", goal="Test timestamps")
 
-        after_creation = datetime.utcnow()
+        datetime.utcnow()
 
         # Assert
         # Note: created_at and updated_at are set by database defaults

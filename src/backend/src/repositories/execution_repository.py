@@ -8,7 +8,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import delete, desc, func, update
+from sqlalchemy import func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 

@@ -4,8 +4,6 @@ Helper functions for working with tasks.
 This module provides utility functions for working with CrewAI tasks.
 """
 
-import json
-import os
 import traceback
 from typing import Any, List, Optional, Type
 
@@ -17,7 +15,6 @@ from src.services.agent_builder.schema_converter import build_model_from_schema
 from src.services.execution.harnesses import active_harness
 from src.services.execution.kernel.task_builder import build_task_args
 from src.services.execution.kernel.tool_helpers import resolve_tool_ids_to_names
-from src.services.guardrails.wrapper import GuardrailWrapper
 
 # Get loggers from the centralized logging system
 logger = LoggerManager.get_instance().crew
@@ -162,7 +159,6 @@ def create_callback_from_string(
             def databricks_callback_wrapper(output):
                 """Synchronous wrapper for DatabricksVolumeCallback"""
                 import asyncio
-                import threading
                 from concurrent.futures import ThreadPoolExecutor
 
                 def run_async_callback():
@@ -189,7 +185,7 @@ def create_callback_from_string(
                     # Run the async callback in a separate thread to avoid event loop conflicts
                     with ThreadPoolExecutor(max_workers=1) as executor:
                         future = executor.submit(run_async_callback)
-                        result = future.result(timeout=30)  # 30 second timeout
+                        future.result(timeout=30)  # 30 second timeout
 
                     return output  # Return the original output to continue the chain
                 except Exception as e:

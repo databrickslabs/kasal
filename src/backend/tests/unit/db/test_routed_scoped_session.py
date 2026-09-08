@@ -31,9 +31,8 @@ import contextlib
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from sqlalchemy import text
-
 import pytest
+from sqlalchemy import text
 
 import src.db.database_router as router
 from src.db import session as session_module

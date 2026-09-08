@@ -3,10 +3,8 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Type
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 from uuid import uuid4
-
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_service import BaseService
 from src.models.chat_history import ChatHistory

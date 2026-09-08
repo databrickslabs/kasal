@@ -7,7 +7,7 @@ process_flow_executor.py:
 3. Cleanup/finally flush (before subprocess teardown)
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 

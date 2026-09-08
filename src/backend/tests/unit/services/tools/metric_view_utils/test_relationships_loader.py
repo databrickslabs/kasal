@@ -1,7 +1,5 @@
 """Tests for relationships loader."""
 
-import pytest
-
 from src.services.tools.metric_view_utils.data_classes import TableInfo
 from src.services.tools.metric_view_utils.relationships_loader import (
     RelationshipsLoader,

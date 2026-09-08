@@ -2,6 +2,7 @@
 
 import logging
 import traceback
+
 from src.schemas.execution import CrewConfig
 
 logger = logging.getLogger("src.services.execution.service")
@@ -66,9 +67,7 @@ def extract_flow_name_inputs(config: CrewConfig) -> tuple:
                 for task in all_tasks:
                     task_id = task.get("id", f"task_{len(tasks_yaml)}")
                     tasks_yaml[task_id] = {
-                        "name": task.get(
-                            "name", task.get("description", "Task")[:50]
-                        ),
+                        "name": task.get("name", task.get("description", "Task")[:50]),
                         "description": task.get("description", ""),
                         "expected_output": task.get(
                             "expected_output", task.get("expectedOutput", "")

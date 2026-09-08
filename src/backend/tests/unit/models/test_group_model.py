@@ -5,11 +5,7 @@ Tests the functionality of the Group and GroupUser database models including
 field validation, relationships, and data integrity.
 """
 
-import uuid
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 from src.models.group import (
     Group,
@@ -23,7 +19,6 @@ from src.models.group import (
 )
 
 # Import all required models to ensure relationships are loaded
-from src.models.user import User
 
 
 class TestGroup:
@@ -474,13 +469,6 @@ class TestGroupEdgeCases:
 
     def test_group_complex_email_domains(self):
         """Test Group with complex email domains."""
-        complex_domains = [
-            "sub.domain.company.co.uk",
-            "dept.university.edu",
-            "team.startup.io",
-            "division.enterprise.com",
-            "my-company-name.business.org",
-        ]
 
         # Test with company names instead of domains
         complex_names = [

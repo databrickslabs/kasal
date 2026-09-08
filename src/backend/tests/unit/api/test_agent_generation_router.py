@@ -12,8 +12,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.agent_generation_router import AgentPrompt, router
-from src.dependencies.providers import get_group_context
 from src.db.database_router import get_smart_db_session
+from src.dependencies.providers import get_group_context
 from src.utils.user_context import GroupContext
 from tests.unit.api.conftest import register_exception_handlers
 

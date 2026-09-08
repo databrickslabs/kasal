@@ -4,9 +4,7 @@ Targets uncovered lines: 150-157, 161-162, 166, 169, 179, 338, 381-382,
 444-470, 479-514, 520-551
 """
 
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from src.services.converters.base.models import KPI, KPIDefinition
 from src.services.converters.formats.sql.models import (
@@ -120,7 +118,6 @@ def test_estimate_complexity_high_has_structures():
 def make_result(sql_queries=None, sql_measures=None):
     """Make a SQLTranslationResult with proper defaults."""
     from src.services.converters.formats.sql.models import (
-        SQLDefinition,
         SQLDialect,
         SQLQuery,
         SQLTranslationOptions,

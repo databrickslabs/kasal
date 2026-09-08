@@ -5,14 +5,10 @@ Edit the component/component_member rows and re-run generator/generate.py.
 """
 
 import json
-import uuid
-from collections.abc import Sequence
-from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Literal, Self
-from uuid import uuid4
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, Field
 
 
 class OutputFormat(str, Enum):

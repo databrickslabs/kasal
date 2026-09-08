@@ -9,8 +9,7 @@ Covers: validate_identifier, get_database_type, create_sqlite_backup,
 import os
 import sqlite3
 import tempfile
-from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, call, mock_open, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

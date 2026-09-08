@@ -186,6 +186,7 @@ disallow_incomplete_defs = true
 exclude = ["src/services/export/templates/"]
 
 [tool.ruff]
+cache-dir = "tests/.artifacts/ruff"
 line-length = 88
 target-version = "py311"
 exclude = [

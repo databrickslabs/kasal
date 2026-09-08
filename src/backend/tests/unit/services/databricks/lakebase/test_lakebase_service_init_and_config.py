@@ -1,5 +1,3 @@
-import asyncio
-from typing import Any, Dict, Optional
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
@@ -365,19 +363,19 @@ class TestLakebaseServiceUtilityMethods:
 # _validate_identifier tests (across lakebase services)
 # ===========================================================================
 
-from src.services.databricks.lakebase.migration import (
+from src.services.databricks.lakebase.migration import (  # noqa: E402 - import follows module initialization
     _validate_identifier as migration_validate_identifier,
 )
-from src.services.databricks.lakebase.permission import (
+from src.services.databricks.lakebase.permission import (  # noqa: E402 - import follows module initialization
     _quote_pg_role as permission_quote_pg_role,
 )
-from src.services.databricks.lakebase.schema import (
+from src.services.databricks.lakebase.schema import (  # noqa: E402 - import follows module initialization
     _quote_pg_role as schema_quote_pg_role,
 )
-from src.services.databricks.lakebase.schema import (
+from src.services.databricks.lakebase.schema import (  # noqa: E402 - import follows module initialization
     _validate_identifier as schema_validate_identifier,
 )
-from src.services.databricks.lakebase.service import (
+from src.services.databricks.lakebase.service import (  # noqa: E402 - import follows module initialization
     _validate_identifier as service_validate_identifier,
 )
 

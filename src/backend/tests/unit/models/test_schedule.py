@@ -133,7 +133,7 @@ class TestSchedule:
         assert schedule.group_id == "group_123"
         assert schedule.created_by_email == "user@group.com"
 
-    def test_schedule_group_fields(self):
+    def test_schedule_group_fieldsAdditionalCases(self):
         """Test Schedule group fields."""
         schedule = Schedule(
             name="Group Schedule",

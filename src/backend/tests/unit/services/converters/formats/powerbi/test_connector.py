@@ -5,7 +5,7 @@ Tests Power BI connector for extracting measures from Power BI datasets via REST
 including authentication, connection management, and measure extraction.
 """
 
-from unittest.mock import MagicMock, Mock, PropertyMock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 

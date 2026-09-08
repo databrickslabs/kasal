@@ -8,14 +8,12 @@ Target: 100% code coverage.
 
 import contextlib
 import json
-import logging
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import (
     AsyncMock,
     MagicMock,
     PropertyMock,
-    call,
     patch,
 )
 from uuid import UUID
@@ -770,7 +768,7 @@ class TestKasalDBSpanExporterExport:
         exporter._span_to_record = MagicMock(return_value=None)
         span = _make_readable_span()
 
-        with patch("src.services.otel_tracing.db_exporter.logger") as mock_logger:
+        with patch("src.services.otel_tracing.db_exporter.logger"):
             result = exporter.export([span])
 
         assert result == SpanExportResult.SUCCESS
@@ -1102,7 +1100,7 @@ class TestWriteBatch:
 
         mock_trace_cls = MagicMock(side_effect=RuntimeError("model creation failed"))
         mock_logger = MagicMock()
-        mock_session = self._mock_write_batch(
+        self._mock_write_batch(
             exporter, records, mock_trace_cls=mock_trace_cls, mock_logger=mock_logger
         )
 
@@ -1219,9 +1217,7 @@ class TestShutdown:
 
     def _make_exporter(self):
         with (
-            patch(
-                "src.services.otel_tracing.db_exporter.ThreadPoolExecutor"
-            ) as mock_exec_cls,
+            patch("src.services.otel_tracing.db_exporter.ThreadPoolExecutor"),
             patch("sqlalchemy.orm.sessionmaker", create=True),
             patch("sqlalchemy.create_engine", create=True),
             patch("src.config.settings.settings") as mock_settings,
@@ -1589,9 +1585,7 @@ class TestExportIntegration:
 
     def _make_exporter(self, group_context=None):
         with (
-            patch(
-                "src.services.otel_tracing.db_exporter.ThreadPoolExecutor"
-            ) as mock_exec_cls,
+            patch("src.services.otel_tracing.db_exporter.ThreadPoolExecutor"),
             patch("sqlalchemy.ext.asyncio.async_sessionmaker", create=True),
             patch("sqlalchemy.ext.asyncio.create_async_engine", create=True),
             patch("src.config.settings.settings") as mock_settings,
@@ -1672,7 +1666,7 @@ class TestExportIntegration:
         assert record["trace_metadata"]["tool_parameters"] == {"query": "AI trends"}
 
 
-class TestForceFlush:
+class TestForceFlushAdditionalCases:
     """PERF-032 regression: force_flush was a no-op, so BatchSpanProcessor's
     shutdown flush had no real guarantee and backed-up queues dropped traces."""
 

@@ -1,7 +1,5 @@
 """Tests for metric_view_utils data classes."""
 
-import pytest
-
 from src.services.tools.metric_view_utils.data_classes import (
     MetricViewSpec,
     MStep,

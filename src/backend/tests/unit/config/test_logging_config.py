@@ -5,13 +5,8 @@ Tests the functionality of the logging configuration module including
 environment-specific setups and logger creation.
 """
 
-import logging
 import os
-import tempfile
-from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from src.config.logging import get_logger, get_logging_config, setup_logging
 
@@ -77,7 +72,7 @@ class TestLoggingConfig:
             mock_logger_manager.get_instance.return_value = mock_instance
 
             with patch.dict(os.environ, {"LOG_DIR": "/custom/log/dir"}):
-                config = get_logging_config("development")
+                get_logging_config("development")
 
                 # Check that initialize was called with custom log dir
                 mock_instance.initialize.assert_called_with("/custom/log/dir")
@@ -97,7 +92,7 @@ class TestLoggingConfig:
             mock_logger_manager.get_instance.return_value = mock_instance
 
             with patch.dict(os.environ, {}, clear=True):
-                config = get_logging_config("development")
+                get_logging_config("development")
 
                 # Check that initialize was called without parameters
                 mock_instance.initialize.assert_called_with()
@@ -218,8 +213,8 @@ class TestLoggingConfig:
         filters = warnings.filters
 
         # Check that some deprecation warnings are filtered
-        httpx_filtered = any(
-            f[2] == "httpx" and f[1] == DeprecationWarning
+        any(
+            f[2] == "httpx" and f[1] is DeprecationWarning
             for f in filters
             if len(f) >= 3 and f[2] is not None
         )

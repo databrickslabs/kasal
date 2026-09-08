@@ -112,7 +112,9 @@ async def _assign_personal_workspace_ids(conn) -> None:
 
     from collections import Counter
     from uuid import uuid4
+
     from sqlalchemy import text
+
     from src.utils.user_context import GroupContext, clear_membership_cache
 
     rows = (

@@ -10,10 +10,9 @@ Tests cover all public methods:
   - check_user_permission (happy path, exception fallback)
 """
 
-import os
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -1224,7 +1223,6 @@ class TestListBackups:
         # The list_backups method does `import asyncio; asyncio.run(get_auth_context())`
         # which fails in a running loop.  We patch asyncio.run at the builtins level.
         mock_auth = SimpleNamespace(workspace_url="https://my-ws.databricks.com/")
-        original_run = asyncio.run
         with patch.object(asyncio, "run", return_value=mock_auth):
             result = await service.list_backups(
                 catalog="c", schema="s", volume_name="v"

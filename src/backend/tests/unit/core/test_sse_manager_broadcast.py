@@ -4,7 +4,6 @@ Extended unit tests for SSE manager to improve coverage.
 
 import asyncio
 from datetime import datetime
-from unittest.mock import MagicMock, patch
 from uuid import UUID
 
 import pytest
@@ -96,8 +95,8 @@ class TestSSEConnectionManager:
     def test_create_multiple_queues_same_job(self):
         """Multiple queues can be created for the same job."""
         manager = SSEConnectionManager()
-        q1 = manager.create_event_queue("job-1")
-        q2 = manager.create_event_queue("job-1")
+        manager.create_event_queue("job-1")
+        manager.create_event_queue("job-1")
         assert len(manager.job_queues["job-1"]) == 2
         assert manager.connection_count == 2
 
@@ -119,7 +118,7 @@ class TestSSEConnectionManager:
         """remove_event_queue only removes specified queue."""
         manager = SSEConnectionManager()
         q1 = manager.create_event_queue("job-1")
-        q2 = manager.create_event_queue("job-1")
+        manager.create_event_queue("job-1")
         manager.remove_event_queue("job-1", q1)
         assert "job-1" in manager.job_queues
         assert len(manager.job_queues["job-1"]) == 1
@@ -159,10 +158,8 @@ class TestSSEConnectionManager:
     async def test_broadcast_also_delivers_to_global_stream(self):
         """broadcast_to_job also sends to all_groups_ subscribers."""
         manager = SSEConnectionManager()
-        job_queue = manager.create_event_queue("job-1")
-        global_queue = manager.create_event_queue(
-            "all_groups_user1", group_ids=["user1"]
-        )
+        manager.create_event_queue("job-1")
+        manager.create_event_queue("all_groups_user1", group_ids=["user1"])
         manager.register_job_owner("job-1", "user1")
 
         event = SSEEvent(data="event")
@@ -248,7 +245,6 @@ class TestEventStreamGenerator:
     @pytest.mark.asyncio
     async def test_generator_yields_connected_event(self):
         """event_stream_generator yields connected event immediately."""
-        from src.core.sse_manager import sse_manager
 
         events = []
         gen = event_stream_generator(

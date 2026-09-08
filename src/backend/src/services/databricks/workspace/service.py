@@ -1,4 +1,3 @@
-import base64
 import logging
 import os
 from typing import Any, Dict, Optional, Tuple
@@ -476,7 +475,7 @@ class DatabricksService:
         )
 
         # Create repository
-        databricks_repository = DatabricksConfigRepository(session)
+        DatabricksConfigRepository(session)
 
         # Create service
         service = cls(session)

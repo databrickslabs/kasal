@@ -9,7 +9,7 @@ Tests cover:
   MCP tools, fallback paths, additional params, prompt template handling.
 """
 
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -337,7 +337,6 @@ class TestCreateAgentLlmConfig:
 
     @pytest.mark.asyncio
     async def test_temperature_converted_from_100_scale(self):
-        captured_args = {}
 
         with (
             patch_build(

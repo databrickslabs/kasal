@@ -2,7 +2,6 @@
 Unit tests for AgentBricks repository.
 """
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -11,11 +10,9 @@ import pytest
 from src.repositories.agentbricks_repository import AgentBricksRepository
 from src.schemas.agentbricks import (
     AgentBricksAuthConfig,
-    AgentBricksEndpoint,
     AgentBricksEndpointsRequest,
     AgentBricksEndpointsResponse,
     AgentBricksExecutionRequest,
-    AgentBricksExecutionResponse,
     AgentBricksMessage,
     AgentBricksQueryRequest,
     AgentBricksQueryResponse,
@@ -538,7 +535,7 @@ class TestGetEndpoints:
                     "get",
                     new_callable=AsyncMock,
                     return_value=mock_response,
-                ) as mock_get:
+                ):
                     request = AgentBricksEndpointsRequest()
                     result = await repo.get_endpoints(request)
 
