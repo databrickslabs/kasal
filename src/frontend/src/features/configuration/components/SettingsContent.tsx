@@ -34,6 +34,14 @@ export default function SettingsContent({ children }: { children: ReactNode }) {
           '&&': { border: 0, borderRadius: 16, backgroundImage: 'none', boxShadow: 'none', backgroundColor: surface },
           '& .MuiPaper-root': { backgroundColor: 'transparent' },
           '&.MuiDialog-paper, &.MuiPopover-paper, &.MuiMenu-paper': kasalStageSurface(dark),
+          // Autocomplete lists float over the form; transparent section surfaces
+          // would let the fields underneath show through their options.
+          '&&.MuiAutocomplete-paper': {
+            ...kasalStageSurface(dark),
+            marginBlock: 6,
+            borderRadius: 12,
+            boxShadow: `0 8px 24px ${alpha('#000', dark ? 0.3 : 0.12)}`,
+          },
         } } },
         MuiCardContent: { styleOverrides: { root: { padding: 24, '&:last-child': { paddingBottom: 24 } } } },
         MuiButton: { defaultProps: { disableElevation: true }, styleOverrides: { root: {
