@@ -39,6 +39,32 @@ logger = LoggerManager.get_instance().guardrails
 DEGRADED_MARKER = "> ⚠️ Unverified: "
 
 
+def adapt_guardrail(guardrail: Any) -> Any:
+    """Expose Kasal's callable wrapper as a source-inspectable CrewAI function.
+
+    CrewAI's started event calls ``inspect.getsource`` on the guardrail itself,
+    which rejects callable instances. Keep the wrapper (and its validation and
+    logging) inside a function, only at this runtime boundary.
+    """
+    from src.services.guardrails.wrapper import GuardrailWrapper
+
+    if not isinstance(guardrail, GuardrailWrapper):
+        return guardrail
+
+    # No return annotation: CrewAI does not resolve postponed annotations.
+    def validate(output: Any):  # type: ignore[no-untyped-def]
+        valid, result = guardrail(output)
+        # CrewAI defers output_json/output_pydantic conversion until AFTER its
+        # guardrails. Returning TaskOutput bypasses that conversion; returning
+        # the accepted text invokes it and populates fields used by flow routes.
+        if valid and result is output and isinstance(getattr(output, "raw", None), str):
+            return True, output.raw
+        return valid, result
+
+    validate.__name__ = type(guardrail.guardrail).__name__
+    return validate
+
+
 def _reason_for(result: Any) -> str:
     """Why the output is soft, in terms a reader can act on.
 
