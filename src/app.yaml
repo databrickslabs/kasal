@@ -16,15 +16,11 @@ env:
   - name: MLFLOW_TRACING_SQL_WAREHOUSE_ID
     valueFrom: sql-warehouse
   - name: KASAL_MLFLOW_RESOURCE_ID
-    valueFrom: mlflow-experiment
+    valueFrom: experiment
   - name: KASAL_OUTPUT_VOLUME
-    valueFrom: output-volume
+    valueFrom: volume
   - name: KASAL_DEFAULT_MODEL
-    valueFrom: default-model
-  - name: KASAL_EMBEDDING_MODEL
-    valueFrom: embedding-model
-  - name: ENCRYPTION_KEY
-    valueFrom: encryption-key
+    valueFrom: serving-endpoint
   - name: KASAL_LAKEBASE_RESOURCE
     valueFrom: lakebase
   - name: KASAL_REQUIRE_LAKEBASE_RESOURCE

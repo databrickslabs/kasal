@@ -32,14 +32,10 @@ import logging
 import os
 from typing import Any, Dict, Optional
 
-from src.core.databricks_app import DatabricksAppInstallation
-
 logger = logging.getLogger(__name__)
 
 # Databricks GTE-large = 1024 dims (matches documentation_embeddings.embedding).
-KNOWLEDGE_EMBEDDING_MODEL = (
-    DatabricksAppInstallation.from_env().embedding_model or "databricks-gte-large-en"
-)
+KNOWLEDGE_EMBEDDING_MODEL = "databricks-gte-large-en"
 
 # Local fallback (dev only). Defaults to nomic-embed-text — the same model the
 # memory embedder uses locally — because local dev stores vectors in SQLite as

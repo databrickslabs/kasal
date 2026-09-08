@@ -71,7 +71,7 @@ def _read_namespace(installation: DatabricksAppInstallation) -> TraceNamespace:
             )
             namespace = TraceNamespace(
                 error=(
-                    "The mlflow-experiment app resource must reference an accessible "
+                    "The experiment app resource must reference an accessible "
                     "experiment with Unity Catalog trace storage. An administrator "
                     "must also grant the app permission to create private trace tables "
                     "in that schema."
@@ -89,7 +89,7 @@ async def trace_namespace(installation: DatabricksAppInstallation) -> TraceNames
         return TraceNamespace()
     if not installation.experiment_id:
         return TraceNamespace(
-            error="Attach the mlflow-experiment resource in the Databricks App installation."
+            error="Attach the experiment resource in the Databricks App installation."
         )
     return await asyncio.to_thread(_read_namespace, installation)
 

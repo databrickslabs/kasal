@@ -62,10 +62,7 @@ class EmbedderConfigBuilder:
         if not embedder_config:
             embedder_config = {
                 "provider": "databricks",
-                "config": {
-                    "model": DatabricksAppInstallation.from_env().embedding_model
-                    or "databricks-gte-large-en"
-                },
+                "config": {"model": "databricks-gte-large-en"},
             }
             logger.info(
                 "No valid embedder config found, using default Databricks configuration"

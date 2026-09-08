@@ -169,6 +169,12 @@ async def initialize_resource_database() -> None:
             await connection.execute(text("CREATE SCHEMA IF NOT EXISTS kasal"))
             await connection.run_sync(Base.metadata.create_all)
             await run_schema_self_heal(connection)
+        # Persist keys with the app identity before any seeder or request can
+        # write credentials. The transaction serializes competing startups.
+        from src.utils.databricks_app_keys import initialize_app_keys
+
+        async with factory._engine.begin() as connection:
+            await initialize_app_keys(connection)
         async_session_factory.activate_lakebase(factory._session_factory)
         mark_lakebase_activated()
         # Keep the engine and refresh task in the factory used by normal reads.

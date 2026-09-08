@@ -30,11 +30,7 @@ def is_installed_model(model: str) -> bool:
     return bool(
         installation.hosted
         and model
-        and model.removeprefix("databricks/")
-        in {
-            installation.default_model,
-            installation.embedding_model,
-        }
+        and model.removeprefix("databricks/") == installation.default_model
     )
 
 

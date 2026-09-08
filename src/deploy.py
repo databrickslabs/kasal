@@ -456,15 +456,14 @@ def deploy_source_to_databricks(
 
     bound_environment = validate_resources(client, app_name, root_dir / "app.yaml")
 
-    # Provision a STABLE encryption key so Kasal's at-rest secret encryption
-    # survives redeploys. Without ENCRYPTION_KEY the app generates a random Fernet
-    # key at every startup, so after a redeploy previously-encrypted tool_configs
-    # secrets (client_secret, tokens) can no longer be decrypted — which surfaces
-    # as misleading "workspace_id missing" execution errors. If you deploy WITHOUT
-    # deploy.py (image / source-path), provision the key once manually — the app
-    # logs the exact `databricks secrets put-secret` command on startup when it's
-    # missing (see EncryptionUtils.get_encryption_key).
-    if "ENCRYPTION_KEY" not in bound_environment:
+    # Native installations persist keys at startup, including source deployments
+    # that bypass this script. Retain CLI provisioning for older templates only.
+    if (
+        "ENCRYPTION_KEY" not in bound_environment
+        and "KASAL_LAKEBASE_RESOURCE" not in bound_environment
+    ):
+        # Native installations initialize private encryption material at startup.
+        # Keep legacy CLI provisioning only for older deployment templates.
         ensure_encryption_key(client, app_name)
 
     # Frontend ships PREBUILT: deploy.py runs the npm build locally on every

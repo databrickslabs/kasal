@@ -12,11 +12,9 @@ runtime bindings are in `src/app.yaml`.
 | Resource key | Select | Permission |
 | --- | --- | --- |
 | `sql-warehouse` | SQL warehouse for trace queries and SQL operations | Can use |
-| `mlflow-experiment` | An installation experiment configured with Unity Catalog trace storage | Can read |
-| `output-volume` | Existing UC volume for generated files | Can read and write |
-| `default-model` | Ready, chat-capable serving endpoint supporting tool calls | Can query |
-| `embedding-model` | 1024-dimensional embedding endpoint, such as `databricks-gte-large-en` | Can query |
-| `encryption-key` | Secret containing a persistent Fernet key | Read |
+| `experiment` | An installation experiment configured with Unity Catalog trace storage | Can read |
+| `volume` | Existing UC volume for generated files | Can read and write |
+| `serving-endpoint` | Ready, chat-capable serving endpoint supporting tool calls | Can query |
 | `lakebase` | Lakebase project, branch and database | Can connect and create |
 
 **Lakebase Marketplace limitation:** the public AppManifest schema currently
@@ -85,25 +83,38 @@ Complete these once with an administrator, before starting Kasal:
    The experiment resource grants access to the experiment; it does not supply
    these additional UC permissions.
 
-3. Create a Fernet key secret once and assign it as `encryption-key`. On upgrades,
-   reuse the key that encrypted the existing data. Replacing it makes existing
-   encrypted credentials unreadable. The legacy CLI installation normally uses
-   `kasal/kasal_encryption_key`; select that existing secret when upgrading.
+Encryption keys are managed automatically. On first startup Kasal creates a
+private Databricks secret scope using the app service principal and persists
+both its RSA keys and Fernet key there. Redeployment restores the same keys;
+users do not create an encryption key or attach a Secret resource. Existing
+explicit keys, old `encryption-key` resource bindings, and available local RSA
+keys are retained when initializing the private scope. Keys that were already
+lost before an upgrade cannot be recovered automatically.
+
+Reuse applies to redeploying the same app with its existing service principal
+and secret scope. Deleting and recreating the app changes that identity; migrate
+the encryption material before reusing an existing database with a new app.
+
+The app must be allowed to create/manage its own secret scope. If workspace
+policy prevents this, startup reports that permission problem and does not
+substitute an ephemeral key. Key material is never stored in the output volume
+or application database.
 
 The CLI deploy command validates required resource keys before building or
 uploading. For a new CLI installation, create the app and attach these resources
-first. Marketplace declares the six supported resource requirements; the native
+first. Marketplace declares the four supported resource requirements; the native
 Lakebase attachment remains a separate step until that manifest schema supports it.
 
 ## Defaults and isolation
 
-- `default-model` becomes the server default for Chat and builder prompts,
+- `serving-endpoint` becomes the server default for Chat and builder prompts,
   including intent classification. Explicit model selections and saved crews
   keep their models. Assigned model endpoints use the app identity granted access
   by the resource; other endpoints retain the usual authentication path. Unknown custom endpoints are registered with conservative
   limits; adjust their model configuration to the endpoint's actual capabilities.
-- Memory and knowledge use `embedding-model`. Keep its identity and vector
-  dimension unchanged for existing data unless you re-embed that data.
+- Memory and knowledge default to `databricks-gte-large-en` (1024 dimensions).
+  They use the existing Databricks authentication path, with no embedding
+  resource to configure during installation.
 - New personal spaces and teamspaces inherit Lakebase memory. Explicit memory
   configurations and disabled settings remain respected.
 - MLflow tracing defaults on; paid evaluations remain opt-in. An explicit saved

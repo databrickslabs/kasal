@@ -20,7 +20,6 @@ class DatabricksAppInstallation:
     experiment_id: str = ""
     output_volume: str = ""
     default_model: str = ""
-    embedding_model: str = ""
 
     @classmethod
     def from_env(cls, env: Optional[Mapping[str, str]] = None):
@@ -49,7 +48,6 @@ class DatabricksAppInstallation:
             experiment_id=value("KASAL_MLFLOW_RESOURCE_ID"),
             output_volume=value("KASAL_OUTPUT_VOLUME"),
             default_model=value("KASAL_DEFAULT_MODEL"),
-            embedding_model=value("KASAL_EMBEDDING_MODEL"),
         )
 
     def experiment_name(self, group_id: str) -> str:
