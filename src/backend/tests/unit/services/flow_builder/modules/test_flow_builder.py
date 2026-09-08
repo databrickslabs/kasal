@@ -2578,32 +2578,6 @@ class TestEdgeCases:
             assert hasattr(flow, "router_explicit_listen_0")
 
     @pytest.mark.asyncio
-    async def test_router_no_starting_points(self):
-        """Router with no starting points defaults to 'starting_point_0'."""
-        from src.services.flow_builder.modules.flow_builder import FlowBuilder
-
-        p = _patches()
-        router_cfg = {
-            "name": "no_sp",
-            "listenTo": None,
-            "routes": {"a": []},
-            "condition": None,
-            "routeConditions": {},
-            "conditionField": "success",
-        }
-
-        with patch.multiple(MODULE, **p):
-            flow = await FlowBuilder._create_dynamic_flow(
-                [],
-                [],
-                [router_cfg],
-                {},
-                {},
-                flow_config={"state": {}, "persistence": {}},
-            )
-            assert hasattr(flow, "router_no_sp_0")
-
-    @pytest.mark.asyncio
     async def test_route_listener_crew_name_from_task(self):
         """Route listener gets crew name from route_tasks config."""
         from src.services.flow_builder.modules.flow_builder import FlowBuilder

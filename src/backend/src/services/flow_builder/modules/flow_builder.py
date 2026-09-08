@@ -44,6 +44,12 @@ from src.services.flow_builder.modules.flow_methods import (
     get_model_context_limits,
 )
 from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+from src.services.flow_builder.modules.router_dependencies import (
+    build_crew_to_method,
+    resolve_router_upstream,
+    route_method_name,
+    validate_router_upstreams,
+)
 from src.services.flow_builder.runtime import Flow as CrewAIFlow
 from src.services.flow_builder.runtime import and_, listen, or_, router
 from src.utils.safe_eval import safe_eval
@@ -755,7 +761,7 @@ class FlowBuilder:
         for _ri, _router_config in enumerate(routers):
             _r_name = _router_config.get("name", f"router_{_ri}")
             for _route_name, _route_tasks in _router_config.get("routes", {}).items():
-                _route_method = f"route_{_r_name}_{_route_name}_{_ri}"
+                _route_method = route_method_name(_r_name, _route_name, _ri)
                 for _rt in _route_tasks:
                     _tid = _rt.get("id") if isinstance(_rt, dict) else None
                     if _tid is not None:
@@ -1200,32 +1206,14 @@ class FlowBuilder:
 
         logger.info(f"Processed {len(hitl_gates)} HITL gate nodes")
 
-        # crew id -> the method this backend actually generated for it.
-        #
-        # A router says what it waits for, and it used to say it by METHOD NAME,
-        # which meant the frontend had to PREDICT a name only this side knows.
-        # It predicted by indexing its own arrays, which hold one entry per edge
-        # and per task, while methods are named per CREW — so any crew with two
-        # incoming edges shifted every later index and the router named a method
-        # that was never created. It then never fired, and the run reported
-        # COMPLETED having done half its work. Twice, on the same flow.
-        #
-        # So the frontend now sends the crew ID and this resolves it, from the
-        # tuples the naming actually came from rather than from a second copy of
-        # the rule.
-        crew_to_method: Dict[str, str] = {}
-        for listener_info in listener_crews:
-            listener_method_name, listener_crew_id = listener_info[0], listener_info[1]
-            if listener_crew_id:
-                crew_to_method.setdefault(str(listener_crew_id), listener_method_name)
-        for sp_method_name, sp_task_ids, _objs, _name, _data in starting_points:
-            sp_ids = {str(t) for t in sp_task_ids}
-            for sp_config in frontend_starting_points:
-                if str(sp_config.get("taskId")) in sp_ids:
-                    sp_crew_id = sp_config.get("crewId")
-                    if sp_crew_id:
-                        crew_to_method.setdefault(str(sp_crew_id), sp_method_name)
-                    break
+        crew_to_method = build_crew_to_method(
+            listener_crews,
+            starting_points,
+            frontend_starting_points,
+            routers,
+            all_tasks,
+        )
+        router_dependencies: Dict[str, str] = {}
         logger.info(f"Crew -> method map for routers: {crew_to_method}")
 
         # Add router methods for conditional routing
@@ -1247,33 +1235,9 @@ class FlowBuilder:
             default_method = (
                 starting_points[0][0] if starting_points else "starting_point_0"
             )
-            listen_to_method = (
-                crew_to_method.get(str(listen_to_crew_id))
-                if listen_to_crew_id
-                else None
-            ) or default_method
-
-            # A router wired to a method that does not exist never fires and
-            # says NOTHING about it. Resolution from the crew id removes the way
-            # that used to happen, but an unknown crew id (a node deleted from
-            # the canvas, a config hand-edited) would land in the same place, so
-            # the check stays.
-            if listen_to_method not in class_methods:
-                available = sorted(
-                    name
-                    for name in class_methods
-                    if name.startswith(("listener_", "starting_point_", "route_"))
-                )
-                logger.error(
-                    "Router %r waits on crew %r, which resolved to %r — a method "
-                    "this flow does not have. It cannot fire, so its routes will "
-                    "never run. Known crews: %s. Available methods: %s",
-                    router_name,
-                    listen_to_crew_id,
-                    listen_to_method,
-                    sorted(crew_to_method),
-                    available,
-                )
+            listen_to_method = resolve_router_upstream(
+                router_config, crew_to_method, default_method
+            )
 
             # Create router method
             def router_factory(
@@ -1522,6 +1486,7 @@ class FlowBuilder:
                 router_method_name,
             )
             class_methods[router_method_name] = bound_router
+            router_dependencies[router_method_name] = listen_to_method
             logger.info(
                 f"Created router method {router_method_name} with routes: {list(routes.keys())}"
             )
@@ -1544,7 +1509,7 @@ class FlowBuilder:
                 )
 
                 if route_task_objs:
-                    route_listener_name = f"route_{router_name}_{route_name}_{i}"
+                    route_listener_name = route_method_name(router_name, route_name, i)
 
                     def route_listener_factory(
                         route_task_list,
@@ -1827,11 +1792,17 @@ class FlowBuilder:
                             logger.info(
                                 f"Route listener kickoff_async completed, result type: {type(result)}"
                             )
-                            # Return a serializable value (not a raw CrewOutput): downstream
-                            # listeners store this in state, which @persist JSON-serializes.
-                            if hasattr(result, "raw") and result.raw:
-                                return result.raw
-                            return str(result) if result is not None else result
+                            # The next router needs this crew's actual output, and
+                            # its chosen branch reads it back by upstream method.
+                            output = (
+                                result.raw
+                                if getattr(result, "raw", None)
+                                else (str(result) if result is not None else None)
+                            )
+                            self.state[route_listener_method_name] = output
+                            if route_crew_name_param:
+                                self.state[route_crew_name_param] = output
+                            return output
 
                         route_listener_method.__name__ = route_listener_method_name
                         route_listener_method.__qualname__ = route_listener_method_name
@@ -1864,6 +1835,8 @@ class FlowBuilder:
                     logger.info(
                         f"Created route listener {route_listener_name} for crew '{route_crew_name}' listening to router '{router_method_name}' for route '{route_name}'"
                     )
+
+        validate_router_upstreams(router_dependencies, class_methods)
 
         # CRITICAL: Create the DynamicFlow class WITH all methods using type()
         # This allows the FlowMeta metaclass to process @start() and @listen() decorators

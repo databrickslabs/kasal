@@ -13,28 +13,11 @@ tuples the naming actually came from, so it cannot drift from it.
 
 import pytest
 
-
-def build_crew_to_method(listener_crews, starting_points, frontend_starting_points):
-    """Mirrors the map built in flow_builder._create_dynamic_flow.
-
-    Kept in the test rather than imported because the production copy is inline
-    in a 1,400-line function; the point of these tests is the RULE, and the rule
-    is short enough to state twice and long enough to be worth pinning.
-    """
-    crew_to_method = {}
-    for info in listener_crews:
-        method_name, crew_id = info[0], info[1]
-        if crew_id:
-            crew_to_method.setdefault(str(crew_id), method_name)
-    for method_name, task_ids, _objs, _name, _data in starting_points:
-        ids = {str(t) for t in task_ids}
-        for config in frontend_starting_points:
-            if str(config.get("taskId")) in ids:
-                crew_id = config.get("crewId")
-                if crew_id:
-                    crew_to_method.setdefault(str(crew_id), method_name)
-                break
-    return crew_to_method
+from src.services.flow_builder.modules.router_dependencies import (
+    build_crew_to_method,
+    resolve_router_upstream,
+    validate_router_upstreams,
+)
 
 
 class TestCrewToMethod:
@@ -105,3 +88,142 @@ class TestCrewToMethod:
         ]
 
         assert build_crew_to_method(listeners, [], {}) == {"crew-a": "listener_0"}
+
+
+class TestConditionalCrewDependencies:
+    def test_unknown_explicit_crew_does_not_fall_back_to_start(self):
+        with pytest.raises(ValueError, match="no executable method"):
+            resolve_router_upstream(
+                {"listenToCrewId": "missing"}, {}, "starting_point_0"
+            )
+
+    def test_a_route_without_runnable_tasks_is_not_a_dependency(self):
+        routers = [{"routes": {"number": [{"id": "deleted-task", "crewId": "number"}]}}]
+        assert build_crew_to_method([], [], [], routers, {}) == {}
+
+    def test_legacy_router_without_crew_uses_start(self):
+        assert resolve_router_upstream({}, {}, "starting_point_0") == "starting_point_0"
+
+    def test_missing_generated_method_fails_before_execution(self):
+        with pytest.raises(ValueError, match="missing flow method"):
+            validate_router_upstreams({"router_number": "route_black_number_1"}, {})
+
+
+@pytest.mark.asyncio
+async def test_router_without_any_starting_point_is_rejected():
+    from src.services.flow_builder.modules.flow_builder import FlowBuilder
+
+    with pytest.raises(ValueError, match="missing flow method 'starting_point_0'"):
+        await FlowBuilder._create_dynamic_flow(
+            [], [], [{"name": "no_start", "routes": {"a": []}}], {}, {}, flow_config={}
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reverse_routers", [False, True])
+@pytest.mark.parametrize(
+    "number,expected",
+    [(100, ["black", "number", "green"]), (101, ["black", "number", "white"])],
+)
+async def test_real_flow_runs_the_branch_after_number_finishes(
+    reverse_routers, number, expected
+):
+    """Exercise the real scheduler for run 415, with deterministic crew outputs."""
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from src.services.flow_builder.modules.flow_builder import FlowBuilder
+    from src.services.flow_builder.runtime import start
+
+    calls = []
+    agent = SimpleNamespace(role="Worker", llm=SimpleNamespace(model="example-model"))
+    tasks = {
+        name: SimpleNamespace(description=name, expected_output="JSON", agent=agent)
+        for name in ("black", "number", "green", "white")
+    }
+
+    def starting_method(**kwargs):
+        @start()
+        async def starting_point_0(self):
+            calls.append("black")
+            output = '{"word":"black"}'
+            self.state["starting_point_0"] = output
+            return output
+
+        return starting_point_0
+
+    def build_crew(**kwargs):
+        async def kickoff_async(inputs):
+            name = kwargs["name"]
+            calls.append(name)
+            if name in ("green", "white"):
+                assert json.loads(inputs["previous_output"]) == {"number": number}
+            return SimpleNamespace(
+                raw=json.dumps(
+                    {"number": number} if name == "number" else {"word": name}
+                )
+            )
+
+        return SimpleNamespace(kickoff_async=kickoff_async)
+
+    harness = SimpleNamespace(
+        build_task=lambda **kw: SimpleNamespace(**kw),
+        build_crew=build_crew,
+        process=lambda value: value,
+    )
+    routers = [
+        {
+            "name": "black",
+            "listenToCrewId": "black",
+            "routes": {
+                "to_number": [
+                    {"id": "number", "crewId": "number", "crewName": "number"}
+                ]
+            },
+            "routeConditions": {"to_number": "state.get('word') == 'black'"},
+        },
+        {
+            "name": "number",
+            "listenToCrewId": "number",
+            "routes": {
+                "to_green": [{"id": "green", "crewId": "green", "crewName": "green"}],
+                "to_white": [{"id": "white", "crewId": "white", "crewName": "white"}],
+            },
+            "routeConditions": {
+                "to_green": "state.get('number', '') == 100",
+                "to_white": "state.get('number', '') > 100",
+            },
+        },
+    ]
+    if reverse_routers:
+        routers.reverse()
+    module = "src.services.flow_builder.modules.flow_builder"
+    with (
+        patch(
+            f"{module}.FlowMethodFactory.create_starting_point_crew_method",
+            side_effect=starting_method,
+        ),
+        patch(f"{module}.active_harness", return_value=harness),
+        patch(
+            f"{module}.get_model_context_limits",
+            new=AsyncMock(return_value=(10000, 1000)),
+        ),
+        patch(
+            "src.services.security.tool_capability_manifest.run_crew_security_checks"
+        ),
+    ):
+        flow = await FlowBuilder._create_dynamic_flow(
+            [("starting_point_0", ["black"], [tasks["black"]], "black", {})],
+            [],
+            routers,
+            {},
+            tasks,
+            flow_config={
+                "startingPoints": [
+                    {"taskId": "black", "crewId": "black", "crewName": "black"}
+                ]
+            },
+        )
+        await flow.kickoff_async()
+    assert calls == expected
