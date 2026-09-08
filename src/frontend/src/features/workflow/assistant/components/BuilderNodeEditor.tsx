@@ -6,7 +6,7 @@ import { useBuilderNodeEditorBridge } from '../store/builderNodeEditorBridge';
 
 /** Existing form and callbacks, rendered in a pane when a builder owns one. */
 export default function BuilderNodeEditor({ open, kind, nodeId, label, onClose, children }: {
-  open: boolean; kind: 'agent' | 'task' | 'connection'; nodeId: string; label: string; onClose: () => void; children: ReactNode;
+  open: boolean; kind: 'agent' | 'task' | 'connection' | 'catalog'; nodeId: string; label: string; onClose: () => void; children: ReactNode;
 }) {
   const openPane = useBuilderNodeEditorBridge(state => state.open);
   const release = useBuilderNodeEditorBridge(state => state.release);
@@ -21,7 +21,7 @@ export default function BuilderNodeEditor({ open, kind, nodeId, label, onClose, 
     return () => release?.(id);
   }, [open, openPane, release, host, kind, nodeId, label]);
   if (!open) return null;
-  const form = <Box onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}
+  const form = kind === 'catalog' ? children : <Box onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}
     sx={{ height: '100%', minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', p: 2, boxSizing: 'border-box', overflow: 'auto',
       '& .MuiPaper-root': { backgroundImage: 'none', backgroundColor: 'transparent', boxShadow: 'none' },
       '& > .MuiCard-root': { height: '100%', flex: 1, minHeight: 0, border: 0 },

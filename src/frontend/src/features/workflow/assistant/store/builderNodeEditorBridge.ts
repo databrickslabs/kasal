@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
 export interface BuilderNodeEditorEntry {
-  id: `agent:${string}` | `task:${string}` | `connection:${string}`;
+  id: `agent:${string}` | `task:${string}` | `connection:${string}` | `catalog:${string}`;
   label: string;
   host: HTMLElement;
   onClose: () => void;

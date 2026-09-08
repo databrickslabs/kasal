@@ -1267,7 +1267,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         )}
 
         {/* Dialogs */}
-        <CrewFlowSelectionDialog
+        <CrewFlowSelectionDialog embedded={!isChatMode}
           open={isCrewFlowDialogOpen}
           onClose={() => {
             setIsCrewFlowDialogOpen(false);
@@ -1284,7 +1284,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         />
 
         {/* Flow Selection Dialog */}
-        <CrewFlowSelectionDialog
+        <CrewFlowSelectionDialog embedded={!isChatMode}
           open={isFlowDialogOpen}
           onClose={() => setIsFlowDialogOpen(false)}
           onCrewSelect={_handleCrewSelectWrapper}

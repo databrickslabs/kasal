@@ -36,9 +36,10 @@ vi.mock('../sessions/SessionLibrary', () => ({ default: () => null }));
 
 // CrewFlowSelectionDialog → surface the props the closure sets.
 vi.mock('../../features/workflow/crews/components/CrewFlowDialog/index', () => ({
-  CrewFlowSelectionDialog: (props: { isOpen?: boolean; open?: boolean; showOnlyTab?: number; initialTab?: number }) => (
+  CrewFlowSelectionDialog: (props: { isOpen?: boolean; open?: boolean; embedded?: boolean; showOnlyTab?: number; initialTab?: number }) => (
     <div
       data-testid="catalog-dialog"
+      data-embedded={String(props.embedded)}
       data-open={String(props.isOpen ?? props.open ?? false)}
       data-showonlytab={String(props.showOnlyTab)}
       data-initialtab={String(props.initialTab)}
@@ -111,6 +112,7 @@ describe('WorkflowDesigner - Load from Catalog matches the active canvas', () =>
 
     const dialog = screen.getAllByTestId('catalog-dialog').find(d => d.getAttribute('data-open') === 'true');
     expect(dialog).toBeTruthy();
+    expect(dialog?.getAttribute('data-embedded')).toBe('true');
     expect(dialog?.getAttribute('data-showonlytab')).toBe(String(CATALOG_FLOWS_TAB));
   });
 
@@ -122,6 +124,7 @@ describe('WorkflowDesigner - Load from Catalog matches the active canvas', () =>
 
     const dialog = screen.getAllByTestId('catalog-dialog').find(d => d.getAttribute('data-open') === 'true');
     expect(dialog).toBeTruthy();
+    expect(dialog?.getAttribute('data-embedded')).toBe('true');
     expect(dialog?.getAttribute('data-initialtab')).toBe(String(CATALOG_CREWS_TAB));
   });
 });
