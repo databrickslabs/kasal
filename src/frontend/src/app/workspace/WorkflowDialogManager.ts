@@ -3,50 +3,26 @@ import { readSettingsNavigation } from '../../features/configuration/lib/setting
 import { useAPIKeysStore } from '../../store/apiKeys';
 
 export interface DialogManagerResult {
-  isAgentDialogOpen: boolean;
-  setIsAgentDialogOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  isTaskDialogOpen: boolean;
-  setIsTaskDialogOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  isCrewPlanningOpen: boolean;
-  setCrewPlanningOpen: React.Dispatch<React.SetStateAction<boolean>>;
   isScheduleDialogOpen: boolean;
   setScheduleDialogOpen: React.Dispatch<React.SetStateAction<boolean>>;
   isAPIKeysDialogOpen: boolean;
   setIsAPIKeysDialogOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  isToolsDialogOpen: boolean;
-  setIsToolsDialogOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  isLogsDialogOpen: boolean;
-  setIsLogsDialogOpen: React.Dispatch<React.SetStateAction<boolean>>;
   isConfigurationDialogOpen: boolean;
   setIsConfigurationDialogOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  isFlowDialogOpen: boolean;
-  setIsFlowDialogOpen: React.Dispatch<React.SetStateAction<boolean>>;
   isTutorialOpen: boolean;
   setIsTutorialOpen: React.Dispatch<React.SetStateAction<boolean>>;
   handleCloseTutorial: () => void;
 }
 
 export const useDialogManager = (
-  hasSeenTutorial: boolean,
   setHasSeenTutorial: (value: boolean) => void
 ): DialogManagerResult => {
   // Dialog states
-  const [isAgentDialogOpen, setIsAgentDialogOpen] = useState(false);
-  const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false);
-  const [isCrewPlanningOpen, setCrewPlanningOpen] = useState(false);
   const [isScheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const [isAPIKeysDialogOpen, setIsAPIKeysDialogOpen] = useState(false);
-  const [isToolsDialogOpen, setIsToolsDialogOpen] = useState(false);
-  const [isLogsDialogOpen, setIsLogsDialogOpen] = useState(false);
   const [isConfigurationDialogOpen, setIsConfigurationDialogOpen] = useState(() => readSettingsNavigation() !== null);
-  const [isFlowDialogOpen, setIsFlowDialogOpen] = useState(false);
   const [isTutorialOpen, setIsTutorialOpen] = useState(false);
 
-  // Debug logging
-  useEffect(() => {
-    console.log('[DialogManager] isTutorialOpen state changed:', isTutorialOpen);
-  }, [isTutorialOpen]);
-  
   // Check URL for configuration parameters on component mount
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -68,14 +44,8 @@ export const useDialogManager = (
     }
   }, []);
 
-  // Handler for opening tools dialog
-  const _handleOpenToolsDialog = useCallback(() => {
-    setIsToolsDialogOpen(true);
-  }, []);
-
   // Handle closing tutorial
   const handleCloseTutorial = useCallback(() => {
-    console.log('[DialogManager] handleCloseTutorial called');
     setIsTutorialOpen(false);
     setHasSeenTutorial(true);
   }, [setHasSeenTutorial]);
@@ -94,24 +64,12 @@ export const useDialogManager = (
   }, []);
 
   return {
-    isAgentDialogOpen,
-    setIsAgentDialogOpen,
-    isTaskDialogOpen,
-    setIsTaskDialogOpen,
-    isCrewPlanningOpen,
-    setCrewPlanningOpen,
     isScheduleDialogOpen,
     setScheduleDialogOpen,
     isAPIKeysDialogOpen,
     setIsAPIKeysDialogOpen,
-    isToolsDialogOpen,
-    setIsToolsDialogOpen,
-    isLogsDialogOpen,
-    setIsLogsDialogOpen,
     isConfigurationDialogOpen,
     setIsConfigurationDialogOpen,
-    isFlowDialogOpen,
-    setIsFlowDialogOpen,
     isTutorialOpen,
     setIsTutorialOpen,
     handleCloseTutorial

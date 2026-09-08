@@ -41,8 +41,6 @@ interface WorkflowPanelsProps {
   selectedModel: string;
   setSelectedModel: (model: string) => void;
   // Dialog props
-  onOpenLogsDialog: () => void;
-  setIsCrewDialogOpen: (open: boolean) => void;
   onOpenTutorial?: () => void;
   onOpenConfiguration?: () => void;
 }
@@ -79,8 +77,6 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
   setReasoningEnabled,
   selectedModel,
   setSelectedModel,
-  onOpenLogsDialog,
-  setIsCrewDialogOpen,
   onOpenTutorial,
   onOpenConfiguration,
 }) => {
@@ -165,8 +161,6 @@ const WorkflowPanels: React.FC<WorkflowPanelsProps> = ({
           setReasoningEnabled={setReasoningEnabled}
           selectedModel={selectedModel}
           setSelectedModel={setSelectedModel}
-          onOpenLogsDialog={onOpenLogsDialog}
-          setIsCrewDialogOpen={setIsCrewDialogOpen}
           showRunHistory={showRunHistory}
           onOpenTutorial={onOpenTutorial}
           onOpenConfiguration={onOpenConfiguration}

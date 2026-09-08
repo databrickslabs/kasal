@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { Node, Edge } from 'reactflow';
 import { jobExecutionService } from '../api/execution/JobExecutionService';
-import { useWorkflowStore } from './workflow';
 import { useErrorStore } from './error';
 import { useTabManagerStore } from './tabManager';
 import { useFlowExecutionStore } from './flowExecutionStore';
@@ -223,7 +222,6 @@ interface CrewExecutionState {
   executeTab: (tabId: string, nodes: Node[], edges: Edge[], tabName?: string) => Promise<{ job_id: string } | null>;
   handleModelChange: (event: React.ChangeEvent<{ value: unknown }>) => void;
   handleRunClick: (type: 'crew' | 'flow') => Promise<void>;
-  handleGenerateCrew: () => Promise<void>;
   executeWithVariables: (variables: Record<string, string>) => Promise<void>;
 }
 
@@ -1097,59 +1095,6 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       } finally {
         set({ isExecuting: false });
       }
-    }
-  },
-
-  handleGenerateCrew: async () => {
-    const { nodes, edges } = useWorkflowStore.getState();
-    const { reasoningEnabled, reasoningLLM, reasoningConfig, selectedModel, schemaDetectionEnabled } = get();
-    set({ isExecuting: true });
-
-    try {
-      // Prepare additionalInputs with reasoning_llm if enabled
-      const additionalInputs: Record<string, unknown> = { generate: true, execution_effort: reasoningConfig.execution_effort };
-      if (reasoningEnabled && reasoningLLM) {
-        additionalInputs.reasoning_llm = reasoningLLM;
-      }
-      if (reasoningEnabled) {
-        additionalInputs.reasoning_config = reasoningConfig;
-      }
-
-      const response = await jobExecutionService.executeJob(
-        nodes,
-        edges,
-        selectedModel,
-        'crew',
-        additionalInputs,
-        schemaDetectionEnabled,
-        reasoningEnabled
-      );
-
-      set({
-        successMessage: 'Crew generated successfully',
-        showSuccess: true,
-        jobId: response.job_id
-      });
-
-      // Dispatch custom jobCreated event to update the run history immediately
-      window.dispatchEvent(new CustomEvent('jobCreated', {
-        detail: {
-          jobId: response.execution_id || response.job_id,
-          jobName: response.run_name || `Crew Generation (${new Date().toLocaleTimeString()})`,
-          status: 'running',
-          groupId: localStorage.getItem('selectedGroupId') // Include the group ID for security filtering
-        }
-      }));
-
-      // Also dispatch the standard refreshRunHistory event
-      window.dispatchEvent(new CustomEvent('refreshRunHistory'));
-    } catch (error) {
-      set({ 
-        errorMessage: error instanceof Error ? error.message : 'Failed to generate crew',
-        showError: true 
-      });
-    } finally {
-      set({ isExecuting: false });
     }
   },
 

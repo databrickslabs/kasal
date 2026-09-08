@@ -14,7 +14,7 @@ import {
   applyEdgeChanges,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { Box, Snackbar, Alert, Dialog, DialogContent, Menu, Button, DialogTitle, IconButton, Typography, Drawer, SpeedDial, SpeedDialAction, SpeedDialIcon } from '@mui/material';
+import { Box, Snackbar, Alert, Dialog, DialogContent, Menu, Button, Drawer, SpeedDial, SpeedDialAction, SpeedDialIcon } from '@mui/material';
 import WorkspaceSplitDivider from './WorkspaceSplitDivider';
 import ChatIcon from '@mui/icons-material/Chat';
 import HistoryIcon from '@mui/icons-material/History';
@@ -45,7 +45,6 @@ import { useAPIKeysStore as _useAPIKeysStore } from '../../store/apiKeys';
 import { FlowFormData as _FlowFormData, FlowConfiguration as _FlowConfiguration } from '../../types/workflow/flow';
 import { createEdge as _createEdge } from '../../utils/edgeUtils';
 import { handleNodesGenerated } from '../../features/workflow/assistant/utils/chatHelpers';
-import CloseIcon from '@mui/icons-material/Close';
 
 // Component Imports
 import { InputVariablesDialog } from '../../features/executions/components/InputVariablesDialog';
@@ -59,19 +58,14 @@ import { useTaskExecutionStore } from '../../store/taskExecutionStore';
 import { useFlowExecutionStore } from '../../store/flowExecutionStore';
 
 // Dialog Imports
-import AgentDialog from '../../features/workflow/agents/components/AgentDialog';
-import TaskDialog from '../../features/workflow/tasks/components/TaskDialog';
-import CrewPlanningDialog from '../../features/workflow/planning/components/CrewPlanningDialog';
 import ScheduleDialog from '../../features/workflow/scheduling/components/ScheduleDialog';
 import TutorialButton from '../../features/help/tutorial/TutorialButton';
 import InteractiveTutorial from '../../features/help/tutorial/InteractiveTutorial';
 import APIKeys from '../../features/configuration/components/APIKeys/APIKeys';
-import Logs from '../../features/executions/components/LLMLogs';
 import ShowLogs from '../../features/executions/components/ShowLogs';
 import { executionLogService } from '../../api/execution/ExecutionLogs';
 import type { LogEntry } from '../../api/execution/ExecutionLogs';
 import Configuration from '../../features/configuration/components/Configuration';
-import ToolForm from '../../features/tools/components/ToolForm';
 import { CrewFlowSelectionDialog } from '../../features/workflow/crews/components/CrewFlowDialog/index';
 import SaveCrew from '../../features/workflow/crews/components/SaveCrew';
 import SaveFlow from '../../features/workflow/flows/components/SaveFlow';
@@ -111,7 +105,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
   // Use workflow store for UI settings
   const {
-    hasSeenTutorial,
     hasSeenHandlebar: _hasSeenHandlebar,
     setHasSeenTutorial,
     setHasSeenHandlebar,
@@ -274,34 +267,8 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   // Use tab execution sync to keep execution config (process type, reasoning, etc.) in sync per tab
   useTabExecutionSync();
 
-  // Use agent and task managers with original flow manager
-  const {
-    agents,
-    addAgentNode: _addAgentNode,
-    isAgentDialogOpen,
-    setIsAgentDialogOpen,
-    handleAgentSelect,
-    handleShowAgentForm,
-    fetchAgents,
-    openInCreateMode: agentOpenInCreateMode,
-  } = useAgentManager({
-    nodes,
-    setNodes
-  });
-
-  const {
-    tasks,
-    addTaskNode: _addTaskNode,
-    isTaskDialogOpen,
-    setIsTaskDialogOpen,
-    handleTaskSelect,
-    handleShowTaskForm,
-    fetchTasks,
-    openInCreateMode: taskOpenInCreateMode,
-  } = useTaskManager({
-    nodes,
-    setNodes
-  });
+  const { handleAgentSelect } = useAgentManager({ setNodes });
+  const { handleTaskSelect } = useTaskManager({ setNodes });
 
   // UI Layout store
   const {
@@ -413,7 +380,7 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   }, [areFlowsVisible, setUIStoreAreFlowsVisible]);
 
   // Use the dialog manager
-  const dialogManager = useDialogManager(hasSeenTutorial, setHasSeenTutorial);
+  const dialogManager = useDialogManager(setHasSeenTutorial);
 
 
   const [isChatProcessing, setIsChatProcessing] = React.useState(false);
@@ -455,13 +422,9 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     isExecuting,
     selectedModel,
     reasoningEnabled,
-    tools,
-    selectedTools,
     setSelectedModel,
     setReasoningEnabled,
-    setSelectedTools,
     handleRunClick,
-    handleGenerateCrew,
     executeFlow: _executeFlow,
     setNodes: setCrewExecutionNodes,
     setEdges: setCrewExecutionEdges,
@@ -960,12 +923,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
   const saveCrewRef = useRef<HTMLButtonElement>(null);
   const saveFlowRef = useRef<HTMLButtonElement>(null);
 
-  // Handle tools change
-  const handleToolsChange = (toolIds: string[]) => {
-    const newSelectedTools = tools.filter(tool => tool.id && toolIds.includes(tool.id));
-    setSelectedTools(newSelectedTools);
-  };
-
   // Handle showing execution logs
   const handleShowExecutionLogs = useCallback(async (jobId?: string) => {
     try {
@@ -1157,12 +1114,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               setReasoningEnabled={setReasoningEnabled}
               selectedModel={selectedModel}
               setSelectedModel={setSelectedModel}
-              onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
-              setIsCrewDialogOpen={() => {
-                setCrewFlowDialogInitialTab(0);
-                setCrewFlowDialogShowOnlyTab(undefined);
-                setIsCrewFlowDialogOpen(true);
-              }}
               onOpenTutorial={() => {
 
                 dialogManager.setIsTutorialOpen(true);
@@ -1316,37 +1267,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         )}
 
         {/* Dialogs */}
-        <AgentDialog
-          open={isAgentDialogOpen}
-          onClose={() => setIsAgentDialogOpen(false)}
-          onAgentSelect={handleAgentSelect}
-          agents={agents}
-          onShowAgentForm={handleShowAgentForm}
-          fetchAgents={fetchAgents}
-          showErrorMessage={showErrorMessage}
-          openInCreateMode={agentOpenInCreateMode}
-        />
-
-        <TaskDialog
-          open={isTaskDialogOpen}
-          onClose={() => setIsTaskDialogOpen(false)}
-          onTaskSelect={handleTaskSelect}
-          tasks={tasks}
-          onShowTaskForm={handleShowTaskForm}
-          fetchTasks={fetchTasks}
-          openInCreateMode={taskOpenInCreateMode}
-        />
-
-        <CrewPlanningDialog
-          open={dialogManager.isCrewPlanningOpen}
-          onClose={() => dialogManager.setCrewPlanningOpen(false)}
-          onGenerateCrew={handleGenerateCrew}
-          selectedModel={selectedModel}
-          tools={tools}
-          selectedTools={selectedTools.map(tool => tool.id || '')}
-          onToolsChange={handleToolsChange}
-        />
-
         <CrewFlowSelectionDialog
           open={isCrewFlowDialogOpen}
           onClose={() => {
@@ -1392,50 +1312,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
         >
           <DialogContent>
             <APIKeys />
-          </DialogContent>
-        </Dialog>
-
-        <Dialog
-          open={dialogManager.isToolsDialogOpen}
-          onClose={() => dialogManager.setIsToolsDialogOpen(false)}
-          maxWidth="lg"
-          fullWidth
-        >
-          <DialogContent>
-            <ToolForm />
-          </DialogContent>
-        </Dialog>
-
-        <Dialog
-          open={dialogManager.isLogsDialogOpen}
-          onClose={() => dialogManager.setIsLogsDialogOpen(false)}
-          maxWidth="lg"
-          fullWidth
-        >
-          <DialogTitle sx={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            pb: 1.5,
-            borderBottom: '1px solid',
-            borderColor: 'divider'
-          }}>
-            <Typography variant="h6">LLM Logs</Typography>
-            <IconButton
-              onClick={() => dialogManager.setIsLogsDialogOpen(false)}
-              size="small"
-              sx={{
-                color: 'text.secondary',
-                '&:hover': {
-                  color: 'text.primary',
-                }
-              }}
-            >
-              <CloseIcon />
-            </IconButton>
-          </DialogTitle>
-          <DialogContent>
-            <Logs />
           </DialogContent>
         </Dialog>
 

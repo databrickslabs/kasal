@@ -178,14 +178,6 @@ vi.mock('./components/ChatMessageItem', () => ({
   ),
 }));
 
-vi.mock('./components/GroupedTraceMessages', () => ({
-  GroupedTraceMessages: ({ messages, running }: { messages: { id: string }[]; running?: boolean }) => (
-    <div data-testid="grouped-trace-messages" data-running={String(Boolean(running))}>
-      {messages.length} trace messages
-    </div>
-  ),
-}));
-
 vi.mock('./KnowledgeFileUpload', () => ({
   KnowledgeFileUpload: () => <div data-testid="knowledge-upload">Upload</div>,
 }));

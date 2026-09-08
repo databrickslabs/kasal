@@ -1,5 +1,3 @@
-import { Tool } from './tool';
-
 export interface CrewAgent {
   id?: string;
   name: string;
@@ -61,13 +59,3 @@ export interface Crew {
   tasks: CrewTask[];
   // workflow?: WorkflowConnection[]; // Reverted: Workflow derived from task.context
 }
-
-export interface CrewPlanningDialogProps {
-  open: boolean;
-  onClose: () => void;
-  onGenerateCrew: (plan: Crew, executeAfterGeneration: boolean) => void;
-  selectedModel: string;
-  tools: Tool[];
-  selectedTools: string[];
-  onToolsChange: (tools: string[]) => void;
-} 
