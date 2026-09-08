@@ -900,14 +900,16 @@ class LLMManager:
         elif provider == ModelProvider.DATABRICKS:
             # Use unified Databricks authentication for CrewAI LLM (thread-safe)
             try:
-                from src.utils.databricks_auth import get_auth_context
+                from src.utils.databricks_app_auth import get_model_auth_context
                 from src.utils.user_context import UserContext
 
                 # Get user token from context for OBO authentication
                 user_token = UserContext.get_user_token()
 
                 # Get authentication context (OBO → PAT → Service Principal)
-                auth = await get_auth_context(user_token=user_token, group_id=group_id)
+                auth = await get_model_auth_context(
+                    model_name_value, user_token=user_token, group_id=group_id
+                )
                 if auth:
                     # Pass authentication directly to CrewAI LLM (thread-safe)
                     api_key = auth.token

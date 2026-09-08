@@ -13,6 +13,8 @@ from typing import Any, Dict, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from src.core.databricks_app import DatabricksAppInstallation
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
@@ -30,7 +32,9 @@ logger = logging.getLogger(__name__)
 # reasoning and tool use with much higher throughput than frontier-only models.
 # It is a global endpoint, so deployments using this default must enable
 # cross-geography routing in the Databricks workspace.
-DEFAULT_ENGINE_MODEL = os.getenv("DEFAULT_LLM_MODEL", "databricks-gemini-3-8-flash")
+DEFAULT_ENGINE_MODEL = DatabricksAppInstallation.from_env().default_model or os.getenv(
+    "DEFAULT_LLM_MODEL", "databricks-gemini-3-8-flash"
+)
 
 
 # Models whose request surface accepts a native reasoning budget:

@@ -40,6 +40,12 @@ def start_root_trace(trace_name: str, inputs: Optional[Dict[str, Any]] = None):
         Trace/span object or None if MLflow unavailable
     """
     mlflow = _get_mlflow()
+    from src.core.databricks_app import is_databricks_app
+    from src.services.mlflow.trace_context import has_destination
+
+    if is_databricks_app() and not has_destination():
+        yield None
+        return
     if not mlflow:
         yield None
         return

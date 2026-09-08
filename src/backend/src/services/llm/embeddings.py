@@ -72,14 +72,16 @@ async def get_embeddings(
         batch_size = int(os.getenv("EMBEDDING_BATCH_SIZE", "32"))
 
     try:
-        from src.utils.databricks_auth import get_auth_context
+        from src.utils.databricks_app_auth import get_model_auth_context
         from src.utils.user_context import UserContext
 
         # Resolve auth ONCE for the whole file (this is the per-chunk cost we
         # are eliminating — each get_auth_context() opens a DB session).
         user_token = UserContext.get_user_token()
         emb_group_id = _get_group_id_from_context(required=False)
-        auth = await get_auth_context(user_token=user_token, group_id=emb_group_id)
+        auth = await get_model_auth_context(
+            embedding_model, user_token=user_token, group_id=emb_group_id
+        )
         if not auth:
             embedding_logger.warning(
                 "No Databricks auth available for batch embeddings"
@@ -219,7 +221,7 @@ async def get_embedding(
         if provider == "databricks" or "databricks" in embedding_model:
             # Use unified Databricks authentication for embeddings
             try:
-                from src.utils.databricks_auth import get_auth_context
+                from src.utils.databricks_app_auth import get_model_auth_context
                 from src.utils.user_context import UserContext
 
                 # Get user token from context for OBO authentication
@@ -230,8 +232,8 @@ async def get_embedding(
                     "Attempting unified Databricks authentication for embeddings"
                 )
                 emb_group_id = _get_group_id_from_context(required=False)
-                auth = await get_auth_context(
-                    user_token=user_token, group_id=emb_group_id
+                auth = await get_model_auth_context(
+                    embedding_model, user_token=user_token, group_id=emb_group_id
                 )
                 if auth:
                     embedding_logger.info(
@@ -345,7 +347,8 @@ async def get_embedding(
                                 # swallowed by the except below, and every 401 simply
                                 # returned None. The refresh has never actually run.
                                 # get_auth_context is the same resolver used above.
-                                refreshed = await get_auth_context(
+                                refreshed = await get_model_auth_context(
+                                    embedding_model,
                                     user_token=UserContext.get_user_token(),
                                     group_id=_get_group_id_from_context(required=False),
                                 )

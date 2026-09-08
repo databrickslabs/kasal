@@ -749,6 +749,17 @@ sync_session_factory = sync_sessionmaker(
 # Database initialization
 async def init_db() -> None:
     """Initialize database tables if they don't exist."""
+    from src.core.databricks_app import LakebaseAppResource, is_databricks_app
+
+    if LakebaseAppResource.from_env() is not None:
+        from src.db.app_resource import initialize_resource_database
+
+        await initialize_resource_database()
+        return
+    if is_databricks_app() and os.getenv("KASAL_REQUIRE_LAKEBASE_RESOURCE") == "true":
+        raise RuntimeError(
+            "Attach the 'lakebase' database resource before deploying Kasal"
+        )
     try:
         # Import all models to ensure they're registered
         import importlib

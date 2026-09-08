@@ -294,6 +294,16 @@ class LakebaseSessionFactory:
         """
         w = await self._get_workspace_client()
 
+        from src.core.databricks_app import LakebaseAppResource
+
+        installed = LakebaseAppResource.from_env()
+        if installed:
+            from src.db.app_resource import resource_token
+
+            token = await resource_token(w, installed)
+            self._token_holder.update(token=token, refreshed_at=time.time())
+            return token
+
         # Try provisioned instance first
         try:
             cred = w.database.generate_database_credential(
@@ -363,6 +373,14 @@ class LakebaseSessionFactory:
         Returns:
             PostgreSQL connection string for Lakebase
         """
+        from src.core.databricks_app import LakebaseAppResource
+
+        installed = LakebaseAppResource.from_env()
+        if installed:
+            from src.db.app_resource import resource_url
+
+            await self._refresh_token()
+            return resource_url(installed)
         try:
             w = await self._get_workspace_client()
 
@@ -752,6 +770,12 @@ async def get_lakebase_session(
         AsyncSession connected to Lakebase
     """
     global _lakebase_factory
+
+    from src.core.databricks_app import LakebaseAppResource
+
+    installed = LakebaseAppResource.from_env()
+    if installed:
+        instance_name = installed.endpoint or installed.host
 
     # Get instance name from config if not provided
     if not instance_name:

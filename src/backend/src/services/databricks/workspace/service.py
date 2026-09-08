@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import httpx
 
+from src.core.databricks_app import DatabricksAppInstallation, LakebaseAppResource
 from src.core.exceptions import KasalError
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
 from src.schemas.databricks_config import (
@@ -156,6 +157,13 @@ class DatabricksService:
 
             invalidate_parent_mlflow_cache()
 
+            if DatabricksAppInstallation.from_env().hosted:
+                return {
+                    "status": "success",
+                    "message": "Databricks preferences saved; installation resources remain managed by Databricks Apps",
+                    "config": await self.get_databricks_config(),
+                }
+
             # Return the response
             return {
                 "status": "success",
@@ -248,6 +256,63 @@ class DatabricksService:
         """
         try:
             config = await self.repository.get_active_config(group_id=self.group_id)
+
+            installation = DatabricksAppInstallation.from_env()
+            if installation.hosted:
+                from .app_resources import trace_namespace
+
+                namespace = await trace_namespace(installation)
+                # Existing installations without the new resource bindings keep
+                # their explicitly configured namespace and warehouse.
+                legacy = config if not installation.experiment_id else None
+                catalog = namespace.catalog or (getattr(legacy, "catalog", "") or "")
+                schema = namespace.schema or (getattr(legacy, "schema", "") or "")
+                warehouse = installation.warehouse_id or (
+                    getattr(config, "warehouse_id", "") or ""
+                )
+                namespace_error = namespace.error if not (catalog and schema) else ""
+                # Connection and compute belong to the installation. Never read
+                # another team's config or persist these defaults into each team.
+                result = DatabricksConfigResponse(
+                    workspace_url=installation.host,
+                    warehouse_id=warehouse,
+                    catalog=catalog,
+                    schema=schema,
+                    enabled=True,
+                    installation_managed=True,
+                    lakebase_managed=LakebaseAppResource.from_env() is not None,
+                    default_model=installation.default_model or None,
+                    warehouse_from_resource=bool(installation.warehouse_id),
+                    resource_error=namespace_error
+                    or (
+                        None
+                        if warehouse
+                        else "Attach the sql-warehouse resource in the Databricks App installation."
+                    ),
+                )
+                if config:
+                    # Preserve optional preferences; assigned storage roots below
+                    # override legacy paths without copying them into each team.
+                    for field in (
+                        "ai_gateway_enabled",
+                        "volume_enabled",
+                        "volume_path",
+                        "volume_file_format",
+                        "volume_create_date_dirs",
+                        "knowledge_volume_enabled",
+                        "knowledge_volume_path",
+                        "knowledge_chunk_size",
+                        "knowledge_chunk_overlap",
+                    ):
+                        value = getattr(config, field, None)
+                        if value is not None:
+                            setattr(result, field, value)
+                # Storage roots belong to the installation; object paths below
+                # them remain scoped by the existing teamspace storage services.
+                if installation.output_volume and self.group_id:
+                    result.volume_enabled = True
+                    result.volume_path = installation.output_path(self.group_id)
+                return result
 
             if not config:
                 return None
@@ -343,8 +408,13 @@ class DatabricksService:
         Returns:
             Status indicating if personal token is required
         """
+        if DatabricksAppInstallation.from_env().hosted:
+            return {
+                "personal_token_required": False,
+                "message": "Databricks uses the app installation identity",
+            }
         try:
-            config = await self.repository.get_active_config()
+            config = await self.repository.get_active_config(group_id=self.group_id)
 
             if not config:
                 return {
@@ -391,7 +461,7 @@ class DatabricksService:
             Tuple[bool, str]: (should_use_personal_token, personal_access_token)
         """
         try:
-            config = await self.repository.get_active_config()
+            config = await self.repository.get_active_config(group_id=self.group_id)
             if not config:
                 return False, ""
 
@@ -516,7 +586,7 @@ class DatabricksService:
         if host:
             workspace_url = host
         else:
-            config = await self.repository.get_active_config()
+            config = await self.repository.get_active_config(group_id=self.group_id)
             workspace_url = ""
             if config and config.workspace_url:
                 workspace_url = config.workspace_url
@@ -627,7 +697,12 @@ class DatabricksService:
         Returns:
             Dictionary with connection status
         """
-        config = await self.repository.get_active_config()
+        installation = DatabricksAppInstallation.from_env()
+        if installation.hosted:
+            from .app_resources import connection_status
+
+            return await connection_status(installation)
+        config = await self.repository.get_active_config(group_id=self.group_id)
 
         if not config:
             return {

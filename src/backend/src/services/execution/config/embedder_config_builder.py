@@ -11,6 +11,7 @@ Handles embedder setup for:
 
 from typing import Any, Dict, List, Optional, Tuple
 
+from src.core.databricks_app import DatabricksAppInstallation
 from src.core.logger import LoggerManager
 from src.utils.databricks_url_utils import DatabricksURLUtils
 
@@ -61,7 +62,10 @@ class EmbedderConfigBuilder:
         if not embedder_config:
             embedder_config = {
                 "provider": "databricks",
-                "config": {"model": "databricks-gte-large-en"},
+                "config": {
+                    "model": DatabricksAppInstallation.from_env().embedding_model
+                    or "databricks-gte-large-en"
+                },
             }
             logger.info(
                 "No valid embedder config found, using default Databricks configuration"
@@ -171,10 +175,20 @@ class EmbedderConfigBuilder:
                 f"User token available: {bool(self.user_token)}, token length: {len(self.user_token) if self.user_token else 0}"
             )
 
-            # Get headers using unified auth
-            auth_headers, error = await get_databricks_auth_headers(
-                user_token=self.user_token
+            from src.utils.databricks_app_auth import (
+                get_model_auth_context,
+                is_installed_model,
             )
+
+            model_name = config.get("model", "databricks-gte-large-en")
+            installed_model = is_installed_model(model_name)
+            if installed_model:
+                auth = await get_model_auth_context(model_name, group_id=self.group_id)
+                auth_headers, error = auth.get_headers(), None
+            else:
+                auth_headers, error = await get_databricks_auth_headers(
+                    user_token=self.user_token
+                )
             if error:
                 logger.warning(f"Unified auth failed, falling back to API key: {error}")
                 # SECURITY: Pass group_id for multi-tenant isolation
@@ -189,7 +203,11 @@ class EmbedderConfigBuilder:
                 return crew_kwargs, None, None
 
             # Get Databricks endpoint
-            databricks_endpoint = await self._get_databricks_endpoint()
+            databricks_endpoint = (
+                DatabricksAppInstallation.from_env().host
+                if installed_model
+                else await self._get_databricks_endpoint()
+            )
             if not databricks_endpoint:
                 logger.error(
                     "No Databricks endpoint found for embeddings - cannot create embedder"
@@ -244,7 +262,11 @@ class EmbedderConfigBuilder:
                             payload["model"] = body_model
 
                         # Prepare headers - prioritize user token for OBO auth
-                        if self.user_token:
+                        if is_installed_model(self.model):
+                            from src.utils.databricks_app_auth import get_app_headers
+
+                            headers = get_app_headers()
+                        elif self.user_token:
                             headers = {
                                 "Authorization": f"Bearer {self.user_token}",
                                 "Content-Type": "application/json",

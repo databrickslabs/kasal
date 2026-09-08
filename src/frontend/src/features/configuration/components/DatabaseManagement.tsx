@@ -1,3 +1,4 @@
+import type { LakebaseConfig } from '../../../types/config/database';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Accordion,
@@ -114,24 +115,6 @@ interface BackupList {
   error?: string;
 }
 
-interface LakebaseConfig {
-  enabled: boolean;
-  instance_name: string;
-  capacity: string;
-  retention_days: number;
-  node_count: number;
-  instance_status?: 'NOT_CREATED' | 'CREATING' | 'READY' | 'STOPPED' | 'ERROR' | 'NOT_FOUND';
-  endpoint?: string;
-  created_at?: string;
-  migration_status?: 'pending' | 'in_progress' | 'completed' | 'failed';
-  migration_completed?: boolean;
-  migration_result?: {
-    total_tables: number;
-    total_rows: number;
-    migrated_tables?: Array<{table: string; rows: number}>;
-  };
-  migration_error?: string;
-}
 
 interface LakebaseInstance {
   name: string;
@@ -355,7 +338,7 @@ const DatabaseManagement: React.FC = () => {
         setLakebaseBackend(response.data.enabled ? 'lakebase' : 'disabled');
 
         // If config has instance name and is enabled, check instance status
-        if (response.data.enabled && response.data.instance_name) {
+        if (response.data.enabled && response.data.instance_name && !response.data.installation_managed) {
           await checkLakebaseInstance(response.data.instance_name);
         }
       }
@@ -742,7 +725,13 @@ const DatabaseManagement: React.FC = () => {
       )}
 
       {databaseInfo && <DatabaseOverview info={databaseInfo} formatSize={formatSize} formatDate={formatDate} />}
-      {showLakebase && (
+      {lakebaseConfig.installation_managed && (
+        <Alert severity="info" sx={{ my: 2 }}>
+          Lakebase is connected through the Databricks App installation. Database: {lakebaseConfig.database_name}.
+          Connection changes are managed in the app resources. Memory and knowledge storage use this database automatically.
+        </Alert>
+      )}
+      {showLakebase && !lakebaseConfig.installation_managed && (
       <Accordion defaultExpanded disableGutters variant="outlined" sx={{ mt: 1.5, borderRadius: 2, '&:before': { display: 'none' } }}>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>

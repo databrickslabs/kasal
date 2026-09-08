@@ -41,8 +41,7 @@ class DatabricksConfigRepository(BaseRepository[DatabricksConfig]):
             Active configuration if found, else None
         """
         query = select(self.model).where(self.model.is_active == True)
-        if group_id is not None:
-            query = query.where(self.model.group_id == group_id)
+        query = query.where(self.model.group_id == group_id)
 
         # Order by updated_at descending to get the most recent one
         query = query.order_by(self.model.updated_at.desc())
@@ -65,8 +64,7 @@ class DatabricksConfigRepository(BaseRepository[DatabricksConfig]):
             .where(self.model.is_active == True)
             .values(is_active=False, updated_at=datetime.now(timezone.utc))
         )
-        if group_id is not None:
-            query = query.where(self.model.group_id == group_id)
+        query = query.where(self.model.group_id == group_id)
         await self.session.execute(query)
         await self.session.flush()
 

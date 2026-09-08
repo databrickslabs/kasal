@@ -119,17 +119,10 @@ export class MemoryBackendService {
    */
   static async getConfig(): Promise<MemoryBackendConfig | null> {
     try {
-      // Get all configs and find the default one
-      const response = await apiClient.get<MemoryBackendConfig[]>('/memory-backend/configs');
-      const configs = response.data;
-
-      if (!configs || configs.length === 0) {
-        return null;
-      }
-
-      // Find the default configuration
-      const defaultConfig = configs.find(config => config.is_default && config.is_active);
-      return defaultConfig || null;
+      const response = await apiClient.get<MemoryBackendConfig | null>(
+        '/memory-backend/configs/effective',
+      );
+      return response.data;
     } catch (error) {
       console.error('Error fetching memory backend config:', error);
       return null;

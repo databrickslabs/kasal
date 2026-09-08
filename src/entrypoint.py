@@ -252,6 +252,7 @@ def run_app():
 
     # Set DATABRICKS_APP_NAME for dev environment
     if args.environment == "dev":
+        os.environ["KASAL_DEPLOYMENT_MODE"] = "local"
         os.environ["DATABRICKS_APP_NAME"] = "kasal-local-test"
         logger.info("Development environment detected - setting DATABRICKS_APP_NAME=kasal-local-test")
 

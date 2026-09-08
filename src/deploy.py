@@ -451,6 +451,11 @@ def deploy_source_to_databricks(
         logger.warning(f"Could not verify identity (proceeding anyway): {e}")
         logger.info(f"Connecting to Databricks at {client.config.host}")
 
+    # Validate bindings before building, uploading, or changing remote state.
+    from deployment_resources import validate_resources
+
+    bound_environment = validate_resources(client, app_name, root_dir / "app.yaml")
+
     # Provision a STABLE encryption key so Kasal's at-rest secret encryption
     # survives redeploys. Without ENCRYPTION_KEY the app generates a random Fernet
     # key at every startup, so after a redeploy previously-encrypted tool_configs
@@ -459,7 +464,8 @@ def deploy_source_to_databricks(
     # deploy.py (image / source-path), provision the key once manually — the app
     # logs the exact `databricks secrets put-secret` command on startup when it's
     # missing (see EncryptionUtils.get_encryption_key).
-    ensure_encryption_key(client, app_name)
+    if "ENCRYPTION_KEY" not in bound_environment:
+        ensure_encryption_key(client, app_name)
 
     # Frontend ships PREBUILT: deploy.py runs the npm build locally on every
     # deploy (root package.json lifecycle) and uploads frontend_static/.
@@ -642,7 +648,7 @@ def deploy_source_to_databricks(
             # Apps against frontend source we no longer upload. pyproject.toml +
             # uv.lock at the bundle root make the build run `uv sync` (we never
             # ship requirements.txt — it would take precedence and bypass uv).
-            root_files = ["app.yaml", "entrypoint.py"]
+            root_files = ["app.yaml", "manifest.yaml", "entrypoint.py"]
             for file_name in root_files:
                 src_file = root_dir / file_name
                 if src_file.exists():

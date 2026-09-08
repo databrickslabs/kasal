@@ -11,6 +11,7 @@ from typing import Any, AsyncGenerator, Dict, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.databricks_app import LakebaseAppResource
 from src.core.exceptions import LakebaseUnavailableError
 from src.core.logger import LoggerManager
 from src.db.lakebase_session import get_lakebase_session
@@ -38,6 +39,9 @@ async def get_lakebase_config_from_db() -> Optional[Dict[str, Any]]:
     Returns:
         Lakebase configuration dictionary or None if not found
     """
+    installed = LakebaseAppResource.from_env()
+    if installed:
+        return installed.configuration()
     try:
         import json
         import sqlite3

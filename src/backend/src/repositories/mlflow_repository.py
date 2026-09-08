@@ -29,8 +29,9 @@ class MLflowRepository:
     rather than moves — but nothing reads them any more.
     """
 
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, *, default_enabled: bool = False):
         self.session = session
+        self.default_enabled = default_enabled
 
     async def _get(self, group_id: Optional[str] = None) -> Optional[MLflowConfig]:
         result = await self.session.execute(
@@ -52,7 +53,7 @@ class MLflowRepository:
         cfg = await self._get(group_id)
         if cfg is not None:
             return cfg
-        cfg = MLflowConfig(group_id=group_id)
+        cfg = MLflowConfig(group_id=group_id, enabled=self.default_enabled)
         self.session.add(cfg)
         await self.session.commit()
         await self.session.refresh(cfg)
@@ -61,7 +62,7 @@ class MLflowRepository:
 
     async def is_enabled(self, group_id: Optional[str] = None) -> bool:
         cfg = await self._get(group_id)
-        return bool(cfg.enabled) if cfg else False
+        return bool(cfg.enabled) if cfg else self.default_enabled
 
     async def set_enabled(self, enabled: bool, group_id: Optional[str] = None) -> bool:
         cfg = await self._ensure(group_id)

@@ -55,7 +55,9 @@ def is_fallback_allowed() -> bool:
     cause queries to miss data that was written to Lakebase — so fallback
     is forbidden.
     """
-    return not _lakebase_ever_activated
+    from src.core.databricks_app import LakebaseAppResource
+
+    return not _lakebase_ever_activated and LakebaseAppResource.from_env() is None
 
 
 def is_lakebase_activated() -> bool:

@@ -3,6 +3,8 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
+from src.core.databricks_app import is_databricks_app
+
 
 class DatabricksConfigBase(BaseModel):
     """Base schema for Databricks configuration."""
@@ -44,7 +46,7 @@ class DatabricksConfigCreate(DatabricksConfigBase):
     @property
     def required_fields(self) -> List[str]:
         """Get list of required fields based on configuration"""
-        if self.enabled:
+        if self.enabled and not is_databricks_app():
             return ["warehouse_id", "catalog", "db_schema"]
         return []
 
@@ -52,7 +54,7 @@ class DatabricksConfigCreate(DatabricksConfigBase):
     def validate_required_fields(self):
         """Validate required fields based on configuration."""
         # Only validate if Databricks is enabled
-        if not self.enabled:
+        if not self.enabled or is_databricks_app():
             return self
 
         # Check required fields
@@ -123,7 +125,11 @@ class DatabricksConfigInDB(DatabricksConfigBase):
 class DatabricksConfigResponse(DatabricksConfigBase):
     """Schema for Databricks configuration response."""
 
-    pass
+    installation_managed: bool = False
+    warehouse_from_resource: bool = False
+    resource_error: Optional[str] = None
+    lakebase_managed: bool = False
+    default_model: Optional[str] = None
 
 
 class DatabricksTokenStatus(BaseModel):

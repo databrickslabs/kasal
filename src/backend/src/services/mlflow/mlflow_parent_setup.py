@@ -27,6 +27,8 @@ import os
 import time
 from typing import Any, Optional
 
+from src.core.databricks_app import is_databricks_app
+
 logger = logging.getLogger(__name__)
 
 try:  # mirror dispatcher's guarded import
@@ -58,6 +60,7 @@ _bound_group_key: Optional[str] = None
 _bound_expires_at: float = 0.0
 # Groups whose setup resolved to "off" (disabled workspace or failed setup).
 _off_cache: dict = {}  # group_key -> expires_at
+_hosted_destinations: dict = {}
 
 
 def _group_cache_key(group_context: Any) -> str:
@@ -77,6 +80,7 @@ def invalidate_parent_mlflow_cache() -> None:
     _bound_group_key = None
     _bound_expires_at = 0.0
     _off_cache.clear()
+    _hosted_destinations.clear()
 
 
 def set_mlflow_tracing(enabled: bool) -> None:
@@ -88,6 +92,12 @@ def set_mlflow_tracing(enabled: bool) -> None:
     explicitly when setup is skipped/fails, re-enable on success.
     """
     if not _HAS_MLFLOW:
+        return
+    if is_databricks_app() and not enabled:
+        from src.services.mlflow.trace_context import bind_destination
+
+        bind_destination(None)
+        # Disabling a teamspace must not switch off concurrent teams globally.
         return
     try:
         if enabled:
@@ -125,7 +135,7 @@ def _setup_sync(
     uc_schema: Optional[str],
     warehouse_id: Optional[str],
     label: str,
-) -> bool:
+) -> object:
     """Blocking MLflow configuration — run via ``asyncio.to_thread``."""
     import mlflow
 
@@ -200,7 +210,11 @@ def _setup_sync(
         os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = str(warehouse_id)
 
     trace_location = _build_uc_trace_location(
-        uc_catalog, uc_schema, warehouse_id, logger
+        uc_catalog,
+        uc_schema,
+        warehouse_id,
+        logger,
+        **({"experiment_name": exp_name} if is_databricks_app() else {}),
     )
     uc_active = trace_location is not None
 
@@ -254,6 +268,8 @@ def _setup_sync(
     except Exception as ae:
         logger.info("[%s] MLflow LiteLLM autolog not available: %s", label, ae)
 
+    if is_databricks_app():
+        return getattr(exp, "trace_location", None) or trace_location
     return True
 
 
@@ -283,6 +299,10 @@ async def configure_parent_mlflow_tracing(
         set_mlflow_tracing(False)
         return False
     if _bound_group_key == group_key and _bound_expires_at > now:
+        if is_databricks_app():
+            from src.services.mlflow.trace_context import bind_destination
+
+            bind_destination(_hosted_destinations.get(group_key))
         set_mlflow_tracing(True)
         return True
 
@@ -293,6 +313,10 @@ async def configure_parent_mlflow_tracing(
             set_mlflow_tracing(False)
             return False
         if _bound_group_key == group_key and _bound_expires_at > now:
+            if is_databricks_app():
+                from src.services.mlflow.trace_context import bind_destination
+
+                bind_destination(_hosted_destinations.get(group_key))
             set_mlflow_tracing(True)
             return True
 
@@ -356,6 +380,12 @@ async def configure_parent_mlflow_tracing(
 
             logger.info("[%s] MLflow tracing configured (experiment + autolog)", label)
             _bound_group_key = group_key
+            if is_databricks_app():
+                from src.services.mlflow.trace_context import bind_destination
+
+                _hosted_destinations.clear()
+                _hosted_destinations[group_key] = setup_ok
+                bind_destination(setup_ok)
             _bound_expires_at = time.monotonic() + _SETUP_TTL_SECONDS
             _off_cache.pop(group_key, None)
             set_mlflow_tracing(True)

@@ -55,6 +55,8 @@ interface MLflowBackend {
 }
 
 interface MLflowSettings {
+  installation_managed?: boolean;
+  resource_error?: string | null;
   enabled: boolean;
   evaluation_enabled: boolean;
   experiment_name?: string | null;
@@ -130,7 +132,7 @@ const MLflowConfiguration: React.FC = () => {
       const exp = resp.data.backend?.experiment;
       const created =
         'experiment_name' in body || body.enabled === true;
-      if (created && resp.data.backend?.kind === 'databricks' && exp) {
+      if (created && !resp.data.installation_managed && resp.data.backend?.kind === 'databricks' && exp) {
         setSavedMsg(
           `Experiment "${exp}" is ready. In the Databricks App settings, add it as ` +
             `an MLflow experiment resource (Permission: Can Edit) so the app can ` +
@@ -179,6 +181,12 @@ const MLflowConfiguration: React.FC = () => {
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
           {error}
+        </Alert>
+      )}
+
+      {settings.installation_managed && (
+        <Alert severity={settings.resource_error ? 'warning' : 'info'} sx={{ mb: 2 }}>
+          {settings.resource_error || 'Tracing is enabled by default on Databricks Apps. Personal spaces and teamspaces use separate trace destinations, provisioned automatically.'}
         </Alert>
       )}
 
@@ -301,7 +309,7 @@ const MLflowConfiguration: React.FC = () => {
           size="small"
           fullWidth
           value={experimentDraft}
-          disabled={saving || noBackend}
+          disabled={saving || noBackend || settings.installation_managed}
           onChange={(e) => setExperimentDraft(e.target.value)}
           // The placeholder is what an empty field WILL use, so it has to be
           // the derived name — a hardcoded one contradicts the helper text
@@ -317,7 +325,7 @@ const MLflowConfiguration: React.FC = () => {
           variant="outlined"
           size="small"
           sx={{ mt: 0.25 }}
-          disabled={saving || experimentDraft === (settings.experiment_name || '')}
+          disabled={saving || settings.installation_managed || experimentDraft === (settings.experiment_name || '')}
           onClick={() => void patch({ experiment_name: experimentDraft })}
         >
           Save

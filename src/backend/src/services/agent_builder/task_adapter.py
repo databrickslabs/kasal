@@ -105,6 +105,8 @@ def create_callback_from_string(
     task_key: str,
     callback_config: Optional[dict] = None,
     execution_name: Optional[str] = None,
+    *,
+    group_id: Optional[str] = None,
 ):
     """
     Create a callable callback from a string name.
@@ -124,14 +126,23 @@ def create_callback_from_string(
 
     if callback_name == "DatabricksVolumeCallback":
         try:
+            from src.core.databricks_app import DatabricksAppInstallation
             from src.services.databricks.volumes.volume_callback import (
                 DatabricksVolumeCallback,
             )
 
-            # Create the callback instance with configuration
+            installation = DatabricksAppInstallation.from_env()
+            installed_path = (
+                installation.output_path(group_id)
+                if installation.output_volume
+                else None
+            )
+            # Resource storage stays scoped even when loading a legacy catalog task.
             databricks_callback = DatabricksVolumeCallback(
                 task_key=task_key,
-                volume_path=(
+                group_id=group_id,
+                volume_path=installed_path
+                or (
                     callback_config.get(
                         "volume_path", "/Volumes/main/default/task_outputs"
                     )
@@ -510,7 +521,8 @@ async def create_task(
             )
             from src.services.memory.config.backend_service import MemoryBackendService
 
-            databricks_config = await DatabricksConfigProvider.get()
+            group_id = config.get("group_id") if isinstance(config, dict) else None
+            databricks_config = await DatabricksConfigProvider.get(group_id=group_id)
 
             # The guard comes FIRST: volume uploads are off in the common case, and
             # opening a session before checking meant paying for one every task.
@@ -546,7 +558,7 @@ async def create_task(
                             backend_str = getattr(
                                 backend_type, "value", str(backend_type)
                             )
-                            if backend_str in ["databricks", "DATABRICKS"]:
+                            if backend_str.lower() in ("databricks", "lakebase"):
                                 active_is_databricks = True
                     except Exception as me:
                         logger.debug(
@@ -616,7 +628,11 @@ async def create_task(
     if "guardrail" not in task_args and existing_callback:
         if isinstance(existing_callback, str):
             callback_func = create_callback_from_string(
-                existing_callback, task_key, callback_config, execution_name
+                existing_callback,
+                task_key,
+                callback_config,
+                execution_name,
+                group_id=config.get("group_id") if isinstance(config, dict) else None,
             )
             if callback_func:
                 task_args["callback"] = callback_func

@@ -132,15 +132,34 @@ async def lifespan(app: FastAPI):
 
     # Initialize database first - this creates both the file and tables
     system_logger.info("Initializing database during lifespan...")
+    from src.core.databricks_app import LakebaseAppResource, is_databricks_app
+
+    installed_database = LakebaseAppResource.from_env() is not None
     try:
         await init_db()
+        if installed_database:
+            from src.services.memory.config.lakebase_service import (
+                LakebaseMemoryService,
+            )
+
+            memory_setup = await LakebaseMemoryService().initialize_tables()
+            if not memory_setup.get("success"):
+                raise RuntimeError(
+                    memory_setup.get("message")
+                    or "Lakebase memory initialization failed"
+                )
         system_logger.info("Database initialization complete")
     except Exception as e:
         system_logger.error(f"Database initialization failed: {str(e)}")
+        if installed_database or (
+            is_databricks_app()
+            and os.getenv("KASAL_REQUIRE_LAKEBASE_RESOURCE") == "true"
+        ):
+            raise
 
     # Start embedding queue service for SQLite to batch operations (non-blocking)
     embedding_queue_started = False
-    if str(settings.DATABASE_URI).startswith("sqlite"):
+    if str(settings.DATABASE_URI).startswith("sqlite") and not installed_database:
         try:
             # Start the queue service in the background without blocking
             import asyncio
@@ -161,7 +180,7 @@ async def lifespan(app: FastAPI):
 
     try:
         # Simple check for tables - just check if the database file exists with content
-        if str(settings.DATABASE_URI).startswith("sqlite"):
+        if str(settings.DATABASE_URI).startswith("sqlite") and not installed_database:
             db_path = settings.SQLITE_DB_PATH
 
             # Get absolute path if relative
@@ -409,7 +428,7 @@ async def lifespan(app: FastAPI):
     # ── Activate Lakebase session factory if Lakebase is the configured DB ──
     # This swaps the global async_session_factory so that ALL existing callers
     # (background tasks, services, tools) automatically use Lakebase.
-    if db_initialized:
+    if db_initialized and not installed_database:
         try:
             from src.db.database_router import (
                 get_lakebase_config_from_db,

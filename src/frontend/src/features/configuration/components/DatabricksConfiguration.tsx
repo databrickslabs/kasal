@@ -30,6 +30,7 @@ import { ToolService } from '../../../api/tools/ToolService';
 
 import apiClient from '../../../shared/api/client';
 import { AxiosError } from 'axios';
+import InstalledDatabricksStorage from './InstalledDatabricksStorage';
 
 interface DatabricksConfigurationProps {
   onSaved?: () => void;
@@ -132,7 +133,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
               const memoryConfig = await MemoryBackendService.getConfig();
               const isMemoryConfigured = isKnowledgeCapableMemoryConfig(memoryConfig);
 
-              const shouldBeEnabled = savedConfig.enabled && savedConfig.knowledge_volume_enabled && isMemoryConfigured;
+              const shouldBeEnabled = savedConfig.enabled && (savedConfig.lakebase_managed || savedConfig.knowledge_volume_enabled) && isMemoryConfigured;
 
               // Only toggle if state doesn't match
               if (knowledgeTool.enabled !== shouldBeEnabled) {
@@ -154,7 +155,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
 
   const handleSaveConfig = async () => {
     // If Databricks is enabled, validate all required fields
-    if (config.enabled) {
+    if (config.enabled && !config.installation_managed) {
       const requiredFields = {
         'Warehouse ID': config.warehouse_id?.trim(),
         'Catalog': config.catalog?.trim(),
@@ -196,7 +197,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
         const knowledgeTool = tools.find(t => t.id === DATABRICKS_KNOWLEDGE_SEARCH_TOOL_ID);
 
         if (knowledgeTool) {
-          const shouldBeEnabled = savedConfig.enabled && savedConfig.knowledge_volume_enabled && isMemoryBackendConfigured;
+          const shouldBeEnabled = savedConfig.enabled && (savedConfig.lakebase_managed || savedConfig.knowledge_volume_enabled) && isMemoryBackendConfigured;
 
           // Only toggle if state doesn't match
           if (knowledgeTool.enabled !== shouldBeEnabled) {
@@ -338,6 +339,11 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
 
   return (
     <Box>
+      {config.installation_managed && (
+        <Alert severity={config.resource_error ? 'warning' : 'info'} sx={{ mb: 2 }}>
+          {config.resource_error || 'Connected automatically through Databricks Apps. Connection, compute and trace storage come from the installation resources.'}
+        </Alert>
+      )}
       <Box sx={{
         display: 'flex',
         alignItems: 'center',
@@ -345,12 +351,13 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
         mb: 2
       }}>
         <Typography variant="subtitle1" fontWeight="medium">
-          {t('configuration.databricks.connectionTitle', { defaultValue: 'Workspace connection' })}
+          {config.installation_managed ? 'Databricks Apps connection' : t('configuration.databricks.connectionTitle', { defaultValue: 'Workspace connection' })}
         </Typography>
         <FormControlLabel
           control={
             <Switch
               checked={config.enabled}
+              disabled={config.installation_managed}
               onChange={handleDatabricksToggle}
               color="primary"
             />
@@ -384,7 +391,8 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
           value={config.warehouse_id}
           onChange={handleInputChange('warehouse_id')}
           fullWidth
-          disabled={loading || !config.enabled}
+          disabled={loading || !config.enabled || config.installation_managed}
+          helperText={config.installation_managed ? 'Assigned through the sql-warehouse app resource.' : undefined}
           size="small"
           required
         />
@@ -394,7 +402,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
           value={config.catalog}
           onChange={handleInputChange('catalog')}
           fullWidth
-          disabled={loading || !config.enabled}
+          disabled={loading || !config.enabled || config.installation_managed}
           size="small"
           required
         />
@@ -404,7 +412,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
           value={config.schema}
           onChange={handleInputChange('schema')}
           fullWidth
-          disabled={loading || !config.enabled}
+          disabled={loading || !config.enabled || config.installation_managed}
           size="small"
           required
         />
@@ -439,6 +447,7 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
       </Stack>
 
       {/* Volume Configuration Section */}
+      {config.installation_managed ? <InstalledDatabricksStorage config={config} /> : <>
 
       <Box data-settings-section sx={{ mb: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
@@ -668,6 +677,8 @@ const DatabricksConfiguration: React.FC<DatabricksConfigurationProps> = ({ onSav
           )}
         </Stack>
       </Box>
+
+      </>}
 
       <Box sx={{
         display: 'flex',

@@ -18,6 +18,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
+from src.core.databricks_app import is_databricks_app
+
 logger = logging.getLogger(__name__)
 
 
@@ -62,12 +64,25 @@ def create_databricks_experiment(
                 )
 
                 trace_location = _build_uc_trace_location(
-                    uc_catalog, uc_schema, warehouse_id, logger
+                    uc_catalog,
+                    uc_schema,
+                    warehouse_id,
+                    logger,
+                    **(
+                        {"experiment_name": experiment_path}
+                        if is_databricks_app()
+                        else {}
+                    ),
                 )
             except Exception as exc:  # noqa: BLE001 — fall back to plain experiment
+                if is_databricks_app():
+                    raise
                 logger.warning(
                     f"[experiment_setup] Could not build UC trace_location: {exc}"
                 )
+
+        if is_databricks_app() and trace_location is None:
+            raise RuntimeError("Databricks Apps tracing resources are not ready")
 
         # set_experiment creates the experiment if it does not exist, and returns
         # the existing one otherwise — safe to call on every save. With a UC

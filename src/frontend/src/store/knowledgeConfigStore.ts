@@ -68,8 +68,10 @@ export const useKnowledgeConfigStore = create<KnowledgeConfigState>()(
         // Check Databricks knowledge source configuration
         const databricksConfig = await DatabricksService.getConfiguration();
         const knowledgeSourceEnabled = !!(
-          databricksConfig?.knowledge_volume_enabled &&
-          databricksConfig?.knowledge_volume_path
+          databricksConfig?.lakebase_managed || (
+            databricksConfig?.knowledge_volume_enabled &&
+            databricksConfig?.knowledge_volume_path
+          )
         );
 
         // If both services returned null (likely 404s), record this

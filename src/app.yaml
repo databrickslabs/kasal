@@ -1,18 +1,46 @@
 command: ['python', 'entrypoint.py']
 # To enable OTel auto-instrumentation for custom traces/metrics (requires UI telemetry enabled):
 # command: ['opentelemetry-instrument', 'python', 'entrypoint.py']
-environment_vars:
-  PYTHONPATH: './backend:${PYTHONPATH}'
-  PYTHONUNBUFFERED: '1'
+env:
+  - name: PYTHONPATH
+    value: './backend'
+  - name: PYTHONUNBUFFERED
+    value: '1'
   # Frontend static files will be available via import-dir
-  FRONTEND_STATIC_DIR: './frontend_static'
+  - name: FRONTEND_STATIC_DIR
+    value: './frontend_static'
+  # Marketplace resource keys are declared in manifest.yaml; the native
+  # lakebase resource is attached separately (see the installation guide).
+  - name: KASAL_SQL_WAREHOUSE_ID
+    valueFrom: sql-warehouse
+  - name: MLFLOW_TRACING_SQL_WAREHOUSE_ID
+    valueFrom: sql-warehouse
+  - name: KASAL_MLFLOW_RESOURCE_ID
+    valueFrom: mlflow-experiment
+  - name: KASAL_OUTPUT_VOLUME
+    valueFrom: output-volume
+  - name: KASAL_DEFAULT_MODEL
+    valueFrom: default-model
+  - name: KASAL_EMBEDDING_MODEL
+    valueFrom: embedding-model
+  - name: ENCRYPTION_KEY
+    valueFrom: encryption-key
+  - name: KASAL_LAKEBASE_RESOURCE
+    valueFrom: lakebase
+  - name: KASAL_REQUIRE_LAKEBASE_RESOURCE
+    value: 'true'
 
   # Logging Configuration
-  KASAL_LOG_LEVEL: 'INFO'           # Global log level
-  KASAL_LOG_APP: 'INFO'             # Application modules
-  KASAL_LOG_THIRD_PARTY: 'WARNING'  # Third-party libraries
-  KASAL_LOG_CONSOLE: 'true'         # Enable console output
-  KASAL_LOG_FILE: 'true'            # Enable file logging
+  - name: KASAL_LOG_LEVEL
+    value: 'INFO'
+  - name: KASAL_LOG_APP
+    value: 'INFO'
+  - name: KASAL_LOG_THIRD_PARTY
+    value: 'WARNING'
+  - name: KASAL_LOG_CONSOLE
+    value: 'true'
+  - name: KASAL_LOG_FILE
+    value: 'true'
 
   # Databricks App Telemetry (Preview)
   # Structured OTel log export is controlled via the Databricks Configuration UI

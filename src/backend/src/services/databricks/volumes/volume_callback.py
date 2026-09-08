@@ -2,6 +2,7 @@
 Databricks Volume callback for storing task outputs in Databricks Volumes.
 """
 
+import asyncio
 import io
 import json
 import logging
@@ -30,6 +31,7 @@ class DatabricksVolumeCallback(KasalCallback):
         max_file_size_mb: float = 100.0,
         task_key: Optional[str] = None,
         execution_name: Optional[str] = None,
+        group_id: Optional[str] = None,
         **kwargs,
     ):
         """
@@ -60,6 +62,7 @@ class DatabricksVolumeCallback(KasalCallback):
                 volume_path = f"/Volumes/{volume_path.replace('.', '/')}"
 
         self.volume_path = volume_path
+        self.group_id = group_id
         self.workspace_url = workspace_url
         self.token = token
         self._auth_initialized = False
@@ -281,6 +284,35 @@ class DatabricksVolumeCallback(KasalCallback):
         schema = path_parts[2]
         volume_name = path_parts[3]
 
+        from src.core.databricks_app import DatabricksAppInstallation
+
+        installation = DatabricksAppInstallation.from_env()
+        if installation.output_volume:
+            if self.volume_path.rstrip("/") != installation.output_path(self.group_id):
+                raise ValueError(
+                    "Installed output storage must use this team's assigned directory"
+                )
+            # Assigned storage is already provisioned. Its resource grant belongs
+            # to the app identity, not the user whose run produced the file.
+            from src.utils.databricks_app_auth import get_app_client
+
+            if any(
+                part in ("..", ".") for part in (*path_parts, *file_path.split("/"))
+            ) or file_path.startswith("/"):
+                raise ValueError("Output path must remain inside assigned storage")
+            client = await asyncio.to_thread(get_app_client)
+            full_path = f"{self.volume_path.rstrip('/')}/{file_path}"
+            await asyncio.to_thread(
+                client.files.create_directory, full_path.rsplit("/", 1)[0]
+            )
+            await asyncio.to_thread(
+                client.files.upload,
+                file_path=full_path,
+                content=io.BytesIO(content.encode("utf-8")),
+                overwrite=True,
+            )
+            return full_path
+
         # Ensure the volume exists using the repository
         from src.repositories.databricks_volume_repository import (
             DatabricksVolumeRepository,
@@ -305,7 +337,7 @@ class DatabricksVolumeCallback(KasalCallback):
         full_path = f"{self.volume_path.rstrip('/')}/{file_path}"
 
         # Create parent directories if needed
-        parent_dir_path = "/".join(file_path.split("/")[:-1])
+        parent_dir_path = "/".join([*path_parts[4:], *file_path.split("/")[:-1]])
         if parent_dir_path:
             dir_result = await volume_repo.create_volume_directory(
                 catalog=catalog,
@@ -328,7 +360,12 @@ class DatabricksVolumeCallback(KasalCallback):
 
         # Upload the file using Databricks SDK
         # File path must be in format: /Volumes/catalog/schema/volume/path
-        client.files.upload(file_path=full_path, content=binary_content, overwrite=True)
+        await asyncio.to_thread(
+            client.files.upload,
+            file_path=full_path,
+            content=binary_content,
+            overwrite=True,
+        )
 
         logger.info(
             f"File uploaded successfully to {full_path} ({len(content_bytes)} bytes)"

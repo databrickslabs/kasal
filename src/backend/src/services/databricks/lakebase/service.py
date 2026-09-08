@@ -321,44 +321,9 @@ class LakebaseService(BaseService):
             raise
 
     async def get_config(self) -> Dict[str, Any]:
-        """
-        Get current Lakebase configuration.
+        from .configuration import get_config
 
-        Returns:
-            Dictionary with Lakebase configuration
-        """
-        try:
-            config = await self.config_repository.get_by_key("lakebase")
-            if config:
-                return {
-                    "enabled": config.value.get("enabled", False),
-                    "instance_name": config.value.get(
-                        "instance_name", "kasal-lakebase"
-                    ),
-                    "capacity": config.value.get("capacity", "CU_1"),
-                    "retention_days": config.value.get("retention_days", 14),
-                    "node_count": config.value.get("node_count", 1),
-                    "instance_status": config.value.get(
-                        "instance_status", "NOT_CREATED"
-                    ),
-                    "endpoint": config.value.get("endpoint"),
-                    "created_at": config.value.get("created_at"),
-                    "database_type": config.value.get("database_type", "lakebase"),
-                }
-            else:
-                # Return default configuration
-                return {
-                    "enabled": False,
-                    "instance_name": "kasal-lakebase",
-                    "capacity": "CU_1",
-                    "retention_days": 14,
-                    "node_count": 1,
-                    "instance_status": "NOT_CREATED",
-                    "database_type": "lakebase",
-                }
-        except Exception as e:
-            logger.error(f"Error getting Lakebase config: {e}")
-            raise
+        return await get_config(self.config_repository)
 
     async def save_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -370,6 +335,13 @@ class LakebaseService(BaseService):
         Returns:
             Saved configuration or empty dict if deleted
         """
+        from src.core.databricks_app import LakebaseAppResource
+        from src.core.exceptions import BadRequestError
+
+        if LakebaseAppResource.from_env():
+            raise BadRequestError(
+                "Lakebase is managed through the Databricks App installation resources"
+            )
         try:
             # If Lakebase is being disabled, delete the configuration
             if not config.get("enabled", False):

@@ -1,8 +1,10 @@
+import asyncio
 from typing import Any, Dict, Optional
 
 from databricks.sdk.useragent import with_product
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.databricks_app import DatabricksAppInstallation, is_databricks_app
 from src.core.logger import LoggerManager
 from src.repositories.mlflow_repository import MLflowRepository
 from src.services.execution.service import ExecutionService
@@ -41,7 +43,7 @@ class MLflowService:
             )
         self.session = session
         self.group_id = group_id
-        self.repo = MLflowRepository(session)
+        self.repo = MLflowRepository(session, default_enabled=is_databricks_app())
         # Runs belong to ExecutionService — mlflow only reads them to attach traces,
         # so it goes through that service rather than its repository.
         self.execution_service = ExecutionService(session)
@@ -80,9 +82,11 @@ class MLflowService:
         is configured, else a local OSS server, else nothing. A stored preference
         could only ever disagree with what is actually available.
         """
+        import asyncio
+
         from src.services.mlflow import local
 
-        enabled = await self.repo.is_enabled(group_id=self.group_id)
+        enabled = await self.is_enabled()
         evaluation_enabled = await self.repo.is_evaluation_enabled(
             group_id=self.group_id
         )
@@ -115,13 +119,25 @@ class MLflowService:
             "experiment": databricks_experiment,
             "url": f"{workspace_url}/ml/experiments" if databricks_available else None,
         }
-        local_uri = local.local_tracking_uri()
+        resource_error = None
+        if is_databricks_app():
+            from src.services.databricks.workspace.service import DatabricksService
+
+            installed = await DatabricksService(
+                self.session, group_id=self.group_id
+            ).get_databricks_config()
+            resource_error = installed.resource_error
+        local_uri = None if is_databricks_app() else local.local_tracking_uri()
         local_available = bool(local_uri)
         local_backend = {
             "kind": "local",
             "available": local_available,
             "uri": local_uri,
-            "reachable": local.is_reachable(local_uri) if local_uri else None,
+            "reachable": (
+                await asyncio.to_thread(local.is_reachable, local_uri)
+                if local_uri
+                else None
+            ),
             "experiment": experiment if local_available else None,
             "url": f"{local_uri}/#/experiments" if local_available else None,
         }
@@ -142,6 +158,8 @@ class MLflowService:
             }
 
         return {
+            "installation_managed": is_databricks_app(),
+            "resource_error": resource_error,
             "enabled": enabled,
             "evaluation_enabled": evaluation_enabled,
             "experiment_name": experiment_name,
@@ -156,6 +174,10 @@ class MLflowService:
         experiment_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Apply a partial update; an omitted field is left alone."""
+        if is_databricks_app() and experiment_name is not None:
+            raise ValueError(
+                "Hosted trace destinations are managed by the installation"
+            )
         if enabled is not None:
             await self.set_enabled(enabled)
         if evaluation_enabled is not None:
@@ -243,6 +265,10 @@ class MLflowService:
         Falls back to the per-teamspace default when nothing is configured. NOT
         the old hardcoded ``/Shared/kasal-crew-execution-traces``.
         """
+        installation = DatabricksAppInstallation.from_env()
+        if installation.hosted and installation.experiment_id:
+            return installation.experiment_name(self.group_id)
+
         from src.services.mlflow import local
 
         experiment_name = await self.repo.get_experiment_name(group_id=self.group_id)
@@ -273,6 +299,8 @@ class MLflowService:
             ).get_databricks_config()
             if not db_config:
                 return (None, None, None)
+            if is_databricks_app() and db_config.resource_error:
+                raise RuntimeError(db_config.resource_error)
             # schema field is `db_schema` (aliased "schema"); reading "schema"
             # returns BaseModel.schema (a method) -> MLflow error.
             return (
@@ -281,6 +309,8 @@ class MLflowService:
                 getattr(db_config, "warehouse_id", None),
             )
         except Exception as cfg_err:  # noqa: BLE001 — plain experiment is the fallback
+            if is_databricks_app():
+                raise
             logger.debug(
                 f"[MLflowService] Could not read UC config for experiment: {cfg_err}"
             )
@@ -371,7 +401,9 @@ class MLflowService:
         try:
             from src.services.databricks.workspace.service import DatabricksService
 
-            cfg = await DatabricksService(self.session).get_databricks_config()
+            cfg = await DatabricksService(
+                self.session, group_id=self.group_id
+            ).get_databricks_config()
         except Exception as exc:  # noqa: BLE001 — absence is a normal dev state
             logger.debug(f"[MLflowService] No Databricks configuration: {exc}")
             return None
@@ -412,7 +444,9 @@ class MLflowService:
                 # Shared derivation (mlflow/sp_auth.py) — the single, correct
                 # implementation for the whole app. Returns None on any failure,
                 # so we fall through to PAT.
-                spn_token = derive_sp_bearer(host, client_id, client_secret)
+                spn_token = await asyncio.to_thread(
+                    derive_sp_bearer, host, client_id, client_secret
+                )
                 if spn_token:
                     workspace_url = host.rstrip("/")
                     if not workspace_url.startswith("http"):

@@ -41,6 +41,8 @@ class MLflowSettings(BaseModel):
     """Everything the MLflow configuration section renders."""
 
     enabled: bool
+    installation_managed: bool = False
+    resource_error: Optional[str] = None
     evaluation_enabled: bool
     experiment_name: Optional[str] = None
     #: The backend a run WILL use — still derived, never chosen (Databricks when

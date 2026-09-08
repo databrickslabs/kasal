@@ -2,6 +2,11 @@ import apiClient from '../../shared/api/client';
 import { AxiosError } from 'axios';
 
 export interface DatabricksConfig {
+  installation_managed?: boolean;
+  warehouse_from_resource?: boolean;
+  resource_error?: string | null;
+  lakebase_managed?: boolean;
+  default_model?: string | null;
   workspace_url: string;
   warehouse_id: string;
   catalog: string;
@@ -181,4 +186,4 @@ export class DatabricksService {
     const instance = DatabricksService.getInstance();
     return instance.setDatabricksConfig(config);
   }
-} 
+}

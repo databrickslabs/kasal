@@ -14,10 +14,14 @@ consistent MLflow tracing setup including:
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
+
+from src.core.databricks_app import DatabricksAppInstallation, is_databricks_app
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +49,12 @@ def uc_experiment_name(base: str) -> str:
 
 
 def _build_uc_trace_location(
-    catalog: Optional[str], schema: Optional[str], warehouse_id: Optional[str], log
+    catalog: Optional[str],
+    schema: Optional[str],
+    warehouse_id: Optional[str],
+    log,
+    *,
+    experiment_name: Optional[str] = None,
 ) -> Any:
     """Build a UnityCatalog trace location so MLflow stores trace spans in UC
     Delta tables (in-network, via the SQL warehouse) instead of uploading a
@@ -59,6 +68,11 @@ def _build_uc_trace_location(
     backend raises an opaque "bad argument type for built-in operation" instead of
     a clear error.
     """
+    hosted = is_databricks_app()
+    if hosted and not (catalog and schema and warehouse_id and experiment_name):
+        raise ValueError(
+            "Databricks Apps tracing requires its installed warehouse, UC namespace and scoped experiment"
+        )
     if not (catalog and schema):
         return None
     # Guard against non-string values (e.g. a Pydantic BaseModel.schema *method*
@@ -66,6 +80,8 @@ def _build_uc_trace_location(
     # Passing a non-str into MLflow surfaces only as "bad argument type for built-in
     # operation"; fail clearly here instead.
     if not (isinstance(catalog, str) and isinstance(schema, str)):
+        if hosted:
+            raise ValueError("Installed UC catalog and schema must be strings")
         log.warning(
             f"[MLflow] UC trace storage skipped: catalog/schema must be strings, got "
             f"catalog={type(catalog).__name__}, schema={type(schema).__name__}"
@@ -80,6 +96,8 @@ def _build_uc_trace_location(
     try:
         from mlflow.entities.trace_location import UnityCatalog
     except Exception:
+        if hosted:
+            raise
         log.info(
             "[MLflow] UnityCatalog trace location unavailable (needs MLflow >= 3.11) "
             "— falling back to experiment artifact storage"
@@ -88,7 +106,13 @@ def _build_uc_trace_location(
     return UnityCatalog(
         catalog_name=catalog,
         schema_name=schema,
-        table_prefix=KASAL_TRACE_TABLE_PREFIX,
+        table_prefix=(
+            "kasal_" + hashlib.sha256(experiment_name.encode()).hexdigest()[:24]
+            if hosted
+            and DatabricksAppInstallation.from_env().experiment_id
+            and experiment_name
+            else KASAL_TRACE_TABLE_PREFIX
+        ),
     )
 
 
@@ -272,17 +296,19 @@ async def configure_mlflow_in_subprocess(
     # across many event loops is a known source of connection conflicts here.
     enabled_for_workspace = legacy_enabled
     teamspace_name: Optional[str] = None
-    if not legacy_enabled:
+    if not legacy_enabled or is_databricks_app():
         try:
             from src.db.session import routed_scoped_session
             from src.repositories.mlflow_repository import MLflowRepository
 
             async with routed_scoped_session() as session:
-                enabled_for_workspace = await MLflowRepository(session).is_enabled(
-                    group_id=group_id
-                )
+                enabled_for_workspace = await MLflowRepository(
+                    session, default_enabled=is_databricks_app()
+                ).is_enabled(group_id=group_id)
                 teamspace_name = await _teamspace_name(session, group_id)
         except Exception as exc:  # noqa: BLE001 — tracing must never fail a run
+            if is_databricks_app():
+                enabled_for_workspace = False
             alog.warning(
                 "[SUBPROCESS] Could not read MLflow settings (%s); "
                 "using the Databricks config flag",
@@ -539,6 +565,13 @@ async def configure_mlflow_in_subprocess(
                 alog.info(
                     f"[SUBPROCESS] Using MLflow experiment from config: {experiment_name}"
                 )
+                if (
+                    is_databricks_app()
+                    and DatabricksAppInstallation.from_env().experiment_id
+                ):
+                    experiment_name = (
+                        DatabricksAppInstallation.from_env().experiment_name(group_id)
+                    )
                 fresh_config = await databricks_service.get_databricks_config()
                 if fresh_config:
                     # Reuse the workspace's configured catalog/schema/warehouse for
@@ -566,7 +599,11 @@ async def configure_mlflow_in_subprocess(
             f"schema={uc_schema!r}, warehouse_id={warehouse_id!r}"
         )
         trace_location = _build_uc_trace_location(
-            uc_catalog, uc_schema, warehouse_id, alog
+            uc_catalog,
+            uc_schema,
+            warehouse_id,
+            alog,
+            **({"experiment_name": experiment_name} if is_databricks_app() else {}),
         )
 
         # When UC trace storage is active, spans are written to the
@@ -637,9 +674,12 @@ async def configure_mlflow_in_subprocess(
         else:
             candidate_names = [experiment_name, "/Shared/crew-traces"]
 
+        if is_databricks_app():
+            # Never fall back to a shared experiment or an untracked sibling.
+            candidate_names = [experiment_name]
         for _name in candidate_names:
             try:
-                experiment = _set_experiment(_name)
+                experiment = await asyncio.to_thread(_set_experiment, _name)
                 experiment_id = experiment.experiment_id
                 alog.info(
                     f"[SUBPROCESS] MLflow experiment set: {_name} (ID: {experiment_id})"
@@ -693,6 +733,16 @@ async def configure_mlflow_in_subprocess(
         # 7. Enable tracing
         # -------------------------------------------------------
         mlflow_tracing_ready = False
+        if is_databricks_app():
+            if experiment is None or trace_location is None:
+                raise RuntimeError(
+                    "Could not provision the private MLflow trace destination"
+                )
+            from src.services.mlflow.trace_context import bind_destination
+
+            bind_destination(
+                getattr(experiment, "trace_location", None) or trace_location
+            )
         try:
             mlflow.tracing.enable()
             mlflow_tracing_ready = True

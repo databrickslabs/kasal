@@ -759,7 +759,22 @@ async def seed_async():
     async with async_session_factory() as session:
         try:
             # Process each model configuration using upsert approach
-            for model_key, model_data in DEFAULT_MODELS.items():
+            from src.core.databricks_app import DatabricksAppInstallation
+
+            models = dict(DEFAULT_MODELS)
+            installed_model = DatabricksAppInstallation.from_env().default_model
+            if installed_model and installed_model not in models:
+                # Custom serving endpoints are not necessarily in the bundled
+                # catalogue. Register the selected endpoint so the default is
+                # also selectable and resolves as Databricks on every path.
+                models[installed_model] = {
+                    "name": installed_model,
+                    "provider": "databricks",
+                    "temperature": 0.7,
+                    "context_window": 16000,
+                    "max_output_tokens": 2048,
+                }
+            for model_key, model_data in models.items():
                 try:
                     # Validate model data structure
                     missing_fields = [
@@ -798,6 +813,9 @@ async def seed_async():
                     )
                     existing_model = result.scalars().first()
 
+                    if existing_model and model_key not in DEFAULT_MODELS:
+                        # Preserve administrator-tuned limits for a custom endpoint.
+                        continue
                     if existing_model:
                         # Update existing model config
                         existing_model.name = model_data["name"]

@@ -95,11 +95,9 @@ class MemoryConfigService:
                     # Get workspace_url from unified auth if not set
                     if not config_dict.get("workspace_url"):
                         try:
-                            import asyncio
-
                             from src.utils.databricks_auth import get_auth_context
 
-                            auth = asyncio.run(get_auth_context())
+                            auth = await get_auth_context()
                             if auth and auth.workspace_url:
                                 config_dict["workspace_url"] = auth.workspace_url
                                 logger.info(
@@ -148,6 +146,22 @@ class MemoryConfigService:
                 )
                 return config
 
+        from src.core.databricks_app import LakebaseAppResource
+
+        installed = LakebaseAppResource.from_env()
+        if installed and group_id:
+            if backends:
+                # A team that explicitly deactivated its configurations keeps
+                # memory off; installation defaults apply to unconfigured teams.
+                return None
+            return MemoryBackendConfig(
+                backend_type=MemoryBackendType.LAKEBASE,
+                lakebase_config=LakebaseMemoryConfig(
+                    instance_name=installed.endpoint or installed.host,
+                    tables_initialized=True,
+                ),
+            )
+
         # If no group-specific backend was found:
         # Only fall back to a system-wide default when NO group_id is provided.
         # When a group_id is provided but the workspace has not configured memory,
@@ -168,11 +182,9 @@ class MemoryConfigService:
                         # Get workspace_url from unified auth if not set
                         if not config_dict.get("workspace_url"):
                             try:
-                                import asyncio
-
                                 from src.utils.databricks_auth import get_auth_context
 
-                                auth = asyncio.run(get_auth_context())
+                                auth = await get_auth_context()
                                 if auth and auth.workspace_url:
                                     config_dict["workspace_url"] = auth.workspace_url
                                     logger.info(

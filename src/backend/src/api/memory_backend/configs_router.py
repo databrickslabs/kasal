@@ -140,6 +140,15 @@ async def create_memory_config(
     return MemoryBackendResponse.model_validate(backend)
 
 
+@router.get("/configs/effective", response_model=Optional[MemoryBackendConfig])
+async def get_effective_memory_config(
+    group_context: GroupContextDep,
+    service: MemoryBackendServiceDep,
+) -> Optional[MemoryBackendConfig]:
+    """Read the same scoped defaults used by Chat, crews and flows."""
+    return await service.get_active_config(group_context.primary_group_id)
+
+
 @router.get("/configs", response_model=List[MemoryBackendResponse])
 async def get_memory_configs(
     request: Request,

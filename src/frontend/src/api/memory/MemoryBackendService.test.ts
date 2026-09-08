@@ -192,12 +192,12 @@ describe('MemoryBackendService', () => {
           short_term_index: 'short_index',
         },
       };
-      // Mock response as array since we're calling /configs endpoint
-      (apiClient.get as Mock).mockResolvedValue({ data: [mockConfig] });
+      // Effective configuration includes inherited installation settings.
+      (apiClient.get as Mock).mockResolvedValue({ data: mockConfig });
 
       const result = await MemoryBackendService.getConfig();
 
-      expect(apiClient.get).toHaveBeenCalledWith('/memory-backend/configs');
+      expect(apiClient.get).toHaveBeenCalledWith('/memory-backend/configs/effective');
       expect(result).toEqual(mockConfig);
     });
 
@@ -209,12 +209,10 @@ describe('MemoryBackendService', () => {
       expect(result).toBeNull();
     });
 
-    it('should return null when no configs exist', async () => {
-      (apiClient.get as Mock).mockResolvedValue({ data: [] });
-
-      const result = await MemoryBackendService.getConfig();
-
-      expect(result).toBeNull();
+    it('should return the installed Lakebase default without a saved row', async () => {
+      const config = { backend_type: MemoryBackendType.LAKEBASE, lakebase_config: { memory_table: 'crew_memory', tables_initialized: true } };
+      (apiClient.get as Mock).mockResolvedValue({ data: config });
+      expect(await MemoryBackendService.getConfig()).toEqual(config);
     });
 
     it('should return null when configs is null', async () => {
