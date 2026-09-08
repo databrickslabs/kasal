@@ -96,6 +96,15 @@ class UCMetricViewGeneratorSchema(BaseModel):
         None,
         description="Power BI API base URL. Defaults to commercial cloud. Use 'https://api.powerbigov.us/v1.0/myorg' for GCC, 'https://api.powerbi.cn/v1.0/myorg' for China cloud.",
     )
+    admin_client_id: Optional[str] = Field(
+        None,
+        description="[Auth - Admin SP] Service Principal client ID with tenant-admin API access, for the MQuery Admin Scanner retry when client_id lacks admin rights. Distinct from client_id.",
+    )
+    admin_client_secret: Optional[str] = Field(
+        None,
+        description="[Auth - Admin SP] Service Principal client secret with tenant-admin API access",
+        repr=False,
+    )
 
 
 class UCMetricViewGeneratorTool(BaseTool):
@@ -150,6 +159,8 @@ class UCMetricViewGeneratorTool(BaseTool):
             "auth_method",
             "access_token",
             "pbi_api_base_url",
+            "admin_client_id",
+            "admin_client_secret",
         )
         default_config = {}
         for key in config_keys:
@@ -245,6 +256,8 @@ class UCMetricViewGeneratorTool(BaseTool):
                     auth_method=_get("auth_method"),
                     access_token=_get("access_token") or "",
                     pbi_api_base_url=_get("pbi_api_base_url") or "",
+                    admin_client_id=_get("admin_client_id") or "",
+                    admin_client_secret=_get("admin_client_secret") or "",
                 )
                 # Use extracted data (override only when manually provided JSON is empty/default)
                 if extracted.get("measures") and measures_raw == "[]":
@@ -896,6 +909,8 @@ class UCMetricViewGeneratorTool(BaseTool):
         client_secret,
         username,
         password,
+        admin_client_id: str = "",
+        admin_client_secret: str = "",
     ) -> list:
         """Recover MQuery/table-source when the Admin Scanner fails for a Service Account.
 
@@ -942,6 +957,37 @@ class UCMetricViewGeneratorTool(BaseTool):
                         return entries
             except Exception as e:
                 logger.warning(f"[UCMV] MQuery TMDL fallback ({label}) failed: {e}")
+
+        # Tier 3: retry the Admin Scanner with a distinct admin Service Principal
+        # (admin_client_id/admin_client_secret) when tiers 1+2 came up empty. Some
+        # workspaces gate tenant-admin API access to a narrower allow-list than
+        # ordinary dataset read — the primary token 401s on getInfo specifically —
+        # AND aren't Fabric-enabled (TMDL unavailable), so only an admin SP recovers
+        # MQuery. Distinct from client_id/client_secret on purpose.
+        if admin_client_id and admin_client_secret:
+            try:
+                from src.services.tools.powerbi_auth_utils import (
+                    get_powerbi_access_token_from_config,
+                )
+                sp_admin_token = _run_async(get_powerbi_access_token_from_config({
+                    "tenant_id": tenant_id,
+                    "client_id": admin_client_id,
+                    "client_secret": admin_client_secret,
+                    "username": None,
+                    "password": None,
+                    "auth_method": "service_principal",
+                    "access_token": None,
+                }))
+                scan_result = gen.trigger_admin_scan(sp_admin_token, workspace_id)
+                tables = gen.parse_admin_tables(scan_result, dataset_id=dataset_id)
+                entries = self._tmdl_tables_to_mquery(tables)
+                if entries:
+                    logger.info(
+                        f"[UCMV] MQuery Admin Scanner (SP admin retry) recovered {len(entries)} tables"
+                    )
+                    return entries
+            except Exception as e:
+                logger.warning(f"[UCMV] MQuery Admin Scanner (SP admin retry) failed: {e}")
         return []
 
     def _extract_measures_fallback(
@@ -1013,6 +1059,8 @@ class UCMetricViewGeneratorTool(BaseTool):
         auth_method: Optional[str],
         access_token: str,
         pbi_api_base_url: str = "",
+        admin_client_id: str = "",
+        admin_client_secret: str = "",
     ) -> dict:
         """Extract measures, MQuery, relationships, and scan data from PBI API.
 
@@ -1145,6 +1193,8 @@ class UCMetricViewGeneratorTool(BaseTool):
                 client_secret=client_secret,
                 username=username,
                 password=password,
+                admin_client_id=admin_client_id,
+                admin_client_secret=admin_client_secret,
             )
             if recovered_mq:
                 result["mquery"] = recovered_mq
