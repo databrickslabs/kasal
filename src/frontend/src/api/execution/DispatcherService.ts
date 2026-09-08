@@ -2,6 +2,7 @@ import { generateWithTrace } from './builderGeneration';
 import { apiClient } from '../../shared/api/client';
 
 export interface DispatcherRequest {
+  session_id?: string;
   message: string;
   model?: string;
   tools?: string[];
@@ -140,4 +141,4 @@ class DispatcherService {
   }
 }
 
-export default new DispatcherService(); 
+export default new DispatcherService();

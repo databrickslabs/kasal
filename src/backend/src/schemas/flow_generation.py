@@ -10,6 +10,7 @@ from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
 
 class FlowGenerationRequest(BaseModel):
+    session_id: str | None = Field(default=None, max_length=255)
     prompt: str = Field(min_length=1, max_length=12000, pattern=r"\S")
     model: str = Field(default=DEFAULT_ENGINE_MODEL, min_length=1, max_length=255)
     current_crew_ids: list[str] = Field(default_factory=list, max_length=24)

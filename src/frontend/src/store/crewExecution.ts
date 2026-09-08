@@ -342,6 +342,9 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     console.log('[CrewExecution] executeCrew - edges:', edges);
 
     const { selectedModel, reasoningEnabled, reasoningLLM, reasoningConfig, schemaDetectionEnabled, inputVariables, processType, managerLLM } = get();
+    const originTab = useTabManagerStore.getState().tabs.find(
+      tab => tab.id === useTabManagerStore.getState().activeTabId
+    );
     set({ isExecuting: true });
 
     try {
@@ -475,7 +478,8 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       const additionalInputs: Record<string, unknown> = {
         execution_effort: reasoningConfig.execution_effort,
         ...inputVariables,
-        process: processType
+        process: processType,
+        session_id: originTab?.chatSessionId,
       };
       if (reasoningEnabled && reasoningLLM) {
         additionalInputs.reasoning_llm = reasoningLLM;
@@ -492,10 +496,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       // The tab's saved crew, when it has one. Recorded on the execution so a
       // resume from the history table can rebuild from the crew as it is NOW
       // rather than replaying the task text frozen into this run.
-      const activeTab = useTabManagerStore.getState().tabs.find(
-        tab => tab.id === useTabManagerStore.getState().activeTabId
-      );
-      const savedCrewId = activeTab?.savedCrewId || undefined;
+      const savedCrewId = originTab?.savedCrewId || undefined;
 
       const response = await jobExecutionService.executeJob(
         nodes,
@@ -586,6 +587,9 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
     console.log('[CrewExecution] executeFlow - savedFlowId:', savedFlowId);
 
     const { selectedModel, reasoningEnabled, reasoningLLM, reasoningConfig, schemaDetectionEnabled, inputVariables } = get();
+    const originTab = useTabManagerStore.getState().tabs.find(
+      tab => tab.id === useTabManagerStore.getState().activeTabId
+    );
     set({ isExecuting: true });
 
     try {
@@ -622,7 +626,7 @@ export const useCrewExecutionStore = create<CrewExecutionState>((set, get) => ({
       // The collected values lead: they become the flow's kickoff inputs, get
       // merged into flow state, and are handed to each crew's kickoff, which is
       // what interpolates `{topic}` in its task text.
-      const additionalInputs: Record<string, unknown> = { ...inputVariables };
+      const additionalInputs: Record<string, unknown> = { ...inputVariables, session_id: originTab?.chatSessionId };
       if (reasoningEnabled && reasoningLLM) {
         additionalInputs.reasoning_llm = reasoningLLM;
       }

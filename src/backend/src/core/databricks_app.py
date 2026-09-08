@@ -17,7 +17,6 @@ class DatabricksAppInstallation:
     app_name: str = ""
     workspace_id: str = ""
     warehouse_id: str = ""
-    experiment_id: str = ""
     output_volume: str = ""
     default_model: str = ""
 
@@ -45,13 +44,12 @@ class DatabricksAppInstallation:
             app_name=value("DATABRICKS_APP_NAME"),
             workspace_id=value("DATABRICKS_WORKSPACE_ID"),
             warehouse_id=value("KASAL_SQL_WAREHOUSE_ID"),
-            experiment_id=value("KASAL_MLFLOW_RESOURCE_ID"),
             output_volume=value("KASAL_OUTPUT_VOLUME"),
             default_model=value("KASAL_DEFAULT_MODEL"),
         )
 
     def experiment_name(self, group_id: str) -> str:
-        """Stable personal/teamspace destination; the resource is never shared output."""
+        """Stable personal/teamspace destination across installation resource changes."""
         if not self.hosted or not group_id:
             raise ValueError("A hosted installation and teamspace are required")
         installation = hashlib.sha256(

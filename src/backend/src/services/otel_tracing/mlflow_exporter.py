@@ -643,6 +643,13 @@ class KasalMLflowSpanExporter(SpanExporter):
                 start_trace_kwargs["experiment_id"] = str(experiment_id)
 
             root = client.start_trace(**start_trace_kwargs)
+            from src.services.mlflow.session import tag_session
+
+            tag_session(
+                root,
+                getattr(self._mlflow_result, "session_id", None),
+                getattr(self._group_context, "group_email", None),
+            )
             root_trace_id = root.trace_id
             root_span_id = root.span_id
         except Exception as e:

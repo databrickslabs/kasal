@@ -12,8 +12,7 @@ runtime bindings are in `src/app.yaml`.
 | Resource key | Select | Permission |
 | --- | --- | --- |
 | `sql-warehouse` | SQL warehouse for trace queries and SQL operations | Can use |
-| `experiment` | An installation experiment configured with Unity Catalog trace storage | Can read |
-| `volume` | Existing UC volume for generated files | Can read and write |
+| `volume` | Existing UC volume for generated files; its parent catalog/schema is used for new trace tables | Can read and write |
 | `serving-endpoint` | Ready, chat-capable serving endpoint supporting tool calls | Can query |
 | `lakebase` | Lakebase project, branch and database | Can connect and create |
 
@@ -75,13 +74,18 @@ Complete these once with an administrator, before starting Kasal:
    schema, application tables and memory tables at startup. Knowledge embeddings
    use the same database; raw uploads are temporary and are deleted after ingestion.
 
-2. Prepare a private Unity Catalog schema for traces. Configure the installation
-   experiment's trace storage there. Grant the app principal `USE CATALOG`,
-   `USE SCHEMA` and `CREATE TABLE`. Configure explicit `SELECT` and `MODIFY`
-   privileges for the app principal on the trace schema, as required by MLflow
-   UC trace storage. Avoid broad inherited read grants to other users.
-   The experiment resource grants access to the experiment; it does not supply
-   these additional UC permissions.
+2. Use a volume in a private Unity Catalog schema. Kasal derives the trace
+   namespace from its path: `/Volumes/catalog/schema/volume` supplies `catalog`
+   and `schema`. Grant the app principal `USE CATALOG`, `USE SCHEMA` and
+   `CREATE TABLE`, plus explicit `SELECT` and `MODIFY` on that schema so its
+   trace tables inherit the privileges required by MLflow UC trace storage.
+   Avoid broad inherited read grants to other users. The volume resource's
+   read/write grant does not supply these table privileges.
+
+There is no experiment to create or attach during installation. Kasal provisions
+a stable experiment and trace tables for each personal space/teamspace when it
+first uses tracing. This runs as the app service principal and requires the
+permissions above; the app does not grant itself privileges.
 
 Encryption keys are managed automatically. On first startup Kasal creates a
 private Databricks secret scope using the app service principal and persists
@@ -102,7 +106,7 @@ or application database.
 
 The CLI deploy command validates required resource keys before building or
 uploading. For a new CLI installation, create the app and attach these resources
-first. Marketplace declares the four supported resource requirements; the native
+first. Marketplace declares the three supported resource requirements; the native
 Lakebase attachment remains a separate step until that manifest schema supports it.
 
 ## Defaults and isolation
@@ -119,8 +123,8 @@ Lakebase attachment remains a separate step until that manifest schema supports 
   configurations and disabled settings remain respected.
 - MLflow tracing defaults on; paid evaluations remain opt-in. An explicit saved
   tracing opt-out stays off. Kasal creates a stable experiment and UC table
-  prefix per personal space or teamspace, separate from the installation's
-  resource experiment. Trace destinations are also bound per async request.
+  prefix per personal space or teamspace using the volume's parent catalog/schema.
+  Trace destinations are also bound per async request.
 - Personal spaces are separate; members of one teamspace share that team's
   scope. UC privileges govern direct Databricks access, so experiment names and
   Kasal filters do not replace a private UC schema and correct grants.
@@ -132,9 +136,22 @@ Lakebase attachment remains a separate step until that manifest schema supports 
   Configuration. Change assigned infrastructure in Databricks App resources
   and redeploy. Existing traces and files are not moved automatically.
 
+On upgrades, existing per-space experiment names and their saved UC destinations
+are reused, even if those tables are outside the volume's schema. Retain the app's
+permissions on those existing tables. An old `experiment` resource may be detached;
+it is no longer read or required by Kasal.
+
 Hosted detection requires the platform's app name, port, workspace ID and host.
 SDK credentials alone do not enable these defaults. The local dev entrypoint
 sets `KASAL_DEPLOYMENT_MODE=local`, which explicitly disables installation defaults.
+
+## Conversation tracing
+
+Chat, Agent Builder, and Flow Builder attach the originating conversation ID to
+MLflow traces. Builder planning calls and subsequent workload executions use that
+same ID, so MLflow can group them as a session. Completed plans and run results
+include an **MLflow** action when tracing is enabled, linking to the tracing
+experiment and the recorded trace when available.
 
 ## References
 

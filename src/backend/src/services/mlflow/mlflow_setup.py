@@ -110,7 +110,7 @@ def _build_uc_trace_location(
         table_prefix=(
             "kasal_" + hashlib.sha256(experiment_name.encode()).hexdigest()[:24]
             if hosted
-            and DatabricksAppInstallation.from_env().experiment_id
+            and DatabricksAppInstallation.from_env().output_volume
             and experiment_name
             else KASAL_TRACE_TABLE_PREFIX
         ),
@@ -127,6 +127,7 @@ class MlflowSetupResult:
     experiment_id: Optional[str] = None
     auth_method: Optional[str] = None  # "pat", "spn", "default"
     error: Optional[str] = None
+    session_id: Optional[str] = None
     otel_exporter_active: bool = False  # OTel MLflow exporter handles trace creation
     uc_trace_storage: bool = (
         False  # UC Delta-table trace storage active (native autolog path)
@@ -568,7 +569,7 @@ async def configure_mlflow_in_subprocess(
                 )
                 if (
                     is_databricks_app()
-                    and DatabricksAppInstallation.from_env().experiment_id
+                    and DatabricksAppInstallation.from_env().output_volume
                 ):
                     experiment_name = (
                         DatabricksAppInstallation.from_env().experiment_name(group_id)
@@ -1278,6 +1279,10 @@ def execute_with_mlflow_trace(
     if not mlflow_result or not mlflow_result.tracing_ready:
         return kickoff_fn()
 
+    from src.services.mlflow.session import session_id_from, tag_session
+
+    mlflow_result.session_id = session_id_from(crew_config, inputs)
+
     # When OTel MLflow exporter is active, it handles trace creation —
     # skip the inline wrapper to avoid duplicate traces.
     if mlflow_result.otel_exporter_active:
@@ -1300,6 +1305,7 @@ def execute_with_mlflow_trace(
     trace_inputs = {**(inputs or {}), "run_name": run_name}
 
     with start_root_trace(trace_name, trace_inputs) as root_span:
+        tag_session(root_span, mlflow_result.session_id)
         # Set execution attributes on the root span
         set_trace_attributes(root_span, crew_config, alog, run_name=run_name)
 
@@ -1348,6 +1354,10 @@ async def execute_with_mlflow_trace_async(
     if not mlflow_result or not mlflow_result.tracing_ready:
         return await kickoff_coro_fn(**kickoff_kwargs)
 
+    from src.services.mlflow.session import session_id_from, tag_session
+
+    mlflow_result.session_id = session_id_from(flow_config, inputs)
+
     # When OTel MLflow exporter is active, it handles trace creation —
     # skip the inline wrapper to avoid duplicate traces.
     if mlflow_result.otel_exporter_active:
@@ -1369,6 +1379,7 @@ async def execute_with_mlflow_trace_async(
     trace_inputs = {**(inputs or {}), "run_name": run_name}
 
     with start_root_trace(trace_name, trace_inputs) as root_span:
+        tag_session(root_span, mlflow_result.session_id)
         set_trace_attributes(root_span, flow_config, alog, run_name=run_name)
         result = await kickoff_coro_fn(**kickoff_kwargs)
         outputs = extract_trace_outputs(result, alog)

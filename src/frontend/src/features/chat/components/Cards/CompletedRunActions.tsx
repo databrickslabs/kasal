@@ -4,6 +4,7 @@ import { usePermissionStore } from '../../../../store/permissions';
 import { useThemeStore } from '../../../../store/theme';
 import { useExecutionStore } from '../../store/executionStore';
 import { useAppStore } from '../../store/appStore';
+import MLflowRunAction from './MLflowRunAction';
 import ScheduleRunDialog from '../Chat/ScheduleRunDialog';
 
 interface CompletedRunActionsProps {
@@ -83,6 +84,8 @@ const CompletedRunActions: React.FC<CompletedRunActionsProps> = ({ executionId, 
           </button>
         )}
 
+
+    {executionId && <MLflowRunAction key={executionId} executionId={executionId} disabled={disabled} />}
 
     {scheduleOpen && executionId && canSchedule && (
       <Modal open onClose={() => setScheduleOpen(false)} hideBackdrop sx={{ zIndex: 1500 }}>

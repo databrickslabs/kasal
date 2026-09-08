@@ -69,7 +69,7 @@ export function startPlanGeneration(groupId: string | null, sessionId: string, p
   void observe(key, request, async signal => {
     await beforeStart();
     signal.throwIfAborted();
-    return DispatcherService.dispatch(payload, jobId => {
+    return DispatcherService.dispatch({ ...payload, session_id: sessionId }, jobId => {
       usePlanGenerationStore.setState(state => ({ activityBySession: {
         ...state.activityBySession,
         [key]: [...(state.activityBySession[key] || []).filter(item => item.jobId !== jobId), { jobId, createdAt: new Date().toISOString() }],

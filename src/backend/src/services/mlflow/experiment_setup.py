@@ -1,16 +1,10 @@
-"""Create the MLflow experiment up front, so it can be attached as an app resource.
+"""Create or resolve the team's MLflow experiment with its UC trace storage.
 
-On Databricks Apps, MLflow calls go through the app's service principal, which
-only gains MLflow access once an **MLflow experiment resource** is attached to
-the app — and that attachment needs the experiment to already EXIST. Kasal
-otherwise creates its experiment lazily (on the first traced run), which is too
-late: prompt registration and the first traces run before that, and the app
-admin cannot attach a resource that isn't there yet.
+Hosted installations derive the provisioning namespace from their assigned
+volume. No experiment resource is required. Existing experiments keep their
+saved storage location; new ones need the app's schema/table permissions.
 
-So when the user saves the MLflow settings, we create the experiment eagerly
-here. The auth + env-swap mirror ``MLflowService.get_experiment_info`` exactly
-(SPN/PAT via ``get_auth_context``); this is the create-if-missing half factored
-out so it can take an explicit path and be called from the settings save.
+The blocking auth and MLflow calls here run in the setup caller's worker thread.
 """
 
 from __future__ import annotations

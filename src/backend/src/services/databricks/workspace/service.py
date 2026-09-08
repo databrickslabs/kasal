@@ -264,7 +264,7 @@ class DatabricksService:
                 namespace = await trace_namespace(installation)
                 # Existing installations without the new resource bindings keep
                 # their explicitly configured namespace and warehouse.
-                legacy = config if not installation.experiment_id else None
+                legacy = config if not installation.output_volume else None
                 catalog = namespace.catalog or (getattr(legacy, "catalog", "") or "")
                 schema = namespace.schema or (getattr(legacy, "schema", "") or "")
                 warehouse = installation.warehouse_id or (
@@ -309,9 +309,13 @@ class DatabricksService:
                             setattr(result, field, value)
                 # Storage roots belong to the installation; object paths below
                 # them remain scoped by the existing teamspace storage services.
-                if installation.output_volume and self.group_id:
-                    result.volume_enabled = True
-                    result.volume_path = installation.output_path(self.group_id)
+                if installation.output_volume:
+                    result.volume_enabled = bool(self.group_id and not namespace.error)
+                    result.volume_path = (
+                        installation.output_path(self.group_id)
+                        if result.volume_enabled
+                        else None
+                    )
                 return result
 
             if not config:

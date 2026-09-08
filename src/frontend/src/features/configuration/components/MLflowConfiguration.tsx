@@ -144,7 +144,7 @@ const MLflowConfiguration: React.FC = () => {
       else setExperimentLink(url);
     } catch {
       tab?.close();
-      setError('Could not open the tracing experiment. Check the app’s experiment and Unity Catalog permissions, then try again.');
+      setError('Could not open the tracing experiment. Check the app’s Unity Catalog trace storage permissions, then try again.');
     } finally {
       setOpeningExperiment(false);
     }

@@ -15,8 +15,6 @@ env:
     valueFrom: sql-warehouse
   - name: MLFLOW_TRACING_SQL_WAREHOUSE_ID
     valueFrom: sql-warehouse
-  - name: KASAL_MLFLOW_RESOURCE_ID
-    valueFrom: experiment
   - name: KASAL_OUTPUT_VOLUME
     valueFrom: volume
   - name: KASAL_DEFAULT_MODEL

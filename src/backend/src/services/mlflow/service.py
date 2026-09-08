@@ -187,14 +187,9 @@ class MLflowService:
         if experiment_name is not None:
             await self.repo.set_experiment_name(experiment_name, group_id=self.group_id)
 
-        # Create the experiment on Databricks now, so an admin can attach it to
-        # the app as an MLflow resource (which is what grants the app SP MLflow
-        # access). Kasal otherwise creates it lazily on the first traced run —
-        # too late to attach up front. Run this both when the NAME is saved AND
-        # when tracing is toggled ON: re-enabling must (re)create the experiment
-        # so the admin has something to attach without having to rename it (a
-        # rename was the only trigger before — the catch-22 the user hit).
-        # Best-effort: a failure must not block saving, but it is surfaced.
+        # Provision the destination when tracing is enabled or renamed, so the
+        # first run can use it. Hosted apps use their volume's namespace and
+        # existing schema permissions; no experiment resource is required.
         if experiment_name is not None or enabled is True:
             await self._ensure_experiment_created()
         return await self.get_settings()
@@ -203,7 +198,7 @@ class MLflowService:
         """Create the configured experiment on Databricks (create-if-missing).
 
         No-op when Databricks is not configured (local/OSS backends create the
-        experiment lazily and need no pre-attachment). Reuses the SPN/PAT auth
+        experiment lazily). Reuses the SPN/PAT auth
         from :meth:`_setup_mlflow_auth`; the blocking create runs in a thread.
         """
         import asyncio
@@ -266,7 +261,7 @@ class MLflowService:
         the old hardcoded ``/Shared/kasal-crew-execution-traces``.
         """
         installation = DatabricksAppInstallation.from_env()
-        if installation.hosted and installation.experiment_id:
+        if installation.hosted and installation.output_volume:
             return installation.experiment_name(self.group_id)
 
         from src.services.mlflow import local
@@ -535,6 +530,7 @@ class MLflowService:
             Dict with url, experiment_id, trace_id, workspace_url, workspace_id
         """
         import asyncio
+        from urllib.parse import urlencode
 
         from src.utils.databricks_auth import get_auth_context
 
@@ -594,9 +590,19 @@ class MLflowService:
         # suffix on Databricks) so the deep link points at the SAME experiment
         # traces land in — NOT the old hardcoded /Shared/kasal-crew-execution-traces
         # fallback, which sent this button to the wrong experiment.
+        execution = None
+        if job_id:
+            execution = await self.execution_service.get_run_by_job_id(
+                job_id, group_ids=[self.group_id]
+            )
         experiment_id = ""
         if auth:
-            exp_name = await self.configured_crew_traces_experiment()
+            saved_name = getattr(execution, "mlflow_experiment_name", None)
+            exp_name = (
+                saved_name
+                if isinstance(saved_name, str) and saved_name
+                else await self.configured_crew_traces_experiment()
+            )
 
             def _get_experiment_id(auth_context, experiment_name: str) -> str:
                 import mlflow
@@ -622,19 +628,10 @@ class MLflowService:
                 "[MLflowService] No auth available, cannot resolve experiment ID"
             )
 
-        # Try to extract trace id from the execution record when job_id is provided
-        trace_id: Optional[str] = None
-        if job_id:
-            try:
-                exec_obj = await self.execution_service.get_run_by_job_id(
-                    job_id, group_ids=[self.group_id]
-                )
-                if exec_obj and getattr(exec_obj, "mlflow_trace_id", None):
-                    trace_id = str(exec_obj.mlflow_trace_id)
-            except Exception as e:
-                logger.warning(
-                    f"[MLflowService] Failed to get trace ID for job {job_id}: {e}"
-                )
+        trace_id = getattr(execution, "mlflow_trace_id", None)
+        trace_id = (
+            str(trace_id) if isinstance(trace_id, (str, int)) and trace_id else None
+        )
 
         # Build URL
         if not workspace_url:
@@ -652,12 +649,12 @@ class MLflowService:
             if experiment_id
             else f"{workspace_url}/ml/experiments"
         )
-        params = []
+        params = {}
         if workspace_id:
-            params.append(f"o={workspace_id}")
+            params["o"] = workspace_id
         if trace_id:
-            params.append(f"selectedEvaluationId={trace_id}")
-        url = base + ("?" + "&".join(params) if params else "")
+            params["selectedEvaluationId"] = trace_id
+        url = base + ("?" + urlencode(params) if params else "")
 
         return {
             "url": url,

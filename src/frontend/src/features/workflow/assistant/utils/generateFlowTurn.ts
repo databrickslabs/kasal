@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction, MutableRefObject } from 'react';
 import type { Node } from 'reactflow';
 import { FlowService } from '../../../../api/workflow/FlowService';
 import { useUILayoutStore } from '../../../../store/uiLayout';
+import { useTabManagerStore } from '../../../../store/tabManager';
 import type { ChatMessage, FlowDraft } from '../types';
 
 interface FlowTurnOptions {
@@ -19,6 +20,8 @@ interface FlowTurnOptions {
 }
 
 export async function generateFlowTurn({ inputValue, selectedModel, nodes, flowRequest, setMessages, setInputValue, setIsLoading, saveMessageToBackend, onFlowGenerated, beginGenerationTrace, setGenerationTraceId }: FlowTurnOptions) {
+  const tabs = useTabManagerStore.getState();
+  const sessionId = tabs.tabs.find(tab => tab.id === tabs.activeTabId)?.chatSessionId;
   const controller = new AbortController();
   flowRequest.current = controller;
   const userMessage: ChatMessage = { id: `flow-user-${Date.now()}`, type: 'user', content: inputValue.trim(), timestamp: new Date() };
@@ -28,7 +31,7 @@ export async function generateFlowTurn({ inputValue, selectedModel, nodes, flowR
   useUILayoutStore.getState().setFlowPanelTab('responses');
   try {
     await saveMessageToBackend(userMessage);
-    const draft = await FlowService.generateFlow(userMessage.content, selectedModel, nodes.map(node => node.data?.crewId).filter(Boolean), controller.signal, beginGenerationTrace);
+    const draft = await FlowService.generateFlow(userMessage.content, selectedModel, nodes.map(node => node.data?.crewId).filter(Boolean), controller.signal, beginGenerationTrace, sessionId);
     if (controller.signal.aborted) return;
     if (draft.nodes.length) onFlowGenerated?.(draft);
     const response: ChatMessage = {

@@ -9,9 +9,9 @@ import { logger } from '../../utils/logger';
 const flowLogger = logger.createChild('FlowService');
 
 export class FlowService {
-  static async generateFlow(prompt: string, model: string, currentCrewIds: string[], signal?: AbortSignal, onStarted?: (jobId: string) => void): Promise<import('../../features/workflow/assistant/types').FlowDraft> {
-    if (onStarted) return generateWithTrace<import('../../features/workflow/assistant/types').FlowDraft>('flow', { prompt, model, current_crew_ids: currentCrewIds }, onStarted, signal);
-    const response = await apiClient.post('/flows/generate', { prompt, model, current_crew_ids: currentCrewIds }, { timeout: 180000, signal });
+  static async generateFlow(prompt: string, model: string, currentCrewIds: string[], signal?: AbortSignal, onStarted?: (jobId: string) => void, sessionId?: string): Promise<import('../../features/workflow/assistant/types').FlowDraft> {
+    if (onStarted) return generateWithTrace<import('../../features/workflow/assistant/types').FlowDraft>('flow', { prompt, model, current_crew_ids: currentCrewIds, session_id: sessionId }, onStarted, signal);
+    const response = await apiClient.post('/flows/generate', { prompt, model, current_crew_ids: currentCrewIds, session_id: sessionId }, { timeout: 180000, signal });
     return response.data;
   }
 
