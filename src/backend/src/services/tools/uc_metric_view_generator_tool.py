@@ -349,6 +349,21 @@ class UCMetricViewGeneratorTool(BaseTool):
                 )
                 loader = RelationshipsLoader()
                 fact_keys = {k for k, v in mquery_tables.items() if v.is_fact}
+                # Also enrich tables that have DAX measures allocated to them but are
+                # NOT aggregate-SQL facts (raw-grain / data-vault sources like fact_pe005,
+                # whose M is a plain SELECT). Phase 1b promotes these to facts *during*
+                # the run — but RelationshipsLoader only builds joins for tables in
+                # fact_keys, so without adding them here they get ZERO joins and their
+                # join-dependent measures (e.g. the *_Yeild_Actual ratios filtering on
+                # Dim_wkctr/Dim_Plant) decline. Gate on a real source_table (matches
+                # Phase 1b) so UI/selection/measure-holder tables aren't pulled in.
+                for _m in (measures or []):
+                    _allocs = [a.get("table") for a in (_m.get("all_allocations") or [])] \
+                        or [_m.get("proposed_allocation")]
+                    for _t in _allocs:
+                        _ti = mquery_tables.get(_t)
+                        if _t and _ti is not None and getattr(_ti, "source_table", None):
+                            fact_keys.add(_t)
                 relationships_enrichment = loader.load(
                     rel_data, mquery_tables, fact_keys
                 )
@@ -507,6 +522,11 @@ class UCMetricViewGeneratorTool(BaseTool):
                 }
                 for k, v in results.get("specs", {}).items()
             },
+            # UI-ready flat list of non-emitted measures (original DAX, why, proposal,
+            # DRAFT source-view SQL) for the validation "Not transpiled" review panel.
+            "untranslatable_items": self._build_untranslatable_items(
+                results.get("specs", {})
+            ),
         }
         output_json = json.dumps(output, indent=2)
 
@@ -550,6 +570,40 @@ class UCMetricViewGeneratorTool(BaseTool):
         # ────────────────────────────────────────────────────────────────────
 
         return output_json
+
+    @staticmethod
+    def _build_untranslatable_items(specs: dict) -> list:
+        """Flatten every spec's untranslatable measures into one UI-ready list.
+
+        Feeds the validation-UI "Not transpiled" review panel: reviewers see the
+        non-emitted measures as first-class rows (original DAX + why skipped +
+        category + dependency in-degree + proposal + DRAFT source-view SQL) instead
+        of digging through the YAML `-- comment` block. Additive. Returns [] when
+        nothing was skipped; high-impact (most-referenced) gaps sorted first.
+        """
+        items: list = []
+        for table_key, spec in (specs or {}).items():
+            view_name = spec.get("view_name")
+            for m in spec.get("untranslatable", []) or []:
+                items.append({
+                    "table_key": table_key,
+                    "view_name": view_name,
+                    "original_name": m.get("original_name") or m.get("name"),
+                    "dax_expression": m.get("dax_expression", ""),
+                    "skip_reason": m.get("skip_reason", ""),
+                    "category": m.get("category", ""),
+                    "dax_class": m.get("dax_class"),
+                    "referenced_by": m.get("referenced_by", 0),
+                    # Actionable next-step for the reviewer (HOW to handle it),
+                    # sourced from the LLM's recipe or a class-based default.
+                    "proposal": m.get("proposal", ""),
+                    "explanation": m.get("explanation"),
+                    # Labeled DRAFT CREATE VIEW scaffold for cross-fact / multi-stage
+                    # (proposal artifact, never an emitted measure).
+                    "source_view_sql_draft": m.get("source_view_sql_draft"),
+                })
+        items.sort(key=lambda x: x.get("referenced_by", 0), reverse=True)
+        return items
 
     # ------------------------------------------------------------------
     # Durable raw DAX persistence (conversion_history / Lakebase)
