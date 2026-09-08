@@ -653,3 +653,39 @@ async def test_generation_creates_contract_after_bounded_source_detail_request()
     assert len(response.nodes) == 2
     assert response.nodes[0].data.model_dump()["outputContract"]["task_id"] == "task-a"
     assert complete.await_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("task_id", [1, "1", "", None, "task-b"])
+async def test_generation_binds_final_task_instead_of_retrying_model_task_ids(task_id):
+    service = generation_service()
+    data = routed_news_plan().model_dump()
+    data["output_contracts"][0]["task_id"] = task_id
+    with patch(
+        "src.services.flow_builder.generation.LLMManager.completion",
+        new_callable=AsyncMock,
+    ) as complete:
+        complete.return_value = json.dumps(data)
+        result = await service.generate(
+            FlowGenerationRequest(prompt="Route important news"),
+            SimpleNamespace(group_ids=["team"]),
+        )
+    assert result.nodes[0].data.model_dump()["outputContract"]["task_id"] == "task-a"
+    assert len(result.nodes) == 2
+    complete.assert_awaited_once()
+
+
+def test_generation_binding_does_not_authorize_an_unselected_or_unknown_crew():
+    data = routed_news_plan().model_dump()
+    data["output_contracts"][0]["crew_id"] = "other-team"
+    with pytest.raises(ValueError, match="selected crew"):
+        draft = FlowPlanningStep.model_validate(data, context={"catalog": catalog()})
+        build_flow(draft, catalog())
+
+
+def test_generation_binding_handles_missing_task_id_without_mutating_answer():
+    data = routed_news_plan().model_dump()
+    del data["output_contracts"][0]["task_id"]
+    draft = FlowPlanningStep.model_validate(data, context={"catalog": catalog()})
+    assert draft.output_contracts[0].task_id == "task-a"
+    assert "task_id" not in data["output_contracts"][0]

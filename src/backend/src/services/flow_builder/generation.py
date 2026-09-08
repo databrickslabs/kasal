@@ -63,6 +63,8 @@ onward, omit otherwise: unmatched results end that branch. Never invent a fallba
 Conditional routes and unconditional joins must
 not share a target. For conditional routing, inspect the source crew's task details, then design a
 small output_contract for its FINAL task: {crew_id, task_id, name, schema_definition}.
+Kasal assigns task_id from the selected crew automatically; use an empty string
+when it is not in the preview. Never guess a task ID or use an ordinal like 1.
 schema_definition is an inline JSON Schema object with properties, required, and
 plain types (object, array, string, integer, number, boolean), optional enums and
 numeric bounds. No refs, code, patterns or unions. Each routing field needs a
@@ -365,7 +367,7 @@ class FlowGenerationService:
             )
             try:
                 plan = FlowPlanningStep.model_validate(
-                    robust_json_parser(content or "")
+                    robust_json_parser(content or ""), context={"catalog": catalog}
                 )
                 if plan.detail_crew_ids:
                     if "crew_details" in context:
