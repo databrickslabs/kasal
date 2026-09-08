@@ -18,6 +18,7 @@ import {
 } from '@mui/icons-material';
 import { apiClient } from '../../../shared/api/client';
 import { useMLflowStore } from '../../../store/mlflow';
+import type { MLflowBackend, MLflowSettings } from '../../../types/config/mlflow';
 
 /**
  * MLflow tracing settings — their own section, not a corner of the Databricks one.
@@ -44,29 +45,6 @@ import { useMLflowStore } from '../../../store/mlflow';
  * does nothing is the most expensive kind.
  */
 
-interface MLflowBackend {
-  kind: 'databricks' | 'local' | 'none';
-  // Whether this backend is usable right now (workspace configured / local URI set).
-  available?: boolean;
-  uri?: string | null;
-  reachable?: boolean | null;
-  experiment?: string | null;
-  url?: string | null;
-}
-
-interface MLflowSettings {
-  installation_managed?: boolean;
-  resource_error?: string | null;
-  enabled: boolean;
-  evaluation_enabled: boolean;
-  experiment_name?: string | null;
-  // The backend a run WILL use (derived, not chosen).
-  backend: MLflowBackend;
-  // Every backend the environment offers, so Databricks / Local / None can be
-  // shown side by side. The one whose kind === backend.kind is active.
-  available?: MLflowBackend[];
-}
-
 const BACKEND_LABEL: Record<MLflowBackend['kind'], string> = {
   databricks: 'Databricks workspace',
   local: 'Local server',
@@ -89,6 +67,8 @@ const MLflowConfiguration: React.FC = () => {
   const [settings, setSettings] = useState<MLflowSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [openingExperiment, setOpeningExperiment] = useState(false);
+  const [experimentLink, setExperimentLink] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const [experimentDraft, setExperimentDraft] = useState('');
@@ -145,6 +125,30 @@ const MLflowConfiguration: React.FC = () => {
       setSaving(false);
     }
   }, [publishEnabled]);
+
+  const openExperiment = async (selectedBackend: MLflowBackend) => {
+    if (!selectedBackend.uri) return;
+    // Reserve the tab during the click so the async lookup is not popup-blocked.
+    const tab = window.open('about:blank', '_blank');
+    if (tab) tab.opener = null;
+    setOpeningExperiment(true);
+    setExperimentLink(null);
+    setError(null);
+    try {
+      // The backend resolves the current team's actual tracing destination and
+      // initializes it with UC storage if this is the team's first visit.
+      const { data } = await apiClient.get<{ experiment_id: string }>('/mlflow/experiment-info');
+      if (!data.experiment_id) throw new Error('Experiment unavailable');
+      const url = `${selectedBackend.uri.replace(/\/$/, '')}/ml/experiments/${encodeURIComponent(data.experiment_id)}/traces`;
+      if (tab && !tab.closed) tab.location.replace(url);
+      else setExperimentLink(url);
+    } catch {
+      tab?.close();
+      setError('Could not open the tracing experiment. Check the app’s experiment and Unity Catalog permissions, then try again.');
+    } finally {
+      setOpeningExperiment(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -255,7 +259,18 @@ const MLflowConfiguration: React.FC = () => {
             {b.reachable === false && (
               <Chip size="small" color="warning" variant="outlined" label="not reachable" />
             )}
-            {b.url && (
+            {b.kind === 'databricks' && isAvailable && b.uri ? (
+              <Button
+                size="small"
+                variant="text"
+                disabled={openingExperiment || !!settings.resource_error}
+                onClick={() => void openExperiment(b)}
+                endIcon={openingExperiment ? <CircularProgress size={14} /> : <LaunchIcon sx={{ fontSize: 14 }} />}
+                sx={{ fontSize: '0.8rem' }}
+              >
+                {openingExperiment ? 'Opening experiment…' : 'Open MLflow'}
+              </Button>
+            ) : b.url && (
               <Link
                 href={b.url}
                 target="_blank"
@@ -268,6 +283,11 @@ const MLflowConfiguration: React.FC = () => {
           </Box>
         );
       })}
+      {experimentLink && (
+        <Link href={experimentLink} target="_blank" rel="noopener noreferrer">
+          Open tracing experiment
+        </Link>
+      )}
       {/* Both backends are always listed above (unavailable ones greyed +
           "not configured"). Explain the resolution so it is not a mystery. */}
       {backend.kind === 'databricks' && (

@@ -31,6 +31,8 @@ import { usePermissionStore } from '../../../store/permissions';
 import { ToolService, Tool as ServiceTool } from '../../../api/tools/ToolService';
 import { MCPService } from '../../../api/tools/MCPService';
 import type { MCPServerConfig } from '../../../types/config/mcp';
+import { apiClient } from '../../../shared/api/client';
+import type { MLflowSettings } from '../../../types/config/mlflow';
 
 interface WorkspaceInfo {
   name: string;
@@ -49,6 +51,7 @@ function WorkspaceOverview({ onConfigureSection, embedded = false }: WorkspaceOv
   const [loading, setLoading] = useState(true);
   const [workspaceInfo, setWorkspaceInfo] = useState<WorkspaceInfo | null>(null);
   const [databricksConfig, setDatabricksConfig] = useState<DatabricksConfig | null>(null);
+  const [mlflowSettings, setMLflowSettings] = useState<MLflowSettings | null>(null);
   const [memoryConfig, setMemoryConfig] = useState<MemoryBackendConfig | null>(null);
   const [tools, setTools] = useState<ServiceTool[]>([]);
   const [mcpServers, setMcpServers] = useState<MCPServerConfig[]>([]);
@@ -64,6 +67,19 @@ function WorkspaceOverview({ onConfigureSection, embedded = false }: WorkspaceOv
     };
     loadInfo();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedGroupId]);
+
+  useEffect(() => {
+    let current = true;
+    setMLflowSettings(null);
+    // Use the same settings as the MLflow page, including installation defaults
+    // and explicit teamspace overrides. Legacy Databricks flags are not current.
+    void apiClient.get<MLflowSettings>('/mlflow/settings').then(({ data }) => {
+      if (current) setMLflowSettings(data);
+    }).catch(() => {
+      if (current) setMLflowSettings(null);
+    });
+    return () => { current = false; };
   }, [selectedGroupId]);
 
   const loadWorkspaceInfo = async () => {
@@ -304,20 +320,20 @@ function WorkspaceOverview({ onConfigureSection, embedded = false }: WorkspaceOv
                 </ListItem>
                 <ListItem>
                   <ListItemIcon sx={{ minWidth: 36 }}>
-                    {getStatusIcon(!!databricksConfig.mlflow_enabled)}
+                    {getStatusIcon(!!mlflowSettings?.enabled)}
                   </ListItemIcon>
                   <ListItemText
                     primary="MLflow Tracing"
-                    secondary={databricksConfig.mlflow_enabled ? 'Enabled' : 'Disabled'}
+                    secondary={mlflowSettings ? (mlflowSettings.enabled ? 'Enabled' : 'Disabled') : 'Unavailable'}
                   />
                 </ListItem>
                 <ListItem>
                   <ListItemIcon sx={{ minWidth: 36 }}>
-                    {getStatusIcon(!!databricksConfig.evaluation_enabled)}
+                    {getStatusIcon(!!mlflowSettings?.evaluation_enabled)}
                   </ListItemIcon>
                   <ListItemText
                     primary="MLflow Evaluation"
-                    secondary={databricksConfig.evaluation_enabled ? 'Enabled' : 'Disabled'}
+                    secondary={mlflowSettings ? (mlflowSettings.evaluation_enabled ? 'Enabled' : 'Disabled · opt-in') : 'Unavailable'}
                   />
                 </ListItem>
 

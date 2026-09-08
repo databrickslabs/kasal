@@ -50,3 +50,55 @@ describe('MLflow settings ownership', () => {
     expect(screen.getByRole('checkbox', { name })).not.toBeChecked();
   });
 });
+
+describe('Open MLflow destination', () => {
+  const hosted = {
+    ...settings,
+    enabled: true,
+    installation_managed: true,
+    backend: {
+      kind: 'databricks', available: true, uri: 'https://example.com/',
+      experiment: '/Shared/personal-traces-uc', url: 'https://example.com/ml/experiments',
+    },
+  };
+
+  it('resolves the teamspace experiment instead of opening all experiments', async () => {
+    const replace = vi.fn();
+    const tab = { opener: {}, closed: false, location: { replace }, close: vi.fn() };
+    const open = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+    vi.mocked(apiClient.get).mockResolvedValueOnce({ data: hosted })
+      .mockResolvedValueOnce({ data: { experiment_id: '1234' } });
+    render(<MLflowConfiguration />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open MLflow' }));
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('https://example.com/ml/experiments/1234/traces'));
+    expect(apiClient.get).toHaveBeenLastCalledWith('/mlflow/experiment-info');
+    expect(tab.opener).toBeNull();
+    open.mockRestore();
+  });
+
+  it('offers the resolved link when the browser blocks the new tab', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    vi.mocked(apiClient.get).mockResolvedValueOnce({ data: hosted })
+      .mockResolvedValueOnce({ data: { experiment_id: '5678' } });
+    render(<MLflowConfiguration />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open MLflow' }));
+    expect(await screen.findByRole('link', { name: 'Open tracing experiment' }))
+      .toHaveAttribute('href', 'https://example.com/ml/experiments/5678/traces');
+    open.mockRestore();
+  });
+
+  it.each([null, new Error('denied')])('does not fall back to all experiments on a lookup failure (%s)', async (failure) => {
+    const close = vi.fn();
+    const replace = vi.fn();
+    const open = vi.spyOn(window, 'open').mockReturnValue({ close, location: { replace } } as unknown as Window);
+    vi.mocked(apiClient.get).mockResolvedValueOnce({ data: hosted });
+    if (failure) vi.mocked(apiClient.get).mockRejectedValueOnce(failure);
+    else vi.mocked(apiClient.get).mockResolvedValueOnce({ data: {} });
+    render(<MLflowConfiguration />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open MLflow' }));
+    expect(await screen.findByText(/Could not open the tracing experiment/)).toBeInTheDocument();
+    expect(close).toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
+    open.mockRestore();
+  });
+});

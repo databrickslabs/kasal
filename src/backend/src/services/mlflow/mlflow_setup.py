@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from src.core.databricks_app import DatabricksAppInstallation, is_databricks_app
+from src.services.mlflow.trace_storage import log_trace_storage, select_experiment
 
 logger = logging.getLogger(__name__)
 
@@ -627,8 +628,8 @@ async def configure_mlflow_in_subprocess(
             ):
                 os.environ.pop(_otlp_k, None)
             alog.info(
-                "[SUBPROCESS] UC trace storage active — KasalMLflowSpanExporter owns "
-                "the trace; OTLP traces export disabled (no localhost sidecar)"
+                "[SUBPROCESS] UC trace storage selected; OTLP traces export "
+                "disabled (no localhost sidecar)"
             )
             # UC trace storage requires an experiment that has NEVER contained a
             # managed (non-UC) trace: MLflow permanently rejects binding a UC
@@ -646,14 +647,10 @@ async def configure_mlflow_in_subprocess(
             )
 
         def _set_experiment(name: str):
-            """set_experiment with UC trace_location when available, else legacy."""
+            """Keep an existing UC destination; defaults only provision new ones."""
             if trace_location is not None:
-                exp = mlflow.set_experiment(name, trace_location=trace_location)
-                alog.info(
-                    f"[SUBPROCESS] MLflow trace storage: Unity Catalog "
-                    f"{uc_catalog}.{uc_schema}.{KASAL_TRACE_TABLE_PREFIX}_otel_* "
-                    f"(warehouse={warehouse_id})"
-                )
+                exp = select_experiment(mlflow, name, trace_location)
+                log_trace_storage(alog, "SUBPROCESS", exp)
                 return exp
             return mlflow.set_experiment(name)
 
@@ -796,19 +793,14 @@ async def configure_mlflow_in_subprocess(
         # -------------------------------------------------------
         # 9. Async logging
         # -------------------------------------------------------
-        # Async logging is DISABLED on purpose. Crew/flow tracing runs in a
-        # subprocess that tears down immediately after the crew completes.
-        # With async logging on, end_trace writes the trace *info*
-        # synchronously but uploads the span-data artifact (traces.json) on a
-        # background worker — which the subprocess kills before it finishes,
-        # leaving a trace whose info is searchable but whose spans 404
-        # (MlflowTraceDataNotFound). flush_trace_async_logging() does not
-        # reliably cover the low-level client trace API here, so the robust fix
-        # is a synchronous upload inside end_trace.
+        # This setting controls metrics/params logging, not trace delivery.
+        # Trace queues have their own lifecycle and are explicitly flushed by
+        # post_execution_mlflow_cleanup before the subprocess exits.
         try:
             mlflow.config.enable_async_logging(False)
             alog.info(
-                "[SUBPROCESS] MLflow async logging DISABLED (synchronous trace upload — required for subprocess lifecycle)"
+                "[SUBPROCESS] MLflow metrics async logging disabled; trace queues "
+                "are flushed before subprocess exit"
             )
         except Exception as async_log_err:
             alog.info(

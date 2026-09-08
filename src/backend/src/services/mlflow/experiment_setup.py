@@ -19,6 +19,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from src.core.databricks_app import is_databricks_app
+from src.services.mlflow.trace_storage import select_experiment
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +89,7 @@ def create_databricks_experiment(
         # the existing one otherwise — safe to call on every save. With a UC
         # trace_location it links UC trace storage at creation.
         if trace_location is not None:
-            exp = mlflow.set_experiment(experiment_path, trace_location=trace_location)
+            exp = select_experiment(mlflow, experiment_path, trace_location)
         else:
             exp = mlflow.set_experiment(experiment_path)
         return {

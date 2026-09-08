@@ -201,10 +201,10 @@ def _setup_sync(
     mlflow.set_tracking_uri("databricks")
 
     from src.services.mlflow.mlflow_setup import (
-        KASAL_TRACE_TABLE_PREFIX,
         _build_uc_trace_location,
         uc_experiment_name,
     )
+    from src.services.mlflow.trace_storage import log_trace_storage, select_experiment
 
     if warehouse_id:
         os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = str(warehouse_id)
@@ -221,16 +221,8 @@ def _setup_sync(
     if uc_active:
         # Dedicated UC-only experiment, shared with crew-execution traces.
         exp_name = uc_experiment_name(exp_name)
-        exp = mlflow.set_experiment(exp_name, trace_location=trace_location)
-        logger.info(
-            "[%s] MLflow trace storage: Unity Catalog %s.%s.%s_otel_* (warehouse=%s), experiment=%s",
-            label,
-            uc_catalog,
-            uc_schema,
-            KASAL_TRACE_TABLE_PREFIX,
-            warehouse_id,
-            exp_name,
-        )
+        exp = select_experiment(mlflow, exp_name, trace_location)
+        log_trace_storage(logger, label, exp)
     else:
         exp = mlflow.set_experiment(exp_name)
         logger.info("[%s] MLflow experiment set (managed): %s", label, exp_name)
