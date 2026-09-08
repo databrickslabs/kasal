@@ -5,7 +5,6 @@ reports which are now recoverable. See
 src/docs/powerbi/ucmv-reevaluation-recoverable-measures.md
 """
 import json
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from src.services.tools.metric_view_utils import capability_version as cv
@@ -204,13 +203,16 @@ class TestReevaluateMeasures:
 # --------------------------------------------------------------------------
 class TestUCMVReevaluationTool:
     def _record(self, dataset_id, fingerprint, items):
-        return SimpleNamespace(
-            id=1, created_at='2026-07-01',
-            configuration={'dataset_id': dataset_id, 'workspace_id': 'ws1',
-                           'capability_fingerprint': fingerprint},
-            input_data={'dataset_id': dataset_id},
-            output_data={'untranslatable_items': items},
-        )
+        """An execution-sourced run dict (executionhistory is the sole source)."""
+        return {
+            'source': 'execution',
+            'key': dataset_id,
+            'label': dataset_id,
+            'created_at': '2026-07-01',
+            'items': items,
+            'fingerprint': fingerprint,
+            'config': {},
+        }
 
     def _items(self):
         return [{
@@ -220,20 +222,16 @@ class TestUCMVReevaluationTool:
             'category': 'complex DAX — needs manual translation', 'referenced_by': 7,
         }]
 
-    def _run_with(self, records, **kwargs):
-        """Drive the ConversionHistory FALLBACK path.
+    def _run_with(self, executions, **kwargs):
+        """Drive the execution path (the tool's sole source).
 
-        The tool prefers executionhistory (where untranslatable_items actually
-        lands), so that must be stubbed empty for the conversion path to run.
+        untranslatable_items lands in executionhistory.result, which
+        _load_executions harvests; the tool reads nothing else.
         """
-        async def _no_executions(self, ids, gid, maxd):
-            return []
-
         async def _fake_load(self, ids, gid, maxd):
-            return records
+            return executions
 
-        with patch.object(UCMVReevaluationTool, '_load_executions', _no_executions), \
-             patch.object(UCMVReevaluationTool, '_load_records', _fake_load):
+        with patch.object(UCMVReevaluationTool, '_load_executions', _fake_load):
             return json.loads(UCMVReevaluationTool()._run(group_id='g1', **kwargs))
 
     def test_reports_recoveries_for_a_stale_run(self):
@@ -268,7 +266,7 @@ class TestUCMVReevaluationTool:
         out = self._run_with([self._record('ds-empty', 'oldfingerprint00', [])])
         ds = out['datasets'][0]
         assert ds['newly_translatable'] == []
-        assert 'no stored non-transpiled measures' in ds['note']
+        assert out['summary']['measures_recovered'] == 0
 
     def test_reports_capability_and_settings(self):
         out = self._run_with([self._record('ds', 'old0', self._items())], use_llm=False)
@@ -278,41 +276,14 @@ class TestUCMVReevaluationTool:
 
     def test_load_failure_is_reported_not_raised(self):
         """A dead DB must produce an error report, never an exception that kills a
-        scheduled sweep. Both sources must fail for the error to surface."""
-        async def _no_executions(self, ids, gid, maxd):
-            return []
-
+        scheduled sweep. The execution scan is the sole source, so its failure surfaces."""
         async def _boom(self, ids, gid, maxd):
             raise RuntimeError('db down')
 
-        with patch.object(UCMVReevaluationTool, '_load_executions', _no_executions), \
-             patch.object(UCMVReevaluationTool, '_load_records', _boom):
+        with patch.object(UCMVReevaluationTool, '_load_executions', _boom):
             out = json.loads(UCMVReevaluationTool()._run(group_id='g1'))
         assert 'db down' in out['error']
         assert out['datasets'] == []
-
-    def test_execution_source_is_preferred_over_conversion_history(self):
-        """REGRESSION: untranslatable_items lands in executionhistory.result, NOT in
-        conversion_history (which only gets a summary copy). Reading conversions first
-        made every sweep report 0 measures even with 100+ recorded failures."""
-        ex = {
-            'source': 'execution', 'key': 'job-1', 'label': 'UCMV run',
-            'created_at': '2026-08-05', 'items': self._items(),
-            'fingerprint': 'oldfingerprint00', 'config': {},
-        }
-
-        async def _execs(self, ids, gid, maxd):
-            return [ex]
-
-        async def _never(self, ids, gid, maxd):
-            raise AssertionError('conversion fallback must not run when executions exist')
-
-        with patch.object(UCMVReevaluationTool, '_load_executions', _execs), \
-             patch.object(UCMVReevaluationTool, '_load_records', _never):
-            out = json.loads(UCMVReevaluationTool()._run(group_id='g1'))
-        assert out['summary']['datasets_scanned'] == 1
-        assert out['datasets'][0]['source'] == 'execution'
-        assert out['summary']['measures_recovered'] == 1
 
     def test_unknown_fingerprint_is_labelled_honestly(self):
         """A run with no recorded fingerprint is retried (a gain can't be ruled out),
@@ -355,11 +326,3 @@ class TestUCMVReevaluationTool:
         assert t._parse_dataset_ids('c, d') == ['c', 'd']
         assert t._parse_dataset_ids(['e']) == ['e']
         assert t._parse_dataset_ids(None) == []
-
-    def test_stored_accessors_tolerate_missing_shapes(self):
-        t = UCMVReevaluationTool()
-        empty = SimpleNamespace()
-        assert t._stored_untranslatable(empty) == []
-        assert t._stored_review(empty) == {}
-        assert t._stored_config(empty) == {}
-        assert t._stored_dataset_id(empty) == ''

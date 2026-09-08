@@ -864,6 +864,28 @@ class ExecutionHistoryService:
             )
             raise
 
+    async def find_recent_results_with_key(
+        self, key: str, limit: int = 20
+    ) -> list[dict]:
+        """Recent runs whose stored ``result`` contains ``key``, as plain dicts.
+
+        Serves the UCMV re-evaluation tool: it scans prior runs for those that
+        recorded non-transpiled measures (``untranslatable_items``). Returns
+        ``[{job_id, run_name, created_at, result}]`` — the tool decodes the result
+        blob itself. Query construction stays in the repository (this service only
+        orchestrates), keeping the tool free of any direct DB access.
+        """
+        runs = await self.history_repo.find_recent_results_containing(key, limit=limit)
+        out: list[dict] = []
+        for run in runs:
+            out.append({
+                "job_id": getattr(run, "job_id", None),
+                "run_name": getattr(run, "run_name", None),
+                "created_at": getattr(run, "created_at", None),
+                "result": getattr(run, "result", None),
+            })
+        return out
+
     async def update_result(
         self, job_id: str, result_data: dict, group_ids: list[str] = None
     ) -> dict:
