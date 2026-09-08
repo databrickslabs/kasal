@@ -104,3 +104,31 @@ class TestResolveViaLetEvaluation:
         assert resolve_via_let_evaluation("", self._params()) is None
         assert resolve_via_let_evaluation(None, self._params()) is None
         assert resolve_via_let_evaluation("let X = 1 in X", {}) is None
+
+
+class TestExtractSourceTableParametricIntegration:
+    """extract_source_table falls back to the let-evaluator when a source's
+    physical table is BUILT from parameters (nehme's literal extractor can't)."""
+
+    _M = (
+        'let Object = "hub_product_" & Table_Version, '
+        'FromClause = Catalog_Name & "." & Database & "." & Object, '
+        'Q = Value.NativeQuery(Src, "select * from " & FromClause & " where 1=1", '
+        "null, [EnableFolding=true]) in Q"
+    )
+    _EXPRS = {
+        "Catalog_Name": '"prod_cat" meta [IsParameterQuery = true, Type = "Text"]',
+        "Database": '"gold" meta [IsParameterQuery = true, Type = "Text"]',
+        "Table_Version": '"v2" meta [IsParameterQuery = true, Type = "Text"]',
+    }
+
+    def test_resolves_parametric_source_with_expressions(self):
+        from src.services.tools.metric_view_utils.mquery_parser import (
+            extract_source_table,
+        )
+
+        assert extract_source_table(self._M) is None  # no expressions → can't resolve
+        assert (
+            extract_source_table(self._M, expressions=self._EXPRS)
+            == "prod_cat.gold.hub_product_v2"
+        )

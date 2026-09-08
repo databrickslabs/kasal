@@ -16,6 +16,7 @@ from collections import OrderedDict
 from typing import Any
 
 from .data_classes import TranslationResult
+from .function_ref_retriever import render_function_refs
 from .utils import to_snake_case
 
 logger = logging.getLogger(__name__)
@@ -320,6 +321,14 @@ async def translate_with_llm(
         original_to_snake,
         table_context=table_context,
     )
+
+    # Inject a deep, UCMV-legal reference for the long-tail DAX functions THIS
+    # measure uses (statistical aggregates, PATH, financial closed-forms, arg-order
+    # traps…) — skipping functions the always-on corpus already teaches deeply.
+    # Fail-open '' for simple measures, so it costs nothing on the common path.
+    _fref = render_function_refs([measure.dax_expression])
+    if _fref:
+        user_prompt = f"{user_prompt}\n{_fref}"
 
     # Call LLM
     response = await _call_llm(user_prompt, _SYSTEM_PROMPT, model)

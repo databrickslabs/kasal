@@ -125,7 +125,7 @@ def _unquote(ident: str) -> str:
     return ident.strip().strip("`").strip("[]").strip('"')
 
 
-def extract_source_table(mquery: str) -> str | None:
+def extract_source_table(mquery: str, expressions: dict | None = None) -> str | None:
     """Parse a physical ``catalog.schema.table`` out of an *extractable* M source.
 
     Only runs for sources ``classify_mquery_source`` tags ``extractable`` (Databricks
@@ -134,9 +134,38 @@ def extract_source_table(mquery: str) -> str | None:
     cannot resolve one confidently — it never guesses (a wrong ``source_table`` would
     silently wire a bad join). Used to fill ``join_key_map[dim].source_table`` during
     config-generation enrichment.
+
+    ``expressions`` (optional): the model's ``{name: raw_M}`` named/shared expressions.
+    When given, a source whose physical table is BUILT from parameters at model-open
+    time — ``FromClause = Catalog & "." & Db & "." & Object`` inside a ``let`` block —
+    is resolved via ``mquery_let_evaluator`` (which nehme's literal-FROM extractor and
+    ``PbiParameterResolver`` can't handle, since the table NAME itself is parametric).
+    Fail-open: falls through to the literal-extraction logic below on any miss.
     """
     if not mquery or not isinstance(mquery, str):
         return None
+
+    # Parameter-driven source: resolve the let block to literal SQL first, then pull
+    # the FROM target out of the resolved SQL. Only when expressions are supplied.
+    if expressions:
+        from .mquery_let_evaluator import (
+            extract_parameter_defaults,
+            resolve_via_let_evaluation,
+        )
+        _params = extract_parameter_defaults(expressions)
+        if _params:
+            _resolved_sql = resolve_via_let_evaluation(mquery, _params)
+            if _resolved_sql:
+                _fm = re.search(
+                    r"\bFROM\s+((?:`[^`]+`|[A-Za-z_]\w*)"
+                    r"(?:\.(?:`[^`]+`|[A-Za-z_]\w*)){2})",
+                    _resolved_sql, re.IGNORECASE,
+                )
+                if _fm:
+                    _parts = _FQN_RE.match(_fm.group(1))
+                    if _parts:
+                        return ".".join(_unquote(p) for p in _parts.groups())
+
     category, _ = classify_mquery_source(mquery)
     if category != "extractable":
         return None
