@@ -391,13 +391,6 @@ DEFAULT_MODELS = {
         "context_window": 1048576,
         "max_output_tokens": 393216,
     },
-    "databricks-gemini-2-5-flash": {
-        "name": "databricks-gemini-2-5-flash",
-        "temperature": 0.7,
-        "provider": "databricks",
-        "context_window": 1048576,
-        "max_output_tokens": 65536,
-    },
     "databricks-gemini-3-1-flash-lite": {
         "name": "databricks-gemini-3-1-flash-lite",
         "temperature": 0.7,
@@ -663,6 +656,11 @@ MODEL_CONFIGS = DEFAULT_MODELS
 # DB on seed (the upsert loop alone never deletes). Claude 3 is retired/superseded
 # by Claude 4.x (Databricks no longer serves Claude 3.7 Sonnet either).
 REMOVED_MODEL_KEYS = [
+    # Databricks deprecated this endpoint (returns BAD_REQUEST "This endpoint
+    # databricks-gemini-2-5-flash is deprecated"). It was a high-context (1M)
+    # fallback candidate, so DatabricksRetryLLM fell back to it and crashed a UCMV
+    # flow with a non-retryable BadRequestError. Pruned 2026-09-07.
+    "databricks-gemini-2-5-flash",
     # DeepSeek, audited 2026-07-25 against api-docs.deepseek.com/quick_start/pricing.
     # deepseek-chat / deepseek-reasoner were DEPRECATED on 2026/07/24 (they mapped
     # to the non-thinking / thinking variants of deepseek-v4-flash). coder-v2 and
