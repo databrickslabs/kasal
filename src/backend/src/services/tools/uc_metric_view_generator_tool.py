@@ -225,16 +225,138 @@ class UCMetricViewGeneratorTool(BaseTool):
         relationships_raw = _get_json("relationships_json")
         scan_raw = _get_json("scan_data_json")
         config_raw = _get_json("config_json") or "{}"
+        # Diagnostic: what arrived via flow injection/kwargs BEFORE any API-mode
+        # extraction or DB fallback runs below, and whether the DB fallback ends
+        # up firing. Carried into `output['_diagnostics']` (not just logged)
+        # because raw log lines aren't reliably queryable in every deployment —
+        # this makes it visible via the same execution_trace pull already used
+        # for Crew 1.
+        _diag: dict = {
+            "preinject_measures_json_chars": len(measures_raw)
+            if isinstance(measures_raw, str)
+            else None,
+            "preinject_mquery_json_chars": len(mquery_raw)
+            if isinstance(mquery_raw, str)
+            else None,
+            "preinject_config_json_chars": len(config_raw)
+            if isinstance(config_raw, str)
+            else None,
+            "db_fallback_fired_for": [],
+            "db_fallback_extraction_id": None,
+        }
         catalog = _get("catalog") or "main"
         schema = _get("schema_name") or "default"
         inner_joins = _get("inner_dim_joins") or False
         unflatten = _get("unflatten_tables") or False
 
-        # Check if API extraction mode (PBI credentials provided)
+        # DB fallback: rebuild measures_json/mquery_json/config_json from Crew
+        # 1's powerbi_extraction row for THIS SAME flow execution, whenever flow
+        # injection left them empty. Deliberately runs BEFORE API-mode extraction
+        # below, not after — API-mode extraction is Crew 2's OWN independent
+        # (and materially weaker — no reference-following / parameter-
+        # substitution resolution) re-derivation, and it always fills something
+        # non-empty when workspace_id/dataset_id are configured. With the DB
+        # fallback gated on "still empty" and running AFTER API-mode extraction,
+        # it was silently dead code — API-mode had always already filled the
+        # fields with its own degraded data by the time the check ran. Running
+        # the DB fallback FIRST means Crew 1's higher-quality result is
+        # preferred, and API-mode extraction becomes the true last resort (only
+        # fills whatever's still missing after this).
+        #
+        # NOT a /tmp file — Crew 1 and Crew 2 run in separate subprocesses (a
+        # file written by one is invisible to the other). This goes through
+        # Kasal's DB (the same mechanism KasalFlowPersistence's checkpoints use,
+        # which survives process/container boundaries), looked up by
+        # execution_id == this tool's own job_id — not "most recent row for this
+        # dataset" — so a same-day rerun of the same report can never pull
+        # another run's data. Rebuilds via the exact same
+        # PipelineConfigGeneratorTool static methods Crew 1 itself used, so
+        # quality matches (not a degraded re-derivation): needs admin_tables +
+        # expressions (for the reference-following / parameter-substitution
+        # resolution), not just the raw table list a naive re-extraction gets.
+        #
+        # Architecture: reach the powerbi_extraction row through the OWNING
+        # service (PowerBIExtractionService) via ToolSessionProvider — the tool
+        # imports no repository and query construction stays in the repository.
+        if measures_raw == "[]" or mquery_raw == "[]" or config_raw == "{}":
+            _job_id = (getattr(self, "trace_context", None) or {}).get("job_id")
+            if not _job_id:
+                logger.info(
+                    "[UCMV] DB fallback: no job_id on trace_context — cannot look up powerbi_extraction"
+                )
+            else:
+                try:
+
+                    async def _load_extraction():
+                        from src.services.tools.tool_session_provider import (
+                            ToolSessionProvider,
+                        )
+
+                        async with ToolSessionProvider.powerbi_extraction_service() as svc:
+                            rows = await svc.list_for_execution(_job_id)
+                            return rows[0] if rows else None
+
+                    _extraction = _run_async(_load_extraction())
+                    if _extraction is None:
+                        logger.info(
+                            f"[UCMV] DB fallback: no powerbi_extraction row found for job_id={_job_id}"
+                        )
+                    else:
+                        _diag["db_fallback_extraction_id"] = _extraction.id
+                        _db_admin_tables = _extraction.admin_tables or {}
+                        _db_expressions = _extraction.expressions or {}
+                        _db_measures = _extraction.measures or []
+                        _db_config = _extraction.proposed_config or {}
+                        logger.info(
+                            f"[UCMV] DB fallback: found powerbi_extraction id={_extraction.id} for "
+                            f"job_id={_job_id} ({len(_db_admin_tables)} tables, {len(_db_expressions)} expressions)"
+                        )
+                        from src.services.tools.pipeline_config_generator_tool import (
+                            PipelineConfigGeneratorTool,
+                        )
+
+                        if mquery_raw == "[]" and _db_admin_tables:
+                            _rebuilt_mquery = (
+                                PipelineConfigGeneratorTool._build_ucmv_mquery(
+                                    _db_admin_tables, _db_expressions
+                                )
+                            )
+                            if _rebuilt_mquery:
+                                mquery_raw = json.dumps(_rebuilt_mquery)
+                                _diag["db_fallback_fired_for"].append("mquery_json")
+                                logger.info(
+                                    f"[UCMV] DB fallback: rebuilt mquery_json ({len(_rebuilt_mquery)} tables)"
+                                )
+                        if measures_raw == "[]" and _db_measures:
+                            _rebuilt_measures = (
+                                PipelineConfigGeneratorTool._build_ucmv_measures(
+                                    _db_measures,
+                                    admin_tables=_db_admin_tables,
+                                    config=_db_config,
+                                )
+                            )
+                            if _rebuilt_measures:
+                                measures_raw = json.dumps(_rebuilt_measures)
+                                _diag["db_fallback_fired_for"].append("measures_json")
+                                logger.info(
+                                    f"[UCMV] DB fallback: rebuilt measures_json ({len(_rebuilt_measures)} measures)"
+                                )
+                        if config_raw == "{}" and _db_config:
+                            config_raw = json.dumps(_db_config)
+                            _diag["db_fallback_fired_for"].append("config_json")
+                except Exception as _db_err:
+                    _diag["db_fallback_error"] = str(_db_err)
+                    logger.warning(f"[UCMV] DB fallback failed: {_db_err}")
+
+        # Check if API extraction mode (PBI credentials provided). Skipped
+        # entirely when the DB fallback above already filled both
+        # measures_json and mquery_json — API-mode's own extraction includes a
+        # live Admin Scanner trigger+poll (up to 5 minutes) that would otherwise
+        # redo, slowly, work Crew 1 already did and this tool just reused for free.
         workspace_id = _get("workspace_id")
         dataset_id = _get("dataset_id")
 
-        if workspace_id and dataset_id:
+        if workspace_id and dataset_id and (measures_raw == "[]" or mquery_raw == "[]"):
             pbi_api_base_url = _get("pbi_api_base_url") or ""
             valid, err_msg = self._validate_pbi_inputs(
                 workspace_id, dataset_id, pbi_api_base_url
@@ -513,6 +635,44 @@ class UCMetricViewGeneratorTool(BaseTool):
         # regardless of whether the transpilation pipeline succeeded.
         fallback_extract = self._build_fallback_extract(measures, mquery_entries)
 
+        # ── Opt-in best-effort views for a THIN-REPORT model ────────────────
+        # When nothing generated, always compute an actionable diagnosis of WHY
+        # (thin report? no source? unresolvable DAX?) so the run is never a
+        # silent empty result. Computed before best-effort so it reflects the
+        # real state. When the user also opted in (allow_best_effort) AND
+        # supplied physical sources (fact_source_map), draft thin UCMVs from
+        # measures that already resolved to real SQL — the fallback-of-the-
+        # fallback; every drafted measure is flagged TODO: verify.
+        zero_view_diagnosis = None
+        if not yaml_output:
+            zero_view_diagnosis = self._diagnose_zero_views(
+                mquery_entries, measures, config
+            )
+            logger.warning(
+                f"[UCMVGenerator] 0 views — {zero_view_diagnosis['case']}: "
+                f"{zero_view_diagnosis['recommended_action']}"
+            )
+
+        best_effort_report = None
+        if (not yaml_output) and _get("allow_best_effort") and _get("fact_source_map"):
+            fsm = _get("fact_source_map")
+            if isinstance(fsm, str):
+                try:
+                    fsm = json.loads(fsm)
+                except Exception:
+                    fsm = None
+            be_views, best_effort_report = self._build_best_effort_views(
+                fact_source_map=fsm, config=config, measures=measures
+            )
+            if be_views:
+                yaml_output = be_views
+                logger.warning(
+                    f"[UCMVGenerator] BEST-EFFORT mode: drafted {best_effort_report['tables_emitted']} "
+                    f"view(s) / {best_effort_report['measures_emitted']} measure(s) from a thin report; "
+                    f"{best_effort_report['measures_skipped_unresolved']} measure(s) unresolved and skipped. "
+                    f"Tables/measures may be MISSING — every measure marked TODO: verify."
+                )
+
         output = {
             "yaml": yaml_output,
             "sql": sql_output,
@@ -526,6 +686,12 @@ class UCMetricViewGeneratorTool(BaseTool):
             # Always present; the UI shows it as a tabular reference and falls back
             # to it as the primary artifact when `yaml` is empty (0 views).
             "fallback_extract": fallback_extract,
+            # Present only when best-effort mode fired: surfaces the coverage gap
+            # (skipped tables/measures) so the UI/consumer can warn "may be missing".
+            "best_effort_report": best_effort_report,
+            # Present when 0 views generated: actionable "why + what to do" so a
+            # thin-report run is never a silent empty result.
+            "zero_view_diagnosis": zero_view_diagnosis,
             "views_generated": len(yaml_output) if isinstance(yaml_output, dict) else 0,
             "specs_summary": {
                 k: {
@@ -540,6 +706,7 @@ class UCMetricViewGeneratorTool(BaseTool):
             "untranslatable_items": self._build_untranslatable_items(
                 results.get("specs", {})
             ),
+            "_diagnostics": _diag,
         }
         output_json = json.dumps(output, indent=2)
 
@@ -715,6 +882,255 @@ class UCMetricViewGeneratorTool(BaseTool):
             r["measure_count"] = len(r["measures"])
             r["has_mquery"] = bool(r["mquery"])
         return rows
+
+    @staticmethod
+    def _diagnose_zero_views(
+        mquery_entries: Any,
+        measures: Any,
+        config: Any,
+    ) -> dict:
+        """Explain WHY 0 UC Metric Views were generated, and what to do about it.
+
+        A thin-report model otherwise silently yields a fallback JSON and no
+        views, with no signal to the user about the cause or fix. This turns
+        that into an actionable diagnosis. It classifies the run by two
+        deterministic signals:
+          * source tables present?  → any mquery entry with real transpiled SQL /
+            an M source expression (not raw/empty).
+          * measures resolvable?    → any config.measure_resolutions with real
+            aggregatable SQL (not TODO).
+
+        Returns {case, reason, recommended_action, signals} — see the customer
+        guide thin-report-and-source-resolution.md for the three cases.
+        """
+        # Signal 1: do we have any real source table?
+        has_source = False
+        if isinstance(mquery_entries, list):
+            for e in mquery_entries:
+                if not isinstance(e, dict):
+                    continue
+                sql = (
+                    e.get("transpiled_sql") or e.get("mquery_expression") or ""
+                ).strip()
+                if sql and sql not in ("{}", "null"):
+                    has_source = True
+                    break
+
+        # Signal 2: any measure that resolved to real aggregatable SQL?
+        resolvable = 0
+        _AGG = (
+            "SUM",
+            "COUNT",
+            "AVG",
+            "MIN",
+            "MAX",
+            "DIVIDE",
+            "CALCULATE",
+            "SUMX",
+            "COUNTX",
+        )
+        resolutions = (
+            (config or {}).get("measure_resolutions", {})
+            if isinstance(config, dict)
+            else {}
+        )
+        for res in (resolutions or {}).values():
+            base = (res or {}).get("base_expr", "") if isinstance(res, dict) else ""
+            if (
+                base
+                and not base.strip().upper().startswith("TODO")
+                and base.strip().upper().startswith(_AGG)
+            ):
+                resolvable += 1
+
+        n_measures = len(measures) if isinstance(measures, list) else 0
+        signals = {
+            "has_source_tables": has_source,
+            "resolvable_measures": resolvable,
+            "total_measures": n_measures,
+        }
+
+        if has_source:
+            # Sources exist but still 0 views — a translation/allocation issue,
+            # not a thin-report problem. Leave it to the normal migration report.
+            return {
+                "case": "sources_present_no_views",
+                "reason": (
+                    "Source tables were found but no metric view was emitted — "
+                    "likely all measures were untranslatable DAX. See the "
+                    "migration report / not-emitted notes."
+                ),
+                "recommended_action": "Review the not-emitted measures; no source mapping needed.",
+                "signals": signals,
+            }
+        # No source tables → thin report (case B) or hand-entered (case C).
+        if resolvable > 0:
+            action = (
+                f"This looks like a THIN REPORT on an upstream semantic model — its "
+                f"source tables are not in what was extracted. PREFERRED: re-run "
+                f"against the upstream model's dataset_id (see Power BI lineage). "
+                f"OR: enable allow_best_effort and supply fact_source_map to draft "
+                f"views for the {resolvable} resolvable measure(s) — tables/measures "
+                f"may be missing. See thin-report-and-source-resolution.md."
+            )
+        else:
+            action = (
+                "This looks like a THIN REPORT (or a report-logic-only model): no "
+                "source tables AND no measures reduce to a table aggregate (mostly "
+                "selector / measure-on-measure DAX). Re-run against the upstream "
+                "semantic model's dataset_id if one exists; otherwise these measures "
+                "cannot be converted to metric views. See "
+                "thin-report-and-source-resolution.md."
+            )
+        return {
+            "case": "thin_report_no_source_tables",
+            "reason": (
+                "No source tables (M-Queries) were found in the extracted model, so "
+                "there is no physical table to build a UC Metric View on."
+            ),
+            "recommended_action": action,
+            "signals": signals,
+        }
+
+    @staticmethod
+    def _build_best_effort_views(
+        fact_source_map: Any,
+        config: Any,
+        measures: Any,
+    ) -> tuple[dict, dict]:
+        """Best-effort UCMVs for a THIN-REPORT model (no M-Query source tables).
+
+        Opt-in fallback used ONLY when the normal path produced 0 views AND the
+        human supplied `fact_source_map` (PBI table -> physical
+        catalog.schema.table). See docs/powerbi/thin-report-and-source-
+        resolution.md — the PREFERRED fix is to point Kasal at the upstream
+        semantic model; this is for when that model is unreachable.
+
+        Emits one thin metric view per supplied source, containing only measures
+        that ALREADY resolved to real aggregatable SQL in
+        `config['measure_resolutions']` (reusing the pipeline's own base_expr +
+        base_filters). It NEVER fabricates SQL:
+        - measures with a `TODO`/empty resolution are skipped (documented, not emitted);
+        - tables not in `fact_source_map` are skipped;
+        so the "never emit silently-wrong SQL" contract holds.
+
+        Every emitted measure is flagged `TODO: verify` because it is a DRAFT
+        produced without a validated transpiled source. Returns (views,
+        coverage_report) where coverage_report makes the GAP explicit —
+        tables/measures that were skipped.
+        """
+        views: dict = {}
+        report = {
+            "mode": "best_effort",
+            "warning": (
+                "DRAFT views built from a thin report without validated source "
+                "tables. Tables/measures may be MISSING; every emitted measure "
+                'is marked "TODO: verify". Prefer converting the upstream '
+                "semantic model — see thin-report-and-source-resolution.md."
+            ),
+            "sources_supplied": 0,
+            "tables_emitted": 0,
+            "measures_emitted": 0,
+            "measures_skipped_unresolved": 0,
+            "tables_without_source": [],
+            "skipped_measures": [],
+        }
+        if not isinstance(fact_source_map, dict) or not fact_source_map:
+            return views, report
+        resolutions = (
+            (config or {}).get("measure_resolutions", {})
+            if isinstance(config, dict)
+            else {}
+        )
+        report["sources_supplied"] = len(fact_source_map)
+
+        _AGG = (
+            "SUM",
+            "COUNT",
+            "AVG",
+            "MIN",
+            "MAX",
+            "DIVIDE",
+            "CALCULATE",
+            "SUMX",
+            "COUNTX",
+        )
+
+        def _to_snake(name: str) -> str:
+            import re as _re
+
+            s = _re.sub(r"[^0-9a-zA-Z]+", "_", str(name)).strip("_").lower()
+            return s or "measure"
+
+        def _alloc(m: dict) -> str:
+            return (
+                m.get("proposed_allocation")
+                or m.get("table_name")
+                or m.get("table")
+                or "__unassigned__"
+            )
+
+        # measure name -> its allocated PBI table (from the measures list)
+        measure_table = {}
+        if isinstance(measures, list):
+            for m in measures:
+                if isinstance(m, dict):
+                    nm = m.get("measure_name") or m.get("original_name") or ""
+                    if nm:
+                        measure_table[nm] = _alloc(m)
+
+        # group RESOLVED measures by their allocated PBI table
+        by_table: dict[str, list] = {}
+        for mname, res in (resolutions or {}).items():
+            base = (res or {}).get("base_expr", "") if isinstance(res, dict) else ""
+            if (
+                (not base)
+                or base.strip().upper().startswith("TODO")
+                or not base.strip().upper().startswith(_AGG)
+            ):
+                report["measures_skipped_unresolved"] += 1
+                report["skipped_measures"].append(mname)
+                continue
+            by_table.setdefault(
+                measure_table.get(mname, "__unassigned__"), []
+            ).append((mname, res))
+
+        for pbi_table, source in fact_source_map.items():
+            rows = by_table.get(pbi_table, [])
+            if not rows:
+                report["tables_without_source"].append(pbi_table)
+                continue
+            measures_out = []
+            for mname, res in rows:
+                expr = res["base_expr"]
+                filters = res.get("base_filters") or []
+                if filters:
+                    expr = f"{expr} FILTER (WHERE {' AND '.join(filters)})"
+                measures_out.append(
+                    {
+                        "name": _to_snake(mname),
+                        "expr": expr,
+                        "comment": (
+                            f"BEST-EFFORT DRAFT — no validated source. TODO: verify. "
+                            f"From DAX '{mname}'."
+                        ),
+                    }
+                )
+            views[pbi_table] = {
+                "version": "1.1",
+                "source": source,
+                "comment": (
+                    f"BEST-EFFORT UC Metric View (thin-report model). "
+                    f"{len(measures_out)} measures drafted from resolved SQL; "
+                    f"NOT validated against a transpiled source. Review before "
+                    f"deploy. Some measures/tables from the original model may "
+                    f"be MISSING."
+                ),
+                "measures": measures_out,
+            }
+            report["tables_emitted"] += 1
+            report["measures_emitted"] += len(measures_out)
+        return views, report
 
     async def _save_dax_to_conversion_history(
         self,
