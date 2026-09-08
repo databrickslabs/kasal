@@ -17,7 +17,6 @@ import 'reactflow/dist/style.css';
 import { Box, Snackbar, Alert, Dialog, DialogContent, Menu, Button, DialogTitle, IconButton, Typography, Drawer, SpeedDial, SpeedDialAction, SpeedDialIcon } from '@mui/material';
 import WorkspaceSplitDivider from './WorkspaceSplitDivider';
 import ChatIcon from '@mui/icons-material/Chat';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import HistoryIcon from '@mui/icons-material/History';
 import SettingsIcon from '@mui/icons-material/Settings';
 import { useWorkflowStore } from '../../store/workflow';
@@ -26,6 +25,7 @@ import { useAppStore as useChatAppStore } from '../../features/chat/store/appSto
 import { usePermissionStore } from '../../store/permissions';
 import SessionSidebar from '../sessions/SessionSidebar';
 import BuilderPanelControls from '../sessions/BuilderPanelControls';
+import CanvasRunButton from '../sessions/CanvasRunButton';
 import SessionLibrary from '../sessions/SessionLibrary';
 import CanvasTools from '../sessions/CanvasTools';
 import { useBuilderSessionMode } from '../sessions/useWorkspaceSessions';
@@ -51,7 +51,6 @@ import CloseIcon from '@mui/icons-material/Close';
 import { InputVariablesDialog } from '../../features/executions/components/InputVariablesDialog';
 import WorkflowPanels from './WorkflowPanels';
 import ChatPanel from '../../features/workflow/assistant/ChatPanel';
-import RightSidebar from './RightSidebar';
 import ChatWorkspace from '../../features/chat/ChatWorkspace';
 import { useUILayoutStore } from '../../store/uiLayout';
 import { useUIFitView } from '../../hooks/workflow/useUIFitView';
@@ -64,7 +63,6 @@ import AgentDialog from '../../features/workflow/agents/components/AgentDialog';
 import TaskDialog from '../../features/workflow/tasks/components/TaskDialog';
 import CrewPlanningDialog from '../../features/workflow/planning/components/CrewPlanningDialog';
 import ScheduleDialog from '../../features/workflow/scheduling/components/ScheduleDialog';
-import TriggersDialog from '../../features/triggers/components/TriggersDialog';
 import TutorialButton from '../../features/help/tutorial/TutorialButton';
 import InteractiveTutorial from '../../features/help/tutorial/InteractiveTutorial';
 import APIKeys from '../../features/configuration/components/APIKeys/APIKeys';
@@ -130,7 +128,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     updateTabExecutionStatus,
     updateTabFlowNodes,
     updateTabFlowEdges,
-    updateTabViewMode
   } = useTabManagerStore();
 
   // Use run status store for job monitoring (SSE-based, no polling needed)
@@ -287,7 +284,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     handleShowAgentForm,
     fetchAgents,
     openInCreateMode: agentOpenInCreateMode,
-    openAgentDialog
   } = useAgentManager({
     nodes,
     setNodes
@@ -302,7 +298,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     handleShowTaskForm,
     fetchTasks,
     openInCreateMode: taskOpenInCreateMode,
-    openTaskDialog
   } = useTaskManager({
     nodes,
     setNodes
@@ -357,27 +352,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
     handleResetPanel: _handleResetPanel,
   } = usePanelManager();
 
-  // Sync panel manager with UI store
-  const toggleFlowsVisibility = React.useCallback(() => {
-    const newViewMode = areFlowsVisible ? 'crew' : 'flow';
-    setUIStoreAreFlowsVisible(!areFlowsVisible);
-    // Save view mode to the current tab
-    const tab = getActiveTab();
-    if (tab) {
-      updateTabViewMode(tab.id, newViewMode);
-    }
-  }, [areFlowsVisible, setUIStoreAreFlowsVisible, getActiveTab, updateTabViewMode]);
-
-  const toggleChatPanel = React.useCallback(() => {
-    setChatPanelVisible(!showChatPanel);
-    // Trigger node repositioning when toggling chat panel visibility
-    setTimeout(() => {
-      const event = new CustomEvent('recalculateNodePositions', {
-        detail: { reason: 'chat-panel-visibility-toggle' }
-      });
-      window.dispatchEvent(event);
-    }, 350); // Wait for animation to complete
-  }, [showChatPanel, setChatPanelVisible]);
 
   // Sync panel position with store
   const setPanelPosition = React.useCallback((position: number | ((prev: number) => number)) => {
@@ -1184,10 +1158,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
               selectedModel={selectedModel}
               setSelectedModel={setSelectedModel}
               onOpenLogsDialog={() => dialogManager.setIsLogsDialogOpen(true)}
-              onToggleChat={toggleChatPanel}
-              isChatOpen={showChatPanel}
-              setIsAgentDialogOpen={() => openAgentDialog(true)}
-              setIsTaskDialogOpen={() => openTaskDialog(true)}
               setIsCrewDialogOpen={() => {
                 setCrewFlowDialogInitialTab(0);
                 setCrewFlowDialogShowOnlyTab(undefined);
@@ -1198,19 +1168,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
                 dialogManager.setIsTutorialOpen(true);
               }}
               onOpenConfiguration={() => dialogManager.setIsConfigurationDialogOpen(true)}
-              onPlayPlan={() => {
-                console.log('[WorkflowDesigner] onPlayPlan called, calling handleRunClick("crew")');
-                handleRunClick('crew');
-              }}
-              onPlayFlow={() => {
-                console.log('[WorkflowDesigner] onPlayFlow called from WorkflowPanels');
-                console.log('[WorkflowDesigner] flowNodes count:', flowNodes.length, 'flowEdges count:', flowEdges.length);
-                // Nodes/edges are auto-synced via useEffect, but ensure sync is current
-                setCrewExecutionNodes(flowNodes);
-                setCrewExecutionEdges(flowEdges);
-                // Execute immediately - auto-sync should have already updated the store
-                handleRunClick('flow');
-              }}
               onPanelDragStart={e => {
                 e.preventDefault();
 
@@ -1258,6 +1215,18 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
 
             {!showRunHistory && <Box sx={{ position: 'absolute', top: 4, right: 8, zIndex: 25 }}><BuilderPanelControls /></Box>}
             <CanvasTools
+            runControl={<CanvasRunButton
+              mode={areFlowsVisible ? 'flow' : 'crew'}
+              hasNodes={areFlowsVisible ? flowNodes.some(node => node.type === 'crewNode') : nodes.some(node => ['agentNode', 'taskNode', 'managerNode'].includes(node.type || ''))}
+              edges={areFlowsVisible ? flowEdges : edges}
+              onRun={() => {
+                if (areFlowsVisible) {
+                  setCrewExecutionNodes(flowNodes);
+                  setCrewExecutionEdges(flowEdges);
+                }
+                handleRunClick(areFlowsVisible ? 'flow' : 'crew');
+              }}
+            />}
             onClear={() => { if (areFlowsVisible) { setFlowNodes([]); setFlowEdges([]); } else { setNodes([]); setEdges([]); } }}
             onFit={() => areFlowsVisible ? flowFlowInstanceRef.current?.fitView({ padding: 0.2, duration: 300 }) : handleUIAwareFitView()}
             onZoomIn={() => (areFlowsVisible ? flowFlowInstanceRef : crewFlowInstanceRef).current?.zoomIn({ duration: 200 })}
@@ -1414,10 +1383,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           selectedModel={selectedModel}
         />
 
-        <TriggersDialog
-          open={dialogManager.isTriggersDialogOpen}
-          onClose={() => dialogManager.setTriggersDialogOpen(false)}
-        />
 
         <Dialog
           open={dialogManager.isAPIKeysDialogOpen}
@@ -1574,64 +1539,9 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
           onCancel={handleTrifectaCancel}
         />
 
-        {isChatMode && <Box sx={{ position: 'absolute', right: 4, bottom: { xs: 84, sm: 12 }, zIndex: 5 }}>
+        {<Box sx={{ position: 'absolute', right: 4, bottom: { xs: 84, sm: 12 }, zIndex: 1203 }}>
           <TutorialButton onClick={() => dialogManager.setIsTutorialOpen(true)} />
         </Box>}
-
-        {/* Right Sidebar — hidden in chat mode */}
-        {!isChatMode && (
-        <RightSidebar
-            onOpenTutorial={() => dialogManager.setIsTutorialOpen(true)}
-            onToggleChat={() => setChatPanelVisible(!showChatPanel)}
-            isChatOpen={showChatPanel}
-            setIsAgentDialogOpen={() => openAgentDialog(true)}
-            setIsTaskDialogOpen={() => openTaskDialog(true)}
-            onSaveCrewClick={() => {
-              const activeTab = getActiveTab();
-              if (activeTab?.savedCrewId) {
-                window.dispatchEvent(new CustomEvent('updateExistingCrew', {
-                  detail: { crewId: activeTab.savedCrewId, tabId: activeTab.id }
-                }));
-              } else {
-                window.dispatchEvent(new CustomEvent('openSaveCrewDialog'));
-              }
-            }}
-            onSaveFlowClick={() => {
-              const activeTab = getActiveTab();
-              if (activeTab?.savedFlowId) {
-                // Overwrite the existing flow (no save-as dialog), mirroring crew save
-                window.dispatchEvent(new CustomEvent('updateExistingFlow', {
-                  detail: { flowId: activeTab.savedFlowId, tabId: activeTab.id }
-                }));
-              } else {
-                window.dispatchEvent(new CustomEvent('openSaveFlowDialog'));
-              }
-            }}
-            showRunHistory={false}
-            executionHistoryHeight={executionHistoryHeight}
-            onOpenTriggersDialog={() => {
-              dialogManager.setTriggersDialogOpen(true);
-            }}
-            areFlowsVisible={areFlowsVisible}
-            toggleFlowsVisibility={toggleFlowsVisibility}
-            hasCrewNodes={nodes.some(node => node.type === 'agentNode' || node.type === 'taskNode' || node.type === 'managerNode')}
-            hasFlowNodes={flowNodes.some(node => node.type === 'crewNode')}
-            edges={flowEdges}
-            onPlayPlan={() => {
-              console.log('[WorkflowDesigner] RightSidebar onPlayPlan called, calling handleRunClick("crew")');
-              handleRunClick('crew');
-            }}
-            onPlayFlow={() => {
-              console.log('[WorkflowDesigner] RightSidebar onPlayFlow called');
-              console.log('[WorkflowDesigner] flowNodes count:', flowNodes.length, 'flowEdges count:', flowEdges.length);
-              // Nodes/edges are auto-synced via useEffect, but ensure sync is current
-              setCrewExecutionNodes(flowNodes);
-              setCrewExecutionEdges(flowEdges);
-              // Execute immediately - auto-sync should have already updated the store
-              handleRunClick('flow');
-            }}
-          />
-        )}
 
         {/* Mobile: SpeedDial for quick actions */}
         {isMobile && (
@@ -1641,7 +1551,6 @@ const WorkflowDesigner: React.FC<WorkflowDesignerProps> = (): JSX.Element => {
             icon={<SpeedDialIcon />}
           >
             <SpeedDialAction icon={<ChatIcon />} tooltipTitle="Chat" onClick={() => setChatPanelVisible(true)} />
-            <SpeedDialAction icon={<PlayArrowIcon />} tooltipTitle="Run" onClick={() => handleRunClick('crew')} />
             <SpeedDialAction icon={<HistoryIcon />} tooltipTitle="History" onClick={() => window.dispatchEvent(new Event('openWorkspaceActivity'))} />
             <SpeedDialAction icon={<SettingsIcon />} tooltipTitle="Settings" onClick={() => dialogManager.setIsConfigurationDialogOpen(true)} />
           </SpeedDial>

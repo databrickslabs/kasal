@@ -72,8 +72,8 @@ export class CanvasLayoutManager {
       leftSidebarExpandedWidth: 280,
 
       // Right sidebar defaults
-      rightSidebarVisible: true,
-      rightSidebarWidth: 48,
+      rightSidebarVisible: false,
+      rightSidebarWidth: 0,
 
       // Chat panel defaults
       chatPanelVisible: true,

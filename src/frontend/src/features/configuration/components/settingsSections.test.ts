@@ -8,7 +8,7 @@ describe('settings navigation permissions', () => {
     expect(getSettingsSections('system', operator)).toEqual([]);
   });
   it('retains editor access to prompts, keys and saved objects', () => {
-    expect(getSettingsSections('workspace', { ...operator, isEditor: true }).map(item => item.id)).toEqual(['prompts', 'api-keys', 'objects']);
+    expect(getSettingsSections('workspace', { ...operator, isEditor: true }).map(item => item.id)).toEqual(['prompts', 'event-triggers', 'api-keys', 'objects']);
   });
   it('keeps teamspace administration separate from system administration', () => {
     const admin = { ...operator, isWorkspaceAdmin: true };

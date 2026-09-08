@@ -823,21 +823,6 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
           </ReactFlow>
         )}
 
-        {/* Shortcuts info */}
-        <Box
-          sx={{
-            position: 'absolute',
-            bottom: 10,
-            left: 10,
-            fontSize: '0.75rem',
-            color: 'text.secondary',
-            opacity: 0.7,
-            pointerEvents: 'none',
-          }}
-        >
-          Tip: Press &quot;del&quot; to delete selected items, &quot;lf&quot; to toggle crew palette
-        </Box>
-
         {/* Notification */}
         <Snackbar
           open={showNotification}

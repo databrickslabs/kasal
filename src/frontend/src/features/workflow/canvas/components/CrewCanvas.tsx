@@ -35,7 +35,6 @@ import { useToolHandlers } from '../../../../hooks/workflow/useToolHandlers';
 import { useCanvasHandlers } from '../../../../hooks/workflow/useCanvasHandlers';
 import { useDialogHandlers } from '../../../../hooks/workflow/useDialogHandlers';
 import ManagerNodeController from './ManagerNodeController';
-import RightSidebar from '../../../../app/workspace/RightSidebar';
 import FlowBackLink from '../../../../app/workspace/FlowBackLink';
 import { useAgentTaskLayout } from '../../../../hooks/workflow/useAgentTaskLayout';
 
@@ -79,20 +78,12 @@ interface CrewCanvasProps {
   setSelectedModel: (model: string) => void;
   // Dialog props
   onOpenLogsDialog: () => void;
-  onToggleChat: () => void;
-  isChatOpen: boolean;
-  setIsAgentDialogOpen: (open: boolean) => void;
-  setIsTaskDialogOpen: (open: boolean) => void;
   setIsCrewDialogOpen: (open: boolean) => void;
   // Execution history visibility
   showRunHistory?: boolean;
-  executionHistoryHeight?: number;
   // Tutorial and configuration
   onOpenTutorial?: () => void;
   onOpenConfiguration?: () => void;
-  // Play button handlers
-  onPlayPlan?: () => void;
-  onPlayFlow?: () => void;
 }
 
 
@@ -112,16 +103,9 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
   setReasoningEnabled: _setReasoningEnabled,
   selectedModel: _selectedModelProp,
   setSelectedModel: _setSelectedModelProp,
-  onToggleChat,
-  isChatOpen,
-  setIsAgentDialogOpen,
-  setIsTaskDialogOpen,
   showRunHistory,
-  executionHistoryHeight = 200,
   onOpenTutorial: _onOpenTutorial,
   onOpenConfiguration: _onOpenConfiguration,
-  onPlayPlan,
-  onPlayFlow
 }) => {
 
   useAgentTaskLayout(nodes, edges, setNodes);
@@ -631,19 +615,7 @@ const CrewCanvas: React.FC<CrewCanvasProps> = ({
             setEdges={setEdges}
           />
 
-          <RightSidebar
-            onToggleChat={onToggleChat}
-            isChatOpen={isChatOpen}
-            setIsAgentDialogOpen={setIsAgentDialogOpen}
-            setIsTaskDialogOpen={setIsTaskDialogOpen}
-            showRunHistory={showRunHistory}
-            executionHistoryHeight={executionHistoryHeight}
-            hasCrewNodes={nodes.some(node => node.type === 'agentNode' || node.type === 'taskNode' || node.type === 'managerNode')}
-            hasFlowNodes={nodes.some(node => node.type === 'crewNode')}
-            edges={edges}
-            onPlayPlan={onPlayPlan}
-            onPlayFlow={onPlayFlow}
-          />
+
 
         </ReactFlow>
       )}

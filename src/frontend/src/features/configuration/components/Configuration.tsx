@@ -1,11 +1,12 @@
 import React, { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Box, Button, CircularProgress, FormControl, IconButton, InputAdornment, InputLabel, List, ListItemButton, ListItemIcon, ListItemText, MenuItem, Select, TextField, Typography } from '@mui/material';
-import { Search, X, Settings2, SlidersHorizontal, Bot, Wrench, BookOpen, MessageSquare, Brain, LayoutTemplate, Cloud, Plug, Network, Activity, KeyRound, Users, Cpu, Database, Boxes, Building2, UserRound, ShieldCheck } from 'lucide-react';
+import { Zap, Search, X, Settings2, SlidersHorizontal, Bot, Wrench, BookOpen, MessageSquare, Brain, LayoutTemplate, Cloud, Plug, Network, Activity, KeyRound, Users, Cpu, Database, Boxes, Building2, UserRound, ShieldCheck } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { usePermissionStore } from '../../../store/permissions';
 import { useUserStore } from '../../../store/user';
 import { useGroupStore } from '../../../store/groups';
 import { useThemeStore } from '../../../store/theme';
+import { useEventTriggersStore } from '../../../store/eventTriggers';
 import { kasalStageSurface } from '../../../theme/kasalSurfaces';
 import { getSettingsSections, SettingsGroup, SettingsScope, SettingsSection, SettingsSectionId } from './settingsSections';
 import GeneralSettings from './GeneralSettings';
@@ -27,9 +28,10 @@ const MemoryConfiguration = lazy(() => import('../../memory/components').then(mo
 const DatabaseManagement = lazy(() => import('./DatabaseManagement'));
 const AccessManagement = lazy(() => import('./AccessManagement'));
 const UIConfigurator = lazy(() => import('./UIConfigurator'));
+const TriggersPanel = lazy(() => import('../../triggers/components/TriggersPanel'));
 const WorkspaceOverview = lazy(() => import('./WorkspaceOverview'));
 
-const icons = { general: SlidersHorizontal, overview: Building2, models: Bot, tools: Wrench, skills: BookOpen, prompts: MessageSquare, memory: Brain, ui: LayoutTemplate, databricks: Cloud, mcp: Plug, 'remote-agents': Network, mlflow: Activity, 'api-keys': KeyRound, access: Users, engines: Cpu, database: Database, objects: Boxes };
+const icons = { 'event-triggers': Zap, general: SlidersHorizontal, overview: Building2, models: Bot, tools: Wrench, skills: BookOpen, prompts: MessageSquare, memory: Brain, ui: LayoutTemplate, databricks: Cloud, mcp: Plug, 'remote-agents': Network, mlflow: Activity, 'api-keys': KeyRound, access: Users, engines: Cpu, database: Database, objects: Boxes };
 const groups: { id: SettingsGroup; label: string }[] = [
   { id: 'general', label: 'General' }, { id: 'ai', label: 'AI capabilities' }, { id: 'connections', label: 'Connections' }, { id: 'administration', label: 'Administration' },
 ];
@@ -37,6 +39,7 @@ const groups: { id: SettingsGroup; label: string }[] = [
 function SectionContent({ id, scope, onNavigate }: { id: SettingsSectionId; scope: SettingsScope; onNavigate: (id: SettingsSectionId) => void }) {
   const mode = scope === 'system' ? 'system' : 'workspace';
   switch (id) {
+    case 'event-triggers': return <TriggersPanel embedded />;
     case 'general': return <GeneralSettings />;
     case 'overview': return <WorkspaceOverview embedded onConfigureSection={section => { if (section === 'mcp') onNavigate('mcp'); }} />;
     case 'models': return <ModelConfiguration mode={mode} />;
@@ -59,6 +62,9 @@ function SectionContent({ id, scope, onNavigate }: { id: SettingsSectionId; scop
 
 export default function Configuration({ onClose }: { onClose?: () => void }) {
   const { t } = useTranslation();
+  const eventTriggersEnabled = useEventTriggersStore(state => state.enabled);
+  const loadEventTriggers = useEventTriggersStore(state => state.load);
+  useEffect(() => { void loadEventTriggers(); }, [loadEventTriggers]);
   const dark = useThemeStore(state => state.isDarkMode);
   const { userRole, isLoading, isSystemAdmin, isPersonalWorkspaceManager, loadPermissions } = usePermissionStore();
   const email = useUserStore(state => state.currentUser?.email);
@@ -89,7 +95,7 @@ export default function Configuration({ onClose }: { onClose?: () => void }) {
   ];
   const activeScope = (scope === 'workspace' && !canConfigureCurrent) || (scope === 'system' && !isSystemAdmin) ? 'personal' : scope;
   const scopeValue = activeScope === 'workspace' ? `workspace:${groupId || ''}` : activeScope;
-  const sections = useMemo(() => getSettingsSections(activeScope, access), [activeScope, access]);
+  const sections = useMemo(() => getSettingsSections(activeScope, access).filter(section => section.id !== 'event-triggers' || eventTriggersEnabled), [activeScope, access, eventTriggersEnabled]);
   const active = sections.find(section => section.id === selected) || sections[0];
   const label = (section: SettingsSection) => t(`configuration.${section.key}`, { defaultValue: section.title });
   const normalizedQuery = query.trim().toLocaleLowerCase();

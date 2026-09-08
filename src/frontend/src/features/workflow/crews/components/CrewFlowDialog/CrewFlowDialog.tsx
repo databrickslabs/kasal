@@ -40,7 +40,7 @@ import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import PersonIcon from '@mui/icons-material/Person';
 import EditIcon from '@mui/icons-material/Edit';
 import UploadIcon from '@mui/icons-material/Upload';
-import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import CrewCatalogActions from './CrewCatalogActions';
 import CrewOptimizeDialog from '../CrewOptimizeDialog';
 import { useMLflowEnabled } from '../../../../../hooks/global/useMLflowEnabled';
 import FileUploadIcon from '@mui/icons-material/FileUpload';
@@ -1624,66 +1624,17 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                                 return Math.max(nodesCount, tasksCount, taskIdsCount);
                               })()}
                             </Typography>
-                            {/* Actions live BELOW the content, not beside the
-                                title: four icons on the title row squeezed the
-                                crew name down to "Swiss Ne…", and the name is
-                                the thing people scan for. */}
-                            <Box
-                              sx={{
-                                display: 'flex',
-                                justifyContent: 'flex-end',
-                                alignItems: 'center',
-                                gap: 0.25,
-                                mt: 1.5,
-                                pt: 1,
-                                borderTop: 0,
-                                borderColor: 'divider',
-                              }}
-                            >
-                                {canEdit && mlflowEnabled && (
-                                  <Tooltip title="Optimize Prompts">
-                                    <IconButton
-                                      size="small"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setOptimizeCrew(crew);
-                                      }}
-                                    >
-                                      <AutoFixHighIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
-                                )}
-                                {canEdit && (
-                                  <PublishButton
-                                    entityType="crew"
-                                    entityId={String(crew.id)}
-                                    entityName={crew.name}
-                                    nodes={crew.nodes}
-                                    published={publishedCrewIds.has(String(crew.id))}
-                                    onChanged={(isPublished) =>
-                                      setPublished('crew', String(crew.id), isPublished)
-                                    }
-                                  />
-                                )}
-                                <Tooltip title="Export Crew">
-                                  <IconButton
-                                    size="small"
-                                    onClick={(e) => handleExportCrew(e, crew)}
-                                  >
-                                    <DownloadIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                                {canDelete && (
-                                  <Tooltip title="Delete Crew">
-                                    <IconButton
-                                      size="small"
-                                      onClick={(e) => handleDeleteCrew(e, crew.id)}
-                                    >
-                                      <DeleteIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
-                                )}
-                            </Box>
+                            <CrewCatalogActions
+                              crew={crew}
+                              canEdit={canEdit}
+                              canDelete={canDelete}
+                              mlflowEnabled={!!mlflowEnabled}
+                              published={publishedCrewIds.has(String(crew.id))}
+                              onPublished={isPublished => setPublished('crew', String(crew.id), isPublished)}
+                              onOptimize={() => setOptimizeCrew(crew)}
+                              onExport={event => handleExportCrew(event, crew)}
+                              onDelete={event => handleDeleteCrew(event, crew.id)}
+                            />
                           </CardContent>
                         </Card>
                       </Grid>

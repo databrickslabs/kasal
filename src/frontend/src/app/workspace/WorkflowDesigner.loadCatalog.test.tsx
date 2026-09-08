@@ -16,7 +16,6 @@ import { CATALOG_FLOWS_TAB, CATALOG_CREWS_TAB } from './WorkflowEventHandlers';
 // ── Heavy child components → inert stubs ────────────────────────────────────
 vi.mock('./WorkflowPanels', () => ({ default: () => null }));
 vi.mock('../../features/workflow/assistant/ChatPanel', () => ({ default: () => null }));
-vi.mock('./RightSidebar', () => ({ default: () => null }));
 vi.mock('../sessions/SessionSidebar', () => ({ default: ({ onOpenCatalog }: { onOpenCatalog: () => void }) => <button onClick={onOpenCatalog}>load-from-catalog</button> }));
 vi.mock('../../features/groups/components/GroupSelector', () => ({ default: () => null }));
 vi.mock('../../features/chat/ChatWorkspace', () => ({ default: () => null }));

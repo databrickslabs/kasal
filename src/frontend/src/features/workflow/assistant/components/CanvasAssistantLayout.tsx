@@ -96,7 +96,7 @@ export function CanvasAssistantLayout({ composer, response, responseKey, session
     <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>{response}</Box>
   </Box>;
 
-  const focusComposer = <Box>    <Box sx={{ width: '100%', maxWidth: 760, mx: 'auto', px: 1.5, pb: 1.5, flexShrink: 0, boxSizing: 'border-box' }}>
+  const focusComposer = <Box>    <Box sx={{ width: '100%', maxWidth: 760, mx: 'auto', pl: 1.5, pr: side === 'right' ? 6.5 : 1.5, pb: 1.5, flexShrink: 0, boxSizing: 'border-box' }}>
       <Box ref={(node: HTMLDivElement | null) => { if (node && !fullscreen && composerHost.parentElement !== node) node.appendChild(composerHost); }} />
     </Box>
   </Box>;

@@ -60,7 +60,7 @@ const emptyInputs = (vars: string[]): Record<string, string> =>
   Object.fromEntries(vars.map((v) => [v, '']));
 
 interface TriggersPanelProps {
-  /** When rendered inside TriggersDialog, the dialog supplies the title — skip
+  /** When embedded in Configuration, the section supplies the title — skip
    * the panel's own heading so it doesn't appear twice. */
   embedded?: boolean;
 }

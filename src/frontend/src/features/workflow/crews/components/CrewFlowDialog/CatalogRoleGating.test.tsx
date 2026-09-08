@@ -13,7 +13,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
-const catalogSrc = readFileSync(resolve(__dirname, 'CrewFlowDialog.tsx'), 'utf-8');
+const catalogSrc = readFileSync(resolve(__dirname, 'CrewFlowDialog.tsx'), 'utf-8')
+  + readFileSync(resolve(__dirname, 'CrewCatalogActions.tsx'), 'utf-8');
 const flowDialogSrc = readFileSync(
   resolve(__dirname, '../../../flows/components/FlowDialog.tsx'),
   'utf-8',

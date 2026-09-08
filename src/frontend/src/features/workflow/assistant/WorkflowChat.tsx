@@ -21,7 +21,6 @@ import {
 import { Sparkles } from 'lucide-react';
 import { improveChatPrompt } from '../../chat/api/prompt';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
-import StopIcon from '@mui/icons-material/Stop';
 import { apiClient } from '../../../shared/api/client';
 import { toast } from 'react-hot-toast';
 import { useBuilderExecutionControls } from '../../../store/builderExecutionControls';
@@ -1672,10 +1671,10 @@ showSessionList && (
             />
             {/* Send beside the settings menu */}
             <IconButton
-              aria-label={executingJobId ? (isStopping ? 'Stopping execution' : 'Stop execution') : 'Send message'}
-              title={executingJobId ? (isStopping ? 'Stopping execution…' : 'Stop execution') : 'Send message'}
-              onClick={executingJobId ? handleStopExecution : handleSendMessage}
-              disabled={executingJobId ? isStopping : isActionDisabled}
+              aria-label="Send message"
+              title={executingJobId ? 'Execution running — use Stop on the canvas' : 'Send message'}
+              onClick={handleSendMessage}
+              disabled={!!executingJobId || isActionDisabled}
               size="small"
               sx={{
                 padding: '4px',
@@ -1694,9 +1693,7 @@ showSessionList && (
                 },
               }}
             >
-              {executingJobId && !isStopping ? (
-                <StopIcon sx={{ fontSize: 18 }} />
-              ) : isLoading || isStopping ? (
+              {isLoading && !executingJobId ? (
                 <CircularProgress size={14} sx={{ color: 'inherit' }} />
               ) : (
                 <ArrowUpwardIcon sx={{ fontSize: 18 }} />

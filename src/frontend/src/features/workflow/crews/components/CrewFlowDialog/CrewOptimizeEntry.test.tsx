@@ -12,20 +12,18 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
 const dialogSrc = readFileSync(resolve(__dirname, 'CrewFlowDialog.tsx'), 'utf-8');
+const actionsSrc = readFileSync(resolve(__dirname, 'CrewCatalogActions.tsx'), 'utf-8');
 
 describe('catalog optimize entry', () => {
   it('has an Optimize Prompts action per crew card', () => {
-    expect(dialogSrc).toContain('title="Optimize Prompts"');
-    expect(dialogSrc).toContain('AutoFixHighIcon');
+    expect(actionsSrc).toContain('title="Optimize Prompts"');
+    expect(actionsSrc).toContain('AutoFixHighIcon');
   });
 
   it('stops propagation so the click never loads the crew', () => {
-    const buttonBlock = dialogSrc.slice(
-      dialogSrc.indexOf('title="Optimize Prompts"'),
-      dialogSrc.indexOf('title="Export Crew"'),
-    );
-    expect(buttonBlock).toContain('e.stopPropagation()');
-    expect(buttonBlock).toContain('setOptimizeCrew(crew)');
+    expect(actionsSrc).toContain('event.stopPropagation()');
+    expect(actionsSrc).toContain('onClick={() => onOptimize()}');
+    expect(dialogSrc).toContain('onOptimize={() => setOptimizeCrew(crew)}');
   });
 
   it('mounts CrewOptimizeDialog wired to the selected crew', () => {

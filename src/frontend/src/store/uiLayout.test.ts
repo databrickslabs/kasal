@@ -245,7 +245,8 @@ describe('uiLayout store — getUILayoutState / useUILayoutState', () => {
     expect(snap).toMatchObject({
       tabBarHeight: 48,
       leftSidebarBaseWidth: 48,
-      rightSidebarWidth: 48,
+      rightSidebarWidth: 0,
+      rightSidebarVisible: false,
       areFlowsVisible: false,
       layoutOrientation: 'horizontal',
     });
