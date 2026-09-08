@@ -2,12 +2,8 @@
 Test suite for GenieRepository
 """
 
-import asyncio
-import json
-import time
-from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
-import httpx
 import pytest
 
 from src.repositories.genie_repository import GenieRepository
@@ -28,9 +24,9 @@ from src.schemas.genie import (
     GenieStartConversationResponse,
 )
 
-# Patch target for get_auth_context - the local imports inside methods
+# Patch the imported authentication dependency at its lookup site.
 # re-import from this module, so patching it here affects all call sites.
-AUTH_PATCH = "src.utils.databricks_auth.get_auth_context"
+AUTH_PATCH = "src.repositories.genie_repository.get_auth_context"
 
 
 @pytest.fixture(autouse=True)
@@ -204,7 +200,7 @@ class TestGenieRepository:
         repository._client.get = AsyncMock(return_value=mock_response)
         repository._client.post = AsyncMock(return_value=mock_response)
 
-        result = await repository.get_spaces(page_token="current-token", page_size=25)
+        await repository.get_spaces(page_token="current-token", page_size=25)
 
         repository._client.get.assert_called_once()
 

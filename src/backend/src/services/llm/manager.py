@@ -63,13 +63,27 @@ async def _run_llm_blocking(func, /, *args, **kwargs):
 # Endpoint-specific LLM subclasses. This import no longer carries side effects:
 # the module used to apply two litellm monkey patches at import time, both of
 # which the engine bypasses (it speaks to endpoints with the OpenAI SDK).
-from src.services.llm.handlers.databricks_retry_llm import DatabricksRetryLLM
-from src.services.llm.handlers.vllm import VLLMFunctionCallingLLM
-from src.services.llm.params import resolve as resolve_llm_params
-from src.services.settings.api_keys import ApiKeysService
-from src.services.settings.models import ModelConfigService
-from src.utils.coercion import positive_int
-from src.utils.databricks_url_utils import DatabricksURLUtils
+from src.services.llm.handlers.databricks_retry_llm import (  # noqa: E402 - import follows module initialization
+    DatabricksRetryLLM,
+)
+from src.services.llm.handlers.vllm import (  # noqa: E402 - import follows module initialization
+    VLLMFunctionCallingLLM,
+)
+from src.services.llm.params import (  # noqa: E402 - import follows module initialization
+    resolve as resolve_llm_params,
+)
+from src.services.settings.api_keys import (  # noqa: E402 - import follows module initialization
+    ApiKeysService,
+)
+from src.services.settings.models import (  # noqa: E402 - import follows module initialization
+    ModelConfigService,
+)
+from src.utils.coercion import (  # noqa: E402 - import follows module initialization
+    positive_int,
+)
+from src.utils.databricks_url_utils import (  # noqa: E402 - import follows module initialization
+    DatabricksURLUtils,
+)
 
 # The former crewai_memory_patch / crewai_instructor_patch side-effect
 # imports are gone: kasal_engine's analyze models are tolerant of
@@ -155,7 +169,11 @@ def _refused_params(
 # The subprocess OBO token fallback lives in core/llm/subprocess_token.py — it is
 # process state that usage telemetry reads, and telemetry must not import this
 # module to get at it. Re-exported here for the existing call sites.
-from src.core.llm.subprocess_token import set_subprocess_user_token
+
+
+from src.core.llm.subprocess_token import (  # noqa: E402 - import follows module initialization
+    set_subprocess_user_token as set_subprocess_user_token,
+)
 
 
 def _register_context_window(
@@ -205,7 +223,6 @@ def _register_context_window(
 # This causes CrewAI to not summarize when needed, leading to empty responses from
 # models like Qwen that silently fail when context is too large.
 try:
-    from src.core.llm.transport import LLM_CONTEXT_WINDOW_SIZES
     from src.seeds.model_configs import MODEL_CONFIGS
 
     # The litellm model-id prefix each provider is called with — must match the
@@ -274,7 +291,9 @@ except Exception as reg_err:
 # every phrasing kasal's endpoints emit (vLLM, Anthropic-on-Databricks, ...).
 # Importing it applies the extension; DatabricksRetryLLM matches against the same
 # list rather than a private copy.
-from src.core.llm import context_limits as _context_limits  # noqa: F401
+from src.core.llm import (  # noqa: F401, E402 - applies context-limit registration
+    context_limits as _context_limits,
+)
 
 # Check if handlers already exist to avoid duplicates
 if not logger.handlers:
@@ -333,7 +352,9 @@ litellm_file_logger = LiteLLMFileLogger()
 # any crew, flow or chat call, so it silently stopped reporting. It now
 # listens on the engine's LLMCallCompletedEvent, which carries the same usage
 # dict the engine already counts — see src/core/llm/usage_telemetry.py.
-from src.core.llm.usage_telemetry import register_usage_telemetry
+from src.core.llm.usage_telemetry import (  # noqa: E402 - import follows module initialization
+    register_usage_telemetry,
+)
 
 register_usage_telemetry()
 
@@ -352,14 +373,11 @@ litellm.retry_on = ["429", "timeout", "rate_limit_error"]
 
 
 def _configure_litellm_caching() -> None:
-    """Enable LiteLLM response caching based on environment settings.
+    """Configure the legacy LiteLLM path with memory or Redis caching.
 
-    Caches completions/embeddings to cut latency and cost on repeated identical
-    calls. Backend and TTL are env-configurable (see ``Settings``); defaults to
-    on-disk ("disk") so the cache persists across the subprocess-per-execution
-    model and is shared between the API process and crew subprocesses (cross-run
-    hits). Failures degrade gracefully — caching is best-effort and must never
-    break an LLM call.
+    DiskCache deserializes pickle from writable cache files. Never initialize
+    that backend, even for existing deployments explicitly requesting "disk".
+    Native chat/crew/flow calls use the transport layer, not this cache.
     """
     from src.config.settings import settings
 
@@ -390,27 +408,14 @@ def _configure_litellm_caching() -> None:
                 logger.info(f"LiteLLM Redis cache enabled (host={host}, ttl={ttl}s)")
                 return
 
-        if cache_type == "disk":
-            # Disk cache persists across the subprocess-per-execution model and is
-            # shared between the API process and crew subprocesses, so identical
-            # calls hit across runs. Use a controlled dir (default under logs)
-            # instead of litellm's ".litellm_cache" in the current directory.
-            disk_dir = settings.LITELLM_CACHE_DIR or os.path.join(log_dir, "llm_cache")
-            try:
-                litellm.enable_cache(type="disk", disk_cache_dir=disk_dir, ttl=ttl)
-                logger.info(f"LiteLLM disk cache enabled (dir={disk_dir}, ttl={ttl}s)")
-                return
-            except Exception as disk_err:
-                # Disk caching needs LiteLLM's optional dependency (litellm[caching],
-                # i.e. the `diskcache` package). When it's absent, fall back to the
-                # in-memory cache so callers still get caching (just without the
-                # cross-subprocess persistence) instead of NO cache at all. Install
-                # litellm[caching] to restore persistent disk caching.
-                logger.info(
-                    f"LiteLLM disk cache unavailable ({disk_err}); falling back to "
-                    "in-memory cache. Install litellm[caching] for persistent disk caching."
-                )
-                cache_type = "local"
+        if cache_type != "local":
+            logger.warning(
+                "Unsupported LiteLLM cache backend %r; using in-memory caching. "
+                "Configure Redis for cross-process caching. Disk caching is disabled "
+                "because it deserializes pickle from writable cache files.",
+                cache_type,
+            )
+            cache_type = "local"
 
         litellm.enable_cache(type=cache_type, ttl=ttl)
         logger.info(f"LiteLLM cache enabled (type={cache_type}, ttl={ttl}s)")

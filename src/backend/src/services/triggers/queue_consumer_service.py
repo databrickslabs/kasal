@@ -316,13 +316,32 @@ class TriggerQueueConsumerService:
         not what the subscription vetted). Returns the HTTP status."""
         import aiohttp
 
-        timeout = aiohttp.ClientTimeout(total=15)
-        async with aiohttp.ClientSession(timeout=timeout) as http:
-            async with http.post(
-                url, json=body, headers=headers, allow_redirects=False
-            ) as resp:
-                await resp.read()
-                return resp.status
+        from src.utils.safe_http import PublicResolver
+        from src.utils.url_security import check_url_structure
+
+        allow_private = os.getenv(
+            "KASAL_EVENT_TRIGGERS_ALLOW_PRIVATE_WEBHOOKS", ""
+        ).lower() in ("1", "true", "yes")
+        if not allow_private:
+            check_url_structure(url)
+        # The connector uses the resolver's returned IPs directly. Literal IPs
+        # bypass its resolver, which is why structural validation is also required.
+        resolver = None if allow_private else PublicResolver()
+        try:
+            connector = aiohttp.TCPConnector(resolver=resolver)
+            timeout = aiohttp.ClientTimeout(total=15)
+            async with aiohttp.ClientSession(
+                timeout=timeout, connector=connector, trust_env=False
+            ) as http:
+                async with http.post(
+                    url, json=body, headers=headers, allow_redirects=False
+                ) as resp:
+                    await resp.read()
+                    return resp.status
+        finally:
+            # Aiohttp only closes resolvers that it creates itself.
+            if resolver is not None:
+                await resolver.close()
 
     # --------------------------------------------------------------- helpers
     _PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")

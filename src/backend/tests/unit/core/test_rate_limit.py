@@ -238,3 +238,32 @@ class TestActiveEnforcement:
         assert headers[b"retry-after"] == b"60"
         body = next(m for m in sent if m["type"] == "http.response.body")["body"]
         assert b"Rate limit exceeded" in body
+
+
+@pytest.mark.asyncio
+async def test_waiting_for_shared_storage_does_not_block_other_requests(monkeypatch):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    middleware = RateLimitMiddleware(RecordingApp())
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def hit(*args):
+        started.set()
+        await release.wait()
+        return True
+
+    monkeypatch.setattr(middleware._limiter, "hit", AsyncMock(side_effect=hit))
+    limited = asyncio.create_task(_invoke(middleware, _scope("/api/generate")))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        status, _ = await asyncio.wait_for(
+            _invoke(middleware, _scope("/api/health")), timeout=1
+        )
+        assert status == 200
+        assert not limited.done()
+        release.set()
+        assert (await limited)[0] == 200
+    finally:
+        release.set()
+        await limited

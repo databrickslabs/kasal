@@ -162,6 +162,7 @@ async def _deliver_one(row: Any, payload: Dict[str, Any]) -> bool:
 
     import httpx
 
+    from src.utils.safe_http import PublicHTTPTransport
     from src.utils.url_security import UnsafeUrlError, assert_safe_outbound_url
 
     body = json.dumps(payload, default=str)
@@ -181,7 +182,10 @@ async def _deliver_one(row: Any, payload: Dict[str, Any]) -> bool:
             await assert_safe_outbound_url(row.url)
 
             async with httpx.AsyncClient(
-                timeout=DELIVERY_TIMEOUT_SECONDS, follow_redirects=False
+                transport=PublicHTTPTransport(),
+                trust_env=False,
+                timeout=DELIVERY_TIMEOUT_SECONDS,
+                follow_redirects=False,
             ) as client:
                 response = await client.post(row.url, content=body, headers=headers)
 

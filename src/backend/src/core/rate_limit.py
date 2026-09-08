@@ -55,8 +55,8 @@ class RateLimitMiddleware:
 
         try:
             from limits import parse
+            from limits.aio.strategies import FixedWindowRateLimiter
             from limits.storage import storage_from_string
-            from limits.strategies import FixedWindowRateLimiter
         except ImportError:
             logger.warning(
                 "[RATE_LIMIT] 'limits' package not installed — rate limiting disabled "
@@ -68,7 +68,13 @@ class RateLimitMiddleware:
         storage_uri = os.getenv("RATE_LIMIT_STORAGE_URI") or "memory://"
         try:
             self._item = parse(limit_str)
-            self._limiter = FixedWindowRateLimiter(storage_from_string(storage_uri))
+            self._limiter = FixedWindowRateLimiter(
+                storage_from_string(
+                    storage_uri
+                    if storage_uri.startswith("async+")
+                    else f"async+{storage_uri}"
+                )
+            )
         except Exception as exc:  # pragma: no cover — defensive (bad config)
             logger.error(
                 "[RATE_LIMIT] Invalid config (%r, %r): %s", limit_str, storage_uri, exc
@@ -135,7 +141,7 @@ class RateLimitMiddleware:
             return
 
         try:
-            allowed = self._limiter.hit(self._item, self._identity(scope))
+            allowed = await self._limiter.hit(self._item, self._identity(scope))
         except Exception as exc:  # never fail a request because the limiter errored
             logger.debug(f"[RATE_LIMIT] hit() error (allowing request): {exc}")
             allowed = True

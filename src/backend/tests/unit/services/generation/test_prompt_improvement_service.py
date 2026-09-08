@@ -172,3 +172,26 @@ class TestLogLLMInteraction:
         svc.log_service.create_log = AsyncMock(side_effect=RuntimeError("db down"))
         # Must not raise.
         await svc._log_llm_interaction(prompt="p", response="r", model="m")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("template", [None, "", "  \n  "])
+async def test_missing_database_template_uses_bundled_default(template):
+    from src.seeds.prompt_templates import IMPROVE_PROMPT_TEMPLATE
+
+    service = PromptImprovementService(MagicMock())
+    service._log_llm_interaction = AsyncMock()
+    with (
+        patch(
+            "src.services.generation.prompt_improvement.TemplateService"
+        ) as templates,
+        patch("src.services.generation.prompt_improvement.LLMManager") as llm,
+    ):
+        templates.get_effective_template_content = AsyncMock(return_value=template)
+        llm.completion = AsyncMock(return_value=json.dumps(AGENT_FIELDS))
+        result = await service.improve_prompt(target="agent", fields=AGENT_FIELDS)
+    assert result == AGENT_FIELDS
+    assert llm.completion.await_args.kwargs["messages"][0] == {
+        "role": "system",
+        "content": IMPROVE_PROMPT_TEMPLATE,
+    }

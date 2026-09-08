@@ -9,12 +9,12 @@ Targets uncovered lines:
 
 import uuid
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from src.core.exceptions import KasalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.exceptions import KasalError
 from src.schemas.flow_execution import FlowExecutionStatus
 from src.services.flow_builder.exceptions import FlowPausedForApprovalException
 from src.services.flow_builder.flow_runner_service import FlowRunnerService
@@ -29,17 +29,7 @@ def _make_service(db=None):
     db = db or MagicMock(spec=AsyncSession)
     with patch("src.services.flow_builder.flow_runner_service.FlowExecutionService"):
         with patch("src.services.flow_builder.flow_runner_service.FlowRepository"):
-            with patch("src.services.flow_builder.flow_runner_service.TaskRepository"):
-                with patch(
-                    "src.services.flow_builder.flow_runner_service.AgentRepository"
-                ):
-                    with patch(
-                        "src.services.flow_builder.flow_runner_service.ToolRepository"
-                    ):
-                        with patch(
-                            "src.services.flow_builder.flow_runner_service.CrewRepository"
-                        ):
-                            return FlowRunnerService(db)
+            return FlowRunnerService(db)
 
 
 def _make_execution(exec_id=1, flow_id=None):
@@ -259,7 +249,7 @@ class TestRunFlow:
             repo_instance.get_run_by_id = AsyncMock(return_value=None)
             MockRepo.return_value = repo_instance
 
-            fid = uuid.uuid4()
+            uuid.uuid4()
             with pytest.raises(KasalError) as exc_info:
                 await svc.run_flow(
                     flow_id=None,
@@ -581,7 +571,7 @@ class TestGetRequiredProviders:
             instance = MagicMock()
             instance.get_model_config = AsyncMock()
             MockSvc.return_value = instance
-            result = await svc._get_required_providers(MagicMock(), {"model": ""})
+            await svc._get_required_providers(MagicMock(), {"model": ""})
         # Empty model name is skipped
         instance.get_model_config.assert_not_called()
 
@@ -755,14 +745,7 @@ class TestRunDynamicFlow:
             ) as MockFlowSvc,
             patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF,
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
-            patch("src.services.flow_builder.flow_runner_service.TaskRepository"),
-            patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
-            patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
-            patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
-            ),
             patch(
                 "src.services.flow_builder.flow_runner_service.ApiKeysService"
             ) as MockApiSvc,
@@ -819,14 +802,7 @@ class TestRunDynamicFlow:
             ) as MockFlowSvc,
             patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF,
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
-            patch("src.services.flow_builder.flow_runner_service.TaskRepository"),
-            patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
-            patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
-            patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
-            ),
             patch(
                 "src.services.flow_builder.flow_runner_service.ApiKeysService"
             ) as MockApiSvc,
@@ -870,14 +846,7 @@ class TestRunDynamicFlow:
             ) as MockFlowSvc,
             patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF,
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
-            patch("src.services.flow_builder.flow_runner_service.TaskRepository"),
-            patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
-            patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
-            patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
-            ),
             patch(
                 "src.services.flow_builder.flow_runner_service.ApiKeysService"
             ) as MockApiSvc,
@@ -938,14 +907,7 @@ class TestRunDynamicFlow:
             ) as MockFlowSvc,
             patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF,
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
-            patch("src.services.flow_builder.flow_runner_service.TaskRepository"),
-            patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
-            patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
-            patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
-            ),
             patch(
                 "src.services.flow_builder.flow_runner_service.ApiKeysService"
             ) as MockApiSvc,
@@ -1024,14 +986,7 @@ class TestRunFlowExecutionResultConversion:
                 "src.services.flow_builder.flow_runner_service.FlowExecutionService"
             ) as MockFlowSvc,
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
-            patch("src.services.flow_builder.flow_runner_service.TaskRepository"),
-            patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
-            patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
-            patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
-            ),
         ):
             flow_svc_instance = MagicMock()
             flow_svc_instance.update_execution_status = AsyncMock()
@@ -1068,14 +1023,7 @@ class TestRunFlowExecutionResultConversion:
             ) as MockBF,
             patch("src.services.flow_builder.backend_flow.BackendFlow", MockBF),
             patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
-            patch("src.services.flow_builder.flow_runner_service.TaskRepository"),
-            patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
-            patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
-            patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
             patch("src.services.execution.service.ExecutionService"),
-            patch(
-                "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
-            ),
             patch(
                 "src.services.flow_builder.flow_runner_service.ApiKeysService"
             ) as MockApiSvc,

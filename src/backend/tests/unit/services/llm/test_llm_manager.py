@@ -11,11 +11,9 @@ Tests cover:
 - get_embedding circuit breaker
 """
 
-import logging
 import os
 import time as _time
-from typing import Any, Dict, List, Optional
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -450,9 +448,7 @@ class TestConfigureCrewaiLlm:
             ),
             patch("src.services.llm.manager.LLM") as MockLLM,
         ):
-            result = await LLMManager.configure_kasal_llm(
-                "deepseek-chat", "group-1", 0.5
-            )
+            await LLMManager.configure_kasal_llm("deepseek-chat", "group-1", 0.5)
             MockLLM.assert_called_once()
             call_kwargs = MockLLM.call_args[1]
             assert call_kwargs["model"] == "deepseek-chat"
@@ -473,7 +469,7 @@ class TestConfigureCrewaiLlm:
             ),
             patch("src.services.llm.manager.LLM") as MockLLM,
         ):
-            result = await LLMManager.configure_kasal_llm("gpt-4o", "group-1", None)
+            await LLMManager.configure_kasal_llm("gpt-4o", "group-1", None)
             call_kwargs = MockLLM.call_args[1]
             assert call_kwargs["model"] == "gpt-4o"
             assert call_kwargs["api_key"] == "sk-key"
@@ -1396,9 +1392,7 @@ class TestGetEmbeddingDatabricksPaths:
             patch("aiohttp.ClientTimeout", return_value=MagicMock()),
         ):
             # Use a model without databricks/ prefix
-            result = await LLMManager.get_embedding(
-                "test text", model="databricks-gte-large-en"
-            )
+            await LLMManager.get_embedding("test text", model="databricks-gte-large-en")
 
         # Should have called construct_embeddings_url with the prefixed model
         assert mock_emb_url.called
@@ -1747,8 +1741,6 @@ class TestModuleRegistration:
 
     def test_registration_warning_on_import_error(self):
         """The registration block logs a warning when MODEL_CONFIGS import fails."""
-        import importlib
-        import sys
 
         # The registration already ran at module import time
         # Just verify the module loaded successfully even if registration failed
@@ -1772,7 +1764,6 @@ class TestConfigureLiteLLMCaching:
             "LITELLM_CACHE_ENABLED": True,
             "LITELLM_CACHE_TYPE": "local",
             "LITELLM_CACHE_TTL": 3600,
-            "LITELLM_CACHE_DIR": None,
             "LITELLM_CACHE_REDIS_HOST": None,
             "LITELLM_CACHE_REDIS_PORT": None,
             "LITELLM_CACHE_REDIS_PASSWORD": None,
@@ -1868,53 +1859,26 @@ class TestConfigureLiteLLMCaching:
                     p.stop()
             mock_enable.assert_called_once_with(type="local", ttl=99)
 
-    def test_disk_cache_uses_configured_dir(self):
-        """'disk' backend enables a persistent cache at the configured directory."""
+    @pytest.mark.parametrize("backend", ["disk", "s3", "unknown"])
+    def test_unsupported_cache_never_initializes_pickle_backend(self, backend):
         patches = self._settings_patches(
-            LITELLM_CACHE_TYPE="disk",
-            LITELLM_CACHE_TTL=120,
-            LITELLM_CACHE_DIR="/var/cache/kasal-llm",
+            LITELLM_CACHE_TYPE=backend, LITELLM_CACHE_TTL=120
         )
-        with patch("src.services.llm.manager.litellm.enable_cache") as mock_enable:
-            for p in patches:
-                p.start()
+        with patch("src.services.llm.manager.litellm.enable_cache") as enable:
+            for item in patches:
+                item.start()
             try:
                 _configure_litellm_caching()
             finally:
-                for p in patches:
-                    p.stop()
-            mock_enable.assert_called_once_with(
-                type="disk", disk_cache_dir="/var/cache/kasal-llm", ttl=120
-            )
+                for item in patches:
+                    item.stop()
+        enable.assert_called_once_with(type="local", ttl=120)
 
-    def test_disk_cache_defaults_dir_under_logs(self):
-        """'disk' backend with no configured dir falls back to a controlled
-        <logs>/llm_cache directory (not litellm's cwd default)."""
-        patches = self._settings_patches(
-            LITELLM_CACHE_TYPE="disk", LITELLM_CACHE_DIR=None
-        )
-        with patch("src.services.llm.manager.litellm.enable_cache") as mock_enable:
-            for p in patches:
-                p.start()
-            try:
-                _configure_litellm_caching()
-            finally:
-                for p in patches:
-                    p.stop()
-            assert mock_enable.call_count == 1
-            kwargs = mock_enable.call_args.kwargs
-            assert kwargs["type"] == "disk"
-            assert kwargs["disk_cache_dir"].endswith("llm_cache")
-
-    def test_default_cache_type_is_disk(self, monkeypatch):
-        """Regression guard: the production default backend is 'disk'. Crews run
-        in fresh subprocesses, so an in-memory ('local') cache is cold on every
-        run — only 'disk' persists for cross-run hits. Reverting the default to
-        'local' silently disables cross-run caching."""
+    def test_default_cache_type_is_local(self, monkeypatch):
         from src.config.settings import Settings
 
         monkeypatch.delenv("LITELLM_CACHE_TYPE", raising=False)
-        assert Settings().LITELLM_CACHE_TYPE == "disk"
+        assert Settings().LITELLM_CACHE_TYPE == "local"
 
     def test_enable_cache_failure_is_swallowed(self):
         """Caching is best-effort: a backend error must not propagate."""
@@ -1931,33 +1895,6 @@ class TestConfigureLiteLLMCaching:
             finally:
                 for p in patches:
                     p.stop()
-
-    def test_disk_cache_falls_back_to_local_when_unavailable(self):
-        """Disk caching needs the optional `diskcache` dep (litellm[caching]).
-        When it's missing, enable_cache(type='disk') raises; we must fall back to
-        the in-memory ('local') cache so callers still get caching — NOT end up
-        with no cache (the original noisy-warning behaviour)."""
-        patches = self._settings_patches(
-            LITELLM_CACHE_TYPE="disk", LITELLM_CACHE_TTL=77, LITELLM_CACHE_DIR="/tmp/x"
-        )
-        # First call (disk) raises like the missing-dependency error; second
-        # call (local fallback) succeeds.
-        with patch(
-            "src.services.llm.manager.litellm.enable_cache",
-            side_effect=[ImportError("install litellm[caching]"), None],
-        ) as mock_enable:
-            for p in patches:
-                p.start()
-            try:
-                _configure_litellm_caching()
-            finally:
-                for p in patches:
-                    p.stop()
-            assert mock_enable.call_count == 2
-            # Disk attempted first...
-            assert mock_enable.call_args_list[0].kwargs["type"] == "disk"
-            # ...then fell back to in-memory local with the same TTL.
-            assert mock_enable.call_args_list[1] == call(type="local", ttl=77)
 
 
 class TestCompletionMaxTokensPolicy:

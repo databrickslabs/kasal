@@ -9,9 +9,9 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Query
 
-from src.dependencies.providers import GroupContextDep
 from src.core.exceptions import ForbiddenError
 from src.core.permissions import is_workspace_admin
+from src.dependencies.providers import GroupContextDep
 from src.schemas.memory_backend import (
     MemoryBackendCreate,
     MemoryBackendType,
@@ -37,6 +37,9 @@ async def test_lakebase_connection(
     Returns:
         Connection test result
     """
+    if not is_workspace_admin(group_context):
+        raise ForbiddenError("Only workspace admins can test Lakebase connections")
+
     try:
         instance_name = request.get("instance_name") if request else None
         result = await service.test_lakebase_connection(instance_name=instance_name)
