@@ -161,6 +161,8 @@ class UCMetricViewGeneratorTool(BaseTool):
             "pbi_api_base_url",
             "admin_client_id",
             "admin_client_secret",
+            "allow_best_effort",
+            "fact_source_map",
         )
         default_config = {}
         for key in config_keys:
@@ -232,15 +234,15 @@ class UCMetricViewGeneratorTool(BaseTool):
         # this makes it visible via the same execution_trace pull already used
         # for Crew 1.
         _diag: dict = {
-            "preinject_measures_json_chars": len(measures_raw)
-            if isinstance(measures_raw, str)
-            else None,
-            "preinject_mquery_json_chars": len(mquery_raw)
-            if isinstance(mquery_raw, str)
-            else None,
-            "preinject_config_json_chars": len(config_raw)
-            if isinstance(config_raw, str)
-            else None,
+            "preinject_measures_json_chars": (
+                len(measures_raw) if isinstance(measures_raw, str) else None
+            ),
+            "preinject_mquery_json_chars": (
+                len(mquery_raw) if isinstance(mquery_raw, str) else None
+            ),
+            "preinject_config_json_chars": (
+                len(config_raw) if isinstance(config_raw, str) else None
+            ),
             "db_fallback_fired_for": [],
             "db_fallback_extraction_id": None,
         }
@@ -292,7 +294,9 @@ class UCMetricViewGeneratorTool(BaseTool):
                             ToolSessionProvider,
                         )
 
-                        async with ToolSessionProvider.powerbi_extraction_service() as svc:
+                        async with (
+                            ToolSessionProvider.powerbi_extraction_service() as svc
+                        ):
                             rows = await svc.list_for_execution(_job_id)
                             return rows[0] if rows else None
 
@@ -492,12 +496,17 @@ class UCMetricViewGeneratorTool(BaseTool):
                 # join-dependent measures (e.g. the *_Yeild_Actual ratios filtering on
                 # Dim_wkctr/Dim_Plant) decline. Gate on a real source_table (matches
                 # Phase 1b) so UI/selection/measure-holder tables aren't pulled in.
-                for _m in (measures or []):
-                    _allocs = [a.get("table") for a in (_m.get("all_allocations") or [])] \
-                        or [_m.get("proposed_allocation")]
+                for _m in measures or []:
+                    _allocs = [
+                        a.get("table") for a in (_m.get("all_allocations") or [])
+                    ] or [_m.get("proposed_allocation")]
                     for _t in _allocs:
                         _ti = mquery_tables.get(_t)
-                        if _t and _ti is not None and getattr(_ti, "source_table", None):
+                        if (
+                            _t
+                            and _ti is not None
+                            and getattr(_ti, "source_table", None)
+                        ):
                             fact_keys.add(_t)
                 relationships_enrichment = loader.load(
                     rel_data, mquery_tables, fact_keys
@@ -741,6 +750,7 @@ class UCMetricViewGeneratorTool(BaseTool):
                     dataset_id=_get("dataset_id"),
                     catalog=catalog,
                     schema=schema,
+                    untranslatable_items=output.get("untranslatable_items") or [],
                 )
             )
         except Exception as _hist_err:
@@ -765,23 +775,25 @@ class UCMetricViewGeneratorTool(BaseTool):
         for table_key, spec in (specs or {}).items():
             view_name = spec.get("view_name")
             for m in spec.get("untranslatable", []) or []:
-                items.append({
-                    "table_key": table_key,
-                    "view_name": view_name,
-                    "original_name": m.get("original_name") or m.get("name"),
-                    "dax_expression": m.get("dax_expression", ""),
-                    "skip_reason": m.get("skip_reason", ""),
-                    "category": m.get("category", ""),
-                    "dax_class": m.get("dax_class"),
-                    "referenced_by": m.get("referenced_by", 0),
-                    # Actionable next-step for the reviewer (HOW to handle it),
-                    # sourced from the LLM's recipe or a class-based default.
-                    "proposal": m.get("proposal", ""),
-                    "explanation": m.get("explanation"),
-                    # Labeled DRAFT CREATE VIEW scaffold for cross-fact / multi-stage
-                    # (proposal artifact, never an emitted measure).
-                    "source_view_sql_draft": m.get("source_view_sql_draft"),
-                })
+                items.append(
+                    {
+                        "table_key": table_key,
+                        "view_name": view_name,
+                        "original_name": m.get("original_name") or m.get("name"),
+                        "dax_expression": m.get("dax_expression", ""),
+                        "skip_reason": m.get("skip_reason", ""),
+                        "category": m.get("category", ""),
+                        "dax_class": m.get("dax_class"),
+                        "referenced_by": m.get("referenced_by", 0),
+                        # Actionable next-step for the reviewer (HOW to handle it),
+                        # sourced from the LLM's recipe or a class-based default.
+                        "proposal": m.get("proposal", ""),
+                        "explanation": m.get("explanation"),
+                        # Labeled DRAFT CREATE VIEW scaffold for cross-fact / multi-stage
+                        # (proposal artifact, never an emitted measure).
+                        "source_view_sql_draft": m.get("source_view_sql_draft"),
+                    }
+                )
         items.sort(key=lambda x: x.get("referenced_by", 0), reverse=True)
         return items
 
@@ -1091,9 +1103,9 @@ class UCMetricViewGeneratorTool(BaseTool):
                 report["measures_skipped_unresolved"] += 1
                 report["skipped_measures"].append(mname)
                 continue
-            by_table.setdefault(
-                measure_table.get(mname, "__unassigned__"), []
-            ).append((mname, res))
+            by_table.setdefault(measure_table.get(mname, "__unassigned__"), []).append(
+                (mname, res)
+            )
 
         for pbi_table, source in fact_source_map.items():
             rows = by_table.get(pbi_table, [])
@@ -1141,6 +1153,7 @@ class UCMetricViewGeneratorTool(BaseTool):
         dataset_id: Optional[str],
         catalog: Optional[str],
         schema: Optional[str],
+        untranslatable_items: Optional[list] = None,
     ) -> None:
         """Persist the full raw DAX extract to conversion_history (fail-open).
 
@@ -1150,7 +1163,24 @@ class UCMetricViewGeneratorTool(BaseTool):
         ``source_format=powerbi_dax`` / ``execution_id``) or
         ``GET /conversion-history/{id}``. Any failure here is non-fatal — it must
         never break the generation itself.
+
+        ``untranslatable_items`` and the transpiler ``capability_fingerprint`` are
+        also persisted so re-evaluation can later answer "which measures failed,
+        and at what capability level?" and decide whether a retry can gain
+        anything — without re-hitting the PowerBI API.
         """
+
+        def _capability_fp() -> str:
+            """Current transpiler capability fingerprint (fail-open)."""
+            try:
+                from src.services.tools.metric_view_utils.capability_version import (
+                    capability_fingerprint,
+                )
+
+                return capability_fingerprint()
+            except Exception:
+                return "unknown"
+
         try:
             from src.schemas.conversion import ConversionHistoryCreate
             from src.services.tools.tool_session_provider import ToolSessionProvider
@@ -1182,6 +1212,9 @@ class UCMetricViewGeneratorTool(BaseTool):
                     "sql": sql_output,
                     "catalog": catalog,
                     "schema": schema,
+                    # Re-evaluation inputs: WHICH measures failed, and at WHAT
+                    # capability level. A later sweep re-tries only these.
+                    "untranslatable_items": untranslatable_items or [],
                 },
                 output_summary=(
                     f"Generated {view_count} UC metric view(s)"
@@ -1196,6 +1229,10 @@ class UCMetricViewGeneratorTool(BaseTool):
                     "dataset_id": dataset_id,
                     "catalog": catalog,
                     "schema": schema,
+                    # Capability level that produced this result. Re-evaluation
+                    # compares it against the current fingerprint to decide
+                    # whether a retry can possibly gain anything.
+                    "capability_fingerprint": _capability_fp(),
                 },
                 status="success",
                 measure_count=measure_count,
@@ -1385,15 +1422,20 @@ class UCMetricViewGeneratorTool(BaseTool):
                 from src.services.tools.powerbi_auth_utils import (
                     get_powerbi_access_token_from_config,
                 )
-                sp_admin_token = _run_async(get_powerbi_access_token_from_config({
-                    "tenant_id": tenant_id,
-                    "client_id": admin_client_id,
-                    "client_secret": admin_client_secret,
-                    "username": None,
-                    "password": None,
-                    "auth_method": "service_principal",
-                    "access_token": None,
-                }))
+
+                sp_admin_token = _run_async(
+                    get_powerbi_access_token_from_config(
+                        {
+                            "tenant_id": tenant_id,
+                            "client_id": admin_client_id,
+                            "client_secret": admin_client_secret,
+                            "username": None,
+                            "password": None,
+                            "auth_method": "service_principal",
+                            "access_token": None,
+                        }
+                    )
+                )
                 scan_result = gen.trigger_admin_scan(sp_admin_token, workspace_id)
                 tables = gen.parse_admin_tables(scan_result, dataset_id=dataset_id)
                 entries = self._tmdl_tables_to_mquery(tables)
@@ -1403,7 +1445,9 @@ class UCMetricViewGeneratorTool(BaseTool):
                     )
                     return entries
             except Exception as e:
-                logger.warning(f"[UCMV] MQuery Admin Scanner (SP admin retry) failed: {e}")
+                logger.warning(
+                    f"[UCMV] MQuery Admin Scanner (SP admin retry) failed: {e}"
+                )
         return []
 
     def _extract_measures_fallback(

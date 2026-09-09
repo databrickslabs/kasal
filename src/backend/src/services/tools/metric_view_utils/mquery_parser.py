@@ -19,6 +19,18 @@ from .data_classes import TableInfo
 
 logger = logging.getLogger(__name__)
 
+# Connector functions for "Get Data → browse catalog/schema/table" navigation
+# UIs. Not Databricks-specific: Snowflake/Postgres/MySQL/Oracle/Redshift/
+# BigQuery's catalog-browse connectors emit the identical [Name=,Kind=]
+# navigation-chain shape (a shared Power Query SDK convention), so the same
+# regex walk in extract_source_table/resolve_mquery_to_sql applies to all of
+# them — only the connector-function gate below differs per family.
+_CATALOG_NAV_CONNECTORS = re.compile(
+    r"\b(Databricks\.\w+|Snowflake\.Databases|PostgreSQL\.Database|"
+    r"MySQL\.Database|Oracle\.Database|AmazonRedshift\.Database|"
+    r"GoogleBigQuery\.Database)\b"
+)
+
 
 def looks_like_raw_mquery(sql: str) -> bool:
     """Heuristic: does this string look like raw Power Query M rather than SQL?
@@ -78,12 +90,28 @@ def classify_mquery_source(mquery: str) -> tuple[str, str]:
             "inline constant table (slicer/selector helper, base64-embedded) — "
             "no warehouse source; correctly skipped",
         )
+    if re.search(r"Table\.FromRows\s*\(\s*\{", m):
+        return (
+            "inline_const",
+            "inline constant table (hardcoded literal rows) — "
+            "no warehouse source; correctly skipped",
+        )
+    # (?<!\.) excludes M's dotted standard-library calls (Table.SelectColumns,
+    # Table.AddColumns, ...) — DAX never namespaces a function with a leading
+    # dot, so a bare match preceded by "." is always M, not the DAX function of
+    # the same name. Without this, a Databricks.Catalogs (or any other
+    # catalog-nav) source with an ordinary Table.SelectColumns step downstream
+    # got mis-classified as 'dax_calc' and short-circuited before ever reaching
+    # the 'extractable' branch — an M source with a real physical table lost
+    # to a DAX-function-name collision purely because it also selected columns.
     if (
         re.search(
-            r"\b(GENERATESERIES|SUMMARIZECOLUMNS|ADDCOLUMNS|SELECTCOLUMNS|VALUES|CALENDAR|CALENDARAUTO)\s*\(",
+            r"(?<!\.)\b(GENERATESERIES|SUMMARIZECOLUMNS|SUMMARIZE|CALCULATETABLE|"
+            r"ADDCOLUMNS|SELECTCOLUMNS|VALUES|CALENDAR|CALENDARAUTO)\s*\(",
             mu,
         )
         or re.match(r"^\s*ROW\s*\(", mu)
+        or re.match(r"^\s*\{\s*\(", m)
         or re.search(r"IsParameterQuery\s*=\s*true", m, re.IGNORECASE)
     ):
         return (
@@ -102,12 +130,13 @@ def classify_mquery_source(mquery: str) -> tuple[str, str]:
             "customer-supplied source-table mapping",
         )
     if re.search(
-        r"\b(Value\.NativeQuery|Sql\.Databases?|Databricks\.\w+|Spark\.)\b", m
-    ):
+        r"\b(Value\.NativeQuery|Sql\.Databases?|Spark\.)\b", m
+    ) or _CATALOG_NAV_CONNECTORS.search(m):
         return (
             "extractable",
-            "looks extractable (native query / Databricks connector) but no "
-            "source table was resolved — extraction gap, investigate",
+            "looks extractable (native query / catalog-browsing warehouse "
+            "connector) but no source table was resolved — extraction gap, "
+            "investigate",
         )
     return ("unknown", "unrecognized M source shape")
 
@@ -152,6 +181,7 @@ def extract_source_table(mquery: str, expressions: dict | None = None) -> str | 
             extract_parameter_defaults,
             resolve_via_let_evaluation,
         )
+
         _params = extract_parameter_defaults(expressions)
         if _params:
             _resolved_sql = resolve_via_let_evaluation(mquery, _params)
@@ -159,7 +189,8 @@ def extract_source_table(mquery: str, expressions: dict | None = None) -> str | 
                 _fm = re.search(
                     r"\bFROM\s+((?:`[^`]+`|[A-Za-z_]\w*)"
                     r"(?:\.(?:`[^`]+`|[A-Za-z_]\w*)){2})",
-                    _resolved_sql, re.IGNORECASE,
+                    _resolved_sql,
+                    re.IGNORECASE,
                 )
                 if _fm:
                     _parts = _FQN_RE.match(_fm.group(1))
@@ -224,9 +255,9 @@ def _quote_sql_ident(name: str) -> str:
     literally named ``Databricks Data Catalog``) is not valid unquoted SQL —
     ``resolve_mquery_to_sql`` must quote it before it lands in a FROM/SELECT.
     """
-    if re.fullmatch(r'[A-Za-z_]\w*', name):
+    if re.fullmatch(r"[A-Za-z_]\w*", name):
         return name
-    return '`' + name.replace('`', '``') + '`'
+    return "`" + name.replace("`", "``") + "`"
 
 
 def resolve_mquery_to_sql(mquery: str) -> str | None:
@@ -257,30 +288,37 @@ def resolve_mquery_to_sql(mquery: str) -> str | None:
     # Table.SelectColumns(<prevStep>, {"a","b","c"}) — projected column list,
     # order preserved. Absent → keep every source column (SELECT *).
     select_cols: list[str] = []
-    sel_match = re.search(r'Table\.SelectColumns\s*\([^,]+,\s*\{([^}]*)\}', m)
+    sel_match = re.search(r"Table\.SelectColumns\s*\([^,]+,\s*\{([^}]*)\}", m)
     if sel_match:
         select_cols = re.findall(r'"([^"]+)"', sel_match.group(1))
 
     # Table.RenameColumns(<prevStep>, {{"old","new"}, {"old2","new2"}, ...})
     # — old→new alias map, applied over the projected list (if any).
     renames: dict[str, str] = {}
-    ren_match = re.search(r'Table\.RenameColumns\s*\([^,]+,\s*\{(.*?)\}\s*\)', m, re.DOTALL)
+    ren_match = re.search(
+        r"Table\.RenameColumns\s*\([^,]+,\s*\{(.*?)\}\s*\)", m, re.DOTALL
+    )
     if ren_match:
-        for pair in re.finditer(r'\{\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\}', ren_match.group(1)):
+        for pair in re.finditer(
+            r'\{\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\}', ren_match.group(1)
+        ):
             renames[pair.group(1)] = pair.group(2)
 
     if select_cols:
         projected = [
-            (f'{_quote_sql_ident(c)} AS {_quote_sql_ident(renames[c])}'
-             if renames.get(c) and renames[c] != c else _quote_sql_ident(c))
+            (
+                f"{_quote_sql_ident(c)} AS {_quote_sql_ident(renames[c])}"
+                if renames.get(c) and renames[c] != c
+                else _quote_sql_ident(c)
+            )
             for c in select_cols
         ]
-        select_clause = ', '.join(projected)
+        select_clause = ", ".join(projected)
     else:
-        select_clause = '*'
+        select_clause = "*"
 
-    fqn_quoted = '.'.join(_quote_sql_ident(p) for p in fqn.split('.'))
-    return f'SELECT {select_clause} FROM {fqn_quoted}'
+    fqn_quoted = ".".join(_quote_sql_ident(p) for p in fqn.split("."))
+    return f"SELECT {select_clause} FROM {fqn_quoted}"
 
 
 # A table whose M is nothing but a passthrough to another named expression —
@@ -300,13 +338,13 @@ def _as_reference_name(expr: str) -> str | None:
     nothing but a reference to another name — ``#"Quoted Name"``, a bare
     identifier, or a plain quoted string — return that name. ``None`` for
     anything with actual logic (a function call, an operator, ...)."""
-    e = (expr or '').strip()
+    e = (expr or "").strip()
     m = re.fullmatch(r'#"([^"]+)"', e)
     if m:
         return m.group(1)
     if re.fullmatch(r'"(?:[^"]|"")+"', e):
         return e[1:-1].replace('""', '"')
-    if re.fullmatch(r'[A-Za-z_]\w*', e):
+    if re.fullmatch(r"[A-Za-z_]\w*", e):
         return e
     return None
 
@@ -315,7 +353,7 @@ def _extract_bare_reference(mquery: str) -> str | None:
     """If ``mquery`` does nothing but reference another named expression (no
     transformation of its own), return that expression's name. ``None`` for
     anything with real logic."""
-    s = (mquery or '').strip()
+    s = (mquery or "").strip()
     if not s:
         return None
     direct = _as_reference_name(s)
@@ -332,8 +370,8 @@ def _extract_bare_reference(mquery: str) -> str | None:
 # signal of the WHOLE table's physical source (it might be only one side of a
 # union), so _extract_first_binding_reference refuses to guess.
 _COMBINING_FUNCTIONS_RE = re.compile(
-    r'\b(Table\.Combine|Table\.Append|Table\.NestedJoin|Table\.Join|'
-    r'Table\.FuzzyNestedJoin|Table\.Merge)\b',
+    r"\b(Table\.Combine|Table\.Append|Table\.NestedJoin|Table\.Join|"
+    r"Table\.FuzzyNestedJoin|Table\.Merge)\b",
     re.IGNORECASE,
 )
 
@@ -353,6 +391,7 @@ def _extract_first_binding_reference(mquery: str) -> str | None:
     if not mquery or _COMBINING_FUNCTIONS_RE.search(mquery):
         return None
     from .mquery_let_evaluator import _extract_let_block, _parse_binding
+
     parsed = _extract_let_block(mquery)
     if not parsed:
         return None
@@ -367,7 +406,8 @@ def _extract_first_binding_reference(mquery: str) -> str | None:
 
 
 def resolve_mquery_with_context(
-    mquery: str, expressions: dict[str, str] | None = None,
+    mquery: str,
+    expressions: dict[str, str] | None = None,
 ) -> str | None:
     """``resolve_mquery_to_sql``, extended with model-level context for the
     shapes a table's own M can't resolve on its own:
@@ -397,13 +437,20 @@ def resolve_mquery_with_context(
     if not expressions:
         return None
 
-    for ref_name in (_extract_bare_reference(mquery), _extract_first_binding_reference(mquery)):
+    for ref_name in (
+        _extract_bare_reference(mquery),
+        _extract_first_binding_reference(mquery),
+    ):
         if ref_name and ref_name in expressions and expressions[ref_name] != mquery:
             resolved = resolve_mquery_to_sql(expressions[ref_name])
             if resolved:
                 return resolved
 
-    from .mquery_let_evaluator import extract_parameter_defaults, resolve_via_let_evaluation
+    from .mquery_let_evaluator import (
+        extract_parameter_defaults,
+        resolve_via_let_evaluation,
+    )
+
     params = extract_parameter_defaults(expressions)
     if params:
         return resolve_via_let_evaluation(mquery, params)

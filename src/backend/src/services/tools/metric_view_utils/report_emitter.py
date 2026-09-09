@@ -11,17 +11,18 @@ from .data_classes import MetricViewSpec
 # explanation (deterministic declines / uncategorized). When present, the LLM's
 # own explanation is preferred — it is usually the concrete recipe already.
 _CLASS_PROPOSAL = {
-    'display_layer': 'Not a metric — rebuild in the AI/BI dashboard layer (slicer parameter, label, or conditional format).',
-    'architecture_change': 'Needs a source-view change (declare a join, UNION the facts, or precompute a column) before it can be a single-source measure.',
-    'unsupported': 'No UC metric-view equivalent — handle in the dashboard layer or omit.',
-    'composed': 'Translate the referenced base measure(s) first, then compose this one via MEASURE().',
-    'out_of_scope': 'References a table/measure outside this fact — allocate it to its owning fact, or handle as multi-fact.',
-    'filtered': 'Expressible as SUM(...) FILTER (WHERE ...) once the referenced column/join is in scope.',
+    "display_layer": "Not a metric — rebuild in the AI/BI dashboard layer (slicer parameter, label, or conditional format).",
+    "architecture_change": "Needs a source-view change (declare a join, UNION the facts, or precompute a column) before it can be a single-source measure.",
+    "unsupported": "No UC metric-view equivalent — handle in the dashboard layer or omit.",
+    "composed": "Translate the referenced base measure(s) first, then compose this one via MEASURE().",
+    "out_of_scope": "References a table/measure outside this fact — allocate it to its owning fact, or handle as multi-fact.",
+    "filtered": "Expressible as SUM(...) FILTER (WHERE ...) once the referenced column/join is in scope.",
 }
 
 
-def build_proposal(dax_class: str | None, explanation: str | None,
-                   skip_reason: str | None = None) -> str:
+def build_proposal(
+    dax_class: str | None, explanation: str | None, skip_reason: str | None = None
+) -> str:
     """A single actionable next-step for a not-emitted measure.
 
     Prefers the LLM's own explanation — it is usually the concrete recipe
@@ -29,12 +30,13 @@ def build_proposal(dax_class: str | None, explanation: str | None,
     join") — and falls back to a class-based recommendation so EVERY declined
     measure carries a proposal, not just a terse reason.
     """
-    exp = (explanation or '').strip()
+    exp = (explanation or "").strip()
     if exp:
         return exp
     return _CLASS_PROPOSAL.get(
-        (dax_class or '').strip(),
-        'Manual translation required — map the DAX to a source-view expression or a dashboard element.')
+        (dax_class or "").strip(),
+        "Manual translation required — map the DAX to a source-view expression or a dashboard element.",
+    )
 
 
 def emit_migration_report(
@@ -213,12 +215,20 @@ def emit_migration_report(
 
     lines.append("## Untranslatable Measures")
     lines.append("")
-    lines.append("| Table | Measure | Reason |")
-    lines.append("|-------|---------|--------|")
+    lines.append("| Table | Measure | Class | Reason | Proposed approach |")
+    lines.append("|-------|---------|-------|--------|-------------------|")
     for table_key, spec in sorted(all_specs.items()):
         for m in spec.untranslatable:
-            reason = m.skip_reason[:80] if m.skip_reason else "Unknown"
-            lines.append(f"| {table_key} | {m.original_name} | {reason} |")
+            reason = (m.skip_reason or "Unknown")[:80]
+            proposal = build_proposal(
+                getattr(m, "dax_class", None),
+                getattr(m, "explanation", None),
+                m.skip_reason,
+            ).replace("|", "\\|")[:200]
+            lines.append(
+                f'| {table_key} | {m.original_name} | {getattr(m, "dax_class", "") or ""} '
+                f"| {reason} | {proposal} |"
+            )
     lines.append("")
 
     # ── M:N Relationships ─────────────────────────────────────────────────
