@@ -282,7 +282,16 @@ class UCMetricViewGeneratorTool(BaseTool):
         # Architecture: reach the powerbi_extraction row through the OWNING
         # service (PowerBIExtractionService) via ToolSessionProvider — the tool
         # imports no repository and query construction stays in the repository.
-        if measures_raw == "[]" or mquery_raw == "[]" or config_raw == "{}":
+        _rel_raw_missing = (not relationships_raw) or (
+            isinstance(relationships_raw, str)
+            and relationships_raw.strip() in ("", "[]", "null")
+        )
+        if (
+            measures_raw == "[]"
+            or mquery_raw == "[]"
+            or config_raw == "{}"
+            or _rel_raw_missing
+        ):
             _job_id = (getattr(self, "trace_context", None) or {}).get("job_id")
             if not _job_id:
                 logger.info(
@@ -350,6 +359,21 @@ class UCMetricViewGeneratorTool(BaseTool):
                         if config_raw == "{}" and _db_config:
                             config_raw = json.dumps(_db_config)
                             _diag["db_fallback_fired_for"].append("config_json")
+                        # Relationships drive RelationshipsLoader's fact→dim join
+                        # enrichment. Without rebuilding them here, every SELECT-*
+                        # fact whose joins come from PBI relationships (not in-SQL
+                        # GROUP BY keys) silently loses ALL its joins when the flow
+                        # injects an empty relationships_json — which is exactly the
+                        # measures/mquery empty-injection case this fallback exists
+                        # for. (Recovered fact_pe005's Dim_wkctr/Dim_Plant joins.)
+                        _db_relationships = getattr(_extraction, "relationships", None)
+                        if _rel_raw_missing and _db_relationships:
+                            relationships_raw = json.dumps(_db_relationships)
+                            _diag["db_fallback_fired_for"].append("relationships_json")
+                            logger.info(
+                                "[UCMV] DB fallback: rebuilt relationships_json "
+                                f"({len(_db_relationships)} relationships)"
+                            )
                 except Exception as _db_err:
                     _diag["db_fallback_error"] = str(_db_err)
                     logger.warning(f"[UCMV] DB fallback failed: {_db_err}")
