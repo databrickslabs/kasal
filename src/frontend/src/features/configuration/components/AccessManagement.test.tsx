@@ -4,9 +4,11 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import AccessManagement from './AccessManagement';
 
 const getUsers = vi.fn();
+const provisionUser = vi.fn();
+const searchDirectory = vi.fn();
 const updateUserPermissions = vi.fn();
 vi.mock('../../../api/groups/UserService', () => ({
-  UserService: { getInstance: () => ({ getUsers, updateUserPermissions }) },
+  UserService: { getInstance: () => ({ getUsers, updateUserPermissions, provisionUser, searchDirectory }) },
 }));
 
 const getGroups = vi.fn();
@@ -58,6 +60,8 @@ describe('AccessManagement (combined Access screen)', () => {
     updateGroupUser.mockResolvedValue({});
     assignUserToGroup.mockResolvedValue({});
     removeUserFromGroup.mockResolvedValue(undefined);
+    provisionUser.mockResolvedValue({ ...USER, id: 'u2', email: 'new@example.com' });
+    searchDirectory.mockResolvedValue([{ email: 'new@example.com', display_name: 'New Person' }]);
   });
 
   it('People lens shows the user with global toggles and membership role chips', async () => {
@@ -65,6 +69,51 @@ describe('AccessManagement (combined Access screen)', () => {
     expect(await screen.findByText('ada@example.com')).toBeInTheDocument();
     expect(screen.getByText('Research: operator · chat only')).toBeInTheDocument();
     expect(screen.getByLabelText('System Admin for ada@example.com')).toBeInTheDocument();
+  });
+
+  it('searches people on the server, including beyond the first page', async () => {
+    getUsers.mockResolvedValueOnce(Array.from({ length: 100 }, (_, i) => ({ ...USER, id: `u${i}`, email: `user${i}@example.com` })));
+    render(<AccessManagement />);
+    await screen.findByText('user99@example.com');
+    fireEvent.click(screen.getByText('Next'));
+    await waitFor(() => expect(getUsers).toHaveBeenCalledWith('', 100, 100));
+    fireEvent.change(screen.getByLabelText('Search people'), { target: { value: 'ada' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search', exact: true }));
+    await waitFor(() => expect(getUsers).toHaveBeenCalledWith('ada', 0, 100));
+  });
+
+  it('finds a directory person, provisions them, and exposes permissions before login', async () => {
+    render(<AccessManagement />);
+    await screen.findByText('ada@example.com');
+    fireEvent.click(screen.getByRole('button', { name: 'Add person' }));
+    fireEvent.change(screen.getByLabelText('Search Databricks directory'), { target: { value: 'new' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Search', exact: true }).at(-1)!);
+    fireEvent.click(await screen.findByLabelText('Select new@example.com'));
+    getUsers.mockResolvedValue([{ ...USER, id: 'u2', email: 'new@example.com' }]);
+    fireEvent.submit(document.getElementById('add-person-form')!);
+    await waitFor(() => expect(provisionUser).toHaveBeenCalledWith('new@example.com'));
+    expect(await screen.findByLabelText('System Admin for new@example.com')).toBeInTheDocument();
+    expect(screen.getByText('No login recorded')).toBeInTheDocument();
+  });
+
+  it('can add by email when directory access fails', async () => {
+    searchDirectory.mockRejectedValue(new Error('Forbidden'));
+    render(<AccessManagement />);
+    await screen.findByText('ada@example.com');
+    fireEvent.click(screen.getByRole('button', { name: 'Add person' }));
+    fireEvent.change(screen.getByLabelText('Search Databricks directory'), { target: { value: 'new' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Search', exact: true }).at(-1)!);
+    expect(await screen.findByText(/directory is unavailable/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/Sign-in email/), { target: { value: 'new@example.com' } });
+    fireEvent.submit(document.getElementById('add-person-form')!);
+    await waitFor(() => expect(provisionUser).toHaveBeenCalledWith('new@example.com'));
+  });
+
+  it('shows the recorded login time', async () => {
+    getUsers.mockResolvedValue([{ ...USER, last_login: '2026-09-09T12:00:00Z' }]);
+    render(<AccessManagement />);
+    expect(await screen.findByText(/^Last login /)).toBeInTheDocument();
+    expect(screen.queryByText('No login recorded')).not.toBeInTheDocument();
   });
 
   it('toggling System Admin calls the user service', async () => {

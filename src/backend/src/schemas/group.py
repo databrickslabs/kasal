@@ -47,6 +47,16 @@ class GroupCreateRequest(GroupBase):
     pass
 
 
+class GroupDuplicateRequest(BaseModel):
+    """Create a teamspace from an existing team's saved configuration."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(..., min_length=1, max_length=80)
+    description: Optional[str] = Field(None, max_length=500)
+    include_members: bool = True
+
+
 class GroupUpdateRequest(BaseModel):
     """Schema for updating an existing group."""
 

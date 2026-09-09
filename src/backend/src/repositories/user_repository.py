@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from sqlalchemy import func, or_, select, update
@@ -81,22 +81,34 @@ class UserRepository(BaseRepository[User]):
         query = (
             update(self.model)
             .where(self.model.id == user_id)
-            .values(last_login=datetime.utcnow())
+            .values(last_login=datetime.now(timezone.utc))
         )
         await self.session.execute(query)
 
-    async def search_users(self, search_term: str, limit: int = 10) -> List[User]:
+    async def search_users(
+        self,
+        search_term: str,
+        limit: int = 10,
+        skip: int = 0,
+        filters: Optional[dict] = None,
+    ) -> List[User]:
         """Search users by email or username"""
         query = (
             select(self.model)
             .where(
                 or_(
-                    self.model.email.ilike(f"%{search_term}%"),
-                    self.model.username.ilike(f"%{search_term}%"),
+                    self.model.email.icontains(search_term, autoescape=True),
+                    self.model.username.icontains(search_term, autoescape=True),
+                    self.model.display_name.icontains(search_term, autoescape=True),
                 )
             )
+            .order_by(self.model.email, self.model.id)
+            .offset(skip)
             .limit(limit)
         )
+        for field in ("role", "status"):
+            if filters and field in filters:
+                query = query.where(getattr(self.model, field) == filters[field])
         result = await self.session.execute(query)
         return list(result.scalars().all())
 

@@ -3,7 +3,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 
 # Import enums from models to ensure consistency
 from src.models.enums import UserRole, UserStatus
@@ -38,6 +38,18 @@ class UserBase(BaseModel):
         # from incremental header processing. Write-path validation is handled
         # by UserUpdate (EmailStr) and get_or_create_user_by_email.
         return v if v else ""
+
+
+class UserProvisionRequest(BaseModel):
+    """Admin pre-provisioning accepts only the sign-in identity."""
+
+    model_config = ConfigDict(extra="forbid")
+    email: EmailStr
+
+
+class DirectoryPerson(BaseModel):
+    email: EmailStr
+    display_name: Optional[str] = None
 
 
 # User update

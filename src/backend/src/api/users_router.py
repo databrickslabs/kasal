@@ -1,11 +1,17 @@
 from typing import Annotated, List, Optional
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 
 from src.core.exceptions import ForbiddenError, NotFoundError
 from src.dependencies.admin_auth import AuthenticatedUserDep, SystemAdminUserDep
 from src.dependencies.providers import GroupContextDep, SessionDep
-from src.schemas.user import UserInDB, UserPermissionUpdate, UserUpdate
+from src.schemas.user import (
+    DirectoryPerson,
+    UserInDB,
+    UserPermissionUpdate,
+    UserProvisionRequest,
+    UserUpdate,
+)
 from src.services.groups.users import UserService
 
 router = APIRouter(
@@ -42,6 +48,7 @@ async def read_users_me(
     logger.info(
         f"[ENDPOINT DEBUG] /users/me called for user: {current_user.email}, is_system_admin: {current_user.is_system_admin}, is_personal_workspace_manager: {current_user.is_personal_workspace_manager}"
     )
+    await service.record_login(current_user.id)
     return await service.get_user_complete(current_user.id)
 
 
@@ -73,8 +80,8 @@ async def read_users(
     service: Annotated[UserService, Depends(get_user_service)],
     admin_user: SystemAdminUserDep,
     group_context: GroupContextDep,
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
     role: Optional[str] = None,
     status: Optional[str] = None,
     search: Optional[str] = None,
@@ -91,6 +98,28 @@ async def read_users(
         skip=skip, limit=limit, filters=filters, search=search
     )
     return users
+
+
+@router.post("", response_model=UserInDB)
+async def provision_user(
+    payload: UserProvisionRequest,
+    service: Annotated[UserService, Depends(get_user_service)],
+    admin_user: SystemAdminUserDep,
+):
+    """Add a person before their first sign-in; existing identities are reused."""
+    return await service.provision_user(str(payload.email))
+
+
+@router.get("/directory", response_model=List[DirectoryPerson])
+async def search_user_directory(
+    admin_user: SystemAdminUserDep,
+    search: str = Query(..., min_length=2, max_length=200),
+):
+    """Search the Databricks workspace directory without creating Kasal users."""
+    from src.services.groups.directory import search_directory
+    from src.utils.user_context import UserContext
+
+    return await search_directory(search.strip(), UserContext.get_user_token())
 
 
 @router.get("/{user_id}")

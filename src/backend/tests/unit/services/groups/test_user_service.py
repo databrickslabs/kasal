@@ -374,20 +374,21 @@ from types import SimpleNamespace  # noqa: E402 - import follows module initiali
 
 
 @pytest.mark.asyncio
-async def test_get_users_search_merges_and_limits():
+async def test_get_users_search_uses_repository_pagination():
     session = AsyncMock()
     with patch("src.services.groups.users.UserRepository") as Repo:
         repo = AsyncMock()
         user1 = SimpleNamespace(id="1")
         user2 = SimpleNamespace(id="2")
-        # Overlap (user2 present in both lists)
-        repo.list = AsyncMock(side_effect=[[user1, user2], [user2]])
+        repo.search_users = AsyncMock(return_value=[user1, user2])
         Repo.return_value = repo
 
         svc = UserService(session)
         out = await svc.get_users(skip=0, limit=10, search="abc")
         assert [u.id for u in out] == ["1", "2"]
-        assert repo.list.call_count == 2
+        repo.search_users.assert_awaited_once_with(
+            "abc", skip=0, limit=10, filters=None
+        )
 
 
 @pytest.mark.asyncio

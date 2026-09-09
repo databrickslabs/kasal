@@ -43,6 +43,10 @@ export interface CreateGroupRequest {
   description?: string;
 }
 
+export interface DuplicateGroupRequest extends CreateGroupRequest {
+  include_members: boolean;
+}
+
 export interface UpdateGroupRequest {
   name?: string;
   description?: string;
@@ -126,6 +130,11 @@ export class GroupService {
       console.error('Error creating group:', error);
       throw new Error('Failed to create group');
     }
+  }
+
+  async duplicateGroup(groupId: string, data: DuplicateGroupRequest): Promise<Group> {
+    const response = await ApiService.post<Group>(`/groups/${encodeURIComponent(groupId)}/duplicate`, data);
+    return response.data;
   }
 
   /**

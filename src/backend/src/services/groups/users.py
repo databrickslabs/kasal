@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,40 +72,57 @@ class UserService:
         search: Optional[str] = None,
     ) -> List[User]:
         """Get a list of users with filtering and search"""
-        # Handle search parameter
-        if search:
-            # Example of a simple search implementation
-            # In a real application, you might want a more sophisticated search
-            users = []
-
-            # Search by username (exact or partial match)
-            username_matches = await self.user_repo.list(
-                filters={"username": {"$like": f"%{search}%"}}, skip=skip, limit=limit
-            )
-            users.extend(username_matches)
-
-            # Search by email (exact or partial match)
-            email_matches = await self.user_repo.list(
-                filters={"email": {"$like": f"%{search}%"}}, skip=skip, limit=limit
-            )
-            users.extend(email_matches)
-
-            # Remove duplicates (users found by both username and email)
-            unique_users = []
-            user_ids = set()
-            for user in users:
-                if user.id not in user_ids:
-                    unique_users.append(user)
-                    user_ids.add(user.id)
-
-            return unique_users[:limit]
-
-        # Regular filtering - use simple list method since list_with_filters doesn't exist
-        return await self.user_repo.list(skip=skip, limit=limit)
+        return await self.user_repo.search_users(
+            search or "", limit=limit, skip=skip, filters=filters
+        )
 
     async def get_user_complete(self, user_id: str) -> Optional[User]:
         """Get a user with complete information"""
         return await self.user_repo.get(user_id)
+
+    async def record_login(self, user_id: str) -> None:
+        """Record profile initialization, without writes on frequent refreshes."""
+        user = await self.user_repo.get(user_id)
+        if user is None:
+            return
+        now = datetime.now(timezone.utc)
+        previous = user.last_login
+        if previous is not None and previous.tzinfo is None:
+            previous = previous.replace(tzinfo=timezone.utc)
+        if previous is None or now - previous >= timedelta(minutes=5):
+            await self.user_repo.update_last_login(user_id)
+            # /users/me must not report success before this write is durable.
+            await self.session.commit()
+
+    async def provision_user(self, email: str) -> User:
+        """Prepare an identity for an admin, without recording a login or bootstrapping privileges."""
+        lock = await _lock_for_email(email)
+        async with lock:
+            existing = await self.user_repo.get_by_email(email)
+            if existing is not None:
+                return existing
+            from uuid import uuid4
+
+            user = User(
+                email=email,
+                username=f"user_{uuid4().hex}",
+                personal_group_id=f"user_{uuid4().hex}",
+                is_system_admin=False,
+                is_personal_workspace_manager=False,
+            )
+            from sqlalchemy.exc import IntegrityError
+
+            try:
+                await self.user_repo.insert(user)
+                await self.session.commit()
+            except IntegrityError:
+                await self.session.rollback()
+                existing = await self.user_repo.get_by_email(email)
+                if existing is not None:
+                    return existing
+                raise
+            await self.session.refresh(user)
+            return user
 
     async def update_user(
         self, user_id: str, user_update: UserUpdate

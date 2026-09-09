@@ -4,6 +4,7 @@ import { apiClient } from '../../shared/api/client';
 export interface User {
   id: string;
   email: string;
+  display_name?: string | null;
   role: string;
   status: string;
   is_system_admin: boolean;
@@ -11,6 +12,11 @@ export interface User {
   created_at: string;
   updated_at: string;
   last_login: string | null;
+}
+
+export interface DirectoryPerson {
+  email: string;
+  display_name: string | null;
 }
 
 export interface UserPermissionUpdate {
@@ -31,8 +37,18 @@ export class UserService {
   /**
    * Get all users (system admin only)
    */
-  async getUsers(): Promise<User[]> {
-    const response = await apiClient.get<User[]>('/users');
+  async getUsers(search = '', skip = 0, limit = 100): Promise<User[]> {
+    const response = await apiClient.get<User[]>('/users', { params: { search, skip, limit } });
+    return response.data;
+  }
+
+  async provisionUser(email: string): Promise<User> {
+    const response = await apiClient.post<User>('/users', { email });
+    return response.data;
+  }
+
+  async searchDirectory(search: string): Promise<DirectoryPerson[]> {
+    const response = await apiClient.get<DirectoryPerson[]>('/users/directory', { params: { search } });
     return response.data;
   }
 

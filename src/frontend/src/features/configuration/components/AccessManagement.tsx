@@ -18,10 +18,11 @@
  * teamspace counts this product sees; revisit with a dedicated endpoint if a
  * deployment ever has hundreds of spaces.
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Box,
+  Button,
   Chip,
   CircularProgress,
   IconButton,
@@ -39,6 +40,7 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TextField,
   Tooltip,
   Typography,
   Paper,
@@ -51,6 +53,7 @@ import PersonIcon from '@mui/icons-material/Person';
 import { GroupService, Group, GroupUser } from '../../../api/groups/GroupService';
 import { UserService, User } from '../../../api/groups/UserService';
 import GroupManagement from './GroupManagement';
+import AddPersonDialog from './AddPersonDialog';
 
 type Membership = { group: Group; member: GroupUser };
 type RoleOption = 'admin' | 'editor' | 'operator';
@@ -73,6 +76,11 @@ const roleChipColor = (role: string): 'error' | 'primary' | 'success' | 'default
 const AccessManagement: React.FC = () => {
   const [lens, setLens] = useState<'people' | 'teamspaces'>('people');
   const [users, setUsers] = useState<User[]>([]);
+  const [query, setQuery] = useState('');
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(0);
+  const [addingPerson, setAddingPerson] = useState(false);
+  const loadVersion = useRef(0);
   const [groups, setGroups] = useState<Group[]>([]);
   const [membersByGroup, setMembersByGroup] = useState<Record<string, GroupUser[]>>({});
   const [loading, setLoading] = useState(true);
@@ -88,10 +96,11 @@ const AccessManagement: React.FC = () => {
   const [addMenu, setAddMenu] = useState<{ anchor: HTMLElement; user: User } | null>(null);
 
   const load = useCallback(async () => {
+    const version = ++loadVersion.current;
     setLoading(true);
     try {
       const [usersData, groupsData] = await Promise.all([
-        UserService.getInstance().getUsers(),
+        UserService.getInstance().getUsers(search, page * 100, 100),
         GroupService.getInstance().getGroups(),
       ]);
       const memberLists = await Promise.all(
@@ -101,6 +110,7 @@ const AccessManagement: React.FC = () => {
             .catch(() => [] as GroupUser[]),
         ),
       );
+      if (version !== loadVersion.current) return;
       setUsers(usersData);
       setGroups(groupsData);
       setMembersByGroup(
@@ -108,11 +118,11 @@ const AccessManagement: React.FC = () => {
       );
     } catch (error) {
       console.error('Failed to load access data:', error);
-      setNotice({ message: 'Failed to load access data', severity: 'error' });
+      if (version === loadVersion.current) setNotice({ message: 'Failed to load access data', severity: 'error' });
     } finally {
-      setLoading(false);
+      if (version === loadVersion.current) setLoading(false);
     }
-  }, []);
+  }, [search, page]);
 
   useEffect(() => {
     void load();
@@ -284,6 +294,31 @@ const AccessManagement: React.FC = () => {
       {lens === 'teamspaces' && <GroupManagement />}
 
       {lens === 'people' && (
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+          <Box component="form" onSubmit={(event) => {
+            event.preventDefault();
+            setPage(0);
+            setSearch(query.trim());
+          }} sx={{ display: 'flex', flex: 1, gap: 1 }}>
+            <TextField label="Search people" placeholder="Name or email" size="small" value={query}
+              onChange={(event) => setQuery(event.target.value)} fullWidth />
+            <Button type="submit">Search</Button>
+          </Box>
+          <Button startIcon={<AddIcon />} variant="contained" onClick={() => setAddingPerson(true)}>Add person</Button>
+          <Button onClick={() => void load()} disabled={loading}>Refresh</Button>
+        </Box>
+      )}
+
+      {addingPerson && <AddPersonDialog onClose={() => setAddingPerson(false)} onAdded={(user) => {
+        setAddingPerson(false);
+        setQuery(user.email);
+        setSearch(user.email);
+        setPage(0);
+        setUsers([user]);
+        setNotice({ message: 'Person added. You can now set their permissions.', severity: 'success' });
+      }} />}
+
+      {lens === 'people' && (
         loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
             <CircularProgress size={28} />
@@ -309,7 +344,7 @@ const AccessManagement: React.FC = () => {
                         {user.email}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {user.last_login ? `Last login ${new Date(user.last_login).toLocaleDateString()}` : 'Never logged in'}
+                        {user.last_login ? `Last login ${new Date(user.last_login).toLocaleString()}` : 'No login recorded'}
                       </Typography>
                     </TableCell>
                     <TableCell>
@@ -378,7 +413,7 @@ const AccessManagement: React.FC = () => {
                 <TableRow>
                   <TableCell colSpan={4}>
                     <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
-                      No users yet — users appear after their first login.
+                      {search ? 'No matching people. Use Add person to find or add someone before their first visit.' : 'No people yet. Use Add person to set permissions before their first visit.'}
                     </Typography>
                   </TableCell>
                 </TableRow>
@@ -387,6 +422,14 @@ const AccessManagement: React.FC = () => {
           </Table>
         </TableContainer>
         )
+      )}
+
+      {lens === 'people' && !loading && (
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 1, mt: 1 }}>
+          <Button disabled={page === 0} onClick={() => setPage((value) => value - 1)}>Previous</Button>
+          <Typography variant="body2">Page {page + 1}</Typography>
+          <Button disabled={users.length < 100} onClick={() => setPage((value) => value + 1)}>Next</Button>
+        </Box>
       )}
 
       {/* Role chip menu: pick a role or remove the membership */}

@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   mockGetGroupUsers: vi.fn(),
   mockAssignUser: vi.fn(),
   mockCreateGroup: vi.fn(),
+  mockDuplicateGroup: vi.fn(),
   mockDeleteGroup: vi.fn(),
   mockRefreshGroupStore: vi.fn(),
 }));
@@ -30,6 +31,7 @@ vi.mock('../../../api/groups/GroupService', () => ({
     getInstance: vi.fn(() => ({
       getGroups: mocks.mockGetGroups,
       createGroup: mocks.mockCreateGroup,
+      duplicateGroup: mocks.mockDuplicateGroup,
       updateGroup: vi.fn(),
       deleteGroup: mocks.mockDeleteGroup,
       assignUserToGroup: mocks.mockAssignUser,
@@ -53,6 +55,7 @@ vi.mock('../../../store/permissions', () => ({
   usePermissionStore: vi.fn((selector) => {
     const state = {
       userRole: 'admin',
+      isSystemAdmin: true,
       isLoading: false,
     };
     return selector ? selector(state) : state;
@@ -108,6 +111,7 @@ describe('GroupManagement', () => {
     vi.clearAllMocks();
     mocks.mockGetGroups.mockResolvedValue(mockGroups);
     mocks.mockGetUsers.mockResolvedValue(mockUsers);
+    mocks.mockDuplicateGroup.mockResolvedValue({ ...mockGroups[0], id: 'copy', name: 'New team' });
     mocks.mockGetGroupUsers.mockResolvedValue([]);
     mocks.mockAssignUser.mockResolvedValue({});
   });
@@ -118,6 +122,59 @@ describe('GroupManagement', () => {
     await waitFor(() => {
       expect(screen.getByText('Teamspaces')).toBeInTheDocument();
     });
+  });
+
+  it('duplicates from a teamspace action with the existing description and optional members', async () => {
+    renderWithProviders(<GroupManagement />);
+    fireEvent.click(await screen.findByLabelText('Actions for Developers'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate Teamspace' }));
+    expect(screen.getByLabelText('Teamspace Name', { exact: false })).toHaveValue('Developers copy');
+    expect(screen.getByLabelText('Description (Optional)')).toHaveValue('Development team group');
+    fireEvent.change(screen.getByLabelText('Teamspace Name', { exact: false }), { target: { value: 'New team' } });
+    fireEvent.click(screen.getByLabelText('Copy members and their roles and permissions'));
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate Teamspace' }));
+    await waitFor(() => expect(mocks.mockDuplicateGroup).toHaveBeenCalledWith('2', {
+      name: 'New team', description: 'Development team group', include_members: false,
+    }));
+    expect(mocks.mockCreateGroup).not.toHaveBeenCalled();
+    await waitFor(() => expect(mocks.mockRefreshGroupStore).toHaveBeenCalled());
+  });
+
+  it('offers an existing teamspace as the starting point when creating', async () => {
+    renderWithProviders(<GroupManagement />);
+    await screen.findByText('Developers');
+    fireEvent.click(screen.getByLabelText('Create teamspace'));
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Start from' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Duplicate Developers' }));
+    expect(screen.getByLabelText('Copy members and their roles and permissions')).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate Teamspace' }));
+    await waitFor(() => expect(mocks.mockDuplicateGroup).toHaveBeenCalledWith('2', {
+      name: 'Developers copy', description: 'Development team group', include_members: true,
+    }));
+  });
+
+  it('keeps the duplication form available on failure', async () => {
+    mocks.mockDuplicateGroup.mockRejectedValueOnce(new Error('Failed copy'));
+    renderWithProviders(<GroupManagement />);
+    fireEvent.click(await screen.findByLabelText('Actions for Developers'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate Teamspace' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate Teamspace' }));
+    expect(await screen.findByText('Failed to duplicate teamspace. Please try again.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Duplicate Teamspace' })).toBeEnabled();
+    expect(screen.getByLabelText('Teamspace Name', { exact: false })).toHaveValue('Developers copy');
+  });
+
+  it('starts empty after cancelling a duplicate', async () => {
+    renderWithProviders(<GroupManagement />);
+    fireEvent.click(await screen.findByLabelText('Actions for Developers'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate Teamspace' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByLabelText('Create teamspace'));
+    expect(screen.getByLabelText('Teamspace Name', { exact: false })).toHaveValue('');
+    fireEvent.change(screen.getByLabelText('Teamspace Name', { exact: false }), { target: { value: 'Empty' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create Teamspace', exact: true }));
+    await waitFor(() => expect(mocks.mockCreateGroup).toHaveBeenCalledWith({ name: 'Empty', description: '' }));
+    expect(mocks.mockDuplicateGroup).not.toHaveBeenCalled();
   });
 
   it('displays loading state initially', () => {

@@ -11,6 +11,8 @@ import {
   DialogActions,
   TextField,
   FormControl,
+  FormControlLabel,
+  Checkbox,
   InputLabel,
   Select,
   MenuItem,
@@ -43,6 +45,7 @@ import { UserService, User } from '../../../api/groups/UserService';
 import { useGroupStore } from '../../../store/groups';
 import {
   Add as AddIcon,
+  ContentCopy as CopyIcon,
   Group as GroupIcon,
   Person as PersonIcon,
   Groups as GroupsIcon,
@@ -62,8 +65,9 @@ import { usePermissionStore } from '../../../store/permissions';
 
 const GroupManagement: React.FC = () => {
   // Check permissions
-  const { userRole, isLoading: permissionsLoading } = usePermissionStore(state => ({
+  const { userRole, isSystemAdmin, isLoading: permissionsLoading } = usePermissionStore(state => ({
     userRole: state.userRole,
+    isSystemAdmin: state.isSystemAdmin,
     isLoading: state.isLoading
   }));
 
@@ -71,6 +75,8 @@ const GroupManagement: React.FC = () => {
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
   const [groupUsers, setGroupUsers] = useState<GroupUser[]>([]);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [duplicateSourceId, setDuplicateSourceId] = useState('');
+  const [includeMembers, setIncludeMembers] = useState(true);
   const [assignUserDialogOpen, setAssignUserDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [groupToDelete, setGroupToDelete] = useState<Group | null>(null);
@@ -179,8 +185,23 @@ const GroupManagement: React.FC = () => {
     }
   };
 
+  const openCreateDialog = () => {
+    setDuplicateSourceId('');
+    setIncludeMembers(true);
+    setNewGroup({ name: '', description: '' });
+    setCreateDialogOpen(true);
+  };
+
+  const chooseDuplicateSource = (sourceId: string) => {
+    setDuplicateSourceId(sourceId);
+    const source = groups.find(group => group.id === sourceId);
+    setNewGroup(source
+      ? { name: `${source.name.slice(0, 75)} copy`, description: source.description || '' }
+      : { name: '', description: '' });
+  };
+
   const handleCreateGroup = async () => {
-    if (!newGroup.name) {
+    if (!newGroup.name.trim()) {
       showNotification('Please fill in all required fields', 'warning');
       return;
     }
@@ -188,17 +209,22 @@ const GroupManagement: React.FC = () => {
     setLoading(true);
     try {
       const groupService = GroupService.getInstance();
-      await groupService.createGroup(newGroup);
+      const details = { ...newGroup, name: newGroup.name.trim() };
+      if (duplicateSourceId) {
+        await groupService.duplicateGroup(duplicateSourceId, { ...details, include_members: includeMembers });
+      } else {
+        await groupService.createGroup(details);
+      }
 
       setCreateDialogOpen(false);
       setNewGroup({ name: '', description: '' });
-      showNotification('Teamspace created successfully', 'success');
-      loadGroups();
+      showNotification(duplicateSourceId ? 'Teamspace duplicated successfully' : 'Teamspace created successfully', 'success');
+      setDuplicateSourceId('');
       // Refresh the Zustand store so GroupSelector picks up the new workspace
-      refreshGroupStore();
+      await Promise.all([loadGroups(false), refreshGroupStore()]);
     } catch (error) {
       console.error('Error creating workspace:', error);
-      showNotification('Failed to create teamspace', 'error');
+      showNotification(duplicateSourceId ? 'Failed to duplicate teamspace. Please try again.' : 'Failed to create teamspace', 'error');
     } finally {
       setLoading(false);
     }
@@ -438,7 +464,7 @@ const GroupManagement: React.FC = () => {
   }
 
   // Only allow admin users to access this component
-  if (userRole !== 'admin') {
+  if (!isSystemAdmin && userRole !== 'admin') {
     return (
       <Box sx={{ p: 3, textAlign: 'center' }}>
         <Avatar sx={{ bgcolor: 'error.light', mx: 'auto', mb: 2, width: 60, height: 60 }}>
@@ -476,8 +502,9 @@ const GroupManagement: React.FC = () => {
           <Zoom in={!loading}>
             <Fab
               color="primary"
+              aria-label="Create teamspace"
               size="medium"
-              onClick={() => setCreateDialogOpen(true)}
+              onClick={openCreateDialog}
               disabled={loading}
               sx={{ boxShadow: 3 }}
             >
@@ -538,7 +565,7 @@ const GroupManagement: React.FC = () => {
                       variant="outlined"
                       size="small"
                       startIcon={<AddIcon />}
-                      onClick={() => setCreateDialogOpen(true)}
+                      onClick={openCreateDialog}
                     >
                       New Teamspace
                     </Button>
@@ -563,7 +590,7 @@ const GroupManagement: React.FC = () => {
                       <Button
                         variant="contained"
                         startIcon={<AddIcon />}
-                        onClick={() => setCreateDialogOpen(true)}
+                        onClick={openCreateDialog}
                       >
                         Create First Teamspace
                       </Button>
@@ -628,6 +655,7 @@ const GroupManagement: React.FC = () => {
                             </Tooltip>
                             <Tooltip title="Group Actions">
                               <IconButton
+                                aria-label={`Actions for ${group.name}`}
                                 onClick={(e) => handleOpenMenu(e, group)}
                               >
                                 <MoreVertIcon />
@@ -828,6 +856,17 @@ const GroupManagement: React.FC = () => {
         }}
       >
         <MenuList>
+          {isSystemAdmin && selectedMenuGroup && !(selectedMenuGroup.auto_created && selectedMenuGroup.id.startsWith('user_')) && (
+            <MenuItem onClick={() => {
+              chooseDuplicateSource(selectedMenuGroup.id);
+              setIncludeMembers(true);
+              setCreateDialogOpen(true);
+              handleCloseMenu();
+            }}>
+              <CopyIcon sx={{ mr: 1 }} fontSize="small" />
+              Duplicate Teamspace
+            </MenuItem>
+          )}
           <MenuItem
             onClick={() => selectedMenuGroup && openDeleteDialog(selectedMenuGroup)}
             sx={{ color: 'error.main' }}
@@ -980,7 +1019,7 @@ const GroupManagement: React.FC = () => {
       {/* Create Workspace Dialog */}
       <Dialog 
         open={createDialogOpen} 
-        onClose={() => setCreateDialogOpen(false)}
+        onClose={loading ? undefined : () => setCreateDialogOpen(false)}
         maxWidth="md"
         fullWidth
         PaperProps={{
@@ -993,7 +1032,7 @@ const GroupManagement: React.FC = () => {
               <WorkspacesIcon />
             </Avatar>
             <Box>
-              <Typography variant="h6">Create New Teamspace</Typography>
+              <Typography variant="h6">{duplicateSourceId ? 'Duplicate Teamspace' : 'Create New Teamspace'}</Typography>
               <Typography variant="body2" color="text.secondary">
                 Set up a collaborative teamspace for your team
               </Typography>
@@ -1006,10 +1045,38 @@ const GroupManagement: React.FC = () => {
           </Alert>
           
           <Grid container spacing={3}>
+            {isSystemAdmin && groups.length > 0 && (
+              <Grid item xs={12}>
+                <FormControl fullWidth>
+                  <InputLabel id="teamspace-source-label">Start from</InputLabel>
+                  <Select labelId="teamspace-source-label" label="Start from" value={duplicateSourceId}
+                    disabled={loading} onChange={(event) => chooseDuplicateSource(event.target.value)}>
+                    <MenuItem value="">Empty teamspace</MenuItem>
+                    {groups.filter(group => !(group.auto_created && group.id.startsWith('user_'))).map(group => (
+                      <MenuItem key={group.id} value={group.id}>Duplicate {group.name}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+            )}
+            {duplicateSourceId && (
+              <Grid item xs={12}>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  Copies tools, connections, saved credentials, models, prompts, skills, UI and memory settings.
+                  Connections continue to use the same external resources. Saved agents, workflows, schedules,
+                  conversations and past runs are not copied.
+                </Typography>
+                <FormControlLabel control={<Checkbox checked={includeMembers} disabled={loading}
+                  onChange={(_event, checked) => setIncludeMembers(checked)} />}
+                  label="Copy members and their roles and permissions" />
+              </Grid>
+            )}
             <Grid item xs={12}>
               <TextField
                 fullWidth
                 label="Teamspace Name"
+                disabled={loading}
+                inputProps={{ maxLength: duplicateSourceId ? 80 : 255 }}
                 value={newGroup.name}
                 onChange={(e) => setNewGroup({ ...newGroup, name: e.target.value })}
                 placeholder="e.g., Product Team, Marketing, Engineering"
@@ -1023,6 +1090,8 @@ const GroupManagement: React.FC = () => {
               <TextField
                 fullWidth
                 label="Description (Optional)"
+                disabled={loading}
+                inputProps={{ maxLength: duplicateSourceId ? 500 : 1000 }}
                 value={newGroup.description}
                 onChange={(e) => setNewGroup({ ...newGroup, description: e.target.value })}
                 multiline
@@ -1044,10 +1113,10 @@ const GroupManagement: React.FC = () => {
           <Button 
             onClick={handleCreateGroup} 
             variant="contained"
-            disabled={loading || !newGroup.name}
+            disabled={loading || !newGroup.name.trim()}
             startIcon={loading ? undefined : <AddIcon />}
           >
-            {loading ? 'Creating...' : 'Create Teamspace'}
+            {loading ? 'Creating...' : duplicateSourceId ? 'Duplicate Teamspace' : 'Create Teamspace'}
           </Button>
         </DialogActions>
       </Dialog>

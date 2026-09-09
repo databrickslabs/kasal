@@ -23,6 +23,7 @@ from src.models.user import User
 from src.schemas.group import (
     GroupContextResponse,
     GroupCreateRequest,
+    GroupDuplicateRequest,
     GroupResponse,
     GroupStatsResponse,
     GroupUpdateRequest,
@@ -32,6 +33,7 @@ from src.schemas.group import (
     GroupWithRoleResponse,
 )
 from src.services.groups.groups import GroupService
+from src.services.groups.duplication import GroupDuplicationService
 from src.services.groups.users import UserService
 
 logger = LoggerManager.get_instance().api
@@ -55,6 +57,21 @@ def get_group_service(session: SessionDep) -> GroupService:
         GroupService instance with injected session
     """
     return GroupService(session)
+
+
+def get_duplication_service(session: SessionDep) -> GroupDuplicationService:
+    return GroupDuplicationService(session)
+
+
+@router.post("/{group_id}/duplicate", response_model=GroupResponse, status_code=201)
+async def duplicate_group(
+    group_id: str,
+    payload: GroupDuplicateRequest,
+    service: Annotated[GroupDuplicationService, Depends(get_duplication_service)],
+    admin_user: SystemAdminUserDep,
+) -> GroupResponse:
+    """Duplicate teamspace configuration, including saved credentials (system admins only)."""
+    return await service.duplicate(group_id, payload, admin_user)
 
 
 async def _verify_group_admin(
